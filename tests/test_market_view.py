@@ -61,6 +61,12 @@ def _patch_regime(monkeypatch, tmp_path, regime: dict, cycles: dict | None = Non
         cp = tmp_path / "sector_cycles.json"
         cp.write_text(json.dumps(cycles))
         monkeypatch.setattr(RF, "_CYCLES_PATH", cp, raising=False)
+    # Published Macro context files are separately tested below.  Default every frozen-view
+    # test to explicit absence so the live vendored tree cannot leak into deterministic fixtures.
+    monkeypatch.setattr(MV, "_RRG_PATH", tmp_path / "missing_rrg.json", raising=False)
+    monkeypatch.setattr(
+        MV, "_GROUP_FLOW_PATH", tmp_path / "missing_group_flow.json", raising=False
+    )
     monkeypatch.setattr(RF, "_trading_days_since", lambda asof: age, raising=False)
 
 
@@ -180,6 +186,103 @@ class TestAdapters:
         for name in ("distribution_tells", "liquidity_quality", "regime_nowcast"):
             assert v["planes"][name]["raw"]["present"] is False
 
+    def test_distribution_cross_reading_matches_risk_off_direction(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_regime(
+            monkeypatch,
+            tmp_path,
+            FIX.incident_regime("2026-07-01"),
+            FIX.incident_sector_cycles("2026-07-01"),
+        )
+        v = MV.view(
+            "us",
+            distribution_tells_out={
+                "hot": False,
+                "def_rs_cross": True,
+                "distributing_weight_frac": 0.0,
+                "asof": "2026-07-01",
+            },
+        )
+        plane = v["planes"]["distribution_tells"]
+        assert plane["direction"] == "risk_off"
+        assert plane["reading"] == "defensive relative-strength cross"
+
+    def test_rrg_contract_is_present_precise_and_non_directional(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_regime(
+            monkeypatch,
+            tmp_path,
+            FIX.incident_regime("2026-07-01"),
+            FIX.incident_sector_cycles("2026-07-01"),
+        )
+        path = tmp_path / "rrg.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "asof": "2026-07-01",
+                    "sectors": [
+                        {"key": "XLK", "quadrant": "lagging"},
+                        {"key": "XLP", "quadrant": "leading"},
+                        {"key": "XLC", "quadrant": "improving"},
+                    ],
+                    "track_record": {
+                        "verdict": "validated",
+                        "proven": {"10": True, "21": True},
+                        "horizons": {
+                            "10": {"score_ic": 0.25, "score_ic_t_hac": 4.1},
+                            "21": {"score_ic": 0.26, "score_ic_t_hac": 3.6},
+                        },
+                    },
+                }
+            )
+        )
+        monkeypatch.setattr(MV, "_RRG_PATH", path)
+        plane = MV.view("us")["planes"]["rrg"]
+        assert plane["raw"]["artifact_present"] is True
+        assert plane["direction"] == "neutral"
+        assert plane["status"] == "advisory"
+        assert "leading=XLP" in plane["reading"]
+        assert plane["raw"]["proven_horizons"] == ["10", "21"]
+
+    def test_group_flow_preserves_display_only_uncalibrated_contract(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_regime(
+            monkeypatch,
+            tmp_path,
+            FIX.incident_regime("2026-07-01"),
+            FIX.incident_sector_cycles("2026-07-01"),
+        )
+        path = tmp_path / "group_flow.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "as_of": "2026-07-01",
+                    "verdict": "display_only",
+                    "calibrated": False,
+                    "cluster": {"regime": "mixed", "absorption": 0.45},
+                    "emerging": {
+                        "sectors": [{"name": "Energy"}],
+                        "baskets": [{"name": "Non-AI Software"}],
+                    },
+                    "cooling": {
+                        "sectors": [{"name": "Consumer Staples"}],
+                        "baskets": [],
+                    },
+                }
+            )
+        )
+        monkeypatch.setattr(MV, "_GROUP_FLOW_PATH", path)
+        plane = MV.view("us")["planes"]["group_flow"]
+        assert plane["raw"]["artifact_present"] is True
+        assert plane["raw"]["calibrated"] is False
+        assert plane["raw"]["directional"] is False
+        assert plane["direction"] == "neutral"
+        assert plane["status"] == "advisory"
+        assert "emerging=Energy,Non-AI Software" in plane["reading"]
+
 
 # ---------------------------------------------------------------------------
 # freshness — per-plane, fail-closed
@@ -195,6 +298,9 @@ class TestFreshness:
         assert v["planes"]["risk_radar"]["freshness"]["stale"] is True
         assert v["planes"]["risk_radar"]["status"] == "advisory"   # stale → downgraded
         assert v["net_posture_tilt"]["n_validated"] == 0
+        assert v["assembly"]["decision_coverage"] == 0.0
+        assert v["assembly"]["degraded"] is True
+        assert "validated_decision_plane_incomplete" in v["assembly"]["degrade_reasons"]
         # a fully-stale view can never manufacture a conflict
         assert v["label_vs_planes"]["conflict"] is False
 
@@ -207,6 +313,16 @@ class TestFreshness:
         monkeypatch.setattr(RF, "_trading_days_since",
                             lambda asof: None if asof in (None, "None") else 0, raising=False)
         rec = MV.view("us")["planes"]["risk_radar"]
+        assert rec["freshness"]["stale"] is True
+        assert rec["status"] == "advisory"
+
+    def test_future_dated_plane_is_stale_fail_closed(self, monkeypatch, tmp_path):
+        _patch_regime(monkeypatch, tmp_path,
+                      FIX.incident_regime("2026-07-01"),
+                      FIX.incident_sector_cycles("2026-07-01"))
+        monkeypatch.setattr(RF, "_trading_days_since", lambda asof: -1, raising=False)
+        rec = MV.view("us")["planes"]["risk_radar"]
+        assert rec["freshness"]["age_sessions"] == -1
         assert rec["freshness"]["stale"] is True
         assert rec["status"] == "advisory"
 
@@ -257,6 +373,90 @@ class TestDisagreementLayer:
         v_drop = MV.view("us")
         # the validated conflict is unchanged by dropping an advisory plane
         assert v_drop["label_vs_planes"]["conflict"] == v_full["label_vs_planes"]["conflict"]
+
+    def test_neutral_consensus_is_unconfirmed_never_agreement(self):
+        lvp = MV._label_vs_planes(
+            "risk_on",
+            {"direction": "neutral", "tilt": 0.0, "contributors": []},
+            {},
+        )
+        assert lvp["conflict"] is False
+        assert lvp["confirmed"] is False
+        assert lvp["relationship"] == "unconfirmed"
+
+    def test_matching_directional_consensus_is_confirmed(self):
+        lvp = MV._label_vs_planes(
+            "risk_on",
+            {"direction": "risk_on", "tilt": 1.0, "contributors": []},
+            {},
+        )
+        assert lvp["confirmed"] is True
+        assert lvp["relationship"] == "confirmed"
+
+    def test_stale_directional_plane_is_excluded_from_coherence(self, monkeypatch):
+        monkeypatch.setattr(
+            RF,
+            "_trading_days_since",
+            lambda asof: None if asof in (None, "None") else 0,
+            raising=False,
+        )
+        planes = {
+            name: MV._absent_record("fixture")
+            for name in MV.PLANE_ORDER
+        }
+        planes["risk_radar"] = MV._plane_record(
+            reading="fresh caution",
+            direction="risk_off",
+            magnitude=0.2,
+            asof="2026-07-29",
+            confidence=0.7,
+            validated=True,
+            source_contract="fixture",
+            raw={},
+        )
+        planes["froth_fragility"] = MV._plane_record(
+            reading="stale contrary",
+            direction="risk_on",
+            magnitude=1.0,
+            asof=None,
+            confidence=None,
+            validated=False,
+            source_contract="fixture",
+            raw={},
+        )
+        assert MV._coherence(planes) == 1.0
+
+    def test_turning_point_inactive_is_present_not_missing(self, monkeypatch, tmp_path):
+        regime = FIX.incident_regime("2026-07-01")
+        regime["turning_point"] = {
+            "asof": "2026-07-01",
+            "present": False,
+            "active": False,
+            "raw_fire": False,
+            "state": "normal",
+        }
+        _patch_regime(
+            monkeypatch,
+            tmp_path,
+            regime,
+            FIX.incident_sector_cycles("2026-07-01"),
+        )
+        v = MV.view("us")
+        rec = v["planes"]["turning_point"]
+        assert rec["raw"]["artifact_present"] is True
+        assert rec["raw"]["signal_active"] is False
+        assert rec["raw"]["present"] is True
+
+    def test_cycles_uses_source_asof_not_wall_clock(self, monkeypatch, tmp_path):
+        _patch_regime(
+            monkeypatch,
+            tmp_path,
+            FIX.incident_regime("2026-07-01"),
+            FIX.incident_sector_cycles("2026-07-01"),
+        )
+        rec = MV.view("us")["planes"]["cycles"]
+        assert rec["freshness"]["asof"] == "2026-07-01"
+        assert rec["raw"]["source_asof"] == "2026-07-01"
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +608,10 @@ class TestMissingFileNoOp:
         monkeypatch.setattr(_NWC, "market_plane", lambda: {"stale": True, "asof": None})
         monkeypatch.setattr(MV, "_ANTICIPATION_DIR", tmp_path / "no_anticipation", raising=False)
         monkeypatch.setattr(MV, "_ROTATION_TENSOR_PATH", tmp_path / "no_rt.json", raising=False)
+        monkeypatch.setattr(MV, "_RRG_PATH", tmp_path / "no_rrg.json", raising=False)
+        monkeypatch.setattr(
+            MV, "_GROUP_FLOW_PATH", tmp_path / "no_group_flow.json", raising=False
+        )
         v = MV.view("us")   # must not raise
         assert v["schema_version"] == "market_view.v1"
         assert v["asof"] is None
@@ -441,6 +645,7 @@ class TestBuild:
         assert (art / "2026-07-01.json").exists()
         on_disk = json.loads((art / "latest.json").read_text())
         assert on_disk["label_vs_planes"]["conflict"] is True
+        assert on_disk["seq"] == 1
         assert list(on_disk.keys()) == list(MV.TOP_LEVEL_ORDER)
         # no .tmp litter left behind
         assert not list(art.glob("*.tmp"))
@@ -460,6 +665,7 @@ class TestBuild:
                       FIX.incident_sector_cycles("2026-06-26"))
         v = MV.build("us", write=True)
         assert "OPENED" in v["brief"]["what_changed"]
+        assert v["seq"] == 2
 
     def test_build_no_op_on_write_failure(self, monkeypatch, tmp_path):
         _patch_regime(monkeypatch, tmp_path,

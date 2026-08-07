@@ -15,6 +15,16 @@ never auto-executes.
   `loop/` (self-improving backtest loop), `portfolio/` (sleeves/scorecard/stages),
   `data_layer/`, `bridge/`. `DOCTRINE.md` is the operating doctrine; `config/*.yml` the params.
 
+## Sister-site architecture
+- **Macro Dashboard**, **Terminal**, and **Mastermind Bot Portfolio** are
+  interconnected sister sites. Treat their signals, state, authentication
+  capacity, and operational resources as one deliberately shared system.
+- Macro Dashboard owns the VPS AI-provider control plane and admin visibility.
+  Mastermind consumes that shared pool with Codex/ChatGPT as the primary
+  provider and Claude OAuth slots as automatic quota/auth fallbacks.
+- Mastermind's daily trading loops and self-improvement loops must use the same
+  shared waterfall; do not create a separate credential island for either path.
+
 ## How to reason (the house rules)
 - **Confirmation over prediction.** You cannot time ignition; detect what has already
   turned. Early-following with discipline beats prophecy with conviction.
@@ -27,11 +37,33 @@ never auto-executes.
   bottleneck-migration view, and the D1–D6 failure-mode detectors.
 - **Honesty, not alpha.** Never claim to "know more than the market." Be blunt, no moralizing.
 
-## Model-tier policy (delegate to subagents)
-Per `config/agents.yml` and our in-house Codex policy:
-- **Opus** (`deep-reasoner`) — deepest synthesis / PM judgment. Use sparingly.
-- **Sonnet** (`narrative-analyst`, `quant-coder`) — per-theme/name analysis, code-grounded questions.
-- **Haiku** (`signal-scout`) — high-volume extraction / labeling / search.
+## Model/provider policy
+- The authoritative VPS uses **Codex `gpt-5.6-sol` at `xhigh`** as the primary
+  model for daily portfolio reasoning and self-improvement reviews.
+- Macro Dashboard's Claude OAuth pool is fallback capacity when Codex is
+  rate-limited or its shared authentication is unavailable. Within that
+  fallback, `deep`/`pm` use Opus, `analyst` uses Sonnet, and `scout` uses Haiku.
+- Provider success, quota, and cooling state must be reflected into Macro's
+  shared ledger so the admin panel and every sister site see the same capacity.
 
-Bias toward delegating non-Opus subtasks to Sonnet/Haiku subagents — quality first, then
-token efficiency.
+## Repository and delivery workflow
+- GitHub `origin` is the source of truth. Never push directly to `master`, never
+  force-push shared branches, and never deploy an arbitrary working directory.
+- Every session must fetch `origin` and work in its own uniquely named worktree
+  and `codex/<task>-<session>` branch created from `origin/master`. Two sessions
+  must never share a branch or working directory.
+- Completion means: run the relevant tests; commit only scoped source/config/test
+  changes; push the branch; open a PR; wait for required checks; merge the PR; then
+  deploy the exact merged `origin/master` commit with
+  `scripts/deploy_from_git.sh <merge-sha>` and verify `/health` returns HTTP 200.
+- A failing or incomplete build is pushed only to a clearly marked draft PR. It
+  is not merged and is not deployed.
+- The VPS is the canonical runtime-state writer. Never commit or deploy generated
+  portfolio state, caches, logs, local environment files, credentials, or backup
+  archives. Do not use the retired Mac-to-VPS state sync as a release step.
+- Store GitHub authentication only in the OS credential store or GitHub CLI
+  keyring. Never put tokens in repository files, prompts-as-memory, docs, or git
+  remotes.
+
+The full operator procedure and recovery rules are in
+`docs/DELIVERY_WORKFLOW.md` on `origin/master`.
