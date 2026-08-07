@@ -187,11 +187,13 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     from bot import settle as _settle
     executed: list[dict] = []
     skipped: list[str] = []
+    positions_before: list[str] = []          # pre-trade holdings — classifies each fill in the log
     queued = False
     if decided:
         skipped = sorted(t for t in target if t not in prices)
         res = _settle.execute_or_queue(PORTFOLIO_ID, target, prices, asof)
         executed = res.get("executed") or []
+        positions_before = res.get("positions_before") or []
         queued = bool(res.get("queued"))
         if res.get("error"):
             out["rebalance_error"] = res["error"]
@@ -224,7 +226,8 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     try:
         _append_decision_log(asof, submission, executed, skipped, brain,
                              feed_health=out.get("feed_health"),
-                             packet_id=(_pgr.packet_id if _pgr else None))
+                             packet_id=(_pgr.packet_id if _pgr else None),
+                             positions_before=positions_before, queued=queued)
     except Exception:
         pass
 
@@ -352,8 +355,56 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
     lines += [
         "Do your research now (the in-house China desks and/or the web — your call), then submit "
         "your complete target book for today via mcp__china__submit_book, with a one-paragraph "
-        "rationale per holding. Confirm each name is priceable with get_quote first. Rebalance with "
-        "conviction; you are accountable for the CNY NAV vs FXI.",
+        "rationale per holding. Confirm each name is priceable with get_quote first. You are "
+        "accountable for the CNY NAV vs FXI.",
+        "",
+        "## How this book is run — read before you size",
+        "",
+        "**1. Start with where the money is moving, not with a name.** Call "
+        "`mcp__china__get_china_sectors` FIRST, before the single-name boards. It ranks sector "
+        "leadership, lists buy-board names inside the leading sectors, and shows your own exposure "
+        "beside it. `leading_sectors_you_own_nothing_in` is the gap list. A leading sector you own "
+        "nothing in is a position you are taking by default — either take it deliberately or write "
+        "one sentence in your summary saying why you are passing. Do not let a sector run 20-30% "
+        "while this book sits in cash and never names it.",
+        "",
+        "**2. Cash is a position, and it has a cost.** Every 10% in cash is 10% not compounding, "
+        "and it must be paid for by a specific, stateable risk — not by vague caution. If you hold "
+        "more than ~15% cash, name in your summary the concrete thing you are waiting for and what "
+        "would make you deploy it. 'Risk-off', 'uncertainty', and 'waiting for clarity' are not "
+        "reasons; a policy event on a known date, a level that has to hold, or a breadth reading "
+        "that has to turn — those are reasons. A large cash weight held for a reason you cannot "
+        "state is the most expensive mistake this book makes.",
+        "",
+        "**3. Size so a win actually shows up in NAV.** A 2% position that doubles adds 2% to the "
+        "book. If your highest-conviction idea cannot move NAV, you do not have a conviction — you "
+        "have a watchlist. Concentrate into what you actually believe: your top names should carry "
+        "real weight, and the tail should be pruned rather than kept at token size 'just in case'. "
+        "Do not spread the book thin across many small equal-weight positions to feel diversified; "
+        "that is how a book tracks the index while paying for the privilege. Every position still "
+        "needs a falsifier and a level that says you were wrong — concentration without a stop is "
+        "not conviction, it is gambling.",
+        "",
+        "**4. Beating the benchmark requires being different from it.** FXI is the bar, not the "
+        "target. A book that mirrors its benchmark cannot beat it. Where you are overweight and "
+        "where you are underweight versus that benchmark IS your thesis — make those deliberate.",
+        "",
+        "**5. Sell for a reason that belongs to the position.** Exit when the thesis breaks, when "
+        "your invalidation level trades, when the thesis has played out, or when the capital has a "
+        "clearly better use. A name disappearing from one of the in-house boards is NOT a sell "
+        "signal — the boards are discovery tools, they are volatile, they are still being improved, "
+        "and a name commonly drops off a board precisely because the trade is already working. If a "
+        "name you hold is no longer surfaced, judge it on its own chart and thesis before you act. "
+        "Never sell a winner merely because the desk stopped mentioning it.",
+        "",
+        "**6. Explain every trade.** Pass `trades` to `submit_book`: one entry for each name you "
+        "open, add to, trim, or exit, with the specific thing that CHANGED and made you act today. "
+        "Remember any name you omit from `holdings` is sold in full and needs an exit reason. This "
+        "is the record the operator reads to understand the day — 'rebalancing' and 'trimming risk' "
+        "explain nothing. Say what you now believe that you did not believe yesterday.",
+        "",
+        "Be blunt and specific. Do not claim to know more than the market; do state clearly what "
+        "you are betting on, how much you are betting, and what would prove you wrong.",
     ]
     return "\n".join(lines)
 
@@ -432,16 +483,32 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
 
 def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          skipped: list, brain: dict, feed_health: dict | None = None,
-                         *, packet_id: str | None = None) -> None:
+                         *, packet_id: str | None = None,
+                         positions_before: list | None = None, queued: bool = False) -> None:
     from portfolio import registry
     from brain import china_intake as _intake_mod
+    from brain import trade_rationale
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    # PER-TRADE REASONING — the day's adds/trims/exits each with the Brain's stated why.
+    # `trades_stated` is what it said it would do (present even when the market was closed and the
+    # book only QUEUED, so intent is never lost); `trades_executed` is that prose joined onto the
+    # trades that really filled, with the action DERIVED from the fills rather than taken on trust.
+    # `trade_coverage` records how much of the day's turnover went unexplained — a gradable metric.
+    _stated = (submission or {}).get("trades") or []
+    _reconciled = trade_rationale.reconcile(
+        _stated, executed,
+        prior_positions=positions_before,
+        target_holdings=(submission or {}).get("holdings") or [])
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
         "summary": (submission or {}).get("summary"),
         "sold_note": (submission or {}).get("sold_note"),
+        "trades_stated": _stated,
+        "trades_executed": _reconciled,
+        "trade_coverage": trade_rationale.coverage(_reconciled),
+        "queued_for_open": bool(queued),
         "feed_health": feed_health,
         "holdings": [{"ticker": h.get("ticker"), "name": _intake_mod.display_name(h.get("ticker")),
                       "venue": h.get("venue"), "weight": h.get("weight"),
@@ -496,6 +563,15 @@ def _translate_report(submission: dict | None, brain: dict | None) -> bool:
         r = h.get("rationale")
         if r and isinstance(r, str):
             texts.append(r)
+    # The per-trade reasons are the operator-facing "why we moved today" text — warm them too, or
+    # the Daily Decision Log's most useful field is the only one that stays English under the toggle.
+    for _t in (sub.get("trades") or []):
+        if not isinstance(_t, dict):
+            continue
+        for _k in ("reason", "thesis_change"):
+            _v = _t.get(_k)
+            if _v and isinstance(_v, str):
+                texts.append(_v)
     bt = (brain or {}).get("text")
     if bt and isinstance(bt, str):
         texts.append(bt[:6000])

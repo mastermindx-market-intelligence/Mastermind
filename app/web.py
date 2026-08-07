@@ -760,6 +760,20 @@ def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONRespons
                         nm_zh = _name_zh(tk)
                         if nm_zh:
                             h["name_zh"] = nm_zh
+                # Per-trade reasoning rows carry tickers too — resolve them the same way so the
+                # "why the book moved" rows never render a bare numeric A-share / HK code.
+                for _row in ((d.get("trades_executed") or []) + (d.get("trades_stated") or [])):
+                    if not isinstance(_row, dict):
+                        continue
+                    tk = (_row.get("ticker") or "")
+                    if tk and not _row.get("name"):
+                        nm = _name(tk)
+                        if nm and nm.upper() != tk.upper():
+                            _row["name"] = nm
+                    if tk and _name_zh:
+                        nm_zh = _name_zh(tk)
+                        if nm_zh:
+                            _row["name_zh"] = nm_zh
             for fld in ("summary", "sold_note", "brain_text"):
                 v = d.get(fld)
                 if v:
@@ -772,6 +786,17 @@ def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONRespons
                     zh = _cached_zh(r)
                     if zh:
                         h["rationale_zh"] = zh
+            # Same zh treatment for the per-trade reasons — this is the text the operator actually
+            # reads to understand the day, so it must survive the language toggle like the rest.
+            for _row in ((d.get("trades_executed") or []) + (d.get("trades_stated") or [])):
+                if not isinstance(_row, dict):
+                    continue
+                for _fld in ("reason", "thesis_change"):
+                    _v = _row.get(_fld)
+                    if _v:
+                        _zh = _cached_zh(_v)
+                        if _zh:
+                            _row[_fld + "_zh"] = _zh
         return JSONResponse({"decisions": decisions})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"decisions": [], "error": str(exc)})

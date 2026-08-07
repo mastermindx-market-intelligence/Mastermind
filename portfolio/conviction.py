@@ -487,14 +487,39 @@ def build(budget: float, name_cap: float = 0.08,
     # signature is a monkeypatch surface for a dozen tests). Additive; the gate still decides.
     _pool = list(candidates())
     _promoted = {str(x).upper().strip() for x in (extra_candidates or []) if x}
-    _pool = sorted(set(_pool) | (_promoted - _MANUAL_EXCLUDE))
+    # RETAIN-TO-EVALUATE — every HELD name is unioned into the pool so it is ALWAYS scored on its
+    # own merits. Before this, `held` was consulted only INSIDE the loop (`is_held`), so a held name
+    # that had merely fallen out of every DISCOVERY source — the top-N `universe()`, the intake
+    # funnel, the `regime_seed()` (documented "ENTRY seed only"), or the Prophet feed (whose plans
+    # stop being `enter`/`wait` the moment a trade is working, prophet_feed._SOURCEABLE_ACTIONS) —
+    # was never evaluated at all. It never reached the exit hysteresis below, so it silently vanished
+    # from the target book, and `paper_account.rebalance` / `queue_orders` executes that absence as a
+    # FULL SELL. Every exit rule below was dead code for exactly the names it was written to protect.
+    #
+    # THE INVARIANT: board membership is a DISCOVERY signal, never an EXIT signal. A name leaves this
+    # book only by failing `hold_ok` (confluence <= _EXIT_CONFLUENCE_FLOOR) or tripping `hard_exit` —
+    # i.e. on its OWN deterioration, never because a volatile upstream board stopped surfacing it.
+    #
+    # `_MANUAL_EXCLUDE` still wins over the held union: it is the operator's explicit kill-switch for
+    # names deliberately reversed out of the book, and this change does not widen its meaning.
+    _pool = sorted(set(_pool) | ((_promoted | held) - _MANUAL_EXCLUDE))
     for t in _pool:
         try:
             full = lenses.full(t, "name")
             syn = full["synthesis"]
             rows: list[dict] = full.get("rows", [])
         except Exception:
-            continue
+            # A NEW candidate we cannot read is simply skipped — no data, no entry. A HELD name is
+            # NOT: dropping it here erases it from the target book, which the rebalance executes as a
+            # full SELL — liquidating a live position on OUR read failure. That is the same disaster
+            # the freeze-on-degrade branch below guards ("missing data must NEVER liquidate the
+            # book"), so we synthesize the degraded synthesis and let that existing, tested path
+            # FREEZE the name at minimal size until we can read it again.
+            if t.upper() not in held:
+                continue
+            syn = {"confluence": 0.0, "vetoes": [], "bull": [], "bear": [],
+                   "size_authority": "insufficient_data", "data_degraded": True}
+            rows = []
 
         vetoes: list[str] = syn.get("vetoes", [])
         confluence: float = syn.get("confluence", 0.0)
@@ -646,6 +671,12 @@ def build(budget: float, name_cap: float = 0.08,
                           + " (not asymmetric)")
             elif confluence <= -0.3:
                 reason = f"Negative confluence ({confluence:+.2f})"
+            elif is_held:
+                # A HELD name is judged against the EXIT floor, not the entry bar — quoting ">0.30"
+                # here misreports why we are selling (the position only had to clear 0.25 to stay).
+                reason = (f"Exit — confluence {confluence:+.2f} fell to/below the exit floor "
+                          f"{_EXIT_CONFLUENCE_FLOOR:.2f} (entry bar is 0.30; held names get the "
+                          f"lower bar)")
             else:
                 reason = f"Insufficient confluence ({confluence:+.2f}, need >0.30)"
 
@@ -736,13 +767,25 @@ def build(budget: float, name_cap: float = 0.08,
                     else:
                         bear_pts.append(f"{lens_name.replace('_', ' ').title()} lens bearish")
 
-            rejected.append({
+            _rej = {
                 "ticker": t,
                 "reason": reason,
                 "vetoes": vetoes,
                 "bear": bear_pts,
                 "confluence": round(confluence, 3),
-            })
+            }
+            # HELD-NAME EXIT PROVENANCE: this rejection is not "a candidate we passed on" — it is a
+            # live position being SOLD. Mark it so the decision log can report the sell WITH its
+            # cause instead of the position silently disappearing from the book. `exit_trigger` is
+            # the machine-readable cause; `reason` stays the human sentence.
+            if is_held:
+                _rej["held_exit"] = True
+                _rej["exit_trigger"] = ("hard_veto" if vetoes
+                                        else "size_authority_blocked" if sa == "blocked"
+                                        else "price_downtrend" if syn.get("price_downtrend")
+                                        else "confluence_below_exit_floor")
+                _rej["exit_floor"] = _EXIT_CONFLUENCE_FLOOR
+            rejected.append(_rej)
 
     # ── BUILD-LEVEL DATA-HEALTH CIRCUIT BREAKER (fail-closed, book-wide) ─────────────────────────
     # If the OVERWHELMING majority of evaluated candidates are data-degraded (>80%), the feed is

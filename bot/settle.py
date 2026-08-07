@@ -94,6 +94,10 @@ def execute_or_queue(pid: str, target: dict[str, float], prices: dict[str, float
         market_open = is_open(pid)
     out: dict = {"executed": [], "queued": False, "market_open": bool(market_open)}
     before = dict((paper_account._load_account(pid).get("positions") or {}))
+    # The PRE-trade holding set, surfaced for the decision log. `executed` alone cannot distinguish
+    # a brand-new position from a top-up (both are side='buy'), nor a full exit from a trim — the
+    # caller needs the before-state to classify each fill. Tickers only: no shares/prices leave here.
+    out["positions_before"] = sorted(before)
     if market_open:
         try:
             paper_account.settle_target(prices, asof, portfolio_id=pid)   # settle any prior queue first

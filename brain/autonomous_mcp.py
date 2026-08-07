@@ -20,7 +20,7 @@ from pathlib import Path
 import bot  # noqa: F401
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
-from brain import bot_mcp
+from brain import bot_mcp, trade_rationale
 
 SERVER_NAME = "desk"
 PORTFOLIO_ID = "autonomous"
@@ -122,8 +122,10 @@ async def get_my_book(args):
       "OPTIONAL governance fields (provide when you can — they improve the shadow decision ledger): "
       "falsifiers (list of strings — what would cause you to reverse this book within 5 days), "
       "evidence_planes (list of strings — data sources you relied on), "
-      "expected_failure_mode (string — the most likely way this book loses money).",
+      "expected_failure_mode (string — the most likely way this book loses money)."
+      + trade_rationale.TOOL_HINT,
       {"type": "object", "properties": {
+          "trades": trade_rationale.TRADES_SCHEMA_PROPERTY,
           "holdings": {"type": "array", "items": {"type": "object", "properties": {
               "ticker": {"type": "string"},
               "weight": {"type": "number", "description": "fraction of NAV, 0-1"},
@@ -170,6 +172,8 @@ async def submit_book(args):
         "sold_note": (args.get("sold_note") or "").strip(),
         "gross": round(gross, 4),
         "scaled_to_no_leverage": scaled,
+        # Per-trade reasoning; reconciled against the real fills by the builder's decision log.
+        "trades": trade_rationale.normalize(args.get("trades")),
     }
     p = submission_path()
     p.parent.mkdir(parents=True, exist_ok=True)

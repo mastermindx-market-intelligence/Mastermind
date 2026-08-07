@@ -270,11 +270,13 @@ def run_etf(asof: str | None = None, *, force: bool = False, armed: bool = True,
     from bot import settle as _settle
     executed: list[dict] = []
     skipped: list[str] = []
+    positions_before: list[str] = []          # pre-trade holdings — classifies each fill in the log
     queued = False
     if decided:
         skipped = sorted(t for t in target if t not in prices)
         res = _settle.execute_or_queue(PORTFOLIO_ID, target, prices, asof)
         executed = res.get("executed") or []
+        positions_before = res.get("positions_before") or []
         queued = bool(res.get("queued"))
         if res.get("error"):
             out["rebalance_error"] = res["error"]
@@ -301,7 +303,8 @@ def run_etf(asof: str | None = None, *, force: bool = False, armed: bool = True,
     #    8. publish the book contract with the fresh scorecard attached.
     try:
         _append_decision_log(asof, submission, executed, skipped, brain, risk, guardrail_notes,
-                             packet_id=(_pgr.packet_id if _pgr else None))
+                             packet_id=(_pgr.packet_id if _pgr else None),
+                             positions_before=positions_before, queued=queued)
     except Exception:
         pass
     try:
@@ -581,7 +584,10 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         "Call get_etf_board first, then submit your complete target book via mcp__desk__submit_book "
         "with a one-paragraph rationale per holding. Rotate with discipline, not churn; you are "
         "accountable for the NAV vs SPY.",
+        "",
     ]
+    from brain import trade_rationale as _tr
+    lines += [_tr.BOOK_DOCTRINE_BLOCK]
     return "\n".join(lines)
 
 
@@ -672,15 +678,29 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
 
 def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          skipped: list, brain: dict, risk: dict, guardrails: list,
-                         *, packet_id: str | None = None) -> None:
+                         *, packet_id: str | None = None,
+                         positions_before: list | None = None, queued: bool = False) -> None:
     from portfolio import etf_universe, registry
+    from brain import trade_rationale
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    # PER-TRADE REASONING — see bot/china.py for the full contract. `trades_stated` survives a
+    # closed-market QUEUE (no fills yet); `trades_executed` joins the prose onto the real fills with
+    # the action derived from them; `trade_coverage` makes unexplained turnover a gradable metric.
+    _stated = (submission or {}).get("trades") or []
+    _reconciled = trade_rationale.reconcile(
+        _stated, executed,
+        prior_positions=positions_before,
+        target_holdings=(submission or {}).get("holdings") or [])
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
         "summary": (submission or {}).get("summary"),
         "sold_note": (submission or {}).get("sold_note"),
+        "trades_stated": _stated,
+        "trades_executed": _reconciled,
+        "trade_coverage": trade_rationale.coverage(_reconciled),
+        "queued_for_open": bool(queued),
         "risk_state": risk.get("state"),
         "risk_reasons": risk.get("reasons"),
         "guardrails": guardrails,

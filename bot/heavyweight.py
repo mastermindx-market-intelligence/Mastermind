@@ -505,6 +505,10 @@ def run_heavyweight(asof: str | None = None, *, force: bool = False, armed: bool
     # 5. EXECUTE — rebalance to the FINAL (enforced) weights at close prices.
     executed: list[dict] = []
     skipped: list[str] = []
+    # Snapshot of the PRE-trade holdings for the decision log: `executed` alone cannot tell a new
+    # position from a top-up, nor a full exit from a trim. Taken here (before the rebalance) and
+    # kept independent of `held` so a later rebinding cannot corrupt it.
+    positions_before: list[str] = list(held)
     do_trade = submitted and bool(final_weights) and not held_prior
     if do_trade:
         priceable = {t: w for t, w in final_weights.items() if t in prices}
@@ -536,7 +540,8 @@ def run_heavyweight(asof: str | None = None, *, force: bool = False, armed: bool
     #    9. publish the book contract.
     try:
         _append_decision_log(asof, submission, kept, notes, executed, skipped, brain, held_prior,
-                             packet_id=(_pgr.packet_id if _pgr else None))
+                             packet_id=(_pgr.packet_id if _pgr else None),
+                             positions_before=positions_before)
     except Exception:
         pass
     try:
@@ -701,7 +706,10 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         "Research Flagship now (its holdings, trades, per-name research, and thinking), then submit your "
         "complete concentrated target book via mcp__heavydesk__submit_book — one conviction rationale per "
         "holding. Press your winners; be decisive; you are accountable for the NAV.",
+        "",
     ]
+    from brain import trade_rationale as _tr
+    lines += [_tr.BOOK_DOCTRINE_BLOCK]
     return "\n".join(lines)
 
 
@@ -798,15 +806,28 @@ def _vs_flagship(hw_return_pct) -> float | None:
 
 def _append_decision_log(asof: str, submission: dict | None, kept: list[dict], notes: dict,
                          executed: list, skipped: list, brain: dict, held_prior: bool,
-                         *, packet_id: str | None = None) -> None:
+                         *, packet_id: str | None = None,
+                         positions_before: list | None = None) -> None:
     from portfolio import registry
+    from brain import trade_rationale
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    # PER-TRADE REASONING — see bot/china.py for the full contract. `trades_executed` joins the
+    # Brain's stated why onto the trades that really filled, with the action derived from the fills;
+    # `trade_coverage` makes unexplained turnover a gradable metric. NOTE the target here is the
+    # ENFORCED book (`kept`), not the raw submission — the 5-50% rails can drop a submitted name, and
+    # the log must classify exits against what the book actually targets.
+    _stated = (submission or {}).get("trades") or []
+    _reconciled = trade_rationale.reconcile(
+        _stated, executed, prior_positions=positions_before, target_holdings=(kept or []))
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
         "summary": (submission or {}).get("summary"),
         "sold_note": (submission or {}).get("sold_note"),
+        "trades_stated": _stated,
+        "trades_executed": _reconciled,
+        "trade_coverage": trade_rationale.coverage(_reconciled),
         # the FINAL (enforced) holdings — what the book actually targets, not the raw submission
         "holdings": [{"ticker": h.get("ticker"), "weight": h.get("weight"),
                       "conviction": h.get("conviction"), "rationale": h.get("rationale")}

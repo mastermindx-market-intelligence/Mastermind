@@ -21,7 +21,7 @@ import json
 import bot  # noqa: F401  -> vendor/macro onto sys.path
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
-from brain import autonomous_mcp, bot_mcp, china_intake
+from brain import autonomous_mcp, bot_mcp, china_intake, trade_rationale
 
 SERVER_NAME = "china"
 PORTFOLIO_ID = "china"
@@ -137,8 +137,10 @@ async def get_my_book(args):
       "OPTIONAL governance fields (provide when you can — they improve the shadow decision ledger): "
       "falsifiers (list of strings — what would cause you to reverse this book within 5 days), "
       "evidence_planes (list of strings — data sources you relied on), "
-      "expected_failure_mode (string — the most likely way this book loses money).",
+      "expected_failure_mode (string — the most likely way this book loses money)."
+      + trade_rationale.TOOL_HINT,
       {"type": "object", "properties": {
+          "trades": trade_rationale.TRADES_SCHEMA_PROPERTY,
           "holdings": {"type": "array", "items": {"type": "object", "properties": {
               "ticker": {"type": "string", "description": "venue-suffixed: *.SS/*.SZ A-share, *.HK Hong Kong, bare = US ADR"},
               "weight": {"type": "number", "description": "fraction of NAV, 0-1"},
@@ -190,6 +192,10 @@ async def submit_book(args):
         "sold_note": (args.get("sold_note") or "").strip(),
         "gross": round(gross, 4),
         "scaled_to_no_leverage": scaled,
+        # Per-trade reasoning. Stored RAW-normalized here; bot/china.py reconciles it against the
+        # trades that actually filled when it writes the decision log (a stated trade that never
+        # filled, and a fill the Brain never explained, are both visible there).
+        "trades": trade_rationale.normalize(args.get("trades")),
     }
     p = submission_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -282,6 +288,173 @@ async def get_china_intake(args):
                          "note": built.get("note")}, ["candidates"])
 
 
+def _num_or_none(v):
+    """Coerce to float or None; bools rejected (a stray True in a momentum field is bad data)."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_sector_rs(raw) -> list[dict]:
+    """Normalize the regime's ``sector_rs`` into ranked ``{sector, rs, mom_20d_pct, rank}`` rows.
+
+    SHAPE-TOLERANT BY DESIGN. The vendored China regime artifact is not present in every checkout
+    (the vendor tree is an R2-backed symlink that is commonly absent), so this reader accepts every
+    shape the emit is known to take rather than asserting one we cannot verify here:
+      * a LIST of dicts keyed by ``sector`` / ``name`` / ``label`` / ``ticker``, with the strength in
+        any of ``rs`` / ``mom_20d_pct`` / ``ret_20d`` / ``score`` / ``value``;
+      * a DICT of ``{sector: number}`` or ``{sector: {...}}``.
+    Anything unrecognized yields [] — the tool then reports the gap honestly instead of inventing a
+    ranking. Sorted strongest-first; an explicit upstream ``rank`` wins over the derived order.
+    """
+    rows: list[dict] = []
+    try:
+        items: list = []
+        if isinstance(raw, dict):
+            items = [{"sector": k, "value": v} for k, v in raw.items()]
+        elif isinstance(raw, list):
+            items = [r for r in raw if isinstance(r, dict)]
+        for r in items:
+            sector = None
+            for k in ("sector", "name", "label", "sector_name", "ticker"):
+                if r.get(k):
+                    sector = str(r[k]).strip()
+                    break
+            if not sector:
+                continue
+            inner = r.get("value") if isinstance(r.get("value"), dict) else r
+            strength = None
+            for k in ("rs", "mom_20d_pct", "ret_20d", "score", "value", "pctile_252d"):
+                strength = _num_or_none(inner.get(k) if isinstance(inner, dict) else inner)
+                if strength is not None:
+                    break
+            rows.append({
+                "sector": sector,
+                "strength": strength,
+                "rs": _num_or_none(r.get("rs")),
+                "mom_20d_pct": _num_or_none(r.get("mom_20d_pct") or r.get("ret_20d")),
+                "rank": r.get("rank") if isinstance(r.get("rank"), int) else None,
+            })
+        rows.sort(key=lambda x: (x["rank"] if x["rank"] is not None else 10_000,
+                                 -(x["strength"] if x["strength"] is not None else float("-inf"))))
+        for i, r in enumerate(rows, 1):
+            r.setdefault("rank", None)
+            if r["rank"] is None:
+                r["rank"] = i
+        return rows
+    except Exception:  # noqa: BLE001 — fail-soft: an unreadable artifact ranks nothing
+        return []
+
+
+def _sector_of_map() -> dict[str, str]:
+    """ticker -> sector, assembled from the A-share buy board (its rows carry ``sector``). Used to
+    report the BOOK's own sector exposure back to the Brain. Fail-soft → {}."""
+    out: dict[str, str] = {}
+    try:
+        for rel, keys in (("factordata/china_standouts.json", ("buy", "standouts")),
+                          ("factordata/china_alpha.json", ("top",))):
+            raw = china_intake._read(rel) or {}
+            for key in keys:
+                for row in (raw.get(key) or []):
+                    if isinstance(row, dict) and row.get("ticker") and row.get("sector"):
+                        out.setdefault(str(row["ticker"]).upper(), str(row["sector"]))
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+@tool("get_china_sectors",
+      "WHICH SECTORS ARE LEADING — the ranked China sector RS/momentum table, the buy-board names "
+      "sitting inside the LEADING sectors, and YOUR BOOK'S OWN sector exposure next to it. Use this "
+      "BEFORE picking names: single-name boards tell you what is good, this tells you where the "
+      "money is actually moving and whether you own any of it. If a sector is leading and your "
+      "exposure to it is zero, that is a decision you are making by default — make it deliberately.",
+      {"type": "object", "properties": {
+          "top_n": {"type": "integer", "description": "how many leading sectors to detail (default 6, max 15)"}}})
+async def get_china_sectors(args):
+    from portfolio import fx, paper_account
+    top_n = max(1, min(int(args.get("top_n") or 6), 15))
+    regime = china_intake._read("china_regime/latest.json") or {}
+    ranked = _normalize_sector_rs(regime.get("sector_rs"))
+
+    # The book's CURRENT sector exposure, so "we own none of the leadership" is visible as a number
+    # rather than something the Brain has to notice for itself.
+    exposure: dict[str, float] = {}
+    unmapped = 0.0
+    try:
+        sec_of = _sector_of_map()
+        state = paper_account._load_account(PORTFOLIO_ID)
+        tickers = list((state.get("positions") or {}).keys())
+        prices = {}
+        for t in tickers:
+            b = fx.usd_to(paper_account._current_price(t), CURRENCY)
+            if b:
+                prices[t] = b
+        nav = paper_account.nav(prices, PORTFOLIO_ID)
+        pnl = paper_account.positions_pnl(prices, PORTFOLIO_ID)
+        for t, rec in pnl.items():
+            mv = rec.get("market_value")
+            if not (mv and nav):
+                continue
+            w = round(mv / nav, 4)
+            s = sec_of.get(t.upper())
+            if s:
+                exposure[s] = round(exposure.get(s, 0.0) + w, 4)
+            else:
+                unmapped = round(unmapped + w, 4)
+    except Exception:  # noqa: BLE001 — exposure is additive context; never sink the tool
+        pass
+
+    leaders = ranked[:top_n]
+    leader_names = {r["sector"] for r in leaders}
+    # Buy-board names that sit INSIDE the leading sectors — the actionable bridge from "this sector
+    # is running" to "here is what you could actually buy in it".
+    in_leaders: dict[str, list] = {}
+    try:
+        board = china_intake._read("factordata/china_standouts.json") or {}
+        for row in (board.get("buy") or [])[:120]:
+            if not isinstance(row, dict):
+                continue
+            s = str(row.get("sector") or "").strip()
+            # Cap per sector: the buy board is conviction-ordered, so the first few are the ones
+            # worth studying, and an uncapped dict here could blow past the tool's JSON cap (the
+            # dict is not shrinkable by _capped_json, which only trims list-valued keys).
+            if s and s in leader_names and len(in_leaders.get(s, [])) < 6:
+                in_leaders.setdefault(s, []).append({
+                    "ticker": row.get("ticker"),
+                    "name": china_intake.display_name(row.get("ticker")),
+                    "conviction_score": (row.get("conviction") or {}).get("score")
+                    if isinstance(row.get("conviction"), dict) else None,
+                    "entry_bucket": ((row.get("conviction") or {}).get("size") or {}).get("bucket")
+                    if isinstance(row.get("conviction"), dict) else None,
+                })
+    except Exception:  # noqa: BLE001
+        pass
+
+    out = {
+        "as_of": regime.get("date"),
+        "leading_sectors": leaders,
+        "lagging_sectors": ranked[-5:] if len(ranked) > top_n else [],
+        "your_exposure_by_sector": exposure,
+        "your_unmapped_weight": unmapped,
+        "leading_sectors_you_own_nothing_in": sorted(
+            s for s in leader_names if not exposure.get(s)),
+        "buy_board_names_in_leading_sectors": in_leaders,
+        "note": ("Sector leadership from the China regime read. `leading_sectors_you_own_nothing_in` "
+                 "is the gap list — a leading sector with zero weight is an active choice, so justify "
+                 "it or close it. Entry discipline still applies per name (entry_bucket='avoid' means "
+                 "wait for a pullback, not skip the sector)."),
+    }
+    if not ranked:
+        out["note"] = ("China regime sector_rs is unavailable or in an unrecognized shape — sector "
+                       "leadership could NOT be read this run. Do not infer leadership from the "
+                       "single-name board alone; say so in your summary.")
+    return _capped_json(out, ["leading_sectors", "lagging_sectors"])
+
+
 @tool("get_china_brief",
       "The macro China desk's narrative brief — a context-only LLM read of the regime, the working "
       "rotation thesis, transmission channels to watch, and watch-items. Qualitative framing, not a "
@@ -318,7 +491,8 @@ async def get_quote(args):
 
 
 _DESK_TOOLS = [get_my_book, submit_book]
-_READ_TOOLS = [get_china_regime, get_china_standouts, get_china_intake, get_china_brief, get_quote]
+_READ_TOOLS = [get_china_regime, get_china_standouts, get_china_sectors, get_china_intake,
+               get_china_brief, get_quote]
 _ALL_TOOLS = _DESK_TOOLS + _READ_TOOLS
 
 

@@ -2377,6 +2377,20 @@ html[data-theme="light"] body.page-mm {
 .mm-dec-conv.medium{color:#d97706;background:rgba(217,119,6,.14)}
 .mm-dec-conv.low{color:var(--muted);background:rgba(127,127,127,.14)}
 .mm-dec-sold{font-size:12px;color:var(--muted);margin-top:7px;font-style:italic}
+/* Per-trade reasoning — why the book actually moved today (adds / trims / exits, each with cause) */
+.mm-dec-why{margin-top:9px;display:flex;flex-direction:column;gap:7px}
+.mm-dec-why-hd{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:1px}
+.mm-dec-why-row{font-size:12.5px;line-height:1.55;padding-left:9px;border-left:2px solid var(--border,rgba(127,127,127,.22))}
+.mm-dec-why-row.exit{border-left-color:rgba(220,38,38,.55)}
+.mm-dec-why-row.new_buy,.mm-dec-why-row.add{border-left-color:rgba(22,163,74,.55)}
+.mm-dec-why-row.trim{border-left-color:rgba(217,119,6,.55)}
+.mm-dec-act{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:5px;margin-right:6px;vertical-align:1px}
+.mm-dec-act.new_buy,.mm-dec-act.add{color:#16a34a;background:rgba(22,163,74,.14)}
+.mm-dec-act.trim{color:#d97706;background:rgba(217,119,6,.14)}
+.mm-dec-act.exit{color:#dc2626;background:rgba(220,38,38,.14)}
+.mm-dec-act.hold{color:var(--muted);background:rgba(127,127,127,.14)}
+.mm-dec-why-tc{font-size:11.5px;color:var(--muted);margin-top:3px}
+.mm-dec-why-none{font-size:11.5px;color:var(--down,#dc2626);opacity:.85}
 .mm-dec-skip{font-size:11px;color:var(--down,#dc2626);margin-top:6px}
 .mm-dec-reason{margin-top:10px;border-top:1px dashed var(--border,rgba(127,127,127,.22));padding-top:8px}
 .mm-dec-toggle{background:transparent;border:0;color:var(--muted,#8a93a6);font:inherit;font-size:12px;font-weight:700;
@@ -6133,6 +6147,7 @@ function renderDecisions() {
       '<div class="mm-dec-head"><span><span class="mm-dec-date">' + esc(d.asof || '') + '</span>' + newBadge + '</span><span class="mm-dec-cost">' + cost + '</span></div>' +
       (decSum ? '<div class="mm-dec-sum">' + esc(decSum) + '</div>' : '') +
       (trades ? '<div class="mm-dec-trades">' + trades + '</div>' : '') +
+      _decTradeReasons(d) +
       sold +
       (holds ? '<div class="mm-dec-holdings">' + holds + '</div>' : '') +
       skip +
@@ -6156,6 +6171,46 @@ window.toggleDecisionLog = function() {
   _decisionsExpanded = !_decisionsExpanded;
   renderDecisions();
 };
+
+// ── WHY THE BOOK MOVED — one row per add / trim / exit, each with the Brain's stated cause ──
+// Prefers `trades_executed` (reasons joined onto the trades that really filled, action derived from
+// the fills). Falls back to `trades_stated` when nothing filled — a book decided after the close is
+// QUEUED to settle at the next open, so the intent exists before any fill does.
+// A trade the Brain never explained is shown as such rather than omitted: the gap is the signal.
+function _decTradeReasons(d) {
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  var rows = (d.trades_executed && d.trades_executed.length) ? d.trades_executed
+           : ((d.trades_stated && d.trades_stated.length) ? d.trades_stated : []);
+  if (!rows.length) return '';
+  var pending = !(d.trades_executed && d.trades_executed.length);
+  var LBL = isZh
+    ? { new_buy: '新建', add: '加仓', trim: '减仓', exit: '清仓', hold: '持有' }
+    : { new_buy: 'NEW BUY', add: 'ADD', trim: 'TRIM', exit: 'EXIT', hold: 'HOLD' };
+  var body = rows.map(function(r) {
+    var act = String(r.action || r.stated_action || '').toLowerCase();
+    var badge = LBL[act] ? '<span class="mm-dec-act ' + act + '">' + esc(LBL[act]) + '</span>' : '';
+    var nm = securityName(r);
+    var nmHtml = (nm && nm !== r.ticker) ? ' <span style="color:var(--muted);font-weight:500">' + esc(nm) + '</span>' : '';
+    var why = (isZh && r.reason_zh) ? r.reason_zh : r.reason;
+    var whyHtml = why
+      ? esc(why)
+      : '<span class="mm-dec-why-none">' + (isZh ? '本次交易未给出理由' : 'no reason given for this trade') + '</span>';
+    var tc = (isZh && r.thesis_change_zh) ? r.thesis_change_zh : r.thesis_change;
+    var tcHtml = tc ? '<div class="mm-dec-why-tc">' + (isZh ? '论点变化：' : 'Thesis change: ') + esc(tc) + '</div>' : '';
+    return '<div class="mm-dec-why-row ' + esc(act) + '">' + badge +
+      '<b>' + esc(r.ticker || '') + '</b>' + nmHtml + ' — ' + whyHtml + tcHtml + '</div>';
+  }).join('');
+  var cov = d.trade_coverage;
+  var covHtml = '';
+  if (cov && cov.n_trades && cov.pct_explained != null && cov.pct_explained < 100) {
+    covHtml = '<div class="mm-dec-why-none">' +
+      (isZh ? (cov.n_explained + '/' + cov.n_trades + ' 笔交易有说明')
+            : (cov.n_explained + ' of ' + cov.n_trades + ' trades explained')) + '</div>';
+  }
+  var hd = isZh ? (pending ? '为何调仓（待开盘成交）' : '为何调仓')
+                : (pending ? 'Why the book moved (queued for the open)' : 'Why the book moved');
+  return '<div class="mm-dec-why"><div class="mm-dec-why-hd">' + esc(hd) + '</div>' + body + covHtml + '</div>';
+}
 
 // ── the Brain's thinking trace — closing reasoning + the data/tools it consulted ──
 function _decReasoningBlock(d, i) {

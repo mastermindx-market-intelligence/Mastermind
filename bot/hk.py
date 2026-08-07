@@ -188,11 +188,13 @@ def run_hk(asof: str | None = None, *, force: bool = False, armed: bool = True,
     from bot import settle as _settle
     executed: list[dict] = []
     skipped: list[str] = []
+    positions_before: list[str] = []          # pre-trade holdings — classifies each fill in the log
     queued = False
     if decided:
         skipped = sorted(t for t in target if t not in prices)
         res = _settle.execute_or_queue(PORTFOLIO_ID, target, prices, asof)
         executed = res.get("executed") or []
+        positions_before = res.get("positions_before") or []
         queued = bool(res.get("queued"))
         if res.get("error"):
             out["rebalance_error"] = res["error"]
@@ -225,7 +227,8 @@ def run_hk(asof: str | None = None, *, force: bool = False, armed: bool = True,
     try:
         _append_decision_log(asof, submission, executed, skipped, brain,
                              feed_health=out.get("feed_health"),
-                             packet_id=(_pgr.packet_id if _pgr else None))
+                             packet_id=(_pgr.packet_id if _pgr else None),
+                             positions_before=positions_before, queued=queued)
     except Exception:
         pass
 
@@ -355,7 +358,10 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         "your complete target book for today via mcp__hk__submit_book, with a one-paragraph "
         "rationale per holding. Confirm each name is priceable with get_quote first. Rebalance with "
         "conviction; you are accountable for the HKD NAV vs FXI.",
+        "",
     ]
+    from brain import trade_rationale as _tr
+    lines += [_tr.BOOK_DOCTRINE_BLOCK]
     return "\n".join(lines)
 
 
@@ -434,16 +440,30 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
 
 def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          skipped: list, brain: dict, feed_health: dict | None = None,
-                         *, packet_id: str | None = None) -> None:
+                         *, packet_id: str | None = None,
+                         positions_before: list | None = None, queued: bool = False) -> None:
     from portfolio import registry
     from brain import china_intake as _intake_mod
+    from brain import trade_rationale
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    # PER-TRADE REASONING — see bot/china.py for the full contract. `trades_stated` survives a
+    # closed-market QUEUE (no fills yet); `trades_executed` joins the prose onto the real fills with
+    # the action derived from them; `trade_coverage` makes unexplained turnover a gradable metric.
+    _stated = (submission or {}).get("trades") or []
+    _reconciled = trade_rationale.reconcile(
+        _stated, executed,
+        prior_positions=positions_before,
+        target_holdings=(submission or {}).get("holdings") or [])
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
         "summary": (submission or {}).get("summary"),
         "sold_note": (submission or {}).get("sold_note"),
+        "trades_stated": _stated,
+        "trades_executed": _reconciled,
+        "trade_coverage": trade_rationale.coverage(_reconciled),
+        "queued_for_open": bool(queued),
         "feed_health": feed_health,
         "holdings": [{"ticker": h.get("ticker"), "name": _intake_mod.display_name(h.get("ticker")),
                       "name_zh": _intake_mod.display_name_zh(h.get("ticker")),
@@ -502,6 +522,15 @@ def _translate_report(submission: dict | None, brain: dict | None) -> bool:
         r = h.get("rationale")
         if r and isinstance(r, str):
             texts.append(r)
+    # The per-trade reasons are the operator-facing "why we moved today" text — warm them too, or
+    # the Daily Decision Log's most useful field is the only one that stays English under the toggle.
+    for _t in (sub.get("trades") or []):
+        if not isinstance(_t, dict):
+            continue
+        for _k in ("reason", "thesis_change"):
+            _v = _t.get(_k)
+            if _v and isinstance(_v, str):
+                texts.append(_v)
     bt = (brain or {}).get("text")
     if bt and isinstance(bt, str):
         texts.append(bt[:6000])
