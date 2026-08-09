@@ -1,4 +1,8 @@
-"""The ETF book — a free-form Opus Brain rotating its own $1M paper book across US-listed ETFs.
+"""The ETF book — archived; historical implementation retained for audit.
+
+The public runner returns before imports, model capacity, or portfolio writes, its cron/first-run
+paths are removed, and POST /api/etf/run returns HTTP 410. The mechanics below describe the retired
+book and remain testable only when the registry is explicitly overridden in an isolated test.
 
 The US-ETF sibling of ``bot/autonomous.py``: once per US trading day (after the close), the Brain
   1. reads the ETF ROTATION BOARD (``get_etf_board`` — the dashboard's regime / sector-RS / risk
@@ -16,7 +20,7 @@ crisis floor that caps offensive gross when the dashboard reads stressed. The en
 Opus decides. Universe + pricing live in ``portfolio.etf_universe``; the board in ``brain.etf_board``.
 Everything is scoped to portfolio_id="etf" so no other book is touched.
 
-Run:  python -m bot.etf        (or the APScheduler 'etf_daily' job, or POST /api/etf/run)
+Successor: ``bot.autonomous.run_autonomous`` / POST ``/api/autonomous/run``.
 """
 from __future__ import annotations
 
@@ -115,9 +119,17 @@ def run_etf(asof: str | None = None, *, force: bool = False, armed: bool = True,
     (e.g. an urgent reconsideration: "the dashboard is stale, check live overnight futures yourself
     and de-risk to SGOV if warranted"). The market-hours gate still applies — off-hours the decided
     book is QUEUED for the next open, never filled on the spot."""
+    asof = asof or date.today().isoformat()
+    from portfolio import registry
+    if registry.is_archived(PORTFOLIO_ID):
+        return {
+            **registry.archived_run_result(PORTFOLIO_ID, asof),
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+            "decided": False,
+            "brain": {"ok": False, "skipped": "portfolio_archived"},
+        }
     from portfolio import etf_universe, market_calendar, paper_account, position_log
 
-    asof = asof or date.today().isoformat()
     out: dict = {"portfolio_id": PORTFOLIO_ID, "asof": asof,
                  "ran_at": datetime.now(timezone.utc).isoformat(),
                  "currency": "USD"}  # ETF book is USD — stamp affirmatively so mandate_packet.currency_ok is True
@@ -842,6 +854,9 @@ if __name__ == "__main__":
     import sys
     _armed = "--offline" not in sys.argv
     o = run_etf(armed=_armed)
+    if o.get("skipped") == "portfolio_archived":
+        print(f"ETF Brain is archived; successor: {o.get('superseded_by') or 'autonomous'}.")
+        raise SystemExit(0)
     print(f"=== etf {o['asof']} (inaugural={o['inaugural']}, trading_day={o['trading_day']}) ===")
     print("brain:", "ok" if o["brain"].get("ok") else o["brain"].get("error", "skipped"),
           "| decided:", o.get("decided"), "| holdings:", o.get("holdings"),

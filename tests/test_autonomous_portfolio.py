@@ -55,7 +55,11 @@ def test_autonomous_store_isolated_from_flagship(iso, monkeypatch):
     assert position_log._ledger_path("autonomous") == auto_dir / "positions_ledger.json"
 
 
-def test_submit_book_scales_and_dedups(iso):
+def test_submit_book_uses_deterministic_sizing_and_dedups(iso, monkeypatch):
+    from brain import decision_submission
+    monkeypatch.setattr(decision_submission, "_instrument_identity", lambda ticker: {
+        "kind": "common_stock", "status": "test_common_stock", "verified": True,
+    })
     res = asyncio.run(autonomous_submit({
         "holdings": [
             {"ticker": "AAA", "weight": 0.8, "rationale": "a"},
@@ -68,8 +72,12 @@ def test_submit_book_scales_and_dedups(iso):
     from brain import autonomous_mcp
     sub = autonomous_mcp.read_submission()
     assert {h["ticker"] for h in sub["holdings"]} == {"AAA", "BBB"}
-    assert sub["scaled_to_no_leverage"] is True
-    assert sub["gross"] == pytest.approx(1.0)           # 0.8+0.8 scaled down to 1.0
+    # Model-supplied weights are advisory in US v2. Missing conviction degrades to
+    # medium, so the trusted allocator assigns each name its 10% ordinal cap.
+    assert sub["scaled_to_no_leverage"] is False
+    assert sub["gross"] == pytest.approx(0.20)
+    assert all(h["weight_source"] == "deterministic_conviction_allocator.v2"
+               for h in sub["holdings"])
     assert all(h["rationale"] for h in sub["holdings"])  # rationale required
 
 
@@ -121,6 +129,84 @@ def test_run_autonomous_executes_submission(iso, monkeypatch):
     assert nvda["rationale"] and nvda["sleeve"] == "brain"
 
 
+def test_run_autonomous_accepts_explicit_all_cash_submission(iso, monkeypatch):
+    """An empty v2 holdings list is a valid target when exits were explicit, not a failed turn."""
+    prices = {"AAPL": 200.0, "SPY": 740.0}
+    monkeypatch.setattr(paper_account, "_current_price", lambda t: prices.get(t))
+    paper_account.execute_fill(
+        "AAPL", "buy", shares=10, price=200.0, asof="2026-06-20",
+        portfolio_id="autonomous",
+    )
+    from bot import autonomous, settle
+    from brain import autonomous_mcp
+    monkeypatch.setattr(settle, "is_open", lambda pid: True)
+
+    def fake_brain(asof, inaugural):
+        autonomous_mcp.submission_path().parent.mkdir(parents=True, exist_ok=True)
+        autonomous_mcp.submission_path().write_text(json.dumps({
+            "schema": "mastermind.target_book.v2",
+            "holdings": [],
+            "exit_decisions": [{
+                "ticker": "AAPL", "action": "exit", "reason": "hard falsifier fired",
+                "reason_code": "hard_falsifier", "evidence": ["test"], "why_now": "now",
+            }],
+            "summary": "explicitly de-risked", "gross": 0.0,
+        }))
+        return {"ok": True, "text": "x", "cost_usd": 0.0, "model": "test"}
+
+    monkeypatch.setattr(autonomous, "_run_brain", fake_brain)
+    out = autonomous.run_autonomous(asof="2026-06-21", armed=True)
+    assert out["decided"] is True
+    assert ("AAPL", "sell") in {(row["ticker"], row["side"]) for row in out["executed"]}
+    assert paper_account._load_account("autonomous")["positions"] == {}
+
+
+def test_run_autonomous_quote_fallback_freezes_instead_of_trimming(iso, monkeypatch):
+    """An avg-cost recovery proves inventory exists, but must never become a trade mark."""
+    prices = {"AAPL": 200.0, "SPY": 740.0}
+    monkeypatch.setattr(paper_account, "_current_price", lambda ticker: prices.get(ticker))
+    paper_account.execute_fill(
+        "AAPL",
+        "buy",
+        shares=10,
+        price=100.0,
+        asof="2026-06-18",
+        portfolio_id="autonomous",
+    )
+    from bot import autonomous, settle
+    from brain import autonomous_mcp
+
+    monkeypatch.setattr(settle, "is_open", lambda pid: True)
+
+    def fake_brain(asof, inaugural):
+        autonomous_mcp.submission_path().parent.mkdir(parents=True, exist_ok=True)
+        autonomous_mcp.submission_path().write_text(
+            json.dumps(
+                {
+                    "schema": "mastermind.target_book.v2",
+                    "holdings": [
+                        {
+                            "ticker": "AAPL",
+                            "weight": 0.01,
+                            "rationale": "carry safely",
+                            "holding_mark_source": "account_avg_cost_fallback",
+                        }
+                    ],
+                    "summary": "quote-degraded review",
+                    "gross": 0.01,
+                }
+            )
+        )
+        return {"ok": True, "text": "x", "cost_usd": 0.0, "model": "test"}
+
+    monkeypatch.setattr(autonomous, "_run_brain", fake_brain)
+    out = autonomous.run_autonomous(asof="2026-06-22", armed=True)
+    assert out["decided"] is False
+    assert out["decision_boundary_frozen"]["tickers"] == ["AAPL"]
+    assert out["executed"] == []
+    assert paper_account._load_account("autonomous")["positions"]["AAPL"]["shares"] == 10
+
+
 def test_run_autonomous_safety_degrosses_fragile_book(iso, monkeypatch):
     """The safety firebreak is CONSUMED on the Brain book too: an all-in, single-name fragile
     submission gets de-grossed (subtract-only) before it executes — raising cash, not levering."""
@@ -163,7 +249,7 @@ def test_web_endpoints_portfolio_aware(iso, monkeypatch):
     portfolios = c.get("/api/portfolios").json()
     ids = {p["id"] for p in portfolios["portfolios"]}
     assert {"flagship", "autonomous"} <= ids
-    assert portfolios["default"] == "flagship"
+    assert portfolios["default"] == "autonomous"
 
     dec = c.get("/api/decisions?portfolio=autonomous").json()
     assert "decisions" in dec

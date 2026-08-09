@@ -467,14 +467,17 @@ def _from_validation(asof: date) -> list[dict]:
         if not v.startswith("FAIL"):
             continue
         cold = bool(r.get("cold_start"))
+        unlock = (
+            "vendor a forward-graded historical series so the AUC/Brier gate is computable"
+            if cold
+            else "the AUC gate is below threshold — improve the signal or retire the arm ambition"
+        )
         out.append(_item(
             f"validation:{r['signal']}", CLASS_VALIDATION,
             f"Perception gate '{r['signal']}' FAILED — stays advisory/display-only",
             evidence=[f"validation run {r['file']}: verdict {r['verdict']!r}",
                       (r.get("arming") or "arm seam dark")],
-            suggested_fix=(f"'{r['signal']}' cannot size: {'vendor a forward-graded historical series '
-                           'so the AUC/Brier gate is computable' if cold else 'the AUC gate is below '
-                           'threshold — improve the signal or retire the arm ambition'}."),
+            suggested_fix=f"'{r['signal']}' cannot size: {unlock}.",
             fix_type=FIX_CODE if cold else FIX_EXPERIMENT,
             owner=OWNER_FABLE,       # gate arming is a boundary call — never self-applied (P8)
             expected_impact=f"'{r['signal']}' becomes gate-eligible (or is honestly retired)",

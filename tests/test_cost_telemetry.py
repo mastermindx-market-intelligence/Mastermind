@@ -517,6 +517,11 @@ def test_pm_conviction_record_full_fields(tmp_path, monkeypatch):
     We mock cli_bridge.reason + autonomous_mcp to avoid any real LLM call and
     inspect the cost_guard ledger entry directly.
     """
+    from portfolio import registry
+
+    # This is a unit test of the retired seat's accounting internals. Production keeps Flagship
+    # archived and therefore correctly spends zero tokens on this path.
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
     import importlib
     import brain.cost_guard as _cg
     _cg = importlib.reload(_cg)
@@ -541,6 +546,7 @@ def test_pm_conviction_record_full_fields(tmp_path, monkeypatch):
 
     # Patch _run_coro to return our fake result synchronously
     monkeypatch.setattr(_pmc, "_run_coro", lambda coro: fake_res)
+    monkeypatch.setattr(_pmc.client, "available", lambda: True)
 
     # autonomous_mcp is imported locally as 'brain.flagship_desk_mcp'; patch via sys.modules
     import sys

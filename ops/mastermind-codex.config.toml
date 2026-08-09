@@ -6,6 +6,15 @@ approval_policy = "never"
 sandbox_mode = "read-only"
 cli_auth_credentials_store = "file"
 
+# Defense-in-depth for any operator invocation that uses this profile directly. The service bridge
+# repeats these as CLI overrides so headless policy does not depend on project-trust load order.
+[shell_environment_policy]
+inherit = "core"
+ignore_default_excludes = false
+
+[projects."/opt/mastermind"]
+trust_level = "trusted"
+
 # Mastermind's book tools are attached per invocation by brain/codex_bridge.py.
 # Native web search is available for the research portions of the daily loops.
 web_search = "live"

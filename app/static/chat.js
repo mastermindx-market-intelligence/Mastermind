@@ -1,9 +1,10 @@
-/* The Brain — live advisor chat widget (Intercom-grade).
+/* Mastermind Portfolio Research Advisor — private live research widget.
  *
- * A floating launcher + glass popup that streams a conversation with the armed Brain over
- * POST /chat (SSE). It can run the full evaluate -> research-paper -> trade flow: tool chips
- * narrate the work, a "paper" event renders an Open-research-paper card, and a click opens
- * the paper in a slide-up sheet (also stored on the Research dashboard).
+ * A floating launcher + glass popup that streams a conversation over POST /chat (SSE). It can
+ * run the evaluate -> research-paper -> non-executing proposal flow: tool chips narrate the work,
+ * a "paper" event renders an Open-research-paper card, and a click opens the paper in a slide-up
+ * sheet (also stored on the Research dashboard). Deterministic scheduled engines retain all
+ * sizing and paper-fill authority.
  *
  * Themes off the macro design-system CSS vars (theme.css) so dark/light + EN/中文 just work;
  * static labels use the .l-en/.l-zh spans theme.css toggles. No build step, no libs.
@@ -36,7 +37,7 @@
   var TOOL = {
     evaluate_gate:     ["🧪", "running the preliminary gate", "运行初步筛查"],
     file_research_paper:["📝", "writing the research paper", "撰写研究报告"],
-    execute_trade:     ["📈", "executing the paper trade", "执行模拟交易"],
+    propose_portfolio_action:["📋", "queuing a portfolio proposal", "提交组合审核建议"],
     get_regime:        ["🌐", "reading the macro regime", "读取宏观状态"],
     get_daily_briefing:["🗒️", "pulling the daily briefing", "拉取每日简报"],
     get_decision_matrix:["🧮", "running the decision matrix", "运行决策矩阵"],
@@ -356,8 +357,8 @@
     body.innerHTML = "";
     var col = addRow("brain");
     bubble(col, fmt(zh()
-      ? "问我宏观状态、任意个股，或检视持仓。把一个想加的标的发给我 — 我会先做初步筛查，通过后撰写完整研究报告，再决定是否加入模拟组合。我只做模拟交易，绝不动用真实资金。"
-      : "Ask me about the macro setup, any name, or the book. Push me a ticker to add — I'll run the preliminary gate, write a full research paper if it clears, then decide whether to add it to the paper book. Paper trades only; never real money."));
+      ? "问我宏观状态、任意个股，或检视持仓。把一个想研究的标的发给我 — 我会先做初步筛查，通过后撰写完整研究报告，并排队一份交由确定性引擎审核的加仓提案。这里不会设定订单规模、不会成交，组合也不会改变。"
+      : "Ask me about the macro setup, any name, or the book. Send a ticker to research — I'll run the preliminary gate, write a full paper if it clears, and queue an ADD proposal for deterministic review. No order is sized or filled here, and the book does not change."));
     renderQuick(); scrollDown();
   }
   function renderTurn(t) {

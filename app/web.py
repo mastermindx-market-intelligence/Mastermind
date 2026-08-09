@@ -15,6 +15,10 @@ from fastapi import APIRouter
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+from portfolio import registry as _portfolio_registry
+
+_PRODUCT_DEFAULT_ID = _portfolio_registry.DASHBOARD_DEFAULT_ID
+
 # Lazy import so the module loads even if brain/ isn't fully initialised yet
 def _cached_zh(text: str):
     """Safe wrapper: returns None if brain.translate isn't available."""
@@ -55,6 +59,242 @@ def _portfolio_dir(portfolio_id: str | None = None) -> Path:
         return _data() / "portfolio"
 
 
+def _product_portfolio_id(portfolio_id: str | None) -> str:
+    """Resolve an API-facing book id without falling through to the archived storage default."""
+    return (portfolio_id if _portfolio_registry.is_known(portfolio_id)
+            else _PRODUCT_DEFAULT_ID)
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    """Best-effort local artifact read used by the frozen archive path."""
+    try:
+        value = json.loads(path.read_text())
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _read_json_list(path: Path) -> list[Any]:
+    """Best-effort local JSON-list read used by archived pending history."""
+    try:
+        value = json.loads(path.read_text())
+        return value if isinstance(value, list) else []
+    except Exception:
+        return []
+
+
+def _read_jsonl_objects(path: Path) -> list[dict[str, Any]]:
+    """Read valid object rows without importing a live valuation/feed module."""
+    try:
+        rows = []
+        for line in path.read_text().splitlines():
+            try:
+                value = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(value, dict):
+                rows.append(value)
+        return rows
+    except Exception:
+        return []
+
+
+def _number(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_number(*values: Any, default: float = 0.0) -> float:
+    for value in values:
+        parsed = _number(value)
+        if parsed is not None:
+            return parsed
+    return default
+
+
+def _archived_performance(portfolio_id: str) -> dict[str, Any]:
+    """Build performance solely from the retired book's final persisted artifacts.
+
+    In particular this does not call ``paper_account.performance``: that active-book helper reads
+    the current benchmark store and can append today's live mark to the served curve. Archived
+    headlines and charts must stay on the same last recorded row forever.
+    """
+    meta = _portfolio_registry.get(portfolio_id)
+    base = _portfolio_dir(portfolio_id)
+    snapshot = _read_json_object(base / "latest.json")
+    account = _read_json_object(base / "account.json")
+    history = [row for row in _read_jsonl_objects(base / "nav_history.jsonl")
+               if row.get("date") and _number(row.get("nav")) is not None]
+
+    starting_nav = _first_number(account.get("starting_nav"), meta.get("starting_nav"),
+                                 default=1_000_000.0)
+    final = history[-1] if history else {}
+    current_nav = _first_number(final.get("nav"), snapshot.get("nav"), default=starting_nav)
+    cash = _first_number(final.get("cash"), snapshot.get("cash_usd"), account.get("cash"))
+    invested = _number(final.get("invested"))
+    if invested is None:
+        invested = max(0.0, current_nav - cash)
+
+    benchmark = _portfolio_registry.benchmark(portfolio_id)
+
+    def _benchmark_matches(row: dict[str, Any]) -> bool:
+        persisted = row.get("benchmark")
+        return persisted == benchmark or (persisted is None and benchmark == "SPY")
+
+    series = []
+    for row in history:
+        spy_nav = _number(row.get("spy_nav")) if _benchmark_matches(row) else None
+        series.append({
+            "date": row["date"],
+            "nav": _number(row.get("nav")),
+            "spy_nav": spy_nav,
+            "kind": "realized",
+        })
+
+    navs = [row["nav"] for row in series if row.get("nav") is not None]
+    max_drawdown_pct = 0.0
+    if navs:
+        peak = navs[0]
+        for value in navs:
+            peak = max(peak, value)
+            if peak > 0:
+                max_drawdown_pct = min(max_drawdown_pct, (value / peak - 1.0) * 100.0)
+
+    total_return_pct = ((current_nav / starting_nav - 1.0) * 100.0
+                        if starting_nav > 0 else 0.0)
+    day_change_pct = 0.0
+    if len(navs) >= 2 and navs[-2] > 0:
+        day_change_pct = (navs[-1] / navs[-2] - 1.0) * 100.0
+
+    final_spy_nav = (_number(final.get("spy_nav")) if _benchmark_matches(final) else None)
+    vs_benchmark_pct = None
+    if final_spy_nav and starting_nav > 0:
+        benchmark_return_pct = (final_spy_nav / starting_nav - 1.0) * 100.0
+        vs_benchmark_pct = round(total_return_pct - benchmark_return_pct, 4)
+
+    frozen_as_of = final.get("date") or snapshot.get("as_of") or account.get("as_of")
+    inception_date = (account.get("inception_date") or
+                      (history[0].get("date") if history else None) or
+                      snapshot.get("as_of"))
+    return {
+        "inception_date": inception_date,
+        "starting_nav": round(starting_nav, 2),
+        "current_nav": round(current_nav, 2),
+        "cash": round(cash, 2),
+        "invested": round(invested, 2),
+        "total_return_pct": round(total_return_pct, 4),
+        "vs_benchmark_pct": vs_benchmark_pct,
+        "vs_spy_pct": vs_benchmark_pct,
+        "benchmark": benchmark,
+        "benchmark_name": _portfolio_registry.benchmark_name(portfolio_id),
+        "benchmark_name_zh": _portfolio_registry.benchmark_name_zh(portfolio_id),
+        "benchmark_as_of": final.get("date") if final_spy_nav is not None else None,
+        "day_change_pct": round(day_change_pct, 4),
+        "max_drawdown_pct": round(max_drawdown_pct, 4),
+        "realized_since": history[0].get("date") if history else inception_date,
+        "series": series,
+        "archived": True,
+        "lifecycle": "archived",
+        "frozen_as_of": frozen_as_of,
+        "note": "Archived portfolio: values are frozen at the final persisted mark.",
+    }
+
+
+def _archived_live_marks(portfolio_id: str) -> dict[str, Any]:
+    """Live-marks-shaped frozen snapshot for a retired portfolio; local reads only."""
+    snapshot = _read_json_object(_portfolio_dir(portfolio_id) / "latest.json")
+    performance = _archived_performance(portfolio_id)
+    frozen_as_of = performance.get("frozen_as_of") or snapshot.get("as_of")
+    positions = []
+    for persisted in snapshot.get("positions") or []:
+        if not isinstance(persisted, dict):
+            continue
+        row = dict(persisted)
+        row.update({
+            "quote_source": "archived_snapshot",
+            "quote_as_of": frozen_as_of,
+            "quote_time_kind": "final_persisted_mark",
+            "quote_is_live": False,
+        })
+        positions.append(row)
+    _attach_security_names(positions)
+    priced = sum(1 for row in positions if row.get("current_price") is not None)
+    return {
+        "schema_version": "live_marks.v1",
+        "portfolio": portfolio_id,
+        "currency": _portfolio_registry.currency(portfolio_id),
+        "generated_at": frozen_as_of,
+        "archived": True,
+        "lifecycle": "archived",
+        "frozen_as_of": frozen_as_of,
+        "session": {
+            "venue": None, "market": "ARCHIVED", "timezone": "UTC", "is_open": False,
+            "state": "archived", "trading_day": False, "holiday": False,
+            "as_of": frozen_as_of, "next_open": None, "poll_after_seconds": None,
+        },
+        "poll_after_seconds": None,
+        "positions": positions,
+        "performance": performance,
+        "pricing": {
+            "priced_positions": priced,
+            "total_positions": len(positions),
+            "complete": priced == len(positions),
+            "source": "final_persisted_snapshot",
+        },
+    }
+
+
+def _persisted_held_days(opened_at: Any, ended_at: Any) -> int | None:
+    """Elapsed calendar days between two persisted timestamps; never consults today's clock."""
+    try:
+        opened = date.fromisoformat(str(opened_at)[:10])
+        ended = date.fromisoformat(str(ended_at)[:10])
+        return max(0, (ended - opened).days)
+    except (TypeError, ValueError):
+        return None
+
+
+def _archived_position_rows(portfolio_id: str, frozen_as_of: Any) -> tuple[list[dict], list[dict]]:
+    """Shape the persisted position ledger without its active reader's moving held-day clock."""
+    ledger = _read_json_object(_portfolio_dir(portfolio_id) / "positions_ledger.json")
+    opened_rows: list[dict] = []
+    closed_rows: list[dict] = []
+    for entry in ledger.values():
+        if not isinstance(entry, dict) or not entry.get("ticker"):
+            continue
+        if entry.get("still_open"):
+            opened_rows.append({
+                "ticker": entry["ticker"], "sleeve": entry.get("sleeve"),
+                "opened_at": entry.get("opened_at"),
+                "held_days": _persisted_held_days(entry.get("opened_at"), frozen_as_of),
+                "entry_weight": entry.get("entry_weight"),
+                "current_weight": entry.get("current_weight"),
+                "entry_price": entry.get("entry_price"),
+                "time_stop_by": entry.get("time_stop_by"),
+                "thesis_id": entry.get("thesis_id"),
+                "published_stop": entry.get("published_stop"),
+                "buy_zone": entry.get("buy_zone"),
+            })
+            continue
+        close_event = next(
+            (event for event in reversed(entry.get("history") or [])
+             if isinstance(event, dict) and event.get("event") == "close"),
+            {},
+        )
+        closed_rows.append({
+            "ticker": entry["ticker"], "sleeve": entry.get("sleeve"),
+            "opened_at": entry.get("opened_at"), "closed_at": entry.get("closed_at"),
+            "held_days": _persisted_held_days(entry.get("opened_at"), entry.get("closed_at")),
+            "exit_reason": close_event.get("reason") or "removed from book",
+            "reason_code": close_event.get("reason_code") or "unspecified",
+        })
+    opened_rows.sort(key=lambda row: row.get("opened_at") or "", reverse=True)
+    closed_rows.sort(key=lambda row: row.get("closed_at") or "", reverse=True)
+    return opened_rows, closed_rows
+
+
 def _attach_security_names(rows) -> None:
     """Attach canonical display names to ticker-bearing API rows in place.
 
@@ -83,9 +323,8 @@ def _attach_security_names(rows) -> None:
         pass
 
 
-# The free-form "Brain" books — each backed by a bot module exposing load_decisions(). Maps a
-# portfolio id to that module (None for the gated flagship / self-directed, which have no Brain
-# decision log). Shared by /api/decisions and /api/portfolio's banner-summary fallback.
+# Mastermind Portfolio books backed by a module exposing load_decisions(). Archived modules stay
+# mapped so their historical journals remain browseable; mapping never grants run authority.
 _BRAIN_BOOK_MODULES = {"autonomous": "bot.autonomous", "heavyweight": "bot.heavyweight",
                        "china": "bot.china", "hk": "bot.hk", "etf": "bot.etf"}
 
@@ -474,8 +713,11 @@ def research_paper_pdf(id: str = "", ticker: str = "") -> Response:
 
 
 @router.get("/api/performance")
-def api_performance(portfolio: str = "flagship") -> JSONResponse:
-    """Equity curve and performance summary for a $1M paper account (default: flagship)."""
+def api_performance(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
+    """Equity curve for an active book, or final persisted history for an archived one."""
+    portfolio = _product_portfolio_id(portfolio)
+    if _portfolio_registry.is_archived(portfolio):
+        return JSONResponse(_archived_performance(portfolio))
     try:
         from portfolio import paper_account
         payload = paper_account.performance(portfolio_id=portfolio,
@@ -500,18 +742,21 @@ def api_performance(portfolio: str = "flagship") -> JSONResponse:
 
 
 @router.get("/api/live_marks")
-def api_live_marks(portfolio: str = "flagship") -> JSONResponse:
+def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     """Active-book intraday prices, unrealized P&L, and calculated NAV.
 
     The endpoint is deliberately narrow and read-only. It performs a batched live
     refresh only while the selected book's own exchange is open. At all other
     times it serves explicitly labelled cache/snapshot marks and tells the client
     to wake once at the next valid open instead of polling overnight or through
-    holidays.
+    holidays. Archived books bypass the exchange clock and quote layer entirely.
     """
+    pid = _product_portfolio_id(portfolio)
+    if _portfolio_registry.is_archived(pid):
+        return JSONResponse(_archived_live_marks(pid), headers={"Cache-Control": "no-store"})
+
     from portfolio import market_sessions, registry
 
-    pid = portfolio if registry.is_known(portfolio) else registry.DEFAULT_ID
     session = market_sessions.status_for_portfolio(pid)
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -640,14 +885,27 @@ def api_live_marks(portfolio: str = "flagship") -> JSONResponse:
 
 
 @router.get("/api/risk")
-def api_risk(portfolio: str = "flagship", recompute: bool = False) -> JSONResponse:
+def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> JSONResponse:
     """Portfolio safety scorecard: a static-weight historical risk backtest of the live book
     (max drawdown · diversification · ticker correlations · beta · vol/VaR/CVaR + a 0-100
     safety score). Serves the nightly-persisted snapshot; pass ?recompute=true to rebuild now
-    (skips the heavier bootstrap CI for a snappy response). Never 500 — read-only, never an order.
+    (skips the heavier bootstrap CI for a snappy response). Archived books always serve their final
+    snapshot and ignore recompute. Never 500 — read-only, never an order.
     """
+    portfolio = _product_portfolio_id(portfolio)
     try:
         from portfolio import safety
+        if _portfolio_registry.is_archived(portfolio):
+            rep = safety.load_safety(portfolio)
+            if rep is None:
+                rep = {
+                    "portfolio_id": portfolio, "safety_score": None, "grade": "—",
+                    "verdict": "Archived safety snapshot unavailable.", "metrics": {},
+                    "subscores": {}, "breaches": [], "caveats": [],
+                }
+            rep = {**rep, "portfolio_id": portfolio, "archived": True,
+                   "lifecycle": "archived", "snapshot_only": True}
+            return JSONResponse(rep)
         rep = None if recompute else safety.load_safety(portfolio)
         if rep is None:
             rep = safety.compute_safety(portfolio, bootstrap=not recompute)
@@ -668,7 +926,8 @@ def api_risk(portfolio: str = "flagship", recompute: bool = False) -> JSONRespon
 
 
 @router.get("/api/portfolio")
-def api_portfolio(portfolio: str = "flagship") -> JSONResponse:
+def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
+    portfolio = _product_portfolio_id(portfolio)
     path = _portfolio_dir(portfolio) / "latest.json"
     if not path.exists():
         return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
@@ -680,71 +939,83 @@ def api_portfolio(portfolio: str = "flagship") -> JSONResponse:
         payload["benchmark"] = registry.benchmark(portfolio)
         payload["benchmark_name"] = registry.benchmark_name(portfolio)
         payload["benchmark_name_zh"] = registry.benchmark_name_zh(portfolio)
+        archived = registry.is_archived(portfolio)
+        payload["archived"] = archived
+        payload["lifecycle"] = "archived" if archived else "active"
+        if archived:
+            frozen = _archived_performance(portfolio)
+            payload["frozen_as_of"] = frozen.get("frozen_as_of")
+            payload["account_preview"] = {
+                key: value for key, value in frozen.items()
+                if key not in {"series", "note"}
+            }
 
         # ------------------------------------------------------------------
         # Live marks: attach current price + unrealized P&L to each position
         # (Polygon delayed quotes via the account's avg-cost lots). Degrades to
         # nulls offline so the client always renders an honest dash.
         # ------------------------------------------------------------------
-        try:
-            from portfolio import paper_account
-            prices = _book_marks(portfolio)
-            # positions_pnl({}) still returns every actual account lot with honest null marks. This
-            # matters when the daily strategy snapshot has zero rows but the paper account still
-            # owns positions: the first critical response must not pretend the account is empty.
-            pnl = paper_account.positions_pnl(prices, portfolio_id=portfolio)
-            account_nav = paper_account.nav(prices, portfolio_id=portfolio)
-            account = paper_account._load_account(portfolio)
-            cash = float(account.get("cash") or 0.0)
-            starting_nav = float(account.get("starting_nav") or 1_000_000.0)
-            payload["account_preview"] = {
-                "inception_date": account.get("inception_date"),
-                "starting_nav": starting_nav,
-                "current_nav": round(float(account_nav), 2),
-                "cash": round(cash, 2),
-                "invested": round(max(0.0, float(account_nav) - cash), 2),
-                "total_return_pct": round((float(account_nav) / starting_nav - 1.0) * 100, 4)
-                if starting_nav > 0 else None,
-                "benchmark": registry.benchmark(portfolio),
-                "benchmark_name": registry.benchmark_name(portfolio),
-                "benchmark_name_zh": registry.benchmark_name_zh(portfolio),
-            }
-            published_tickers: set[str] = set()
-            for pos in payload.get("positions", []):
-                ticker = pos.get("ticker")
-                if ticker:
-                    published_tickers.add(ticker)
-                rec = pnl.get(ticker)
-                if rec:
-                    pos["cost_basis"] = rec.get("avg_cost")   # true avg-cost basis
-                    pos["current_price"] = rec.get("current_price")
-                    pos["market_value"] = rec.get("market_value")
-                    pos["unrealized_pnl"] = rec.get("unrealized_pnl")
-                    pos["unrealized_pct"] = rec.get("unrealized_pct")
-                    if rec.get("market_value") is not None and account_nav > 0:
-                        pos["weight"] = round(float(rec["market_value"]) / account_nav, 6)
-            for ticker, rec in pnl.items():
-                if ticker in published_tickers:
-                    continue
-                payload.setdefault("positions", []).append({
-                    "ticker": ticker,
-                    "sleeve": "account",
-                    "verdict": "hold",
-                    "stage": None,
-                    "live_only": True,
-                    "shares": rec.get("shares"),
-                    "cost_basis": rec.get("avg_cost"),
-                    "current_price": rec.get("current_price"),
-                    "market_value": rec.get("market_value"),
-                    "unrealized_pnl": rec.get("unrealized_pnl"),
-                    "unrealized_pct": rec.get("unrealized_pct"),
-                    "weight": (
-                        round(float(rec["market_value"]) / account_nav, 6)
-                        if rec.get("market_value") is not None and account_nav > 0 else None
-                    ),
-                })
-        except Exception:
-            pass
+        if not archived:
+            try:
+                from portfolio import paper_account
+                prices = _book_marks(portfolio)
+                # positions_pnl({}) still returns every actual account lot with honest null marks.
+                # This matters when the daily strategy snapshot has zero rows but the paper account
+                # still owns positions: the first critical response must not pretend it is empty.
+                pnl = paper_account.positions_pnl(prices, portfolio_id=portfolio)
+                account_nav = paper_account.nav(prices, portfolio_id=portfolio)
+                account = paper_account._load_account(portfolio)
+                cash = float(account.get("cash") or 0.0)
+                starting_nav = float(account.get("starting_nav") or 1_000_000.0)
+                payload["account_preview"] = {
+                    "inception_date": account.get("inception_date"),
+                    "starting_nav": starting_nav,
+                    "current_nav": round(float(account_nav), 2),
+                    "cash": round(cash, 2),
+                    "invested": round(max(0.0, float(account_nav) - cash), 2),
+                    "total_return_pct": round(
+                        (float(account_nav) / starting_nav - 1.0) * 100, 4
+                    ) if starting_nav > 0 else None,
+                    "benchmark": registry.benchmark(portfolio),
+                    "benchmark_name": registry.benchmark_name(portfolio),
+                    "benchmark_name_zh": registry.benchmark_name_zh(portfolio),
+                }
+                published_tickers: set[str] = set()
+                for pos in payload.get("positions", []):
+                    ticker = pos.get("ticker")
+                    if ticker:
+                        published_tickers.add(ticker)
+                    rec = pnl.get(ticker)
+                    if rec:
+                        pos["cost_basis"] = rec.get("avg_cost")
+                        pos["current_price"] = rec.get("current_price")
+                        pos["market_value"] = rec.get("market_value")
+                        pos["unrealized_pnl"] = rec.get("unrealized_pnl")
+                        pos["unrealized_pct"] = rec.get("unrealized_pct")
+                        if rec.get("market_value") is not None and account_nav > 0:
+                            pos["weight"] = round(float(rec["market_value"]) / account_nav, 6)
+                for ticker, rec in pnl.items():
+                    if ticker in published_tickers:
+                        continue
+                    payload.setdefault("positions", []).append({
+                        "ticker": ticker,
+                        "sleeve": "account",
+                        "verdict": "hold",
+                        "stage": None,
+                        "live_only": True,
+                        "shares": rec.get("shares"),
+                        "cost_basis": rec.get("avg_cost"),
+                        "current_price": rec.get("current_price"),
+                        "market_value": rec.get("market_value"),
+                        "unrealized_pnl": rec.get("unrealized_pnl"),
+                        "unrealized_pct": rec.get("unrealized_pct"),
+                        "weight": (
+                            round(float(rec["market_value"]) / account_nav, 6)
+                            if rec.get("market_value") is not None and account_nav > 0 else None
+                        ),
+                    })
+            except Exception:
+                pass
 
         # Every book gets canonical human-readable security names on read. This
         # repairs historical US/China/HK payloads without mutating runtime state.
@@ -846,11 +1117,33 @@ _portfolios_cache: dict[str, Any] = {}  # {"payload": dict, "ts": float}
 def _portfolio_status(meta: dict) -> dict:
     """Assemble one book's tab-switcher row (metadata + quick status). I/O-bound (live marks +
     benchmark history), so callers run these concurrently across books."""
-    from portfolio import paper_account, registry
+    from portfolio import registry
     pid = meta["id"]
     status: dict[str, Any] = {"nav": None, "total_return_pct": None,
                               "vs_benchmark_pct": None, "vs_spy_pct": None,
                               "day_change_pct": None, "holdings": 0, "cash_pct": None, "as_of": None}
+    if registry.is_archived(pid):
+        perf = _archived_performance(pid)
+        nav = perf.get("current_nav") or 0
+        status.update({
+            "nav": perf.get("current_nav"),
+            "total_return_pct": perf.get("total_return_pct"),
+            "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
+            "vs_spy_pct": perf.get("vs_spy_pct"),
+            "day_change_pct": perf.get("day_change_pct"),
+            "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
+            "as_of": perf.get("frozen_as_of"),
+        })
+        snapshot = _read_json_object(registry.data_dir(pid) / "latest.json")
+        status["holdings"] = len(snapshot.get("positions") or [])
+        return {**{k: meta.get(k) for k in (
+                    "id", "name", "tagline", "kind", "manager", "benchmark",
+                    "benchmark_name", "benchmark_name_zh", "currency")},
+                "active": False, "lifecycle": "archived",
+                "superseded_by": meta.get("superseded_by"),
+                "archived_reason": meta.get("archived_reason"),
+                "status": status}
+
     # the self-directed book has its own engine (not paper_account) — read its NAV/return directly
     if pid == "self_directed":
         try:
@@ -892,6 +1185,7 @@ def _portfolio_status(meta: dict) -> dict:
                     "id", "name", "tagline", "kind", "manager", "benchmark",
                     "benchmark_name", "benchmark_name_zh", "currency")},
                 "status": status}
+    from portfolio import paper_account
     try:
         # The switcher is navigation metadata, not a reason to live-fetch every book at once.
         # Use cache/snapshot marks here; /api/live_marks updates the active tab during its session.
@@ -919,14 +1213,18 @@ def _portfolio_status(meta: dict) -> dict:
     return {**{k: meta.get(k) for k in (
                 "id", "name", "tagline", "kind", "manager", "benchmark",
                 "benchmark_name", "benchmark_name_zh", "currency")},
+            "active": bool(meta.get("active", True)),
+            "lifecycle": meta.get("status") or ("active" if meta.get("active", True) else "archived"),
+            "superseded_by": meta.get("superseded_by"),
+            "archived_reason": meta.get("archived_reason"),
             "status": status}
 
 
 @router.get("/api/portfolios")
 def api_portfolios() -> JSONResponse:
     """The set of portfolios the dashboard switches between, each with a quick status
-    (NAV, return, versus-book-benchmark, holdings) for the tab labels. The flagship is the gated engine
-    book; the autonomous book is managed free-form by the shared-provider Mastermind AI.
+    (NAV, return, versus-book-benchmark, holdings) for the tab labels. US Brain is the active US
+    Mastermind Portfolio; Flagship, Heavyweight, and ETF remain read-only archived history.
 
     Each book's status is I/O-bound (live marks + benchmark history); we price them concurrently
     and cache the assembled payload for ``_PORTFOLIOS_TTL`` so a tab click / poll doesn't re-price."""
@@ -942,7 +1240,8 @@ def api_portfolios() -> JSONResponse:
     with ThreadPoolExecutor(max_workers=max(1, len(metas))) as ex:
         out = list(ex.map(_portfolio_status, metas))
 
-    payload = {"portfolios": out, "default": registry.DEFAULT_ID}
+    payload = {"portfolios": out, "default": registry.DASHBOARD_DEFAULT_ID,
+               "scope": "mastermind_portfolio"}
     _portfolios_cache["payload"] = payload
     _portfolios_cache["ts"] = now
     return JSONResponse(payload)
@@ -950,8 +1249,7 @@ def api_portfolios() -> JSONResponse:
 
 @router.get("/api/decisions")
 def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONResponse:
-    """The autonomous Brain's daily decision log — what it bought / sold / held each day, and
-    the rationale for every holding. Empty for the gated flagship (it journals via research papers)."""
+    """Mastermind Portfolio's structured daily decision journal for an active or archived Brain."""
     try:
         _src = _brain_book_module(portfolio)
         if _src is None:
@@ -998,13 +1296,18 @@ def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONRespons
                     zh = _cached_zh(r)
                     if zh:
                         h["rationale_zh"] = zh
-        return JSONResponse({"decisions": decisions})
+        from portfolio import registry
+        meta = registry.get(portfolio)
+        return JSONResponse({"decisions": decisions, "portfolio": portfolio,
+                             "lifecycle": meta.get("status"),
+                             "archived": registry.is_archived(portfolio),
+                             "scope": "mastermind_portfolio"})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"decisions": [], "error": str(exc)})
 
 
 @router.get("/api/posture")
-def api_posture(book: str = "flagship") -> JSONResponse:
+def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     """The book's STRATEGY-LABEL signal — a glance-able posture on top of the free-form rationale:
     {book, posture_label, posture_label_zh, posture_tone, sub_strategy, favored[], avoided[],
     driver, detail, cash_pct, invested_pct, available}.
@@ -1014,6 +1317,7 @@ def api_posture(book: str = "flagship") -> JSONResponse:
     offline (no LLM), and graceful: an absent / malformed book degrades to ``available: False``
     rather than raising. The `book` id is any registry portfolio (flagship / autonomous /
     heavyweight / china / hk / etf)."""
+    book = _product_portfolio_id(book)
     try:
         from brain import posture as _posture
         return JSONResponse(_posture.posture(book))
@@ -1270,12 +1574,43 @@ def api_outcome_ledger() -> JSONResponse:
 
 
 @router.get("/api/trades")
-def api_trades(portfolio: str = "flagship") -> JSONResponse:
+def api_trades(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     """Open/closed position summaries PLUS a complete per-fill blotter (`history`):
     every individual buy/sell, with realized P&L on sells and live unrealized P&L
-    on still-open buy remainders. Scoped to a portfolio (default: flagship)."""
+    on still-open buy remainders. Archived books use only their final persisted marks and ledgers.
+    Scoped to a portfolio (default: active US Brain)."""
+    portfolio = _product_portfolio_id(portfolio)
     try:
-        from portfolio import market_calendar, paper_account, position_log, registry, trade_history
+        from portfolio import registry, trade_history
+        if registry.is_archived(portfolio):
+            archived_dir = registry.data_dir(portfolio)
+            snapshot = _read_json_object(archived_dir / "latest.json")
+            account = _read_json_object(archived_dir / "account.json")
+            frozen_as_of = (_archived_performance(portfolio).get("frozen_as_of")
+                            or snapshot.get("as_of"))
+            persisted_marks = {
+                str(row.get("ticker") or "").upper(): float(row["current_price"])
+                for row in (snapshot.get("positions") or [])
+                if isinstance(row, dict) and row.get("ticker") and _number(row.get("current_price"))
+            }
+            history = trade_history.history(
+                persisted_marks,
+                portfolio_id=portfolio,
+                account_state=account,
+            )
+            pending = _read_json_list(archived_dir / "pending_orders.json")
+            open_positions, closed_positions = _archived_position_rows(portfolio, frozen_as_of)
+            _attach_security_names([*open_positions, *closed_positions, *history, *pending])
+            return JSONResponse({
+                "open": open_positions, "closed": closed_positions, "history": history,
+                "pending": pending,
+                "market": {"is_open": False, "session": "archived", "as_of": frozen_as_of,
+                           "next_open": None},
+                "portfolio": portfolio, "archived": True, "lifecycle": "archived",
+                "frozen_as_of": frozen_as_of,
+            })
+
+        from portfolio import market_calendar, paper_account, position_log
         # Venue-restricted books (china=*.SS/*.SZ CNY, hk=*.HK HKD) must mark their open lots in BASE
         # currency via _book_marks — _live_prices filters to bare US names, so it returns {} for these
         # books and the blotter's still-open lots showed NULL unrealized P&L (the Positions panel used
@@ -1596,7 +1931,8 @@ def api_fundamentals() -> JSONResponse:
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
-# MASTERMIND AI (W-AI) — the self-improvement loop's admin surface.
+# MASTERMIND PORTFOLIO LOOP (legacy route prefix: /api/mastermind_ai).
+# This is NOT the public Mastermind AI market copilot served by Macro Dashboard.
 # GETs are read-only snapshots; the POSTs are non-LLM operator paths registered in
 # app/auth.py _NON_LLM_OPERATOR_PATHS (blocked on the serve-only mirror) and the whole
 # /api/mastermind_ai prefix is denied in app/response_cache.py (always-fresh admin data).
@@ -1604,13 +1940,17 @@ def api_fundamentals() -> JSONResponse:
 
 @router.get("/api/mastermind_ai")
 def api_mastermind_ai() -> JSONResponse:
-    """One-call status snapshot for the admin 'Mastermind AI' section: settings, flags, last
+    """One-call status snapshot for the admin 'Mastermind Portfolio Loop' section: settings, flags, last
     loops, latest review, the current NW reflection (nudges/drift/coverage/quality), journal
     counts, and the operator directive queue."""
     try:
         import bot  # noqa: F401
         from brain import mastermind_ai
-        return JSONResponse(mastermind_ai.status())
+        payload = mastermind_ai.status()
+        payload["product_scope"] = "mastermind_portfolio_loop"
+        payload["public_chatbot_separate"] = True
+        payload["legacy_route_prefix"] = "/api/mastermind_ai"
+        return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"schema": "mastermind_ai_status.v1", "error": str(exc)})
 
@@ -1728,6 +2068,17 @@ def api_readiness() -> JSONResponse:
         return JSONResponse({"status": readiness.status(), "alerts": readiness.alerts()})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"status": {}, "alerts": [], "error": str(exc)})
+
+
+@router.get("/api/portfolio_learning")
+def api_portfolio_learning() -> JSONResponse:
+    """Post-sell opportunity-cost ledger, measured lessons and context requests for the three
+    active regional portfolios. Read-only; separate from the public Mastermind AI chatbot."""
+    try:
+        from brain import portfolio_learning
+        return JSONResponse(portfolio_learning.status())
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"schema": "mastermind_portfolio_learning.v1", "error": str(exc)})
 
 
 @router.get("/api/macro")

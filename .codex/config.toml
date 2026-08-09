@@ -3,3 +3,11 @@ inherit = "core"
 
 [shell_environment_policy.set]
 BOT_REASONING_LAYER = "1"
+
+[agents]
+enabled = true
+# Daily portfolio research is read-heavy. Keep fan-out bounded so one nightly run
+# cannot turn a wide Prophet board into an unbounded token tree.
+max_concurrent_threads_per_session = 3
+default_subagent_model = "gpt-5.6-terra"
+default_subagent_reasoning_effort = "medium"

@@ -1,4 +1,4 @@
-"""brain/nw_reflection.py — the Mastermind AI reflection engine over the Neural Web bridge (W-AI).
+"""brain/nw_reflection.py — Mastermind Portfolio reflection over the Neural Web bridge (W-AI).
 
 Deterministic, offline, NO LLM, NO authority. Reads the published NW context (through
 brain.neural_web_context — the sole reader), the bot's own graded ledgers, and the context-audit

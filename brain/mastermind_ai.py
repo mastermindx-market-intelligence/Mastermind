@@ -1,9 +1,11 @@
-"""brain/mastermind_ai.py — the Mastermind AI self-improvement loop coordinator (W-AI).
+"""brain/mastermind_ai.py — legacy Mastermind Portfolio improvement coordinator (W-AI).
 
-One module owns the loop the operator sees in the admin panel: each nightly tick runs the
+This compatibility-named module owns the *portfolio* loop the operator sees in the admin panel;
+it is not the public Mastermind AI chatbot.  Each nightly tick runs the
 observational self-improvement cycle (journal drafting + pin recompute + NW reflection), writes a
-loop-log row, and every N loops writes a review with a deterministic progress assessment. It also
-owns the operator-adjustable settings and the operator→orchestrator directive queue.
+loop-log row, advances the three active regional books' post-sell learning ledgers, and every N
+loops writes a review with a deterministic progress assessment. It also owns the
+operator-adjustable settings and the operator→orchestrator directive queue.
 
 AUTHORITY: none. The cycle writes files only — it never trades, never flips a flag, never mutates
 a seat, a prompt, or a book. The only actors with any authority remain self_tune (through the Lab
@@ -77,7 +79,12 @@ _DIRECTIVE_DENY: list[tuple[str, re.Pattern]] = [
 ]
 
 _NUDGE_CODE_RE = re.compile(r"^[a-z0-9_]{1,60}$")
-_DIRECTIVE_SOURCE_RE = re.compile(r"^(operator|nudge:[a-z0-9_]{1,60})$")
+_DIRECTIVE_SOURCE_RE = re.compile(
+    r"^(operator|nudge:[a-z0-9_]{1,60}|context:ctx-[a-f0-9]{16})$"
+)
+_CONTEXT_REQUEST_PREFIX = (
+    "UNTRUSTED PM CONTEXT REQUEST; REQUEST ONLY; NO DATA, TOOL, CODE, SIZING, OR EXECUTION AUTHORITY. "
+)
 
 # nudge code -> auto-drafted directive text (draft_directives_from_nudges). Public-surface law:
 # every template must clear _DIRECTIVE_DENY and the 280 cap — add_directive re-gates them anyway
@@ -225,13 +232,15 @@ def _read_jsonl(p: Path, limit: int | None = None) -> list[dict]:
         return []
 
 
-def _append_jsonl(p: Path, row: dict) -> None:
+def _append_jsonl(p: Path, row: dict) -> bool:
+    """Append one complete row and report durability to state-machine callers."""
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         with p.open("a") as fh:
             fh.write(json.dumps(row, default=str) + "\n")
+        return True
     except Exception:  # noqa: BLE001
-        pass
+        return False
 
 
 def _now_iso() -> str:
@@ -249,10 +258,12 @@ def _parse_ts(s: str) -> datetime | None:
 # ── directives (operator → orchestrator) ─────────────────────────────────────────────────────
 
 def add_directive(text: str, source: str | None = None) -> dict:
-    """Queue a scrubbed operator directive for the next feedback publish. Returns {ok,...}.
+    """Queue a scrubbed directive/request envelope for the next feedback publish.
 
-    source tags provenance ('operator' or 'nudge:<code>'; anything else degrades to
-    'operator'). Auto-drafted texts pass the EXACT same gate as operator-typed ones."""
+    ``context:ctx-*`` rows are explicitly untrusted, request-only PM output.  Transporting that
+    envelope cannot promote its authority; the downstream orchestrator must review it separately.
+    Other invalid sources degrade to ``operator``.  Every text passes the same public-surface gate.
+    """
     try:
         t = str(text or "").strip()
         if not t:
@@ -279,7 +290,15 @@ def add_directive(text: str, source: str | None = None) -> dict:
             "source": src,
             "status": "queued",
         }
-        _append_jsonl(_DIRECTIVES, row)
+        if src.startswith("context:"):
+            row.update({
+                "kind": "pm_context_request",
+                "provenance": "untrusted_pm_generated",
+                "authority": "request_only",
+                "execution_authority": False,
+            })
+        if not _append_jsonl(_DIRECTIVES, row):
+            return {"ok": False, "error": "directive_write_failed"}
         return {"ok": True, "directive": row}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": type(exc).__name__}
@@ -356,6 +375,85 @@ def draft_directives_from_nudges(codes: list[str] | None = None) -> dict:
         return {"ok": False, "error": type(exc).__name__}
 
 
+def draft_directives_from_context_requests() -> dict:
+    """Forward typed portfolio context gaps into the existing audited Macro dialogue.
+
+    This is request transport only.  It cannot expose a new file, alter a tool allowlist, edit code,
+    or promote signal authority.  Macro's orchestrator still decides whether a request is useful and
+    acknowledges the directive through the same bounded channel as every other improvement ask.
+    """
+    try:
+        from brain import portfolio_learning
+
+        view = directives(limit=500)
+        # Repair either half of a previously interrupted two-ledger transition before selecting
+        # new work. This is idempotent and cannot elevate the originating request's authority.
+        for directive in view:
+            if str(directive.get("source") or "").startswith("context:"):
+                _sync_context_request(directive)
+        pending = [
+            row for row in portfolio_learning.context_requests(limit=None)
+            if row.get("status") == "queued_for_orchestrator_review"
+        ]
+        slots = max(
+            0,
+            settings()["directives_max_open"]
+            - sum(1 for row in view if row.get("status") in ("queued", "published")),
+        )
+        directive_by_source = {
+            str(row.get("source") or ""): row
+            for row in view
+            if str(row.get("source") or "").startswith("context:")
+        }
+        queued: list[dict] = []
+        skipped: list[dict] = []
+        for request in pending:
+            request_id = str(request.get("id") or "")
+            source = f"context:{request_id}"
+            existing_directive = directive_by_source.get(source)
+            if existing_directive:
+                repaired = _sync_context_request(existing_directive)
+                skipped.append({
+                    "id": request_id,
+                    "reason": (
+                        "directive already exists"
+                        if repaired else "directive exists but request transition write failed"
+                    ),
+                })
+                continue
+            if slots <= 0:
+                skipped.append({"id": request_id, "reason": "no open directive slots"})
+                continue
+            ticker = f" for {request.get('ticker')}" if request.get("ticker") else ""
+            text = _CONTEXT_REQUEST_PREFIX + (
+                f"Review {request.get('book')} portfolio request for context plane "
+                f"{request.get('plane')}{ticker}: {request.get('reason')}"
+            )
+            text = text[:_DIRECTIVE_MAX_CHARS]
+            result = add_directive(text, source=source)
+            if not result.get("ok"):
+                skipped.append({"id": request_id, "reason": str(result.get("error") or "rejected")})
+                continue
+            directive = result["directive"]
+            advanced = portfolio_learning.advance_context_request(
+                request_id,
+                "directive_queued",
+                directive_id=directive["id"],
+            )
+            if not advanced:
+                skipped.append({"id": request_id,
+                                "reason": "directive queued but request transition write failed"})
+                directive_by_source[source] = directive
+                slots -= 1
+                continue
+            queued.append({"id": request_id, "directive_id": directive["id"]})
+            directive_by_source[source] = directive
+            slots -= 1
+        return {"ok": True, "queued": queued, "skipped": skipped, "open_slots": slots}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": type(exc).__name__}
+
+
 def directives(limit: int = 50) -> list[dict]:
     """Latest-status view of the directive queue (last write per id wins)."""
     by_id: dict[str, dict] = {}
@@ -369,8 +467,32 @@ def directives(limit: int = 50) -> list[dict]:
     return rows[-limit:]
 
 
-def _advance_directive(rid: str, status: str) -> None:
-    _append_jsonl(_DIRECTIVES, {"id": rid, "ts": _now_iso(), "status": status})
+def _advance_directive(rid: str, status: str) -> bool:
+    return _append_jsonl(_DIRECTIVES, {"id": rid, "ts": _now_iso(), "status": status})
+
+
+def _sync_context_request(directive: dict) -> bool:
+    """Mirror one durable directive state without ever promoting the PM request's authority."""
+    source = str(directive.get("source") or "")
+    if not source.startswith("context:"):
+        return True
+    request_status = {
+        "queued": "directive_queued",
+        "published": "published_to_orchestrator",
+        "acknowledged": "acknowledged_by_orchestrator",
+        "expired": "expired_unacknowledged",
+    }.get(str(directive.get("status") or ""))
+    if not request_status:
+        return True
+    try:
+        from brain import portfolio_learning
+        return portfolio_learning.advance_context_request(
+            source.removeprefix("context:"),
+            request_status,
+            directive_id=directive.get("id"),
+        )
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def open_directives_for_publish() -> list[dict]:
@@ -385,9 +507,19 @@ def open_directives_for_publish() -> list[dict]:
         open_rows = [d for d in directives()
                      if d.get("status") in ("queued", "published") and d.get("text")]
         for d in open_rows[:cap]:   # directives() is ts-ascending → FIFO
-            out.append({"id": d["id"], "created": d.get("ts", "")[:10], "text": d["text"]})
             if d.get("status") == "queued":
-                _advance_directive(d["id"], "published")
+                if not _advance_directive(d["id"], "published"):
+                    continue
+                d = {**d, "status": "published"}
+            # A context request is not put on the wire unless both local ledgers agree that it is
+            # published. If the second append fails, compensate the directive back to queued so the
+            # next call retries the paired transition before transport.
+            if not _sync_context_request(d):
+                # The directive ledger is writable (the published append above succeeded), so
+                # compensate back to queued. No request is emitted unless both ledgers agree.
+                _advance_directive(d["id"], "queued")
+                continue
+            out.append({"id": d["id"], "created": d.get("ts", "")[:10], "text": d["text"]})
         return out
     except Exception:  # noqa: BLE001
         return out
@@ -425,15 +557,27 @@ def reconcile_ack() -> dict:
         if ack:
             _write_last_ack(seen_codes, seen_ids)
         advanced = 0
+        durably_acknowledged: set[str] = set()
         for d in directives():
-            if d.get("status") == "published" and d.get("id") in seen_ids:
-                _advance_directive(d["id"], "acknowledged")
+            if (d.get("status") == "published" and d.get("id") in seen_ids and
+                    _advance_directive(d["id"], "acknowledged")):
                 advanced += 1
+                durably_acknowledged.add(str(d["id"]))
+        context_advanced = 0
+        try:
+            from brain import portfolio_learning
+            context_advanced = portfolio_learning.acknowledge_context_directives(
+                durably_acknowledged
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return {"state": "ok" if lobe else "absent",
                 "directives_acknowledged": advanced,
+                "context_requests_acknowledged": context_advanced,
                 "nudge_codes_seen_n": len(seen_codes)}
     except Exception:  # noqa: BLE001
-        return {"state": "absent", "directives_acknowledged": 0, "nudge_codes_seen_n": 0}
+        return {"state": "absent", "directives_acknowledged": 0,
+                "context_requests_acknowledged": 0, "nudge_codes_seen_n": 0}
 
 
 def expire_stale_published() -> dict:
@@ -454,8 +598,10 @@ def expire_stale_published() -> dict:
                 continue
             ts = _parse_ts(last_pub.get(d.get("id"), ""))
             if ts is not None and ts < cut:
-                _advance_directive(d["id"], "expired")
+                if not _advance_directive(d["id"], "expired"):
+                    continue
                 out["expired"] += 1
+                _sync_context_request({**d, "status": "expired"})
     except Exception:  # noqa: BLE001
         pass
     return out
@@ -605,24 +751,62 @@ def run_cycle(asof: date | str | None = None, trigger: str = "manual") -> dict:
     steps["ack"] = reconcile_ack()
     steps["directive_expiry"] = expire_stale_published()
 
-    # auto-draft: runs AFTER ack+expiry so any slots freed this tick are immediately usable.
-    # Requires an explicit operator standing grant (auto_act_on_findings); the loop still
-    # never originates directives without that grant — authority is operator-granted, per-click
-    # via the API or as a standing grant via this setting.
+    # Typed PM context requests have an independent request-only transport lane. Forwarding the
+    # explicitly untrusted envelope does not grant the requested plane, alter tools, or authorize an
+    # implementation; Macro/operator review remains the separate authority boundary.
+    try:
+        context_result = draft_directives_from_context_requests()
+        steps["context_request_transport"] = {
+            "ok": bool(context_result.get("ok")),
+            "queued_n": len(context_result.get("queued") or []),
+            "skipped_n": len(context_result.get("skipped") or []),
+            **({"error": context_result.get("error")} if context_result.get("error") else {}),
+        }
+    except Exception as exc:  # noqa: BLE001
+        steps["context_request_transport"] = {"ok": False, "queued_n": 0,
+                                              "skipped_n": 0, "error": type(exc).__name__}
+
+    # Auto-drafting deterministic NW findings remains separately operator-gated. It runs after
+    # request transport so model-authored context gaps cannot be starved by the nudge queue.
     if cfg.get("auto_act_on_findings"):
         try:
-            res = draft_directives_from_nudges()  # no codes = all open nudges
-            if res.get("ok"):
+            nudge_result = draft_directives_from_nudges()  # no codes = all open nudges
+            if nudge_result.get("ok"):
+                queued_n = len(nudge_result.get("queued") or [])
+                skipped_n = len(nudge_result.get("skipped") or [])
                 steps["auto_draft"] = {
-                    "queued_n": len(res.get("queued") or []),
-                    "skipped_n": len(res.get("skipped") or []),
+                    "queued_n": queued_n,
+                    "skipped_n": skipped_n,
+                    "nw_nudges_queued": len(nudge_result.get("queued") or []),
                 }
             else:
-                steps["auto_draft"] = {"error": str(res.get("error") or type(res).__name__)}
+                steps["auto_draft"] = {
+                    "error": str(nudge_result.get("error") or "draft_failed")
+                }
         except Exception as exc:  # noqa: BLE001
             steps["auto_draft"] = {"error": type(exc).__name__}
 
-    # 4. state snapshots for the log
+    # 4. portfolio behavioural learning.  This is bounded memory, not self-modifying code:
+    # it grades completed exits, derives evidence-labelled lessons, and queues typed context
+    # requests for operator/orchestrator review.  It cannot trade, resize a book, change a
+    # prompt on disk, or grant itself new infrastructure authority.
+    try:
+        from brain import portfolio_learning
+        learned = portfolio_learning.refresh_all(asof_s)
+        steps["portfolio_learning"] = {
+            book: {
+                "ok": state.get("ok", False),
+                "lessons_n": state.get("lessons_n", 0),
+                "post_sell": state.get("post_sell") or {},
+                **({"error": state.get("error")} if state.get("error") else {}),
+            }
+            for book, state in (learned.get("books") or {}).items()
+            if isinstance(state, dict)
+        }
+    except Exception as exc:  # noqa: BLE001
+        steps["portfolio_learning_error"] = type(exc).__name__
+
+    # 5. state snapshots for the log
     jc = _journal_counts()
     steps["journal"] = jc
     steps["self_tune"] = _self_tune_state()
@@ -665,7 +849,7 @@ def run_cycle(asof: date | str | None = None, trigger: str = "manual") -> dict:
     except Exception:  # noqa: BLE001
         pass
 
-    # 5. every-N-loops review
+    # 6. every-N-loops review
     try:
         if loop_n % max(2, int(cfg["review_every_n_loops"])) == 0:
             review = _build_review(loop_n, cfg)
@@ -725,6 +909,33 @@ def _build_review(loop_n: int, cfg: dict) -> dict:
                           f"(status {'scoring' if (s.get('n') or 0) >= 12 else 'building'})")
     except Exception:  # noqa: BLE001
         pass
+    try:
+        from brain import portfolio_learning
+        learning = portfolio_learning.status()
+        active_summary: dict[str, dict] = {}
+        for book, block in (learning.get("books") or {}).items():
+            lessons = (block.get("lessons") or {}).get("lessons") or []
+            post_sell = block.get("post_sell") or {}
+            active_summary[book] = {
+                "lesson_codes": [str(row.get("code")) for row in lessons if row.get("code")],
+                "post_sell_n": post_sell.get("n_sales", post_sell.get("n_exits", 0)),
+                "full_exits_n": post_sell.get("n_exits", 0),
+                "partial_trims_n": post_sell.get("n_partial_trims", 0),
+            }
+        completed["active_portfolio_learning"] = active_summary
+        requests = learning.get("context_requests") or []
+        request_states: dict[str, int] = {}
+        for request in requests:
+            state = str(request.get("status") or "unknown")
+            request_states[state] = request_states.get(state, 0) + 1
+        assessment.append(
+            "active portfolio learning: "
+            + json.dumps(active_summary, separators=(",", ":"), sort_keys=True)
+            + "; context requests "
+            + json.dumps(request_states, separators=(",", ":"), sort_keys=True)
+        )
+    except Exception:  # noqa: BLE001
+        pass
     jc = _journal_counts()
     assessment.append(f"journal: {jc['lessons']} lessons banked, {jc['pins_active']} rules pinned "
                       f"({jc['pins_unpinned']} unpinned by their own falsifiers), "
@@ -756,7 +967,7 @@ def _build_review(loop_n: int, cfg: dict) -> dict:
     if llm_review_flag_on() and cfg.get("llm_review"):
         try:
             from brain import cli_bridge
-            prompt = ("You are the Mastermind AI reviewing your own self-improvement loop. "
+            prompt = ("You are the Mastermind Portfolio reviewing your bounded improvement loop. "
                       "In <=150 words, assess progress honestly (no alpha claims): "
                       + json.dumps({"completed": completed, "assessment": assessment})[:4000])
             res = cli_bridge.reason_sync(prompt, role="analyst", max_turns=1,
@@ -808,6 +1019,11 @@ def status() -> dict:
         reflection = nw_reflection.latest()
     except Exception:  # noqa: BLE001
         reflection = {}
+    try:
+        from brain import portfolio_learning
+        learning = portfolio_learning.status()
+    except Exception:  # noqa: BLE001
+        learning = {}
     log_rows = loop_log(limit=5)
     return {
         "schema": "mastermind_ai_status.v1",
@@ -828,4 +1044,9 @@ def status() -> dict:
         "journal": _journal_counts(),
         "directives": directives(limit=20),
         "dialogue": dialogue_health(),
+        "portfolio_learning": learning,
+        "product_scope": {
+            "name": "Mastermind Portfolio",
+            "public_chatbot": "Mastermind AI (separate product and authority)",
+        },
     }

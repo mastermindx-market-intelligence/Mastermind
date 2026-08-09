@@ -37,8 +37,10 @@ def _clean():
             p.unlink()
 
 
-def test_daily_loop_deterministic():
+def test_daily_loop_deterministic(monkeypatch):
     _clean()
+    from portfolio import registry
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
     from bot import daily
     out = daily.run_daily(armed=False)            # offline: book only, no Claude bridge
     assert out["book"]["ran"] is True
@@ -53,12 +55,14 @@ def test_daily_loop_deterministic():
     _clean()
 
 
-def test_scheduler_registers_daily_job():
+def test_scheduler_registers_successor_us_job_only():
     _clean()
     from app import scheduler
     s = scheduler.start()
     if s is None:                                  # apscheduler not installed -> graceful no-op
         return
-    assert any(j.id == "daily_loop" for j in s.get_jobs())
+    ids = {j.id for j in s.get_jobs()}
+    assert "autonomous_daily" in ids
+    assert not ({"daily_loop", "heavyweight_daily", "etf_daily"} & ids)
     s.shutdown(wait=False)
     _clean()

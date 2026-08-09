@@ -65,6 +65,22 @@ def test_read_signal_external_path_still_denied():
     assert "DENIED" in _read("/etc/passwd")
 
 
+def test_read_signal_denies_prefix_sibling_of_allowed_root(tmp_path, monkeypatch):
+    allowed = tmp_path / "data"
+    sibling = tmp_path / "data_backup"
+    allowed.mkdir()
+    sibling.mkdir()
+    secret = sibling / "secret.json"
+    secret.write_text('{"secret":"must-not-leak"}', encoding="utf-8")
+    monkeypatch.setattr(bot_mcp, "_READ_ROOTS", [allowed])
+    monkeypatch.setattr(bot_mcp, "_DENY_ROOTS", [])
+
+    out = _read(str(secret))
+
+    assert "DENIED" in out
+    assert "must-not-leak" not in out
+
+
 def test_denied_book_read_is_audited(tmp_path, monkeypatch):
     audit = tmp_path / "read_signal_denied.jsonl"
     monkeypatch.setattr(bot_mcp, "_LEAK_AUDIT", audit)
@@ -91,6 +107,8 @@ def test_autonomous_allowlist_has_no_flagship_book_reader():
 
 
 def test_autonomous_allowlist_is_only_typed_read_desk_web():
-    # every allowed tool is a typed mcp__bot__/mcp__desk__ tool or a web tool — nothing raw.
+    # every allowed data/action tool is typed MCP or web. Task may dispatch only the project's
+    # read-only subagents; their own allowlists contain no portfolio submission MCP.
     for t in autonomous_mcp.allowed_tools():
-        assert t.startswith("mcp__bot__") or t.startswith("mcp__desk__") or t in set(bot_mcp.WEB_TOOLS), t
+        assert (t.startswith("mcp__bot__") or t.startswith("mcp__desk__")
+                or t in set(bot_mcp.WEB_TOOLS) or t == "Task"), t

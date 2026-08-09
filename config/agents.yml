@@ -36,9 +36,10 @@ reasoning:
 # Backend: 'waterfall' = Macro shared pool (Codex first, Claude OAuth fallback);
 #          'cli' = Claude Code (subscription tokens, sees dashboard context, tiered subagents);
 #          'codex' = OpenAI Codex CLI with ChatGPT-managed auth (brain/codex_bridge.py);
-#          'api' = the metered Anthropic Messages API. 'cli' remains the local default;
-# set BOT_LLM_BACKEND=waterfall on the authoritative VPS.
-backend: cli
+#          'api' = the metered Anthropic Messages API.
+# The checked-in fail-safe matches production policy: Codex first, then Macro's shared Claude
+# OAuth capacity. A direct backend remains an explicit diagnostics-only environment override.
+backend: waterfall
 
 # Codex provider policy. Daily paper-book and self-improvement calls use the
 # requested Sol / Extra High baseline whenever the shared Codex account is

@@ -22,7 +22,8 @@ import bot  # noqa: F401,E402 — vendor/macro on sys.path before importing brai
 from brain import cio  # noqa: E402
 
 
-def run(asof: date | None = None, *, with_agenda: bool = True) -> dict:
+def run(asof: date | None = None, *, with_agenda: bool = True,
+        narrate: bool = True) -> dict:
     """Build + persist the weekly CIO review, then the improvement agenda (W-L / L3). Returns the CIO
     write() result dict with an added ``agenda`` key. Never raises.
 
@@ -35,7 +36,7 @@ def run(asof: date | None = None, *, with_agenda: bool = True) -> dict:
     the scheduler passes ``with_agenda=False`` to avoid a double-write. Either path calls the same
     ``brain.improvement_agenda.write`` (one writer, charter P7)."""
     try:
-        res = cio.write(asof)
+        res = cio.write(asof, narrate=narrate)
     except Exception as e:  # noqa: BLE001 — the runner is best-effort; never crash the scheduler
         return {"ok": False, "error": str(e)}
     if not with_agenda:

@@ -31,11 +31,28 @@ READ_PORTFOLIO = "flagship"
 SUBMIT_PORTFOLIO = "flagship_judgment"
 BOOK_MARKER = _auto.BOOK_MARKER
 
-# submission_path / clear_submission / read_submission are generic (they take a portfolio_id) —
-# reuse them, scoped to SUBMIT_PORTFOLIO, so pm_conviction reads exactly what submit_book writes.
-submission_path = _auto.submission_path
-clear_submission = _auto.clear_submission
-read_submission = _auto.read_submission
+def _is_archived() -> bool:
+    """Fail closed when the registry cannot prove the retired Flagship is active."""
+    try:
+        from portfolio import registry
+        return registry.is_archived(READ_PORTFOLIO)
+    except Exception:  # noqa: BLE001 - indeterminate retirement state must never enable writes
+        return True
+
+
+def submission_path(portfolio_id: str = SUBMIT_PORTFOLIO):
+    """Retain the historical path helper without granting mutation authority."""
+    return _auto.submission_path(portfolio_id)
+
+
+def clear_submission(portfolio_id: str = SUBMIT_PORTFOLIO) -> None:
+    if _is_archived():
+        return
+    _auto.clear_submission(portfolio_id)
+
+
+def read_submission(portfolio_id: str = SUBMIT_PORTFOLIO):
+    return _auto.read_submission(portfolio_id)
 
 
 @tool("get_my_book",
@@ -146,6 +163,11 @@ async def get_my_book(args):
                                   "confidence_in_rule": {"type": "number"}}}}},
        "required": ["holdings", "summary"]})
 async def submit_book(args):
+    if _is_archived():
+        return bot_mcp._ok(
+            "REFUSED: portfolio_archived. Flagship is retired and superseded by autonomous; "
+            "no pending judgment decision was recorded."
+        )
     holdings = args.get("holdings") or []
     cleaned: list[dict] = []
     gross = 0.0
@@ -192,14 +214,19 @@ _DESK_TOOLS = [get_my_book, submit_book]
 _READ_TOOLS = [t for t in bot_mcp._READ if t.name != "get_portfolio"]
 
 
+def _desk_tools() -> list:
+    """Archived Flagship retains no state-writing MCP tool, including in-process servers."""
+    return [t for t in _DESK_TOOLS if t is not submit_book] if _is_archived() else list(_DESK_TOOLS)
+
+
 def build_servers() -> dict:
     return {
         bot_mcp.SERVER_NAME: create_sdk_mcp_server(name=bot_mcp.SERVER_NAME, version="0.1.0", tools=_READ_TOOLS),
-        SERVER_NAME: create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=_DESK_TOOLS),
+        SERVER_NAME: create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=_desk_tools()),
     }
 
 
 def allowed_tools() -> list[str]:
     read = [f"mcp__{bot_mcp.SERVER_NAME}__{t.name}" for t in _READ_TOOLS]
-    desk = [f"mcp__{SERVER_NAME}__{t.name}" for t in _DESK_TOOLS]
+    desk = [f"mcp__{SERVER_NAME}__{t.name}" for t in _desk_tools()]
     return read + desk + bot_mcp.WEB_TOOLS

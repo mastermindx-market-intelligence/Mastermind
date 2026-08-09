@@ -144,6 +144,7 @@ def test_api_posture_never_500_across_books():
         r = client.get(f"/api/posture?book={book}")
         assert r.status_code == 200, f"{book} -> {r.status_code}"
         d = r.json()
-        assert d["book"] == book
+        expected_book = "autonomous" if book == "bogus_book" else book
+        assert d["book"] == expected_book
         # tone is always one of the design-token classes the chip CSS knows about
         assert d["posture_tone"] in ("up", "down", "warn", "info", "muted")

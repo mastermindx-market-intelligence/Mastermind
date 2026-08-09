@@ -1,12 +1,16 @@
-"""The daily loop — one entrypoint for cron / the scheduler.
+"""Historical Flagship daily loop — archived and operationally disabled.
 
-Runs, in order, each step degrading gracefully (a missing credential never breaks the loop):
+``run_daily`` returns a stable archive no-op before refreshes, market reads, model calls, or writes.
+The scheduler no longer registers it and POST /daily returns HTTP 410. The implementation below is
+retained for auditability of the old portfolio's mechanics.
+
+When explicitly enabled in an isolated legacy test it runs, in order:
   0a. Deploy-lag tripwire: alert (LOUD) when production trails master >24h. Never raises.
   0b. Freshen the vendored macro analyzer data before the engine reads it.
   1.  Gated multi-name paper book (phase2, material-change gated).
   2.  Armed Claude regime/theme research -> proposals gated into the falsifiable ledger.
 
-Run:  python -m bot.daily        (or POST /daily, or the APScheduler job in app/scheduler.py)
+Successor: ``bot.autonomous.run_autonomous`` / POST ``/api/autonomous/run``.
 """
 from __future__ import annotations
 
@@ -20,6 +24,15 @@ _log = logging.getLogger(__name__)
 
 def run_daily(asof: str | None = None, *, force: bool = False, armed: bool = True) -> dict:
     asof = asof or date.today().isoformat()
+    from portfolio import registry
+    if registry.is_archived("flagship"):
+        archived = registry.archived_run_result("flagship", asof)
+        return {
+            "asof": asof,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+            **archived,
+            "book": {"ran": False, **archived},
+        }
     out = {"asof": asof, "ran_at": datetime.now(timezone.utc).isoformat()}
 
     # 0a. DEPLOY-LAG TRIPWIRE — alert when production trails master >24h (W-I Task 4b).

@@ -54,6 +54,14 @@ _FIX = Path(__file__).resolve().parent / "fixtures" / "2026-07-02-semis-breakdow
 # W-E.0 fixtures root — frozen inputs and expected outputs for the perception organs.
 _MV_FIX = Path(__file__).resolve().parent.parent / "fixtures" / "market_view"
 
+
+@pytest.fixture(autouse=True)
+def _legacy_flagship_algorithm_enabled(monkeypatch):
+    """Keep the historical incident replay executable while Flagship stays archived by default."""
+    from portfolio import registry
+
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
+
 # ── fixture loaders ─────────────────────────────────────────────────────────────────────────────
 
 def _state_json(day: str) -> dict:

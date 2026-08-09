@@ -7,6 +7,7 @@ import bot  # noqa: F401
 
 from bot import phase2
 from data_layer import store
+from portfolio import registry
 
 # ── W8 legacy-contract pin (2026-07-19): this file tests pre-W8 phase2 mechanics; the v2
 # entry/context gates + feeds are covered by tests/test_flagship_v2_replay.py and
@@ -31,6 +32,12 @@ def _w8_legacy_env(monkeypatch):
         _pf._reset_cache()
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _legacy_flagship_runner_enabled(monkeypatch):
+    """Exercise the retired Flagship engine without changing its production archive default."""
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
 
 
 # NOTE: the store DB is isolated to a tmp file per test by the autouse `_isolate_bot_db`

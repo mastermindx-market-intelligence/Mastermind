@@ -5,6 +5,7 @@ event. Relies on real data fixtures already in data/ (portfolio, research).
 """
 from __future__ import annotations
 
+import inspect
 import json
 
 from fastapi.testclient import TestClient
@@ -47,6 +48,24 @@ def test_dashboard_serves_html():
     assert r.status_code == 200
     assert "text/html" in r.headers.get("content-type", "")
     assert "MASTERMIND" in r.text
+
+
+def test_product_api_defaults_agree_with_active_us_brain():
+    from app import web
+    from portfolio import registry
+
+    expected = registry.DASHBOARD_DEFAULT_ID
+    assert expected == "autonomous"
+    for endpoint, parameter in (
+        (web.api_performance, "portfolio"),
+        (web.api_live_marks, "portfolio"),
+        (web.api_risk, "portfolio"),
+        (web.api_portfolio, "portfolio"),
+        (web.api_posture, "book"),
+        (web.api_trades, "portfolio"),
+    ):
+        assert inspect.signature(endpoint).parameters[parameter].default == expected
+    assert web._product_portfolio_id("not-a-book") == expected
 
 
 def test_account_script_serves_javascript():
@@ -102,11 +121,11 @@ def test_live_marks_contract_is_never_browser_cached(monkeypatch):
         "holiday": False, "as_of": "2026-07-30T17:00:00-04:00",
         "next_open": "2026-07-31T09:30:00-04:00", "poll_after_seconds": 59405,
     })
-    r = _client().get("/api/live_marks?portfolio=flagship")
+    r = _client().get("/api/live_marks?portfolio=autonomous")
     assert r.status_code == 200
     data = r.json()
     assert data["schema_version"] == "live_marks.v1"
-    assert data["portfolio"] == "flagship"
+    assert data["portfolio"] == "autonomous"
     assert data["session"]["is_open"] is False
     assert data["poll_after_seconds"] == 59405
     assert "current_nav" in data["performance"]
@@ -137,7 +156,7 @@ def test_live_marks_exposes_account_cost_basis_for_live_only_holdings(monkeypatc
         "total_return_pct": 0.0,
     })
 
-    data = json.loads(web.api_live_marks("flagship").body)
+    data = json.loads(web.api_live_marks("autonomous").body)
     assert data["positions"][0]["ticker"] == "ABC"
     assert data["positions"][0]["cost_basis"] == 100.0
     assert data["positions"][0]["current_price"] == 110.0
@@ -150,7 +169,7 @@ def test_portfolio_first_paint_includes_account_lot_missing_from_daily_snapshot(
     from portfolio import paper_account
 
     (tmp_path / "latest.json").write_text(json.dumps({
-        "schema": "portfolio.v1", "portfolio_id": "flagship", "positions": [],
+        "schema": "portfolio.v1", "portfolio_id": "autonomous", "positions": [],
         "decisions": [], "rejected": [],
     }))
     monkeypatch.setattr(web, "_portfolio_dir", lambda portfolio_id=None: tmp_path)
@@ -168,7 +187,7 @@ def test_portfolio_first_paint_includes_account_lot_missing_from_daily_snapshot(
         "cash": 8_900.0, "positions": {},
     })
 
-    response = web.api_portfolio("flagship")
+    response = web.api_portfolio("autonomous")
     assert response.status_code == 200
     positions = json.loads(response.body)["positions"]
     assert positions == [{
@@ -245,7 +264,20 @@ def test_api_market_view_serves_artifact_or_honest_stub():
         assert data.get("available") is False
 
 
-def test_api_portfolio_schema():
+def test_api_portfolio_schema(tmp_path, monkeypatch):
+    """The route contract is deterministic and does not depend on mutable VPS book state."""
+    from app import web
+
+    (tmp_path / "latest.json").write_text(json.dumps({
+        "schema": "portfolio.v1",
+        "portfolio_id": "flagship",
+        "positions": [{"ticker": "SMH", "weight": 0.2}],
+        "decisions": [],
+        "rejected": [],
+    }))
+    monkeypatch.setattr(web, "_portfolio_dir", lambda portfolio_id=None: tmp_path)
+    monkeypatch.setattr(web, "_book_marks", lambda portfolio_id=None: {})
+    monkeypatch.setattr(web, "_attach_security_names", lambda rows: None)
     client = _client()
     r = client.get("/api/portfolio")
     assert r.status_code == 200

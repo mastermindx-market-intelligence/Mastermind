@@ -1,10 +1,45 @@
-"""Phase 1 acceptance — the one-name paper thesis runs end-to-end on real data."""
+"""Phase 1 acceptance — the one-name paper thesis runs end-to-end on fixed evidence."""
 import bot  # noqa: F401
 
 from bot import phase1
 
 
-def test_phase1_end_to_end():
+def test_phase1_end_to_end(monkeypatch):
+    fixtures = {
+        "data/regime/latest.json": {
+            "date": "2026-06-18",
+            "quad": "Q1",
+            "quad_name": "Goldilocks",
+            "liquidity_overlay": "neutral",
+            "macro_risk": {"score": 0.28},
+            "sector_rs": [
+                {"ticker": "SMH", "rank": 1, "pctile_252d": 99.2},
+                {"ticker": "XLK", "rank": 2, "pctile_252d": 87.0},
+            ],
+        },
+        "site/stockdata/NVDA.json": {
+            "tech": {"price": 120.0, "pct_vs_200dma": 12.0},
+        },
+        "site/basketdata/baskets.json": {"baskets": []},
+    }
+    monkeypatch.setattr(phase1, "_j", fixtures.__getitem__)
+    monkeypatch.setattr(
+        phase1,
+        "leading_order",
+        lambda chain, rs: {
+            "chain": chain,
+            "leading_order": 1,
+            "next_baskets": ["power_grid"],
+        },
+    )
+    monkeypatch.setattr(phase1.ledger, "append", lambda doc: True)
+    monkeypatch.setattr(
+        phase1.scorer,
+        "track_record",
+        lambda asof: {"status": "building", "as_of": asof.isoformat()},
+    )
+    monkeypatch.setattr(phase1, "write", lambda payload: {"hub": "isolated"})
+
     out = phase1.run()
     d = out["decision"]
 

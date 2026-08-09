@@ -78,6 +78,7 @@ def test_tape_degrades_offline():
 
 
 def test_get_overnight_tape_tool(monkeypatch):
+    pytest.importorskip("claude_agent_sdk")
     from brain import bot_mcp
     from data_layer import overnight as ov
     monkeypatch.setattr(ov, "tape", lambda force=False: {"risk": {"state": "calm"}, "groups": {}, "live": True})
@@ -91,29 +92,29 @@ def test_get_overnight_tape_tool(monkeypatch):
 def test_watch_skips_when_market_open(iso, monkeypatch):
     from bot import overnight, settle
     monkeypatch.setattr(settle, "is_open", lambda pid: True)
-    assert overnight.watch("etf")["skipped"] == "market_open"
+    assert overnight.watch("autonomous")["skipped"] == "market_open"
 
 
 def test_watch_skips_when_nothing_queued(iso, monkeypatch):
     from bot import overnight, settle
     monkeypatch.setattr(settle, "is_open", lambda pid: False)
-    assert overnight.watch("etf")["skipped"] == "nothing_queued"
+    assert overnight.watch("autonomous")["skipped"] == "nothing_queued"
 
 
 def test_watch_skips_when_tape_calm(iso, monkeypatch):
     from bot import overnight, settle
     from data_layer import overnight as ov
     monkeypatch.setattr(settle, "is_open", lambda pid: False)
-    paper_account.save_pending_target({"SPY": 0.5}, "2026-06-23", portfolio_id="etf")
+    paper_account.save_pending_target({"SPY": 0.5}, "2026-06-23", portfolio_id="autonomous")
     monkeypatch.setattr(ov, "tape", lambda force=False: {"risk": {"state": "calm", "reasons": ["x"]}, "groups": {}})
-    assert overnight.watch("etf")["skipped"] == "tape_calm"     # deterministic tripwire → no LLM fired
+    assert overnight.watch("autonomous")["skipped"] == "tape_calm"  # deterministic tripwire → no LLM
 
 
 def test_watch_fires_on_material_move(iso, monkeypatch):
-    from bot import overnight, settle, etf as etf_mod
+    from bot import autonomous as autonomous_mod, overnight, settle
     from data_layer import overnight as ov
     monkeypatch.setattr(settle, "is_open", lambda pid: False)
-    paper_account.save_pending_target({"XLK": 0.5}, "2026-06-23", portfolio_id="etf")
+    paper_account.save_pending_target({"AAPL": 0.5}, "2026-06-23", portfolio_id="autonomous")
     stressed = {"risk": {"state": "stressed", "reasons": ["US futures -2%"]},
                 "groups": {"us_futures": [{"name": "S&P 500 fut", "change_pct": -2.0}],
                            "international": [], "vol": [], "fx_rates": []}}
@@ -124,8 +125,8 @@ def test_watch_fires_on_material_move(iso, monkeypatch):
         captured["directive"] = directive
         return {"decided": True, "queued_for_open": True, "holdings": 1, "brain": {"ok": True}}
 
-    monkeypatch.setattr(etf_mod, "run_etf", fake_run)
-    res = overnight.watch("etf", asof="2026-06-23")
+    monkeypatch.setattr(autonomous_mod, "run_autonomous", fake_run)
+    res = overnight.watch("autonomous", asof="2026-06-23")
     assert res.get("refined", {}).get("decided") is True
     assert res["refined"]["queued_for_open"] is True
     assert "OVERNIGHT REVIEW" in captured["directive"]
@@ -134,18 +135,19 @@ def test_watch_fires_on_material_move(iso, monkeypatch):
 
 # --------------------------------------------------------------------------- W4 A2: flagship + heavyweight
 
-def test_runners_contains_all_six():
-    """_RUNNERS must cover all six US/Asia books including flagship and heavyweight (A2)."""
+def test_runners_contains_active_brains_only():
+    """Only active Brains may be reached by the overnight token-bearing fanout."""
     from bot import overnight
-    for pid in ("etf", "autonomous", "china", "hk", "flagship", "heavyweight"):
+    for pid in ("autonomous", "china", "hk"):
         assert pid in overnight._RUNNERS, f"_RUNNERS missing '{pid}'"
+    assert not ({"etf", "flagship", "heavyweight"} & set(overnight._RUNNERS))
     # each entry must be a 2-tuple (module_path, function_name)
     for pid, entry in overnight._RUNNERS.items():
         assert isinstance(entry, tuple) and len(entry) == 2, f"_RUNNERS['{pid}'] must be a 2-tuple"
 
 
 def test_watch_flagship_non_material_no_redecide(iso, monkeypatch):
-    """Calm tape → flagship overnight watch skips (no LLM, no rebuild)."""
+    """Flagship is skipped before tape inspection regardless of pending historical state."""
     from bot import overnight, settle
     from data_layer import overnight as ov
     monkeypatch.setattr(settle, "is_open", lambda pid: False)
@@ -154,12 +156,12 @@ def test_watch_flagship_non_material_no_redecide(iso, monkeypatch):
     monkeypatch.setattr(ov, "tape",
                         lambda force=False: {"risk": {"state": "calm", "reasons": []}, "groups": {}})
     res = overnight.watch("flagship", asof="2026-07-01")
-    assert res["skipped"] == "tape_calm"
+    assert res["skipped"] == "portfolio_archived"
     assert "refined" not in res
 
 
 def test_watch_flagship_material_fires_rebuild(iso, monkeypatch):
-    """Material tape → flagship overnight watch fires run_flagship with a directive."""
+    """Material tape cannot resurrect Flagship or invoke its runner."""
     from bot import overnight, settle
     import bot.phase2 as phase2_mod
     from data_layer import overnight as ov
@@ -178,13 +180,12 @@ def test_watch_flagship_material_fires_rebuild(iso, monkeypatch):
 
     monkeypatch.setattr(phase2_mod, "run_flagship", fake_run_flagship)
     res = overnight.watch("flagship", asof="2026-07-01")
-    assert res.get("refined", {}).get("decided") is True
-    assert captured.get("directive") is not None
-    assert "OVERNIGHT REVIEW" in captured["directive"]
+    assert res["skipped"] == "portfolio_archived"
+    assert captured == {}
 
 
 def test_watch_heavyweight_material_fires_rebuild(iso, monkeypatch):
-    """Material tape → heavyweight overnight watch fires run_heavyweight with a directive."""
+    """Material tape cannot resurrect Heavyweight or invoke its runner."""
     from bot import overnight, settle
     import bot.heavyweight as hw_mod
     from data_layer import overnight as ov
@@ -204,79 +205,29 @@ def test_watch_heavyweight_material_fires_rebuild(iso, monkeypatch):
 
     monkeypatch.setattr(hw_mod, "run_heavyweight", fake_run_heavyweight)
     res = overnight.watch("heavyweight", asof="2026-07-01")
-    assert res.get("refined", {}).get("decided") is True
-    assert captured.get("directive") is not None
-    assert "OVERNIGHT REVIEW" in captured["directive"]
+    assert res["skipped"] == "portfolio_archived"
+    assert captured == {}
 
 
 def test_phase2_run_directive_none_byte_identical(iso, monkeypatch):
-    """phase2.run(directive=None) must produce the same gate decision as run() with no arg.
-
-    Intent-only: we assert the gate is consulted and the function does not raise.
-    We do NOT pin the build outcome to a live market state (calm-tape invariant test)."""
+    """The public overnight Flagship entrypoint is archive-stable with no directive."""
     import bot.phase2 as phase2_mod
-    # stub the entire run to a no-op so we don't need fixtures/data
-    calls: list = []
-
-    original_run = phase2_mod.run.__wrapped__ if hasattr(phase2_mod.run, "__wrapped__") else None
-
-    def _stub_gate(*a, **kw):
-        calls.append(kw)
-        return {"run": False, "triggers": []}
-
-    from brain import gate
-    monkeypatch.setattr(gate, "should_run", _stub_gate)
-    # also stub the expensive parts that run() calls before reaching the gate
-    from data_layer import store
-    monkeypatch.setattr(store, "connect", lambda: None)
-    monkeypatch.setattr(store, "last_run", lambda con: None)
-
-    # both calls must reach the gate check — directive=None must not short-circuit
-    # (we can't easily diff the full book here without production fixtures, so we
-    #  verify the gate is invoked and the force keyword is correct)
-    try:
-        phase2_mod.run(asof="2026-07-01")
-    except Exception:
-        pass
-    n_no_directive = len(calls)
-
-    try:
-        phase2_mod.run(asof="2026-07-01", directive=None)
-    except Exception:
-        pass
-    n_with_none = len(calls)
-
-    # both should hit gate exactly once
-    assert n_no_directive >= 1
-    assert n_with_none == n_no_directive + 1 or n_with_none >= 2
+    out = phase2_mod.run_flagship(asof="2026-07-01", directive=None)
+    assert out["skipped"] == "portfolio_archived"
+    assert out["decided"] is False
 
 
 def test_phase2_run_directive_forces_gate(iso, monkeypatch):
-    """When directive is set, phase2.run passes force=True to the gate (the overnight tap
-    already verified materiality; we should always rebuild)."""
+    """An urgent directive cannot bypass the archive policy."""
     import bot.phase2 as phase2_mod
-    captured_force: list = []
-
-    def _stub_gate(sig, last, *, interval_days, force, asof):
-        captured_force.append(force)
-        return {"run": False, "triggers": []}
-
-    from brain import gate
-    from data_layer import store
-    monkeypatch.setattr(gate, "should_run", _stub_gate)
-    monkeypatch.setattr(store, "connect", lambda: None)
-    monkeypatch.setattr(store, "last_run", lambda con: None)
-
-    try:
-        phase2_mod.run(asof="2026-07-01", directive="OVERNIGHT: SOXX -6.4%")
-    except Exception:
-        pass
-    assert any(f is True for f in captured_force), \
-        "directive must cause force=True to the build gate"
+    out = phase2_mod.run_flagship(
+        asof="2026-07-01", directive="OVERNIGHT: SOXX -6.4%")
+    assert out["skipped"] == "portfolio_archived"
+    assert out["queued_for_open"] is False
 
 
 def test_heavyweight_run_directive_threads_to_brain(iso, monkeypatch):
-    """directive passed to run_heavyweight is forwarded to _run_brain.
+    """A directive cannot bypass Heavyweight's archive guard.
 
     MUST take ``iso`` (registry._ROOT → tmp): run_heavyweight() calls
     paper_account.mark(..., portfolio_id='heavyweight') UNCONDITIONALLY
@@ -306,7 +257,7 @@ def test_heavyweight_run_directive_threads_to_brain(iso, monkeypatch):
         hw_mod.run_heavyweight(asof="2026-07-01", directive=test_directive)
     except Exception:
         pass
-    assert captured.get("directive") == test_directive
+    assert captured == {}
 
 
 def test_heavyweight_build_prompt_injects_directive():

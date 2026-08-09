@@ -227,7 +227,8 @@ def test_api_trades_returns_open_closed_shape():
     # depend on the LIVE ledger having state (the conftest now isolates positions_ledger).
     from portfolio import position_log
     position_log.update([{"ticker": "TEST", "sleeve": "conviction", "weight": 0.05,
-                          "entry_price": 100.0}], "2026-06-18")
+                          "entry_price": 100.0}], "2026-06-18",
+                        portfolio_id="autonomous")
     client = _client()
     r = client.get("/api/trades")
     assert r.status_code == 200
@@ -270,12 +271,27 @@ def test_api_activity_events_have_required_shape():
         assert ev["kind"] in ("trade", "decision", "research", "run")
 
 
-def test_api_portfolio_now_has_thesis_full():
-    """/api/portfolio positions should now carry thesis_full."""
+def test_api_portfolio_now_has_thesis_full(tmp_path, monkeypatch):
+    """The default active-US /api/portfolio positions carry thesis_full."""
+    from portfolio import registry
+    monkeypatch.setattr(registry, "_ROOT", tmp_path, raising=False)
+    book_dir = registry.data_dir("autonomous")
+    book_dir.mkdir(parents=True, exist_ok=True)
+    (book_dir / "latest.json").write_text(json.dumps({
+        "as_of": "2026-06-18",
+        "portfolio_id": "autonomous",
+        "positions": [{
+            "ticker": "TEST",
+            "sleeve": "portfolio",
+            "weight": 0.05,
+            "thesis_full": {"summary": "Test thesis", "bull": [], "bear": []},
+        }],
+    }))
     client = _client()
     r = client.get("/api/portfolio")
     assert r.status_code == 200
     data = r.json()
+    assert data["portfolio_id"] == "autonomous"
     positions = data.get("positions", [])
     assert positions
     for pos in positions:

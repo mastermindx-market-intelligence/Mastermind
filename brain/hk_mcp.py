@@ -21,7 +21,7 @@ import json
 import bot  # noqa: F401  -> vendor/macro onto sys.path
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
-from brain import autonomous_mcp, bot_mcp, china_intake
+from brain import autonomous_mcp, bot_mcp, china_intake, decision_submission
 
 SERVER_NAME = "hk"
 PORTFOLIO_ID = "hk"
@@ -130,20 +130,22 @@ async def get_my_book(args):
 
 
 @tool("submit_book",
-      "Submit your FINAL decided China portfolio for today as a COMPLETE target book — this is how "
-      "you trade. The desk rebalances the paper account to exactly these weights: a name you include "
-      "is bought/held to its weight, a name you OMIT (that you currently hold) is SOLD in full. So "
-      "include EVERY name you want to keep. Weights are fractions of NAV (0-1) and must sum to <= 1.0 "
-      "(the remainder stays in cash). Provide a one-paragraph rationale for EVERY holding (required) "
+      "Submit your FINAL decided Hong Kong portfolio for today as a COMPLETE target book — this is how "
+      "you express name selection and ordinal intent. For every row choose ADD, HOLD, or TRIM; a TRIM "
+      "requires evidence and an ordinal intensity. The trusted incremental allocator computes all final "
+      "weights; any numeric weight is optional audit context and never sizing authority. Omission is NOT an exit: any "
+      "current holding you omit is carried unchanged unless it also appears in exit_decisions with "
+      "decision evidence. Include every name you actively reviewed. The allocator preserves unchanged "
+      "holdings and never invents marginal names merely to fill gross. Provide a one-paragraph rationale for EVERY holding (required) "
       "plus an overall summary, and optionally note what you sold and why. There is NO gate. Trade "
       "liquid Hong Kong listings ONLY (ticker like 0700.HK / 9988.HK); mainland A-shares and "
       "US-listed ADRs are REJECTED by this book. Confirm a name is priceable with get_quote "
       "before relying on it (names we cannot price are skipped). Call this ONCE, at the end. "
-      "OPTIONAL governance fields (provide when you can — they improve the shadow decision ledger): "
+      "All governance fields added by this schema are REQUIRED: "
       "falsifiers (list of strings — what would cause you to reverse this book within 5 days), "
       "evidence_planes (list of strings — data sources you relied on), "
       "expected_failure_mode (string — the most likely way this book loses money).",
-      {"type": "object", "properties": {
+      decision_submission.enhance_schema({"type": "object", "properties": {
           "holdings": {"type": "array", "items": {"type": "object", "properties": {
               "ticker": {"type": "string", "description": "venue-suffixed: *.SS/*.SZ A-share, *.HK Hong Kong, bare = US ADR"},
               "weight": {"type": "number", "description": "fraction of NAV, 0-1"},
@@ -158,52 +160,28 @@ async def get_my_book(args):
                               "description": "data sources / signal planes you relied on for this decision"},
           "expected_failure_mode": {"type": "string",
                                     "description": "the most likely way this book loses money"}},
-       "required": ["holdings", "summary"]})
+       "required": ["holdings", "summary"]}))
 async def submit_book(args):
-    holdings = args.get("holdings") or []
-    cleaned: list[dict] = []
-    rejected_offvenue: list[str] = []
-    gross = 0.0
-    seen: set[str] = set()
-    for h in holdings:
-        t = (h.get("ticker") or "").upper().strip()
-        try:
-            w = float(h.get("weight") or 0.0)
-        except (TypeError, ValueError):
-            w = 0.0
-        r = (h.get("rationale") or "").strip()
-        if not t or t in seen or w <= 0 or not r:
-            continue
-        v = china_intake._venue(t)
-        if ALLOWED_VENUES and v not in ALLOWED_VENUES:
-            rejected_offvenue.append(t)      # wrong venue for this book (e.g. an HK name in the A-share book)
-            continue
-        seen.add(t)
-        cleaned.append({"ticker": t, "weight": w, "rationale": r,
-                        "venue": v,
-                        "conviction": (h.get("conviction") or "medium")})
-        gross += w
-    scaled = False
-    if gross > 1.0 and cleaned:
-        scale = 1.0 / gross
-        for h in cleaned:
-            h["weight"] = round(h["weight"] * scale, 6)
-        gross, scaled = 1.0, True
-    payload = {
-        "holdings": cleaned,
-        "summary": (args.get("summary") or "").strip(),
-        "sold_note": (args.get("sold_note") or "").strip(),
-        "gross": round(gross, 4),
-        "scaled_to_no_leverage": scaled,
-    }
+    try:
+        payload, audit = decision_submission.normalize(
+            PORTFOLIO_ID, args, venue_of=china_intake._venue,
+            allowed_venues=ALLOWED_VENUES, deterministic_sizing=True)
+    except decision_submission.DecisionBoundaryFreeze as exc:
+        return bot_mcp._ok(
+            f"SUBMISSION REJECTED; prior paper book preserved unchanged. Trusted-boundary reason: {exc}"
+        )
+    cleaned = payload["holdings"]
+    gross = float(payload["gross"])
     p = submission_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
+    decision_submission.write_atomic(p, payload)
     cash_pct = max(0.0, 1.0 - gross) * 100
     note = (f"HK book submitted: {len(cleaned)} holdings, {gross * 100:.0f}% invested, "
-            f"{cash_pct:.0f}% cash" + (" (scaled to remove leverage)" if scaled else "")
-            + (f". REJECTED {len(rejected_offvenue)} off-venue name(s) (this book is HK only): "
-               + ", ".join(rejected_offvenue) if rejected_offvenue else "")
+            f"{cash_pct:.0f}% cash" + (" (scaled to remove leverage)" if payload.get("scaled_to_no_leverage") else "")
+            + (f". REJECTED {len(audit['rejected'])} off-venue name(s): " +
+               ", ".join(r["ticker"] for r in audit["rejected"]) if audit.get("rejected") else "")
+            + (f". Carried {len(audit['carried'])} omitted name(s) pending explicit exits" if audit.get("carried") else "")
+            + (". Execution will fail closed until held-position quotes recover"
+               if audit.get("quote_fallback_holdings") else "")
             + ". The desk will rebalance the paper account to these targets at the next mark.")
     return bot_mcp._ok(f"{BOOK_MARKER} {json.dumps({'n': len(cleaned), 'gross': round(gross, 4)})}\n{note}")
 
@@ -322,8 +300,62 @@ async def get_quote(args):
     })
 
 
+@tool("get_context_catalog",
+      "Catalog of the directly wired Macro Dashboard, Terminal, Prophet, Neural Web and technical "
+      "planes. Freshness and authority are explicit; use HK intake/regime for market selection.", {})
+async def get_context_catalog(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.context_catalog())
+
+
+@tool("get_surface_packet",
+      "Read one cataloged Macro/Terminal surface through a fixed artifact allowlist. This is bounded "
+      "context only: never transplant a US-market read into the HK regime or grant it trade authority.",
+      autonomous_mcp.SURFACE_PACKET_SCHEMA)
+async def get_surface_packet(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.surface_packet(
+        str(args.get("surface_id") or ""), limit=args.get("limit", 6)))
+
+
+@tool("get_technical_lab",
+      "Golden Oracle, MACD-RSI, Stoch-RSI, multi-timeframe trend and entry-discipline evidence for "
+      "one Hong Kong ticker. Missing fields stay explicit and technicals never override the HK intake.",
+      {"type": "object", "properties": {
+          "ticker": {"type": "string", "minLength": 1, "maxLength": 24}},
+       "required": ["ticker"], "additionalProperties": False})
+async def get_technical_lab(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.technical_packet(str(args.get("ticker") or "")))
+
+
+@tool("get_neural_web_packet",
+      "Bounded Neural Web context for this HK book and up to six requested/held names. Context and "
+      "provenance only; it cannot originate, size, block, or exit a trade.",
+      autonomous_mcp.NEURAL_WEB_PACKET_SCHEMA)
+async def get_neural_web_packet(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.neural_web_packet(
+        PORTFOLIO_ID, tickers=args.get("tickers")))
+
+
+@tool("request_context_upgrade",
+      "Queue a bounded request for missing HK decision context. Review only: it does not change code, "
+      "tools, sizing, or execution authority.",
+      {"type": "object", "properties": {
+          "plane": {"type": "string"}, "reason": {"type": "string"},
+          "ticker": {"type": "string"}},
+       "required": ["plane", "reason"], "additionalProperties": False})
+async def request_context_upgrade(args):
+    from brain import portfolio_learning
+    return bot_mcp._json(portfolio_learning.request_context(
+        PORTFOLIO_ID, args.get("plane"), args.get("reason"), args.get("ticker")))
+
+
 _DESK_TOOLS = [get_my_book, submit_book]
-_READ_TOOLS = [get_china_regime, get_china_standouts, get_china_intake, get_china_brief, get_quote]
+_READ_TOOLS = [get_china_regime, get_china_standouts, get_china_intake, get_china_brief,
+               get_quote, get_context_catalog, get_surface_packet, get_technical_lab,
+               get_neural_web_packet, request_context_upgrade]
 _ALL_TOOLS = _DESK_TOOLS + _READ_TOOLS
 
 
@@ -335,4 +367,4 @@ def build_servers() -> dict:
 def allowed_tools() -> list[str]:
     """The china desk's own tools + web. NO raw Read/Grep/Glob, NO flagship get_portfolio, NO gated
     execute_trade — a free-form book that can only see its OWN state and the China desks."""
-    return [f"mcp__{SERVER_NAME}__{t.name}" for t in _ALL_TOOLS] + bot_mcp.WEB_TOOLS
+    return [f"mcp__{SERVER_NAME}__{t.name}" for t in _ALL_TOOLS] + bot_mcp.WEB_TOOLS + ["Task"]

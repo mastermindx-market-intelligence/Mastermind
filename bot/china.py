@@ -117,19 +117,70 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
         )
     out["brain"] = {k: brain.get(k) for k in ("ok", "cost_usd", "tools_used", "error", "run_id", "model")}
 
-    # 2. read the submitted book — then ENFORCE the venue restriction in the trusted layer: drop any
-    #    holding outside the book's allowed venues (A-share only) even if the Brain slipped one in.
+    # 2. read the normalized submitted book.  decision_submission rejects new off-venue adds.
+    #    Keep the narrow filter below as defence in depth for malformed/legacy payloads, but never
+    #    turn a trusted omission-carry row for an existing legacy position into an implicit sale.
     submission = china_mcp.read_submission()
     if submission and ALLOWED_VENUES:
         from brain import china_intake as _intake
         all_h = submission.get("holdings") or []
-        kept = [h for h in all_h if _intake._venue(h.get("ticker")) in ALLOWED_VENUES]
-        rejected = [h.get("ticker") for h in all_h if _intake._venue(h.get("ticker")) not in ALLOWED_VENUES]
+        held_at_start = set((state0.get("positions") or {}).keys())
+
+        def _trusted_legacy_carry(h: dict) -> bool:
+            ticker = str(h.get("ticker") or "").upper().strip()
+            return bool(
+                ticker in held_at_start
+                and h.get("carried_forward") is True
+                and h.get("action_effective") == "hold"
+                and h.get("weight_source") == "omission_carry.v1"
+                and h.get("carry_reason") == "missing_explicit_exit_decision"
+            )
+
+        kept = [
+            h for h in all_h
+            if _intake._venue(h.get("ticker")) in ALLOWED_VENUES
+            or _trusted_legacy_carry(h)
+        ]
+        rejected = [
+            h.get("ticker") for h in all_h
+            if _intake._venue(h.get("ticker")) not in ALLOWED_VENUES
+            and not _trusted_legacy_carry(h)
+        ]
+        normalized_rejected = [
+            rec.get("ticker")
+            for rec in ((submission.get("submission_audit") or {}).get("rejected") or [])
+            if isinstance(rec, dict) and rec.get("reason") == "off_venue"
+        ]
         if rejected:
             submission = {**submission, "holdings": kept}
-            out["rejected_offvenue"] = rejected
-    decided = bool(submission and submission.get("holdings"))
+        if rejected or normalized_rejected:
+            out["rejected_offvenue"] = sorted(
+                {str(ticker) for ticker in rejected + normalized_rejected if ticker}
+            )
+    # A fully explicit 100%-cash target is valid. Missing submission still carries the prior book.
+    decided = bool(
+        submission
+        and isinstance(submission.get("holdings"), list)
+        and (submission.get("summary") or "").strip()
+    )
     out["decided"] = decided
+    target_status = "proposed" if decided else "rejected_no_submission"
+    effective_target: dict[str, float] | None = None
+    quote_fallbacks = sorted(
+        h.get("ticker")
+        for h in ((submission or {}).get("holdings") or [])
+        if h.get("holding_mark_source") == "account_avg_cost_fallback"
+    )
+    if decided and quote_fallbacks:
+        # Average cost establishes inventory but cannot authorize a rebalance.
+        # Freeze the complete account until every held line has a trusted quote.
+        decided = False
+        out["decided"] = False
+        out["decision_boundary_frozen"] = {
+            "reason": "held_position_quote_fallback",
+            "tickers": quote_fallbacks,
+        }
+        target_status = "frozen_held_quote_fallback"
 
     # 2c. PACKET GATE (ruling R6, Charter P2/P3/P8). Boundary is AFTER the venue filter
     # (trusted Python) but BEFORE pricing + execute. On enforce+invalid → decided=False
@@ -160,6 +211,7 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
                 decided = False
                 out["decided"] = decided
                 out["packet_rejected"] = True
+                target_status = "rejected_packet_gate"
         except Exception as _pg_exc:   # noqa: BLE001 — gate must never block the book
             out["packet_gate_error"] = repr(_pg_exc)[:200]
 
@@ -169,6 +221,7 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     #    are marked at the prevailing rate, and the CSI 300 benchmark is marked in CNY too.
     from portfolio import fx
     held = list((paper_account._load_account(PORTFOLIO_ID).get("positions") or {}).keys())
+    held_set = set(held)
     target = {h["ticker"]: float(h.get("weight") or 0.0)
               for h in (submission.get("holdings") if decided else [])}
     prices: dict[str, float] = {}
@@ -182,22 +235,63 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     #    CNY mark; CLOSED (the normal post-close run, or any off-hours run) → QUEUE the target to
     #    settle at the next A-share open, booking NO fills now — so the book never trades off-hours
     #    and re-running a closed session can't churn it (bot/settle.py + the scheduler's open settle).
-    #    Names we cannot price are skipped (the full target still flows so an unpriceable held name is
-    #    carried, not liquidated on a feed gap — critical for the Asia leg).
+    #    A missing second quote cannot erase an existing holding, but it also cannot leave a latent
+    #    BUY in the queue: unpriceable held rows flow through unchanged; unpriceable new rows do not.
     from bot import settle as _settle
     executed: list[dict] = []
     skipped: list[str] = []
     queued = False
+    execution_quote_blocked = False
+    settlement_receipt_id: str | None = None
     if decided:
-        skipped = sorted(t for t in target if t not in prices)
-        res = _settle.execute_or_queue(PORTFOLIO_ID, target, prices, asof)
+        carried_unpriceable = sorted(
+            t for t in target if t in held_set and t not in prices
+        )
+        execution_target = {
+            t: weight for t, weight in target.items()
+            if t in prices or t in held_set
+        }
+        skipped = sorted(
+            t for t in target if t not in prices and t not in held_set
+        )
+        if carried_unpriceable:
+            out["carried_unpriceable_holdings"] = carried_unpriceable
+        res = _settle.execute_or_queue(
+            PORTFOLIO_ID,
+            execution_target,
+            prices,
+            asof,
+            decision_snapshot=submission,
+        )
         executed = res.get("executed") or []
         queued = bool(res.get("queued"))
+        settlement_receipt_id = res.get("settlement_receipt_id")
         if res.get("error"):
             out["rebalance_error"] = res["error"]
+        if res.get("skipped"):
+            out["execution_skipped"] = res["skipped"]
+        if res.get("unpriceable_exits"):
+            out["unpriceable_exits"] = res["unpriceable_exits"]
+        if res.get("unpriceable_targets"):
+            out["unpriceable_targets"] = res["unpriceable_targets"]
+        if res.get("skipped") in {
+            "unpriceable_exit_prices", "unpriceable_target_prices"
+        }:
+            execution_quote_blocked = True
+            out["pending_target_retained"] = bool(res.get("pending_retained"))
+        if res.get("error"):
+            target_status = "rejected_execution_error"
+        elif res.get("skipped") and not queued:
+            target_status = f"rejected_{res['skipped']}"
+        elif queued:
+            target_status = "queued"
+            effective_target = dict(execution_target)
+        else:
+            target_status = "executed"
+            effective_target = dict(execution_target)
         if executed:
             ledger_positions = [{"ticker": t, "sleeve": SLEEVE, "weight": w, "entry_price": prices.get(t)}
-                                for t, w in target.items() if t in prices]
+                                for t, w in execution_target.items()]
             try:
                 position_log.update(ledger_positions, asof, portfolio_id=PORTFOLIO_ID)
             except Exception:
@@ -208,25 +302,60 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     out["skipped_unpriceable"] = skipped
 
     # 5. mark NAV vs CSI 300 (benchmark auto-resolved per-book from the registry)
-    try:
-        paper_account.mark(prices, asof, portfolio_id=PORTFOLIO_ID)
-    except Exception as e:                       # noqa: BLE001
-        out["mark_error"] = repr(e)[:200]
+    if execution_quote_blocked:
+        # mark() may initialize benchmark fields in account.json. Keep the whole paper account
+        # write-free until the retained exit target has a trusted market price.
+        out["mark_skipped"] = "execution_quote_guard"
+    else:
+        try:
+            paper_account.mark(prices, asof, portfolio_id=PORTFOLIO_ID)
+        except Exception as e:                       # noqa: BLE001
+            out["mark_error"] = repr(e)[:200]
 
     # 6. publish the book contract + 7. append the daily decision log
-    payload = _build_payload(asof, submission, prices, executed, skipped, brain,
-                             feed_health=out.get("feed_health"))
+    out["target_status"] = target_status
+    out["decision_effective"] = target_status in {"executed", "queued"}
+    payload = _build_payload(
+        asof,
+        submission,
+        prices,
+        executed,
+        skipped,
+        brain,
+        feed_health=out.get("feed_health"),
+        target_status=target_status,
+    )
+    publish_ok = False
     try:
         from bridge import build_portfolio
         out["paths"] = build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
+        publish_ok = True
     except Exception as e:                       # noqa: BLE001
         out["write_error"] = repr(e)[:200]
+    decision_log_ok = False
     try:
-        _append_decision_log(asof, submission, executed, skipped, brain,
-                             feed_health=out.get("feed_health"),
-                             packet_id=(_pgr.packet_id if _pgr else None))
+        _append_decision_log(
+            asof,
+            submission,
+            executed,
+            skipped,
+            brain,
+            feed_health=out.get("feed_health"),
+            packet_id=(_pgr.packet_id if _pgr else None),
+            target_status=target_status,
+            effective_target=effective_target,
+        )
+        decision_log_ok = True
     except Exception:
         pass
+    if settlement_receipt_id and publish_ok and decision_log_ok and not out.get("mark_error"):
+        try:
+            paper_account.acknowledge_settlement_receipt(
+                settlement_receipt_id, PORTFOLIO_ID
+            )
+            out["settlement_receipt_acknowledged"] = True
+        except Exception as exc:  # noqa: BLE001 - receipt remains available for open-settle retry
+            out["settlement_receipt_ack_error"] = repr(exc)[:200]
 
     # 8. delegate the Chinese translation of today's report to the Haiku tier so the dashboard
     #    renders zh the moment it's toggled — automatic after every run, never blocks the book.
@@ -251,6 +380,15 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     except Exception:  # noqa: BLE001
         pass
 
+    try:
+        from brain import portfolio_learning
+        post = portfolio_learning.refresh_post_sell(PORTFOLIO_ID, asof)
+        lessons = portfolio_learning.derive_lessons(PORTFOLIO_ID)
+        out["learning"] = {"post_sell": post.get("summary"),
+                           "lessons_n": len(lessons.get("lessons") or [])}
+    except Exception:
+        pass
+
     return out
 
 
@@ -261,17 +399,20 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
 _PERSONA = (
     "You are the CHINA A-SHARE PORTFOLIO MANAGER of a real-money-style ¥1,000,000 PAPER book, marked "
     "in CNY (renminbi). You run once per Asia trading day, after the mainland A-share close. You have "
-    "FULL discretion: you decide every buy, sell, trim, and the cash level, and you rebalance the "
-    "whole book daily. There is NO gate, NO committee, NO research-paper requirement, and NO "
-    "doctrine constraining you — only paper cash (you cannot use leverage). \n\n"
-    "Idle cash earns ~4% annualized (a money-market sweep), so holding cash when you lack "
-    "high-conviction ideas is a REWARDED choice, not dead money — do not force marginal names just "
-    "to stay invested. \n\n"
+    "accountable discretion over names, ordinal conviction, ADD/HOLD/TRIM/EXIT intent, and risk posture. "
+    "The operating doctrine and evidence contract apply; the trusted incremental allocator alone turns "
+    "your ordinal decisions into weights and never uses model numbers as authority. It preserves reviewed "
+    "holds and omissions, and never invents marginal trades merely to fill gross. \n\n"
+    "Capital preservation and positive alpha are co-equal goals. Cash is allowed but is not a rewarded "
+    "default: before holding more than 40%, search the corroborated intake and defensive A-share leaders, "
+    "then document the rejected opportunities and opportunity cost. Only verified crash conditions or "
+    "degraded feeds justify retreating primarily to cash. Preserve the market-specific process that has "
+    "worked; do not import US or HK patterns without local evidence. \n\n"
     "Your universe is MAINLAND CHINA A-SHARES ONLY — Shanghai (``*.SS``) and Shenzhen (``*.SZ``) "
     "listings, quoted in CNY (e.g. 600519.SS, 300750.SZ, 601318.SS). You MAY NOT hold Hong Kong "
     "(``*.HK``) names or US-listed ADRs — those belong to the separate HK book, and any non-A-share "
-    "ticker you submit will be REJECTED by the desk. A-shares are native CNY, so size every weight as "
-    "a fraction of the one CNY NAV. \n\n"
+    "ticker you submit will be REJECTED by the desk. A-shares are native CNY; reason about portfolio "
+    "impact and conviction, while the trusted layer owns exact CNY-NAV weights. \n\n"
     "You have two research channels and may use EITHER or BOTH: (1) the in-house macro China desks "
     "via mcp__china__* tools — get_china_regime (top-down quad + PBoC liquidity), get_china_intake "
     "(the unified, corroborated A-share candidate funnel across the buy board, alpha leaders, and "
@@ -281,9 +422,16 @@ _PERSONA = (
     "returns the venue, the local-currency price, and the CNY price the book will actually transact "
     "at; a name with priceable=false will be SKIPPED. When you are done researching, call "
     "mcp__china__submit_book ONCE with your COMPLETE target book for today: every A-share you want to "
-    "hold, its weight (fraction of NAV), and a clear one-paragraph rationale for EACH holding. "
-    "Anything you currently hold but omit will be SOLD. Be decisive and concrete; this book is "
-    "graded on its realized CNY NAV vs the CSI 300. \n\n"
+    "hold, its ADD/HOLD/TRIM intent, ordinal conviction, and a clear one-paragraph rationale for EACH holding. "
+    "A TRIM must include evidence and light/standard/deep intensity; the allocator derives the reduction. "
+    "Omission never sells: give every intended full exit an explicit exit_decisions record with reason, "
+    "evidence and why-now. Submit the structured decision memo and evidence provenance required by the "
+    "tool. Let winners run while their local sector, tape and thesis persist; review trim-and-trail before "
+    "a full exit. Be decisive and concrete; this book is graded on its realized CNY NAV vs the CSI 300. \n\n"
+    "When independent research would benefit, delegate at most three read-only tasks to signal-scout or "
+    "narrative-analyst, wait for compact findings, and synthesize the final book yourself. Subagents never "
+    "submit or size. Do not expose hidden chain-of-thought; record concise evidence, alternatives and the "
+    "decision-relevant conclusion. \n\n"
     "NAMING — in EVERY piece of prose you write (each holding's rationale, the overall summary, the "
     "sold note, and your closing write-up / decision log), refer to a company by its NAME alongside "
     "the ticker, e.g. write '贵州茅台 (600519.SS)', never a bare '600519.SS'. get_my_book, get_quote, "
@@ -323,6 +471,11 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         lines += ["## ⚠ PRIORITY DIRECTIVE FOR THIS RUN", directive.strip(), ""]
     if regime:
         lines += [f"China macro regime (in-house read): {regime}", ""]
+    try:
+        from brain import portfolio_learning
+        lines += [portfolio_learning.prompt_block(PORTFOLIO_ID), ""]
+    except Exception:
+        pass
     # E2.5 — POSTURE block (flag-independent read-only prompt enrichment).
     # The China Brain sees the shadow posture so it can observe whether it would have agreed.
     # Missing/absent artifact → section omitted (degrade silently; never blocks the book).
@@ -342,7 +495,8 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         lines += [
             "This is your INAUGURAL run. The book is 100% cash: ¥1,000,000 (CNY). Build the "
             "A-share portfolio from scratch — buy whatever mainland A-shares (*.SS / *.SZ) you are "
-            "convinced of, sized however you see fit (keep some cash if you want). No HK or ADR names.",
+            "convinced of and label each ADD with ordinal conviction. The trusted allocator will size "
+            "only those approved names; it will not force weak ideas. No HK or ADR names.",
             "",
         ]
     else:
@@ -352,8 +506,9 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
     lines += [
         "Do your research now (the in-house China desks and/or the web — your call), then submit "
         "your complete target book for today via mcp__china__submit_book, with a one-paragraph "
-        "rationale per holding. Confirm each name is priceable with get_quote first. Rebalance with "
-        "conviction; you are accountable for the CNY NAV vs the CSI 300.",
+        "rationale per holding, ADD/HOLD/TRIM intent, all governance fields, a structured decision memo, and an explicit record "
+        "for every exit. Confirm each name is priceable with get_quote first. Search deeper before choosing "
+        "high cash; you are accountable for selection and CNY NAV vs the CSI 300, while exact weights remain deterministic.",
     ]
     return "\n".join(lines)
 
@@ -363,9 +518,10 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
 # ---------------------------------------------------------------------------
 
 def _build_payload(asof: str, submission: dict | None, prices: dict, executed: list,
-                   skipped: list, brain: dict, feed_health: dict | None = None) -> dict:
+                   skipped: list, brain: dict, feed_health: dict | None = None,
+                   *, target_status: str = "executed") -> dict:
     from portfolio import china_calendar, paper_account, position_log
-    from brain import china_intake
+    from brain import china_intake, decision_submission
     state = paper_account._load_account(PORTFOLIO_ID)
     pnl = paper_account.positions_pnl(prices, PORTFOLIO_ID)
     nav = paper_account.nav(prices, PORTFOLIO_ID)
@@ -401,15 +557,16 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
 
     gross = round(sum((p.get("weight") or 0.0) for p in positions), 4)
     decisions = []
-    summary = (submission or {}).get("summary")
+    narrative = decision_submission.effective_narrative_fields(submission, target_status)
+    summary = narrative.get("summary")
     if summary:
         decisions.append({"subject": "China book", "lean": summary,
-                          "thesis": (submission or {}).get("sold_note") or "",
+                          "thesis": narrative.get("sold_note") or "",
                           "logged_at": datetime.now(timezone.utc).isoformat()})
     return {
         "as_of": asof,
         "portfolio_id": PORTFOLIO_ID,
-        "manager": "Mastermind AI (Codex-first)",
+        "manager": "Mastermind Portfolio CN Brain (Codex-first)",
         "kind": "china_brain",
         "currency": CURRENCY,
         "benchmark": BENCHMARK,
@@ -418,8 +575,7 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
         "cash": round(1.0 - gross, 4) if gross <= 1.0 else 0.0,
         "cash_usd": round(cash, 2),
         "nav": round(nav, 2),
-        "summary": summary,
-        "sold_note": (submission or {}).get("sold_note"),
+        **narrative,
         "positions": positions,
         "decisions": decisions,
         "executed_today": executed,
@@ -432,9 +588,11 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
 
 def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          skipped: list, brain: dict, feed_health: dict | None = None,
-                         *, packet_id: str | None = None) -> None:
+                         *, packet_id: str | None = None,
+                         target_status: str = "rejected_unspecified",
+                         effective_target: dict[str, float] | None = None) -> None:
     from portfolio import registry
-    from brain import china_intake as _intake_mod
+    from brain import china_intake as _intake_mod, decision_submission
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     entry = {
@@ -443,9 +601,8 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "summary": (submission or {}).get("summary"),
         "sold_note": (submission or {}).get("sold_note"),
         "feed_health": feed_health,
-        "holdings": [{"ticker": h.get("ticker"), "name": _intake_mod.display_name(h.get("ticker")),
-                      "venue": h.get("venue"), "weight": h.get("weight"),
-                      "conviction": h.get("conviction"), "rationale": h.get("rationale")}
+        "holdings": [{**decision_submission.holding_audit_fields(h),
+                      "name": _intake_mod.display_name(h.get("ticker"))}
                      for h in ((submission or {}).get("holdings") or [])],
         "executed": [{**e, "name": _intake_mod.display_name(e.get("ticker"))} for e in (executed or [])],
         "skipped_unpriceable": skipped,
@@ -456,6 +613,11 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "model": brain.get("model") if isinstance(brain, dict) else None,
         "error": brain.get("error") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
+        **decision_submission.target_status_fields(target_status),
+        "effective_holdings": decision_submission.effective_holding_audit(
+            submission, effective_target, target_status
+        ),
+        **decision_submission.audit_fields(submission),
     }
     from bot import decision_rows
     existing = []
@@ -508,15 +670,16 @@ def _translate_report(submission: dict | None, brain: dict | None) -> bool:
         return False
 
 
-def republish(asof: str | None = None) -> dict:
+def republish(asof: str | None = None, *, submission: dict | None = None) -> dict:
     """Re-emit the CURRENT book's published contract (with display names) + re-warm the zh cache
     from the LAST submission and today's CNY marks — WITHOUT a new Brain call. Use to refresh the
     live book after a code change (e.g. names / translation) or an FX move. Idempotent per asof."""
     from portfolio import fx, paper_account
     from brain import china_mcp
     asof = asof or date.today().isoformat()
-    submission = china_mcp.read_submission()
-    if not submission or not submission.get("holdings"):
+    if submission is None:
+        submission = china_mcp.read_submission()
+    if submission is None or not isinstance(submission.get("holdings"), list):
         return {"ok": False, "error": "no current submission to republish"}
     held = list((paper_account._load_account(PORTFOLIO_ID).get("positions") or {}).keys())
     target = {h["ticker"]: float(h.get("weight") or 0.0) for h in (submission.get("holdings") or [])}
@@ -526,7 +689,9 @@ def republish(asof: str | None = None) -> dict:
         base = fx.usd_to(paper_account._current_price(t), CURRENCY)
         if base and base > 0:
             prices[t] = base
-    payload = _build_payload(asof, submission, prices, [], [], {})
+    payload = _build_payload(
+        asof, submission, prices, [], [], {}, target_status="executed"
+    )
     out: dict = {"ok": True, "holdings": len(target)}
     try:
         from bridge import build_portfolio

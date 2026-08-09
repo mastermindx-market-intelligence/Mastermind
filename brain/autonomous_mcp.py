@@ -1,10 +1,9 @@
-"""The autonomous desk's MCP surface — the FREE-FORM book the Opus Brain manages itself.
+"""The US Brain v2 MCP surface — typed evidence in, explicit target decisions out.
 
-Unlike the gated flagship (brain/bot_mcp.execute_trade, which refuses an add without a
-CONFIRMED research paper), this desk lets the Brain trade WHATEVER it is convinced of. The
-Brain researches (reusing the macro-dashboard READ tools from bot_mcp + WebSearch/WebFetch),
-then calls ONE tool — ``submit_book`` — with its complete target portfolio for the day, each
-holding carrying a one-paragraph rationale. No gate, no research paper, no sleeves.
+This is the sole active US stock-selection portfolio.  Prophet and Macro intelligence are
+high-signal discovery/context planes, not automatic buy authority.  A single accountable
+manager selects common stocks, validates timing, and calls ``submit_book`` once.  The trusted
+boundary rejects ETFs and never treats an omitted holding as an implicit sell.
 
 The tool does NOT execute the trade itself; it RECORDS the decided book to a per-portfolio
 file (``_pending_decision.json``). The deterministic builder (``bot/autonomous.py``) reads it
@@ -27,6 +26,36 @@ PORTFOLIO_ID = "autonomous"
 
 # Marker the builder / any streaming layer can scan a tool result for.
 BOOK_MARKER = "__BOOK__"
+
+# Enum-like IDs keep the MCP boundary on the same fixed allowlist as
+# portfolio_intelligence.surface_packet; callers can never supply a filesystem path.
+SURFACE_IDS = (
+    "sector_central", "intelligence_hub", "foresight", "radar", "state_of_themes",
+    "etfs", "macro_context", "movers", "intraday_flow", "options",
+    "confluence_screener", "stock_seasonality", "prophet", "neural_web",
+    "golden_oracle", "technical_lab",
+)
+SURFACE_PACKET_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "surface_id": {"type": "string", "enum": list(SURFACE_IDS)},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+    },
+    "required": ["surface_id"],
+    "additionalProperties": False,
+}
+NEURAL_WEB_PACKET_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tickers": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "maxLength": 24},
+            "maxItems": 6,
+            "uniqueItems": True,
+        },
+    },
+    "additionalProperties": False,
+}
 
 
 def submission_path(portfolio_id: str = PORTFOLIO_ID) -> Path:
@@ -110,78 +139,146 @@ async def get_my_book(args):
 
 
 @tool("submit_book",
-      "Submit your FINAL decided portfolio for today as a COMPLETE target book — this is how you "
-      "trade. The desk rebalances the paper account to exactly these weights: a name you include "
-      "is bought/held to its weight, a name you OMIT (that you currently hold) is SOLD in full, a "
-      "changed weight is trimmed/added. So include EVERY name you want to keep. Weights are "
-      "fractions of NAV (0-1) and must sum to <= 1.0 (the remainder stays in cash). Provide a "
-      "one-paragraph rationale for EVERY holding (required) plus an overall summary, and optionally "
-      "note what you sold and why. There is NO gate and NO research-paper requirement — buy whatever "
-      "you are convinced of. Call this ONCE, at the end, after your research. Trade liquid US-listed "
-      "equities/ETFs (use get_quote to confirm a name is priceable before relying on it). "
-      "OPTIONAL governance fields (provide when you can — they improve the shadow decision ledger): "
-      "falsifiers (list of strings — what would cause you to reverse this book within 5 days), "
-      "evidence_planes (list of strings — data sources you relied on), "
-      "expected_failure_mode (string — the most likely way this book loses money).",
+      "Submit the FINAL US stock portfolio once. Include every desired holding and an explicit "
+      "exit_decisions record for each held name you intend to sell; omission alone NEVER sells. "
+      "ETFs are rejected and any legacy ETF is quarantined until an explicit "
+      "legacy_instrument_migration exit. For each row choose ADD, HOLD, or TRIM; TRIM requires "
+      "evidence and an ordinal intensity. The trusted allocator alone computes weights, so any numeric "
+      "weight is optional audit context and never authority. Each holding must state why-now, falsifier, "
+      "source provenance, expected horizon and exit plan. Provide a structured decision_memo so the "
+      "dashboard can show the candidate funnel, timing, rejected alternatives and lessons without "
+      "publishing hidden chain-of-thought.",
       {"type": "object", "properties": {
           "holdings": {"type": "array", "items": {"type": "object", "properties": {
               "ticker": {"type": "string"},
-              "weight": {"type": "number", "description": "fraction of NAV, 0-1"},
+              "weight": {"type": "number", "description": "optional advisory fraction; ignored for sizing"},
               "rationale": {"type": "string", "description": "one paragraph: why you own this, now"},
-              "conviction": {"type": "string", "enum": ["high", "medium", "low"]}},
-              "required": ["ticker", "weight", "rationale"]}},
+              "conviction": {"type": "string", "enum": ["high", "medium", "low"]},
+              "action": {"type": "string", "enum": ["add", "hold", "trim"]},
+              "trim_intensity": {"type": "string", "enum": ["light", "standard", "deep"]},
+              "why_now": {"type": "string"}, "falsifier": {"type": "string"},
+              "evidence": {"type": "array", "items": {"type": "string"}},
+              "source_provenance": {"type": "array", "items": {"type": "string"}},
+              "expected_horizon": {"type": "string"}, "exit_plan": {"type": "string"}},
+              "required": ["ticker", "rationale", "conviction", "action", "why_now", "falsifier",
+                           "evidence", "source_provenance", "expected_horizon", "exit_plan"]}},
           "summary": {"type": "string", "description": "overall thesis / how the book is positioned today"},
           "sold_note": {"type": "string", "description": "optional: what you exited or trimmed and why"},
+          "exit_decisions": {"type": "array", "items": {"type": "object", "properties": {
+              "ticker": {"type": "string"}, "action": {"type": "string", "enum": ["exit"]},
+              "reason": {"type": "string"},
+              "reason_code": {"type": "string", "enum": ["hard_falsifier", "technical_break",
+                  "material_thesis_change", "risk_limit", "fraud_or_delisting", "stop_breach",
+                  "legacy_instrument_migration", "thesis_change"]},
+              "evidence": {"type": "array", "items": {"type": "string"}},
+              "falsifier": {"type": "string"}, "why_now": {"type": "string"}},
+              "required": ["ticker", "action", "reason", "reason_code", "evidence", "why_now"]}},
           "falsifiers": {"type": "array", "items": {"type": "string"},
                          "description": "what would cause you to reverse this book within 5 days"},
           "evidence_planes": {"type": "array", "items": {"type": "string"},
                               "description": "data sources / signal planes you relied on for this decision"},
+          "source_provenance": {"type": "array", "items": {"type": "string"}},
+          "liquidity_notes": {"type": "string"},
+          "risk_posture": {"type": "string", "enum": ["normal", "caution", "crash"]},
+          "cash_rationale": {"type": "string"},
           "expected_failure_mode": {"type": "string",
-                                    "description": "the most likely way this book loses money"}},
-       "required": ["holdings", "summary"]})
+                                    "description": "the most likely way this book loses money"},
+          "decision_memo": {"type": "object", "properties": {
+              "market_frame": {}, "candidate_funnel": {}, "selected": {}, "rejected": {},
+              "changes": {}, "timing": {}, "risk_deliberation": {}, "alternatives": {},
+              "lessons_applied": {}, "context_gaps": {}, "delegation_summary": {}}}},
+       "required": ["holdings", "summary", "exit_decisions", "falsifiers", "evidence_planes",
+                    "source_provenance", "expected_failure_mode", "risk_posture",
+                    "cash_rationale", "decision_memo"]})
 async def submit_book(args):
-    holdings = args.get("holdings") or []
-    cleaned: list[dict] = []
-    gross = 0.0
-    seen: set[str] = set()
-    for h in holdings:
-        t = (h.get("ticker") or "").upper().strip()
-        try:
-            w = float(h.get("weight") or 0.0)
-        except (TypeError, ValueError):
-            w = 0.0
-        r = (h.get("rationale") or "").strip()
-        if not t or t in seen or w <= 0 or not r:
-            continue
-        seen.add(t)
-        cleaned.append({"ticker": t, "weight": w, "rationale": r,
-                        "conviction": (h.get("conviction") or "medium")})
-        gross += w
-    # no leverage — if the Brain over-allocates, scale down proportionally (mirrors rebalance())
-    scaled = False
-    if gross > 1.0 and cleaned:
-        scale = 1.0 / gross
-        for h in cleaned:
-            h["weight"] = round(h["weight"] * scale, 6)
-        gross, scaled = 1.0, True
-    payload = {
-        "holdings": cleaned,
-        "summary": (args.get("summary") or "").strip(),
-        "sold_note": (args.get("sold_note") or "").strip(),
-        "gross": round(gross, 4),
-        "scaled_to_no_leverage": scaled,
-    }
+    from brain import decision_submission
+    try:
+        payload, audit = decision_submission.normalize(
+            PORTFOLIO_ID, args, stock_only=True, early_exit_hysteresis=True,
+            deterministic_sizing=True)
+    except decision_submission.DecisionBoundaryFreeze as exc:
+        return bot_mcp._ok(
+            f"SUBMISSION REJECTED; prior paper book preserved unchanged. Trusted-boundary reason: {exc}"
+        )
+    cleaned = payload["holdings"]
+    gross = float(payload["gross"])
     p = submission_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
+    decision_submission.write_atomic(p, payload)
     cash_pct = max(0.0, 1.0 - gross) * 100
     note = (f"Book submitted: {len(cleaned)} holdings, {gross * 100:.0f}% invested, {cash_pct:.0f}% cash"
-            + (" (scaled to remove leverage)" if scaled else "")
+            + (" (scaled to remove leverage)" if payload.get("scaled_to_no_leverage") else "")
+            + (f". Carried {len(audit['carried'])} omitted/early-exit name(s) pending an explicit valid exit"
+               if audit.get("carried") else "")
+            + (f". Quarantined {len(audit['quarantined'])} legacy/non-stock holding(s) without trading them"
+               if audit.get("quarantined") else "")
+            + (". Execution will fail closed until held-position quotes recover"
+               if audit.get("quote_fallback_holdings") else "")
+            + (f". Rejected {len(audit['rejected'])} ETF/invalid name(s)" if audit.get("rejected") else "")
             + ". The desk will rebalance the paper account to these targets at the next mark.")
     return bot_mcp._ok(f"{BOOK_MARKER} {json.dumps({'n': len(cleaned), 'gross': round(gross, 4)})}\n{note}")
 
 
-_DESK_TOOLS = [get_my_book, submit_book]
+@tool("get_market_packet", "Compact US regime, data-health, Prophet and sector-rotation packet. Call early.", {})
+async def get_market_packet(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.market_packet(PORTFOLIO_ID))
+
+
+@tool("get_prophet_board", "Prophet's current Enter/Wait candidates plus active Hold/Trail plans. Discovery and geometry, never automatic authority.",
+      {"type": "object", "properties": {"limit": {"type": "integer"}}})
+async def get_prophet_board(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.prophet_board(limit=int(args.get("limit") or 24)))
+
+
+@tool("get_sector_rotation", "Current Sector Central leaders, laggards and rotation state in a bounded packet.",
+      {"type": "object", "properties": {"limit": {"type": "integer"}}})
+async def get_sector_rotation(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.sector_rotation(limit=int(args.get("limit") or 12)))
+
+
+@tool("get_technical_lab", "Golden Oracle, MACD-RSI, Stoch-RSI, multi-timeframe trend, Prophet geometry and entry-discipline packet for one ticker.",
+      {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
+async def get_technical_lab(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.technical_packet(str(args.get("ticker") or "")))
+
+
+@tool("get_context_catalog", "Catalog of directly wired Macro Dashboard, Terminal, Prophet, Neural Web and technical data planes with freshness and authority.", {})
+async def get_context_catalog(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.context_catalog())
+
+
+@tool("get_surface_packet", "Read one cataloged Macro/Terminal surface through a fixed artifact allowlist. Returns bounded decision context and freshness; never sizing or execution authority.",
+      SURFACE_PACKET_SCHEMA)
+async def get_surface_packet(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.surface_packet(
+        str(args.get("surface_id") or ""), limit=args.get("limit", 6)))
+
+
+@tool("get_neural_web_packet", "Bounded Neural Web context for this US book and up to six requested/held names. Context and provenance only; it cannot originate, size, block, or exit a trade.",
+      NEURAL_WEB_PACKET_SCHEMA)
+async def get_neural_web_packet(args):
+    from brain import portfolio_intelligence
+    return bot_mcp._json(portfolio_intelligence.neural_web_packet(
+        PORTFOLIO_ID, tickers=args.get("tickers")))
+
+
+@tool("request_context_upgrade", "Queue a bounded request for a missing decision-relevant context plane. This requests review; it does not change code or authority.",
+      {"type": "object", "properties": {"plane": {"type": "string"}, "reason": {"type": "string"},
+       "ticker": {"type": "string"}}, "required": ["plane", "reason"]})
+async def request_context_upgrade(args):
+    from brain import portfolio_learning
+    return bot_mcp._json(portfolio_learning.request_context(
+        PORTFOLIO_ID, args.get("plane"), args.get("reason"), args.get("ticker")))
+
+
+_DESK_TOOLS = [get_my_book, get_market_packet, get_prophet_board, get_sector_rotation,
+               get_technical_lab, get_context_catalog, get_surface_packet,
+               get_neural_web_packet, request_context_upgrade, submit_book]
 
 # Reuse the macro-dashboard READ tools, but drop get_portfolio (that's the FLAGSHIP book — the
 # autonomous Brain reads its OWN book via get_my_book to avoid confusion).
@@ -208,4 +305,7 @@ def allowed_tools() -> list[str]:
     dirs (see bot_mcp._DENY_ROOTS)."""
     read = [f"mcp__{bot_mcp.SERVER_NAME}__{t.name}" for t in _READ_TOOLS]
     desk = [f"mcp__{SERVER_NAME}__{t.name}" for t in _DESK_TOOLS]
-    return read + desk + bot_mcp.WEB_TOOLS
+    # Claude fallback uses the built-in Task dispatcher; project subagents are separately
+    # restricted to Read/Grep/Glob and cannot see this desk's submit tool. Codex uses its
+    # project-local `.codex/agents` definitions instead and ignores this allow-list.
+    return read + desk + bot_mcp.WEB_TOOLS + ["Task"]

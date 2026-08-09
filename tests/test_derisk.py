@@ -12,7 +12,16 @@ import sys
 import types
 
 import bot  # noqa: F401  -> vendor/macro onto sys.path
+import pytest
 from bot import derisk as D
+from portfolio import registry
+
+
+@pytest.fixture(autouse=True)
+def legacy_cutters_enabled_for_unit_tests(monkeypatch):
+    """Exercise retired cutter internals without weakening the production archive contract."""
+    for pid in ("flagship", "heavyweight", "etf"):
+        monkeypatch.setitem(registry._BY_ID[pid], "active", True)
 
 
 def _patch_macro(monkeypatch, state_dict):
@@ -258,7 +267,7 @@ def test_derisk_heavyweight_failsoft_on_missing_state(monkeypatch):
     res = D.derisk_heavyweight("2026-06-23", regime={}, force=True)   # must NOT raise
     assert "error" in res and res["pid"] == "heavyweight"
 
-    # (2) sweep-level fail-soft: a cutter that raises is swallowed by sweep_us into an {error} entry.
+    # (2) archived held-book cutters are outside the sweep entirely; only autonomous is called.
     monkeypatch.setattr(D, "enabled", lambda: True)
     def _raises(asof=None):
         raise RuntimeError("no ledger")
@@ -266,11 +275,12 @@ def test_derisk_heavyweight_failsoft_on_missing_state(monkeypatch):
     monkeypatch.setattr(D, "derisk_flagship", lambda asof=None: {"action": "hold"})
     monkeypatch.setattr(D, "derisk_brain", lambda pid, asof=None: {"action": "hold"})
     out = D.sweep_us("2026-06-23")                                   # must NOT raise
-    assert "error" in out["heavyweight"]
+    assert set(out) == {"autonomous"}
+    assert out["autonomous"]["action"] == "hold"
 
 
-def test_sweep_us_invokes_heavyweight(monkeypatch):
-    # sweep_us must route heavyweight through the HELD cutter (derisk_heavyweight), not derisk_brain.
+def test_sweep_us_invokes_active_us_brain_only(monkeypatch):
+    # Retired held books and ETF must never receive post-archive risk writes.
     monkeypatch.setattr(D, "enabled", lambda: True)
     calls = {}
     monkeypatch.setattr(D, "derisk_flagship", lambda asof=None: calls.setdefault("flagship", True) or {"action": "hold"})
@@ -278,16 +288,18 @@ def test_sweep_us_invokes_heavyweight(monkeypatch):
     brain_pids = []
     monkeypatch.setattr(D, "derisk_brain", lambda pid, asof=None: brain_pids.append(pid) or {"action": "hold"})
     out = D.sweep_us("2026-06-23")
-    assert calls.get("flagship") and calls.get("heavyweight")     # both held cutters fired
-    assert "heavyweight" in out
-    assert brain_pids == ["autonomous", "etf"]                    # heavyweight NOT routed as a Brain book
+    assert calls == {}
+    assert set(out) == {"autonomous"}
+    assert brain_pids == ["autonomous"]
 
 
 # ───────────────────────────── brain pending-target de-risk ─────────────────────────────
 def _patch_brain_pa(monkeypatch, target):
     pa = types.ModuleType("portfolio.paper_account")
     saved = {}
-    pa.load_pending_target = lambda pid=None: {"target": dict(target), "asof": "2026-06-23"}
+    pending = {"target": dict(target), "asof": "2026-06-23"}
+    pa.load_pending_target = lambda pid=None: pending
+    pa.preflight_pending_target = lambda pid=None: {"ok": True, "pending": pending}
     pa.save_pending_target = lambda tgt, asof, portfolio_id=None: saved.update({"t": dict(tgt)})
     import portfolio as _pf_pkg
     from portfolio import fragility_chain as _real_fc

@@ -41,7 +41,7 @@ def _events_of_kind(root: Path, kind: str) -> list[dict]:
 
 class TestLockContention:
     def test_concurrent_same_book_one_skips(self, tmp_path, monkeypatch):
-        """Two concurrent invocations of _job (flagship) with the lock pre-held:
+        """Two concurrent invocations of the active US job with the lock pre-held:
         the real production job must skip and write a run_skipped event BY PRODUCTION CODE."""
         import app.scheduler as sched_mod
         import control_plane.locks as locks_mod
@@ -53,13 +53,13 @@ class TestLockContention:
         orig_ld = locks_mod._locks_dir
         monkeypatch.setattr(locks_mod, "_locks_dir", lambda root=None: orig_ld(tmp_path))
 
-        # Pre-hold the book:flagship lock so the job cannot acquire it
+        # Pre-hold the active book lock so the job cannot acquire it
         from control_plane import locks
-        held = locks.acquire("book:flagship", root=tmp_path)
+        held = locks.acquire("book:autonomous", root=tmp_path)
         assert held is not None, "pre-hold must succeed"
         try:
             # Invoke the REAL production job function — it must detect the lock and skip
-            sched_mod._job()
+            sched_mod._autonomous_job()
         finally:
             held.release()
 
@@ -69,7 +69,7 @@ class TestLockContention:
         skipped = [e for e in events if e.get("kind") == "run_skipped"]
         assert len(skipped) >= 1, "real job wrapper must write run_skipped event"
         assert skipped[0]["status"] == "lock_held"
-        assert skipped[0]["job"] == "daily_loop"
+        assert skipped[0]["job"] == "autonomous_daily"
 
     def test_after_release_second_acquires(self, tmp_path):
         """After the first holder releases, a new acquire must succeed."""
@@ -327,8 +327,8 @@ class TestSchedulerEndpoint:
             "/api/scheduler must be auth-protected; it was found in _OPEN_PATHS"
         )
 
-    def test_api_scheduler_unauthenticated_rejected(self, monkeypatch):
-        """Unauthenticated GET /api/scheduler must be rejected (non-200) when auth is enabled."""
+    def test_api_scheduler_get_is_read_only_open(self, monkeypatch):
+        """Read-only GET APIs are open; only mutating operator routes require bearer auth."""
         try:
             from fastapi.testclient import TestClient
             from app.main import app
@@ -343,15 +343,12 @@ class TestSchedulerEndpoint:
         monkeypatch.setattr(re_mod, "_ledger_path",
                             lambda root=None: Path("/tmp/__no_such_path__/run_events.jsonl"))
 
-        # Enable auth for this test so the guard is exercised
-        monkeypatch.setattr(auth_mod, "enabled", lambda: True)
+        # GET must not consult the POST-only operator authorization check.
+        monkeypatch.setattr(auth_mod, "is_operator_authorized", lambda request: False)
 
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/api/scheduler")
-        assert resp.status_code != 200, (
-            f"/api/scheduler returned 200 without credentials (auth guard not firing); "
-            f"status={resp.status_code}"
-        )
+        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -424,8 +421,8 @@ class TestStartupEvent:
 # ---------------------------------------------------------------------------
 
 class TestWeekendHygiene:
-    def test_daily_loop_is_mon_fri(self):
-        """daily_loop trigger must include day_of_week on the nearby CronTrigger call.
+    def test_active_us_loop_is_mon_fri_and_archived_loops_absent(self):
+        """The successor US loop is weekday-only and retired book crons are absent.
 
         The scheduler builds up a multi-line add_job call:
             sch.add_job(_job, CronTrigger(day_of_week="mon-fri", ...), id="daily_loop", ...)
@@ -435,13 +432,16 @@ class TestWeekendHygiene:
         import app.scheduler as sched_mod
         src = inspect.getsource(sched_mod.start)
         lines = src.splitlines()
-        # Find the line index where daily_loop id is registered
-        idx = next((i for i, l in enumerate(lines) if '"daily_loop"' in l or "'daily_loop'" in l), None)
-        assert idx is not None, "daily_loop must appear in start()"
+        # Find the line index where autonomous_daily is registered
+        idx = next((i for i, l in enumerate(lines)
+                    if '"autonomous_daily"' in l or "'autonomous_daily'" in l), None)
+        assert idx is not None, "autonomous_daily must appear in start()"
         # Check the surrounding 5-line window for day_of_week
         window = lines[max(0, idx - 5): idx + 5]
         found = any("day_of_week" in l for l in window)
-        assert found, f"daily_loop block must include day_of_week; window:\n" + "\n".join(window)
+        assert found, f"autonomous_daily block must include day_of_week; window:\n" + "\n".join(window)
+        for retired in ("daily_loop", "heavyweight_daily", "etf_daily"):
+            assert f'id="{retired}"' not in src
 
     def test_publish_macro_snapshot_is_mon_fri(self):
         """publish_macro_snapshot trigger must include day_of_week on the nearby CronTrigger call."""
@@ -520,12 +520,14 @@ class TestSettleLocks:
         orig_ld = locks_mod._locks_dir
         monkeypatch.setattr(locks_mod, "_locks_dir", lambda root=None: orig_ld(tmp_path))
 
-    def test_settle_pending_skips_when_etf_lock_held(self, tmp_path, monkeypatch):
-        """_settle_pending_job must skip the WHOLE settle when book:etf is pre-held,
-        and must emit a run_skipped event — written by production code."""
+    def test_settle_pending_ignores_archived_etf_lock(self, tmp_path, monkeypatch):
+        """An archived ETF lock cannot block settlement of the successor US Brain."""
         import app.scheduler as sched_mod
+        from bot import settle as settle_mod
         from control_plane import locks
         self._redirect(monkeypatch, tmp_path)
+        calls = []
+        monkeypatch.setattr(settle_mod, "settle_us", lambda: calls.append("autonomous"))
 
         # Pre-hold book:etf (simulating a concurrent _etf_job run)
         held = locks.acquire("book:etf", root=tmp_path)
@@ -537,10 +539,8 @@ class TestSettleLocks:
 
         events = _read_events(tmp_path)
         skipped = [e for e in events if e.get("kind") == "run_skipped"]
-        assert skipped, "settle_pending must emit run_skipped when book:etf is held"
-        assert any(e["job"] == "settle_pending" for e in skipped), (
-            f"run_skipped must name job=settle_pending; got: {skipped}"
-        )
+        assert calls == ["autonomous"]
+        assert not any(e.get("book") == "etf" for e in skipped)
 
     def test_settle_pending_skips_when_autonomous_lock_held(self, tmp_path, monkeypatch):
         """_settle_pending_job must skip when book:autonomous is pre-held."""
@@ -559,8 +559,8 @@ class TestSettleLocks:
         skipped = [e for e in events if e.get("kind") == "run_skipped"]
         assert skipped, "settle_pending must emit run_skipped when book:autonomous is held"
 
-    def test_settle_pending_acquires_and_releases_both_locks(self, tmp_path, monkeypatch):
-        """When both locks are free, _settle_pending_job acquires both and releases them on exit."""
+    def test_settle_pending_acquires_and_releases_active_lock(self, tmp_path, monkeypatch):
+        """The active US book lock is released after settlement."""
         import app.scheduler as sched_mod
         from control_plane import locks
         self._redirect(monkeypatch, tmp_path)
@@ -581,13 +581,10 @@ class TestSettleLocks:
 
         sched_mod._settle_pending_job()
 
-        # After the job completes, both locks must be free (acquirable again)
+        # After the job completes, the active lock must be free (acquirable again).
         lock_auto = locks.acquire("book:autonomous", root=tmp_path)
-        lock_etf = locks.acquire("book:etf", root=tmp_path)
         assert lock_auto is not None, "book:autonomous must be released after settle_pending completes"
-        assert lock_etf is not None, "book:etf must be released after settle_pending completes"
         lock_auto.release()
-        lock_etf.release()
 
     def test_settle_brain_asia_skips_when_hk_lock_held(self, tmp_path, monkeypatch):
         """_settle_brain_asia_job must skip the WHOLE settle when book:hk is pre-held."""
@@ -625,6 +622,179 @@ class TestSettleLocks:
         assert skipped, "settle_brain_asia must emit run_skipped when book:china is held"
 
 
+class TestDeriskSettleLockBoundary:
+    """The US de-risk replacement and open settle share one book-level transaction boundary."""
+
+    def _redirect(self, monkeypatch, tmp_path):
+        import control_plane.locks as locks_mod
+        import control_plane.run_events as re_mod
+
+        orig_ld = locks_mod._locks_dir
+        orig_lp = re_mod._ledger_path
+        monkeypatch.setattr(locks_mod, "_locks_dir", lambda root=None: orig_ld(tmp_path))
+        monkeypatch.setattr(re_mod, "_ledger_path", lambda root=None: orig_lp(tmp_path))
+
+    def test_derisk_holds_autonomous_lock_across_pending_target_rewrite(
+        self, tmp_path, monkeypatch
+    ):
+        """A settle arriving mid-derisk cannot execute the stale pre-rewrite target."""
+        import app.scheduler as sched_mod
+        from bot import derisk as derisk_mod
+        from bot import settle as settle_mod
+
+        self._redirect(monkeypatch, tmp_path)
+        derisk_entered = threading.Event()
+        allow_rewrite = threading.Event()
+        pending_target = {"version": "stale"}
+        settled_versions: list[str] = []
+
+        def _blocking_derisk():
+            derisk_entered.set()
+            assert allow_rewrite.wait(timeout=5), "test must release the simulated rewrite"
+            pending_target["version"] = "derisked"
+            return {"autonomous": {"action": "revised_pending_target"}}
+
+        def _settle():
+            settled_versions.append(pending_target["version"])
+
+        monkeypatch.setattr(derisk_mod, "sweep_us", _blocking_derisk)
+        monkeypatch.setattr(settle_mod, "settle_us", _settle)
+
+        worker = threading.Thread(target=sched_mod._derisk_us_job, daemon=True)
+        worker.start()
+        assert derisk_entered.wait(timeout=5), "derisk must enter while holding book:autonomous"
+
+        # This invocation overlaps the pending-target read/replace window. It must skip instead of
+        # executing the stale target; the next scheduled settle can consume the revised target.
+        sched_mod._settle_pending_job()
+        assert settled_versions == []
+
+        allow_rewrite.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert pending_target["version"] == "derisked"
+
+        skipped = [e for e in _read_events(tmp_path) if e.get("kind") == "run_skipped"]
+        assert any(
+            e.get("job") == "settle_pending" and e.get("book") == "autonomous"
+            for e in skipped
+        )
+
+    def test_derisk_skips_when_settle_owns_autonomous_lock(self, tmp_path, monkeypatch):
+        """The reverse ordering is also fail-closed: settle ownership blocks target rewrites."""
+        import app.scheduler as sched_mod
+        from bot import derisk as derisk_mod
+        from control_plane import locks
+
+        self._redirect(monkeypatch, tmp_path)
+        rewrites: list[str] = []
+        monkeypatch.setattr(derisk_mod, "sweep_us", lambda: rewrites.append("rewritten"))
+
+        held = locks.acquire("book:autonomous", root=tmp_path)
+        assert held is not None
+        try:
+            sched_mod._derisk_us_job()
+        finally:
+            held.release()
+
+        assert rewrites == []
+        skipped = [e for e in _read_events(tmp_path) if e.get("kind") == "run_skipped"]
+        assert any(
+            e.get("job") == "derisk_us_intraday" and e.get("book") == "autonomous"
+            for e in skipped
+        )
+
+
+class TestOvernightSettleLockBoundary:
+    """Overnight target refinement and open settlement are mutually exclusive per book."""
+
+    def _redirect(self, monkeypatch, tmp_path):
+        import control_plane.locks as locks_mod
+        import control_plane.run_events as re_mod
+
+        orig_ld = locks_mod._locks_dir
+        orig_lp = re_mod._ledger_path
+        monkeypatch.setattr(locks_mod, "_locks_dir", lambda root=None: orig_ld(tmp_path))
+        monkeypatch.setattr(re_mod, "_ledger_path", lambda root=None: orig_lp(tmp_path))
+
+    def test_us_watch_blocks_stale_settle_and_reverse_lock_skips_llm(
+        self, tmp_path, monkeypatch
+    ):
+        import app.scheduler as sched_mod
+        from bot import overnight, settle
+        from control_plane import locks
+
+        self._redirect(monkeypatch, tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        settled: list[str] = []
+        watch_calls: list[str] = []
+
+        def blocking_watch():
+            watch_calls.append("watch")
+            entered.set()
+            assert release.wait(timeout=5)
+
+        monkeypatch.setattr(overnight, "watch_us", blocking_watch)
+        monkeypatch.setattr(settle, "settle_us", lambda: settled.append("settled"))
+
+        worker = threading.Thread(target=sched_mod._watch_us_job, daemon=True)
+        worker.start()
+        assert entered.wait(timeout=5)
+        sched_mod._settle_pending_job()
+        assert settled == []
+        release.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive() and watch_calls == ["watch"]
+
+        # Reverse order: lock ownership prevents even entering the watch/LLM path.
+        held = locks.acquire("book:autonomous", root=tmp_path)
+        assert held is not None
+        try:
+            sched_mod._watch_us_job()
+        finally:
+            held.release()
+        assert watch_calls == ["watch"]
+
+    def test_asia_watch_holds_both_locks_and_skips_when_either_is_owned(
+        self, tmp_path, monkeypatch
+    ):
+        import app.scheduler as sched_mod
+        from bot import overnight, settle
+        from control_plane import locks
+
+        self._redirect(monkeypatch, tmp_path)
+        entered = threading.Event()
+        release = threading.Event()
+        settles: list[str] = []
+        watch_calls: list[str] = []
+
+        def blocking_watch():
+            watch_calls.append("watch")
+            entered.set()
+            assert release.wait(timeout=5)
+
+        monkeypatch.setattr(overnight, "watch_asia", blocking_watch)
+        monkeypatch.setattr(settle, "settle_asia", lambda: settles.append("settled"))
+
+        worker = threading.Thread(target=sched_mod._watch_asia_job, daemon=True)
+        worker.start()
+        assert entered.wait(timeout=5)
+        sched_mod._settle_brain_asia_job()
+        assert settles == []
+        release.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive() and watch_calls == ["watch"]
+
+        held_hk = locks.acquire("book:hk", root=tmp_path)
+        assert held_hk is not None
+        try:
+            sched_mod._watch_asia_job()
+        finally:
+            held_hk.release()
+        assert watch_calls == ["watch"]
+
+
 # ---------------------------------------------------------------------------
 # 8. Fix-3: _cio_weekly_job calls write_regional best-effort
 # ---------------------------------------------------------------------------
@@ -652,9 +822,13 @@ class TestCioWeeklyCallsWriteRegional:
         self._redirect(monkeypatch, tmp_path)
 
         # Stub run_cio so the US CIO review side-effect is a no-op
-        run_cio_calls = {"n": 0}
+        run_cio_calls = {"n": 0, "kwargs": None}
         fake_run_cio_mod = types.ModuleType("scripts.run_cio")
-        fake_run_cio_mod.run = lambda *a, **kw: (run_cio_calls.__setitem__("n", run_cio_calls["n"] + 1) or {"ok": True})
+        def _fake_run_cio(*args, **kwargs):
+            run_cio_calls["n"] += 1
+            run_cio_calls["kwargs"] = kwargs
+            return {"ok": True}
+        fake_run_cio_mod.run = _fake_run_cio
         monkeypatch.setitem(sys.modules, "scripts.run_cio", fake_run_cio_mod)
 
         # Spy on brain.book_lifecycle.write_regional
@@ -676,6 +850,8 @@ class TestCioWeeklyCallsWriteRegional:
         assert write_regional_calls["n"] == 1, (
             f"_cio_weekly_job must call write_regional() exactly once; called {write_regional_calls['n']} times"
         )
+        assert run_cio_calls["n"] == 1
+        assert run_cio_calls["kwargs"] == {"with_agenda": False, "narrate": False}
 
     def test_cio_weekly_job_write_regional_failure_does_not_abort(self, tmp_path, monkeypatch):
         """A write_regional() exception must not propagate out of _cio_weekly_job.

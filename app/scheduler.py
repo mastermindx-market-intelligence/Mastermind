@@ -1,15 +1,12 @@
-"""APScheduler wiring — fire the daily loops on a cron cadence (the "loop").
+"""APScheduler wiring — fire the active portfolio loops on a cron cadence (the "loop").
 
-Single in-process scheduler on a SQLite jobstore so the schedule survives restarts. 18 jobs:
+Single in-process scheduler on a SQLite jobstore so the schedule survives restarts. Core jobs:
   * 'macro_refresh'       — pull vendored macro data every 3 h (belt-and-suspenders freshness).
-  * 'daily_mark'          — mark all paper books to NAV daily before the flagship build.
-  * 'daily_loop'          — gated flagship book (bot.daily.run_daily, Mon–Fri after close).
+  * 'daily_mark'          — mark active managed paper books to NAV daily.
   * 'autonomous_daily'    — free-form Opus-Brain US book (bot.autonomous, Mon–Fri).
-  * 'heavyweight_daily'   — heavyweight book (bot.heavyweight, Mon–Fri).
   * 'china_daily'         — CN Brain book (bot.china_daily, Mon–Fri).
   * 'hk_daily'            — HK Brain book (bot.hk_daily, Mon–Fri).
-  * 'etf_daily'           — ETF Brain book (bot.etf_daily, Mon–Fri).
-  * 'settle_pending'      — settle Self-Directed pending orders at the US open (Mon–Fri).
+  * 'settle_pending'      — settle the active US Brain target at the US open (Mon–Fri).
   * 'settle_brain_asia'   — settle asia Brain pending orders at the HK/CN open (Mon–Fri).
   * 'watch_us'            — intraday watchlist review for US books (Mon–Fri).
   * 'watch_asia'          — intraday watchlist review for Asia books (Mon–Fri).
@@ -19,14 +16,14 @@ Single in-process scheduler on a SQLite jobstore so the schedule survives restar
   * 'improvement_agenda'  — weekly improvement-agenda refresh.
   * 'loop_maintenance'    — periodic ledger + experiment maintenance.
   * 'experiment_maturity' — experiment maturity sweep.
-Started from app.main on startup; the flagship is also exposed via POST /daily and the
-autonomous book via POST /api/autonomous/run. Configure the hours with BOT_DAILY_UTC_HOUR /
-AUTONOMOUS_DAILY_UTC_HOUR.
+Flagship, Heavyweight, and ETF remain in scheduler health as archived historical jobs but are never
+registered; stale persisted jobs are removed while the scheduler is paused and their retained
+wrappers fail closed. Their manual endpoints return HTTP 410. Started from app.main on startup;
+the successor US book is exposed via POST /api/autonomous/run.
 
 WEEKEND HYGIENE NOTE (MW1 investigation)
 -----------------------------------------
-daily_loop fires the flagship book build; a session requires market data (which only exists on
-trading days) — no documented intent to run on weekends. Changed to mon-fri.
+The active portfolio builds require trading-day market data and therefore run Mon–Fri only.
 
 publish_macro_snapshot pushes a snapshot of the portfolio/regime state.  Its content is
 date-stamped market data only (no weekend quotes, no book rebuild on weekends).  A weekend
@@ -135,17 +132,55 @@ def _skip_event(job: str, book: str):
 
 _BRAIN_RETRY_COUNTS: dict[tuple[str, str], int] = {}
 
+# Historical job ids retained in scheduler health, but never registered or executed.  The wrappers
+# also fail closed so a stale SQLite jobstore entry from an older release cannot spend model tokens
+# during the deployment that retires it.
+_ARCHIVED_BOOK_JOBS: dict[str, str] = {
+    "daily_loop": "flagship",
+    "heavyweight_daily": "heavyweight",
+    "etf_daily": "etf",
+}
+
+
+def _archived_job_noop(job: str, book: str, *, trigger: str = "cron") -> bool:
+    """Return True after recording a no-op when ``book`` is archived.
+
+    Registry failures are fail-closed for the three explicitly retired books. This guard sits before
+    locks, market reads, imports of the runner, and retry scheduling.
+    """
+    try:
+        from portfolio import registry
+        archived = registry.is_archived(book)
+    except Exception:  # noqa: BLE001
+        archived = book in set(_ARCHIVED_BOOK_JOBS.values())
+    if not archived:
+        return False
+    handle = _ledger_start(job, book=book, trigger=trigger)
+    try:
+        from control_plane import run_events
+        run_events.append({
+            "kind": "run_skipped",
+            "job": job,
+            "book": book,
+            "step": "archive_policy",
+            "status": "portfolio_archived",
+            "severity": "ADVISORY_ONLY",
+            "actor": "system",
+            "extra": {"superseded_by": "autonomous"},
+        })
+    except Exception:  # noqa: BLE001
+        pass
+    _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
+    return True
+
 # The book jobs eligible for retry-at-reset, mapped job_id -> book id.  (Verified idempotent:
 # each re-runs the Brain after a no-decision and safely re-settles after a success — the Brain
 # books clear+re-decide, flagship's deterministic book carries/rebuilds identically under the
 # gate.  None is excluded.)
 _BRAIN_RETRY_JOBS: dict[str, str] = {
-    "daily_loop":        "flagship",
     "autonomous_daily":  "autonomous",
-    "heavyweight_daily": "heavyweight",
     "china_daily":       "china",
     "hk_daily":          "hk",
-    "etf_daily":         "etf",
 }
 
 
@@ -157,12 +192,9 @@ def _today_iso_utc() -> str:
 def _job_func_for(job_id: str):
     """Return the scheduler job function for job_id (module global), or None."""
     return {
-        "daily_loop":        _job,
         "autonomous_daily":  _autonomous_job,
-        "heavyweight_daily": _heavyweight_job,
         "china_daily":       _china_job,
         "hk_daily":          _hk_job,
-        "etf_daily":         _etf_job,
     }.get(job_id)
 
 
@@ -265,6 +297,8 @@ def _maybe_schedule_brain_retry(job_id: str, book: str, since_ts) -> None:
     raises into the scheduler."""
     from datetime import datetime, timezone
     try:
+        if _BRAIN_RETRY_JOBS.get(job_id) != book:
+            return  # archived/unknown jobs are ineligible even if an old failure marker exists
         marker = _read_pool_exhausted_since(book, since_ts)
         if marker is None:
             return  # no all-cooling failure this run — nothing to retry
@@ -332,7 +366,9 @@ def _maybe_schedule_brain_retry(job_id: str, book: str, since_ts) -> None:
 # ---------------------------------------------------------------------------
 
 def _job():
-    """Flagship daily loop: gated book build (Mon–Fri after close)."""
+    """Retired Flagship wrapper retained only to neutralize stale persisted jobs."""
+    if _archived_job_noop("daily_loop", "flagship"):
+        return
     from datetime import datetime, timezone
     _started = datetime.now(timezone.utc)
     handle = _ledger_start("daily_loop", book="flagship", trigger="cron")
@@ -376,8 +412,9 @@ def _autonomous_job():
 
 
 def _heavyweight_job():
-    """The concentrated Opus-Brain book: studies Flagship's book and presses its best ideas. Runs
-    AFTER flagship + autonomous so it constrains against a fresh Flagship book."""
+    """Retired Heavyweight wrapper retained only to neutralize stale persisted jobs."""
+    if _archived_job_noop("heavyweight_daily", "heavyweight"):
+        return
     from datetime import datetime, timezone
     _started = datetime.now(timezone.utc)
     handle = _ledger_start("heavyweight_daily", book="heavyweight", trigger="cron")
@@ -445,8 +482,9 @@ def _hk_job():
 
 
 def _etf_job():
-    """The free-form ETF Opus-Brain book: rotates across US-listed ETFs (index/sector/factor/duration/
-    cash) under an ETF-adapted doctrine + risk guardrails, once per US trading day after the close."""
+    """Retired ETF wrapper retained only to neutralize stale persisted jobs."""
+    if _archived_job_noop("etf_daily", "etf"):
+        return
     from datetime import datetime, timezone
     _started = datetime.now(timezone.utc)
     handle = _ledger_start("etf_daily", book="etf", trigger="cron")
@@ -525,59 +563,26 @@ def _vps_state_sync_job():
 
 
 def _settle_pending_job():
-    """Settle the US books' queued orders at the OPEN, during market hours.
+    """Settle the active US Brain's queued target at the US open.
 
-    All books DECIDE after their close (the flagship at 22:40 UTC; the US Brain books at 23:10/23:15)
-    and, while the market is shut, only QUEUE their target — they never book an off-hours fill. This
-    morning sweep settles them at the real session open: the flagship's queued buy orders
-    (queue_orders → fill_pending) and the US Brain books' queued target (autonomous + etf →
-    paper_account.settle_target, a full rebalance to the decided book at the open mark), then
-    republishes so the dashboard renders the freshly-filled positions. Idempotent + never raises.
-
-    LOCKING (MW1 fix): settle_us touches both the autonomous AND etf books' account state — the
-    same state mutated by _autonomous_job and _etf_job.  We must hold BOTH locks before running;
-    if either is busy (a concurrent build is in progress), skip the entire settle and log.
-    Acquisition order is alphabetical (book:autonomous < book:etf) — settle is the only multi-lock
-    holder and single-book jobs hold exactly one lock each, so this fixed order is deadlock-safe."""
+    Flagship and ETF historical queues are intentionally left frozen: archive means no fills, not a
+    final implicit rebalance. The successor US Brain is the only managed US account touched here.
+    """
     handle = _ledger_start("settle_pending", trigger="cron")
     try:
         from control_plane import locks
-        # Acquire both locks in alphabetical order (deadlock-safe — see docstring).
         lock_auto = locks.acquire_or_log("book:autonomous", job="settle_pending", book="autonomous")
         if lock_auto is None:
-            _skip_event("settle_pending", "autonomous+etf")
-            _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
-            return
-        lock_etf = locks.acquire_or_log("book:etf", job="settle_pending", book="etf")
-        if lock_etf is None:
-            lock_auto.release()
-            _skip_event("settle_pending", "autonomous+etf")
+            _skip_event("settle_pending", "autonomous")
             _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
             return
         try:
-            from scripts.fill_pending_now import settle
-            # settle("flagship") mutates the flagship account + latest.json, so hold book:flagship
-            # around it — otherwise a manual POST /daily (which holds book:flagship) can race this write
-            # (the corruption class MW1 per-book locking exists to prevent). If a build already holds it,
-            # skip ONLY the flagship settle (the build fills its own pending) and still settle the US
-            # Brain books. acquire_or_log is a non-blocking try-lock, so this adds no ordering deadlock.
-            _lock_flag = locks.acquire_or_log("book:flagship", job="settle_pending", book="flagship")
-            if _lock_flag is None:
-                _skip_event("settle_pending", "flagship")
-            else:
-                try:
-                    settle("flagship", require_open=True)
-                except Exception as exc:  # noqa: BLE001 — a settle miss must never kill the scheduler
-                    _step_failed_event("settle_pending", "flagship", "fill_pending_flagship", exc)
-                finally:
-                    _lock_flag.release()
             try:
                 from bot import settle as _settle
-                _settle.settle_us()  # autonomous + etf: settle the queued target at the US open
+                _settle.settle_us()  # autonomous only
             except Exception as exc:  # noqa: BLE001
-                _step_failed_event("settle_pending", "autonomous+etf", "settle_us", exc)
+                _step_failed_event("settle_pending", "autonomous", "settle_us", exc)
         finally:
-            lock_etf.release()
             lock_auto.release()
         _ledger_end(handle, "ok")
     except Exception as exc:  # noqa: BLE001
@@ -625,14 +630,27 @@ def _settle_brain_asia_job():
 def _watch_us_job():
     """Overnight watch for the US Brain books: between the US close and the next open, re-read the live
     overnight tape; on a MATERIAL move (deterministic tripwire — free, no LLM) re-prompt the Brain to
-    revise its queued target (which settles at the open). Cheap on a calm tape; never raises."""
+    revise its queued target (which settles at the open). The entire preflight/research/rewrite holds
+    ``book:autonomous`` so an open settle cannot execute stale intent mid-refinement. Cheap on a calm
+    tape; never raises."""
     handle = _ledger_start("watch_us_overnight", trigger="cron")
     try:
-        from bot import overnight
+        from control_plane import locks
+        lock_auto = locks.acquire_or_log(
+            "book:autonomous", job="watch_us_overnight", book="autonomous"
+        )
+        if lock_auto is None:
+            _skip_event("watch_us_overnight", "autonomous")
+            _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
+            return
         try:
-            overnight.watch_us()
-        except Exception as exc:  # noqa: BLE001 — a watch miss must never kill the scheduler
-            _step_failed_event("watch_us_overnight", "", "watch_us", exc)
+            from bot import overnight
+            try:
+                overnight.watch_us()
+            except Exception as exc:  # noqa: BLE001 — a watch miss must never kill the scheduler
+                _step_failed_event("watch_us_overnight", "autonomous", "watch_us", exc)
+        finally:
+            lock_auto.release()
         _ledger_end(handle, "ok")
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -641,14 +659,36 @@ def _watch_us_job():
 
 def _watch_asia_job():
     """Overnight watch for the Greater-China Brain books (china + hk) between their close and the next
-    A-share open. Same tripwire→refine discipline as the US watch. Never raises."""
+    A-share open. Same tripwire→refine discipline as the US watch. It holds both regional book locks
+    in the same alphabetical order as settlement across the whole sequential watch, preventing either
+    target from settling while the refinement still reasons from its prior state. Never raises."""
     handle = _ledger_start("watch_asia_overnight", trigger="cron")
     try:
-        from bot import overnight
+        from control_plane import locks
+        lock_china = locks.acquire_or_log(
+            "book:china", job="watch_asia_overnight", book="china"
+        )
+        if lock_china is None:
+            _skip_event("watch_asia_overnight", "china+hk")
+            _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
+            return
+        lock_hk = locks.acquire_or_log(
+            "book:hk", job="watch_asia_overnight", book="hk"
+        )
+        if lock_hk is None:
+            lock_china.release()
+            _skip_event("watch_asia_overnight", "china+hk")
+            _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
+            return
         try:
-            overnight.watch_asia()
-        except Exception as exc:  # noqa: BLE001 — a watch miss must never kill the scheduler
-            _step_failed_event("watch_asia_overnight", "", "watch_asia", exc)
+            from bot import overnight
+            try:
+                overnight.watch_asia()
+            except Exception as exc:  # noqa: BLE001 — a watch miss must never kill the scheduler
+                _step_failed_event("watch_asia_overnight", "china+hk", "watch_asia", exc)
+        finally:
+            lock_hk.release()
+            lock_china.release()
         _ledger_end(handle, "ok")
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -656,18 +696,33 @@ def _watch_asia_job():
 
 
 def _derisk_us_job():
-    """FAST DE-RISK sweep for the US books DURING the session — the reflex the desk lacked on
-    2026-06-23. A deterministic tripwire (macro RISK-OFF state / SPY gamma flip / credit gap / −X% theme
-    day — free, no LLM) auto-cuts the held Flagship book to the gross cap and revises the US Brain books'
-    queued targets. Flag-gated (MASTERMIND_FAST_DERISK); a no-op when disarmed or no unwind is confirmed.
-    Never raises."""
+    """FAST DE-RISK sweep for the active US Brain DURING the session.
+
+    The sweep may rewrite ``autonomous/pending_target.json``. Hold the same per-book lock as the
+    open-session settle and daily decision jobs for the whole read/decide/write boundary; otherwise
+    settle can execute the stale target while de-risk is deriving its replacement. Flag-gated
+    (MASTERMIND_FAST_DERISK); a no-op when disarmed or no unwind is confirmed. Never raises.
+    """
     handle = _ledger_start("derisk_us_intraday", trigger="cron")
     try:
-        from bot import derisk
+        from control_plane import locks
+        lock_auto = locks.acquire_or_log(
+            "book:autonomous",
+            job="derisk_us_intraday",
+            book="autonomous",
+        )
+        if lock_auto is None:
+            _skip_event("derisk_us_intraday", "autonomous")
+            _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
+            return
         try:
-            derisk.sweep_us()
-        except Exception as exc:  # noqa: BLE001 — a de-risk miss must never kill the scheduler
-            _step_failed_event("derisk_us_intraday", "", "sweep_us", exc)
+            from bot import derisk
+            try:
+                derisk.sweep_us()
+            except Exception as exc:  # noqa: BLE001 — a de-risk miss must never kill the scheduler
+                _step_failed_event("derisk_us_intraday", "autonomous", "sweep_us", exc)
+        finally:
+            lock_auto.release()
         _ledger_end(handle, "ok")
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -701,7 +756,10 @@ def _cio_weekly_job():
     handle = _ledger_start("cio_weekly", trigger="cron")
     try:
         from scripts.run_cio import run as run_cio
-        run_cio(with_agenda=False)  # the dedicated agenda job owns the scheduled agenda write
+        # The retained CIO implementation grades the retired Flagship seat architecture. Keep its
+        # deterministic historical/regional accountability artifacts, but never spend unattended
+        # model capacity narrating dead seats; active-book meta-learning runs in mastermind_ai.
+        run_cio(with_agenda=False, narrate=False)
         _ledger_end(handle, "ok")
     except Exception as exc:  # noqa: BLE001 — a CIO miss must never kill the scheduler
         _ledger_end(handle, "error")
@@ -983,11 +1041,10 @@ def _run_loop_maintenance_steps():
         _step_failed_event("loop_maintenance", "", "mastermind_ai.run_cycle", exc)
 
 
-# The books that the deterministic/Brain builders mark only on their OWN run day. flagship marks
-# on its build (and on its carried-forward sweep), each Brain book on its run — but a book that
-# does NOT rebuild on a given day never advances its nav_history, so it can't be graded forward.
+# The ACTIVE managed books that mark only on their own run day. Archived books are frozen historical
+# records: advancing their NAV or accruing cash after retirement would fabricate a live track record.
 # self_directed is excluded: it is NOT a paper_account book (its own engine owns its NAV).
-_MARK_BOOK_IDS = ["flagship", "autonomous", "heavyweight", "china", "hk", "etf"]
+_MARK_BOOK_IDS = ["autonomous", "china", "hk"]
 
 
 def _daily_mark_job():
@@ -1021,7 +1078,7 @@ def _daily_mark_job():
         from portfolio import marks
         from brain.benchmark_ledger import DEFENSIVE_BASKET
         want: set = set(DEFENSIVE_BASKET)
-        for _pid in registry.ids():
+        for _pid in registry.active_ids(include_self_directed=False):
             try:
                 _st = paper_account._load_account(_pid) if _pid != "self_directed" else {}
                 want |= set(_st.get("positions", {}).keys())
@@ -1290,9 +1347,7 @@ def _prewarm_marks_job():
         us: set = set()
         hk: set = set()
         cn: set = set()
-        for pid in registry.ids():
-            if pid == "self_directed":
-                continue  # its own engine + the Supabase-backed desk warm on their own request path
+        for pid in registry.active_ids(include_self_directed=False):
             try:
                 held = paper_account._load_account(pid).get("positions", {}).keys()
             except Exception:  # noqa: BLE001
@@ -1331,6 +1386,55 @@ def _prewarm_marks_job():
         log.debug("prewarm_marks failed: %s", exc)
 
 
+def _startup_us_brain_cutover_preflight() -> dict:
+    """Validate/quarantine autonomous queued state before any scheduler job may run.
+
+    A successful quarantine is a safe startup outcome because the incompatible target is no longer
+    executable.  A failed move or unexpected validation error is not: ``start`` leaves the scheduler
+    non-running rather than risk a persisted misfire laundering or settling the v1 target.
+    """
+    try:
+        from portfolio import paper_account
+
+        preflight = paper_account.preflight_pending_target("autonomous")
+        quarantine = preflight.get("quarantine") or {}
+        if preflight.get("ok"):
+            result = {
+                "safe_to_resume": True,
+                "outcome": "compatible" if preflight.get("pending") else "nothing_queued",
+            }
+        else:
+            quarantine_status = quarantine.get("status")
+            result = {
+                "safe_to_resume": quarantine_status == "quarantined",
+                "outcome": quarantine_status or "preflight_rejected",
+                "reason": quarantine.get("reason") or preflight.get("skipped"),
+                "quarantine_file": quarantine.get("quarantine_file"),
+            }
+    except Exception as exc:  # noqa: BLE001 - startup remains fail-closed below
+        result = {
+            "safe_to_resume": False,
+            "outcome": "preflight_error",
+            "error": repr(exc)[:300],
+        }
+
+    try:
+        from control_plane import run_events
+        run_events.append({
+            "kind": "pending_target_cutover_preflight",
+            "job": "startup",
+            "book": "autonomous",
+            "step": "before_scheduler_resume",
+            "status": "ok" if result["safe_to_resume"] else "error",
+            "severity": None if result["safe_to_resume"] else "HARD_STOP",
+            "actor": "deterministic_engine",
+            "extra": result,
+        })
+    except Exception:  # noqa: BLE001 - result still gates resume even if telemetry is unavailable
+        pass
+    return result
+
+
 def start():
     """Start the daily-loop scheduler (idempotent). Returns the scheduler or None."""
     global _scheduler
@@ -1343,7 +1447,6 @@ def start():
         return None
     hour = int(os.environ.get("BOT_DAILY_UTC_HOUR", "22"))
     a_hour = int(os.environ.get("AUTONOMOUS_DAILY_UTC_HOUR", "23"))
-    h_hour = int(os.environ.get("HEAVYWEIGHT_DAILY_UTC_HOUR", "23"))
     # China book fires on Asia's clock: the A-share close is 15:00 CST = 07:00 UTC, so build a bit
     # after (08:00 UTC ≈ 16:00 CST). Separate from the US books' evening cadence.
     cn_hour = int(os.environ.get("CHINA_DAILY_UTC_HOUR", "8"))
@@ -1390,19 +1493,9 @@ def start():
     sch.add_job(_daily_mark_job,
                 CronTrigger(day_of_week="mon-fri", hour=hour, minute=35, timezone="UTC"),
                 id="daily_mark", replace_existing=True, misfire_grace_time=3600, coalesce=True)
-    # FLAGSHIP DAILY LOOP — Mon–Fri only.  A weekend run finds no market data and a no-op build
-    # would confuse the dashboard's "last built" display.  day_of_week added in MW1.
-    sch.add_job(_job, CronTrigger(day_of_week="mon-fri", hour=hour, minute=40, timezone="UTC"),
-                id="daily_loop",
-                replace_existing=True, misfire_grace_time=3600, coalesce=True)
     # Mon–Fri only (no Sat/Sun) — the autonomous book refreshes once per trading day after close.
     sch.add_job(_autonomous_job, CronTrigger(day_of_week="mon-fri", hour=a_hour, minute=10, timezone="UTC"),
                 id="autonomous_daily", replace_existing=True, misfire_grace_time=3600, coalesce=True)
-    # Heavyweight runs LAST (23:25 by default) — after flagship's 22:40 build (so it constrains
-    # against a fresh Flagship book) and after autonomous's 23:10 (so the two Brain runs don't
-    # hammer the subscription/price feeds at once; they touch disjoint data dirs — no state race).
-    sch.add_job(_heavyweight_job, CronTrigger(day_of_week="mon-fri", hour=h_hour, minute=25, timezone="UTC"),
-                id="heavyweight_daily", replace_existing=True, misfire_grace_time=3600, coalesce=True)
     # All-China book on Asia's clock (Mon–Fri after the A-share close). Touches a disjoint data dir
     # (data/portfolios/china) and a different feed window from the US books — no state race.
     sch.add_job(_china_job, CronTrigger(day_of_week="mon-fri", hour=cn_hour, minute=0, timezone="UTC"),
@@ -1411,14 +1504,7 @@ def start():
     # (data/portfolios/hk) — no state race with the A-share china book.
     sch.add_job(_hk_job, CronTrigger(day_of_week="mon-fri", hour=hk_hour, minute=0, timezone="UTC"),
                 id="hk_daily", replace_existing=True, misfire_grace_time=3600, coalesce=True)
-    # ETF book on the US evening cadence (Mon–Fri after the close), staggered 5 min after the
-    # autonomous book so the two US Brain runs don't hammer the subscription/price feeds at once;
-    # disjoint data dir (data/portfolios/etf) — no state race.
-    sch.add_job(_etf_job, CronTrigger(day_of_week="mon-fri", hour=a_hour, minute=15, timezone="UTC"),
-                id="etf_daily", replace_existing=True, misfire_grace_time=3600, coalesce=True)
-    # Settle flagship's queued PENDING orders at the open (Mon–Fri, 15:00 UTC ≈ 10–11am ET — mid US
-    # session year-round). Closes the gap left by the post-close-only build, which queues overnight
-    # buys but never reaches fill_pending — so without this the gated book never actually trades.
+    # Settle the successor US Brain's queued target at the open (Mon–Fri, 15:00 UTC ≈ 10–11am ET).
     # NOTE: timezone is pinned to UTC explicitly. A bare CronTrigger(hour=…) inherits the MACHINE's
     # local tz (APScheduler ignores the scheduler's timezone for an already-tz'd trigger), which
     # would drift this off the US session on a non-UTC host — fatal here, since the is_open() guard
@@ -1538,7 +1624,23 @@ def start():
     sch.add_job(_prewarm_marks_job,
                 CronTrigger(day_of_week="mon-fri", hour=prewarm_hours, minute=prewarm_min, timezone="UTC"),
                 id="prewarm_marks", replace_existing=True, misfire_grace_time=120, coalesce=True)
-    sch.start()
+    # Start PAUSED so a stale persistent SQLite job from the pre-archive release cannot misfire in
+    # the interval between jobstore hydration and cleanup. MemoryJobStore simply finds nothing.
+    sch.start(paused=True)
+    for _retired_job in _ARCHIVED_BOOK_JOBS:
+        try:
+            if sch.get_job(_retired_job) is not None:
+                sch.remove_job(_retired_job)
+        except Exception:  # noqa: BLE001 — wrappers also fail closed if cleanup is unavailable
+            pass
+    cutover = _startup_us_brain_cutover_preflight()
+    if not cutover["safe_to_resume"]:
+        sch.shutdown(wait=False)
+        raise RuntimeError(
+            "scheduler held: autonomous pending-target cutover preflight failed "
+            f"({cutover.get('outcome')})"
+        )
+    sch.resume()
     _scheduler = sch
     return sch
 
@@ -1624,6 +1726,9 @@ def scheduler_health() -> list[dict]:
 
         records.append({
             "id": jid,
+            "archived": jid in _ARCHIVED_BOOK_JOBS,
+            "status": "archived" if jid in _ARCHIVED_BOOK_JOBS else "active",
+            "book": _ARCHIVED_BOOK_JOBS.get(jid),
             "next_run_time": next_run.get(jid),
             "last_started": started_ev.get("ts") if started_ev else None,
             "last_finished": finished_ev.get("ts") if finished_ev else None,
@@ -1685,10 +1790,9 @@ def maybe_first_autonomous_run() -> bool:
 
 
 def maybe_first_heavyweight_run() -> bool:
-    """On first turn-on, build the Heavyweight book right away (instead of waiting for the next
-    close), but ONLY once Flagship has published a non-empty book to constrain against. No-op once
-    Heavyweight has a NAV track record. Gated on the Claude layer being available + the Flagship
-    universe being non-empty + HEAVYWEIGHT_FIRST_RUN != '0'. Runs in a daemon thread."""
+    """Compatibility entrypoint: Heavyweight is archived and can never spawn a first-run thread."""
+    if _archived_job_noop("heavyweight_daily", "heavyweight", trigger="first_run"):
+        return False
     if os.environ.get("HEAVYWEIGHT_FIRST_RUN", "1") == "0":
         return False
     try:
@@ -1817,9 +1921,9 @@ def maybe_first_hk_run() -> bool:
 
 
 def maybe_first_etf_run() -> bool:
-    """On first turn-on, immediately build the ETF book so it can rotate right away — instead of
-    waiting for the next US close. No-op once it has a NAV track record. Gated on the Claude layer
-    being available + ETF_FIRST_RUN != '0'. Runs in a daemon thread (never blocks startup)."""
+    """Compatibility entrypoint: ETF Brain is archived and can never spawn a first-run thread."""
+    if _archived_job_noop("etf_daily", "etf", trigger="first_run"):
+        return False
     if os.environ.get("ETF_FIRST_RUN", "1") == "0":
         return False
     try:

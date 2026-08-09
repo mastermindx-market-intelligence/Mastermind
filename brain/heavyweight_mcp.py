@@ -46,6 +46,15 @@ FLAGSHIP_ID = "flagship"
 BOOK_MARKER = "__BOOK__"
 
 
+def _is_archived(portfolio_id: str = PORTFOLIO_ID) -> bool:
+    """Fail closed when the registry cannot prove this retired desk is active."""
+    try:
+        from portfolio import registry
+        return registry.is_archived(portfolio_id)
+    except Exception:  # noqa: BLE001 - an indeterminate retirement state must not enable writes
+        return True
+
+
 def _json_big(obj, cap: int = 24000) -> dict:
     return bot_mcp._ok(json.dumps(obj, default=str, ensure_ascii=False)[:cap])
 
@@ -56,6 +65,8 @@ def submission_path(portfolio_id: str = PORTFOLIO_ID) -> Path:
 
 
 def clear_submission(portfolio_id: str = PORTFOLIO_ID) -> None:
+    if _is_archived(portfolio_id):
+        return
     try:
         submission_path(portfolio_id).unlink()
     except FileNotFoundError:
@@ -159,6 +170,11 @@ async def get_my_book(args):
                                     "description": "the most likely way this book loses money"}},
        "required": ["holdings", "summary"]})
 async def submit_book(args):
+    if _is_archived():
+        return bot_mcp._ok(
+            "REFUSED: portfolio_archived. Heavyweight is retired and superseded by autonomous; "
+            "no pending decision was recorded."
+        )
     # Record the Brain's RAW decided book (dedup + basic validity only). The authoritative
     # universe + 5–50% sizing rails live in bot/heavyweight._enforce so there is ONE normalizer
     # and the logged weights are the executed ones (no submit-time scaling here).
@@ -320,11 +336,16 @@ _DESK_TOOLS = [get_my_book, submit_book,
 _READ_TOOLS = [t for t in bot_mcp._READ if t.name != "get_portfolio"]
 
 
+def _desk_tools() -> list:
+    """Archived books retain read tools, but never expose their state-writing submit tool."""
+    return [t for t in _DESK_TOOLS if t is not submit_book] if _is_archived() else list(_DESK_TOOLS)
+
+
 def build_servers() -> dict:
     """The mcp_servers map for the SDK: the macro READ tools (bot) + this heavyweight desk."""
     return {
         bot_mcp.SERVER_NAME: create_sdk_mcp_server(name=bot_mcp.SERVER_NAME, version="0.1.0", tools=_READ_TOOLS),
-        SERVER_NAME: create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=_DESK_TOOLS),
+        SERVER_NAME: create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=_desk_tools()),
     }
 
 
@@ -334,5 +355,5 @@ def allowed_tools() -> list[str]:
     to Flagship via the typed get_flagship_* tools (read_signal still denies portfolio book dirs),
     so it can never wander into the autonomous / self-directed books."""
     read = [f"mcp__{bot_mcp.SERVER_NAME}__{t.name}" for t in _READ_TOOLS]
-    desk = [f"mcp__{SERVER_NAME}__{t.name}" for t in _DESK_TOOLS]
+    desk = [f"mcp__{SERVER_NAME}__{t.name}" for t in _desk_tools()]
     return read + desk + bot_mcp.WEB_TOOLS

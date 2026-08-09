@@ -27,6 +27,14 @@ import bot  # noqa: F401
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
+_CLAUDE_AGENT_NAMES = (
+    "deep-reasoner", "narrative-analyst", "quant-coder", "signal-scout",
+)
+_CLAUDE_BOOK_SERVERS = {
+    "autonomous": frozenset({"bot", "desk"}),
+    "china": frozenset({"china"}),
+    "hk": frozenset({"hk"}),
+}
 
 try:
     from claude_agent_sdk import query as _sdk_query, ClaudeAgentOptions as _Options
@@ -76,9 +84,22 @@ def cli_path() -> str | None:
     return shutil.which("claude")
 
 
+def _selected_backend(override: str | None = None) -> str:
+    """Resolve routing without evaluating a broken project config ahead of an explicit override."""
+    if override:
+        return str(override).strip().lower()
+    env = os.environ.get("BOT_LLM_BACKEND")
+    if env:
+        return env.strip().lower()
+    try:
+        return str(_cfg().get("backend", "waterfall")).strip().lower()
+    except Exception:
+        return "waterfall"
+
+
 def available() -> bool:
     """True if the configured subscription CLI backend is reachable."""
-    selected = os.environ.get("BOT_LLM_BACKEND", _cfg().get("backend", "cli")).strip().lower()
+    selected = _selected_backend()
     if selected == "waterfall":
         try:
             from brain import provider_waterfall
@@ -96,6 +117,57 @@ def available() -> bool:
 
 def _abs_dirs(dirs: list[str]) -> list[str]:
     return [str((_ROOT / d).resolve()) for d in dirs]
+
+
+def _claude_delegation_surface(tools: list[str], mcp_servers: dict | None,
+                               book: str | None) -> tuple[list[str], dict | None, str | None]:
+    """Fail closed to a single root PM until Claude child MCP inheritance is proven safe.
+
+    Claude project-agent tool declarations are retained as defense in depth, but the SDK does not
+    currently give this bridge a runtime-verifiable child MCP inventory.  Removing ``Task`` keeps
+    the fallback usable while preventing a child from inheriting the root submit server.
+    """
+    if "Task" not in tools:
+        return tools, mcp_servers, None
+    safe_book = str(book or "")
+    expected = _CLAUDE_BOOK_SERVERS.get(safe_book)
+    if expected is None:
+        return tools, mcp_servers, "Claude delegation requires an explicit active portfolio book"
+    configured = set((mcp_servers or {}).keys())
+    if configured != set(expected):
+        return (
+            tools,
+            mcp_servers,
+            f"Claude delegation book {safe_book!r} requires only its reviewed MCP servers",
+        )
+
+    profiles: dict[str, dict] = {}
+    try:
+        for path in sorted((_ROOT / ".claude" / "agents").glob("*.md")):
+            parts = path.read_text(encoding="utf-8").split("---", 2)
+            if len(parts) != 3:
+                continue
+            frontmatter = yaml.safe_load(parts[1]) or {}
+            profiles[str(frontmatter.get("name") or "")] = frontmatter
+    except Exception as exc:
+        return tools, mcp_servers, f"Claude delegation policy unavailable: {type(exc).__name__}"
+    missing = set(_CLAUDE_AGENT_NAMES) - set(profiles)
+    if missing:
+        return tools, mcp_servers, "Claude delegation is missing a reviewed child profile"
+    for name in _CLAUDE_AGENT_NAMES:
+        child_tools = profiles[name].get("tools") or []
+        if not child_tools or any(
+            not str(tool).startswith("mcp__research__") for tool in child_tools
+        ):
+            return tools, mcp_servers, f"Claude agent {name!r} is not typed-read-only"
+        if any(
+            leaf in {"submit_book", "request_context_upgrade"}
+            for leaf in (str(tool).rsplit("__", 1)[-1] for tool in child_tools)
+        ):
+            return tools, mcp_servers, f"Claude agent {name!r} exposes a write tool"
+
+    scoped_tools = [tool for tool in tools if tool != "Task"]
+    return scoped_tools, mcp_servers, None
 
 
 def _subscription_env(env_name: str | None = None) -> dict:
@@ -205,10 +277,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   _backend_override: str | None = None,
                   _oauth_candidates: list[dict] | None = None) -> dict:
     """Internal dispatcher with explicit provider overrides for the shared pool."""
-    selected_backend = (
-        _backend_override
-        or os.environ.get("BOT_LLM_BACKEND", _cfg().get("backend", "cli"))
-    ).strip().lower()
+    selected_backend = _selected_backend(_backend_override)
     if selected_backend == "waterfall":
         from brain import provider_waterfall
         return await provider_waterfall.reason(
@@ -303,6 +372,19 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 
     mdl = resolve_model(role, model)
     tools = allowed_tools if allowed_tools is not None else rc.get("allowed_tools", ["Read", "Grep", "Glob"])
+    tools, mcp_servers, delegation_error = _claude_delegation_surface(
+        list(tools), mcp_servers, book
+    )
+    if delegation_error:
+        return {
+            "model": mdl,
+            "role": role,
+            "armed": arm,
+            "ok": False,
+            "backend": "cli",
+            "text": None,
+            "error": delegation_error,
+        }
     dirs = _abs_dirs(add_dirs if add_dirs is not None else rc.get("add_dirs", []))
     turns = max_turns or rc.get("max_turns", 1)
     workdir = cwd or str(_ROOT)
@@ -633,8 +715,12 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     element. LEAK LAW (mirrors macro brain_gateway): thinking is LOG-ONLY — it rides
     this side channel to brain/thinking_log and is NEVER placed in the returned result
     dict, so no caller (decision paths included) can consume it."""
+    # Claude Agent SDK intentionally loads no filesystem settings by default.  The regional PMs
+    # may delegate only through this repository's reviewed, read-only `.claude/agents` profiles,
+    # so opt into the project source explicitly (never user/local settings from the VPS account).
     opts = _Options(model=mdl, allowed_tools=tools, add_dirs=dirs, cwd=workdir,
-                    max_turns=turns, permission_mode=perm, env=_subscription_env(env_name))
+                    max_turns=turns, permission_mode=perm, env=_subscription_env(env_name),
+                    setting_sources=["project"])
     if mcp_servers:
         opts.mcp_servers = mcp_servers
     if resume:
@@ -886,6 +972,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         max_turns=max_turns or rc.get("research_max_turns", 16),
         permission_mode=rc.get("permission_mode", "default"),
         env=_subscription_env(_stream_env_name),
+        setting_sources=["project"],
     )
     opts.mcp_servers = {bot_mcp.SERVER_NAME: bot_mcp.build_server()}
     if resume:

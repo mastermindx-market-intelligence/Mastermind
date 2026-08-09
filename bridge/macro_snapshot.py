@@ -71,7 +71,15 @@ def _default_dest() -> Path:
 def _performance(portfolio_id: str) -> dict:
     """Equity curve + return summary for a book; safe-empty on any error."""
     try:
-        from portfolio import paper_account
+        from portfolio import paper_account, registry
+
+        if registry.is_archived(portfolio_id):
+            # Reuse the dashboard's persisted-only archive projection.  Calling the active
+            # performance helper would fetch current marks and make a retired public snapshot
+            # drift after its historical series was frozen.
+            from app.web import _archived_performance
+
+            return _archived_performance(portfolio_id)
         return paper_account.performance(portfolio_id=portfolio_id)
     except Exception as exc:  # never let one book sink the snapshot
         return {"series": [], "note": f"performance unavailable: {exc}"}
@@ -100,6 +108,11 @@ def _book(portfolio_id: str) -> dict | None:
         "tagline": meta.get("tagline", ""),
         "kind": meta.get("kind", ""),
         "manager": meta.get("manager", ""),
+        "active": bool(meta.get("active", True)),
+        "status": meta.get("status", "active"),
+        "archived": not bool(meta.get("active", True)),
+        "superseded_by": meta.get("superseded_by"),
+        "archived_reason": meta.get("archived_reason"),
         "benchmark": meta.get("benchmark", "SPY"),
         "as_of": latest.get("as_of"),
         "market_status": latest.get("market_status"),
@@ -125,12 +138,12 @@ def build() -> dict:
     try:
         from portfolio import registry
         ids = registry.ids()
-        default_book = registry.DEFAULT_ID
+        default_book = registry.DASHBOARD_DEFAULT_ID
     except Exception:
-        ids, default_book = ["flagship"], "flagship"
+        ids, default_book = ["autonomous"], "autonomous"
 
     books = [b for b in (_book(pid) for pid in ids) if b is not None]
-    # Default to the flagship if present, else the first book that published.
+    # Default to the active US product book if present, else the first published book.
     if not any(b["id"] == default_book for b in books) and books:
         default_book = books[0]["id"]
 

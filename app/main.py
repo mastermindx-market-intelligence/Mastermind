@@ -10,11 +10,46 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
+import subprocess
 
 from app.deps import data_dir
 
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEPLOY_MARKER = ".deployed_git_sha"
+_FULL_GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _resolve_deployed_git_sha(root: Path | None = None) -> str | None:
+    """Return the exact release SHA without trusting malformed provenance.
+
+    Production is deployed from a Git archive and deliberately has no ``.git``
+    directory. The transactional deployer writes the validated full SHA to a
+    marker before restarting the service. Developer checkouts fall back to
+    their local Git HEAD so the open health contract remains useful locally.
+    """
+    checkout = Path(root) if root is not None else _REPO_ROOT
+    try:
+        marker_sha = (checkout / _DEPLOY_MARKER).read_text(encoding="utf-8").strip().lower()
+    except (OSError, UnicodeError):
+        marker_sha = ""
+    if _FULL_GIT_SHA.fullmatch(marker_sha):
+        return marker_sha
+
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=checkout,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip().lower()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return git_sha if _FULL_GIT_SHA.fullmatch(git_sha) else None
+
 try:
-    from fastapi import FastAPI
+    from fastapi import FastAPI, HTTPException
 except ImportError:  # FastAPI is optional until Phase 1
     FastAPI = None  # type: ignore
 
@@ -69,15 +104,8 @@ if FastAPI is not None:
     auth.install(app)
 
     # Resolved once at startup: /health is polled by uptime probes and must not
-    # spawn a subprocess per request. Fails closed to no version field.
-    import subprocess, shlex  # noqa: E401
-    try:
-        _git_sha = subprocess.check_output(
-            shlex.split("git rev-parse --short HEAD"),
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-    except Exception:
-        _git_sha = None
+    # touch disk or spawn a subprocess per request. Fails closed to no commit.
+    _git_sha = _resolve_deployed_git_sha()
 
     def _startup_flags() -> dict:
         """Snapshot of MASTERMIND_* env vars at startup time — embedded in the app_started event."""
@@ -92,10 +120,48 @@ if FastAPI is not None:
         # Keep only non-sensitive fields; uptime probes check `status == "ok"` only.
         # Filesystem paths and CLI paths are omitted — they leak on an open route.
         from app.auth import serve_only as _serve_only
-        out: dict = {"status": "ok", "paper_only": True}
+        from brain import client as _brain_client, codex_bridge as _codex_bridge
+        reasoning_backend = _brain_client.backend()
+        shared_reasoning_available = (
+            _brain_client.available() if reasoning_backend == "waterfall" else False
+        )
+        reasoning_policy_ok = reasoning_backend == "waterfall" and shared_reasoning_available
+        codex_available = _codex_bridge.available()
+        is_serve_only = _serve_only()
+        scheduler_obj = getattr(app.state, "scheduler", None)
+        scheduler_running = bool(
+            scheduler_obj is not None and getattr(scheduler_obj, "running", False)
+        )
+        scheduled_runtime_expected = not is_serve_only
+        scheduled_runtime_ok = (not scheduled_runtime_expected) or scheduler_running
+        out: dict = {
+            "status": "ok",
+            "paper_only": True,
+            "reasoning_policy_scope": "scheduled_portfolio_reasoning",
+            "reasoning_backend": reasoning_backend,
+            "reasoning_policy": "codex_first_claude_oauth_fallback",
+            "reasoning_policy_ok": reasoning_policy_ok,
+            "shared_reasoning_available": shared_reasoning_available,
+            "codex_available": codex_available,
+            "reasoning_primary": (
+                "unavailable" if not shared_reasoning_available
+                else "codex" if codex_available
+                else "claude_oauth_fallback"
+            ),
+            "scheduled_portfolio_reasoning_backend": reasoning_backend,
+            "scheduled_portfolio_reasoning_policy": "codex_first_claude_oauth_fallback",
+            "scheduled_portfolio_reasoning_available": shared_reasoning_available,
+            "scheduled_portfolio_reasoning_policy_ok": reasoning_policy_ok,
+            "scheduled_runtime_expected": scheduled_runtime_expected,
+            "scheduler_running": scheduler_running,
+            "scheduled_runtime_ok": scheduled_runtime_ok,
+            "advisor_chat_backend": "claude_agent_sdk",
+            "advisor_chat_uses_scheduled_reasoning_waterfall": False,
+        }
         if _git_sha:
+            out["commit"] = _git_sha
             out["version"] = _git_sha
-        if _serve_only():
+        if is_serve_only:
             out["serve_only"] = True
         return out
 
@@ -108,6 +174,20 @@ if FastAPI is not None:
         role: str = "deep"
         max_turns: int | None = None
         resume: str | None = None     # continue a prior research session by id
+
+    def _reject_archived_run(portfolio_id: str) -> None:
+        """HTTP 410 before locks/imports/model calls for a retired portfolio runner."""
+        from portfolio import registry
+        if not registry.is_archived(portfolio_id):
+            return
+        meta = registry.get(portfolio_id)
+        raise HTTPException(status_code=410, detail={
+            "error": "portfolio_archived",
+            "portfolio_id": portfolio_id,
+            "status": "archived",
+            "superseded_by": meta.get("superseded_by"),
+            "reason": meta.get("archived_reason"),
+        })
 
     @app.post("/reason")
     async def reason(req: ReasonReq) -> dict:
@@ -172,7 +252,13 @@ if FastAPI is not None:
                 pass
             app.state.scheduler = None
         else:
-            app.state.scheduler = scheduler.start()   # daily loops on cron; None if apscheduler absent
+            started_scheduler = scheduler.start()
+            if started_scheduler is None:
+                # APScheduler is a declared runtime dependency. A reasoning API without daily,
+                # settlement, or learning jobs is not a degraded portfolio service—it is a dead
+                # one—so fail startup and let the supervisor/deployer roll back.
+                raise RuntimeError("scheduler failed to start: APScheduler unavailable")
+            app.state.scheduler = started_scheduler
 
         # SCHEDULER WATCHDOG (incident 2026-07-06 ×2): APScheduler's main-loop thread can die
         # silently (observed: sqlite jobstore flipping to "readonly database") while uvicorn keeps
@@ -207,12 +293,8 @@ if FastAPI is not None:
             app.state.autonomous_first_run = scheduler.maybe_first_autonomous_run()
         except Exception:
             app.state.autonomous_first_run = False
-        # Heavyweight presses Flagship's best — kick its first build too (no-op until Flagship has a
-        # non-empty book to constrain against, and once Heavyweight has a track record).
-        try:
-            app.state.heavyweight_first_run = scheduler.maybe_first_heavyweight_run()
-        except Exception:
-            app.state.heavyweight_first_run = False
+        # Retired books retain their state/API history but never spawn startup workers.
+        app.state.heavyweight_first_run = False
         # All-China book — kick its first build too (no-op once it has a track record). Runs on
         # Asia's clock thereafter via the china_daily cron.
         try:
@@ -223,16 +305,12 @@ if FastAPI is not None:
             app.state.hk_first_run = scheduler.maybe_first_hk_run()
         except Exception:
             app.state.hk_first_run = False
-        # ETF rotation book (US-listed ETFs, doctrine + guardrails) — kick its first build too
-        # (no-op once it has a track record). Runs on the US evening cadence thereafter.
-        try:
-            app.state.etf_first_run = scheduler.maybe_first_etf_run()
-        except Exception:
-            app.state.etf_first_run = False
+        app.state.etf_first_run = False
 
     @app.post("/daily")
     def daily(force: bool = False) -> dict:
         """Manually fire the daily loop (gated book + armed research)."""
+        _reject_archived_run("flagship")
         from control_plane import run_ledger, locks
         handle = run_ledger.start_run("daily_loop", book="flagship", trigger="http")
         lock = locks.acquire_or_log("book:flagship", job="daily_loop", book="flagship")
@@ -299,6 +377,7 @@ if FastAPI is not None:
         """Manually fire the Heavyweight Opus-Brain book (study Flagship → concentrated rebalance).
 
         Long call; by default starts in the background and returns immediately. ?wait=true blocks."""
+        _reject_archived_run("heavyweight")
         from control_plane import run_ledger, locks
         from bot import heavyweight
         if wait:
@@ -430,6 +509,7 @@ if FastAPI is not None:
         risk guardrails).
 
         Long call; by default starts in the background and returns immediately. ?wait=true blocks."""
+        _reject_archived_run("etf")
         from control_plane import run_ledger, locks
         from bot import etf
         if wait:

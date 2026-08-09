@@ -278,6 +278,37 @@ def _from_open_theses() -> dict:
         return {}
 
 
+def _from_prophet() -> dict:
+    """Current Prophet Enter/Wait plans as a provenance-labelled discovery source.
+
+    Prophet does substantial upstream filtering, so the US PM should see these names.
+    This still contributes candidacy only: the PM and trusted timing/risk layers retain
+    selection and allocation authority.
+    """
+    try:
+        from portfolio import prophet_feed
+        out: dict[str, dict] = {}
+        for ticker in prophet_feed.candidate_tickers():
+            plan = prophet_feed.plan_for(ticker) or {}
+            conviction = _f(plan.get("conviction"))
+            score = max(0.0, min(1.0, (conviction / 100.0) if conviction and conviction > 1 else
+                                  (conviction or 0.55)))
+            action = str(plan.get("recommended_action") or "watch").lower()
+            phase = str(plan.get("phase") or "unknown")
+            out[ticker] = {
+                "score": score,
+                "reason": f"Prophet {action} plan ({phase}); validate plan geometry and timing",
+                "lean": 1,
+                "confidence": score,
+                "falsifier": (f"price violates Prophet invalidation {plan.get('invalidation')}"
+                               if plan.get("invalidation") is not None else None),
+            }
+        return out
+    except Exception as exc:
+        log.debug("intake: prophet source failed (%s)", exc)
+        return {}
+
+
 # --------------------------------------------------------------------------- #
 # P2 REWORK FUNNEL WIRING (roadmap docs/design/REWORK_ROADMAP_2026-07-11.md).
 #
@@ -495,10 +526,11 @@ def _from_cycles_bottoming() -> dict:
 # The four P2 rework sources (rotation_in / divergence_clue / neural_web / cycles_bottoming) are
 # registered here so they participate in the funnel — but each returns {} when its flag is off, so
 # with all flags at default this list contributes exactly nothing (byte-identical to pre-rework).
-_SIMPLE_SOURCES = ("standout", "radar", "altdata", "news", "thesis",
+_SIMPLE_SOURCES = ("standout", "radar", "altdata", "news", "thesis", "prophet",
                    "rotation_in", "divergence_clue", "neural_web", "cycles_bottoming")
 _LOADERS = {"standout": "_from_standouts", "radar": "_from_radar", "altdata": "_from_altdata",
             "news": "_from_news_surge", "thesis": "_from_open_theses",
+            "prophet": "_from_prophet",
             "rotation_in": "_from_rotation_in", "divergence_clue": "_from_divergence_clue",
             "neural_web": "_from_neural_web", "cycles_bottoming": "_from_cycles_bottoming"}
 

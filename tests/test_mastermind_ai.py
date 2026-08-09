@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 import brain.neural_web_context as nwc
-from brain import journal, mastermind_ai as mai, nw_reflection as nwr
+from brain import journal, mastermind_ai as mai, nw_reflection as nwr, portfolio_learning as pl
 
 
 # ───────────────────────────── isolation ─────────────────────────────
@@ -45,6 +45,7 @@ def _isolate_ai(tmp_path, monkeypatch):
     monkeypatch.setattr(mai, "_REVIEWS", d / "reviews.jsonl", raising=True)
     monkeypatch.setattr(mai, "_DIRECTIVES", d / "directives.jsonl", raising=True)
     monkeypatch.setattr(mai, "_LAST_ACK", d / "last_ack.json", raising=True)
+    monkeypatch.setattr(pl, "_DIR", tmp_path / "data" / "portfolio_learning", raising=True)
     monkeypatch.setattr(mai, "_doctrine_block", lambda: {}, raising=True)
     # reflection engine writes under tmp too (run_cycle step 2 + _build_review history read)
     out = tmp_path / "data" / "nw_reflection"
@@ -236,7 +237,8 @@ def test_reconcile_ack_flips_published_to_acknowledged(monkeypatch):
 
 def test_reconcile_ack_absent_lobe_is_honest_noop():
     res = mai.reconcile_ack()
-    assert res == {"state": "absent", "directives_acknowledged": 0, "nudge_codes_seen_n": 0}
+    assert res == {"state": "absent", "directives_acknowledged": 0,
+                   "context_requests_acknowledged": 0, "nudge_codes_seen_n": 0}
 
 
 # ───────────────────────────── act on nudges (W-AI.1) ─────────────────────────────
@@ -686,6 +688,32 @@ def test_run_cycle_does_not_auto_draft_when_setting_off(monkeypatch):
     assert mai.directives() == []
 
 
+def test_context_request_transport_is_independent_and_request_only(monkeypatch):
+    """A typed PM request is transported for review even while NW auto-action remains OFF."""
+    monkeypatch.setenv("MASTERMIND_AI_LOOP", "1")
+    monkeypatch.setattr(nwr, "persist", _make_persist_stub([_nudge("fdr_cleared_absent")]))
+    request = pl.request_context(
+        "autonomous",
+        "terminal.intraday",
+        "Need verified intraday breadth and trend data for exit timing.",
+        "AAPL",
+    )["request"]
+
+    row = mai.run_cycle("2026-07-14")
+
+    assert "auto_draft" not in row["steps"]  # deterministic NW finding still needs its grant
+    transport = row["steps"]["context_request_transport"]
+    assert transport == {"ok": True, "queued_n": 1, "skipped_n": 0}
+    directive = mai.directives()[0]
+    assert directive["source"] == f"context:{request['id']}"
+    assert directive["kind"] == "pm_context_request"
+    assert directive["provenance"] == "untrusted_pm_generated"
+    assert directive["authority"] == "request_only"
+    assert directive["execution_authority"] is False
+    assert directive["text"].startswith("UNTRUSTED PM CONTEXT REQUEST; REQUEST ONLY;")
+    assert pl.context_requests()[0]["status"] == "directive_queued"
+
+
 def test_run_cycle_auto_drafts_when_setting_on(monkeypatch):
     """Standing grant ON: cycle queues one directive per open nudge with source 'nudge:<code>'."""
     monkeypatch.setenv("MASTERMIND_AI_LOOP", "1")
@@ -721,3 +749,69 @@ def test_run_cycle_auto_draft_dedup_second_cycle(monkeypatch):
     assert len(mai.directives()) == 1
     # no auto-drafted clause in summary when queued_n == 0
     assert "directives auto-drafted" not in row2["summary"]
+
+
+def test_context_request_reaches_existing_directive_ack_pipeline(monkeypatch):
+    request = pl.request_context(
+        "autonomous",
+        "terminal.intraday",
+        "Need verified intraday breadth and trend data for exit timing.",
+        "AAPL",
+    )["request"]
+
+    drafted = mai.draft_directives_from_context_requests()
+    assert drafted["ok"] is True
+    assert drafted["queued"][0]["id"] == request["id"]
+    directive_id = drafted["queued"][0]["directive_id"]
+    directive = mai.directives()[0]
+    assert directive["authority"] == "request_only"
+    assert directive["provenance"] == "untrusted_pm_generated"
+    assert pl.context_requests()[0]["status"] == "directive_queued"
+
+    published = mai.open_directives_for_publish()
+    assert published[0]["id"] == directive_id
+    assert published[0]["text"].startswith("UNTRUSTED PM CONTEXT REQUEST; REQUEST ONLY;")
+    assert pl.context_requests()[0]["status"] == "published_to_orchestrator"
+
+    monkeypatch.setattr(nwc, "context", lambda: {"lobes": {"mastermind_ai": {
+        "ack": {"directive_ids_seen": [directive_id], "nudge_codes_seen": []}
+    }}})
+    ack = mai.reconcile_ack()
+    assert ack["context_requests_acknowledged"] == 1
+    assert pl.context_requests()[0]["status"] == "acknowledged_by_orchestrator"
+
+
+def test_context_request_transitions_fail_closed_and_repair(monkeypatch):
+    request = pl.request_context(
+        "autonomous",
+        "terminal.flow",
+        "Need verified same-session flow context for a current exit review.",
+        "AAPL",
+    )["request"]
+
+    # A failed directive append must not claim success or advance the request ledger.
+    real_directive_append = mai._append_jsonl
+    monkeypatch.setattr(mai, "_append_jsonl", lambda path, row: False)
+    failed = mai.draft_directives_from_context_requests()
+    assert failed["queued"] == []
+    assert failed["skipped"] == [{"id": request["id"], "reason": "directive_write_failed"}]
+    assert mai.directives() == []
+    assert pl.context_requests()[0]["status"] == "queued_for_orchestrator_review"
+
+    monkeypatch.setattr(mai, "_append_jsonl", real_directive_append)
+    drafted = mai.draft_directives_from_context_requests()
+    directive_id = drafted["queued"][0]["directive_id"]
+
+    # If the paired context transition fails, publishing is fail-closed and the directive is
+    # compensated back to queued. Restoring the writer lets the next call repair and publish once.
+    real_context_append = pl._append_jsonl
+    monkeypatch.setattr(pl, "_append_jsonl", lambda path, row: False)
+    assert mai.open_directives_for_publish() == []
+    assert mai.directives()[0]["status"] == "queued"
+    assert pl.context_requests()[0]["status"] == "directive_queued"
+
+    monkeypatch.setattr(pl, "_append_jsonl", real_context_append)
+    published = mai.open_directives_for_publish()
+    assert [row["id"] for row in published] == [directive_id]
+    assert mai.directives()[0]["status"] == "published"
+    assert pl.context_requests()[0]["status"] == "published_to_orchestrator"

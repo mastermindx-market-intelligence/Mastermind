@@ -330,7 +330,7 @@ def test_china_intake_ranks_and_handles_conviction_dict(monkeypatch):
 # --------------------------------------------------------------------------- #
 # China desk MCP
 # --------------------------------------------------------------------------- #
-def test_submit_book_scales_and_tags_venue(iso):
+def test_submit_book_uses_deterministic_incremental_sizing_and_tags_venue(iso):
     res = asyncio.run(china_submit({
         "holdings": [
             {"ticker": "600519.SS", "weight": 0.7, "rationale": "moat"},
@@ -344,8 +344,11 @@ def test_submit_book_scales_and_tags_venue(iso):
     sub = china_mcp.read_submission()
     # only the two A-shares survive — HK is off-venue, BABA has no rationale
     assert {h["ticker"] for h in sub["holdings"]} == {"600519.SS", "300750.SZ"}
-    # gross 1.4 > 1 → scaled back to no-leverage (1.0)
-    assert sub["scaled_to_no_leverage"] is True and sub["gross"] == pytest.approx(1.0)
+    # Model numeric weights are audit-only. Two medium-conviction ADDs receive the
+    # regional deterministic cap; the allocator does not force extra names to fill gross.
+    assert sub["scaled_to_no_leverage"] is False and sub["gross"] == pytest.approx(0.24)
+    assert all(h["weight_source"] == "deterministic_incremental_regional_allocator.v1"
+               for h in sub["holdings"])
     venues = {h["ticker"]: h["venue"] for h in sub["holdings"]}
     assert venues["600519.SS"] == "A-share" and venues["300750.SZ"] == "A-share"
     # the off-venue name is reported as rejected in the tool result
@@ -863,7 +866,8 @@ def test_run_china_carries_unpriceable_held_position(iso, monkeypatch):
     out = china.run_china(asof="2026-06-23", armed=True)
     acct = json.loads((registry.data_dir("china") / "account.json").read_text())
     assert "300750.SZ" in acct["positions"], "unpriceable-but-resubmitted name was wrongly liquidated"
-    assert "300750.SZ" in out["skipped_unpriceable"]
+    assert "300750.SZ" in out["carried_unpriceable_holdings"]
+    assert "300750.SZ" not in out["skipped_unpriceable"]
     assert not any(t["ticker"] == "300750.SZ" and t["side"] == "sell" for t in out["executed"])
 
 
@@ -1194,7 +1198,8 @@ def test_china_allowlist_is_only_typed_read_desk_web():
     execute_trade, no mcp__bot__* — and its server map is isolated to the 'china' server."""
     from brain import bot_mcp, china_mcp
     allowed = set(china_mcp.allowed_tools())
-    assert allowed == {f"mcp__china__{t.name}" for t in china_mcp._ALL_TOOLS} | set(bot_mcp.WEB_TOOLS)
+    assert allowed == ({f"mcp__china__{t.name}" for t in china_mcp._ALL_TOOLS}
+                       | set(bot_mcp.WEB_TOOLS) | {"Task"})
     assert not (allowed & {"Read", "Grep", "Glob"})
     assert not any(a.startswith("mcp__bot__") for a in allowed)
     assert "mcp__china__execute_trade" not in allowed

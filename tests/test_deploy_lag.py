@@ -227,6 +227,8 @@ def test_daily_exposes_deploy_lag_key(monkeypatch):
     is present and carries the returned value — not that git actually ran.
     """
     from scripts import check_deploy_lag as cdl
+    from portfolio import registry
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
     sentinel = {"ok": True, "behind_by_commits": 0, "lag_hours": 0.0, "warn": False,
                 "message": "test stub", "git_unavailable": False}
     monkeypatch.setattr(cdl, "check", lambda **kw: sentinel, raising=False)
