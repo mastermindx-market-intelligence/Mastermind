@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -333,98 +332,26 @@ def _latest_holdings(book: str) -> dict[str, dict]:
     return rows
 
 
-def _looks_like_etf(ticker: str) -> bool:
-    try:
-        from portfolio import etf_universe
-
-        if etf_universe.is_etf(ticker) or etf_universe.name_of(ticker):
-            return True
-    except (AttributeError, ImportError, OSError, TypeError, ValueError):
-        pass
-    try:
-        from brain import intake
-
-        for rel in (
-            f"stockdata/{ticker}.json",
-            f"stockbrief/{ticker}.json",
-            f"gex/{ticker}.json",
-        ):
-            raw = intake._read(rel) or {}
-            meta = raw.get("meta") if isinstance(raw, dict) else {}
-            meta = meta if isinstance(meta, dict) else {}
-            labels = " ".join(
-                str(value or "")
-                for value in (
-                    raw.get("name") if isinstance(raw, dict) else None,
-                    meta.get("en"),
-                    meta.get("zh"),
-                    meta.get("grp"),
-                )
-            )
-            if re.search(
-                r"\bETF\b|exchange[- ]traded|\b(?:index|sector) fund\b",
-                labels,
-                re.IGNORECASE,
-            ):
-                return True
-    except (AttributeError, ImportError, OSError, TypeError, ValueError):
-        pass
-    return False
-
-
 def _instrument_identity(ticker: str) -> dict[str, Any]:
-    """Validate a US symbol from positive, company-level local metadata.
+    """Shared US instrument identity used by reasoning and execution boundaries."""
+    from portfolio import instrument_policy
 
-    Options, flow, signal, and GEX artifacts prove only that a symbol was observed;
-    they do not prove that it is a common stock.  In particular, those planes also
-    contain ETFs.  A new US name therefore needs the stock-data contract's explicit
-    company name and non-ETF sector classification.  Anything less remains
-    unverified and fails closed at the stock-only boundary.
-    """
-    ticker = str(ticker or "").upper().strip()
-    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", ticker):
-        return {"kind": "invalid", "status": "invalid_ticker_syntax", "verified": False}
-    if ticker.endswith((".HK", ".SS", ".SZ")):
-        return {"kind": "invalid", "status": "non_us_venue", "verified": True}
-    if _looks_like_etf(ticker):
-        return {"kind": "etf", "status": "trusted_etf_metadata", "verified": True}
-    try:
-        from brain import intake
+    return instrument_policy.classify_us_instrument(ticker)
 
-        raw = intake._read(f"stockdata/{ticker}.json")
-        if isinstance(raw, dict) and raw:
-            contract_ticker = str(raw.get("ticker") or "").upper().strip()
-            name = _clean_text(raw.get("name"), 300)
-            sector = _clean_text(raw.get("sector"), 200)
-            if contract_ticker != ticker:
-                return {
-                    "kind": "unknown",
-                    "status": "stockdata_ticker_mismatch",
-                    "verified": False,
-                }
-            if re.search(r"\bETF\b|exchange[- ]traded|\bfund\b", f"{name} {sector}", re.I):
-                return {
-                    "kind": "etf",
-                    "status": "trusted_stockdata_etf_classification",
-                    "verified": True,
-                }
-            if name and sector and sector.lower() not in {"macro", "etf / macro"}:
-                return {
-                    "kind": "common_stock",
-                    "status": "trusted_company_stockdata.v1",
-                    "verified": True,
-                }
-            return {
-                "kind": "unknown",
-                "status": "stockdata_missing_common_stock_classification",
-                "verified": False,
-            }
-    except (AttributeError, ImportError, OSError, TypeError, ValueError):
-        pass
+
+def _mandate_migration_exit(ticker: str, identity: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic, auditable exit for inherited ETFs in the stock-only US book."""
+    status = _clean_text(identity.get("status"), 200) or "verified_etf"
     return {
-        "kind": "unknown",
-        "status": "unverified_instrument_identity",
-        "verified": False,
+        "ticker": ticker,
+        "action": "exit",
+        "reason": "Inherited ETF violates the US Brain common-stock-only mandate.",
+        "reason_code": "legacy_instrument_migration",
+        "evidence": [f"instrument_policy:{status}", "operator_directive:etfs_prohibited"],
+        "falsifier": "None; ETF eligibility is prohibited by portfolio mandate.",
+        "why_now": "Remove inherited pre-v2 ETF inventory at the next priceable paper session.",
+        "authority": "deterministic_stock_only_mandate",
+        "identity_status": status,
     }
 
 
@@ -475,25 +402,6 @@ def _clean_evidence(value: Any) -> Any:
 
 def _has_evidence(value: Any) -> bool:
     return isinstance(value, list) and any(_clean_text(v, 500) for v in value)
-
-
-def _quarantine(old: dict, reason: str, requested_action: str | None = None) -> dict:
-    rec = dict(old)
-    rec.update(
-        {
-            "weight": float(old.get("weight") or 0.0),
-            "proposed_weight": None,
-            "weight_source": "legacy_instrument_quarantine.v1",
-            "action_requested": requested_action,
-            "action_effective": "quarantine_hold",
-            "carried_forward": True,
-            "carry_reason": "legacy_instrument_quarantine",
-            "quarantined": True,
-            "quarantine_reason": reason,
-            "_protected_weight": float(old.get("weight") or 0.0),
-        }
-    )
-    return rec
 
 
 def _sizing_policy(book: str, posture: str) -> dict[str, Any]:
@@ -724,6 +632,8 @@ def normalize(
     blocked_actions: list[dict] = []
     quarantined: list[dict] = []
     identity_audit: list[dict] = []
+    mandatory_migrations: list[dict] = []
+    mandatory_exit_tickers: set[str] = set()
 
     for raw in args.get("holdings") or []:
         if not isinstance(raw, dict):
@@ -749,12 +659,22 @@ def normalize(
         identity_audit.append({"ticker": ticker, **identity})
         if stock_only and identity["kind"] != "common_stock":
             if old:
-                requested_action = _clean_text(raw.get("action"), 40).lower() or None
-                rec = _quarantine(old, identity["status"], requested_action)
-                rec["identity_status"] = identity["status"]
-                cleaned.append(rec)
-                seen.add(ticker)
-                quarantined.append({"ticker": ticker, "reason": identity["status"]})
+                if identity.get("kind") == "etf" and identity.get("verified") is True:
+                    mandatory_exit_tickers.add(ticker)
+                    mandatory_migrations.append(
+                        {
+                            "ticker": ticker,
+                            "reason": identity.get("status"),
+                            "authority": "deterministic_stock_only_mandate",
+                            "requested_action": _clean_text(raw.get("action"), 40).lower()
+                            or None,
+                        }
+                    )
+                    seen.add(ticker)
+                    continue
+                raise DecisionBoundaryFreeze(
+                    f"held_instrument_identity_unverified:{ticker}:{identity.get('status')}"
+                )
             else:
                 rejected.append({"ticker": ticker, "reason": identity["status"]})
             continue
@@ -839,9 +759,16 @@ def normalize(
     carried: list[dict] = []
     blocked_early: list[str] = []
     blocked_exits: list[dict] = []
-    effective_exits: list[dict] = []
+    effective_exits: list[dict] = [
+        _mandate_migration_exit(ticker, next(
+            row for row in identity_audit if row.get("ticker") == ticker
+        ))
+        for ticker in sorted(mandatory_exit_tickers)
+    ]
 
     for ticker, old in prior.items():
+        if ticker in mandatory_exit_tickers:
+            continue
         if ticker in seen:
             if ticker in exits:
                 blocked_exits.append(
@@ -872,28 +799,23 @@ def normalize(
         )
         if stock_only and identity["kind"] != "common_stock":
             identity_audit.append({"ticker": ticker, **identity})
-            if (
-                exit_rec
-                and exit_rec.get("reason_code") == "legacy_instrument_migration"
-            ):
-                effective_exits.append(dict(exit_rec))
-                continue
-            if exit_rec:
-                blocked_exits.append(
+            if identity.get("kind") == "etf" and identity.get("verified") is True:
+                effective_exits.append(_mandate_migration_exit(ticker, identity))
+                mandatory_migrations.append(
                     {
                         "ticker": ticker,
-                        "reason": "legacy_instrument_requires_migration_exit",
-                        "requested_action": "exit",
-                        "effective_action": "quarantine_hold",
+                        "reason": identity.get("status"),
+                        "authority": "deterministic_stock_only_mandate",
+                        "requested_action": (
+                            exit_rec.get("action") if isinstance(exit_rec, dict) else None
+                        ),
                     }
                 )
-            rec = _quarantine(old, identity["status"])
-            rec["identity_status"] = identity["status"]
-            cleaned.append(rec)
-            seen.add(ticker)
-            quarantined.append({"ticker": ticker, "reason": identity["status"]})
-            carried.append({"ticker": ticker, "reason": "legacy_instrument_quarantine"})
-            continue
+                seen.add(ticker)
+                continue
+            raise DecisionBoundaryFreeze(
+                f"held_instrument_identity_unverified:{ticker}:{identity.get('status')}"
+            )
 
         allow_exit = exit_rec is not None
         carry_reason = "missing_explicit_exit_decision"
@@ -1027,6 +949,7 @@ def normalize(
         "ignored_exit_requests": ignored_exits,
         "rejected": rejected,
         "quarantined": quarantined,
+        "mandatory_instrument_migrations": mandatory_migrations,
         "identity": identity_audit,
         "unallocated_adds": unallocated_adds,
         "quote_fallback_holdings": sorted(

@@ -648,6 +648,22 @@ def derisk_brain(pid: str, asof: str | None = None, *, regime: dict | None = Non
     if archived := _archived_noop(pid, asof):
         return archived
     out: dict = {"pid": pid, "asof": asof}
+    if pid == "autonomous":
+        try:
+            from portfolio import autonomous_migration
+            if autonomous_migration.is_pending_migration():
+                return {
+                    **out,
+                    "skipped": "legacy_etf_migration_pending",
+                    "queued_for_open": True,
+                    "paper_only": True,
+                }
+        except Exception as exc:  # noqa: BLE001 - never rewrite through an unavailable fence
+            return {
+                **out,
+                "skipped": "legacy_etf_migration_fence_unavailable",
+                "error": repr(exc)[:160],
+            }
     if not (enabled() or force):
         return {**out, "skipped": "disabled"}
     try:

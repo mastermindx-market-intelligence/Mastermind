@@ -688,7 +688,7 @@ def test_queue_orders_nav_base_uses_current_nav_not_1m(tmp_account: None) -> Non
 
     # queue a fresh 10% GOOG open with nav_base=None -> should size against $400k, not $1M.
     pending = paper_account.queue_orders(
-        {"AAPL": 1.0, "GOOG": 0.1}, {"AAPL": 200.0, "GOOG": 100.0},
+        {"AAPL": 0.9, "GOOG": 0.1}, {"AAPL": 200.0, "GOOG": 100.0},
         "2026-06-21", nav_base=None, fill_after="2026-06-22",
     )
     goog = next(o for o in pending if o["ticker"] == "GOOG")

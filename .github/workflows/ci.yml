@@ -79,6 +79,10 @@ jobs:
           tests/test_portfolio_archival.py
           tests/test_portfolio_registry_security.py
           tests/test_decision_submission_v2.py
+          tests/test_autonomous_stock_only_boundary.py
+          tests/test_autonomous_etf_migration.py
+          tests/test_portfolio_dashboard_ui.py
+          tests/test_portfolio_eod_marks.py
           tests/test_pending_target_cutover.py
           tests/test_paper_transaction_boundary.py
           tests/test_execution_quote_gap.py

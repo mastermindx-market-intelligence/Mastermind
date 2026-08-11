@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -414,15 +415,20 @@ def _book_marks(portfolio_id: str | None = None, *, refresh: bool | None = None)
     name off the hot cache or the instant Terminal snapshot — never a synchronous per-name network
     fetch (the old HK path fired one yf.download PER NAME, ~5-12s). USD books mark in USD;
     single-currency non-US books (hk=HKD / china=CNY) convert the USD mark to base via ``portfolio.fx``
-    exactly as before. Returns {} when nothing is priceable, so callers degrade to the avg-cost mark
-    (no movement) rather than mis-marking. The book of record's NAV is still marked from the LIVE feeds
-    by the scheduler's daily_mark/build jobs — this fast path never writes NAV.
+    exactly as before. Returns {} only when neither a current source nor a bounded persisted mark is
+    available; callers then render an honest unpriced state. The book of record's NAV is still marked from the LIVE feeds
+    by the scheduler's daily_mark/build jobs — this fast path never writes NAV.  If both hot paths
+    miss, a bounded read of the book's own last persisted mark supplies the prior EOD/base-currency
+    value with provenance through ``_book_quote_provenance``; that display carry is never exposed to
+    settlement or rebalance code.
     """
     tickers = _account_tickers(portfolio_id)
     if not tickers:
         return {}
+    resolved_pid = portfolio_id
     try:
         from portfolio import registry
+        resolved_pid = registry.canonical_id(portfolio_id)
         ccy = registry.currency(portfolio_id)
     except Exception:
         ccy = "USD"
@@ -430,9 +436,11 @@ def _book_marks(portfolio_id: str | None = None, *, refresh: bool | None = None)
     # warms off-thread; the dedicated live-marks endpoint pre-warms synchronously and then calls
     # this helper with refresh=False. China A-shares are included — their CNY marks are converted
     # to USD by _dash_mark_usd before conversion into the book's base currency below.
+    session: dict[str, Any] = {}
     try:
         from portfolio import market_sessions
-        market_open = market_sessions.status_for_portfolio(portfolio_id)["is_open"]
+        session = market_sessions.status_for_portfolio(portfolio_id)
+        market_open = session["is_open"]
     except Exception:
         market_open = False
     if market_open and refresh is not False:
@@ -441,9 +449,31 @@ def _book_marks(portfolio_id: str | None = None, *, refresh: bool | None = None)
             yahoo_feed.warm(tickers, background=(refresh is None))
         except Exception:
             pass
+    persisted = _persisted_book_quotes(
+        resolved_pid or _portfolio_registry.DEFAULT_ID,
+        tickers,
+        asof=session.get("as_of"),
+    )
+    current_quotes = _quote_provenance(tickers)
     out: dict[str, float] = {}
     for t in tickers:
+        persisted_quote = persisted.get(t)
+        current_quote = current_quotes.get(t)
+        selected_quote = _select_dashboard_quote(
+            current_quote,
+            persisted_quote,
+            asof=session.get("as_of"),
+        )
+        if selected_quote is persisted_quote and persisted_quote is not None:
+            px = persisted_quote.get("price_local")
+            if px and px > 0:
+                out[t] = float(px)
+            continue
         usd = _dash_mark_usd(t)
+        # A dated non-live quote that failed the freshness selector is not rescued by its bare
+        # price.  (A source-less injected quote remains supported for legacy/tests only.)
+        if current_quote is not None and selected_quote is None:
+            continue
         if not (usd and usd > 0):
             continue
         if ccy == "USD":
@@ -473,6 +503,209 @@ def _quote_provenance(tickers: list[str]) -> dict[str, dict[str, Any]]:
         quote = yahoo_feed.quote_cached(t) or terminal_prices.quote_local(t)
         if quote:
             out[t] = quote
+    return out
+
+
+_PERSISTED_MARK_MAX_AGE_DAYS = 30
+
+
+def _date_part(value: Any) -> date | None:
+    """Parse a contract date/timestamp without guessing a timezone or accepting malformed input."""
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _snapshot_is_completed_eod(
+    portfolio_id: str,
+    snapshot: dict[str, Any],
+    snapshot_date: date | None,
+) -> bool:
+    """Conservatively identify a portfolio snapshot written after that venue's regular close."""
+    status = snapshot.get("market_status") or {}
+    if (
+        snapshot_date is None
+        or status.get("open") is not False
+        or status.get("trading_day") is False
+    ):
+        return False
+    if status.get("state") in {"post_close", "early_close"}:
+        return True
+    raw_asof = status.get("asof") or status.get("asof_cst") or status.get("asof_et")
+    try:
+        marked_at = datetime.fromisoformat(str(raw_asof).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if marked_at.date() != snapshot_date:
+        return False
+    close_hour = 15 if portfolio_id == "china" else 16
+    return (marked_at.hour, marked_at.minute) >= (close_hour, 0)
+
+
+def _persisted_book_quotes(
+    portfolio_id: str,
+    tickers: list[str],
+    *,
+    asof: Any = None,
+) -> dict[str, dict[str, Any]]:
+    """Last valid per-position marks for the dashboard's *display-only* fallback.
+
+    This is deliberately separate from every fill/rebalance price path.  It reads only the book's
+    persisted account and published portfolio snapshot, rejects future-dated or >30-calendar-day
+    marks, and returns the book's BASE-currency price with explicit provenance.  The published
+    snapshot wins ties because it also records whether the strategy published after the cash market
+    had closed.  Legacy account ``current_price`` fields without an as-of are never trusted on their
+    own; an existing close snapshot can still attest the same holding during the upgrade cutover.
+    """
+    wanted = {(ticker or "").upper().strip() for ticker in (tickers or [])} - {""}
+    if not wanted:
+        return {}
+    target_date = _date_part(asof) or date.today()
+    base = _portfolio_dir(portfolio_id)
+    snapshot = _read_json_object(base / "latest.json")
+    if portfolio_id == "self_directed":
+        try:
+            from portfolio import self_directed
+            account = self_directed._load_account()
+        except Exception:
+            account = {}
+    else:
+        account = _read_json_object(base / "account.json")
+
+    candidates: dict[str, list[tuple[date, int, float, dict[str, Any]]]] = {
+        ticker: [] for ticker in wanted
+    }
+
+    snapshot_date = _date_part(snapshot.get("as_of"))
+    snapshot_is_eod = _snapshot_is_completed_eod(portfolio_id, snapshot, snapshot_date)
+    if snapshot_date is not None:
+        for raw in snapshot.get("positions") or []:
+            if not isinstance(raw, dict):
+                continue
+            ticker = str(raw.get("ticker") or "").upper().strip()
+            if ticker not in candidates:
+                continue
+            px = _number(raw.get("current_price"))
+            if px is None or not math.isfinite(px) or px <= 0:
+                continue
+            source = "portfolio_eod" if snapshot_is_eod else "portfolio_snapshot"
+            candidates[ticker].append((
+                snapshot_date,
+                2,
+                px,
+                {
+                    "source": source,
+                    "as_of": str(snapshot.get("as_of"))[:10],
+                    "time_kind": (
+                        "completed_session_close" if snapshot_is_eod
+                        else "portfolio_snapshot_date"
+                    ),
+                    "origin_source": raw.get("quote_source"),
+                },
+            ))
+
+    for ticker, raw in (account.get("positions") or {}).items():
+        ticker = str(ticker or "").upper().strip()
+        if ticker not in candidates or not isinstance(raw, dict):
+            continue
+        px = _number(raw.get("current_price"))
+        mark_date = _date_part(raw.get("current_price_asof"))
+        if px is None or not math.isfinite(px) or px <= 0 or mark_date is None:
+            continue
+        candidates[ticker].append((
+            mark_date,
+            1,
+            px,
+            {
+                "source": "persisted_portfolio_mark",
+                "as_of": str(raw.get("current_price_asof"))[:10],
+                "time_kind": raw.get("current_price_time_kind") or "portfolio_mark_date",
+                "origin_source": raw.get("current_price_source"),
+            },
+        ))
+
+    out: dict[str, dict[str, Any]] = {}
+    for ticker, rows in candidates.items():
+        eligible = []
+        for mark_date, priority, px, meta in rows:
+            age_days = (target_date - mark_date).days
+            if age_days < 0 or age_days > _PERSISTED_MARK_MAX_AGE_DAYS:
+                continue
+            eligible.append((mark_date, priority, px, meta, age_days))
+        if not eligible:
+            continue
+        mark_date, _priority, px, meta, age_days = max(
+            eligible, key=lambda row: (row[0], row[1])
+        )
+        out[ticker] = {
+            "ticker": ticker,
+            "price_local": float(px),
+            **meta,
+            "age_seconds": float(age_days * 86_400),
+            "stale_days": age_days,
+            "fresh": False,
+            "is_live": False,
+        }
+    return out
+
+
+def _select_dashboard_quote(
+    current: dict[str, Any] | None,
+    persisted: dict[str, Any] | None,
+    *,
+    asof: Any = None,
+) -> dict[str, Any] | None:
+    """Choose the display quote by evidence time, not accessor order.
+
+    A real intraday quote always wins.  Terminal is a non-live daily snapshot: it must be dated,
+    point-in-time valid, and strictly newer than the book's persisted close before it can replace
+    that close.  File-mtime-only Terminal provenance cannot outrank a market-dated portfolio mark.
+    """
+    if current and current.get("source") == "yahoo_intraday":
+        return current
+    target_date = _date_part(asof) or date.today()
+    if current:
+        current_date = _date_part(current.get("as_of"))
+        current_age = (target_date - current_date).days if current_date is not None else None
+        current_is_bounded = (
+            current_age is not None
+            and 0 <= current_age <= _PERSISTED_MARK_MAX_AGE_DAYS
+        )
+        if not current_is_bounded:
+            current = None
+        elif persisted:
+            persisted_date = _date_part(persisted.get("as_of"))
+            if (
+                current.get("time_kind") == "snapshot_file_mtime"
+                or persisted_date is None
+                or current_date is None
+                or current_date <= persisted_date
+            ):
+                current = None
+    return current or persisted
+
+
+def _book_quote_provenance(
+    portfolio_id: str,
+    tickers: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Provenance matching ``_book_marks``: hot/Terminal first, bounded persisted mark second."""
+    current = _quote_provenance(tickers)
+    try:
+        from portfolio import market_sessions
+        asof = market_sessions.status_for_portfolio(portfolio_id).get("as_of")
+    except Exception:
+        asof = None
+    carried = _persisted_book_quotes(portfolio_id, tickers, asof=asof)
+    out: dict[str, dict[str, Any]] = {}
+    for raw_ticker in tickers:
+        ticker = (raw_ticker or "").upper().strip()
+        selected = _select_dashboard_quote(
+            current.get(ticker), carried.get(ticker), asof=asof
+        )
+        if selected is not None:
+            out[ticker] = selected
     return out
 
 
@@ -771,20 +1004,41 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             if session["is_open"] and held:
                 yahoo_feed.warm(held)  # one blocking batch; only on a valid US session
             prices = _live_prices(held, refresh=False)
+            persisted_quotes = _persisted_book_quotes(
+                pid, held, asof=session.get("as_of")
+            )
+            current_quotes = _quote_provenance(held)
+            for ticker in held:
+                current_quote = current_quotes.get(ticker)
+                persisted_quote = persisted_quotes.get(ticker)
+                selected_quote = _select_dashboard_quote(
+                    current_quote, persisted_quote, asof=session.get("as_of")
+                )
+                if selected_quote is persisted_quote and persisted_quote is not None:
+                    px = persisted_quote.get("price_local")
+                    if px and px > 0:
+                        prices[ticker] = float(px)
+                elif current_quote is not None and selected_quote is None:
+                    prices.pop(ticker, None)
             book = self_directed.book(
                 prices=prices,
                 read_only=True,
                 resolve_missing_prices=False,
             )
             _attach_security_names(book.get("positions"))
-            provenance = _quote_provenance(held)
+            provenance = _book_quote_provenance(pid, held)
             for row in book.get("positions") or []:
                 quote = provenance.get((row.get("ticker") or "").upper()) or {}
                 row.update({
                     "quote_source": quote.get("source"),
                     "quote_as_of": quote.get("as_of"),
                     "quote_time_kind": quote.get("time_kind"),
-                    "quote_is_live": quote.get("source") == "yahoo_intraday",
+                    "quote_age_seconds": quote.get("age_seconds"),
+                    "quote_stale_days": quote.get("stale_days"),
+                    "quote_origin_source": quote.get("origin_source"),
+                    "quote_is_live": bool(
+                        quote.get("is_live") or quote.get("source") == "yahoo_intraday"
+                    ),
                 })
             priced = sum(1 for row in book.get("positions") or []
                          if row.get("current_price") is not None)
@@ -820,7 +1074,7 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 yahoo_feed.warm(held)  # all names in one request; no per-ticker stampede
             prices = _book_marks(pid, refresh=False)
             pnl = paper_account.positions_pnl(prices, portfolio_id=pid)
-            provenance = _quote_provenance(held)
+            provenance = _book_quote_provenance(pid, held)
             positions = []
             for ticker, row in pnl.items():
                 quote = provenance.get((ticker or "").upper()) or {}
@@ -835,7 +1089,11 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                     "quote_as_of": quote.get("as_of"),
                     "quote_time_kind": quote.get("time_kind"),
                     "quote_age_seconds": quote.get("age_seconds"),
-                    "quote_is_live": quote.get("source") == "yahoo_intraday",
+                    "quote_stale_days": quote.get("stale_days"),
+                    "quote_origin_source": quote.get("origin_source"),
+                    "quote_is_live": bool(
+                        quote.get("is_live") or quote.get("source") == "yahoo_intraday"
+                    ),
                 })
             performance_full = paper_account.performance(portfolio_id=pid, prices=prices)
             performance = {
@@ -965,6 +1223,7 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 # This matters when the daily strategy snapshot has zero rows but the paper account
                 # still owns positions: the first critical response must not pretend it is empty.
                 pnl = paper_account.positions_pnl(prices, portfolio_id=portfolio)
+                provenance = _book_quote_provenance(portfolio, list(pnl))
                 account_nav = paper_account.nav(prices, portfolio_id=portfolio)
                 account = paper_account._load_account(portfolio)
                 cash = float(account.get("cash") or 0.0)
@@ -989,17 +1248,29 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                         published_tickers.add(ticker)
                     rec = pnl.get(ticker)
                     if rec:
+                        quote = provenance.get((ticker or "").upper()) or {}
                         pos["cost_basis"] = rec.get("avg_cost")
                         pos["current_price"] = rec.get("current_price")
                         pos["market_value"] = rec.get("market_value")
                         pos["unrealized_pnl"] = rec.get("unrealized_pnl")
                         pos["unrealized_pct"] = rec.get("unrealized_pct")
+                        if quote:
+                            pos["quote_source"] = quote.get("source")
+                            pos["quote_as_of"] = quote.get("as_of")
+                            pos["quote_time_kind"] = quote.get("time_kind")
+                            pos["quote_age_seconds"] = quote.get("age_seconds")
+                            pos["quote_stale_days"] = quote.get("stale_days")
+                            pos["quote_origin_source"] = quote.get("origin_source")
+                            pos["quote_is_live"] = bool(
+                                quote.get("is_live") or quote.get("source") == "yahoo_intraday"
+                            )
                         if rec.get("market_value") is not None and account_nav > 0:
                             pos["weight"] = round(float(rec["market_value"]) / account_nav, 6)
                 for ticker, rec in pnl.items():
                     if ticker in published_tickers:
                         continue
-                    payload.setdefault("positions", []).append({
+                    quote = provenance.get((ticker or "").upper()) or {}
+                    account_row = {
                         "ticker": ticker,
                         "sleeve": "account",
                         "verdict": "hold",
@@ -1015,7 +1286,20 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                             round(float(rec["market_value"]) / account_nav, 6)
                             if rec.get("market_value") is not None and account_nav > 0 else None
                         ),
-                    })
+                    }
+                    if quote:
+                        account_row.update({
+                            "quote_source": quote.get("source"),
+                            "quote_as_of": quote.get("as_of"),
+                            "quote_time_kind": quote.get("time_kind"),
+                            "quote_age_seconds": quote.get("age_seconds"),
+                            "quote_stale_days": quote.get("stale_days"),
+                            "quote_origin_source": quote.get("origin_source"),
+                            "quote_is_live": bool(
+                                quote.get("is_live") or quote.get("source") == "yahoo_intraday"
+                            ),
+                        })
+                    payload.setdefault("positions", []).append(account_row)
             except Exception:
                 pass
 

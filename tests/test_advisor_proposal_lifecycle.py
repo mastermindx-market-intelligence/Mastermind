@@ -26,6 +26,26 @@ def _propose(ticker: str, action: str, *, asof: str = "2026-08-08") -> dict:
     )
 
 
+def test_advisor_rejects_etf_add_but_keeps_etf_exit_researchable(tmp_path, monkeypatch):
+    queue = tmp_path / "recommendations.jsonl"
+    monkeypatch.setattr(advisor_trade, "_PROPOSALS", queue)
+
+    rejected = _propose("USMV", "add")
+    exit_proposal = _propose("USMV", "exit")
+
+    assert rejected == {
+        "ok": False,
+        "executed": False,
+        "ticker": "USMV",
+        "action": "add",
+        "error": "US portfolio proposals are verified-common-stock-only",
+        "identity_status": "trusted_etf_metadata",
+    }
+    assert exit_proposal["ok"] is True
+    assert exit_proposal["proposal"]["executed"] is False
+    assert [row["action"] for row in advisor_trade.pending_proposals()] == ["exit"]
+
+
 def test_advisor_book_reader_uses_active_us_product_default(tmp_path, monkeypatch):
     from portfolio import registry
 

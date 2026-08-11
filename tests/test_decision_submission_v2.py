@@ -404,7 +404,7 @@ def test_hold_quantization_never_rounds_valid_full_book_over_one(monkeypatch):
     assert audit["sizing"]["weight_quantization"]["gross_increased"] is False
 
 
-def test_legacy_etf_is_quarantined_until_explicit_migration(monkeypatch):
+def test_verified_legacy_etf_is_a_mandatory_migration_exit(monkeypatch):
     monkeypatch.setattr(
         ds,
         "_latest_holdings",
@@ -433,10 +433,48 @@ def test_legacy_etf_is_quarantined_until_explicit_migration(monkeypatch):
         early_exit_hysteresis=True,
         deterministic_sizing=True,
     )
-    row = payload["holdings"][0]
-    assert row["ticker"] == "SPY" and row["weight"] == pytest.approx(0.20)
-    assert row["action_effective"] == "quarantine_hold" and row["quarantined"] is True
-    assert audit["quarantined"] == [{"ticker": "SPY", "reason": "trusted_etf_metadata"}]
+    assert payload["holdings"] == []
+    assert payload["exit_decisions"] == [
+        {
+            "ticker": "SPY",
+            "action": "exit",
+            "reason": "Inherited ETF violates the US Brain common-stock-only mandate.",
+            "reason_code": "legacy_instrument_migration",
+            "evidence": [
+                "instrument_policy:trusted_etf_metadata",
+                "operator_directive:etfs_prohibited",
+            ],
+            "falsifier": "None; ETF eligibility is prohibited by portfolio mandate.",
+            "why_now": "Remove inherited pre-v2 ETF inventory at the next priceable paper session.",
+            "authority": "deterministic_stock_only_mandate",
+            "identity_status": "trusted_etf_metadata",
+        }
+    ]
+    assert audit["quarantined"] == []
+    assert audit["mandatory_instrument_migrations"] == [
+        {
+            "ticker": "SPY",
+            "reason": "trusted_etf_metadata",
+            "authority": "deterministic_stock_only_mandate",
+            "requested_action": None,
+        }
+    ]
+
+    attempted_hold = _holding("SPY", action="hold")
+    held_payload, held_audit = ds.normalize(
+        "autonomous",
+        _args([attempted_hold]),
+        stock_only=True,
+        early_exit_hysteresis=True,
+        deterministic_sizing=True,
+    )
+    assert held_payload["holdings"] == []
+    assert held_payload["exit_decisions"][0]["authority"] == (
+        "deterministic_stock_only_mandate"
+    )
+    assert held_audit["mandatory_instrument_migrations"][0][
+        "requested_action"
+    ] == "hold"
 
     migration = [
         {
@@ -457,6 +495,41 @@ def test_legacy_etf_is_quarantined_until_explicit_migration(monkeypatch):
     )
     assert payload["holdings"] == []
     assert payload["exit_decisions"][0]["reason_code"] == "legacy_instrument_migration"
+
+
+def test_unknown_held_us_instrument_freezes_instead_of_guessing(monkeypatch):
+    monkeypatch.setattr(
+        ds,
+        "_latest_holdings",
+        lambda book: {
+            "MYSTERY": {
+                "ticker": "MYSTERY",
+                "weight": 0.20,
+                "rationale": "legacy",
+                "conviction": "low",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        ds,
+        "_instrument_identity",
+        lambda ticker: {
+            "kind": "unknown",
+            "status": "missing_canonical_stockdata",
+            "verified": False,
+        },
+    )
+    with pytest.raises(
+        ds.DecisionBoundaryFreeze,
+        match="held_instrument_identity_unverified:MYSTERY:missing_canonical_stockdata",
+    ):
+        ds.normalize(
+            "autonomous",
+            _args(),
+            stock_only=True,
+            early_exit_hysteresis=True,
+            deterministic_sizing=True,
+        )
 
 
 def test_unverified_new_us_instrument_fails_closed(monkeypatch):
@@ -484,20 +557,26 @@ def test_unverified_new_us_instrument_fails_closed(monkeypatch):
 
 def test_nested_trusted_metadata_identifies_non_allowlisted_etf(monkeypatch):
     # Keep the identity contract hermetic: CI intentionally does not receive the
-    # VPS-owned signal/data tree. ARKK is outside the retired ETF desk's narrow
-    # allowlist, while a trusted nested Macro contract explicitly identifies it
-    # as an ETF. A mere ticker artifact cannot authenticate a common stock.
-    from brain import intake
-    from portfolio import etf_universe
+    # VPS-owned signal/data tree. The retired ETF desk's allowlist is not the
+    # only negative authority: an explicit nested security-master type can also
+    # identify an ETF. Weak analytical labels such as meta.grp/sector cannot.
+    from portfolio import etf_universe, instrument_policy
 
     monkeypatch.setattr(etf_universe, "is_etf", lambda ticker: False)
     monkeypatch.setattr(etf_universe, "name_of", lambda ticker: None)
     monkeypatch.setattr(
-        intake,
-        "_read",
-        lambda rel: {"meta": {"grp": "Macro ETF"}} if rel == "gex/ARKK.json" else {},
+        instrument_policy,
+        "_read_macro_json",
+        lambda rel: {
+            "meta": {
+                "grp": "Macro ETF",
+                "security_type": "exchange-traded fund",
+            }
+        }
+        if rel == "gex/FRESHETF.json"
+        else {},
     )
-    identity = ds._instrument_identity("ARKK")
+    identity = ds._instrument_identity("FRESHETF")
     assert identity["kind"] == "etf" and identity["verified"] is True
 
 

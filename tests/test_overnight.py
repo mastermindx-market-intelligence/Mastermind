@@ -105,7 +105,7 @@ def test_watch_skips_when_tape_calm(iso, monkeypatch):
     from bot import overnight, settle
     from data_layer import overnight as ov
     monkeypatch.setattr(settle, "is_open", lambda pid: False)
-    paper_account.save_pending_target({"SPY": 0.5}, "2026-06-23", portfolio_id="autonomous")
+    paper_account.save_pending_target({"AAPL": 0.5}, "2026-06-23", portfolio_id="autonomous")
     monkeypatch.setattr(ov, "tape", lambda force=False: {"risk": {"state": "calm", "reasons": ["x"]}, "groups": {}})
     assert overnight.watch("autonomous")["skipped"] == "tape_calm"  # deterministic tripwire → no LLM
 

@@ -451,6 +451,15 @@ def _write_settlement_receipt(
     target = validate_target_weights(
         pending.get("target"),
         require_canonical_tickers=True,
+        portfolio_id=portfolio_id,
+    )
+    constraints = _validated_execution_constraints(
+        pending.get("execution_constraints")
+        if "execution_constraints" in pending
+        else None,
+        target=target,
+        decision_snapshot=pending.get("decision_snapshot"),
+        portfolio_id=portfolio_id,
     )
     transaction_id = str(transaction.get("transaction_id") or "")
     if len(transaction_id) != 64 or any(ch not in "0123456789abcdef" for ch in transaction_id):
@@ -481,6 +490,8 @@ def _write_settlement_receipt(
             (transaction.get("account_after") or {}).get("positions") or {}
         ),
     }
+    if constraints is not None:
+        receipt["execution_constraints"] = deepcopy(constraints)
     path = _settlement_receipt_path(transaction_id, portfolio_id)
     encoded = json.dumps(receipt, indent=2, default=str).encode("utf-8")
     if path.exists():
@@ -520,6 +531,15 @@ def pending_settlement_receipts(portfolio_id: str | None = None) -> list[dict[st
         target = validate_target_weights(
             row.get("target"),
             require_canonical_tickers=True,
+            portfolio_id=portfolio_id,
+        )
+        _validated_execution_constraints(
+            row.get("execution_constraints")
+            if "execution_constraints" in row
+            else None,
+            target=target,
+            decision_snapshot=row.get("decision_snapshot"),
+            portfolio_id=portfolio_id,
         )
         if row.get("target_sha256") != _target_sha256(target):
             raise PaperTransactionConflict("settlement receipt target digest mismatch")
@@ -600,6 +620,108 @@ def _apply_transaction_followup(
     clear_pending_target(portfolio_id)
 
 
+def _position_shares_for_mandate(state: dict[str, Any], ticker: str) -> float:
+    lot = (state.get("positions") or {}).get(ticker)
+    if not isinstance(lot, dict):
+        return 0.0
+    try:
+        shares = float(lot.get("shares") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return shares if math.isfinite(shares) and shares > 0.0 else 0.0
+
+
+def _validate_autonomous_transaction_mandate(
+    transaction: dict[str, Any],
+    *,
+    before: dict[str, Any],
+    after: dict[str, Any],
+    fills: list[Any],
+) -> None:
+    """Reject a legacy/malformed US WAL before it can mutate account or fill state.
+
+    A WAL is executable authority.  After the common-stock-only cutover, replay must enforce the
+    same mandate as a fresh rebalance instead of applying a pre-upgrade ETF buy and discovering the
+    violation only while writing its receipt.  Existing ETF lots may remain unchanged or decrease;
+    any increase and every recorded BUY require positive common-stock identity.
+    """
+    from portfolio import instrument_policy
+
+    transition = transaction.get("followup")
+    preserved: frozenset[str] = frozenset()
+    constrained_positions_sha256: str | None = None
+    if isinstance(transition, dict) and transition.get("kind") == "clear_pending_target":
+        pending = transition.get("pending_payload")
+        incompatibility = pending_target_contract_error(pending, "autonomous")
+        if incompatibility:
+            raise PaperTransactionConflict(
+                f"autonomous WAL pending target violates mandate: {incompatibility}"
+            )
+        constraints = (
+            pending.get("execution_constraints")
+            if isinstance(pending, dict) and "execution_constraints" in pending
+            else None
+        )
+        if isinstance(constraints, dict):
+            preserved = frozenset(constraints.get("tickers") or [])
+            constrained_positions_sha256 = constraints.get("positions_sha256")
+
+    if constrained_positions_sha256 is not None:
+        try:
+            before_positions_sha256 = positions_sha256(before.get("positions"))
+        except InvalidExecutionConstraints as exc:
+            raise PaperTransactionConflict(
+                f"autonomous WAL positions snapshot is invalid: {exc.reason}"
+            ) from exc
+        if before_positions_sha256 != constrained_positions_sha256:
+            raise PaperTransactionConflict(
+                "autonomous WAL positions snapshot violates migration authority"
+            )
+
+    for entry in fills:
+        if not isinstance(entry, dict) or not isinstance(entry.get("record"), dict):
+            raise PaperTransactionConflict("autonomous WAL contains a malformed fill entry")
+        record = entry["record"]
+        ticker = _canonical_target_ticker(record.get("ticker"))
+        if not ticker or record.get("ticker") != ticker:
+            raise PaperTransactionConflict("autonomous WAL contains a noncanonical fill ticker")
+        side = str(record.get("side") or "").lower().strip()
+        if side not in {"buy", "sell"}:
+            raise PaperTransactionConflict("autonomous WAL contains an invalid fill side")
+        if side == "buy":
+            identity_error = instrument_policy.executable_common_stock_error(ticker)
+            if identity_error:
+                raise PaperTransactionConflict(
+                    f"autonomous WAL BUY violates mandate: {identity_error}"
+                )
+        if ticker in preserved:
+            raise PaperTransactionConflict(
+                f"autonomous WAL trades preserved position: {ticker}"
+            )
+    before_positions = before.get("positions") or {}
+    after_positions = after.get("positions") or {}
+    if not isinstance(before_positions, dict) or not isinstance(after_positions, dict):
+        raise PaperTransactionConflict("autonomous WAL position state is invalid")
+    for raw_ticker in set(before_positions) | set(after_positions):
+        ticker = _canonical_target_ticker(raw_ticker)
+        if not ticker or raw_ticker != ticker:
+            raise PaperTransactionConflict("autonomous WAL contains a noncanonical position")
+        before_shares = _position_shares_for_mandate(before, ticker)
+        after_shares = _position_shares_for_mandate(after, ticker)
+        if after_shares > before_shares + 1e-9:
+            identity_error = instrument_policy.executable_common_stock_error(ticker)
+            if identity_error:
+                raise PaperTransactionConflict(
+                    f"autonomous WAL position increase violates mandate: {identity_error}"
+                )
+
+    for ticker in preserved:
+        if before_positions.get(ticker) != after_positions.get(ticker):
+            raise PaperTransactionConflict(
+                f"autonomous WAL changed preserved position: {ticker}"
+            )
+
+
 def _recover_paper_transaction_unlocked(
     portfolio_id: str | None = None,
 ) -> dict[str, Any] | None:
@@ -624,6 +746,14 @@ def _recover_paper_transaction_unlocked(
         raise PaperTransactionConflict("paper transaction before-state digest mismatch")
     if transaction.get("account_after_sha256") != _content_sha256(after):
         raise PaperTransactionConflict("paper transaction after-state digest mismatch")
+
+    if portfolio_id == "autonomous":
+        _validate_autonomous_transaction_mandate(
+            transaction,
+            before=before,
+            after=after,
+            fills=fills,
+        )
 
     current = _load_account_file(portfolio_id, strict=True)
     current_hash = _content_sha256(current)
@@ -1042,7 +1172,7 @@ def unpriceable_target_requirements(
     they use for execution.
     """
     account = state if state is not None else _load_account(portfolio_id)
-    targets = validate_target_weights(target_weights)
+    targets = validate_target_weights(target_weights, portfolio_id=portfolio_id)
     held = {
         str(raw_ticker).upper().strip()
         for raw_ticker, position in (account.get("positions") or {}).items()
@@ -1083,16 +1213,60 @@ def _canonical_target_ticker(value: Any) -> str:
     return ticker
 
 
+def canonical_positive_positions(positions: Any) -> dict[str, dict[str, float]]:
+    """Canonical executable held-lot snapshot used by operator-migration constraints.
+
+    Only positive lots participate.  Cash, marks, and other account metadata are deliberately
+    excluded, while ticker set, exact share count, and average cost are authority-bearing.  Invalid
+    lot data fails closed instead of being omitted from the digest.
+    """
+    if not isinstance(positions, dict):
+        raise InvalidExecutionConstraints("positions_snapshot_not_object")
+    canonical: dict[str, dict[str, float]] = {}
+    for raw_ticker in sorted(positions):
+        ticker = _canonical_target_ticker(raw_ticker)
+        if not ticker or raw_ticker != ticker:
+            raise InvalidExecutionConstraints("positions_snapshot_ticker_noncanonical")
+        raw_lot = positions.get(raw_ticker)
+        if not isinstance(raw_lot, dict):
+            raise InvalidExecutionConstraints(f"positions_snapshot_lot_invalid:{ticker}")
+        raw_shares = raw_lot.get("shares")
+        if isinstance(raw_shares, bool) or not isinstance(raw_shares, Real):
+            raise InvalidExecutionConstraints(f"positions_snapshot_lot_invalid:{ticker}")
+        shares = float(raw_shares)
+        if not math.isfinite(shares) or shares < 0.0:
+            raise InvalidExecutionConstraints(f"positions_snapshot_shares_invalid:{ticker}")
+        if shares <= 1e-9:
+            continue
+        raw_avg_cost = raw_lot.get("avg_cost")
+        if isinstance(raw_avg_cost, bool) or not isinstance(raw_avg_cost, Real):
+            raise InvalidExecutionConstraints(f"positions_snapshot_lot_invalid:{ticker}")
+        avg_cost = float(raw_avg_cost)
+        if not math.isfinite(avg_cost) or avg_cost <= 0.0:
+            raise InvalidExecutionConstraints(f"positions_snapshot_cost_invalid:{ticker}")
+        canonical[ticker] = {"shares": shares, "avg_cost": avg_cost}
+    return canonical
+
+
+def positions_sha256(positions: Any) -> str:
+    """Digest the exact positive held-lot snapshot (ticker, shares, and average cost)."""
+    return _content_sha256(canonical_positive_positions(positions))
+
+
 def validate_target_weights(
     target_weights: Any,
     *,
     require_canonical_tickers: bool = False,
+    portfolio_id: str | None = None,
 ) -> dict[str, float]:
     """Validate and canonicalize one complete executable target book.
 
     This is an authority boundary, not a convenience coercer: booleans, numeric strings, NaN,
     infinities, negative weights, individual weights above 100%, canonical ticker collisions, and
     gross exposure above 100% are rejected.  Zero rows carry no executable intent and are removed.
+    The ``autonomous`` book has an additional positive-identity requirement: every retained row
+    must resolve to a trusted common-stock contract.  That check is deliberately absent for the
+    regional books and the archived ETF book, which own different universe rules.
     """
     if not isinstance(target_weights, dict):
         raise InvalidTargetWeights("target_not_object")
@@ -1119,6 +1293,12 @@ def validate_target_weights(
         if weight > 1.0:
             raise InvalidTargetWeights(f"weight_above_one:{ticker}")
         if weight > 0.0:
+            if portfolio_id == "autonomous":
+                from portfolio import instrument_policy
+
+                identity_error = instrument_policy.executable_common_stock_error(ticker)
+                if identity_error:
+                    raise InvalidTargetWeights(identity_error)
             canonical[ticker] = weight
 
     gross = math.fsum(canonical.values())
@@ -1134,6 +1314,8 @@ def rebalance(
     portfolio_id: str | None = None,
     *,
     _followup: dict[str, Any] | None = None,
+    _preserve_existing_shares: frozenset[str] | set[str] | None = None,
+    _preserve_positions_sha256: str | None = None,
 ) -> None:
     """Simulate fills to reach target_weights * current_nav.
 
@@ -1149,9 +1331,45 @@ def rebalance(
     """
     # Validate before loading/recovering mutable account state.  An invalid current instruction is
     # never allowed to trigger a write, nor is it silently normalized into a different portfolio.
-    target_weights = validate_target_weights(target_weights)
+    target_weights = validate_target_weights(
+        target_weights,
+        portfolio_id=portfolio_id,
+    )
+    preserve_existing_shares = frozenset(_preserve_existing_shares or ())
+    preserve_mode = _preserve_positions_sha256 is not None
+    if preserve_mode:
+        if portfolio_id != "autonomous":
+            raise InvalidExecutionConstraints("preserve_mode_wrong_portfolio")
+        if preserve_existing_shares != frozenset(target_weights):
+            raise InvalidExecutionConstraints("preserve_tickers_target_set_mismatch")
+        if (
+            not isinstance(_preserve_positions_sha256, str)
+            or len(_preserve_positions_sha256) != 64
+            or any(ch not in "0123456789abcdef" for ch in _preserve_positions_sha256)
+        ):
+            raise InvalidExecutionConstraints("preserve_positions_sha256_invalid")
+    elif preserve_existing_shares:
+        raise InvalidExecutionConstraints("preserve_positions_sha256_missing")
     state = _load_account(portfolio_id)
     before_state = deepcopy(state)
+    if preserve_mode:
+        observed_positions_sha256 = positions_sha256(state.get("positions"))
+        if observed_positions_sha256 != _preserve_positions_sha256:
+            raise InvalidExecutionConstraints("positions_snapshot_mismatch")
+    preserved_lots: dict[str, dict[str, Any]] = {}
+    for ticker in sorted(preserve_existing_shares):
+        lot = (state.get("positions") or {}).get(ticker)
+        if not isinstance(lot, dict):
+            raise InvalidExecutionConstraints(f"preserved_position_missing:{ticker}")
+        try:
+            held_shares = float(lot.get("shares") or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise InvalidExecutionConstraints(
+                f"preserved_position_invalid:{ticker}"
+            ) from exc
+        if not math.isfinite(held_shares) or held_shares <= 1e-9:
+            raise InvalidExecutionConstraints(f"preserved_position_missing:{ticker}")
+        preserved_lots[ticker] = deepcopy(lot)
 
     current_nav = (
         state["cash"]
@@ -1171,6 +1389,11 @@ def rebalance(
     targeted = set(target_weights)                 # everything we INTEND to hold (priced or not)
     target_shares: dict[str, float] = {}
     for ticker, weight in target_weights.items():
+        if ticker in preserve_existing_shares:
+            # The operator migration has no authority to resize continuing common stocks.  Target
+            # weights remain in the complete book for identity/provenance, but share count is the
+            # executable invariant even if the price doubles between queue and settlement.
+            continue
         px = prices.get(ticker)
         if px is None or px <= 0:
             continue                               # targeted but unpriceable this run -> carry, don't trade
@@ -1276,6 +1499,10 @@ def rebalance(
                 "value": round(value, 2),
             })
 
+    for ticker, original_lot in preserved_lots.items():
+        if (state.get("positions") or {}).get(ticker) != original_lot:
+            raise InvalidExecutionConstraints(f"preserved_position_changed:{ticker}")
+
     try:
         _commit_account_and_fills(
             before_state,
@@ -1320,6 +1547,16 @@ def execute_fill(ticker: str, side: str, *, weight: float | None = None,
     ticker = ticker.upper()
     side = (side or "").lower()
     asof = asof or date.today().isoformat()
+    # The advisor/single-fill path bypasses complete-target normalization.  Apply the same positive
+    # identity policy before even loading recoverable account state so it cannot become a side door
+    # for an ETF or an unverified symbol.  Sells deliberately remain unrestricted: legacy ETF
+    # inventory must always be exitable from the common-stock-only successor book.
+    if side == "buy" and portfolio_id == "autonomous":
+        validate_target_weights(
+            {ticker: 1.0},
+            require_canonical_tickers=True,
+            portfolio_id=portfolio_id,
+        )
     state = _load_account(portfolio_id)
     before_state = deepcopy(state)
     px = price if (price and price > 0) else _current_price(ticker)
@@ -1446,6 +1683,10 @@ def queue_orders(
                (empty/zero) so a first-ever build on a fresh account still sizes sanely.
     fill_after : the next-open date string for display.
     """
+    target_weights = validate_target_weights(
+        target_weights,
+        portfolio_id=portfolio_id,
+    )
     state = _load_account(portfolio_id)
     if nav_base is None or float(nav_base) <= 0.0:
         nav_base = state["cash"] + sum(
@@ -1576,6 +1817,16 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
     pending = load_pending(portfolio_id)
     if not pending:
         return []
+    if portfolio_id == "autonomous":
+        # A pre-v2/manual pending-order artifact must not bypass the complete-target boundary.
+        # Validate every BUY before account recovery/mutation; SELL rows stay unrestricted so
+        # inherited ETFs remain removable.
+        buy_targets = {
+            str(order.get("ticker") or "").upper().strip(): 1.0
+            for order in pending
+            if str(order.get("side") or "buy").lower() != "sell"
+        }
+        validate_target_weights(buy_targets, portfolio_id=portfolio_id)
     state = _load_account(portfolio_id)
     before_state = deepcopy(state)
     fills: list[dict] = []
@@ -1670,6 +1921,9 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
 PENDING_TARGET_SCHEMA_V2 = "pending_target.v2"
 US_BRAIN_ENGINE_V2 = "us_brain_v2"
 PENDING_DECISION_SCHEMA_V1 = "pending_decision.v1"
+EXECUTION_CONSTRAINTS_SCHEMA_V1 = "execution_constraints.v1"
+PRESERVE_EXISTING_SHARES_MODE = "preserve_existing_shares"
+AUTONOMOUS_LEGACY_ETF_MIGRATION_SCHEMA_V1 = "autonomous_legacy_etf_migration.v1"
 _MAX_PENDING_DECISION_BYTES = 1_000_000
 
 
@@ -1681,6 +1935,24 @@ class PendingTargetQuarantined(RuntimeError):
         super().__init__(
             f"pending target quarantined for {result.get('portfolio_id')}: "
             f"{result.get('reason')}"
+        )
+
+
+class InvalidExecutionConstraints(ValueError):
+    """A privileged executable constraint failed its narrow authorization contract."""
+
+    def __init__(self, reason: str):
+        self.reason = str(reason)
+        super().__init__(f"invalid execution constraints: {self.reason}")
+
+
+class PendingTargetCASConflict(RuntimeError):
+    """A require-absent queue write lost its compare-and-swap precondition."""
+
+    def __init__(self, portfolio_id: str | None = None):
+        self.portfolio_id = portfolio_id or "flagship"
+        super().__init__(
+            f"pending target already exists for {self.portfolio_id}; require-absent save refused"
         )
 
 
@@ -1790,6 +2062,105 @@ def _pending_decision_record(
     }
 
 
+def _validated_execution_constraints(
+    execution_constraints: Any,
+    *,
+    target: dict[str, float],
+    decision_snapshot: dict[str, Any] | None,
+    portfolio_id: str | None,
+) -> dict[str, Any] | None:
+    """Authorize the one narrow share-preservation mode used by the ETF migration.
+
+    Generic PM targets carry no constraints and retain ordinary weight-based semantics.  A
+    preservation constraint is accepted only when it is hash-bound to this exact autonomous target
+    and its accepted decision snapshot proves the deterministic operator-migration schema.  Exact
+    set equality prevents the privilege from hiding a resize/add beside the preserved positions.
+    """
+    if execution_constraints is None:
+        return None
+    if portfolio_id != "autonomous":
+        raise InvalidExecutionConstraints("unauthorized_portfolio")
+    if not isinstance(execution_constraints, dict):
+        raise InvalidExecutionConstraints("constraint_not_object")
+    expected_fields = {
+        "schema",
+        "mode",
+        "tickers",
+        "target_sha256",
+        "positions_sha256",
+    }
+    if set(execution_constraints) != expected_fields:
+        raise InvalidExecutionConstraints("unexpected_constraint_fields")
+    if execution_constraints.get("schema") != EXECUTION_CONSTRAINTS_SCHEMA_V1:
+        raise InvalidExecutionConstraints("unsupported_constraint_schema")
+    if execution_constraints.get("mode") != PRESERVE_EXISTING_SHARES_MODE:
+        raise InvalidExecutionConstraints("unsupported_constraint_mode")
+
+    digest = _target_sha256(target)
+    if execution_constraints.get("target_sha256") != digest:
+        raise InvalidExecutionConstraints("constraint_target_sha256_mismatch")
+    positions_digest = execution_constraints.get("positions_sha256")
+    if (
+        not isinstance(positions_digest, str)
+        or len(positions_digest) != 64
+        or any(ch not in "0123456789abcdef" for ch in positions_digest)
+    ):
+        raise InvalidExecutionConstraints("constraint_positions_sha256_invalid")
+    raw_tickers = execution_constraints.get("tickers")
+    if not isinstance(raw_tickers, list):
+        raise InvalidExecutionConstraints("constraint_tickers_not_list")
+    tickers: list[str] = []
+    for raw_ticker in raw_tickers:
+        ticker = _canonical_target_ticker(raw_ticker)
+        if not ticker or raw_ticker != ticker:
+            raise InvalidExecutionConstraints("constraint_ticker_noncanonical")
+        tickers.append(ticker)
+    if tickers != sorted(set(tickers)):
+        raise InvalidExecutionConstraints("constraint_tickers_not_sorted_unique")
+    if tickers != sorted(target):
+        raise InvalidExecutionConstraints("constraint_tickers_target_set_mismatch")
+
+    decision = decision_snapshot
+    if (
+        not isinstance(decision, dict)
+        or decision.get("schema_version") != PENDING_DECISION_SCHEMA_V1
+        or decision.get("portfolio_id") != "autonomous"
+        or decision.get("target_sha256") != digest
+        or not isinstance(decision.get("submission"), dict)
+    ):
+        raise InvalidExecutionConstraints("unauthorized_decision_snapshot")
+    migration = decision["submission"].get("operator_migration")
+    if (
+        not isinstance(migration, dict)
+        or migration.get("schema") != AUTONOMOUS_LEGACY_ETF_MIGRATION_SCHEMA_V1
+        or migration.get("paper_only") is not True
+    ):
+        raise InvalidExecutionConstraints("unauthorized_operator_migration")
+    preserved = migration.get("preserved_common_stocks")
+    if not isinstance(preserved, list):
+        raise InvalidExecutionConstraints("migration_preserved_tickers_not_list")
+    normalized_preserved: list[str] = []
+    for raw_ticker in preserved:
+        ticker = _canonical_target_ticker(raw_ticker)
+        if not ticker or raw_ticker != ticker:
+            raise InvalidExecutionConstraints("migration_preserved_ticker_noncanonical")
+        normalized_preserved.append(ticker)
+    if normalized_preserved != sorted(set(normalized_preserved)):
+        raise InvalidExecutionConstraints("migration_preserved_tickers_not_sorted_unique")
+    if normalized_preserved != tickers:
+        raise InvalidExecutionConstraints("migration_preserved_tickers_mismatch")
+    if migration.get("positions_sha256") != positions_digest:
+        raise InvalidExecutionConstraints("migration_positions_sha256_mismatch")
+
+    return {
+        "schema": EXECUTION_CONSTRAINTS_SCHEMA_V1,
+        "mode": PRESERVE_EXISTING_SHARES_MODE,
+        "tickers": tickers,
+        "target_sha256": digest,
+        "positions_sha256": positions_digest,
+    }
+
+
 def pending_target_contract_error(payload: dict[str, Any] | None,
                                   portfolio_id: str | None = None) -> str | None:
     """Return an incompatibility reason for an executable pending target, else ``None``.
@@ -1810,6 +2181,7 @@ def pending_target_contract_error(payload: dict[str, Any] | None,
         target = validate_target_weights(
             payload.get("target"),
             require_canonical_tickers=True,
+            portfolio_id=portfolio_id,
         )
     except InvalidTargetWeights as exc:
         return f"invalid_target:{exc.reason}"
@@ -1825,6 +2197,18 @@ def pending_target_contract_error(payload: dict[str, Any] | None,
             return "malformed_decision_submission"
         if decision.get("target_sha256") != _target_sha256(target):
             return "decision_snapshot_target_mismatch"
+    try:
+        if "execution_constraints" in payload:
+            if payload.get("execution_constraints") is None:
+                raise InvalidExecutionConstraints("constraint_not_object")
+            _validated_execution_constraints(
+                payload.get("execution_constraints"),
+                target=target,
+                decision_snapshot=decision,
+                portfolio_id=portfolio_id,
+            )
+    except InvalidExecutionConstraints as exc:
+        return f"invalid_execution_constraints:{exc.reason}"
     return None
 
 
@@ -1863,7 +2247,10 @@ def quarantine_pending_target(portfolio_id: str | None, reason: str,
             "schema_version": PENDING_TARGET_SCHEMA_V2,
             "engine_version": US_BRAIN_ENGINE_V2,
             "portfolio_id": "autonomous",
-            "target_weights": "canonical_finite_long_only_gross_lte_one",
+            "target_weights": (
+                "canonical_positively_verified_us_common_stock_only_"
+                "finite_long_only_gross_lte_one"
+            ),
         } if portfolio_id == "autonomous" else {
             "portfolio_id": portfolio_id or "flagship",
             "target_weights": "canonical_finite_long_only_gross_lte_one",
@@ -1962,44 +2349,77 @@ def save_pending_target(
     portfolio_id: str | None = None,
     *,
     decision_snapshot: dict[str, Any] | None = None,
+    execution_constraints: dict[str, Any] | None = None,
+    require_pending_absent: bool = False,
 ) -> None:
     """Atomically persist the latest decided target and its accepted PM provenance.
 
     ``decision_snapshot`` is optional for backward-compatible/operator queues.  All active Brain
     loops provide it.  When present, it is embedded in the same atomic file and hash-bound to the
     numeric target, so a later failed refinement cannot erase or misattribute the eventual fill.
+    ``execution_constraints`` is privileged and normally absent; only the hash-bound autonomous
+    legacy-ETF operator migration may request exact-share preservation.  Every writer serializes on
+    the paper-transaction lock.  ``require_pending_absent`` upgrades the operator migration's
+    pre-save observation into an atomic compare-and-swap; generic PM writers retain latest-wins.
     """
-    target = validate_target_weights(target_weights)
-    _ensure_dir(portfolio_id)
-    payload = {
-        "target": target,
-        "asof": asof,
-        "queued_at": datetime.now(timezone.utc).isoformat(),
-    }
+    target = validate_target_weights(
+        target_weights,
+        portfolio_id=portfolio_id,
+    )
     decision = _pending_decision_record(
         decision_snapshot,
         target=target,
         asof=asof,
         portfolio_id=portfolio_id,
     )
+    constraints = _validated_execution_constraints(
+        execution_constraints,
+        target=target,
+        decision_snapshot=decision,
+        portfolio_id=portfolio_id,
+    )
+    payload = {
+        "target": target,
+        "asof": asof,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    }
     if decision is not None:
         payload["decision_snapshot"] = decision
+    if constraints is not None:
+        payload["execution_constraints"] = constraints
     if portfolio_id == "autonomous":
         payload.update({
             "schema_version": PENDING_TARGET_SCHEMA_V2,
             "engine_version": US_BRAIN_ENGINE_V2,
             "portfolio_id": "autonomous",
         })
-    path = _pending_target_path(portfolio_id)
-    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-        os.replace(tmp, path)
-    finally:
+    if not isinstance(require_pending_absent, bool):
+        raise TypeError("require_pending_absent must be boolean")
+    with _paper_transaction_lock(portfolio_id):
+        path = _pending_target_path(portfolio_id)
+        if constraints is not None:
+            if _transaction_path(portfolio_id).exists():
+                raise PaperTransactionConflict(
+                    "cannot queue operator migration with an unresolved paper transaction"
+                )
+            current_account = _load_account_file(portfolio_id, strict=True)
+            if positions_sha256(current_account.get("positions")) != constraints.get(
+                "positions_sha256"
+            ):
+                raise InvalidExecutionConstraints(
+                    "positions_snapshot_changed_before_queue"
+                )
+        if require_pending_absent and path.exists():
+            raise PendingTargetCASConflict(portfolio_id)
+        tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
         try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
+            tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            try:
+                tmp.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _read_pending_target_payload(portfolio_id: str | None = None) -> dict | None:
@@ -2057,6 +2477,19 @@ def settle_target(prices: dict[str, float], asof: str,
     target = validate_target_weights(
         pt.get("target") or {},
         require_canonical_tickers=True,
+        portfolio_id=portfolio_id,
+    )
+    constraints = _validated_execution_constraints(
+        pt.get("execution_constraints") if "execution_constraints" in pt else None,
+        target=target,
+        decision_snapshot=pt.get("decision_snapshot"),
+        portfolio_id=portfolio_id,
+    )
+    preserve_existing_shares = (
+        frozenset(constraints["tickers"]) if constraints is not None else None
+    )
+    preserve_positions_sha256 = (
+        constraints["positions_sha256"] if constraints is not None else None
     )
     missing_prices = unpriceable_target_requirements(
         target,
@@ -2077,6 +2510,8 @@ def settle_target(prices: dict[str, float], asof: str,
         asof,
         portfolio_id=portfolio_id,
         _followup=followup,
+        _preserve_existing_shares=preserve_existing_shares,
+        _preserve_positions_sha256=preserve_positions_sha256,
     )
     # Test doubles and older embedders may replace ``rebalance`` with a compatible callable that
     # ignores the private transaction follow-up.  Clear only if the exact original target still
@@ -2090,7 +2525,8 @@ def settle_target(prices: dict[str, float], asof: str,
 
 
 def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
-         benchmark: str | None = None) -> None:
+         benchmark: str | None = None, *,
+         mark_source: str = "paper_account_mark") -> None:
     """Snapshot NAV to nav_history.jsonl. Also initialises the benchmark shares on first call.
 
     The benchmark symbol is registry-resolved per book. Its normalized shares remain in the
@@ -2118,19 +2554,34 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         state["benchmark_symbol"] = bench
         _save_account(state, portfolio_id)
 
-    # ADDITIVE: persist each held position's latest mark onto the account so non-mark readers
-    # (and the dashboard) have a stored current_price even between live-quote refreshes. We use the
-    # SAME prices dict the NAV computation below uses, falling back to avg_cost when a name has no
-    # live quote this run (so a stale/missing quote can't be written as a misleadingly precise mark).
-    # Existing readers ignore the field; nav() still recomputes from `prices`, so this never alters NAV.
+    # Persist each held position's latest *observed* mark so closed-market readers can value the
+    # account at its last completed mark.  A missing quote MUST NOT overwrite that evidence with
+    # avg_cost: doing so turns an absent feed into a fabricated zero P&L and destroys the only EOD
+    # price the dashboard can carry overnight.  The mark's date/source travel with the value, and a
+    # backfill for an older date cannot roll a newer stored mark backward.  This metadata is display
+    # provenance only; execution continues to require the explicit ``prices`` argument elsewhere.
     _marked_any = False
+    _mark_asof = str(asof)[:10]
+    _mark_source = str(mark_source or "paper_account_mark").strip() or "paper_account_mark"
     for ticker, pos in state["positions"].items():
         px = prices.get(ticker)
-        if px is None or px <= 0:
-            px = pos.get("avg_cost")
-        if px is not None:
-            pos["current_price"] = round(float(px), 4)
-            _marked_any = True
+        try:
+            px = float(px) if px is not None else None
+        except (TypeError, ValueError):
+            px = None
+        if px is None or not math.isfinite(px) or px <= 0:
+            continue
+        previous_asof = str(pos.get("current_price_asof") or "")[:10]
+        try:
+            if previous_asof and date.fromisoformat(previous_asof) > date.fromisoformat(_mark_asof):
+                continue
+        except (TypeError, ValueError):
+            pass
+        pos["current_price"] = round(px, 4)
+        pos["current_price_asof"] = _mark_asof
+        pos["current_price_source"] = _mark_source
+        pos["current_price_time_kind"] = "portfolio_mark_date"
+        _marked_any = True
     if _marked_any:
         _save_account(state, portfolio_id)
 

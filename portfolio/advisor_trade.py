@@ -350,6 +350,22 @@ def propose_action(
             "ticker": normalized_ticker,
             "error": f"unsupported action '{normalized_action}'",
         }
+    if normalized_action in {"add", "trim"}:
+        from portfolio import instrument_policy
+
+        identity = instrument_policy.classify_us_instrument(normalized_ticker)
+        if not (
+            identity.get("kind") == "common_stock"
+            and identity.get("verified") is True
+        ):
+            return {
+                "ok": False,
+                "executed": False,
+                "ticker": normalized_ticker,
+                "action": normalized_action,
+                "error": "US portfolio proposals are verified-common-stock-only",
+                "identity_status": identity.get("status") or "unverified_identity",
+            }
     if not normalized_thesis:
         return {
             "ok": False,

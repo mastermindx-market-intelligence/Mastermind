@@ -51,6 +51,8 @@ def test_mark_persists_current_price(tmp_account: None) -> None:
     state = paper_account._load_account()
     assert state["positions"]["AAPL"]["current_price"] == 200.0
     assert state["positions"]["MSFT"]["current_price"] == 400.0
+    assert state["positions"]["AAPL"]["current_price_asof"] == "2026-01-02"
+    assert state["positions"]["AAPL"]["current_price_source"] == "paper_account_mark"
 
     # a later mark at higher prices updates the persisted current_price in place
     paper_account.mark(_PRICES_UP, "2026-01-03")
@@ -59,18 +61,34 @@ def test_mark_persists_current_price(tmp_account: None) -> None:
     assert state["positions"]["MSFT"]["current_price"] == 440.0
 
 
-def test_mark_current_price_falls_back_to_avg_cost(tmp_account: None) -> None:
-    """A held name with NO live quote this run gets its avg_cost stamped (never a stale/garbage
-    mark), and NAV is unaffected (nav() still recomputes from the prices dict)."""
+def test_mark_missing_price_retains_prior_observed_mark(tmp_account: None) -> None:
+    """A missing quote cannot erase the last valid EOD mark or fabricate zero P&L at avg_cost."""
     from portfolio import paper_account
 
     paper_account.rebalance({"AAPL": 0.5}, _PRICES, "2026-01-02")
     avg = paper_account._load_account()["positions"]["AAPL"]["avg_cost"]
+    paper_account.mark({"AAPL": 210.0, "SPY": 500.0}, "2026-01-02")
 
-    # mark with NO AAPL price (only the benchmark) — AAPL must fall back to its avg_cost
+    # The following day's benchmark-only run has no AAPL evidence. Retain 210.0 and its original
+    # provenance instead of replacing it with the unrelated cost basis.
     paper_account.mark({"SPY": 500.0}, "2026-01-03")
     state = paper_account._load_account()
-    assert state["positions"]["AAPL"]["current_price"] == round(avg, 4)
+    lot = state["positions"]["AAPL"]
+    assert lot["current_price"] == 210.0
+    assert lot["current_price"] != round(avg, 4)
+    assert lot["current_price_asof"] == "2026-01-02"
+
+
+def test_mark_backfill_cannot_regress_persisted_price(tmp_account: None) -> None:
+    from portfolio import paper_account
+
+    paper_account.rebalance({"AAPL": 0.5}, _PRICES, "2026-01-02")
+    paper_account.mark({"AAPL": 220.0, "SPY": 500.0}, "2026-01-03")
+    paper_account.mark({"AAPL": 180.0, "SPY": 490.0}, "2026-01-02")
+
+    lot = paper_account._load_account()["positions"]["AAPL"]
+    assert lot["current_price"] == 220.0
+    assert lot["current_price_asof"] == "2026-01-03"
 
 
 def test_mark_current_price_does_not_change_nav(tmp_account: None) -> None:
