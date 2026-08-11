@@ -1,0 +1,118 @@
+# config/strategic_state.yml — what the company is currently trying to accomplish.
+#
+# DOCUMENTATION-AS-CONFIG (same contract as config/authority_map.yml): this file is
+# both the human-readable statement of company strategy and the machine-verifiable
+# table that tests/test_strategic_state.py asserts over.
+#
+# SOURCE LAW: research/MASTERMIND_CHARTER_V2.md is the constitution and outranks this
+# file. The charter states the PERMANENT principles (P1-P10); this file states the
+# CURRENT objective set. Where they conflict, the charter wins and this file is
+# amended — never the reverse. Charter P7 (one source of truth per concept) is why
+# this is the only file that answers "what is the company working on right now."
+#
+# WHAT THIS FILE IS NOT. It is not a control plane, a scheduler, or a job queue, and
+# no runtime behavior keys off it. control_plane/ owns job governance,
+# config/authority_map.yml owns the A0-A7 authority ladder, config/agents.yml owns
+# seats and model routing, brain/improvement_agenda.py owns the ranked work queue.
+# Wiring an execution path that reads this file to decide what to RUN would create a
+# second control plane — prohibited by `constraints` below and by Phase 0 census §6.1.
+#
+# WHO EDITS IT. The Chairman or the AI CEO seat, as a recorded decision. A worker
+# session may NOT rewrite the objective set to match whatever it happens to be
+# building; that is the reinterpretation failure the executive contract forbids
+# (see AGENTS.md § "Executive contract").
+
+schema: mastermind.strategic_state.v1
+
+meta:
+  title: Mastermind-X company strategic state
+  canonical_home: mastermind
+  authority: advisory_and_orientation_only
+  as_of: 2026-08-11
+  charter: research/MASTERMIND_CHARTER_V2.md
+  contract: AGENTS.md
+  origin: research/EXECUTIVE_OS_PHASE0_CENSUS.md   # Macro repo; census §5 item 2
+  maintenance: >
+    Change this file only when company strategy actually changes — a P0 is added,
+    retired, or re-scoped, or a review trigger fires. Live PR state, per-task
+    priorities, and evidence belong in the improvement agenda and the build maps,
+    not here.
+
+# Allowed vocabularies. Declared so a typo becomes a red test rather than a silent
+# new department / status / constraint class.
+departments: [prophet, product, marketing, executive]
+statuses: [active, paused, achieved, retired]
+constraint_levels: [permitted, constrained, prohibited]
+
+company_phase: PRE_REVENUE_MVP_CONVERGENCE
+
+north_star:
+  - improve durable out_of_sample market forecasting
+  - make Mastermind coherent and trustworthy enough for real users
+  - establish first repeatable revenue acquisition loop
+  - build a continuously improving AI-led organization
+
+p0:
+  - id: US_PROPHET_ENTRY_TIMING
+    department: prophet
+    objective: >
+      Diagnose and materially reduce structural late-entry behavior in US Prophet
+      without unacceptable false-positive cost.
+    status: active
+
+  - id: PRODUCT_TRUST_COHERENCE
+    department: product
+    objective: >
+      Remove AI-generated residue, inconsistent UX/CSS, dead surfaces, confusing
+      structure, and other obvious unfinished-product signals.
+    status: active
+
+  - id: MONETIZATION_AND_ONBOARDING
+    department: product
+    objective: >
+      Complete signup, trial, billing, entitlement, paywall, activation,
+      analytics, and lifecycle paths required for revenue.
+    status: active
+
+  - id: ZERO_TO_ONE_ACQUISITION
+    department: marketing
+    objective: >
+      Find and prove the first repeatable path from zero traffic to qualified
+      prospects and paying users.
+    status: active
+
+  - id: EXECUTIVE_OS
+    department: executive
+    objective: >
+      Establish durable CEO->COO->worker execution with resource-aware routing,
+      persistence, verification, and failover.
+    status: active
+
+# Intended share of company effort per investment bucket. Buckets are NOT departments
+# (one department can draw on several): they are the axes the Chairman/CEO rebalance.
+# Advisory — nothing auto-throttles off these numbers. Must sum to ~1.0.
+resource_policy:
+  prophet_quality: 0.30
+  product_ux: 0.25
+  monetization: 0.15
+  go_to_market: 0.15
+  executive_infrastructure: 0.10
+  exploratory_rd: 0.05
+
+# Standing limits on what may be started or armed at this company phase. `prohibited`
+# means a worker may not do it under any local justification — only a recorded
+# Chairman/CEO decision that amends this file can change the level.
+constraints:
+  new_feature_expansion: constrained
+  autonomous_production_deploy: prohibited
+  autonomous_live_capital_execution: prohibited
+  duplicate_control_planes: prohibited
+  marketing_org_expansion_before_distribution_proof: prohibited
+
+# Events that force a re-read of this whole file. Reaching one is not itself a
+# strategy change — it is the trigger to hold the review.
+review_triggers:
+  - first_10_paying_users
+  - material_us_prophet_entry_improvement
+  - mvp_product_trust_gate_passed
+  - executive_worker_fleet_operational

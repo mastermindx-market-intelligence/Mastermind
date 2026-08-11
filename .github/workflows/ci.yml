@@ -66,6 +66,7 @@ jobs:
           tests/test_book_state_isolation.py
           tests/test_vendored_read_ratchet.py
           tests/test_executive_os_runtime.py
+          tests/test_strategic_state.py
 
       - name: Run Portfolio v2 safety gate
         run: >-
