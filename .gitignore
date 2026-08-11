@@ -46,6 +46,7 @@ catboost_info/
 data/portfolio_watch/
 data/governance/
 data/locks/
+data/control_plane/
 
 # Session-local configuration, archives, and credential-bearing backups.
 .claude/launch.json
