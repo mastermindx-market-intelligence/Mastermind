@@ -1,14 +1,18 @@
 """Deterministic instrument identity policy for executable portfolio targets.
 
-The US Brain is a common-stock-only book.  A ticker-shaped string, a quote, or a
-signal artifact does not prove that an instrument is a common stock: all of
-those surfaces also contain ETFs.  This module therefore distinguishes negative
-authority (trusted ETF metadata can reject immediately) from positive authority
-(only the canonical per-company ``stockdata`` contract can approve a name).
+Every active AI portfolio is a single-name-equity book.  A ticker-shaped string,
+a quote, or a signal artifact does not prove that an instrument is an eligible
+stock: those surfaces also contain ETFs, funds, indices, warrants, and other
+pooled products.  Positive authority is market-specific and local:
 
-The policy is intentionally read-only and fail-closed.  Missing or conflicting
+* US Brain — the canonical per-company ``stockdata`` contract.
+* CN Brain — exact membership in Macro's validated A-share stock heatmap.
+* HK Brain — exact membership in Macro's validated official HSCI universe or
+  its validated Hong Kong stock heatmap.
+
+The policy is read-only and fail-closed.  Missing, malformed, or conflicting
 metadata returns ``unknown``; callers must not turn that into executable intent.
-Regional books and the archived ETF book do not use this policy.
+The archived ETF book and the user's self-directed book remain outside it.
 """
 
 from __future__ import annotations
@@ -19,6 +23,9 @@ from pathlib import Path
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parent.parent
+
+POLICY_NAME = "single_name_equity_only"
+POLICY_VERSION = "single_name_equity.v1"
 
 # Negative authority only.  The retired ETF book has a deliberately narrow
 # allocation universe; these additional well-known funds close obvious gaps in
@@ -90,6 +97,43 @@ _NON_COMMON_SECURITY_TYPES = frozenset(
         "cryptocurrency",
     }
 )
+_US_COMPANY_EXCHANGES = frozenset(
+    {"NASDAQ", "NYSE", "NYSE AMERICAN", "NYSE MKT"}
+)
+
+_CHINA_STOCK_SYMBOL = re.compile(
+    r"(?:(?:600|601|603|605|688|689)\d{3}\.SS|"
+    r"(?:000|001|002|003|300|301|302)\d{3}\.SZ)"
+)
+_CHINA_TICKER = re.compile(r"\d{6}\.(?:SS|SZ)")
+_HK_STOCK_SYMBOL = re.compile(r"\d{4}\.HK")
+
+# Reviewed negative authority for representative/high-liquidity regional funds.
+# This list is intentionally not the positive universe: an unlisted ETF still
+# fails closed because it cannot appear in either trusted stock master.  These
+# rows additionally authorize deterministic removal if inherited inventory is
+# ever discovered.
+_KNOWN_CHINA_ETFS = frozenset(
+    {
+        "159919.SZ",  # Harvest CSI 300 ETF
+        "510050.SS",  # ChinaAMC SSE 50 ETF
+        "510300.SS",  # Huatai-PineBridge CSI 300 ETF
+        "510500.SS",  # China Southern CSI 500 ETF
+        "512100.SS",  # China Southern CSI 1000 ETF
+    }
+)
+_KNOWN_HK_ETFS = frozenset(
+    {
+        "2800.HK",  # Tracker Fund of Hong Kong
+        "2822.HK",  # CSOP FTSE China A50 ETF
+        "2823.HK",  # iShares FTSE A50 China Index ETF
+        "2828.HK",  # Hang Seng China Enterprises Index ETF
+        "3033.HK",  # CSOP Hang Seng TECH Index ETF
+        "3067.HK",  # iShares Hang Seng TECH ETF
+        "3088.HK",  # ChinaAMC Hang Seng TECH Index ETF
+    }
+)
+_KNOWN_REGIONAL_INDICES = frozenset({"000300.SS", "000001.SS", "399001.SZ", "^HSI"})
 
 
 def _clean_text(value: Any, limit: int = 500) -> str:
@@ -181,6 +225,31 @@ def _security_type(payload: dict[str, Any]) -> str:
         if normalized:
             return normalized
     return ""
+
+
+def _canonical_company_profile(stockdata: dict[str, Any]) -> bool:
+    """Whether the canonical snapshot carries narrow operating-company evidence.
+
+    Some legitimate issuers use their ticker as the display name (for example RH)
+    and omit ``security_type``.  A recognized US company exchange plus an SEC SIC
+    description is still positive company evidence; an entity-style prefix in the
+    canonical profile description covers names such as ``AGCO Corporation``.  ETF
+    listings normally have neither, and all explicit negative identity checks run
+    before this function is consulted.
+    """
+    profile = (
+        stockdata.get("profile")
+        if isinstance(stockdata.get("profile"), dict)
+        else {}
+    )
+    exchange = _clean_text(profile.get("exchange"), 100).upper()
+    sic_description = _clean_text(profile.get("sic_description"), 300)
+    if exchange in _US_COMPANY_EXCHANGES and sic_description:
+        return True
+
+    description = _clean_text(profile.get("description"), 1000)
+    prefix, marker, _ = description.partition(" is ")
+    return bool(marker and _CORPORATE_LEGAL_SUFFIX.search(prefix.strip()))
 
 
 def classify_us_instrument(ticker: Any) -> dict[str, Any]:
@@ -324,6 +393,13 @@ def classify_us_instrument(ticker: Any) -> dict[str, Any]:
             "status": "weak_etf_taxonomy_not_identity_authority",
             "verified": False,
         }
+    if name and _canonical_company_profile(stockdata):
+        return {
+            "ticker": symbol,
+            "kind": "common_stock",
+            "status": "trusted_company_profile.v1",
+            "verified": True,
+        }
     if company_name and sector:
         return {
             "ticker": symbol,
@@ -345,3 +421,275 @@ def executable_common_stock_error(ticker: str) -> str | None:
     if identity.get("kind") == "common_stock" and identity.get("verified") is True:
         return None
     return f"non_common_stock:{ticker}:{identity.get('status') or 'unverified_identity'}"
+
+
+def _validated_stock_heatmap(portfolio_id: str) -> tuple[dict[str, dict[str, Any]], str]:
+    """Return an exact trusted regional stock map or an explicit invalid status.
+
+    A single malformed row taints the authority artifact.  Silently filtering a
+    bad nested row could manufacture positive identity from an incomplete map.
+    """
+    contracts = {
+        "china": ("marketdata/china_heatmap.json", "china", "chinastockdata"),
+        "hk": ("marketdata/hk_heatmap.json", "hk", "hkstockdata"),
+    }
+    if portfolio_id not in contracts:
+        return {}, "unsupported_regional_book"
+    relative, market, stockdata_dir = contracts[portfolio_id]
+    payload = _read_macro_json(relative)
+    if not isinstance(payload, dict):
+        return {}, "missing_regional_stock_heatmap"
+    tiles = payload.get("tiles")
+    n_tiles = payload.get("n_tiles")
+    if (
+        payload.get("market") != market
+        or payload.get("map_type") != "stocks"
+        or payload.get("stockdata_dir") != stockdata_dir
+        or not isinstance(tiles, list)
+        or isinstance(n_tiles, bool)
+        or not isinstance(n_tiles, int)
+        or n_tiles <= 0
+        or n_tiles != len(tiles)
+    ):
+        return {}, "invalid_regional_stock_heatmap_contract"
+
+    rows: dict[str, dict[str, Any]] = {}
+    pattern = _CHINA_TICKER if portfolio_id == "china" else _HK_STOCK_SYMBOL
+    for raw in tiles:
+        if not isinstance(raw, dict):
+            return {}, "invalid_regional_stock_heatmap_rows"
+        ticker = raw.get("t") or raw.get("ticker")
+        if (
+            not isinstance(ticker, str)
+            or ticker != ticker.upper().strip()
+            or pattern.fullmatch(ticker) is None
+            or ticker in rows
+        ):
+            return {}, "invalid_regional_stock_heatmap_rows"
+        if not any(
+            isinstance(raw.get(field), str) and raw.get(field).strip()
+            for field in ("name", "name_zh", "security_name")
+        ):
+            return {}, "invalid_regional_stock_heatmap_rows"
+        rows[ticker] = raw
+    return rows, "trusted_regional_stock_heatmap.v1"
+
+
+def _validated_hk_official_universe() -> tuple[set[str], str]:
+    """Return the official HSCI constituent universe when its provenance is intact."""
+    payload = _read_macro_json("hk_stocks_ext/_universe.json")
+    if not isinstance(payload, dict):
+        return set(), "missing_hk_official_stock_universe"
+    tickers = payload.get("tickers")
+    count = payload.get("n")
+    source = _clean_text(payload.get("source"), 500)
+    if (
+        not isinstance(tickers, list)
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or count <= 0
+        or count != len(tickers)
+        or not source.startswith("https://www.hsi.com.hk/")
+    ):
+        return set(), "invalid_hk_official_stock_universe_contract"
+    normalized: list[str] = []
+    for ticker in tickers:
+        if (
+            not isinstance(ticker, str)
+            or ticker != ticker.upper().strip()
+            or _HK_STOCK_SYMBOL.fullmatch(ticker) is None
+        ):
+            return set(), "invalid_hk_official_stock_universe_rows"
+        normalized.append(ticker)
+    if len(set(normalized)) != len(normalized):
+        return set(), "invalid_hk_official_stock_universe_rows"
+    return set(normalized), "trusted_hsci_constituent_universe.v1"
+
+
+def _regional_row_identity(
+    portfolio_id: str,
+    symbol: str,
+    row: dict[str, Any] | None,
+    *,
+    source_status: str,
+) -> dict[str, Any]:
+    """Turn one positively matched regional stock-master row into identity."""
+    if isinstance(row, dict):
+        security_type = _security_type(row)
+        if security_type in _NON_COMMON_SECURITY_TYPES:
+            kind = "etf" if security_type in {
+                "etf",
+                "exchange traded fund",
+                "exchange-traded fund",
+            } else "non_common_instrument"
+            return {
+                "ticker": symbol,
+                "kind": kind,
+                "status": "regional_master_non_common_security_type",
+                "verified": True,
+                "liquidation_authorized": True,
+            }
+        if _EXPLICIT_ETF_LABEL.search(_explicit_identity_labels(row)):
+            return {
+                "ticker": symbol,
+                "kind": "etf",
+                "status": "trusted_regional_etf_metadata",
+                "verified": True,
+                "liquidation_authorized": True,
+            }
+    return {
+        "ticker": symbol,
+        "kind": "common_stock",
+        "status": source_status,
+        "verified": True,
+        "market": portfolio_id,
+    }
+
+
+def _classify_regional_instrument(portfolio_id: str, ticker: Any) -> dict[str, Any]:
+    symbol = str(ticker or "").upper().strip()
+    expected = _CHINA_TICKER if portfolio_id == "china" else _HK_STOCK_SYMBOL
+    if symbol in _KNOWN_REGIONAL_INDICES:
+        return {
+            "ticker": symbol,
+            "kind": "index",
+            "status": "regional_benchmark_index",
+            "verified": True,
+            "liquidation_authorized": True,
+        }
+    if expected.fullmatch(symbol) is None:
+        # Asset identity and venue eligibility are deliberately separate.  A
+        # legacy HK company in the CN account is still a stock (so omission can
+        # preserve it until an evidenced exit), but executable_equity_error()
+        # rejects it for the wrong book and proposed holdings are venue-gated.
+        if portfolio_id == "china" and _HK_STOCK_SYMBOL.fullmatch(symbol):
+            return _classify_regional_instrument("hk", symbol)
+        if portfolio_id == "hk" and _CHINA_TICKER.fullmatch(symbol):
+            return _classify_regional_instrument("china", symbol)
+        return {
+            "ticker": symbol,
+            "kind": "invalid",
+            "status": f"non_{portfolio_id}_venue_or_ticker_syntax",
+            "verified": False,
+        }
+    if symbol in (_KNOWN_CHINA_ETFS if portfolio_id == "china" else _KNOWN_HK_ETFS):
+        return {
+            "ticker": symbol,
+            "kind": "etf",
+            "status": "reviewed_regional_etf_registry.v1",
+            "verified": True,
+            "liquidation_authorized": True,
+        }
+    if portfolio_id == "china" and _CHINA_STOCK_SYMBOL.fullmatch(symbol) is None:
+        # Same-suffix fund/bond/index namespaces are not company-share authority.
+        # Unknown codes fail closed but do not authorize a guessed liquidation.
+        return {
+            "ticker": symbol,
+            "kind": "unknown",
+            "status": "not_a_recognized_a_share_stock_code",
+            "verified": False,
+        }
+
+    heatmap, heatmap_status = _validated_stock_heatmap(portfolio_id)
+    row = heatmap.get(symbol)
+    if row is not None:
+        return _regional_row_identity(
+            portfolio_id,
+            symbol,
+            row,
+            source_status=heatmap_status,
+        )
+
+    if portfolio_id == "hk":
+        official, official_status = _validated_hk_official_universe()
+        if symbol in official:
+            return _regional_row_identity(
+                portfolio_id,
+                symbol,
+                None,
+                source_status=official_status,
+            )
+        if heatmap_status.startswith("trusted_") or official_status.startswith("trusted_"):
+            status = "not_in_trusted_regional_stock_master"
+        else:
+            status = f"{heatmap_status};{official_status}"
+    else:
+        status = (
+            "not_in_trusted_regional_stock_master"
+            if heatmap_status.startswith("trusted_")
+            else heatmap_status
+        )
+    return {
+        "ticker": symbol,
+        "kind": "unknown",
+        "status": status,
+        "verified": False,
+    }
+
+
+def classify_instrument(portfolio_id: str, ticker: Any) -> dict[str, Any]:
+    """Classify an instrument against the registry-owned policy for one book."""
+    from portfolio import registry
+
+    try:
+        policy = registry.asset_policy(portfolio_id)
+    except ValueError:
+        symbol = str(ticker or "").upper().strip()
+        return {
+            "ticker": symbol,
+            "kind": "invalid",
+            "status": "unknown_portfolio",
+            "verified": False,
+        }
+    if policy != POLICY_NAME:
+        return {
+            "ticker": str(ticker or "").upper().strip(),
+            "kind": "not_applicable",
+            "status": "asset_policy_not_enforced",
+            "verified": False,
+        }
+    if portfolio_id == "autonomous":
+        return classify_us_instrument(ticker)
+    if portfolio_id in {"china", "hk"}:
+        return _classify_regional_instrument(portfolio_id, ticker)
+    return {
+        "ticker": str(ticker or "").upper().strip(),
+        "kind": "unknown",
+        "status": "unsupported_single_name_equity_book",
+        "verified": False,
+    }
+
+
+def liquidation_authorized(identity: dict[str, Any] | None) -> bool:
+    """Whether exact positive evidence permits a deterministic compliance exit."""
+    if not isinstance(identity, dict) or identity.get("verified") is not True:
+        return False
+    if identity.get("liquidation_authorized") is True:
+        return True
+    # Compatibility for the US classifier, whose exact return dictionaries are
+    # kept stable for existing callers and audit fixtures.
+    return identity.get("kind") in {"etf", "non_common_instrument", "index", "warrant"}
+
+
+def executable_equity_error(portfolio_id: str, ticker: str) -> str | None:
+    """Return ``None`` only when this book may hold the instrument positively."""
+    from portfolio import registry
+
+    if not registry.requires_single_name_equity(portfolio_id):
+        return None
+    if portfolio_id == "autonomous":
+        return executable_common_stock_error(ticker)
+    identity = classify_instrument(portfolio_id, ticker)
+    if (
+        identity.get("kind") == "common_stock"
+        and identity.get("verified") is True
+        and identity.get("market") == portfolio_id
+    ):
+        return None
+    if identity.get("kind") == "common_stock" and identity.get("verified") is True:
+        identity = {**identity, "status": "single_name_equity_wrong_market"}
+    symbol = str(ticker or "").upper().strip()
+    return (
+        f"non_single_name_equity:{symbol}:"
+        f"{identity.get('status') or 'unverified_identity'}"
+    )

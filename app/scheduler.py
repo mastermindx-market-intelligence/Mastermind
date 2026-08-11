@@ -1418,43 +1418,79 @@ def _prewarm_marks_job():
 
 
 def _startup_us_brain_cutover_preflight() -> dict:
-    """Validate/quarantine autonomous queued state before any scheduler job may run.
+    """Validate/quarantine every stock-only AI queue before scheduler jobs may run.
 
     A successful quarantine is a safe startup outcome because the incompatible target is no longer
     executable.  A failed move or unexpected validation error is not: ``start`` leaves the scheduler
-    non-running rather than risk a persisted misfire laundering or settling the v1 target.
+    non-running rather than risk a persisted misfire laundering or settling an ETF target.
     """
-    try:
-        from portfolio import paper_account
+    from portfolio import registry
 
-        preflight = paper_account.preflight_pending_target("autonomous")
-        quarantine = preflight.get("quarantine") or {}
-        if preflight.get("ok"):
-            result = {
-                "safe_to_resume": True,
-                "outcome": "compatible" if preflight.get("pending") else "nothing_queued",
+    books: dict[str, dict] = {}
+    for pid in registry.active_ids(include_self_directed=False):
+        if not registry.requires_single_name_equity(pid):
+            continue
+        try:
+            from portfolio import paper_account
+
+            preflight = paper_account.preflight_pending_target(pid)
+            quarantine = preflight.get("quarantine") or {}
+            if preflight.get("ok"):
+                book_result = {
+                    "safe_to_resume": True,
+                    "outcome": (
+                        "compatible" if preflight.get("pending") else "nothing_queued"
+                    ),
+                }
+            else:
+                quarantine_status = quarantine.get("status")
+                book_result = {
+                    "safe_to_resume": quarantine_status == "quarantined",
+                    "outcome": quarantine_status or "preflight_rejected",
+                    "reason": quarantine.get("reason") or preflight.get("skipped"),
+                    "quarantine_file": quarantine.get("quarantine_file"),
+                }
+        except Exception as exc:  # noqa: BLE001 - startup remains fail-closed below
+            book_result = {
+                "safe_to_resume": False,
+                "outcome": "preflight_error",
+                "error": repr(exc)[:300],
             }
-        else:
-            quarantine_status = quarantine.get("status")
-            result = {
-                "safe_to_resume": quarantine_status == "quarantined",
-                "outcome": quarantine_status or "preflight_rejected",
-                "reason": quarantine.get("reason") or preflight.get("skipped"),
-                "quarantine_file": quarantine.get("quarantine_file"),
-            }
-    except Exception as exc:  # noqa: BLE001 - startup remains fail-closed below
-        result = {
-            "safe_to_resume": False,
-            "outcome": "preflight_error",
-            "error": repr(exc)[:300],
-        }
+        books[pid] = book_result
+
+        try:
+            from control_plane import run_events
+            run_events.append({
+                "kind": "pending_target_cutover_preflight",
+                "job": "startup",
+                "book": pid,
+                "step": "before_scheduler_resume",
+                "status": "ok" if book_result["safe_to_resume"] else "error",
+                "severity": None if book_result["safe_to_resume"] else "HARD_STOP",
+                "actor": "deterministic_engine",
+                "extra": book_result,
+            })
+        except Exception:  # noqa: BLE001 - result still gates resume
+            pass
+
+    safe = bool(books) and all(row.get("safe_to_resume") for row in books.values())
+    outcomes = {str(row.get("outcome")) for row in books.values()}
+    if not safe:
+        outcome = "preflight_failed"
+    elif "quarantined" in outcomes:
+        outcome = "quarantined"
+    elif "compatible" in outcomes:
+        outcome = "compatible"
+    else:
+        outcome = "nothing_queued"
+    result = {"safe_to_resume": safe, "outcome": outcome, "books": books}
 
     try:
         from control_plane import run_events
         run_events.append({
             "kind": "pending_target_cutover_preflight",
             "job": "startup",
-            "book": "autonomous",
+            "book": "active_ai_portfolios",
             "step": "before_scheduler_resume",
             "status": "ok" if result["safe_to_resume"] else "error",
             "severity": None if result["safe_to_resume"] else "HARD_STOP",
@@ -1668,7 +1704,7 @@ def start():
     if not cutover["safe_to_resume"]:
         sch.shutdown(wait=False)
         raise RuntimeError(
-            "scheduler held: autonomous pending-target cutover preflight failed "
+            "scheduler held: stock-only pending-target preflight failed "
             f"({cutover.get('outcome')})"
         )
     sch.resume()

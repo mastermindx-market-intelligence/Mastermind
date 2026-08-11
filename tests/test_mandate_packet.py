@@ -118,7 +118,7 @@ def test_hk_universe_breach_wrong_venue():
 
 def test_hk_universe_ok_correct_venue():
     pkt = MP.build("hk", _state("hk",
-                                  positions=[_pos("700.HK", 0.20), _pos("9988.HK", 0.15)],
+                                  positions=[_pos("0700.HK", 0.20), _pos("9988.HK", 0.15)],
                                   currency="HKD"))
     assert pkt["universe_ok"] is True
 

@@ -34,9 +34,8 @@ constants and cross-checked here (cite per-field).
                   self_directed excluded); per-name 5%–50%; ≤8 names.
                   Sourced: bot/heavyweight.py MIN_W=0.05, MAX_W=0.50, MAX_NAMES=8.
 
-  autonomous    — Free-form Opus Brain, US equities; no gate; paper cash is the
-                  only hard constraint (no leverage).
-                  Universe: all US equities (unrestricted by venue).
+  autonomous    — Free-form Brain, positively verified single-name US equities;
+                  ETFs/funds are prohibited; no leverage.
                   Sizing: no explicit per-name cap (Brain-submitted; firm clamp applies).
 
   etf           — Opus Brain, US-listed ETFs only; ETF allowlist enforced in trusted
@@ -44,12 +43,12 @@ constants and cross-checked here (cite per-field).
                   config/etf_strategy.yml (default 0.35).
                   Sourced: bot/etf.py _guardrails() / portfolio.etf_universe.
 
-  china         — Opus Brain, mainland A-shares (*.SS / *.SZ) only, marked CNY.
-                  Universe: venue ["A-share"] per registry.
+  china         — Brain, positively verified single-name mainland A-shares only,
+                  marked CNY. ETFs/funds/index products are prohibited.
                   Sizing: Brain-submitted; firm clamp applies; no per-name cap declared.
 
-  hk            — Opus Brain, Hong Kong listings (*.HK) only, marked HKD.
-                  Universe: venue ["HK"] per registry.
+  hk            — Brain, positively verified single-name Hong Kong equities only,
+                  marked HKD. ETFs/funds/index products are prohibited.
                   Sizing: Brain-submitted; firm clamp applies; no per-name cap declared.
 
   self_directed — User's manual book; no compliance check enforced (yardstick, not
@@ -80,19 +79,19 @@ _MANDATES: dict[str, str] = {
         "minus self_directed; per-name 5%–50%; ≤8 names. (bot/heavyweight.py R1)"
     ),
     "autonomous": (
-        "Free-form Opus Brain; US equities; no gate; "
-        "paper cash is the only hard constraint (no leverage)."
+        "Free-form Brain; positively verified single-name US equities only; "
+        "ETFs/funds prohibited; no leverage."
     ),
     "etf": (
         "Opus Brain; US-listed ETFs only (ETF allowlist enforced); "
         "single-ETF max ~35% (config/etf_strategy.yml); crisis-ladder doctrine (bot/etf.py)."
     ),
     "china": (
-        "Opus Brain; mainland A-shares (*.SS / *.SZ) only; "
+        "Brain; positively verified single-name mainland A-shares only; ETFs/funds prohibited; "
         "marked natively in CNY; no cross-FX conversion."
     ),
     "hk": (
-        "Opus Brain; Hong Kong listings (*.HK) only; "
+        "Brain; positively verified single-name Hong Kong equities only; ETFs/funds prohibited; "
         "marked natively in HKD; no cross-FX conversion."
     ),
     "self_directed": (
@@ -173,6 +172,84 @@ def _universe_check(book_id: str, positions: list[dict]) -> dict[str, Any]:
     ]
     tickers = [t for t in tickers if t]
 
+    # ── active AI books: exact single-name-equity identity ─────────────────
+    try:
+        stock_policy = registry.requires_single_name_equity(book_id)
+    except ValueError:
+        stock_policy = False
+    if stock_policy:
+        try:
+            from portfolio import instrument_policy
+
+            if book_id == "china":
+                wrong_venue = [
+                    ticker
+                    for ticker in tickers
+                    if not ticker.endswith((".SS", ".SZ"))
+                ]
+            elif book_id == "hk":
+                wrong_venue = [ticker for ticker in tickers if not ticker.endswith(".HK")]
+            else:
+                wrong_venue = [
+                    ticker
+                    for ticker in tickers
+                    if ticker.endswith((".SS", ".SZ", ".HK"))
+                ]
+            if wrong_venue:
+                return {
+                    "ok": False,
+                    "detail": f"instruments outside the book market: {wrong_venue}",
+                    "violating": wrong_venue,
+                }
+
+            identities = {
+                ticker: instrument_policy.classify_instrument(book_id, ticker)
+                for ticker in tickers
+            }
+            bad = [
+                ticker
+                for ticker, identity in identities.items()
+                if identity.get("verified") is True
+                and not (
+                    identity.get("kind") == "common_stock"
+                    and (
+                        book_id == "autonomous"
+                        or identity.get("market") == book_id
+                    )
+                )
+            ]
+            unknown = [
+                ticker
+                for ticker, identity in identities.items()
+                if identity.get("verified") is not True
+            ]
+            if bad:
+                return {
+                    "ok": False,
+                    "detail": f"prohibited/non-market instruments: {bad}",
+                    "violating": bad,
+                }
+            if unknown:
+                return {
+                    "ok": None,
+                    "detail": f"instrument identity unavailable: {unknown}",
+                    "violating": [],
+                }
+            return {
+                "ok": True,
+                "detail": (
+                    f"all {len(tickers)} names positively verified under "
+                    f"{instrument_policy.POLICY_VERSION}"
+                ),
+                "violating": [],
+            }
+        except Exception as exc:  # noqa: BLE001 - advisory packet degrades explicitly
+            return {
+                "ok": None,
+                "detail": f"instrument policy check error: {exc!r}"[:200],
+                "violating": [],
+            }
+
     # ── heavyweight: must be within firm union minus self_directed ──────────
     if book_id == "heavyweight":
         try:
@@ -214,7 +291,7 @@ def _universe_check(book_id: str, positions: list[dict]) -> dict[str, Any]:
             return {"ok": None, "detail": f"ETF universe check error: {exc!r}"[:200],
                     "violating": []}
 
-    # ── china / hk: venue-listed check ─────────────────────────────────────
+    # ── other venue-scoped books: listing check ────────────────────────────
     if venues:
         bad: list[str] = []
         for t in tickers:

@@ -43,6 +43,44 @@ def stock_only_book(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
+    (stockdata / "RH.json").write_text(
+        json.dumps(
+            {
+                "ticker": "RH",
+                "name": "RH",
+                "sector": "Consumer Discretionary",
+                "profile": {
+                    "exchange": "NYSE",
+                    "sic_description": "Retail-Furniture Stores",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (stockdata / "AGCO.json").write_text(
+        json.dumps(
+            {
+                "ticker": "AGCO",
+                "name": "AGCO",
+                "sector": "Industrials",
+                "profile": {
+                    "description": "AGCO Corporation is an agricultural machinery manufacturer."
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (stockdata / "ECHOETF.json").write_text(
+        json.dumps(
+            {
+                "ticker": "ECHOETF",
+                "name": "ECHOETF",
+                "sector": "Financial Services",
+                "profile": {"exchange": "NYSE Arca"},
+            }
+        ),
+        encoding="utf-8",
+    )
     weak_sector_companies = {
         "ET": "Energy Transfer LP",
         "GSK": "GSK plc",
@@ -189,6 +227,41 @@ def test_company_investment_trust_name_is_not_misclassified_as_etf(stock_only_bo
     assert paper_account.validate_target_weights(
         {"FRT": 0.20}, portfolio_id="autonomous"
     ) == {"FRT": 0.20}
+
+
+@pytest.mark.parametrize("ticker", ["RH", "AGCO"])
+def test_ticker_named_company_with_profile_evidence_remains_executable(
+    stock_only_book, ticker
+):
+    from portfolio import instrument_policy, paper_account
+
+    identity = instrument_policy.classify_us_instrument(ticker)
+    assert identity == {
+        "ticker": ticker,
+        "kind": "common_stock",
+        "status": "trusted_company_profile.v1",
+        "verified": True,
+    }
+    assert paper_account.validate_target_weights(
+        {ticker: 0.20}, portfolio_id="autonomous"
+    ) == {ticker: 0.20}
+
+
+def test_ticker_echo_without_company_profile_evidence_still_fails_closed(
+    stock_only_book,
+):
+    from portfolio import instrument_policy, paper_account
+
+    identity = instrument_policy.classify_us_instrument("ECHOETF")
+    assert identity["kind"] == "unknown"
+    assert identity["verified"] is False
+    with pytest.raises(
+        paper_account.InvalidTargetWeights,
+        match="non_common_stock:ECHOETF:",
+    ):
+        paper_account.validate_target_weights(
+            {"ECHOETF": 0.20}, portfolio_id="autonomous"
+        )
 
 
 def test_etf_macro_sector_alone_is_not_identity_or_liquidation_authority(

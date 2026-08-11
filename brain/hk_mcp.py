@@ -1,7 +1,7 @@
-"""The HK desk's MCP surface — the FREE-FORM all-China book the Opus Brain manages itself.
+"""The HK desk's MCP surface — the single-name Hong Kong equity book the Brain manages itself.
 
-Sibling of ``brain/autonomous_mcp.py`` but pointed at the macro China desks and the multi-venue
-(A-share / HK / ADR) universe. The Brain researches via the China read tools below + the web,
+Sibling of ``brain/autonomous_mcp.py`` but pointed at the macro China desks and the verified
+single-company Hong Kong universe. The Brain researches via the China read tools below + the web,
 then calls ONE tool — ``submit_book`` — with its complete target portfolio for the day, each
 holding carrying a one-paragraph rationale. No gate, no research paper, no sleeves.
 
@@ -32,6 +32,30 @@ from portfolio import registry as _registry
 BENCHMARK = _registry.benchmark(PORTFOLIO_ID)
 CURRENCY = _registry.currency(PORTFOLIO_ID)            # "HKD"
 ALLOWED_VENUES = set(_registry.venues(PORTFOLIO_ID))   # {"HK"}
+
+
+def _equity_identity(ticker: str) -> dict:
+    """Read-only proposal hygiene; paper-account boundaries remain authoritative."""
+    try:
+        from portfolio import instrument_policy
+
+        return instrument_policy.classify_instrument(PORTFOLIO_ID, ticker)
+    except Exception as exc:  # noqa: BLE001 - missing identity can never fail open
+        return {
+            "ticker": str(ticker or "").upper().strip(),
+            "kind": "unknown",
+            "status": f"identity_lookup_failed:{type(exc).__name__}",
+            "verified": False,
+        }
+
+
+def _eligible_equity(ticker: str, identity: dict | None = None) -> bool:
+    identity = identity if isinstance(identity, dict) else _equity_identity(ticker)
+    return (
+        identity.get("kind") == "common_stock"
+        and identity.get("verified") is True
+        and identity.get("market") == PORTFOLIO_ID
+    )
 
 # Marker the builder / streaming layer can scan a tool result for (shared with the autonomous desk).
 BOOK_MARKER = autonomous_mcp.BOOK_MARKER
@@ -138,8 +162,10 @@ async def get_my_book(args):
       "decision evidence. Include every name you actively reviewed. The allocator preserves unchanged "
       "holdings and never invents marginal names merely to fill gross. Provide a one-paragraph rationale for EVERY holding (required) "
       "plus an overall summary, and optionally note what you sold and why. There is NO gate. Trade "
-      "liquid Hong Kong listings ONLY (ticker like 0700.HK / 9988.HK); mainland A-shares and "
-      "US-listed ADRs are REJECTED by this book. Confirm a name is priceable with get_quote "
+      "liquid, positively verified single-company Hong Kong equities ONLY (ticker like 0700.HK / "
+      "9988.HK). ETFs, index funds, pooled products, warrants, mainland A-shares, and US-listed "
+      "ADRs are REJECTED. ETF/index signals may inform context but are never holdings. Confirm both "
+      "eligibility and priceability with get_quote "
       "before relying on it (names we cannot price are skipped). Call this ONCE, at the end. "
       "All governance fields added by this schema are REQUIRED: "
       "falsifiers (list of strings — what would cause you to reverse this book within 5 days), "
@@ -165,7 +191,8 @@ async def submit_book(args):
     try:
         payload, audit = decision_submission.normalize(
             PORTFOLIO_ID, args, venue_of=china_intake._venue,
-            allowed_venues=ALLOWED_VENUES, deterministic_sizing=True)
+            allowed_venues=ALLOWED_VENUES, stock_only=True,
+            deterministic_sizing=True)
     except decision_submission.DecisionBoundaryFreeze as exc:
         return bot_mcp._ok(
             f"SUBMISSION REJECTED; prior paper book preserved unchanged. Trusted-boundary reason: {exc}"
@@ -237,9 +264,11 @@ async def get_china_standouts(args):
                          "= wait for a pullback. Call get_china_intake for the corroborated ranking."}
     shrink: list[str] = []
     if show_a:
-        out["a_share_buy"] = [_slim_standout(s) for s in (a.get("buy") or [])[:limit]]; shrink.append("a_share_buy")
+        eligible = [s for s in (a.get("buy") or []) if isinstance(s, dict) and _eligible_equity(s.get("ticker"))]
+        out["a_share_buy"] = [_slim_standout(s) for s in eligible[:limit]]; shrink.append("a_share_buy")
     if show_hk:
-        out["hk_buy"] = [_slim_standout(s) for s in (hk.get("buy") or [])[:limit]]; shrink.append("hk_buy")
+        eligible = [s for s in (hk.get("buy") or []) if isinstance(s, dict) and _eligible_equity(s.get("ticker"))]
+        out["hk_buy"] = [_slim_standout(s) for s in eligible[:limit]]; shrink.append("hk_buy")
     return _capped_json(out, shrink)
 
 
@@ -250,18 +279,35 @@ async def get_china_standouts(args):
       {"type": "object", "properties": {"limit": {"type": "integer", "description": "max candidates (default 25, max 60)"}}})
 async def get_china_intake(args):
     limit = max(1, min(int(args.get("limit") or 25), 60))
-    built = china_intake.build(limit)
+    # The shared funnel is cross-market ranked.  Read its complete local queue, then apply this
+    # book's venue/identity boundary before truncating; otherwise off-venue names near the top can
+    # crowd valid stocks out of the Brain's shortlist and manufacture an unnecessarily cash-heavy
+    # book.
+    built = china_intake.build(10_000)
     # Project a compact candidate row so the funnel — the Brain's primary shortlist — never exceeds
     # the tool serialization cap and returns truncated/invalid JSON. Restrict to the book's venue.
+    venue_rows = [
+        c for c in (built.get("candidates") or [])
+        if isinstance(c, dict)
+        and (not ALLOWED_VENUES or c.get("venue") in ALLOWED_VENUES)
+    ]
+    eligible_rows = [c for c in venue_rows if _eligible_equity(c.get("ticker"))]
     slim = [{"ticker": c.get("ticker"), "name": china_intake.display_name(c.get("ticker")),
              "venue": c.get("venue"), "score": c.get("score"),
              "n_sources": c.get("n_sources"), "lean": c.get("lean"),
              "sources": c.get("sources"), "reasons": (c.get("reasons") or [])[:2],
              "falsifier": c.get("falsifier")}
-            for c in (built.get("candidates") or [])
-            if not ALLOWED_VENUES or c.get("venue") in ALLOWED_VENUES]
+            for c in eligible_rows[:limit]]
     return _capped_json({"as_of": built.get("as_of"), "macro_context": built.get("macro_context"),
-                         "n_universe": built.get("n_universe"), "candidates": slim,
+                         "n_universe": built.get("n_universe"),
+                         "n_venue_universe": len(venue_rows),
+                         "n_eligible_universe": len(eligible_rows),
+                         "n_off_venue_filtered": max(
+                             0, int(built.get("n_universe") or 0) - len(venue_rows)
+                         ),
+                         "n_ineligible_filtered": len(venue_rows) - len(eligible_rows),
+                         "asset_policy": "single_name_equity_only",
+                         "candidates": slim,
                          "note": built.get("note")}, ["candidates"])
 
 
@@ -278,7 +324,7 @@ async def get_china_brief(args):
 
 
 @tool("get_quote",
-      "Confirm a Greater-China name is PRICEABLE and see its HKD mark before you rely on it. Returns "
+      "Confirm a Hong Kong single-company equity is ELIGIBLE and PRICEABLE before relying on it. Returns "
       "the venue (A-share/HK/ADR), quote currency, the local-currency price, and the HKD price the "
       "book will actually transact at (HK names are native HKD; non-HK names are rejected by this book"
       "). priceable=false means the desk will SKIP this name — pick another.",
@@ -292,11 +338,17 @@ async def get_quote(args):
     base = fx.usd_to(usd, CURRENCY)              # the book's base currency (HKD for china, HKD for hk)
     cur = fx.currency_of(t)                       # native quote currency
     local = round(usd * fx.rate_per_usd(cur), 4) if usd else None   # native-currency price
+    identity = _equity_identity(t)
+    eligible = _eligible_equity(t, identity)
+    quote_available = bool(base and base > 0)
     return bot_mcp._json({
         "ticker": t, "name": china_intake.display_name(t), "venue": china_intake._venue(t),
         "currency": cur, "price_local": local, "base_currency": CURRENCY,
         "price_base": round(base, 4) if base else None,
-        "priceable": bool(base and base > 0),
+        "eligible": eligible,
+        "identity_status": identity.get("status"),
+        "quote_available": quote_available,
+        "priceable": bool(eligible and quote_available),
     })
 
 

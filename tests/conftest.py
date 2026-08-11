@@ -75,7 +75,7 @@ _ensure_engine_canon()
 
 @pytest.fixture(autouse=True)
 def _hermetic_us_common_stock_identity(monkeypatch):
-    """Supply positive company metadata for the real US stocks used by account-boundary tests.
+    """Supply hermetic identity data for stocks used by account-boundary tests.
 
     Production authenticates a US target from Macro's canonical ``site/stockdata`` contract.
     Hosted CI deliberately checks out only Macro's importable engine/lib surface and therefore has
@@ -91,8 +91,32 @@ def _hermetic_us_common_stock_identity(monkeypatch):
 
         verified = {
             "AAPL": ("Apple Inc.", "Information Technology"),
+            "BIIB": ("Biogen Inc.", "Health Care"),
             "MSFT": ("Microsoft Corporation", "Information Technology"),
             "NVDA": ("NVIDIA Corporation", "Information Technology"),
+        }
+        china_stocks = {
+            "000001.SZ",
+            "000858.SZ",
+            "002020.SZ",
+            "300015.SZ",
+            "300750.SZ",
+            "600000.SS",
+            "600519.SS",
+            "600882.SS",
+            "601318.SS",
+            "603301.SS",
+            "688411.SS",
+            "688981.SS",
+        }
+        hk_stocks = {
+            "0005.HK",
+            "0700.HK",
+            "0941.HK",
+            "3988.HK",
+            "3993.HK",
+            "9988.HK",
+            "9999.HK",
         }
         original = instrument_policy._read_macro_json
 
@@ -108,6 +132,38 @@ def _hermetic_us_common_stock_identity(monkeypatch):
                         "sector": sector,
                         "security_type": "common stock",
                     }
+            if relative == "marketdata/china_heatmap.json":
+                tiles = [
+                    {
+                        "t": ticker,
+                        "name": f"Test company {ticker}",
+                        "name_zh": f"测试公司 {ticker}",
+                    }
+                    for ticker in sorted(china_stocks)
+                ]
+                return {
+                    "market": "china",
+                    "map_type": "stocks",
+                    "stockdata_dir": "chinastockdata",
+                    "n_tiles": len(tiles),
+                    "tiles": tiles,
+                }
+            if relative == "marketdata/hk_heatmap.json":
+                tiles = [
+                    {
+                        "t": ticker,
+                        "name": f"Test company {ticker}",
+                        "name_zh": f"测试公司 {ticker}",
+                    }
+                    for ticker in sorted(hk_stocks)
+                ]
+                return {
+                    "market": "hk",
+                    "map_type": "stocks",
+                    "stockdata_dir": "hkstockdata",
+                    "n_tiles": len(tiles),
+                    "tiles": tiles,
+                }
             return original(relative)
 
         monkeypatch.setattr(instrument_policy, "_read_macro_json", _read)

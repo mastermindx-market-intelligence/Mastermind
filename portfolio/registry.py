@@ -64,9 +64,10 @@ PORTFOLIOS: list[dict] = [
     {
         "id": "autonomous",
         "name": "US Brain",
-        "tagline": "Free-form · Codex-first AI · daily",
+        "tagline": "Single-name US stocks · Codex-first AI · daily",
         "kind": "autonomous",     # shared-provider AI trades freely; no gate, no research paper
         "manager": "brain",
+        "asset_policy": "single_name_equity_only",
         "starting_nav": 1_000_000.0,
         "benchmark": "SPY",
         "legacy": False,
@@ -93,10 +94,11 @@ PORTFOLIOS: list[dict] = [
     {
         "id": "china",
         "name": "CN Brain",
-        "tagline": "Mainland A-shares only · Codex-first AI · daily",
+        "tagline": "Mainland single-name A-shares · Codex-first AI · daily",
         "kind": "china_brain",    # shared-provider AI over the macro China A-share desks; holds
                                   # ONLY mainland A-shares (*.SS / *.SZ), marked natively in CNY (bot/china.py).
         "manager": "brain",
+        "asset_policy": "single_name_equity_only",
         "starting_nav": 1_000_000.0,
         "benchmark": "000300.SS", # CSI 300 — broad Shanghai/Shenzhen A-share benchmark
         "benchmark_name": "CSI 300",
@@ -110,10 +112,11 @@ PORTFOLIOS: list[dict] = [
     {
         "id": "hk",
         "name": "HK Brain",
-        "tagline": "Hong Kong only · Codex-first AI · daily",
+        "tagline": "Hong Kong single-name equities · Codex-first AI · daily",
         "kind": "hk_brain",       # shared-provider AI over the HK buy board; holds ONLY Hong-Kong
                                   # listed names (*.HK), marked natively in HKD (no cross-FX — bot/hk.py).
         "manager": "brain",
+        "asset_policy": "single_name_equity_only",
         "starting_nav": 1_000_000.0,
         "benchmark": "^HSI",      # Hang Seng Index — native Hong Kong market benchmark
         "benchmark_name": "Hang Seng",
@@ -307,3 +310,19 @@ def currency(portfolio_id: str | None = None) -> str:
 def venues(portfolio_id: str | None = None) -> list[str]:
     """The venues a book may trade — e.g. ['HK'] or ['A-share']. Empty = unrestricted (US books)."""
     return list(get(portfolio_id).get("venues") or [])
+
+
+def asset_policy(portfolio_id: str | None = None) -> str | None:
+    """Return the exact registry-owned executable asset policy for a known book.
+
+    Unlike :func:`get`, this authority lookup never falls back from an unknown id to Flagship.
+    Callers at execution boundaries must not be able to opt an active AI book out of its mandate.
+    """
+    pid = canonical_id(portfolio_id)
+    value = _BY_ID[pid].get("asset_policy")
+    return str(value) if value else None
+
+
+def requires_single_name_equity(portfolio_id: str | None = None) -> bool:
+    """Whether positive single-name-equity identity is required before any BUY."""
+    return asset_policy(portfolio_id) == "single_name_equity_only"
