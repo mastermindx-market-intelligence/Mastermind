@@ -91,6 +91,14 @@ def _fake_transport(
     fake_bin.mkdir()
     remote = tmp_path / "remote"
     (remote / "app").mkdir(parents=True)
+    live_data = tmp_path / "live-data"
+    live_data.mkdir()
+    autonomous = live_data / "portfolios" / "autonomous"
+    autonomous.mkdir(parents=True)
+    (autonomous / "account.json").write_text('{"cash":1000000}\n', encoding="utf-8")
+    (autonomous / "fills.jsonl").write_text(
+        '{"date":"2026-08-11","ticker":"AAPL","side":"buy"}\n', encoding="utf-8"
+    )
     (remote / "app" / "old.py").write_text("old\n", encoding="utf-8")
     source = tmp_path / "source"
     source.mkdir()
@@ -109,6 +117,39 @@ def _fake_transport(
         "if [[ \"${FAKE_FAIL_MARKER:-0}\" == 1 && \"$cmd\" == *\"printf '%s\\n'\"* "
         "&& \"$cmd\" == *\".deployed_git_sha\"* ]]; then exit 31; fi\n"
         "exec bash -c \"$cmd\"\n",
+    )
+    _write_executable(
+        fake_bin / "python3",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "[[ \"${1:-}\" == -m && \"${2:-}\" == portfolio.forward_evaluation ]] || exit 97\n"
+        "command=${3:-}\n"
+        "marker=\"$FAKE_LIVE_DATA/portfolio_forward_evaluation/start.json\"\n"
+        "case \"$command\" in\n"
+        "  init)\n"
+        "    printf 'init\\n' >>\"$FAKE_GATE_EVENTS\"\n"
+        "    mkdir -p \"$(dirname \"$marker\")\"\n"
+        "    if [[ -e \"$marker\" ]]; then\n"
+        "      printf '{\"initialized\": false, \"release_state\": \"pending_health\"}\\n'\n"
+        "    else\n"
+        "      printf '{\"release_state\": \"pending_health\"}\\n' >\"$marker\"\n"
+        "      printf '{\"initialized\": true, \"release_state\": \"pending_health\"}\\n'\n"
+        "    fi ;;\n"
+        "  finalize)\n"
+        "    printf 'finalize\\n' >>\"$FAKE_GATE_EVENTS\"\n"
+        "    [[ -e \"$marker\" ]] || exit 2\n"
+        "    printf '{\"release_state\": \"active\"}\\n' >\"$marker\" ;;\n"
+        "  status)\n"
+        "    printf 'status\\n' >>\"$FAKE_GATE_EVENTS\"\n"
+        "    grep -q '\"release_state\": \"active\"' \"$marker\" 2>/dev/null ;;\n"
+        "  *) exit 98 ;;\n"
+        "esac\n",
+    )
+    _write_executable(
+        fake_bin / "flock",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "printf 'flock:%s\\n' \"$*\" >>\"$FAKE_GATE_EVENTS\"\n",
     )
     _write_executable(
         fake_bin / "rsync",
@@ -134,8 +175,31 @@ def _fake_transport(
         fake_bin / "systemctl",
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
+        "cmd=\"$*\"\n"
+        "if [[ \"$cmd\" == stop\ * ]]; then printf 'stop\\n' >>\"$FAKE_GATE_EVENTS\"; exit 0; fi\n"
+        "printf 'restart\\n' >>\"$FAKE_GATE_EVENTS\"\n"
         "cat \"$FAKE_REMOTE/.deployed_git_sha\" 2>/dev/null >>\"$FAKE_EVENTS\" || "
         "printf 'missing\\n' >>\"$FAKE_EVENTS\"\n"
+        "if [[ \"${FAKE_MUTATE_ACCOUNT_ON_RESTART:-0}\" == 1 "
+        "&& ! -e \"$FAKE_AUTHORITY_MUTATION_STATE\" ]]; then\n"
+        "  printf 'mutated\\n' >>\"$FAKE_LIVE_DATA/portfolios/autonomous/account.json\"\n"
+        "  : >\"$FAKE_AUTHORITY_MUTATION_STATE\"\n"
+        "fi\n"
+        "if [[ \"${FAKE_MUTATE_FILLS_ON_RESTART:-0}\" == 1 "
+        "&& ! -e \"$FAKE_AUTHORITY_MUTATION_STATE\" ]]; then\n"
+        "  printf '{\"mutated\":true}\\n' >>\"$FAKE_LIVE_DATA/portfolios/autonomous/fills.jsonl\"\n"
+        "  : >\"$FAKE_AUTHORITY_MUTATION_STATE\"\n"
+        "fi\n"
+        "if [[ \"${FAKE_REMOVE_AUTHORITY_ON_RESTART:-}\" == account "
+        "&& ! -e \"$FAKE_AUTHORITY_MUTATION_STATE\" ]]; then\n"
+        "  rm -f \"$FAKE_LIVE_DATA/portfolios/autonomous/account.json\"\n"
+        "  : >\"$FAKE_AUTHORITY_MUTATION_STATE\"\n"
+        "fi\n"
+        "if [[ \"${FAKE_REMOVE_AUTHORITY_ON_RESTART:-}\" == fills "
+        "&& ! -e \"$FAKE_AUTHORITY_MUTATION_STATE\" ]]; then\n"
+        "  rm -f \"$FAKE_LIVE_DATA/portfolios/autonomous/fills.jsonl\"\n"
+        "  : >\"$FAKE_AUTHORITY_MUTATION_STATE\"\n"
+        "fi\n"
         "if [[ \"${FAKE_FAIL_RESTART_ONCE:-0}\" == 1 && ! -e \"$FAKE_RESTART_STATE\" ]]; "
         "then : >\"$FAKE_RESTART_STATE\"; exit 32; fi\n",
     )
@@ -149,18 +213,25 @@ def _fake_transport(
             "MASTERMIND_DEPLOY_EXPECT_SHA": new_sha,
             "MASTERMIND_VPS_HOST": "fixture-host",
             "MASTERMIND_VPS_PATH": str(remote),
+            "MASTERMIND_VPS_LIVE_DATA_PATH": str(live_data),
             "MASTERMIND_VPS_KEY": str(key),
             "MASTERMIND_VPS_SERVICE": "fixture.service",
             "MASTERMIND_VPS_HEALTH": "http://fixture.invalid/health",
             "MASTERMIND_DEPLOY_LOG": str(tmp_path / "deploy.log"),
             "FAKE_REMOTE": str(remote),
+            "FAKE_LIVE_DATA": str(live_data),
             "FAKE_EVENTS": str(events),
+            "FAKE_GATE_EVENTS": str(tmp_path / "activation_events"),
             "FAKE_EXPECTED": new_sha,
             "FAKE_FAIL_NEW": "1" if fail_new_release else "0",
             "FAKE_FAIL_MARKER": "0",
             "FAKE_RSYNC_PARTIAL": "0",
             "FAKE_FAIL_RESTART_ONCE": "0",
             "FAKE_RESTART_STATE": str(tmp_path / "restart_failed_once"),
+            "FAKE_AUTHORITY_MUTATION_STATE": str(tmp_path / "authority_mutated_once"),
+            "FAKE_MUTATE_ACCOUNT_ON_RESTART": "0",
+            "FAKE_MUTATE_FILLS_ON_RESTART": "0",
+            "FAKE_REMOVE_AUTHORITY_ON_RESTART": "",
             "FAKE_SCHEDULER_OK": "true",
         }
     )
@@ -176,6 +247,63 @@ def test_deploy_writes_expected_marker_before_restart(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert events.read_text(encoding="utf-8").splitlines() == [new_sha]
     assert (tmp_path / "remote" / ".deployed_git_sha").read_text().strip() == new_sha
+    assert (tmp_path / "live-data" / "portfolio_forward_evaluation" / "start.json").exists()
+    assert not (tmp_path / "remote" / "data" / "portfolio_forward_evaluation").exists()
+    assert (tmp_path / "activation_events").read_text(encoding="utf-8").splitlines() == [
+        "stop", "init", "restart", "flock:-x -w 30 9", "finalize", "status",
+    ]
+
+
+def test_activation_gate_order_and_canonical_lock_are_explicit():
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    stop = script.index("systemctl stop '$SVC'")
+    baseline = script.index("FORWARD_BASELINE_HASHES=", stop)
+    restart = script.index("systemctl restart '$SVC'", baseline)
+    lock = script.index("lock_path='$LIVE_DATA_PATH/locks/book:autonomous.lock'", restart)
+    compare_account = script.index(r"[ \"\$account_sha\" = '$FORWARD_ACCOUNT_SHA' ]", lock)
+    compare_fills = script.index(r"[ \"\$fills_sha\" = '$FORWARD_FILLS_SHA' ]", lock)
+    finalize = script.index("portfolio.forward_evaluation finalize", compare_fills)
+    status = script.index("portfolio.forward_evaluation status", finalize)
+    assert stop < baseline < restart < lock < compare_account < compare_fills < finalize < status
+    assert r'exec 9>>\"\$lock_path\"' in script
+    assert "flock -x -w 30 9" in script
+
+
+@pytest.mark.parametrize("mutation_flag", [
+    "FAKE_MUTATE_ACCOUNT_ON_RESTART",
+    "FAKE_MUTATE_FILLS_ON_RESTART",
+])
+def test_activation_rejects_account_or_fills_byte_mutation(tmp_path, mutation_flag):
+    env, events, old_sha, new_sha = _fake_transport(tmp_path, fail_new_release=False)
+    env[mutation_flag] = "1"
+
+    result = subprocess.run(
+        ["bash", str(DEPLOY_SCRIPT)], env=env, text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 1
+    assert events.read_text(encoding="utf-8").splitlines() == [new_sha, old_sha]
+    assert "authority bytes changed, missing, unreadable, or lock verification failed" in result.stdout
+    gate_events = (tmp_path / "activation_events").read_text(encoding="utf-8").splitlines()
+    assert "flock:-x -w 30 9" in gate_events
+    assert "finalize" not in gate_events
+    assert not (tmp_path / "live-data" / "portfolio_forward_evaluation" / "start.json").exists()
+
+
+def test_activation_rejects_missing_authority_file(tmp_path):
+    env, events, old_sha, new_sha = _fake_transport(tmp_path, fail_new_release=False)
+    env["FAKE_REMOVE_AUTHORITY_ON_RESTART"] = "fills"
+
+    result = subprocess.run(
+        ["bash", str(DEPLOY_SCRIPT)], env=env, text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 1
+    assert events.read_text(encoding="utf-8").splitlines() == [new_sha, old_sha]
+    assert "authority bytes changed, missing, unreadable, or lock verification failed" in result.stdout
+    gate_events = (tmp_path / "activation_events").read_text(encoding="utf-8").splitlines()
+    assert "flock:-x -w 30 9" in gate_events
+    assert "finalize" not in gate_events
 
 
 def test_failed_deploy_restores_marker_before_rollback_restart(tmp_path):
@@ -187,6 +315,7 @@ def test_failed_deploy_restores_marker_before_rollback_restart(tmp_path):
     assert result.returncode == 1
     assert events.read_text(encoding="utf-8").splitlines() == [new_sha, old_sha]
     assert (tmp_path / "remote" / ".deployed_git_sha").read_text().strip() == old_sha
+    assert not (tmp_path / "live-data" / "portfolio_forward_evaluation" / "start.json").exists()
     assert "rollback complete; health returned 200" in result.stdout
 
 

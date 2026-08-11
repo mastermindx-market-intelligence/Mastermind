@@ -149,6 +149,35 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     out["decided"] = decided
     target_status = "proposed" if decided else "rejected_no_submission"
     effective_target: dict[str, float] | None = None
+    lesson_validation: dict = {"ok": True, "cited_ids": []}
+    if decided:
+        try:
+            from brain import portfolio_learning
+            lesson_validation = portfolio_learning.attach_lesson_trace(
+                PORTFOLIO_ID, asof, submission
+            )
+        except Exception as exc:  # noqa: BLE001 - citations fail closed; no trace can grant authority
+            raw_lessons = ((submission.get("decision_memo") or {}).get("lessons_applied")
+                           if isinstance(submission.get("decision_memo"), dict) else None)
+            lesson_validation = (
+                {"ok": True, "cited_ids": [],
+                 "warning": f"empty_trace_unavailable:{type(exc).__name__}"}
+                if not raw_lessons
+                else {"ok": False, "error": f"trace_validation_error:{type(exc).__name__}"}
+            )
+        out["lesson_citations"] = {
+            key: lesson_validation.get(key)
+            for key in ("ok", "error", "warning", "presentation_id", "cited_ids")
+            if lesson_validation.get(key) is not None
+        }
+        if lesson_validation.get("decision_id"):
+            out["lesson_citations"]["planned_decision_id"] = lesson_validation["decision_id"]
+        if lesson_validation.get("application_id"):
+            out["lesson_citations"]["planned_lesson_application_id"] = lesson_validation["application_id"]
+        if not lesson_validation.get("ok"):
+            decided = False
+            out["decided"] = False
+            target_status = "rejected_lesson_citations"
     quote_fallbacks = sorted(
         h.get("ticker")
         for h in ((submission or {}).get("holdings") or [])
@@ -323,6 +352,27 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
             except Exception:
                 pass
 
+    lesson_application: dict | None = None
+    if target_status in {"executed", "queued"}:
+        try:
+            from brain import portfolio_learning
+            lesson_application = portfolio_learning.record_application(
+                PORTFOLIO_ID,
+                asof,
+                submission,
+                effective_target,
+                target_status=target_status,
+                executed_trades=executed,
+                settlement_receipt_id=_settlement_receipt_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - observational trace never changes the target
+            lesson_application = {
+                "ok": False,
+                "recorded": False,
+                "error": f"application_trace_error:{type(exc).__name__}",
+            }
+        out["lesson_application"] = lesson_application
+
     # A proposal is consumed only after the trusted target has actually been accepted by the
     # paper execution boundary.  A syntactically valid submission can still be frozen by quote
     # recovery, rejected by the packet gate, or fail settlement; those proposals must remain
@@ -408,11 +458,30 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     # A direct market-open run may have committed through the WAL.  Its receipt is the crash-safe
     # outbox for mark/publish provenance; acknowledge it only after this run completed both durable
     # projections.  Otherwise the scheduler will finalize it idempotently on the next open.
+    _lesson_receipt_finalization = {"ok": True, "required": False}
+    if _settlement_receipt_id:
+        try:
+            from brain import portfolio_learning
+            _lesson_receipt_finalization = portfolio_learning.application_finalization_status(
+                PORTFOLIO_ID,
+                submission,
+                settlement_receipt_id=_settlement_receipt_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - receipt remains the retry outbox
+            _lesson_receipt_finalization = {
+                "ok": False,
+                "required": True,
+                "error": f"application_finalization_error:{type(exc).__name__}",
+            }
+        out["lesson_receipt_finalization"] = _lesson_receipt_finalization
+        if not _lesson_receipt_finalization.get("ok"):
+            out["settlement_receipt_retained"] = True
     if (
         _settlement_receipt_id
         and _publish_ok
         and _decision_log_ok
         and not out.get("mark_error")
+        and _lesson_receipt_finalization.get("ok") is True
     ):
         try:
             paper_account.acknowledge_settlement_receipt(
@@ -523,7 +592,7 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         advisor_context = ""
     try:
         from brain import portfolio_learning
-        lines += [portfolio_learning.prompt_block(PORTFOLIO_ID), ""]
+        lines += [portfolio_learning.prompt_block(PORTFOLIO_ID, asof=asof), ""]
     except Exception:
         pass
     # RISK GOVERNOR — the live risk-state block that governs sizing/gross (flag-gated; OFF → "").
@@ -609,6 +678,11 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
         decisions.append({"subject": "Autonomous book", "lean": summary,
                           "thesis": narrative.get("sold_note") or "",
                           "logged_at": datetime.now(timezone.utc).isoformat()})
+    try:
+        from brain import portfolio_learning
+        lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
+    except Exception:
+        lesson_links = {}
     return {
         "as_of": asof,
         "portfolio_id": PORTFOLIO_ID,
@@ -626,6 +700,7 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
         "skipped_unpriceable": skipped,
         "market_status": market_calendar.status(),
         "brain": {k: brain.get(k) for k in ("cost_usd", "tools_used", "model")},
+        **lesson_links,
     }
 
 
@@ -638,6 +713,11 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
     from brain import decision_submission
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from brain import portfolio_learning
+        lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
+    except Exception:
+        lesson_links = {}
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -661,6 +741,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
             submission, effective_target, target_status
         ),
         **decision_submission.audit_fields(submission),
+        **lesson_links,
     }
     # idempotent per date: keep exactly one entry per asof (latest SUBSTANTIVE run wins — a
     # failed re-run must not erase a good book; see bot/decision_rows)
@@ -726,7 +807,41 @@ def republish(asof: str | None = None, *, submission: dict | None = None) -> dic
     try:
         from bridge import build_portfolio
         build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
-        return {"ok": True, "holdings": len(target)}
+        try:
+            from brain import portfolio_learning
+            lesson_transition = portfolio_learning.settle_application(
+                PORTFOLIO_ID, submission, asof
+            )
+        except Exception as exc:  # noqa: BLE001 - fills/publish remain authoritative
+            lesson_transition = {
+                "ok": False,
+                "transitioned": False,
+                "error": f"application_transition_error:{type(exc).__name__}",
+            }
+        try:
+            lesson_finalization = portfolio_learning.application_finalization_status(
+                PORTFOLIO_ID, submission
+            )
+        except Exception as exc:  # noqa: BLE001 - finalizer must retain the receipt
+            lesson_finalization = {
+                "ok": False,
+                "required": True,
+                "error": f"application_finalization_error:{type(exc).__name__}",
+            }
+        if not lesson_finalization.get("ok"):
+            return {
+                "ok": False,
+                "error": "lesson_application_not_durable",
+                "holdings": len(target),
+                "lesson_application": lesson_transition,
+                "lesson_finalization": lesson_finalization,
+            }
+        return {
+            "ok": True,
+            "holdings": len(target),
+            "lesson_application": lesson_transition,
+            "lesson_finalization": lesson_finalization,
+        }
     except Exception as e:                               # noqa: BLE001
         return {"ok": False, "error": repr(e)[:200]}
 

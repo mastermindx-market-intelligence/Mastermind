@@ -30,6 +30,7 @@ SRC="${SRC%/}/"
 
 BOXHOST="${MASTERMIND_VPS_HOST:-root@146.190.142.17}"
 DPATH="${MASTERMIND_VPS_PATH:-/opt/mastermind}"
+LIVE_DATA_PATH="${MASTERMIND_VPS_LIVE_DATA_PATH:-/opt/mastermind-live-data}"
 KEY="${MASTERMIND_VPS_KEY:-/Users/chriswong/.ssh/macro_dashboard_deploy_v2}"
 SVC="${MASTERMIND_VPS_SERVICE:-mastermind.service}"
 HEALTH="${MASTERMIND_VPS_HEALTH:-http://127.0.0.1:8001/health}"
@@ -74,6 +75,17 @@ probe_health() {
   fi
 }
 
+# A healthy code process is not a complete v2 release until the immutable cohort marker is active.
+# The CLI exits non-zero for both a missing marker and pending_health, so interrupted/no-op deploys
+# are forced back through the bounded release transaction instead of silently staying not_started.
+probe_forward_evaluation() {
+  "${SSH[@]}" "$BOXHOST" \
+    "cd '$DPATH' &&
+     MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
+       python3 -m portfolio.forward_evaluation status >/dev/null" \
+    >>"$LOG" 2>&1
+}
+
 DIRS="app brain bot portfolio data_layer loop bridge control_plane scripts config ops .claude .codex"
 FILES="pyproject.toml DOCTRINE.md README.md AGENTS.md .deployed_git_sha"
 EXC=(
@@ -97,7 +109,8 @@ RAW="$(rsync -azn --delete --out-format='%n' -e "$RSYNC_SSH" \
 CHANGED="$(printf '%s\n' "$RAW" | grep -vE '/$|^$' || true)"
 N="$(printf '%s\n' "$CHANGED" | grep -c . || true)"
 
-if [[ "${N:-0}" -eq 0 ]] && [[ "$(probe_health "$EXPECTED_SHA")" == "200" ]]; then
+if [[ "${N:-0}" -eq 0 ]] && [[ "$(probe_health "$EXPECTED_SHA")" == "200" ]] \
+    && probe_forward_evaluation; then
   log "deploy no-op: $EXPECTED_SHA already in sync and healthy"
   exit 0
 fi
@@ -115,6 +128,15 @@ if [[ ! "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   PREVIOUS_SHA=""
 fi
 
+FORWARD_START_STATE="$("${SSH[@]}" "$BOXHOST" \
+  "if [ -e '$LIVE_DATA_PATH/portfolio_forward_evaluation/start.json' ]; then printf present; else printf missing; fi" \
+  2>/dev/null || true)"
+if [[ "$FORWARD_START_STATE" != "present" && "$FORWARD_START_STATE" != "missing" ]]; then
+  log "deploy failed: could not resolve forward evaluation marker state"
+  exit 1
+fi
+FORWARD_START_CREATED=0
+
 "${SSH[@]}" "$BOXHOST" \
   "cd '$DPATH' &&
    rm -rf .deploy_prev &&
@@ -130,6 +152,13 @@ rollback_release() {
   local reason="$1"
   local restore_status=0
   log "deploy failed: $reason; rolling back"
+  if [[ "$FORWARD_START_CREATED" -eq 1 ]]; then
+    if ! "${SSH[@]}" "$BOXHOST" \
+      "rm -f '$LIVE_DATA_PATH/portfolio_forward_evaluation/start.json'"; then
+      restore_status=1
+      log "rollback could not remove the pending forward evaluation marker"
+    fi
+  fi
   if ! "${SSH[@]}" "$BOXHOST" \
     "cd '$DPATH' &&
      restore_failed=0
@@ -177,6 +206,53 @@ if ! "${SSH[@]}" "$BOXHOST" \
   "printf '%s\n' '$EXPECTED_SHA' > '$DPATH/.deployed_git_sha'"; then
   fail_release "release marker write failed"
 fi
+
+# Freeze durable portfolio writers before taking the one-time legacy baseline.  pending_health is
+# deliberately inert, so target schedulers may start for the health probe without emitting an
+# evaluation snapshot.  Exact-SHA health below is the only operation that activates the cohort.
+if ! "${SSH[@]}" "$BOXHOST" "systemctl stop '$SVC'"; then
+  fail_release "service stop before forward evaluation baseline failed"
+fi
+
+# Bind the pending cohort to the exact canonical US account/fill bytes observed while no service
+# writer can run.  Missing or unreadable authority artifacts are a release failure, never an empty
+# baseline.  The hashes stay in the deploy process only; runtime state remains on the VPS.
+FORWARD_BASELINE_HASHES=""
+if ! FORWARD_BASELINE_HASHES="$("${SSH[@]}" "$BOXHOST" \
+  "set -e
+   account_path='$LIVE_DATA_PATH/portfolios/autonomous/account.json'
+   fills_path='$LIVE_DATA_PATH/portfolios/autonomous/fills.jsonl'
+   [ -f \"\$account_path\" ] && [ -r \"\$account_path\" ]
+   [ -f \"\$fills_path\" ] && [ -r \"\$fills_path\" ]
+   sha256sum -- \"\$account_path\" \"\$fills_path\"" 2>&1)"; then
+  printf '%s\n' "$FORWARD_BASELINE_HASHES" >>"$LOG"
+  fail_release "forward evaluation authority-byte baseline failed"
+fi
+printf '%s\n' "$FORWARD_BASELINE_HASHES" >>"$LOG"
+FORWARD_ACCOUNT_SHA="$(printf '%s\n' "$FORWARD_BASELINE_HASHES" | sed -n '1s/[[:space:]].*//p')"
+FORWARD_FILLS_SHA="$(printf '%s\n' "$FORWARD_BASELINE_HASHES" | sed -n '2s/[[:space:]].*//p')"
+if [[ ! "$FORWARD_ACCOUNT_SHA" =~ ^[0-9a-f]{64}$ ]] \
+    || [[ ! "$FORWARD_FILLS_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+  fail_release "forward evaluation authority-byte baseline was invalid"
+fi
+if [[ "$FORWARD_START_STATE" == "missing" ]]; then
+  FORWARD_START_CREATED=1
+fi
+FORWARD_INIT_OUTPUT=""
+if ! FORWARD_INIT_OUTPUT="$("${SSH[@]}" "$BOXHOST" \
+  "cd '$DPATH' &&
+   MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
+     python3 -m portfolio.forward_evaluation init \
+       --deployment-sha '$EXPECTED_SHA' --asof \"\$(date -u +%F)\"" 2>&1)"; then
+  printf '%s\n' "$FORWARD_INIT_OUTPUT" >>"$LOG"
+  fail_release "forward evaluation pending start initialization failed"
+fi
+printf '%s\n' "$FORWARD_INIT_OUTPUT" >>"$LOG"
+if [[ "$FORWARD_START_CREATED" -eq 1 ]] \
+    && ! printf '%s' "$FORWARD_INIT_OUTPUT" | grep -Eq '"initialized"[[:space:]]*:[[:space:]]*true'; then
+  # A concurrent valid initializer won the create-once race; it is not ours to remove on rollback.
+  FORWARD_START_CREATED=0
+fi
 if ! "${SSH[@]}" "$BOXHOST" "systemctl restart '$SVC'"; then
   fail_release "service restart failed"
 fi
@@ -188,6 +264,32 @@ for _ in 1 2 3 4 5 6 7 8; do
 done
 
 if [[ "$CODE" == "200" ]]; then
+  # Activate only after the exact commit, provider policy, and scheduled runtime pass health.
+  # The canonical book lock spans compare -> finalize -> status, preventing a service writer from
+  # slipping between byte verification and activation. finalize is idempotent for an active marker.
+  if ! "${SSH[@]}" "$BOXHOST" \
+    "set -e
+     cd '$DPATH'
+     lock_path='$LIVE_DATA_PATH/locks/book:autonomous.lock'
+     account_path='$LIVE_DATA_PATH/portfolios/autonomous/account.json'
+     fills_path='$LIVE_DATA_PATH/portfolios/autonomous/fills.jsonl'
+     mkdir -p \"\$(dirname \"\$lock_path\")\"
+     exec 9>>\"\$lock_path\"
+     flock -x -w 30 9
+     [ -f \"\$account_path\" ] && [ -r \"\$account_path\" ]
+     [ -f \"\$fills_path\" ] && [ -r \"\$fills_path\" ]
+     account_sha=\$(sha256sum -- \"\$account_path\" | awk '{print \$1}')
+     fills_sha=\$(sha256sum -- \"\$fills_path\" | awk '{print \$1}')
+     [ \"\$account_sha\" = '$FORWARD_ACCOUNT_SHA' ]
+     [ \"\$fills_sha\" = '$FORWARD_FILLS_SHA' ]
+     MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
+       python3 -m portfolio.forward_evaluation finalize --deployment-sha '$EXPECTED_SHA' &&
+     MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
+       python3 -m portfolio.forward_evaluation status >/dev/null" \
+    >>"$LOG" 2>&1; then
+    log "forward evaluation authority bytes changed, missing, unreadable, or lock verification failed"
+    fail_release "forward evaluation activation/status verification failed"
+  fi
   log "deploy OK: $SVC healthy at commit $EXPECTED_SHA"
   exit 0
 fi

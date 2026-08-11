@@ -166,6 +166,35 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     out["decided"] = decided
     target_status = "proposed" if decided else "rejected_no_submission"
     effective_target: dict[str, float] | None = None
+    lesson_validation: dict = {"ok": True, "cited_ids": []}
+    if decided:
+        try:
+            from brain import portfolio_learning
+            lesson_validation = portfolio_learning.attach_lesson_trace(
+                PORTFOLIO_ID, asof, submission
+            )
+        except Exception as exc:  # noqa: BLE001 - non-empty citations fail closed
+            raw_lessons = ((submission.get("decision_memo") or {}).get("lessons_applied")
+                           if isinstance(submission.get("decision_memo"), dict) else None)
+            lesson_validation = (
+                {"ok": True, "cited_ids": [],
+                 "warning": f"empty_trace_unavailable:{type(exc).__name__}"}
+                if not raw_lessons
+                else {"ok": False, "error": f"trace_validation_error:{type(exc).__name__}"}
+            )
+        out["lesson_citations"] = {
+            key: lesson_validation.get(key)
+            for key in ("ok", "error", "warning", "presentation_id", "cited_ids")
+            if lesson_validation.get(key) is not None
+        }
+        if lesson_validation.get("decision_id"):
+            out["lesson_citations"]["planned_decision_id"] = lesson_validation["decision_id"]
+        if lesson_validation.get("application_id"):
+            out["lesson_citations"]["planned_lesson_application_id"] = lesson_validation["application_id"]
+        if not lesson_validation.get("ok"):
+            decided = False
+            out["decided"] = False
+            target_status = "rejected_lesson_citations"
     quote_fallbacks = sorted(
         h.get("ticker")
         for h in ((submission or {}).get("holdings") or [])
@@ -296,6 +325,26 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
                 position_log.update(ledger_positions, asof, portfolio_id=PORTFOLIO_ID)
             except Exception:
                 pass
+    lesson_application: dict | None = None
+    if target_status in {"executed", "queued"}:
+        try:
+            from brain import portfolio_learning
+            lesson_application = portfolio_learning.record_application(
+                PORTFOLIO_ID,
+                asof,
+                submission,
+                effective_target,
+                target_status=target_status,
+                executed_trades=executed,
+                settlement_receipt_id=settlement_receipt_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - observational trace never changes the target
+            lesson_application = {
+                "ok": False,
+                "recorded": False,
+                "error": f"application_trace_error:{type(exc).__name__}",
+            }
+        out["lesson_application"] = lesson_application
     out["executed"] = executed
     out["queued_for_open"] = queued
     out["market_open"] = _settle.is_open(PORTFOLIO_ID)
@@ -348,7 +397,31 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
         decision_log_ok = True
     except Exception:
         pass
-    if settlement_receipt_id and publish_ok and decision_log_ok and not out.get("mark_error"):
+    lesson_receipt_finalization = {"ok": True, "required": False}
+    if settlement_receipt_id:
+        try:
+            from brain import portfolio_learning
+            lesson_receipt_finalization = portfolio_learning.application_finalization_status(
+                PORTFOLIO_ID,
+                submission,
+                settlement_receipt_id=settlement_receipt_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - receipt remains the retry outbox
+            lesson_receipt_finalization = {
+                "ok": False,
+                "required": True,
+                "error": f"application_finalization_error:{type(exc).__name__}",
+            }
+        out["lesson_receipt_finalization"] = lesson_receipt_finalization
+        if not lesson_receipt_finalization.get("ok"):
+            out["settlement_receipt_retained"] = True
+    if (
+        settlement_receipt_id
+        and publish_ok
+        and decision_log_ok
+        and not out.get("mark_error")
+        and lesson_receipt_finalization.get("ok") is True
+    ):
         try:
             paper_account.acknowledge_settlement_receipt(
                 settlement_receipt_id, PORTFOLIO_ID
@@ -473,7 +546,7 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         lines += [f"China macro regime (in-house read): {regime}", ""]
     try:
         from brain import portfolio_learning
-        lines += [portfolio_learning.prompt_block(PORTFOLIO_ID), ""]
+        lines += [portfolio_learning.prompt_block(PORTFOLIO_ID, asof=asof), ""]
     except Exception:
         pass
     # E2.5 — POSTURE block (flag-independent read-only prompt enrichment).
@@ -563,6 +636,11 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
         decisions.append({"subject": "China book", "lean": summary,
                           "thesis": narrative.get("sold_note") or "",
                           "logged_at": datetime.now(timezone.utc).isoformat()})
+    try:
+        from brain import portfolio_learning
+        lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
+    except Exception:
+        lesson_links = {}
     return {
         "as_of": asof,
         "portfolio_id": PORTFOLIO_ID,
@@ -583,6 +661,7 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
         "feed_health": feed_health,
         "market_status": china_calendar.status(),
         "brain": {k: brain.get(k) for k in ("cost_usd", "tools_used", "model")},
+        **lesson_links,
     }
 
 
@@ -595,6 +674,11 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
     from brain import china_intake as _intake_mod, decision_submission
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from brain import portfolio_learning
+        lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
+    except Exception:
+        lesson_links = {}
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -618,6 +702,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
             submission, effective_target, target_status
         ),
         **decision_submission.audit_fields(submission),
+        **lesson_links,
     }
     from bot import decision_rows
     existing = []
@@ -698,6 +783,31 @@ def republish(asof: str | None = None, *, submission: dict | None = None) -> dic
         build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
     except Exception as e:                           # noqa: BLE001
         return {"ok": False, "error": repr(e)[:200]}
+    try:
+        from brain import portfolio_learning
+        out["lesson_application"] = portfolio_learning.settle_application(
+            PORTFOLIO_ID, submission, asof
+        )
+    except Exception as exc:  # noqa: BLE001 - fills/publish remain authoritative
+        out["lesson_application"] = {
+            "ok": False,
+            "transitioned": False,
+            "error": f"application_transition_error:{type(exc).__name__}",
+        }
+    try:
+        out["lesson_finalization"] = portfolio_learning.application_finalization_status(
+            PORTFOLIO_ID, submission
+        )
+    except Exception as exc:  # noqa: BLE001 - finalizer must retain the receipt
+        out["lesson_finalization"] = {
+            "ok": False,
+            "required": True,
+            "error": f"application_finalization_error:{type(exc).__name__}",
+        }
+    if not out["lesson_finalization"].get("ok"):
+        out["ok"] = False
+        out["error"] = "lesson_application_not_durable"
+        return out
     # republish has no live Brain object, so recover its closing write-up from the decision log
     # to translate it too (the automated run_china path passes the live brain directly).
     brain = {}

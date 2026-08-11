@@ -191,13 +191,21 @@ def test_claude_child_profiles_have_no_raw_cross_book_or_runtime_file_tools():
     assert "get_china_intake" in china & hk
 
 
-def test_research_signal_reader_allows_published_contract_but_denies_env_file():
+def test_research_signal_reader_allows_published_contract_but_denies_env_file(
+    monkeypatch, tmp_path,
+):
     import asyncio
 
-    from brain import autonomous_mcp
+    from brain import autonomous_mcp, bot_mcp
+
+    published_root = tmp_path / "published"
+    published_root.mkdir()
+    published = published_root / "china_brief.json"
+    published.write_text('{"schema": "china.brief.v1"}', encoding="utf-8")
+    monkeypatch.setattr(bot_mcp, "_READ_ROOTS", [published_root])
 
     reader = next(tool for tool in autonomous_mcp._READ_TOOLS if tool.name == "read_signal")
-    allowed = asyncio.run(reader.handler({"path": "vendor/macro/site/china_brief.json"}))
+    allowed = asyncio.run(reader.handler({"path": str(published)}))
     denied = asyncio.run(reader.handler({"path": ".env"}))
     allowed_text = allowed["content"][0]["text"]
     denied_text = denied["content"][0]["text"]

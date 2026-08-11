@@ -482,10 +482,21 @@ def test_unverified_new_us_instrument_fails_closed(monkeypatch):
     ]
 
 
-def test_nested_trusted_metadata_identifies_non_allowlisted_etf():
-    # ARKK is outside the retired ETF desk's narrow allowlist, but the local GEX
-    # contract identifies it as a Macro ETF. A mere ticker artifact cannot let it
-    # masquerade as a common stock.
+def test_nested_trusted_metadata_identifies_non_allowlisted_etf(monkeypatch):
+    # Keep the identity contract hermetic: CI intentionally does not receive the
+    # VPS-owned signal/data tree. ARKK is outside the retired ETF desk's narrow
+    # allowlist, while a trusted nested Macro contract explicitly identifies it
+    # as an ETF. A mere ticker artifact cannot authenticate a common stock.
+    from brain import intake
+    from portfolio import etf_universe
+
+    monkeypatch.setattr(etf_universe, "is_etf", lambda ticker: False)
+    monkeypatch.setattr(etf_universe, "name_of", lambda ticker: None)
+    monkeypatch.setattr(
+        intake,
+        "_read",
+        lambda rel: {"meta": {"grp": "Macro ETF"}} if rel == "gex/ARKK.json" else {},
+    )
     identity = ds._instrument_identity("ARKK")
     assert identity["kind"] == "etf" and identity["verified"] is True
 

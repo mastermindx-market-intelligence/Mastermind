@@ -1247,6 +1247,35 @@ def api_portfolios() -> JSONResponse:
     return JSONResponse(payload)
 
 
+@router.get("/api/forward-evaluation")
+def api_forward_evaluation(portfolio: str | None = None,
+                           asof: str | None = None) -> JSONResponse:
+    """Compact read-only evidence status for the three active regional portfolio brains.
+
+    This route only serves already-materialised runtime artifacts.  It never computes a metric,
+    takes a book lock, calls a feed/model, or writes the evaluation cohort/snapshots.
+    """
+    from portfolio import forward_evaluation, registry
+
+    if portfolio is not None and not registry.is_known(portfolio):
+        return JSONResponse({
+            "schema": forward_evaluation.STATUS_SCHEMA,
+            "book": portfolio,
+            "status": "unknown_book",
+            "write_permitted": False,
+        }, status_code=404)
+    try:
+        return JSONResponse(forward_evaluation.status(portfolio, asof))
+    except ValueError as exc:
+        return JSONResponse({
+            "schema": forward_evaluation.STATUS_SCHEMA,
+            "book": portfolio,
+            "status": "invalid_request",
+            "write_permitted": False,
+            "error": str(exc),
+        }, status_code=400)
+
+
 @router.get("/api/decisions")
 def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONResponse:
     """Mastermind Portfolio's structured daily decision journal for an active or archived Brain."""

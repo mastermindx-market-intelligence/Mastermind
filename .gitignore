@@ -71,6 +71,7 @@ data/macro_risk/
 data/mastermind/
 data/mastermind_ai/
 data/portfolio_learning/
+data/portfolio_forward_evaluation/
 .deployed_git_sha
 data/metabolism/
 data/nw_reflection/

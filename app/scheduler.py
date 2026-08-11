@@ -80,7 +80,8 @@ def _ledger_end(handle, status: str, *, severity: str | None = None):
         pass
 
 
-def _step_failed_event(job: str, book: str, step: str, exc: BaseException):
+def _step_failed_event(job: str, book: str, step: str, exc: BaseException,
+                       *, severity: str = "ADVISORY_ONLY"):
     """Append a step_failed run_event for a swallowed exception.  Never raises."""
     try:
         from control_plane import run_events
@@ -90,7 +91,7 @@ def _step_failed_event(job: str, book: str, step: str, exc: BaseException):
             "book": book,
             "step": step,
             "status": "error",
-            "severity": "ADVISORY_ONLY",
+            "severity": severity,
             "err": exc,
             "actor": "system",
         })
@@ -365,6 +366,31 @@ def _maybe_schedule_brain_retry(job_id: str, book: str, since_ts) -> None:
 # job implementations
 # ---------------------------------------------------------------------------
 
+def _post_mark_forward_evaluation(book: str, result: dict | None = None,
+                                  *, asof: str | None = None) -> dict:
+    """Advance the bounded forward ledger while the caller still owns ``book:<id>``.
+
+    The leaf reads durable artifacts only.  Before the exact-deployment start marker exists it
+    returns ``not_started`` and writes nothing.  A failed/explicitly-skipped mark is not evaluated;
+    a later daily-mark sweep can safely catch it up under the same per-book lock.
+    """
+    result = result if isinstance(result, dict) else {}
+    if result.get("mark_error") or result.get("mark_skipped"):
+        return {"book": book, "status": "skipped_no_post_mark", "write_permitted": False}
+    stamp = str(asof or result.get("asof") or _today_iso())[:10]
+    try:
+        from portfolio import forward_evaluation
+        return forward_evaluation.evaluate(book, stamp)
+    except Exception as exc:  # noqa: BLE001 — evaluation must never interrupt a paper-book run
+        try:
+            from portfolio import forward_evaluation
+            forward_evaluation.record_failure(book, stamp, exc)
+        except Exception:  # noqa: BLE001 — the governance ledger remains the second hard signal
+            pass
+        _step_failed_event("forward_evaluation", book, "forward_evaluation.evaluate", exc,
+                           severity="FREEZE")
+        return {"book": book, "status": "error", "error": type(exc).__name__}
+
 def _job():
     """Retired Flagship wrapper retained only to neutralize stale persisted jobs."""
     if _archived_job_noop("daily_loop", "flagship"):
@@ -403,7 +429,8 @@ def _autonomous_job():
             return
         with lock:
             from bot.autonomous import run_autonomous
-            run_autonomous()
+            _result = run_autonomous()
+            _post_mark_forward_evaluation("autonomous", _result)
         _ledger_end(handle, "ok")
         _maybe_schedule_brain_retry("autonomous_daily", "autonomous", _started)
     except Exception as exc:  # noqa: BLE001
@@ -450,7 +477,8 @@ def _china_job():
             return
         with lock:
             from bot.china import run_china
-            run_china()
+            _result = run_china()
+            _post_mark_forward_evaluation("china", _result)
         _ledger_end(handle, "ok")
         _maybe_schedule_brain_retry("china_daily", "china", _started)
     except Exception as exc:  # noqa: BLE001
@@ -473,7 +501,8 @@ def _hk_job():
             return
         with lock:
             from bot.hk import run_hk
-            run_hk()
+            _result = run_hk()
+            _post_mark_forward_evaluation("hk", _result)
         _ledger_end(handle, "ok")
         _maybe_schedule_brain_retry("hk_daily", "hk", _started)
     except Exception as exc:  # noqa: BLE001
@@ -1149,7 +1178,9 @@ def _daily_mark_job():
                         prices[t] = px
                 if prices:
                     paper_account.mark(prices, asof, portfolio_id=pid, benchmark=bench)
-        except Exception:  # noqa: BLE001 — one book's mark miss must never kill the sweep
+                    _post_mark_forward_evaluation(pid, asof=asof)
+        except Exception as exc:  # noqa: BLE001 — one book's mark miss must never kill the sweep
+            _step_failed_event("daily_mark", pid, f"mark:{pid}", exc, severity="FREEZE")
             continue
     # ── W-L / L1: mark the Self-Directed book too (its own engine, its own nav_history) ──
     # It is NOT a paper_account book, so it marks through its own mark seam. Install the ONE marking
@@ -1779,7 +1810,8 @@ def maybe_first_autonomous_run() -> bool:
                 return
             with lock:
                 from bot.autonomous import run_autonomous
-                run_autonomous()
+                _result = run_autonomous()
+                _post_mark_forward_evaluation("autonomous", _result)
             _ledger_end(handle, "ok")
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
@@ -1869,7 +1901,8 @@ def maybe_first_china_run() -> bool:
                 return
             with lock:
                 from bot.china import run_china
-                run_china()
+                _result = run_china()
+                _post_mark_forward_evaluation("china", _result)
             _ledger_end(handle, "ok")
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
@@ -1910,7 +1943,8 @@ def maybe_first_hk_run() -> bool:
                 return
             with lock:
                 from bot.hk import run_hk
-                run_hk()
+                _result = run_hk()
+                _post_mark_forward_evaluation("hk", _result)
             _ledger_end(handle, "ok")
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
