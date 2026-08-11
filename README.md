@@ -1,47 +1,39 @@
 # Mastermind
 
-Autonomous, narrative-based, medium/long-term **US-equity** investment agent. A
-live "breathing" web app that reuses the macro dashboard's engine as a library,
-runs a gated Claude (Opus 4.8) analysis loop, keeps a Brier-scored accountability
-ledger, and publishes its paper portfolio + decision journal back to the macro
-dashboard as a static page.
+A seven-book, paper-only portfolio operating system spanning US, ETF, mainland
+China, Hong Kong, concentrated, and self-directed mandates. Reasoning agents
+analyze and propose; deterministic engines own sizing, caps, settlement, marking,
+and binding release gates. The system never auto-executes broker trades.
 
-> Paper-only / display-only. Accountability, not alpha. Never auto-executes.
+This is one of three first-class Mastermind-X repositories alongside Macro
+Dashboard and Mastermind Terminal. It consumes bounded Macro context and publishes
+privacy-whitelisted paper state and accountability back through Macro.
 
 ## Architecture (one sentence)
 
-Themes/regime → a Claude deliberation → a deterministic sizing pass → a paper
-book → a static page, with a self-improving backtest loop feeding vetted
-strategies in from the side. Three invariants: the macro repo is a **pinned,
-read-only submodule**; **nothing executes**; **sizing is subtract-only**.
+Macro evidence and context → manager reasoning → deterministic controls → seven
+paper books → decision/outcome ledgers → sanitized Macro publication. Reasoning
+may propose intent but cannot bypass deterministic portfolio authority.
 
 ```
 Mastermind/
-  vendor/macro/      pinned submodule (symlink in local Phase 0) — engine.* lib
-  app/               FastAPI service (deps bootstrap, /health, /regime)
-  bot/               package root — bootstraps vendor/macro onto sys.path; smoke test
-  brain/             B — Claude deliberation (client/gate/panel/adjudicator/decision/scorer)
-  loop/              A — self-improving backtest loop (candidates/harness/holdout/promote)
-  portfolio/         C — themes -> sized, timed positions
-  data_layer/        D — read channel + Polygon ingest + Postgres/DuckDB
-  bridge/            write-back: site/portfolio.json -> macro dashboard page
-  sql/0001_schema.sql  the 9-table system-of-record
-  config/brain.yml   model tiers, gate, de-confidencing, paper gate
-  prototype/index.html  clickable static UI prototype (no backend)
+  app/               FastAPI product, operator routes, dashboard, scheduler
+  bot/               scheduled paper-book builders and orchestration
+  brain/             reasoning, Macro adapters, accountability, operator AI
+  portfolio/         book registry/state, deterministic sizing, risk, marking
+  loop/              offline research and forward-paper qualification
+  control_plane/     contracts, authority modes, packets, locks, governance
+  data_layer/        Macro refresh, data reads, storage, price snapshots
+  bridge/            sanitized snapshot, feedback, and Macro publication
+  config/            doctrine, mandates, providers, contracts, authority modes
 ```
-
-## Phase 0 — prove the wiring
-
-```bash
-# vendor/macro is a symlink to the working macro checkout (data/ populated)
-python -m bot.smoke          # imports engine, reproduces today's regime live
-pytest                       # same as an acceptance test
-```
-
-Expected: the live `build_features() -> classify()` recompute matches
-`data/regime/latest.json` (live == backtest by construction).
 
 ## Status
 
-Phase 0 scaffold. Brain / loop / portfolio / data_layer / bridge packages are
-empty placeholders to be filled per the design (see the design doc / memory).
+Operating paper system with seven current books: Flagship, Heavyweight, US Brain,
+ETF Brain, CN Brain, HK Brain, and Self Directed. Open pull requests are proposed
+overlays, not current `master` behavior.
+
+Start with `AGENTS.md` for authority and delivery rules,
+`research/MASTERMIND_CHARTER_V2.md` for the canonical charter, and
+`docs/DELIVERY_WORKFLOW.md` for operations. `README.md` is orientation only.
