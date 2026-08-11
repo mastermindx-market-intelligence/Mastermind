@@ -813,3 +813,4 @@ mastermind_ai:
   llm_review:            false  # runtime half of the LLM-review double gate (env: MASTERMIND_AI_REVIEW_LLM)
   directives_max_open:   10     # queued+published operator directives the publisher may carry
   directive_expiry_days: 14     # published-but-never-acknowledged directives expire after N days
+  auto_act_on_findings:  true   # standing operator grant: forward bounded nudges/context requests; never auto-build or trade

@@ -7,12 +7,12 @@ confirmations of an unwind — a −X% theme day on the book's fragile chain, a 
 credit gap — together with the Macro Risk Officer's risk state and the live overnight tape. When it
 fires, the desk de-risks IMMEDIATELY, subtract-only:
 
-  * ``derisk_flagship`` — cuts the held Flagship conviction book down to the risk-off gross cap
-    (cracking-chain + worst-loser first), realizing REAL paper exits (``paper_account.execute_fill``)
-    so cash is actually freed, with the Risk Officer's never-blow-to-cash guard enforced. Never adds.
   * ``derisk_brain``    — revises a Brain book's queued ``pending_target`` down to the gross cap and
     away from the cracking chains, so it settles defensively at the next open. No LLM needed (it fires
     even when the model is down — the whole point).
+
+Flagship and Heavyweight cutter implementations remain below for historical audit and unit-level
+regression, but an archive guard freezes them before any tripwire, price, artifact, or account write.
 
 Flag-gated behind ``MASTERMIND_FAST_DERISK`` (default OFF → the scheduler hooks are inert and the books
 are byte-identical to today). The macro-risk teeth themselves are gated on ``MASTERMIND_MACRO_RISK``.
@@ -27,18 +27,15 @@ from pathlib import Path
 from typing import Any
 
 import bot  # noqa: F401  -> vendor/macro onto sys.path
+from portfolio import registry
 
 _ROOT = Path(__file__).resolve().parent.parent
 _V = _ROOT / "vendor" / "macro"
 _ARTIFACTS = _ROOT / "data" / "macro_risk"
 
-# NOTE: _US_BOOKS is NOT iterated — the US books split into two structurally-different cutter
-# families (see sweep_us): flagship + heavyweight are HELD books cut in place, while autonomous +
-# etf are QUEUED Brain books whose pending target is revised.  A single "for pid in _US_BOOKS"
-# loop would be a misleading second code path (heavyweight through derisk_brain is a no-op — it
-# never queues a pending_target).  Kept as documentation of the US perimeter; do not route a sweep
-# off it.  Held-book cutters: ("flagship", "heavyweight"); queued Brain books: ("autonomous", "etf").
-_US_BOOKS = ("flagship", "heavyweight", "autonomous", "etf")
+# Active scheduler perimeter. Retired US books are deliberately absent and their direct cutters
+# independently enforce the registry archive guard.
+_US_BOOKS = ("autonomous",)
 _ASIA_BOOKS = ("china", "hk")
 
 # The held-book sleeve sets the in-place cutters (derisk_flagship / derisk_heavyweight) act on.
@@ -53,6 +50,13 @@ _HEAVYWEIGHT_SLEEVES: frozenset[str] = frozenset({"heavy"})
 # was exempt on 2026-07-01, so a severity-2 tripwire with a full-sized leadership sleeve did
 # nothing.  Both sleeves are SUBTRACT-ONLY here: we only trim/exit, never add.
 _DERISKED_SLEEVES: frozenset[str] = frozenset({"conviction", "leadership"})
+
+
+def _archived_noop(pid: str, asof: str) -> dict | None:
+    """Freeze a retired account before tripwires, prices, artifacts, or account writes."""
+    if not registry.is_archived(pid):
+        return None
+    return {"pid": pid, **registry.archived_run_result(pid, asof)}
 
 
 def _severity_cap(severity: int) -> float | None:
@@ -304,6 +308,8 @@ def derisk_flagship(asof: str | None = None, *, regime: dict | None = None, forc
     Officer's never-blow-to-cash guard enforced. Subtract-only; never adds; never raises. No-op (and
     free) when disabled, no trigger, or already under the cap. ``force`` bypasses the trigger gate."""
     asof = asof or date.today().isoformat()
+    if archived := _archived_noop("flagship", asof):
+        return archived
     out: dict = {"pid": "flagship", "asof": asof}
     if not (enabled() or force):
         return {**out, "skipped": "disabled"}
@@ -463,11 +469,11 @@ def derisk_flagship(asof: str | None = None, *, regime: dict | None = None, forc
 # ─────────────────────────────────────────────────────────────────────────────
 # HEAVYWEIGHT — off-cycle subtract-only cut of the held concentrated book to the gross cap.
 #
-# Heavyweight (bot/heavyweight.py) is a HELD book: it rebalances directly at close via
+# Historical implementation note: Heavyweight (bot/heavyweight.py) is a HELD book that rebalanced
+# directly at close via
 # paper_account.rebalance(..., portfolio_id="heavyweight") and NEVER queues a pending_target. So the
 # "just add it to sweep_us()" one-liner that routes a book through derisk_brain would be a silent
-# no-op here ("nothing_queued"). Heavyweight is in the US risk perimeter (firm_exposure._FIRM_US_BOOKS
-# includes it) but had NO off-ramp; this is that off-ramp — a HELD-book cutter faithfully mirroring
+# no-op here ("nothing_queued"). Before retirement this was its off-ramp — a HELD-book cutter mirroring
 # derisk_flagship, scoped to portfolio_id="heavyweight" and its single "heavy" sleeve.
 #
 # Parity with derisk_flagship: SAME tripwire, SAME severity-derived eff_cap (min(state_cap, sev_cap)
@@ -479,7 +485,8 @@ def derisk_flagship(asof: str | None = None, *, regime: dict | None = None, forc
 # Heavyweight is single-sleeve with its own concentration doctrine and no ½-Kelly minimum-invested
 # floor — exactly the case flagship's LEADERSHIP sleeve is in, which also bypasses risk_officer.
 # The never-blow-to-cash property is structural: the cut stops the instant gross ≤ eff_cap (0.55–0.70),
-# so it always leaves 30–45% invested — it can never liquidate the book to cash.
+# so it always leaves 30–45% invested — it can never liquidate the book to cash. The archive guard
+# now returns before any of this implementation runs.
 # ─────────────────────────────────────────────────────────────────────────────
 def derisk_heavyweight(asof: str | None = None, *, regime: dict | None = None,
                        force: bool = False) -> dict:
@@ -491,8 +498,10 @@ def derisk_heavyweight(asof: str | None = None, *, regime: dict | None = None,
     Mirrors derisk_flagship's severity discipline exactly (min(state_cap, sev_cap) + posture notch);
     the only divergence is that heavyweight's single "heavy" sleeve bypasses the conviction-only
     risk_officer guard (see the module note above)."""
-    from bot.heavyweight import PORTFOLIO_ID as _HW_PID  # "heavyweight" — single source of truth
     asof = asof or date.today().isoformat()
+    if archived := _archived_noop("heavyweight", asof):
+        return archived
+    from bot.heavyweight import PORTFOLIO_ID as _HW_PID  # "heavyweight" — active-test source
     out: dict = {"pid": _HW_PID, "asof": asof}
     if not (enabled() or force):
         return {**out, "skipped": "disabled"}
@@ -636,6 +645,8 @@ def derisk_brain(pid: str, asof: str | None = None, *, regime: dict | None = Non
     a cracking fragile chain. Deterministic — no LLM (it fires even when the model is down). The revised
     target settles defensively through the existing queue→settle machinery. Never adds; never raises."""
     asof = asof or date.today().isoformat()
+    if archived := _archived_noop(pid, asof):
+        return archived
     out: dict = {"pid": pid, "asof": asof}
     if not (enabled() or force):
         return {**out, "skipped": "disabled"}
@@ -644,7 +655,15 @@ def derisk_brain(pid: str, asof: str | None = None, *, regime: dict | None = Non
     except Exception as e:  # noqa: BLE001
         return {**out, "error": f"import: {e!r}"[:160]}
 
-    pt = paper_account.load_pending_target(pid)
+    preflight = paper_account.preflight_pending_target(pid)
+    if not preflight["ok"]:
+        return {
+            **out,
+            "skipped": preflight["skipped"],
+            "quarantined": True,
+            "quarantine": preflight["quarantine"],
+        }
+    pt = preflight["pending"]
     if not pt or not (pt.get("target")):
         return {**out, "skipped": "nothing_queued"}
 
@@ -702,7 +721,16 @@ def derisk_brain(pid: str, asof: str | None = None, *, regime: dict | None = Non
         scaled = True
 
     try:
-        paper_account.save_pending_target(target, asof, portfolio_id=pid)
+        decision_snapshot = pt.get("decision_snapshot")
+        if decision_snapshot is None:
+            paper_account.save_pending_target(target, asof, portfolio_id=pid)
+        else:
+            paper_account.save_pending_target(
+                target,
+                asof,
+                portfolio_id=pid,
+                decision_snapshot=decision_snapshot,
+            )
     except Exception as e:  # noqa: BLE001
         return {**out, "error": f"save: {e!r}"[:160]}
 
@@ -733,26 +761,15 @@ def _log_sweep_advisory(pid: str, exc: Exception) -> None:
 
 
 def sweep_us(asof: str | None = None) -> dict:
-    """Intraday/overnight de-risk sweep for the US books (scheduler job). Flagship AND Heavyweight cut
-    HELD (in place, real exits); the US Brain books (autonomous, etf) revise their QUEUED targets. No-op
-    unless armed + a confirmation fires. Never raises.
+    """Intraday/overnight de-risk sweep for the active US Brain only.
 
-    Heavyweight is a HELD book (it rebalances directly at close, never queues a pending_target), so it
-    needs the held-book cutter derisk_heavyweight — routing it through derisk_brain would be a silent
-    'nothing_queued' no-op. It is in the US risk perimeter (firm_exposure._FIRM_US_BOOKS) but had no
-    off-ramp before this."""
+    Archived books are frozen historical records; a post-retirement risk sweep must not create a
+    final sale, pending-target rewrite, or synthetic continuation of their track records.
+    """
     out: dict = {}
     if not enabled():
         return {"skipped": "disabled"}
-    # HELD-book cutters (real exits, in place) — flagship + heavyweight.
-    for pid, _cut in (("flagship", derisk_flagship), ("heavyweight", derisk_heavyweight)):
-        try:
-            out[pid] = _cut(asof)
-        except Exception as e:  # noqa: BLE001
-            out[pid] = {"error": repr(e)[:160]}
-            _log_sweep_advisory(pid, e)
-    # QUEUED Brain books (revise the pending target) — autonomous + etf.
-    for pid in ("autonomous", "etf"):
+    for pid in _US_BOOKS:
         try:
             out[pid] = derisk_brain(pid, asof)
         except Exception as e:  # noqa: BLE001

@@ -233,7 +233,13 @@ def test_settle_open_stamps_fill_price_source(tmp_path, monkeypatch):
     monkeypatch.setattr(paper_account, "_load_account",
                         lambda pid_: fake_account, raising=False)
     monkeypatch.setattr(paper_account, "load_pending_target",
-                        lambda pid_: {"target": {"AAPL": 0.5}, "asof": asof},
+                        lambda pid_: {
+                            "target": {"AAPL": 0.5},
+                            "asof": asof,
+                            "schema_version": paper_account.PENDING_TARGET_SCHEMA_V2,
+                            "engine_version": paper_account.US_BRAIN_ENGINE_V2,
+                            "portfolio_id": "autonomous",
+                        },
                         raising=False)
     monkeypatch.setattr(paper_account, "settle_target",
                         lambda prices, asof_, portfolio_id=None: {"AAPL": 0.5},
@@ -303,7 +309,13 @@ def test_settle_open_fill_source_falls_back_to_last_price(tmp_path, monkeypatch)
         return {"cash": 500_000.0, "positions": {"MSFT": {"shares": 5.0, "avg_cost": 410.0}}}
     monkeypatch.setattr(paper_account, "_load_account", fake_load_account, raising=False)
     monkeypatch.setattr(paper_account, "load_pending_target",
-                        lambda pid_: {"target": {"MSFT": 0.5}, "asof": asof},
+                        lambda pid_: {
+                            "target": {"MSFT": 0.5},
+                            "asof": asof,
+                            "schema_version": paper_account.PENDING_TARGET_SCHEMA_V2,
+                            "engine_version": paper_account.US_BRAIN_ENGINE_V2,
+                            "portfolio_id": "autonomous",
+                        },
                         raising=False)
     monkeypatch.setattr(paper_account, "settle_target",
                         lambda prices, asof_, portfolio_id=None: {"MSFT": 0.5},

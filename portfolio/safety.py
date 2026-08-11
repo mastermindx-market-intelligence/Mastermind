@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -906,12 +906,12 @@ def load_safety(portfolio_id: str | None = None) -> dict | None:
 
 
 def safety_for_all(asof: str | None = None, *, bootstrap: bool = True) -> dict:
-    """Compute + persist a safety report for every registered portfolio (the nightly job)."""
+    """Compute + persist nightly safety reports for operationally active portfolios only."""
     try:
         from portfolio import registry
-        ids = registry.ids()
+        ids = registry.active_ids()
     except Exception:
-        ids = ["flagship"]
+        ids = []
     summary: dict[str, Any] = {}
     for pid in ids:
         try:

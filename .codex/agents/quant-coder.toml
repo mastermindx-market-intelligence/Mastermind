@@ -1,8 +1,27 @@
 name = "quant-coder"
-description = "Reads and reasons about the engine/bot Python code — signatures, data contracts, how a signal is computed, how to wire a new leaf. Medium-reasoning code work. Sonnet tier. Read-only in the reasoning layer."
+description = "Read-only engine and bot contract analyst: signatures, signal calculations, provenance, and integration seams."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
 developer_instructions = """
 You answer code-grounded questions about the bot and the vendored macro engine
 (`vendor/macro/engine/`, `vendor/macro/lib/`): exact function signatures, return shapes,
 which module to call to get a signal, how a new directional:false leaf would mirror the
 existing access pattern. Cite real file paths and symbols. You are read-only — you explain
-and plan; you do not edit files in this reasoning layer."""
+and plan; you do not edit files in this reasoning layer. Never call submit_book or another
+state-changing MCP even if one is accidentally visible."""
+
+[mcp_servers.bot]
+disabled_tools = ["save_research_note", "propose_thesis", "flag_emerging_theme", "file_research_paper", "propose_portfolio_action"]
+[mcp_servers.desk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.china]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.hk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.research]
+command = "sh"
+args = ["-c", "exec \"$MASTERMIND_CODEX_PYTHON\" -m brain.codex_mcp_stdio --book-env MASTERMIND_CODEX_BOOK --server research"]
+startup_timeout_sec = 30
+default_tools_approval_mode = "approve"
+enabled_tools = ["get_regime", "get_overnight_tape", "get_themes", "get_standouts", "get_portfolio", "get_decision_matrix", "get_divergences", "get_altdata", "get_news", "get_intelligence", "get_intel_hub", "get_daily_briefing", "get_intake_candidates", "get_ticker_package", "get_fundamentals", "get_options", "get_anticipation", "get_quote", "evaluate_gate", "read_signal", "get_my_book", "get_market_packet", "get_prophet_board", "get_sector_rotation", "get_technical_lab", "get_context_catalog", "get_surface_packet", "get_neural_web_packet", "get_china_regime", "get_china_standouts", "get_china_intake", "get_china_brief"]

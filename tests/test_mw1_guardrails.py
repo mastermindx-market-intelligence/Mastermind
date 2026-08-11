@@ -706,7 +706,7 @@ class TestMarksLayer:
 class TestSettlePaths:
     """settle.execute_or_queue: account write failure → HARD_STOP event logged."""
 
-    def test_open_settle_rebalance_failure_emits_hard_stop(self, monkeypatch, tmp_path):
+    def test_open_settle_target_failure_emits_hard_stop(self, monkeypatch, tmp_path):
         cap = _capture(monkeypatch)
 
         from bot import settle
@@ -715,11 +715,15 @@ class TestSettlePaths:
         # Force market_open
         monkeypatch.setattr(settle, "is_open", lambda pid: True)
 
-        # settle_target succeeds, rebalance raises
-        monkeypatch.setattr(paper_account, "settle_target", lambda prices, asof, portfolio_id=None: {})
-        monkeypatch.setattr(paper_account, "rebalance",
-                            lambda tw, prices, asof, portfolio_id=None: (_ for _ in ()).throw(
-                                OSError("rebalance-fail")))
+        # The current WAL boundary settles the latest target exactly once. A failure is raised by
+        # settle_target itself; there is no second rebalance call after settlement.
+        monkeypatch.setattr(
+            paper_account,
+            "settle_target",
+            lambda prices, asof, portfolio_id=None: (_ for _ in ()).throw(
+                OSError("settle-target-fail")
+            ),
+        )
         monkeypatch.setattr(paper_account, "_load_account",
                             lambda pid=None: {"positions": {}, "cash": 100000.0})
 
@@ -754,20 +758,20 @@ class TestSettlePaths:
 class TestDerisKSweep:
     """derisk.sweep_us/sweep_asia: sweep leg failure → ADVISORY event."""
 
-    def test_flagship_sweep_failure_emits_advisory(self, monkeypatch):
+    def test_archived_us_sweeps_are_not_invoked(self, monkeypatch):
         cap = _capture(monkeypatch)
 
         from bot import derisk
         monkeypatch.setattr(derisk, "enabled", lambda: True)
         monkeypatch.setattr(derisk, "derisk_flagship",
                             lambda asof=None, **kw: (_ for _ in ()).throw(RuntimeError("crash")))
+        monkeypatch.setattr(derisk, "derisk_brain",
+                            lambda pid, asof=None, **kw: {"pid": pid, "action": "hold"})
 
         out = derisk.sweep_us()
 
-        assert "flagship" in out
-        assert "error" in out["flagship"]
-        assert any(e.get("severity") == "ADVISORY_ONLY" for e in cap.events), \
-            f"no ADVISORY event on sweep failure; got: {cap.events}"
+        assert out == {"autonomous": {"pid": "autonomous", "action": "hold"}}
+        assert not cap.events, f"retired US sweep emitted events: {cap.events}"
 
     def test_brain_sweep_failure_emits_advisory(self, monkeypatch):
         cap = _capture(monkeypatch)
@@ -782,8 +786,8 @@ class TestDerisKSweep:
 
         advisory_events = [e for e in cap.events if e.get("severity") == "ADVISORY_ONLY"]
         assert advisory_events, f"no ADVISORY event on brain sweep failure; got: {cap.events}"
-        # Both autonomous and etf should log
-        assert len(advisory_events) >= 2, f"expected >=2 ADVISORY events; got: {advisory_events}"
+        assert list(out) == ["autonomous"]
+        assert len(advisory_events) == 1, f"expected one active-US advisory; got: {advisory_events}"
 
     def test_sweep_disabled_no_events(self, monkeypatch):
         cap = _capture(monkeypatch)
@@ -800,11 +804,42 @@ class TestDerisKSweep:
 # (R9) peer-expectation sentinel — full test suite
 # ---------------------------------------------------------------------------
 
+class TestActiveUSPeerTopology:
+    """Current firm-risk perimeter has one active US book and no retired peers."""
+
+    def test_archived_us_books_do_not_create_peer_exposure(self, tmp_path, monkeypatch):
+        cap = _capture(monkeypatch)
+        from portfolio import firm_exposure, registry
+
+        monkeypatch.setattr(registry, "_ROOT", tmp_path, raising=False)
+        for pid in ("flagship", "heavyweight", "etf"):
+            path = registry.data_dir(pid) / "latest.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({
+                "portfolio_id": pid,
+                "positions": [{"ticker": "NVDA", "weight": 0.10}],
+            }))
+
+        assert firm_exposure._FIRM_US_BOOKS == ("autonomous",)
+        assert firm_exposure._peer_exposure("autonomous") is None
+        assert firm_exposure.headroom("NVDA", "autonomous") == float("inf")
+        assert not cap.events
+
 class TestPeerSentinel:
-    """R9: expected-missing peer → FREEZE + headroom=0; not-expected-missing → old behavior;
-    kill-switch suppresses freeze behavior (but still logs).
-    NEW tests: stale-branch, 36h boundary, no-liquidation (freeze not zero).
+    """Legacy multi-active-US sentinel internals, isolated from the production registry.
+
+    The successor topology has no US peer, but these pure guardrail mechanics remain importable and
+    are retained for regression coverage should a second active US mandate be introduced later.
     """
+
+    @pytest.fixture(autouse=True)
+    def legacy_multi_book_topology(self, monkeypatch):
+        from portfolio import firm_exposure, registry
+
+        legacy_ids = ("flagship", "autonomous", "etf", "heavyweight")
+        for pid in legacy_ids:
+            monkeypatch.setitem(registry._BY_ID[pid], "active", True)
+        monkeypatch.setattr(firm_exposure, "_FIRM_US_BOOKS", legacy_ids)
 
     @pytest.fixture
     def iso(self, tmp_path, monkeypatch):

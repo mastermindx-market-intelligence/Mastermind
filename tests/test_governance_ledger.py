@@ -747,7 +747,7 @@ class TestAuthorityMapConformance:
         return yaml.safe_load(p.read_text())
 
     def test_all_decision_flags_mapped(self):
-        """Every KNOWN_FLAGS entry (excluding pseudo_flags) must be in authority_map.yml 'flags'."""
+        """Every decision flag, excluding docs and authority-none observers, must be mapped."""
         try:
             amap = self._load_authority_map()
         except Exception as e:
@@ -755,8 +755,15 @@ class TestAuthorityMapConformance:
 
         from control_plane.flags import KNOWN_FLAGS
         pseudo = set(amap.get("pseudo_flags") or [])
+        # brain.mastermind_ai is explicitly authority-none: these runtime flags only enable its
+        # files-only observation cycle or optional review prose. Neither can trade, size a book,
+        # change a prompt/seat/flag, or promote a request without separate operator review.
+        observability_only = {
+            "MASTERMIND_AI_LOOP",
+            "MASTERMIND_AI_REVIEW_LLM",
+        }
         mapped_flags = set(amap.get("flags") or {})
-        decision_flags = [f for f in KNOWN_FLAGS if f not in pseudo]
+        decision_flags = [f for f in KNOWN_FLAGS if f not in pseudo | observability_only]
 
         missing = [f for f in decision_flags if f not in mapped_flags]
         assert not missing, (
@@ -1046,13 +1053,13 @@ class TestIncidentReplays:
         events = _read_events(tmp_path)
         assert len(events) == 3
 
-    def test_r17_settle_pending_skips_when_etf_held(self, tmp_path, monkeypatch):
-        """MW1 replay: settle_pending skips + emits run_skipped when book:etf is held.
+    def test_r17_settle_pending_skips_when_autonomous_held(self, tmp_path, monkeypatch):
+        """MW1 replay: settle_pending skips + emits run_skipped when book:autonomous is held.
         MW2: governance ledger accumulation must not interfere with this path."""
         import app.scheduler as sched
         from control_plane import locks
         self._redirect(monkeypatch, tmp_path)
-        held = locks.acquire("book:etf", root=tmp_path)
+        held = locks.acquire("book:autonomous", root=tmp_path)
         assert held is not None
         try:
             sched._settle_pending_job()

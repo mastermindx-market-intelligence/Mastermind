@@ -1,11 +1,12 @@
-"""The brain's LLM client — shared waterfall plus direct compatibility modes.
+"""The brain's LLM client — shared waterfall plus explicit compatibility modes.
 
 The authoritative VPS uses ``waterfall``: Codex (ChatGPT-managed auth, Sol
 xhigh) first, then Macro Dashboard's shared Claude OAuth pool.  Direct
 ``codex``/``cli`` modes remain available for diagnostics and local use, with
 ``api`` as the metered Anthropic Messages API fallback.
 
-Either way `call_model()` returns (text|None, degraded_reason|None) — the same contract as
+Every mode is exclusive: a configured shared-waterfall outage never falls through to a
+separate metered credential.  ``call_model()`` returns (text|None, degraded_reason|None) — the same contract as
 master_brain._call_model. When neither backend can run, it returns (None, reason) so the
 pipeline degrades to the deterministic, engine-derived path: the falsifier and sizing never
 depend on the LLM.
@@ -27,14 +28,15 @@ TIERS = {
 
 
 def backend() -> str:
-    """Configured LLM backend. Env override > agents.yml > ``cli``."""
+    """Configured LLM backend. Env override > agents.yml > shared waterfall."""
     env = os.environ.get("BOT_LLM_BACKEND")
     if env in ("waterfall", "codex", "cli", "api"):
         return env
     try:
-        return cli_bridge._cfg().get("backend", "cli")
+        return cli_bridge._cfg().get("backend", "waterfall")
     except Exception:
-        return "cli"
+        # A missing/malformed config must not silently invert the authoritative provider policy.
+        return "waterfall"
 
 
 def api_available() -> bool:
@@ -48,22 +50,31 @@ def api_available() -> bool:
 
 
 def available() -> bool:
-    """Can we reason at all (either backend)?"""
-    if backend() == "waterfall":
+    """Whether the explicitly configured backend can currently reason."""
+    selected = backend()
+    if selected == "waterfall":
         return cli_bridge.available()
-    if backend() == "codex":
+    if selected == "codex":
         return codex_bridge.available()
-    return cli_bridge.available() or api_available()
+    if selected == "cli":
+        return cli_bridge.available()
+    if selected == "api":
+        return api_available()
+    return False
 
 
 def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 1500,
                seat: str | None = None, record_book: str | None = None):
-    """Return (text|None, degraded_reason|None). Routes CLI-first, then the Messages API.
+    """Return (text|None, degraded_reason|None) through one explicit backend.
 
     seat / record_book: cost-attribution overrides forwarded to the recorder on either
     backend — seat names the ledger seat (default = role), record_book overrides the
     _ROLE_BOOK default book. Attribution-only; never changes routing or behaviour."""
-    if backend() == "waterfall" and cli_bridge.available():
+    selected = backend()
+
+    if selected == "waterfall":
+        if not cli_bridge.available():
+            return None, "provider_waterfall_unavailable"
         try:
             r = cli_bridge.reason_sync(
                 user,
@@ -78,7 +89,9 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
         except Exception:
             return None, "provider_waterfall_error"
 
-    if backend() == "codex" and codex_bridge.available():
+    if selected == "codex":
+        if not codex_bridge.available():
+            return None, "codex_unavailable"
         try:
             r = codex_bridge.reason_sync(
                 user,
@@ -91,9 +104,11 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
                 return r["text"], None
             return None, (r.get("error") or "codex_empty")
         except Exception:
-            pass
+            return None, "codex_error"
 
-    if backend() == "cli" and cli_bridge.available():
+    if selected == "cli":
+        if not cli_bridge.available():
+            return None, "cli_unavailable"
         try:
             r = cli_bridge.reason_sync(user, role=role, append_system=system,
                                        seat=seat, record_book=record_book)
@@ -101,9 +116,9 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
                 return r["text"], None
             return None, (r.get("error") or "cli_empty")
         except Exception:
-            pass  # fall through to the API backend
+            return None, "cli_error"
 
-    if not api_available():
+    if selected != "api" or not api_available():
         return None, "no_backend"
     import anthropic
     t = TIERS[role]

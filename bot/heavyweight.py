@@ -1,4 +1,8 @@
-"""The Heavyweight portfolio — an Opus Brain that concentrates Flagship's BEST ideas.
+"""The Heavyweight portfolio — archived; historical implementation retained for audit.
+
+The public runner returns before imports, model capacity, or portfolio writes, its cron/first-run
+paths are removed, and POST /api/heavyweight/run returns HTTP 410. The mechanics below describe the
+retired book and remain testable only when the registry is explicitly overridden in an isolated test.
 
 Once per trading day (after Flagship's nightly build), the Brain:
   1. sees Flagship's full state — holdings + weights, trade history, per-name research papers,
@@ -18,8 +22,7 @@ hard never-liquidate guard — if the universe/sizing rails strip the whole subm
 book is HELD rather than blown to cash. "Add to winners" is expressed by the Brain through size
 (the rebalance sets absolute weights; there is no separate delta path).
 
-Run:  python -m bot.heavyweight        (or the APScheduler 'heavyweight_daily' job, or
-                                         POST /api/heavyweight/run)
+Successor: ``bot.autonomous.run_autonomous`` / POST ``/api/autonomous/run``.
 """
 from __future__ import annotations
 
@@ -342,10 +345,18 @@ def _firm_clamp_freeze_heavyweight(final_weights: dict[str, float], exc: Excepti
 def run_heavyweight(asof: str | None = None, *, force: bool = False, armed: bool = True,
                    directive: str | None = None) -> dict:
     """Run one Heavyweight turn end-to-end. Best-effort: every step degrades gracefully."""
+    from portfolio import registry
+    asof = asof or date.today().isoformat()
+    if registry.is_archived(PORTFOLIO_ID):
+        return {
+            **registry.archived_run_result(PORTFOLIO_ID, asof),
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+            "decided": False,
+            "brain": {"ok": False, "skipped": "portfolio_archived"},
+        }
     from portfolio import market_calendar, paper_account, position_log
     from brain import heavyweight_mcp
 
-    asof = asof or date.today().isoformat()
     out: dict = {"portfolio_id": PORTFOLIO_ID, "asof": asof,
                  "ran_at": datetime.now(timezone.utc).isoformat()}
     today = _safe_date(asof)
@@ -938,6 +949,9 @@ if __name__ == "__main__":
     import sys
     _armed = "--offline" not in sys.argv
     o = run_heavyweight(armed=_armed)
+    if o.get("skipped") == "portfolio_archived":
+        print(f"Heavyweight is archived; successor: {o.get('superseded_by') or 'autonomous'}.")
+        raise SystemExit(0)
     print(f"=== heavyweight {o['asof']} (inaugural={o['inaugural']}, trading_day={o['trading_day']}) ===")
     print("brain:", "ok" if o["brain"].get("ok") else o["brain"].get("error", "skipped"),
           "| decided:", o.get("decided"), "| universe:", o.get("flagship_universe_size"),

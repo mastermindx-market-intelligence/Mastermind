@@ -125,14 +125,16 @@ def feed_enabled() -> bool:
 # --------------------------------------------------------------------------- #
 _CACHE: dict[str, Any] | None = None    # None = not yet loaded; {} = absent/malformed/stale/flag-off
 _CACHE_LOADED: bool = False
+_CACHE_MTIME_NS: int | None = None
 
 
 def _reset_cache() -> None:
     """Invalidate the per-process index cache. Tests MUST call this around fixtures (the cache is
     keyed on nothing but process lifetime, so a monkeypatched path/flag needs an explicit reset)."""
-    global _CACHE, _CACHE_LOADED
+    global _CACHE, _CACHE_LOADED, _CACHE_MTIME_NS
     _CACHE = None
     _CACHE_LOADED = False
+    _CACHE_MTIME_NS = None
 
 
 # --------------------------------------------------------------------------- #
@@ -262,10 +264,18 @@ def index() -> dict:
     Cached for the process lifetime; call ``_reset_cache()`` to force a fresh read (tests / intraday
     refresh). Never raises — a read/parse error logs at debug and yields ``{}``.
     """
-    global _CACHE, _CACHE_LOADED
-    if _CACHE_LOADED:
+    global _CACHE, _CACHE_LOADED, _CACHE_MTIME_NS
+    try:
+        current_mtime = _ARTIFACT_PATH.stat().st_mtime_ns if _ARTIFACT_PATH.exists() else None
+    except Exception:
+        current_mtime = None
+    # The VPS process is long-lived while Prophet is rebuilt nightly.  A process-lifetime
+    # cache silently served yesterday's board until restart, so reload whenever the artifact
+    # changes (including appearing or disappearing). Tests may still force a reset explicitly.
+    if _CACHE_LOADED and current_mtime == _CACHE_MTIME_NS:
         return _CACHE or {}
     _CACHE_LOADED = True
+    _CACHE_MTIME_NS = current_mtime
     _CACHE = {}
     try:
         if not feed_enabled():

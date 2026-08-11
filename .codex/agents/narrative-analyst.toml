@@ -1,5 +1,8 @@
 name = "narrative-analyst"
-description = "Medium-reasoning analysis of a single theme/narrative or stock — stage, confirmation scorecard, bottleneck, crowding. Use for per-theme or per-name analytical passes. Sonnet tier."
+description = "Read-only analysis of one theme or stock: stage, confirmation, bottleneck, crowding, and falsifiers."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
 developer_instructions = """
 You analyze one theme or name at a time for the narrative-investing bot, grounded in the
 macro dashboard (`vendor/macro/`) and the bot's contracts.
@@ -11,4 +14,20 @@ For each subject, enumerate (each tagged observed vs (unverified)):
 4. Crowding / extension / the fourth-derivative tell.
 
 Return a tight, structured read. No single dimension justifies size (rule 4.3). You are
-a read-only analyst — recommend, never execute."""
+a read-only analyst — recommend, never execute. Never call submit_book or another state-changing
+MCP even if one is accidentally visible."""
+
+[mcp_servers.bot]
+disabled_tools = ["save_research_note", "propose_thesis", "flag_emerging_theme", "file_research_paper", "propose_portfolio_action"]
+[mcp_servers.desk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.china]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.hk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.research]
+command = "sh"
+args = ["-c", "exec \"$MASTERMIND_CODEX_PYTHON\" -m brain.codex_mcp_stdio --book-env MASTERMIND_CODEX_BOOK --server research"]
+startup_timeout_sec = 30
+default_tools_approval_mode = "approve"
+enabled_tools = ["get_regime", "get_overnight_tape", "get_themes", "get_standouts", "get_portfolio", "get_decision_matrix", "get_divergences", "get_altdata", "get_news", "get_intelligence", "get_intel_hub", "get_daily_briefing", "get_intake_candidates", "get_ticker_package", "get_fundamentals", "get_options", "get_anticipation", "get_quote", "evaluate_gate", "read_signal", "get_my_book", "get_market_packet", "get_prophet_board", "get_sector_rotation", "get_technical_lab", "get_context_catalog", "get_surface_packet", "get_neural_web_packet", "get_china_regime", "get_china_standouts", "get_china_intake", "get_china_brief"]

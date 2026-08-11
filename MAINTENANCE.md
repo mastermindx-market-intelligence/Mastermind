@@ -235,23 +235,25 @@ Flags that are OFF by default and must NOT be enabled without Fable review:
 | Job id | Time (UTC) | What it does |
 |---|---|---|
 | `macro_refresh` | every 3h :30 | pull macro vendor data; staleness tripwire |
-| `daily_mark` | Mon–Fri 22:35 | mark ALL books to market (never trades) |
-| `daily_loop` | 22:40 | flagship book build |
-| `autonomous_daily` | Mon–Fri 23:10 | autonomous Brain book |
-| `etf_daily` | Mon–Fri 23:15 | ETF Brain book |
-| `heavyweight_daily` | Mon–Fri 23:25 | Heavyweight Brain book |
+| `daily_mark` | Mon–Fri 22:35 | mark the three active managed books (US/CN/HK; never trades) |
+| `daily_loop` | archived / not scheduled | frozen Flagship history; retained wrapper fails closed |
+| `autonomous_daily` | Mon–Fri 23:10 | US Brain v2, the sole active US stock-selection book |
+| `etf_daily` | archived / not scheduled | frozen ETF Brain history; retained wrapper fails closed |
+| `heavyweight_daily` | archived / not scheduled | frozen Heavyweight history; retained wrapper fails closed |
 | `china_daily` | Mon–Fri 08:00 | China Brain book (Asia clock) |
 | `hk_daily` | Mon–Fri 09:00 | HK Brain book (Asia clock) |
-| `settle_pending` | Mon–Fri 15:00 | fill flagship queued orders at open |
+| `settle_pending` | Mon–Fri 15:00 | settle only the versioned US Brain v2 target at the US open |
 | `settle_brain_asia` | Mon–Fri 01:35 | fill China/HK queued orders at A-share open |
-| `watch_us_overnight` | Mon–Fri 02,06,11:20 | overnight watch, US books |
+| `watch_us_overnight` | Mon–Fri 02,06,11:20 | overnight watch, active US Brain only |
 | `watch_asia_overnight` | Mon–Fri 14,20,00:20 | overnight watch, Asia books |
-| `derisk_us_intraday` | Mon–Fri 14–20:00,30 | fast de-risk sweep (FAST_DERISK flag) |
+| `derisk_us_intraday` | Mon–Fri 14–20:00,30 | active-US fast de-risk sweep (FAST_DERISK flag) |
 | `publish_macro_snapshot` | 12:25, 22:25 | push snapshot to Macro Dashboard |
-| `cio_weekly` | Sunday 10:00 | CIO review; writes data/brain/cio/ |
-| `loop_maintenance` | Mon–Fri 23:45 | forward clocks: predictions, outcomes, calibration |
+| `cio_weekly` | Sunday 10:00 | deterministic historical/regional artifacts only; no retired-seat LLM narration |
+| `loop_maintenance` | Mon–Fri 23:45 | outcomes, calibration, post-sell ledger, lessons, and context-request lifecycle |
 
-All times configurable via env vars in `.env` (see app/scheduler.py for names).
+Times are configurable through the service environment (see `app/scheduler.py` for names). The
+authoritative VPS systemd EnvironmentFile, rather than a preserved checkout `.env`, owns provider
+and credential-location policy.
 
 ---
 

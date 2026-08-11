@@ -21,7 +21,13 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 
 # The original, engine-gated book. Its id resolves to the legacy data/portfolio/ dir.
+#
+# ``DEFAULT_ID`` is a STORAGE compatibility default, not the product/dashboard default.  It must
+# remain ``flagship`` because a large amount of legacy code intentionally uses ``data_dir(None)``
+# for the original ``data/portfolio`` tree.  New callers that need the product default should use
+# ``DASHBOARD_DEFAULT_ID`` instead.
 DEFAULT_ID = "flagship"
+DASHBOARD_DEFAULT_ID = "autonomous"
 
 # Ordered — this drives the dashboard tab order.
 PORTFOLIOS: list[dict] = [
@@ -34,6 +40,10 @@ PORTFOLIOS: list[dict] = [
         "starting_nav": 1_000_000.0,
         "benchmark": "SPY",       # equity-curve comparison line
         "legacy": True,           # state lives in data/portfolio/ (not data/portfolios/flagship)
+        "active": False,
+        "status": "archived",
+        "superseded_by": "autonomous",
+        "archived_reason": "retired after the US-board design audit; history remains read-only",
     },
     {
         "id": "heavyweight",
@@ -46,6 +56,10 @@ PORTFOLIOS: list[dict] = [
         "starting_nav": 1_000_000.0,
         "benchmark": "SPY",
         "legacy": False,
+        "active": False,
+        "status": "archived",
+        "superseded_by": "autonomous",
+        "archived_reason": "redundant Flagship analogue; history remains read-only",
     },
     {
         "id": "autonomous",
@@ -56,6 +70,8 @@ PORTFOLIOS: list[dict] = [
         "starting_nav": 1_000_000.0,
         "benchmark": "SPY",
         "legacy": False,
+        "active": True,
+        "status": "active",
     },
     {
         "id": "etf",
@@ -69,6 +85,10 @@ PORTFOLIOS: list[dict] = [
         "starting_nav": 1_000_000.0,
         "benchmark": "SPY",
         "legacy": False,
+        "active": False,
+        "status": "archived",
+        "superseded_by": "autonomous",
+        "archived_reason": "standalone ETF allocation mandate retired; history remains read-only",
     },
     {
         "id": "china",
@@ -84,6 +104,8 @@ PORTFOLIOS: list[dict] = [
         "currency": "CNY",        # base currency — A-shares quote CNY
         "venues": ["A-share"],    # tradeable universe: mainland A-shares (Shanghai / Shenzhen) only
         "legacy": False,
+        "active": True,
+        "status": "active",
     },
     {
         "id": "hk",
@@ -99,6 +121,8 @@ PORTFOLIOS: list[dict] = [
         "currency": "HKD",        # base currency — HK names quote HKD, so no cross-currency conversion
         "venues": ["HK"],         # tradeable universe: Hong Kong listings only
         "legacy": False,
+        "active": True,
+        "status": "active",
     },
     {
         "id": "self_directed",
@@ -110,6 +134,8 @@ PORTFOLIOS: list[dict] = [
         "starting_nav": 1_000_000.0,
         "benchmark": "SPY",
         "legacy": False,
+        "active": True,
+        "status": "active",
     },
 ]
 
@@ -117,6 +143,42 @@ PORTFOLIOS: list[dict] = [
 _DEFAULT_BENCHMARK = "SPY"
 
 _BY_ID = {p["id"]: p for p in PORTFOLIOS}
+
+def canonical_id(portfolio_id: str | None = None) -> str:
+    """Return the canonical id for a known book, or reject it before any filesystem use.
+
+    ``None`` retains the legacy storage default.  All other values must be an exact registry id;
+    aliases, whitespace, path-like values, and unknown ids fail closed.
+    """
+    candidate = DEFAULT_ID if portfolio_id is None else portfolio_id
+    if type(candidate) is not str:
+        raise ValueError(f"unknown portfolio id: {portfolio_id!r}")
+    # Return literals rather than the caller's value.  Besides being fail-closed, this makes the
+    # taint boundary obvious to static analysis and prevents a future path-normalisation shortcut.
+    if candidate == "flagship":
+        return "flagship"
+    if candidate == "heavyweight":
+        return "heavyweight"
+    if candidate == "autonomous":
+        return "autonomous"
+    if candidate == "etf":
+        return "etf"
+    if candidate == "china":
+        return "china"
+    if candidate == "hk":
+        return "hk"
+    if candidate == "self_directed":
+        return "self_directed"
+    raise ValueError(f"unknown portfolio id: {portfolio_id!r}")
+
+
+def _canonical_storage_id(portfolio_id: str | None = None) -> str:
+    """Return a literal allowlisted storage id, including explicitly retained shadow storage."""
+    if type(portfolio_id) is str and portfolio_id == "flagship_judgment":
+        # Retired Flagship judgment submissions remain readable at their historical isolated path.
+        # This is storage compatibility only; it is absent from PORTFOLIOS and never operational.
+        return "flagship_judgment"
+    return canonical_id(portfolio_id)
 
 
 def ids() -> list[str]:
@@ -128,6 +190,25 @@ def all_portfolios() -> list[dict]:
     return [dict(p) for p in PORTFOLIOS]
 
 
+def active_portfolios(*, include_self_directed: bool = True) -> list[dict]:
+    """Active books only.
+
+    Archived books deliberately stay in :func:`all_portfolios` so their historical NAV, trades,
+    and decisions remain browseable. Operational code (schedulers, marking, settlement, exposure
+    clamps) must opt into this active-only view instead.
+    """
+    return [
+        dict(p) for p in PORTFOLIOS
+        if bool(p.get("active", True))
+        and (include_self_directed or p.get("id") != "self_directed")
+    ]
+
+
+def active_ids(*, include_self_directed: bool = True) -> list[str]:
+    """Portfolio ids currently allowed to participate in operational work."""
+    return [p["id"] for p in active_portfolios(include_self_directed=include_self_directed)]
+
+
 def get(portfolio_id: str | None) -> dict:
     """Metadata for a portfolio (falls back to the default if unknown/None)."""
     return dict(_BY_ID.get(portfolio_id or DEFAULT_ID, _BY_ID[DEFAULT_ID]))
@@ -137,17 +218,64 @@ def is_known(portfolio_id: str | None) -> bool:
     return (portfolio_id or DEFAULT_ID) in _BY_ID
 
 
+def is_active(portfolio_id: str | None) -> bool:
+    """Whether a known portfolio may run, settle, mark, or enter current firm-risk math."""
+    meta = _BY_ID.get(portfolio_id or DEFAULT_ID)
+    return bool(meta and meta.get("active", True))
+
+
+def is_archived(portfolio_id: str | None) -> bool:
+    """Whether a known portfolio is retained for history but operationally disabled."""
+    meta = _BY_ID.get(portfolio_id or DEFAULT_ID)
+    return bool(meta and not meta.get("active", True))
+
+
+def archived_run_result(portfolio_id: str, asof: str | None = None) -> dict:
+    """Stable no-op payload for defense-in-depth runner guards.
+
+    This helper performs no I/O. It lets direct Python/CLI entrypoints fail closed before clearing a
+    submission, reading live feeds, acquiring model capacity, or mutating portfolio state.
+    """
+    meta = get(portfolio_id)
+    return {
+        "portfolio_id": meta["id"],
+        "asof": asof,
+        "active": False,
+        "status": "archived",
+        "archived": True,
+        "skipped": "portfolio_archived",
+        "superseded_by": meta.get("superseded_by"),
+        "reason": meta.get("archived_reason") or "portfolio archived",
+    }
+
+
 def data_dir(portfolio_id: str | None = None) -> Path:
     """The per-portfolio state directory.
 
-    ``flagship``/``None`` → the legacy ``data/portfolio/``; everything else →
-    ``data/portfolios/<id>/`` (an unknown id is sandboxed there too, never the legacy dir).
+    ``flagship``/``None`` → the legacy ``data/portfolio/``; every other known book → its
+    allowlisted directory under ``data/portfolios/``.  Unknown ids fail closed before a path is
+    constructed.
     """
-    pid = portfolio_id or DEFAULT_ID
-    meta = _BY_ID.get(pid)
-    if meta is not None and meta.get("legacy"):
+    pid = _canonical_storage_id(portfolio_id)
+    # Every path component below is a source literal.  The caller-provided value never reaches a
+    # filesystem expression, even after passing the exact-id allowlist above.
+    if pid == "flagship":
         return _ROOT / "data" / "portfolio"
-    return _ROOT / "data" / "portfolios" / pid
+    if pid == "heavyweight":
+        return _ROOT / "data" / "portfolios" / "heavyweight"
+    if pid == "autonomous":
+        return _ROOT / "data" / "portfolios" / "autonomous"
+    if pid == "etf":
+        return _ROOT / "data" / "portfolios" / "etf"
+    if pid == "china":
+        return _ROOT / "data" / "portfolios" / "china"
+    if pid == "hk":
+        return _ROOT / "data" / "portfolios" / "hk"
+    if pid == "self_directed":
+        return _ROOT / "data" / "portfolios" / "self_directed"
+    if pid == "flagship_judgment":
+        return _ROOT / "data" / "portfolios" / "flagship_judgment"
+    raise AssertionError("canonical portfolio storage id has no path")  # pragma: no cover
 
 
 def starting_nav(portfolio_id: str | None = None) -> float:

@@ -268,9 +268,12 @@ def test_llm_disabled_under_pytest():
 # phase2 integration — the gate stands between a name and the book
 # ---------------------------------------------------------------------------
 
-def test_phase2_attaches_research_to_conviction_and_holds():
+def test_phase2_attaches_research_to_conviction_and_holds(monkeypatch):
     from pathlib import Path
     from bot import phase2
+    from portfolio import registry
+    # This integration test exercises the retired Flagship engine's research seam only.
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
     db = Path(__file__).resolve().parent.parent / "data" / "bot.db"
     if db.exists():
         db.unlink()

@@ -13,13 +13,23 @@ Price sources:
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
-from datetime import date, datetime, timezone
+import fcntl
+from copy import deepcopy
+from contextlib import contextmanager
+from datetime import UTC, date, datetime, timezone
+from numbers import Real
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import bot  # noqa: F401  -> vendor/macro onto sys.path
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 _ROOT = Path(__file__).resolve().parent.parent
 _DATA = _ROOT / "data" / "portfolio"
@@ -149,7 +159,35 @@ def _ensure_dir(portfolio_id: str | None = None) -> None:
 
 
 def _load_account(portfolio_id: str | None = None) -> dict[str, Any]:
-    """Load account state; return a fresh $1M state on any corruption."""
+    """Load account state, first completing any recoverable paper transaction.
+
+    A write-ahead transaction is deliberately not ignored: returning an account while its fill
+    ledger is known to be incomplete would make an execution failure look like an ordinary settled
+    book.  Recovery is idempotent; a genuine conflict raises and leaves the artifact for inspection.
+    """
+    with _paper_transaction_lock(portfolio_id):
+        if _transaction_path(portfolio_id).exists():
+            _recover_paper_transaction_unlocked(portfolio_id)
+        return _load_account_file(portfolio_id)
+
+
+def _fresh_account() -> dict[str, Any]:
+    return {
+        "inception_date": _INCEPTION_DATE,
+        "starting_nav": _STARTING_NAV,
+        "cash": _STARTING_NAV,
+        "positions": {},          # TICKER -> {shares, avg_cost}
+        "spy_shares": None,       # set on first mark()
+        "spy_inception_price": None,
+    }
+
+
+def _load_account_file(portfolio_id: str | None = None, *, strict: bool = False) -> dict[str, Any]:
+    """Read account.json without invoking transaction recovery.
+
+    ``strict`` is used by replay: a corrupt on-disk account must never be mistaken for a fresh book
+    and overwritten by a prepared transaction.
+    """
     _account_path = _paths(portfolio_id)["account"]
     try:
         if _account_path.exists():
@@ -161,21 +199,50 @@ def _load_account(portfolio_id: str | None = None) -> dict[str, Any]:
                 and raw.get("starting_nav")
             ):
                 return raw
-    except Exception:
-        pass
-    return {
-        "inception_date": _INCEPTION_DATE,
-        "starting_nav": _STARTING_NAV,
-        "cash": _STARTING_NAV,
-        "positions": {},          # TICKER -> {shares, avg_cost}
-        "spy_shares": None,       # set on first mark()
-        "spy_inception_price": None,
-    }
+            if strict:
+                raise PaperTransactionConflict("account schema is invalid during transaction recovery")
+    except PaperTransactionConflict:
+        raise
+    except Exception as exc:
+        if strict:
+            raise PaperTransactionConflict(
+                f"account cannot be read during transaction recovery: {exc!r}"
+            ) from exc
+    return _fresh_account()
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """Durably replace one runtime-state file without exposing a partial JSON document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with tmp.open("wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # Some filesystems do not permit directory fsync.  The atomic replace still holds.
+            pass
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _save_account(state: dict[str, Any], portfolio_id: str | None = None) -> None:
     _ensure_dir(portfolio_id)
-    _paths(portfolio_id)["account"].write_text(json.dumps(state, indent=2, default=str))
+    _atomic_write_bytes(
+        _paths(portfolio_id)["account"],
+        json.dumps(state, indent=2, default=str).encode("utf-8"),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -224,6 +291,8 @@ def _append_jsonl(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, default=str) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def _load_jsonl(path: Path) -> list[dict]:
@@ -240,6 +309,443 @@ def _load_jsonl(path: Path) -> list[dict]:
         except Exception:
             pass
     return rows
+
+
+# ---------------------------------------------------------------------------
+# recoverable paper transaction boundary
+# ---------------------------------------------------------------------------
+# account.json and fills.jsonl cannot be replaced in one filesystem operation.  A durable
+# write-ahead artifact therefore describes the complete transition before either file changes.
+# The account carries the transaction id and every fill carries a deterministic fill id.  Replay
+# can then distinguish "not started", "account applied", and "some/all fills appended" without
+# guessing or booking a duplicate fill.  The artifact is removed only after account, fills, and the
+# exact pending target (when settlement supplied one) have all reached their committed state.
+PAPER_TRANSACTION_SCHEMA = "paper_transaction.v1"
+PAPER_SETTLEMENT_RECEIPT_SCHEMA = "paper_settlement_receipt.v1"
+
+
+class PaperTransactionConflict(RuntimeError):
+    """Prepared paper state cannot be replayed without overwriting unrelated runtime state."""
+
+
+def _transaction_path(portfolio_id: str | None = None) -> Path:
+    return _paths(portfolio_id)["data"] / "paper_transaction.json"
+
+
+def _settlement_receipt_dir(portfolio_id: str | None = None) -> Path:
+    return _paths(portfolio_id)["data"] / "settlement_receipts"
+
+
+def _settlement_receipt_path(
+    transaction_id: str,
+    portfolio_id: str | None = None,
+) -> Path:
+    return _settlement_receipt_dir(portfolio_id) / f"{transaction_id}.json"
+
+
+@contextmanager
+def _paper_transaction_lock(portfolio_id: str | None = None):
+    """Serialize prepare/replay within one paper book across scheduler/API processes."""
+    path = _paths(portfolio_id)["data"] / ".paper_transaction.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8")
+
+
+def _content_sha256(value: Any) -> str:
+    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def _write_transaction(payload: dict[str, Any], portfolio_id: str | None = None) -> None:
+    _atomic_write_bytes(
+        _transaction_path(portfolio_id),
+        json.dumps(payload, indent=2, default=str).encode("utf-8"),
+    )
+
+
+def _load_transaction(portfolio_id: str | None = None) -> dict[str, Any] | None:
+    path = _transaction_path(portfolio_id)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise PaperTransactionConflict(f"paper transaction artifact is unreadable: {exc!r}") from exc
+    if not isinstance(payload, dict) or payload.get("schema") != PAPER_TRANSACTION_SCHEMA:
+        raise PaperTransactionConflict("paper transaction artifact has an unknown schema")
+    return payload
+
+
+def _repair_partial_jsonl_tail(path: Path) -> None:
+    """Remove only a provably incomplete final JSONL fragment left by an interrupted append.
+
+    Complete legacy rows (including a valid last row without a newline) are preserved.  A malformed
+    tail is copied to a recovery artifact before the ledger is atomically repaired.
+    """
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return
+    if not raw or raw.endswith(b"\n"):
+        return
+    split_at = raw.rfind(b"\n") + 1
+    tail = raw[split_at:]
+    try:
+        json.loads(tail.decode("utf-8"))
+    except Exception:
+        recovery = path.with_name(
+            f"{path.name}.partial.{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')}"
+        )
+        _atomic_write_bytes(recovery, tail)
+        _atomic_write_bytes(path, raw[:split_at])
+        return
+    _atomic_write_bytes(path, raw + b"\n")
+
+
+def _pending_clear_transition(portfolio_id: str | None = None) -> dict[str, Any]:
+    """Capture the exact queued target that a successful settlement is allowed to remove."""
+    path = _pending_target_path(portfolio_id)
+    pending_payload = _read_pending_target_payload(portfolio_id)
+    return {
+        "kind": "clear_pending_target",
+        "filename": path.name,
+        "before_sha256": _file_sha256(path),
+        # This is the accepted executable instruction, including its hash-bound structured PM
+        # decision.  It becomes the recovery outbox if account/fill commit outlives the caller.
+        "pending_payload": deepcopy(pending_payload),
+    }
+
+
+def _write_settlement_receipt(
+    transaction: dict[str, Any],
+    portfolio_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Durably publish one committed target settlement before its WAL can disappear."""
+    transition = transaction.get("followup")
+    if not isinstance(transition, dict) or transition.get("kind") != "clear_pending_target":
+        return None
+    pending = transition.get("pending_payload")
+    if not isinstance(pending, dict) or not isinstance(pending.get("target"), dict):
+        raise PaperTransactionConflict("settlement transaction lacks its queued target provenance")
+    target = validate_target_weights(
+        pending.get("target"),
+        require_canonical_tickers=True,
+    )
+    transaction_id = str(transaction.get("transaction_id") or "")
+    if len(transaction_id) != 64 or any(ch not in "0123456789abcdef" for ch in transaction_id):
+        raise PaperTransactionConflict("settlement transaction id is invalid")
+    fills = [
+        deepcopy(entry.get("record"))
+        for entry in (transaction.get("fills") or [])
+        if isinstance(entry, dict) and isinstance(entry.get("record"), dict)
+    ]
+    receipt = {
+        "schema": PAPER_SETTLEMENT_RECEIPT_SCHEMA,
+        "transaction_id": transaction_id,
+        "portfolio_id": str(portfolio_id or "flagship"),
+        "settlement_asof": transaction.get("asof"),
+        # Stable across replay attempts; wall-clock freshness belongs to the caller's finalization
+        # event, while the receipt itself must be byte-comparable for idempotent recovery.
+        "committed_at": transaction.get("prepared_at") or transaction.get("asof"),
+        "pending_target_sha256": transition.get("before_sha256"),
+        "target_sha256": _target_sha256(target),
+        "target": target,
+        "decision_snapshot": deepcopy(pending.get("decision_snapshot")),
+        "queued_asof": pending.get("asof"),
+        "fills": fills,
+        "account_before_positions": deepcopy(
+            (transaction.get("account_before") or {}).get("positions") or {}
+        ),
+        "account_after_positions": deepcopy(
+            (transaction.get("account_after") or {}).get("positions") or {}
+        ),
+    }
+    path = _settlement_receipt_path(transaction_id, portfolio_id)
+    encoded = json.dumps(receipt, indent=2, default=str).encode("utf-8")
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise PaperTransactionConflict(
+                f"settlement receipt is unreadable: {exc!r}"
+            ) from exc
+        if _content_sha256(existing) != _content_sha256(receipt):
+            raise PaperTransactionConflict("settlement receipt conflicts with recovered WAL")
+        return existing
+    _atomic_write_bytes(path, encoded)
+    return receipt
+
+
+def pending_settlement_receipts(portfolio_id: str | None = None) -> list[dict[str, Any]]:
+    """Validated, oldest-first committed-settlement outbox rows awaiting finalization."""
+    root = _settlement_receipt_dir(portfolio_id)
+    if not root.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*.json")):
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise PaperTransactionConflict(
+                f"settlement receipt {path.name} is unreadable: {exc!r}"
+            ) from exc
+        transaction_id = str(row.get("transaction_id") or "")
+        if (
+            row.get("schema") != PAPER_SETTLEMENT_RECEIPT_SCHEMA
+            or row.get("portfolio_id") != str(portfolio_id or "flagship")
+            or path.name != f"{transaction_id}.json"
+        ):
+            raise PaperTransactionConflict("settlement receipt identity is invalid")
+        target = validate_target_weights(
+            row.get("target"),
+            require_canonical_tickers=True,
+        )
+        if row.get("target_sha256") != _target_sha256(target):
+            raise PaperTransactionConflict("settlement receipt target digest mismatch")
+        rows.append(row)
+    rows.sort(key=lambda row: (str(row.get("committed_at") or ""), row["transaction_id"]))
+    return rows
+
+
+def acknowledge_settlement_receipt(
+    transaction_id: str,
+    portfolio_id: str | None = None,
+) -> bool:
+    """Acknowledge only the exact committed receipt after mark/publish finalization."""
+    value = str(transaction_id or "")
+    if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+        raise ValueError("invalid settlement receipt transaction id")
+    path = _settlement_receipt_path(value, portfolio_id)
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def _pending_orders_transition(
+    orders_after: list[dict[str, Any]],
+    portfolio_id: str | None = None,
+) -> dict[str, Any]:
+    path = _paths(portfolio_id)["pending"]
+    return {
+        "kind": "replace_pending_orders",
+        "filename": path.name,
+        "before_sha256": _file_sha256(path),
+        "after_orders": deepcopy(orders_after),
+        "after_sha256": hashlib.sha256(
+            json.dumps(orders_after, indent=2, default=str).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _apply_transaction_followup(
+    transaction: dict[str, Any],
+    portfolio_id: str | None = None,
+) -> None:
+    transition = transaction.get("followup")
+    if not isinstance(transition, dict):
+        return
+    kind = transition.get("kind")
+    if kind not in {"clear_pending_target", "replace_pending_orders"}:
+        raise PaperTransactionConflict("paper transaction contains an unknown follow-up")
+    path = (
+        _pending_target_path(portfolio_id)
+        if kind == "clear_pending_target"
+        else _paths(portfolio_id)["pending"]
+    )
+    if transition.get("filename") != path.name:
+        raise PaperTransactionConflict("paper transaction follow-up path is invalid")
+    expected = transition.get("before_sha256")
+    observed = _file_sha256(path)
+    if kind == "replace_pending_orders":
+        orders_after = transition.get("after_orders")
+        if not isinstance(orders_after, list):
+            raise PaperTransactionConflict("paper transaction pending-order payload is invalid")
+        if observed == transition.get("after_sha256"):
+            return
+        if observed != expected:
+            # A newer queue has already superseded the orders this transaction consumed.
+            return
+        _save_pending(orders_after, portfolio_id)
+        return
+
+    if observed is None:
+        return
+    if observed != expected:
+        # A newer complete target superseded the one this transaction settled.  It must remain
+        # executable; completion of the older transaction is not authority to delete it.
+        return
+    clear_pending_target(portfolio_id)
+
+
+def _recover_paper_transaction_unlocked(
+    portfolio_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Idempotently finish a prepared account/fill transition and return its audit summary.
+
+    Recovery never guesses.  The current account must equal either the recorded before state or
+    the exact after state; otherwise replay stops with the artifact intact.  Deterministic fill ids
+    make an exception raised before *or after* an append safe to retry.
+    """
+    transaction = _load_transaction(portfolio_id)
+    if transaction is None:
+        return None
+    if transaction.get("portfolio_id") != str(portfolio_id or "flagship"):
+        raise PaperTransactionConflict("paper transaction portfolio identity mismatch")
+
+    before = transaction.get("account_before")
+    after = transaction.get("account_after")
+    fills = transaction.get("fills")
+    if not isinstance(before, dict) or not isinstance(after, dict) or not isinstance(fills, list):
+        raise PaperTransactionConflict("paper transaction payload is incomplete")
+    if transaction.get("account_before_sha256") != _content_sha256(before):
+        raise PaperTransactionConflict("paper transaction before-state digest mismatch")
+    if transaction.get("account_after_sha256") != _content_sha256(after):
+        raise PaperTransactionConflict("paper transaction after-state digest mismatch")
+
+    current = _load_account_file(portfolio_id, strict=True)
+    current_hash = _content_sha256(current)
+    before_hash = transaction["account_before_sha256"]
+    after_hash = transaction["account_after_sha256"]
+    if current_hash == before_hash:
+        _save_account(after, portfolio_id)
+    elif current_hash != after_hash:
+        raise PaperTransactionConflict(
+            "account changed outside the prepared paper transaction; replay stopped"
+        )
+
+    fills_path = _paths(portfolio_id)["fills"]
+    _repair_partial_jsonl_tail(fills_path)
+    existing_ids = {
+        str(row.get("fill_id"))
+        for row in _load_jsonl(fills_path)
+        if isinstance(row, dict) and row.get("fill_id")
+    }
+    for entry in fills:
+        if not isinstance(entry, dict):
+            raise PaperTransactionConflict("paper transaction fill entry is malformed")
+        fill_id = entry.get("fill_id")
+        record = entry.get("record")
+        if not isinstance(fill_id, str) or not isinstance(record, dict):
+            raise PaperTransactionConflict("paper transaction fill entry is incomplete")
+        if record.get("fill_id") != fill_id:
+            raise PaperTransactionConflict("paper transaction fill id mismatch")
+        expected_id = hashlib.sha256(
+            _canonical_json_bytes({
+                "transaction_id": transaction.get("transaction_id"),
+                "index": entry.get("index"),
+                "fill": {k: v for k, v in record.items() if k not in {"fill_id", "transaction_id"}},
+            })
+        ).hexdigest()
+        if fill_id != expected_id:
+            raise PaperTransactionConflict("paper transaction deterministic fill id is invalid")
+        if fill_id in existing_ids:
+            continue
+        _append_jsonl(fills_path, record)
+        existing_ids.add(fill_id)
+
+    receipt = _write_settlement_receipt(transaction, portfolio_id)
+    _apply_transaction_followup(transaction, portfolio_id)
+    _transaction_path(portfolio_id).unlink()
+    result = {
+        "transaction_id": transaction.get("transaction_id"),
+        "portfolio_id": transaction.get("portfolio_id"),
+        "fill_count": len(fills),
+        "status": "committed",
+    }
+    if receipt is not None:
+        result["settlement_receipt_id"] = receipt["transaction_id"]
+    return result
+
+
+def recover_paper_transaction(portfolio_id: str | None = None) -> dict[str, Any] | None:
+    """Serialize and idempotently finish one book's prepared paper transaction."""
+    with _paper_transaction_lock(portfolio_id):
+        return _recover_paper_transaction_unlocked(portfolio_id)
+
+
+def _commit_account_and_fills(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    fills: list[dict[str, Any]],
+    *,
+    asof: str,
+    portfolio_id: str | None = None,
+    followup: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Prepare and commit one replay-safe paper mutation."""
+    with _paper_transaction_lock(portfolio_id):
+        if _transaction_path(portfolio_id).exists():
+            _recover_paper_transaction_unlocked(portfolio_id)
+
+        before_snapshot = deepcopy(before)
+        after_snapshot = deepcopy(after)
+        raw_fills = [deepcopy(fill) for fill in fills]
+        if before_snapshot == after_snapshot and not raw_fills and followup is None:
+            return None
+
+        seed = {
+            "schema": PAPER_TRANSACTION_SCHEMA,
+            "portfolio_id": str(portfolio_id or "flagship"),
+            "asof": str(asof),
+            "account_before_sha256": _content_sha256(before_snapshot),
+            "account_after": after_snapshot,
+            "fills": raw_fills,
+            "followup": followup,
+        }
+        transaction_id = hashlib.sha256(_canonical_json_bytes(seed)).hexdigest()
+        if before_snapshot != after_snapshot or raw_fills:
+            after_snapshot["last_paper_transaction_id"] = transaction_id
+
+        fill_entries: list[dict[str, Any]] = []
+        for index, fill in enumerate(raw_fills):
+            fill_id = hashlib.sha256(
+                _canonical_json_bytes({
+                    "transaction_id": transaction_id,
+                    "index": index,
+                    "fill": fill,
+                })
+            ).hexdigest()
+            record = {**fill, "transaction_id": transaction_id, "fill_id": fill_id}
+            fill_entries.append({"index": index, "fill_id": fill_id, "record": record})
+
+        transaction = {
+            "schema": PAPER_TRANSACTION_SCHEMA,
+            "transaction_id": transaction_id,
+            "portfolio_id": str(portfolio_id or "flagship"),
+            "asof": str(asof),
+            "prepared_at": datetime.now(UTC).isoformat(),
+            "account_before": before_snapshot,
+            "account_before_sha256": _content_sha256(before_snapshot),
+            "account_after": after_snapshot,
+            "account_after_sha256": _content_sha256(after_snapshot),
+            "fills": fill_entries,
+            "followup": followup,
+        }
+        _write_transaction(transaction, portfolio_id)
+        return _recover_paper_transaction_unlocked(portfolio_id)
 
 
 # ---------------------------------------------------------------------------
@@ -466,16 +972,173 @@ def positions_pnl(prices: dict[str, float], portfolio_id: str | None = None) -> 
     return out
 
 
+def _trusted_execution_price(value: Any) -> bool:
+    """Whether ``value`` is a usable paper-fill mark.
+
+    Average cost remains an acceptable *valuation* fallback elsewhere in this module, but it is
+    never evidence of a price at which an exit could have occurred.  Keep the execution predicate
+    deliberately narrow so ``None``, zero, negative, NaN, and infinities all fail closed.
+    """
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(price) and price > 0.0
+
+
+def unpriceable_exit_tickers(
+    target_weights: dict[str, float],
+    prices: dict[str, float],
+    portfolio_id: str | None = None,
+    *,
+    state: dict[str, Any] | None = None,
+) -> list[str]:
+    """Return held names the target intends to fully exit without a trusted fill price.
+
+    A missing target row and an explicit non-positive target weight both mean a full exit.  A held
+    name with a positive target is not blocked here: ``rebalance`` can safely carry it unchanged
+    until it is priceable.  ``state`` is injectable so higher-level execution paths can validate a
+    single account snapshot before performing any write.
+    """
+    account = state if state is not None else _load_account(portfolio_id)
+    targets: dict[str, float] = {}
+    for raw_ticker, raw_weight in (target_weights or {}).items():
+        ticker = str(raw_ticker).upper().strip()
+        if not ticker:
+            continue
+        try:
+            targets[ticker] = float(raw_weight)
+        except (TypeError, ValueError):
+            targets[ticker] = 0.0
+
+    blocked: list[str] = []
+    for raw_ticker, position in (account.get("positions") or {}).items():
+        ticker = str(raw_ticker).upper().strip()
+        try:
+            shares = float((position or {}).get("shares") or 0.0)
+        except (TypeError, ValueError):
+            shares = 0.0
+        if shares <= 1e-9 or targets.get(ticker, 0.0) > 1e-9:
+            continue
+        if not _trusted_execution_price(prices.get(ticker)):
+            blocked.append(ticker)
+    return sorted(set(blocked))
+
+
+def unpriceable_target_requirements(
+    target_weights: dict[str, float],
+    prices: dict[str, float],
+    portfolio_id: str | None = None,
+    *,
+    state: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
+    """Return every missing mark that prevents an atomic complete-target rebalance.
+
+    A complete target is one instruction, not a best-effort collection of independent
+    orders.  It requires a trusted mark for every positive target row (new or held) and
+    for every held row omitted/zeroed by the target.  Otherwise a partial rebalance can
+    consume cash for the priceable names, silently skip another accepted name, and then
+    clear the queue.  ``state`` lets callers bind the check to the same account snapshot
+    they use for execution.
+    """
+    account = state if state is not None else _load_account(portfolio_id)
+    targets = validate_target_weights(target_weights)
+    held = {
+        str(raw_ticker).upper().strip()
+        for raw_ticker, position in (account.get("positions") or {}).items()
+        if isinstance(position, dict)
+        and isinstance(position.get("shares"), Real)
+        and float(position.get("shares") or 0.0) > 1e-9
+    }
+    positive_targets = set(targets)
+    exits = held - positive_targets
+    required = positive_targets | exits
+    blocked = sorted(
+        ticker for ticker in required
+        if not _trusted_execution_price(prices.get(ticker))
+    )
+    return {
+        "tickers": blocked,
+        "exit_tickers": sorted(set(blocked) & exits),
+        "positive_target_tickers": sorted(set(blocked) & positive_targets),
+    }
+
+
+class InvalidTargetWeights(ValueError):
+    """A complete executable target failed the deterministic sizing contract."""
+
+    def __init__(self, reason: str):
+        self.reason = str(reason)
+        super().__init__(f"invalid target weights: {self.reason}")
+
+
+def _canonical_target_ticker(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    ticker = value.upper().strip()
+    if not ticker or len(ticker) > 16:
+        return ""
+    if any(not (char.isalnum() or char in ".-") for char in ticker):
+        return ""
+    return ticker
+
+
+def validate_target_weights(
+    target_weights: Any,
+    *,
+    require_canonical_tickers: bool = False,
+) -> dict[str, float]:
+    """Validate and canonicalize one complete executable target book.
+
+    This is an authority boundary, not a convenience coercer: booleans, numeric strings, NaN,
+    infinities, negative weights, individual weights above 100%, canonical ticker collisions, and
+    gross exposure above 100% are rejected.  Zero rows carry no executable intent and are removed.
+    """
+    if not isinstance(target_weights, dict):
+        raise InvalidTargetWeights("target_not_object")
+
+    canonical: dict[str, float] = {}
+    observed: set[str] = set()
+    for raw_ticker, raw_weight in target_weights.items():
+        ticker = _canonical_target_ticker(raw_ticker)
+        if not ticker:
+            raise InvalidTargetWeights("invalid_ticker")
+        if require_canonical_tickers and raw_ticker != ticker:
+            raise InvalidTargetWeights("noncanonical_ticker")
+        if ticker in observed:
+            raise InvalidTargetWeights("canonical_ticker_collision")
+        observed.add(ticker)
+
+        if isinstance(raw_weight, bool) or not isinstance(raw_weight, Real):
+            raise InvalidTargetWeights(f"non_numeric_weight:{ticker}")
+        weight = float(raw_weight)
+        if not math.isfinite(weight):
+            raise InvalidTargetWeights(f"non_finite_weight:{ticker}")
+        if weight < 0.0:
+            raise InvalidTargetWeights(f"negative_weight:{ticker}")
+        if weight > 1.0:
+            raise InvalidTargetWeights(f"weight_above_one:{ticker}")
+        if weight > 0.0:
+            canonical[ticker] = weight
+
+    gross = math.fsum(canonical.values())
+    if gross > 1.0:
+        raise InvalidTargetWeights("gross_above_one")
+    return canonical
+
+
 def rebalance(
     target_weights: dict[str, float],
     prices: dict[str, float],
     asof: str,
     portfolio_id: str | None = None,
+    *,
+    _followup: dict[str, Any] | None = None,
 ) -> None:
     """Simulate fills to reach target_weights * current_nav.
 
     Rules:
-    - No leverage: gross weight is clamped to 1.0 if needed.
+    - No leverage: malformed or over-gross targets fail closed before account mutation.
     - Cash floored at 0.
     - Fills recorded to fills.jsonl.
     - account.json updated atomically.
@@ -484,12 +1147,11 @@ def rebalance(
     FREEZE event is logged to run_events and the exception re-raised so the caller can decide
     whether to abort the run (callers already wrap with try/except for best-effort runs).
     """
+    # Validate before loading/recovering mutable account state.  An invalid current instruction is
+    # never allowed to trigger a write, nor is it silently normalized into a different portfolio.
+    target_weights = validate_target_weights(target_weights)
     state = _load_account(portfolio_id)
-    gross = sum(target_weights.values())
-    if gross > 1.0:
-        # scale down proportionally so we stay cash-positive
-        scale = 1.0 / gross
-        target_weights = {k: v * scale for k, v in target_weights.items()}
+    before_state = deepcopy(state)
 
     current_nav = (
         state["cash"]
@@ -549,11 +1211,17 @@ def rebalance(
                 "value": round(value, 2),
             })
 
-    # close out only tickers GENUINELY dropped from the target (not merely unpriceable this run)
+    # Close out only tickers GENUINELY dropped from the target *and* carrying a trusted price this
+    # run.  ``avg_cost`` may value inventory when a quote is missing, but booking an exit at cost
+    # fabricates a fill and realized return.  Higher-level settle paths reject the whole target on
+    # this condition; direct low-level callers conservatively carry only the unpriceable line.
     for ticker in list(state["positions"].keys()):
         if ticker not in targeted:
             pos = state["positions"][ticker]
-            px = prices.get(ticker, pos["avg_cost"])
+            px = prices.get(ticker)
+            if not _trusted_execution_price(px):
+                continue
+            px = float(px)
             sell_shares = pos["shares"]
             value = sell_shares * px
             state["cash"] += value
@@ -609,10 +1277,14 @@ def rebalance(
             })
 
     try:
-        _save_account(state, portfolio_id)
-        fills_path = _paths(portfolio_id)["fills"]
-        for fill in fills:
-            _append_jsonl(fills_path, fill)
+        _commit_account_and_fills(
+            before_state,
+            state,
+            fills,
+            asof=asof,
+            portfolio_id=portfolio_id,
+            followup=_followup,
+        )
     except Exception as _exc:
         # Log FREEZE: account write failure — do not silently lose fills or corrupt the ledger.
         # Conservative action: we attempted the write; it failed. Re-raise so callers can handle.
@@ -622,7 +1294,7 @@ def rebalance(
                 "rebalance_account_write",
                 Severity.FREEZE,
                 detail=f"rebalance account save raised: {_exc!r}"[:200],
-                action_taken="account write failed; fills may be partially written",
+                action_taken="recoverable transaction retained; execution stopped",
             ).log(job="paper_account_rebalance", book=str(portfolio_id or "flagship"))
         except Exception:  # noqa: BLE001 — guardrail logging must never mask the original error
             pass
@@ -649,6 +1321,7 @@ def execute_fill(ticker: str, side: str, *, weight: float | None = None,
     side = (side or "").lower()
     asof = asof or date.today().isoformat()
     state = _load_account(portfolio_id)
+    before_state = deepcopy(state)
     px = price if (price and price > 0) else _current_price(ticker)
     if not px or px <= 0:
         return {"ok": False, "ticker": ticker, "error": "no price available"}
@@ -689,8 +1362,13 @@ def execute_fill(ticker: str, side: str, *, weight: float | None = None,
         fill = {"date": asof, "ticker": ticker, "side": "sell",
                 "shares": round(sell, 6), "price": round(px, 4), "value": round(value, 2)}
 
-    _save_account(state, portfolio_id)
-    _append_jsonl(_paths(portfolio_id)["fills"], fill)
+    _commit_account_and_fills(
+        before_state,
+        state,
+        [fill],
+        asof=asof,
+        portfolio_id=portfolio_id,
+    )
     return {"ok": True, **fill, "cash_after": round(state["cash"], 2)}
 
 
@@ -717,7 +1395,10 @@ def load_pending(portfolio_id: str | None = None) -> list[dict]:
 
 def _save_pending(orders: list[dict], portfolio_id: str | None = None) -> None:
     _ensure_dir(portfolio_id)
-    _paths(portfolio_id)["pending"].write_text(json.dumps(orders, indent=2, default=str))
+    _atomic_write_bytes(
+        _paths(portfolio_id)["pending"],
+        json.dumps(orders, indent=2, default=str).encode("utf-8"),
+    )
 
 
 def queue_orders(
@@ -896,6 +1577,7 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
     if not pending:
         return []
     state = _load_account(portfolio_id)
+    before_state = deepcopy(state)
     fills: list[dict] = []
     still_pending: list[dict] = []
 
@@ -960,11 +1642,14 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
             "shares": round(buy, 6), "price": round(px, 4), "value": round(value, 2),
             "from_pending": True,
         })
-    _save_account(state, portfolio_id)
-    fills_path = _paths(portfolio_id)["fills"]
-    for fill in fills:
-        _append_jsonl(fills_path, fill)
-    _save_pending(still_pending, portfolio_id)
+    _commit_account_and_fills(
+        before_state,
+        state,
+        fills,
+        asof=asof,
+        portfolio_id=portfolio_id,
+        followup=_pending_orders_transition(still_pending, portfolio_id),
+    )
     return fills
 
 
@@ -977,24 +1662,348 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
 # open. Idempotent: re-running a closed session REPLACES the queued target (latest decision wins), so
 # repeatedly building after the close can never churn the book — nothing is filled until the open.
 
+# The successor US book changed both its selection policy and its investable universe.  A queued
+# target is executable state, not merely a cache: an unversioned v1 target left on disk can otherwise
+# survive a deployment and rebalance the v2 book into the retired ETF-heavy policy at the next open.
+# Regional books did not make that breaking transition, so their existing unversioned queue contract
+# remains valid.  The compatibility fence below is deliberately scoped to ``autonomous`` only.
+PENDING_TARGET_SCHEMA_V2 = "pending_target.v2"
+US_BRAIN_ENGINE_V2 = "us_brain_v2"
+PENDING_DECISION_SCHEMA_V1 = "pending_decision.v1"
+_MAX_PENDING_DECISION_BYTES = 1_000_000
+
+
+class PendingTargetQuarantined(RuntimeError):
+    """Raised after an incompatible queued target has been isolated without executing it."""
+
+    def __init__(self, result: dict[str, Any]):
+        self.result = result
+        super().__init__(
+            f"pending target quarantined for {result.get('portfolio_id')}: "
+            f"{result.get('reason')}"
+        )
+
+
+class UnpriceableExitPrices(RuntimeError):
+    """Legacy-named stop for any incomplete complete-target price set.
+
+    The queued target remains on disk.  Callers can retry at a later market-open price rather than
+    clearing an only-partly-applied instruction or inventing a paper fill from average cost.
+    """
+
+    def __init__(
+        self,
+        tickers: list[str],
+        portfolio_id: str | None = None,
+        *,
+        exit_tickers: list[str] | None = None,
+        positive_target_tickers: list[str] | None = None,
+    ):
+        self.tickers = sorted(set(str(t).upper() for t in tickers))
+        self.exit_tickers = sorted(
+            set(str(t).upper() for t in (exit_tickers or []))
+        )
+        self.positive_target_tickers = sorted(
+            set(str(t).upper() for t in (positive_target_tickers or []))
+        )
+        self.portfolio_id = portfolio_id or "flagship"
+        super().__init__(
+            f"unpriceable complete-target names for {self.portfolio_id}: "
+            f"{', '.join(self.tickers)}"
+        )
+
+
 def _pending_target_path(portfolio_id: str | None = None) -> Path:
     return _paths(portfolio_id)["data"] / "pending_target.json"
 
 
-def save_pending_target(target_weights: dict[str, float], asof: str,
-                        portfolio_id: str | None = None) -> None:
-    """Persist a decided target book to settle at the NEXT market open — no fills now. Idempotent."""
+def pending_target_file_exists(portfolio_id: str | None = None) -> bool:
+    """Whether executable queue state exists, including malformed JSON that cannot be loaded."""
+    return _pending_target_path(portfolio_id).exists()
+
+
+def _target_sha256(target: dict[str, float]) -> str:
+    """Stable identity for the executable portion of a queued instruction."""
+    encoded = json.dumps(
+        target,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _pending_decision_record(
+    decision_snapshot: dict[str, Any] | None,
+    *,
+    target: dict[str, float],
+    asof: str,
+    portfolio_id: str | None,
+) -> dict[str, Any] | None:
+    """Bind an accepted structured PM decision to the exact executable target.
+
+    The submission scratch files are intentionally cleared before every Brain turn, so they cannot
+    be settlement provenance.  This compact record travels atomically inside ``pending_target``.
+    A deterministic risk rewrite may pass an existing record; its original structured submission
+    is preserved while the lineage records the target hash transition.
+    """
+    if decision_snapshot is None:
+        return None
+    if not isinstance(decision_snapshot, dict):
+        raise TypeError("decision_snapshot must be a mapping")
+
+    # JSON round-tripping rejects non-serializable executable metadata and gives us an isolated,
+    # immutable copy.  The typed MCP boundary already bounds the structured submission; this final
+    # cap prevents an audit attachment from turning executable state into an unbounded artifact.
+    raw = json.dumps(decision_snapshot, default=str, ensure_ascii=False)
+    if len(raw.encode("utf-8")) > _MAX_PENDING_DECISION_BYTES:
+        raise ValueError("decision_snapshot exceeds bounded pending-target budget")
+    supplied = json.loads(raw)
+
+    pid = portfolio_id or "flagship"
+    digest = _target_sha256(target)
+    if supplied.get("schema_version") == PENDING_DECISION_SCHEMA_V1:
+        record = supplied
+        if record.get("portfolio_id") not in {None, pid}:
+            raise ValueError("decision_snapshot portfolio identity mismatch")
+        previous = record.get("target_sha256")
+        if previous and previous != digest:
+            lineage = list(record.get("target_lineage") or [])
+            lineage.append({
+                "from_target_sha256": previous,
+                "to_target_sha256": digest,
+                "rebound_asof": asof,
+                "reason": "deterministic_risk_rewrite",
+            })
+            record["target_lineage"] = lineage[-20:]
+        record["target_sha256"] = digest
+        record["portfolio_id"] = pid
+        record["last_bound_asof"] = asof
+        return record
+
+    return {
+        "schema_version": PENDING_DECISION_SCHEMA_V1,
+        "portfolio_id": pid,
+        "accepted_asof": asof,
+        "target_sha256": digest,
+        "submission": supplied,
+    }
+
+
+def pending_target_contract_error(payload: dict[str, Any] | None,
+                                  portfolio_id: str | None = None) -> str | None:
+    """Return an incompatibility reason for an executable pending target, else ``None``.
+
+    Only the successor US book has a breaking *version* contract.  Every book shares the same
+    executable-target validation contract; malformed regional legacy payloads fail closed too.
+    """
+    if not isinstance(payload, dict) or not isinstance(payload.get("target"), dict):
+        return "malformed_payload"
+    if portfolio_id == "autonomous":
+        if payload.get("schema_version") != PENDING_TARGET_SCHEMA_V2:
+            return "missing_or_incompatible_schema_version"
+        if payload.get("engine_version") != US_BRAIN_ENGINE_V2:
+            return "missing_or_incompatible_engine_version"
+        if payload.get("portfolio_id") != "autonomous":
+            return "portfolio_identity_mismatch"
+    try:
+        target = validate_target_weights(
+            payload.get("target"),
+            require_canonical_tickers=True,
+        )
+    except InvalidTargetWeights as exc:
+        return f"invalid_target:{exc.reason}"
+    decision = payload.get("decision_snapshot")
+    if decision is not None:
+        if not isinstance(decision, dict):
+            return "malformed_decision_snapshot"
+        if decision.get("schema_version") != PENDING_DECISION_SCHEMA_V1:
+            return "incompatible_decision_snapshot_schema"
+        if decision.get("portfolio_id") != (portfolio_id or "flagship"):
+            return "decision_snapshot_portfolio_mismatch"
+        if not isinstance(decision.get("submission"), dict):
+            return "malformed_decision_submission"
+        if decision.get("target_sha256") != _target_sha256(target):
+            return "decision_snapshot_target_mismatch"
+    return None
+
+
+def quarantine_pending_target(portfolio_id: str | None, reason: str,
+                              payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Recoverably isolate an incompatible target and write bounded audit metadata.
+
+    The source is atomically renamed within its existing runtime-book directory.  It is never
+    deleted and its contents are not rewritten, so an operator can inspect or restore it.  A compact
+    JSONL side ledger lives beside the quarantined file; the shared governance event is best-effort.
+    If the move itself fails, callers still receive/raise a fail-closed result and MUST NOT rebalance.
+    """
+    source = _pending_target_path(portfolio_id)
+    data_dir = source.parent
+    data_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    suffix = f"{now.strftime('%Y%m%dT%H%M%S%fZ')}.{uuid4().hex[:8]}"
+    destination = data_dir / f"pending_target.quarantine.{suffix}.json"
+    raw = b""
+    try:
+        raw = source.read_bytes()
+    except OSError:
+        pass
+
+    observed = payload if isinstance(payload, dict) else {}
+    target = observed.get("target") if isinstance(observed.get("target"), dict) else {}
+    record: dict[str, Any] = {
+        "event": "pending_target_quarantined",
+        "portfolio_id": portfolio_id or "flagship",
+        "reason": str(reason),
+        "quarantined_at": now.isoformat(),
+        "source_file": source.name,
+        "quarantine_file": destination.name,
+        "recoverable": True,
+        "expected_contract": ({
+            "schema_version": PENDING_TARGET_SCHEMA_V2,
+            "engine_version": US_BRAIN_ENGINE_V2,
+            "portfolio_id": "autonomous",
+            "target_weights": "canonical_finite_long_only_gross_lte_one",
+        } if portfolio_id == "autonomous" else {
+            "portfolio_id": portfolio_id or "flagship",
+            "target_weights": "canonical_finite_long_only_gross_lte_one",
+        }),
+        "observed_contract": {
+            "schema_version": observed.get("schema_version"),
+            "engine_version": observed.get("engine_version"),
+            "portfolio_id": observed.get("portfolio_id"),
+        },
+        "queued_asof": observed.get("asof"),
+        "target_count": len(target),
+        "target_symbols": sorted(str(t).upper() for t in target)[:50],
+        "source_sha256": hashlib.sha256(raw).hexdigest() if raw else None,
+    }
+    try:
+        source.replace(destination)
+        record["status"] = "quarantined"
+    except Exception as exc:  # noqa: BLE001 - failure remains a hard, non-executing stop
+        record["status"] = "quarantine_failed"
+        record["recoverable"] = source.exists()
+        record["error"] = repr(exc)[:300]
+
+    try:
+        _append_jsonl(data_dir / "pending_target_quarantine.jsonl", record)
+    except Exception as exc:  # noqa: BLE001 - the shared event below is a second audit sink
+        record["audit_ledger_error"] = repr(exc)[:300]
+    try:
+        from control_plane import run_events
+        run_events.append({
+            "kind": "pending_target_quarantined",
+            "job": "pending_target_contract_guard",
+            "book": portfolio_id or "flagship",
+            "step": "pre_rebalance_validation",
+            "status": "skip",
+            "severity": "HARD_STOP",
+            "actor": "deterministic_engine",
+            "extra": {
+                "reason": record["reason"],
+                "quarantine_file": record["quarantine_file"],
+                "quarantine_status": record["status"],
+                "recoverable": record["recoverable"],
+                "expected_contract": record["expected_contract"],
+                "observed_contract": record["observed_contract"],
+                "target_count": record["target_count"],
+                "source_sha256": record["source_sha256"],
+            },
+        })
+    except Exception as exc:  # noqa: BLE001 - event logging never re-enables a quarantined target
+        record["event_log_error"] = repr(exc)[:300]
+    return record
+
+
+def preflight_pending_target(portfolio_id: str | None = None) -> dict[str, Any]:
+    """Validate queued executable state before any consumer may inspect or rewrite its target.
+
+    This is the single cutover boundary used by settlement, deterministic de-risk, and overnight
+    refinement.  Returning ``ok=False`` means the caller must stop immediately: the incompatible
+    file has been recoverably quarantined (or its quarantine move failed closed).  Missing queues
+    and valid regional legacy queues remain ordinary ``ok=True`` outcomes.
+    """
+    # Finish any already-prepared settlement first.  In particular, a crash/failure after account
+    # and fills committed but before queue deletion must clear that exact old queue before it can be
+    # mistaken for a fresh instruction.
+    recover_paper_transaction(portfolio_id)
+    raw_pending = _read_pending_target_payload(portfolio_id)
+    pending = load_pending_target(portfolio_id)
+    if pending is None:
+        if pending_target_file_exists(portfolio_id):
+            reason = pending_target_contract_error(raw_pending, portfolio_id) or "malformed_payload"
+            quarantined = quarantine_pending_target(portfolio_id, reason, raw_pending)
+            return {
+                "ok": False,
+                "skipped": "pending_target_quarantined",
+                "quarantined": True,
+                "quarantine": quarantined,
+                "pending": None,
+            }
+        return {"ok": True, "pending": None}
+
+    incompatibility = pending_target_contract_error(pending, portfolio_id)
+    if incompatibility:
+        quarantined = quarantine_pending_target(portfolio_id, incompatibility, pending)
+        return {
+            "ok": False,
+            "skipped": "pending_target_quarantined",
+            "quarantined": True,
+            "quarantine": quarantined,
+            "pending": None,
+        }
+    return {"ok": True, "pending": pending}
+
+
+def save_pending_target(
+    target_weights: dict[str, float],
+    asof: str,
+    portfolio_id: str | None = None,
+    *,
+    decision_snapshot: dict[str, Any] | None = None,
+) -> None:
+    """Atomically persist the latest decided target and its accepted PM provenance.
+
+    ``decision_snapshot`` is optional for backward-compatible/operator queues.  All active Brain
+    loops provide it.  When present, it is embedded in the same atomic file and hash-bound to the
+    numeric target, so a later failed refinement cannot erase or misattribute the eventual fill.
+    """
+    target = validate_target_weights(target_weights)
     _ensure_dir(portfolio_id)
     payload = {
-        "target": {str(k).upper(): float(v) for k, v in (target_weights or {}).items() if v},
+        "target": target,
         "asof": asof,
         "queued_at": datetime.now(timezone.utc).isoformat(),
     }
-    _pending_target_path(portfolio_id).write_text(json.dumps(payload, indent=2, default=str))
+    decision = _pending_decision_record(
+        decision_snapshot,
+        target=target,
+        asof=asof,
+        portfolio_id=portfolio_id,
+    )
+    if decision is not None:
+        payload["decision_snapshot"] = decision
+    if portfolio_id == "autonomous":
+        payload.update({
+            "schema_version": PENDING_TARGET_SCHEMA_V2,
+            "engine_version": US_BRAIN_ENGINE_V2,
+            "portfolio_id": "autonomous",
+        })
+    path = _pending_target_path(portfolio_id)
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
 
 
-def load_pending_target(portfolio_id: str | None = None) -> dict | None:
-    """The queued target ({target, asof, queued_at}) or None. Survives a corrupt file."""
+def _read_pending_target_payload(portfolio_id: str | None = None) -> dict | None:
+    """Parse the queued target without validating or mutating it (preflight owns quarantine)."""
     try:
         p = _pending_target_path(portfolio_id)
         if p.exists():
@@ -1006,25 +2015,77 @@ def load_pending_target(portfolio_id: str | None = None) -> dict | None:
     return None
 
 
+def load_pending_target(portfolio_id: str | None = None) -> dict | None:
+    """Return a valid queued target, or ``None`` for missing/corrupt/incompatible state.
+
+    Settlement consumers must use ``preflight_pending_target`` so an invalid executable artifact is
+    quarantined with an audit record.  This read helper still applies the identical shared validator
+    and never hands malformed weights to a caller.
+    """
+    payload = _read_pending_target_payload(portfolio_id)
+    if pending_target_contract_error(payload, portfolio_id):
+        return None
+    return payload
+
+
 def clear_pending_target(portfolio_id: str | None = None) -> None:
     try:
         _pending_target_path(portfolio_id).unlink()
     except FileNotFoundError:
-        pass
-    except Exception:
         pass
 
 
 def settle_target(prices: dict[str, float], asof: str,
                   portfolio_id: str | None = None) -> dict | None:
     """If a target was queued while the market was closed, rebalance to it now (at the open marks)
-    and clear it. Returns the settled target dict, or None if nothing was queued. Paper-only."""
-    pt = load_pending_target(portfolio_id)
+    and clear it. Returns the settled target dict, or None if nothing was queued. Paper-only.
+
+    The autonomous-book contract is validated before ``rebalance``.  A legacy/unversioned target is
+    quarantined in place and raises ``PendingTargetQuarantined``; current holdings remain untouched.
+    If any positive target or intended full exit lacks a trusted price,
+    ``UnpriceableExitPrices`` is raised before an account write and the pending target is retained
+    for a later retry.
+    """
+    preflight = preflight_pending_target(portfolio_id)
+    if not preflight["ok"]:
+        raise PendingTargetQuarantined(preflight["quarantine"])
+    pt = preflight["pending"]
     if not pt:
         return None
-    target = pt.get("target") or {}
-    rebalance(target, prices, asof, portfolio_id=portfolio_id)
-    clear_pending_target(portfolio_id)
+    # Preflight already applied this validator in strict-persisted mode.  Re-validate here to close
+    # a future refactor/TOCTOU seam and to pass canonical weights into the rebalance engine.
+    target = validate_target_weights(
+        pt.get("target") or {},
+        require_canonical_tickers=True,
+    )
+    missing_prices = unpriceable_target_requirements(
+        target,
+        prices,
+        portfolio_id=portfolio_id,
+    )
+    if missing_prices["tickers"]:
+        raise UnpriceableExitPrices(
+            missing_prices["tickers"],
+            portfolio_id,
+            exit_tickers=missing_prices["exit_tickers"],
+            positive_target_tickers=missing_prices["positive_target_tickers"],
+        )
+    followup = _pending_clear_transition(portfolio_id)
+    rebalance(
+        target,
+        prices,
+        asof,
+        portfolio_id=portfolio_id,
+        _followup=followup,
+    )
+    # Test doubles and older embedders may replace ``rebalance`` with a compatible callable that
+    # ignores the private transaction follow-up.  Clear only if the exact original target still
+    # remains and no WAL is outstanding; a newer target is never removed here.
+    if (
+        not _transaction_path(portfolio_id).exists()
+        and _file_sha256(_pending_target_path(portfolio_id)) == followup.get("before_sha256")
+    ):
+        clear_pending_target(portfolio_id)
     return target
 
 

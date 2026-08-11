@@ -54,16 +54,16 @@ def test_seeded_from_live_so_reads_still_work():
     assert acct.get("starting_nav"), "seeded copy lost starting_nav"
 
 
-def test_writing_a_book_does_not_touch_the_live_file():
+def test_writing_a_book_does_not_touch_the_live_file(tmp_path, monkeypatch):
     """The exact failure mode: save on a Brain book stays in tmp.
 
-    Uses a throwaway book id, NOT a real one. The isolated root is session-scoped (tests
-    share it on purpose — see conftest._book_state_root), so mutating `heavyweight` here
-    would leak a bogus balance into every later test in the run.
+    Use a registered book under a per-test root. Unknown storage ids deliberately fail closed at
+    the registry boundary, and the per-test root avoids leaking this balance into later tests.
     """
-    pid = "_isolation_probe"
-    live = REPO / "data" / "portfolios" / pid
-    assert not live.exists(), f"{live} should never exist — pick another probe id"
+    pid = "autonomous"
+    live = REPO / "data" / "portfolios" / pid / "account.json"
+    live_before = live.read_bytes() if live.exists() else None
+    monkeypatch.setattr(registry, "_ROOT", tmp_path)
 
     state = paper_account._load_account(pid)
     state["cash"] = 123.45
@@ -71,4 +71,7 @@ def test_writing_a_book_does_not_touch_the_live_file():
 
     assert paper_account._load_account(pid)["cash"] == 123.45          # the write landed
     assert not _is_live(paper_account._paths(pid)["account"])           # ...but not live
-    assert not live.exists(), "a test created a book directory in the LIVE data tree"
+    if live_before is None:
+        assert not live.exists(), "a test created a book file in the LIVE data tree"
+    else:
+        assert live.read_bytes() == live_before, "a test changed the LIVE paper account"

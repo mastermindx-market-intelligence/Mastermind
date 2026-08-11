@@ -1,4 +1,4 @@
-"""brain/nw_reflection.py — the Mastermind AI reflection engine over the Neural Web bridge (W-AI).
+"""brain/nw_reflection.py — Mastermind Portfolio reflection over the Neural Web bridge (W-AI).
 
 Deterministic, offline, NO LLM, NO authority. Reads the published NW context (through
 brain.neural_web_context — the sole reader), the bot's own graded ledgers, and the context-audit
@@ -397,6 +397,15 @@ def _update_nudge_registry(candidates: list[dict], asof: str, ran_kinds: set[str
             continue
         if _code_kind(code) not in ran_kinds:
             continue  # detector never ran — "vanished" is not "fixed"
+        # A present-but-empty candidate_context makes only the aggregate
+        # ``candidate_context_empty`` diagnosis evaluable.  The sibling field
+        # detectors have no rows to inspect, so their absence cannot honestly
+        # mean that the fields recovered.
+        if (
+            _code_kind(code) == "contract_drift"
+            and "candidate_context_empty" in candidate_codes
+        ):
+            continue
         ent["status"] = "resolved"
         ent["resolved_on"] = asof
     _write_nudge_state(state)

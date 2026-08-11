@@ -161,6 +161,7 @@ def _isolate_side_ledgers(tmp_path, monkeypatch):
 
 def _fake_query_with_thinking():
     async def fake_query(*, prompt, options):
+        assert options.setting_sources == ["project"]
         yield _Assistant([
             ThinkingBlock("round-1 reasoning: signals disagree"),
             TextBlock("Checking the tape."),

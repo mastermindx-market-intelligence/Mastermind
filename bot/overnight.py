@@ -20,16 +20,9 @@ import bot  # noqa: F401  -> vendor/macro onto sys.path
 
 # pid → (module, daily-entrypoint) — each accepts a `directive=` (the ad-hoc overnight instruction)
 _RUNNERS = {
-    "etf": ("bot.etf", "run_etf"),
     "autonomous": ("bot.autonomous", "run_autonomous"),
     "china": ("bot.china", "run_china"),
     "hk": ("bot.hk", "run_hk"),
-    # W4 A2: Flagship + Heavyweight join the overnight watch so they can de-risk on a material
-    # overnight move (on 07-01 SOXX -6.4% autonomous sold SMH while these books could not lean out).
-    # Precondition satisfied: W1 severity ladder is live — a directive now has teeth (eff_cap bites
-    # both conviction AND leadership sleeves).  Flag-off → byte-identical deterministic rebuild.
-    "flagship": ("bot.phase2", "run_flagship"),
-    "heavyweight": ("bot.heavyweight", "run_heavyweight"),
 }
 
 
@@ -76,15 +69,27 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
     """One overnight watch tick for book `pid`. No-op (and free) unless the market is CLOSED, a target
     is QUEUED, and the live tape is MATERIAL — only then does it fire the Opus re-decision that revises
     the queued target. Never raises. `force` bypasses the tripwire (manual re-prompt)."""
-    from bot import settle
-    from data_layer import overnight
-    from portfolio import paper_account
+    from portfolio import registry
     asof = asof or date.today().isoformat()
     out: dict = {"pid": pid, "asof": asof}
     try:
+        if registry.is_archived(pid):
+            return {**out, "skipped": "portfolio_archived",
+                    "superseded_by": registry.get(pid).get("superseded_by")}
+        from bot import settle
+        from data_layer import overnight
+        from portfolio import paper_account
         if settle.is_open(pid):
             return {**out, "skipped": "market_open"}        # in-session: the normal daily run handles it
-        if not paper_account.load_pending_target(pid):
+        preflight = paper_account.preflight_pending_target(pid)
+        if not preflight["ok"]:
+            return {
+                **out,
+                "skipped": preflight["skipped"],
+                "quarantined": True,
+                "quarantine": preflight["quarantine"],
+            }
+        if not preflight["pending"]:
             return {**out, "skipped": "nothing_queued"}     # no queued decision to refine
         # FAST DE-RISK (deterministic, free, no LLM) — on a CONFIRMED unwind, revise the queued target
         # down to the gross cap + away from the cracking chains BEFORE the Opus refine, so the book
@@ -113,13 +118,8 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
 
 
 def watch_us(asof: str | None = None) -> dict:
-    """Overnight watch tick for the US Brain books (scheduler job).
-
-    Covers all six US books: autonomous, etf, flagship, and heavyweight.  Flagship and
-    heavyweight were added in W4 A2 so they can de-risk overnight on a material tape move
-    (prior to this they carried their queued targets unchanged regardless of what happened
-    overnight — the 07-01 SOXX -6.4% gap exposed the gap)."""
-    return {pid: watch(pid, asof) for pid in ("autonomous", "etf", "flagship", "heavyweight")}
+    """Overnight watch tick for the one active US Brain (scheduler job)."""
+    return {"autonomous": watch("autonomous", asof)}
 
 
 def watch_asia(asof: str | None = None) -> dict:

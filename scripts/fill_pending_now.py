@@ -73,6 +73,11 @@ def settle(pid: str | None = None, *, require_open: bool = False, log=print) -> 
     open (so an automated caller never books a fill on a closed session). Safe to call when there
     is nothing to do — returns {filled:0}. Paper-only."""
     pid = pid or registry.DEFAULT_ID
+    if registry.is_archived(pid):
+        result = registry.archived_run_result(pid, date.today().isoformat())
+        log(f"[{pid}] portfolio archived — pending orders remain frozen; use "
+            f"{result.get('superseded_by') or 'an active book'} instead.")
+        return {"filled": 0, "remaining": None, **result}
     ccy = registry.currency(pid)
     pending = paper_account.load_pending(pid)
     if not pending:
@@ -142,6 +147,8 @@ def settle(pid: str | None = None, *, require_open: bool = False, log=print) -> 
 
 def main(pid: str) -> int:
     res = settle(pid)
+    if res.get("skipped") == "portfolio_archived":
+        return 0
     if res.get("note") == "no pending":
         print(f"[{pid or registry.DEFAULT_ID}] no pending orders — nothing to settle.")
         return 0

@@ -1,0 +1,24 @@
+name = "worker"
+description = "Read-only supporting worker for evidence extraction; portfolio writes are unavailable."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+developer_instructions = """
+Act only as a read-only supporting researcher for the parent. Never edit code or portfolio state.
+Never call submit_book, request_context_upgrade, or another state-changing MCP. Never size or execute.
+"""
+
+[mcp_servers.bot]
+disabled_tools = ["save_research_note", "propose_thesis", "flag_emerging_theme", "file_research_paper", "propose_portfolio_action"]
+[mcp_servers.desk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.china]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.hk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.research]
+command = "sh"
+args = ["-c", "exec \"$MASTERMIND_CODEX_PYTHON\" -m brain.codex_mcp_stdio --book-env MASTERMIND_CODEX_BOOK --server research"]
+startup_timeout_sec = 30
+default_tools_approval_mode = "approve"
+enabled_tools = ["get_regime", "get_overnight_tape", "get_themes", "get_standouts", "get_portfolio", "get_decision_matrix", "get_divergences", "get_altdata", "get_news", "get_intelligence", "get_intel_hub", "get_daily_briefing", "get_intake_candidates", "get_ticker_package", "get_fundamentals", "get_options", "get_anticipation", "get_quote", "evaluate_gate", "read_signal", "get_my_book", "get_market_packet", "get_prophet_board", "get_sector_rotation", "get_technical_lab", "get_context_catalog", "get_surface_packet", "get_neural_web_packet", "get_china_regime", "get_china_standouts", "get_china_intake", "get_china_brief"]

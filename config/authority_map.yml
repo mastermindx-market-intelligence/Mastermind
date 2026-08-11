@@ -301,6 +301,23 @@ flags:
       Arms the context-only Treasury/TGA liquidity prompt layer (W-TSY.1);
       dark-shipped default OFF.
 
+  # Mastermind AI observational review loop (files-only; no book authority)
+  MASTERMIND_AI_LOOP:
+    authority_level: A4
+    allowed_effect: [arm_observational_ai_loop, disarm_observational_ai_loop]
+    note: >
+      Arms the nightly files-only reflection, lesson, and context-request transport
+      loop. Outputs remain untrusted request-only observations: this flag grants no
+      sizing, execution, doctrine-edit, deployment, or feature-flag authority.
+
+  MASTERMIND_AI_REVIEW_LLM:
+    authority_level: A4
+    allowed_effect: [arm_ai_review_llm, disarm_ai_review_llm]
+    note: >
+      Capability gate for optional LLM prose inside the observational review loop.
+      The deterministic review still runs when this is off; when on, generated prose
+      remains advisory and request-only with no portfolio or self-modification authority.
+
   # ── Portfolio / sizing ────────────────────────────────────────────────────────
   MASTERMIND_ALLOW_FRACTIONAL:
     authority_level: A3

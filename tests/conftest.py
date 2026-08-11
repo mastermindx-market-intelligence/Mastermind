@@ -5,6 +5,7 @@ paths, which call brain.runlog.start_run(...) and would otherwise append real
 run-log entries into data/brain/runs/ on every `pytest` invocation — cluttering
 the live "Brain Activity" feed. Isolate the run-log to a tmp dir for all tests.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -70,6 +71,38 @@ def _ensure_engine_canon() -> None:
 
 
 _ensure_engine_canon()
+
+
+@pytest.fixture(autouse=True)
+def _offline_llm_fuse(tmp_path, monkeypatch):
+    """Make every ordinary pytest run incapable of spending live LLM tokens.
+
+    The production default is the shared Codex-first waterfall, so a machine with a valid local
+    Codex login could otherwise turn a legacy unit test into a real model call.  Tests may still
+    exercise either bridge by installing their own fake transport after this fixture.  The one
+    opt-in live smoke remains available with ``BOT_TEST_LIVE_LLM=1``.
+    """
+    if os.environ.get("BOT_TEST_LIVE_LLM") == "1":
+        yield
+        return
+
+    no_auth_home = tmp_path / "_no_codex_auth"
+    no_auth_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("BOT_LLM_BACKEND", "cli")
+    monkeypatch.setenv("CODEX_HOME", str(no_auth_home))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    for slot in range(1, 21):
+        monkeypatch.delenv(f"CLAUDE_CODE_OAUTH_TOKEN_{slot}", raising=False)
+    try:
+        from brain import cli_bridge
+        # Blocks both Agent SDK and subprocess/keychain access before either transport starts.
+        # Focused bridge tests replace this with a fake path inside their own test scope.
+        monkeypatch.setattr(cli_bridge, "cli_path", lambda: None)
+    except Exception:
+        pass
+    yield
 
 
 @pytest.fixture(autouse=True)

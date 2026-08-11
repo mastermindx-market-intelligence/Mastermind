@@ -62,6 +62,9 @@ def test_build_and_tickers_run_with_flags_off(monkeypatch):
     # deterministically (no dependence on what the macro side has built), exactly as test_intake.
     monkeypatch.setattr(intake, "_read", lambda rel: None)
     monkeypatch.setattr(intake, "_from_open_theses", lambda: {})
+    # Prophet is now a permanent, authority-fenced discovery source (not one of the four
+    # default-off rework flags). Isolate it explicitly to retain this seed-fallback unit case.
+    monkeypatch.setattr(intake, "_from_prophet", lambda: {})
     out = intake.build(limit=5)                       # must not raise
     assert out["n_universe"] == len(intake._SEED)     # pure seed fallback (all real sources empty)
     assert intake.tickers(limit=5) == [c["ticker"] for c in out["candidates"]]

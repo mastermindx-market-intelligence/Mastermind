@@ -281,16 +281,47 @@ def test_rejected_entry_has_required_shape():
 
 
 # ============================================================
-# /api/portfolio carries rejected[] (integration, uses real latest.json)
+# Archived Flagship /api/portfolio retains its historical rejected[] contract.
 # ============================================================
 
-def test_api_portfolio_carries_rejected_list():
-    """/api/portfolio must include a top-level 'rejected' key containing a list."""
+@_pytest_w8.fixture
+def archived_flagship_api_book(tmp_path, monkeypatch):
+    """Seed a deterministic archived snapshot without relying on the active product default."""
+    from portfolio import registry
+
+    monkeypatch.setattr(registry, "_ROOT", tmp_path, raising=False)
+    book_dir = registry.data_dir("flagship")
+    book_dir.mkdir(parents=True, exist_ok=True)
+    (book_dir / "latest.json").write_text(json.dumps({
+        "as_of": "2026-06-18",
+        "portfolio_id": "flagship",
+        "positions": [{
+            "ticker": "XLK",
+            "sleeve": "leadership",
+            "weight": 0.10,
+            "thesis_full": {
+                "summary": "Leadership remains intact.",
+                "bull": ["Relative strength persists."],
+                "bear": ["Leadership breadth narrows."],
+            },
+        }],
+        "rejected": [{
+            "ticker": "MU",
+            "reason": "Confirmation incomplete.",
+            "vetoes": [],
+            "bear": ["Cycle weakens."],
+            "confluence": 0.25,
+        }],
+    }))
+
+
+def test_api_portfolio_carries_rejected_list(archived_flagship_api_book):
+    """Archived Flagship remains readable with its top-level rejected list."""
     from app.main import app
     from fastapi.testclient import TestClient
 
     client = TestClient(app, raise_server_exceptions=True)
-    r = client.get("/api/portfolio")
+    r = client.get("/api/portfolio?portfolio=flagship")
     assert r.status_code == 200, f"Expected 200; got {r.status_code}"
     data = r.json()
     assert "rejected" in data, (
@@ -300,13 +331,13 @@ def test_api_portfolio_carries_rejected_list():
     assert isinstance(data["rejected"], list), "rejected must be a list"
 
 
-def test_api_portfolio_rejected_entry_shape():
+def test_api_portfolio_rejected_entry_shape(archived_flagship_api_book):
     """Each rejected entry in /api/portfolio must have ticker, reason, vetoes, bear, confluence."""
     from app.main import app
     from fastapi.testclient import TestClient
 
     client = TestClient(app, raise_server_exceptions=True)
-    r = client.get("/api/portfolio")
+    r = client.get("/api/portfolio?portfolio=flagship")
     data = r.json()
     rejected = data.get("rejected", [])
 
@@ -316,13 +347,13 @@ def test_api_portfolio_rejected_entry_shape():
             assert field in entry, f"Rejected entry missing '{field}': {entry}"
 
 
-def test_api_portfolio_leadership_bear_non_empty():
+def test_api_portfolio_leadership_bear_non_empty(archived_flagship_api_book):
     """Every leadership ETF in /api/portfolio must have non-empty thesis_full.bear."""
     from app.main import app
     from fastapi.testclient import TestClient
 
     client = TestClient(app, raise_server_exceptions=True)
-    r = client.get("/api/portfolio")
+    r = client.get("/api/portfolio?portfolio=flagship")
     data = r.json()
     for pos in data.get("positions", []):
         if pos.get("sleeve") == "leadership":

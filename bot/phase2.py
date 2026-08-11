@@ -1,4 +1,8 @@
-"""Phase 2 — the gated daily loop + a multi-name 3-sleeve paper book.
+"""Phase 2 — archived Flagship implementation retained for historical audit.
+
+Operational entrypoints fail closed before invoking this engine; ``run_flagship`` and the module CLI
+return an archive no-op and direct scheduled/manual paths have been removed. The mechanics below
+describe the retired gated book.
 
 gate (material-change) -> assemble state -> LLM-optional adjudication -> build the
 Leadership sleeve (mechanical, top-RS sectors, trend-gated) + the Conviction sleeve
@@ -853,6 +857,13 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
     FLAGSHIP-ONLY: the autonomous/etf/heavyweight books read the same macro artifacts but
     their stale-anchor-freeze wiring is a separate reviewed change.  ``stale_freeze`` must
     NEVER be passed for those books from this function."""
+    # This legacy engine is importable by operator scripts and tests in addition to the guarded
+    # scheduler wrappers.  Fail closed at the public entrypoint itself, before opening a run log,
+    # reading live artifacts, acquiring model capacity, or writing any portfolio state.
+    from portfolio import registry as _registry
+    if _registry.is_archived("flagship"):
+        return {"ran": False, **_registry.archived_run_result("flagship", asof)}
+
     # —— open run log ——
     _run_id: str | None = None
     try:
@@ -2824,6 +2835,15 @@ def run_flagship(asof: str | None = None, *, directive: str | None = None) -> di
     still valuable: the dwell/severity state can cut the book overnight.
 
     Never raises."""
+    from portfolio import registry
+    if registry.is_archived("flagship"):
+        return {
+            "decided": False,
+            "queued_for_open": False,
+            "brain": {"ok": False, "skipped": "portfolio_archived"},
+            "holdings": 0,
+            **registry.archived_run_result("flagship", asof),
+        }
     from portfolio import paper_account
     try:
         res = run(asof=asof, directive=directive)
@@ -2843,6 +2863,10 @@ def run_flagship(asof: str | None = None, *, directive: str | None = None) -> di
 
 
 if __name__ == "__main__":
+    from portfolio import registry as _registry
+    if _registry.is_archived("flagship"):
+        print("Flagship is archived; use the autonomous US Brain instead.")
+        raise SystemExit(0)
     out = run()
     if not out["ran"]:
         print("Gate: carried forward —", out["reason"])

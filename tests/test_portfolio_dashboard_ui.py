@@ -46,6 +46,30 @@ def test_daily_decision_log_is_bounded_and_expandable() -> None:
     assert 'aria-controls="dec-list"' in HTML
     assert "window.toggleDecisionLog" in HTML
     assert "_decisions.slice(0, DECISION_PREVIEW_COUNT)" in HTML
+    assert "Decision memo & evidence" in HTML
+    assert "function _decisionMemoHTML(d)" in HTML
+    assert "decision_memo" in HTML and "exit_decisions" in HTML
+
+
+def test_active_us_brain_is_default_and_archived_books_are_frozen_history() -> None:
+    assert "var _portfolio = 'autonomous'" in HTML
+    assert "d.default" in HTML
+    assert "_portfolio = d.default" in HTML
+    assert "routeOwnsBook" in HTML
+    assert "['autonomous', 'china', 'hk', 'self_directed', 'flagship', 'heavyweight', 'etf']" in HTML
+    assert "mm-archive-chip" in HTML
+    assert "Archived history" in HTML
+    assert "no live pricing" in HTML
+    assert "meta.lifecycle === 'archived'" in HTML
+    assert "Mastermind Portfolio" in HTML
+
+
+def test_private_advisor_ui_describes_proposals_not_execution() -> None:
+    assert "Mastermind Portfolio Research Advisor" in CHAT
+    assert "propose_portfolio_action" in CHAT
+    assert "queuing a portfolio proposal" in CHAT
+    assert "execute_trade:" not in CHAT
+    assert "executing the paper trade" not in CHAT
 
 
 def test_brain_summary_uses_available_width_and_only_discloses_real_overflow() -> None:

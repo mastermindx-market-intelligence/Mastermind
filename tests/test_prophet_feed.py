@@ -22,6 +22,7 @@ fixtures never rot.
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, timedelta
 
 import pytest
@@ -98,6 +99,20 @@ def _clean_cache():
     pf._reset_cache()
     yield
     pf._reset_cache()
+
+
+def test_index_cache_reloads_when_nightly_artifact_changes(monkeypatch, tmp_path):
+    first = _plan("FIRST", entry=100, invalidation=90, t1=120, t2=130, trigger=99,
+                  conviction=70, phase="pre_trigger", action="wait", signal_days_ago=0)
+    path = _install(monkeypatch, tmp_path, _index([first]))
+    assert pf.plans()[0]["ticker"] == "FIRST"
+    old_ns = path.stat().st_mtime_ns
+    second = _plan("SECOND", entry=50, invalidation=45, t1=60, t2=65, trigger=49,
+                   conviction=80, phase="pre_trigger", action="wait", signal_days_ago=0)
+    path.write_text(json.dumps(_index([second])))
+    os.utime(path, ns=(old_ns + 1_000_000_000, old_ns + 1_000_000_000))
+    # No explicit _reset_cache(): the long-lived service sees the new nightly board.
+    assert pf.plans()[0]["ticker"] == "SECOND"
 
 
 # A representative fixture board: 4+ plans covering enter/wait/hold/invalidated + a non-BULL + an

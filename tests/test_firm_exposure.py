@@ -8,6 +8,7 @@ raises, and honours the env threshold overrides. No network, no live book is tou
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -17,9 +18,20 @@ from portfolio import firm_exposure, registry
 @pytest.fixture
 def iso(tmp_path, monkeypatch):
     """Isolate per-id portfolio state to a tmp root (registry.data_dir derives off _ROOT), and point
-    the module's own _ROOT at the tmp tree too (so the absent sector snapshot is honestly omitted)."""
+    the module's own _ROOT at the tmp tree too (so the absent sector snapshot is honestly omitted).
+
+    This file unit-tests the generic multi-book aggregation/clamp formula with synthetic historical
+    books, so it explicitly restores the pre-archive peer set. Production eligibility is pinned in
+    test_portfolio_archival.py.
+    """
     monkeypatch.setattr(registry, "_ROOT", tmp_path, raising=False)
     monkeypatch.setattr(firm_exposure, "_ROOT", tmp_path, raising=False)
+    legacy = [dict(p) for p in registry.all_portfolios() if p.get("id") != "self_directed"]
+    monkeypatch.setattr(firm_exposure, "_book_ids", lambda: legacy)
+    monkeypatch.setattr(
+        firm_exposure, "_FIRM_US_BOOKS",
+        ("flagship", "autonomous", "etf", "heavyweight"),
+    )
     return tmp_path
 
 

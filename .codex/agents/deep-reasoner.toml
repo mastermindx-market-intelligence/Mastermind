@@ -1,5 +1,8 @@
 name = "deep-reasoner"
-description = "Deep narrative + macro synthesis and accountable portfolio-manager judgment. Use for the hardest reasoning — connecting regime, themes, bottleneck migration, and the doctrine into a falsifiable lean. Opus tier; use sparingly."
+description = "Deep narrative and macro synthesis for the hardest read-only portfolio questions. Use sparingly; the root PM remains accountable."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "read-only"
 developer_instructions = """
 You are the portfolio-manager / deep-reasoning desk for an autonomous, paper-only
 narrative-investing bot. You reason over the macro dashboard (vendored at
@@ -13,4 +16,22 @@ Rules of the house (non-negotiable):
 - Respect the doctrine in `DOCTRINE.md`: confirmation over prediction, the 3-sleeve
   architecture, the time stop, and the failure-mode detectors.
 - Tag inferred (vs observed) inputs as (unverified). Be blunt, no moralizing.
-- Read-only: you analyze and recommend; you never execute or write trade state."""
+- Read-only: you analyze and recommend; you never execute or write trade state. Treat submit_book
+and every other state-changing MCP as unavailable even if a runtime mistakenly exposes one."""
+
+# Agent files are config layers: an empty table does not erase the parent's MCP map. Deny leaves
+# are applied after the parent's exact enabled_tools list, retaining reads while removing writes.
+[mcp_servers.bot]
+disabled_tools = ["save_research_note", "propose_thesis", "flag_emerging_theme", "file_research_paper", "propose_portfolio_action"]
+[mcp_servers.desk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.china]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.hk]
+disabled_tools = ["request_context_upgrade", "submit_book"]
+[mcp_servers.research]
+command = "sh"
+args = ["-c", "exec \"$MASTERMIND_CODEX_PYTHON\" -m brain.codex_mcp_stdio --book-env MASTERMIND_CODEX_BOOK --server research"]
+startup_timeout_sec = 30
+default_tools_approval_mode = "approve"
+enabled_tools = ["get_regime", "get_overnight_tape", "get_themes", "get_standouts", "get_portfolio", "get_decision_matrix", "get_divergences", "get_altdata", "get_news", "get_intelligence", "get_intel_hub", "get_daily_briefing", "get_intake_candidates", "get_ticker_package", "get_fundamentals", "get_options", "get_anticipation", "get_quote", "evaluate_gate", "read_signal", "get_my_book", "get_market_packet", "get_prophet_board", "get_sector_rotation", "get_technical_lab", "get_context_catalog", "get_surface_packet", "get_neural_web_packet", "get_china_regime", "get_china_standouts", "get_china_intake", "get_china_brief"]

@@ -17,6 +17,12 @@ from portfolio import paper_account, registry
 from bot import heavyweight as hw
 
 
+@pytest.fixture(autouse=True)
+def legacy_runner_enabled_for_unit_tests(monkeypatch):
+    """Exercise retired implementation internals without weakening the production archive default."""
+    monkeypatch.setitem(registry._BY_ID["heavyweight"], "active", True)
+
+
 @pytest.fixture
 def iso(tmp_path, monkeypatch):
     """Isolate all per-id portfolio state (incl. the legacy flagship dir) to a tmp root, so tests
@@ -154,6 +160,13 @@ def test_run_firm_cap_clamps_below_rails(iso, monkeypatch):
     firm NAME cap is 0.10, so Heavyweight's NVDA is trimmed to the 0.04 remaining firm headroom even
     though the concentration rails alone would allow up to 0.50."""
     monkeypatch.setenv("MASTERMIND_FIRM_CAPS", "1")               # re-arm (iso disables it)
+    # Production excludes archived peers from firm exposure. This historical unit specifically
+    # exercises the old multi-active-book clamp, so activate Flagship only inside the fixture.
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
+    from portfolio import firm_exposure
+    monkeypatch.setattr(
+        firm_exposure, "_FIRM_US_BOOKS", ("flagship", "heavyweight")
+    )
     prices = {"NVDA": 210.0, "AVGO": 300.0, "SPY": 740.0}
     monkeypatch.setattr(paper_account, "_current_price", lambda t: prices.get(t))
     # NVDA is in Flagship's universe AND Flagship holds NVDA at 0.06 (a firm peer weight on the name).

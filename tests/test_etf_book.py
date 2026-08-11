@@ -14,6 +14,12 @@ import pytest
 from portfolio import etf_universe, paper_account, registry
 
 
+@pytest.fixture(autouse=True)
+def legacy_runner_enabled_for_unit_tests(monkeypatch):
+    """Exercise retired implementation internals without weakening the production archive default."""
+    monkeypatch.setitem(registry._BY_ID["etf"], "active", True)
+
+
 @pytest.fixture
 def iso(tmp_path, monkeypatch):
     """Isolate all per-id portfolio state to a tmp root (registry.data_dir derives off _ROOT)."""
@@ -396,43 +402,21 @@ def test_run_etf_offline_inaugural(iso, monkeypatch):
     assert latest["kind"] == "etf_brain"
 
 
-def test_run_etf_executes_and_filters(iso, monkeypatch):
-    prices = {"XLK": 200.0, "SGOV": 100.0, "SPY": 740.0}   # VLUE deliberately unpriceable
-    monkeypatch.setattr(paper_account, "_current_price", lambda t: prices.get(t))
-    from bot import etf, settle
-    from brain import etf_board, etf_mcp
-    monkeypatch.setattr(etf_board, "risk_state", lambda regime=None: {"state": "calm", "reasons": ["test"]})
-    monkeypatch.setattr(settle, "is_open", lambda pid: True)   # force OPEN so it fills (not queues)
+def test_run_etf_archive_refuses_execution(iso, monkeypatch):
+    """The retired implementation may remain importable, but its public runner is inert."""
+    from bot import etf
 
-    def fake_brain(asof, inaugural):
-        etf_mcp.submission_path().parent.mkdir(parents=True, exist_ok=True)
-        etf_mcp.submission_path().write_text(json.dumps({
-            "holdings": [
-                {"ticker": "XLK", "weight": 0.3, "rationale": "tech leadership"},
-                {"ticker": "SGOV", "weight": 0.3, "rationale": "T-bill cash yield"},
-                {"ticker": "AAPL", "weight": 0.2, "rationale": "single name — trusted layer rejects"},
-                {"ticker": "VLUE", "weight": 0.1, "rationale": "value tilt (unpriceable this run)"},
-            ],
-            "summary": "barbell: tech + bills", "gross": 0.9,
-        }))
-        return {"ok": True, "text": "x", "cost_usd": 0.0, "model": "claude-opus-4-8"}
-
-    monkeypatch.setattr(etf, "_run_brain", fake_brain)
+    monkeypatch.setitem(registry._BY_ID["etf"], "active", False)
+    monkeypatch.setattr(
+        etf,
+        "_run_brain",
+        lambda *args, **kwargs: pytest.fail("archived ETF runner called the Brain"),
+    )
     out = etf.run_etf(asof="2026-06-21", armed=True)
-    assert out["decided"] is True
-    assert "AAPL" in out.get("rejected_offlist", [])      # single name rejected in the trusted layer
-    assert "VLUE" in out["skipped_unpriceable"]           # in universe but no price → skipped, surfaced
-    sides = {(t["ticker"], t["side"]) for t in out["executed"]}
-    assert ("XLK", "buy") in sides and ("SGOV", "buy") in sides
-    # decision log captured the day's narrative + per-name rationale + risk state
-    decs = etf.load_decisions()
-    assert decs and decs[0]["summary"] == "barbell: tech + bills"
-    assert decs[0]["risk_state"] == "calm"
-    assert any(h["ticker"] == "XLK" and h["rationale"] for h in decs[0]["holdings"])
-    # positions carry the rationale + group for the dashboard
-    latest = json.loads((registry.data_dir("etf") / "latest.json").read_text())
-    xlk = next(p for p in latest["positions"] if p["ticker"] == "XLK")
-    assert xlk["rationale"] and xlk["sleeve"] == "brain" and xlk["group"] == "sectors"
+    assert out["status"] == "archived"
+    assert out["skipped"] == "portfolio_archived"
+    assert out["decided"] is False
+    assert not registry.data_dir("etf").exists()
 
 
 # --------------------------------------------------------------------------- market-hours gate
@@ -469,27 +453,17 @@ def test_run_etf_queues_when_closed_no_fills(iso, monkeypatch):
     assert not (paper_account._load_account("etf").get("positions") or {})
 
 
-def test_settle_open_fills_queued_target(iso, monkeypatch):
-    prices = {"XLK": 200.0, "SGOV": 100.0, "SPY": 740.0}
-    monkeypatch.setattr(paper_account, "_current_price", lambda t: prices.get(t))
+def test_settle_open_preserves_archived_queue(iso, monkeypatch):
     from bot import settle
-    from brain import etf_board
-    monkeypatch.setattr(etf_board, "risk_state", lambda regime=None: {"state": "calm", "reasons": ["t"]})
     paper_account.save_pending_target({"XLK": 0.3, "SGOV": 0.3}, "2026-06-22", portfolio_id="etf")
-
-    # closed → no-op, target stays queued
-    monkeypatch.setattr(settle, "is_open", lambda pid: False)
-    assert settle.settle_open("etf", asof="2026-06-22").get("skipped") == "market_closed"
-    assert paper_account.load_pending_target("etf") is not None
-
-    # open → fills the queued target and clears it
+    monkeypatch.setitem(registry._BY_ID["etf"], "active", False)
     monkeypatch.setattr(settle, "is_open", lambda pid: True)
     res = settle.settle_open("etf", asof="2026-06-22")
-    assert res["ok"] is True
-    sides = {(t["ticker"], t["side"]) for t in res["executed"]}
-    assert ("XLK", "buy") in sides and ("SGOV", "buy") in sides
-    assert set(paper_account._load_account("etf").get("positions") or {}) == {"XLK", "SGOV"}
-    assert paper_account.load_pending_target("etf") is None        # cleared after settle
+    assert res["ok"] is False
+    assert res["status"] == "archived"
+    assert res["skipped"] == "portfolio_archived"
+    assert paper_account.load_pending_target("etf") is not None
+    assert not (registry.data_dir("etf") / "account.json").exists()
 
 
 def test_settle_target_round_trip(iso, monkeypatch):

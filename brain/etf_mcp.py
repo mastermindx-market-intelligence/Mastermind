@@ -34,6 +34,15 @@ BENCHMARK = "SPY"
 BOOK_MARKER = autonomous_mcp.BOOK_MARKER
 
 
+def _is_archived() -> bool:
+    """Fail closed when the registry cannot prove this retired desk is active."""
+    try:
+        from portfolio import registry
+        return registry.is_archived(PORTFOLIO_ID)
+    except Exception:  # noqa: BLE001 - an indeterminate retirement state must not enable writes
+        return True
+
+
 # ---------------------------------------------------------------------------
 # submission helpers — reuse the autonomous desk's per-portfolio file machinery
 # ---------------------------------------------------------------------------
@@ -43,6 +52,8 @@ def submission_path():
 
 
 def clear_submission():
+    if _is_archived():
+        return
     autonomous_mcp.clear_submission(PORTFOLIO_ID)
 
 
@@ -171,6 +182,11 @@ async def get_quote(args):
                                     "description": "the most likely way this book loses money"}},
        "required": ["holdings", "summary"]})
 async def submit_book(args):
+    if _is_archived():
+        return bot_mcp._ok(
+            "REFUSED: portfolio_archived. ETF Brain is retired and superseded by autonomous; "
+            "no pending decision was recorded."
+        )
     from portfolio import etf_universe
     holdings = args.get("holdings") or []
     cleaned: list[dict] = []
@@ -228,11 +244,16 @@ _DESK_TOOLS = [get_my_book, get_etf_board, get_quote, submit_book]
 _READ_TOOLS = [t for t in bot_mcp._READ if t.name not in ("get_portfolio", "get_quote")]
 
 
+def _desk_tools() -> list:
+    """Archived books retain read tools, but never expose their state-writing submit tool."""
+    return [t for t in _DESK_TOOLS if t is not submit_book] if _is_archived() else list(_DESK_TOOLS)
+
+
 def build_servers() -> dict:
     """The mcp_servers map: the macro READ tools (bot) + the ETF desk."""
     return {
         bot_mcp.SERVER_NAME: create_sdk_mcp_server(name=bot_mcp.SERVER_NAME, version="0.1.0", tools=_READ_TOOLS),
-        SERVER_NAME: create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=_DESK_TOOLS),
+        SERVER_NAME: create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=_desk_tools()),
     }
 
 
@@ -241,5 +262,5 @@ def allowed_tools() -> list[str]:
     get_portfolio, NO gated execute_trade — a free-form book that can only see its OWN state, the
     macro desks, and the ETF rotation board."""
     read = [f"mcp__{bot_mcp.SERVER_NAME}__{t.name}" for t in _READ_TOOLS]
-    desk = [f"mcp__{SERVER_NAME}__{t.name}" for t in _DESK_TOOLS]
+    desk = [f"mcp__{SERVER_NAME}__{t.name}" for t in _desk_tools()]
     return read + desk + bot_mcp.WEB_TOOLS

@@ -19,6 +19,14 @@ import bot  # noqa: F401  -> vendor/macro onto sys.path
 from bot import derisk as D
 
 
+@pytest.fixture(autouse=True)
+def _legacy_flagship_algorithm_enabled(monkeypatch):
+    """Exercise the retired cutter's pure incident logic without reactivating it in production."""
+    from portfolio import registry
+
+    monkeypatch.setitem(registry._BY_ID["flagship"], "active", True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # shared helpers (mirrors test_derisk.py style)
 # ─────────────────────────────────────────────────────────────────────────────

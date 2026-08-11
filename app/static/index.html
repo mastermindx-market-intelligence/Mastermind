@@ -2449,6 +2449,9 @@ html[data-theme="light"] body.page-mm {
 .mm-pf-tab .mm-pf-sub{font-size:10.5px;font-weight:600;font-variant-numeric:tabular-nums;opacity:.85}
 .mm-pf-tab.active{color:var(--text,#e6e9ef);background:var(--bg,#0e1117);
   border-color:var(--border,rgba(127,127,127,.28));box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.mm-pf-tab.archived{opacity:.58;border-style:dashed}.mm-pf-tab.archived:hover,.mm-pf-tab.archived.active{opacity:.9}
+.mm-archive-chip{font-size:7.5px;letter-spacing:.08em;padding:1px 4px;border-radius:4px;
+  border:1px solid currentColor;color:var(--muted);font-weight:900;margin-left:3px}
 .mm-pf-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .mm-pf-dot.gated{background:#3b82f6}.mm-pf-dot.autonomous{background:#a855f7}.mm-pf-dot.heavyweight{background:#f59e0b}.mm-pf-dot.china{background:#ef4444}.mm-pf-dot.hk{background:#10b981}.mm-pf-dot.etf{background:#06b6d4}
 .mm-pf-sub .up{color:var(--up,#16a34a)}.mm-pf-sub .down{color:var(--down,#dc2626)}
@@ -2513,6 +2516,10 @@ html[data-theme="light"] body.page-mm {
 .mm-dec-date{font-weight:800;font-size:13px;font-variant-numeric:tabular-nums}
 .mm-dec-cost{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .mm-dec-sum{color:var(--text);font-size:13px;line-height:1.55;margin-bottom:8px}
+.mm-dec-memo{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin:8px 0}
+.mm-dec-memo-card{border:1px solid var(--line);border-radius:9px;background:var(--panel2);padding:9px 10px;min-width:0}
+.mm-dec-memo-k{font-size:9px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:850;margin-bottom:5px}
+.mm-dec-memo-v{font-size:11.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;color:var(--text);font-family:inherit}
 .mm-dec-trades{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
 .mm-trade-chip{font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;padding:2px 8px;border-radius:6px;border:1px solid transparent}
 .mm-trade-chip.buy{color:var(--up,#16a34a);background:rgba(22,163,74,.12);border-color:rgba(22,163,74,.30)}
@@ -2646,8 +2653,8 @@ html[data-theme="light"] body.page-mm {
     <div class="mm-auto-banner">
       <div class="mm-auto-head">
         <div class="mm-auto-id">
-          <span class="mm-auto-badge" id="auto-badge">Mastermind AI</span>
-          <span class="mm-auto-title" id="auto-title">Mastermind AI</span>
+          <span class="mm-auto-badge" id="auto-badge">Mastermind Portfolio</span>
+          <span class="mm-auto-title" id="auto-title">Mastermind Portfolio</span>
           <span class="mm-auto-tag" id="auto-tag"></span>
         </div>
         <div class="mm-auto-meta" id="auto-meta"></div>
@@ -2769,8 +2776,8 @@ html[data-theme="light"] body.page-mm {
   <div class="panel span12" id="decisions">
     <h2><span class="l-en">Daily Decision Log</span><span class="l-zh">每日决策日志</span></h2>
     <div class="mm-dec-sub" style="color:var(--muted);font-size:12px;margin:-2px 0 12px">
-      <span class="l-en">What Mastermind AI bought, sold and held each day — and why.</span>
-      <span class="l-zh">Mastermind AI 每天买入、卖出与持有的内容及其理由。</span>
+      <span class="l-en">What the Mastermind Portfolio PM selected, rejected, changed and learned — with evidence.</span>
+      <span class="l-zh">Mastermind Portfolio 每天的选择、拒绝、变更、证据与复盘。</span>
     </div>
     <div class="mm-dec-list" id="dec-list"></div>
     <div class="mm-dec-more-wrap">
@@ -3656,7 +3663,7 @@ var _calib = null;                // outcome ledger (the Calibration sub-page)
 var _researchSub = 'theses';      // 'theses' | 'calibration'
 var _currentView = 'dashboard';   // 'dashboard' | 'research' | 'self'
 // ── multi-portfolio switcher state ──────────────────────────────────────────
-var _portfolio = 'flagship';      // active portfolio id (drives every portfolio-scoped fetch)
+var _portfolio = 'autonomous';    // product default: the sole active US Brain v2
 var _pfFetchSeq = 0;              // monotonic token per fetchAll: a faster-resolving stale fetch
                                   // from a previous tab must NOT clobber the current book's render
 var _sharedLoaded = false;        // true once engine-level (shared) endpoints have loaded once,
@@ -3731,7 +3738,8 @@ var _PF_LABELS = {
   hk:            { en: 'HK Brain',      zh: '港股大脑' },
   self_directed: { en: 'Self-Directed', zh: '自主操盘' }
 };
-var _PF_ORDER = ['flagship', 'heavyweight', 'autonomous', 'etf', 'china', 'hk', 'self_directed'];
+// Active regional brains first; frozen historical US experiments remain inspectable at the end.
+var _PF_ORDER = ['autonomous', 'china', 'hk', 'self_directed', 'flagship', 'heavyweight', 'etf'];
 function _pfLabel(p) {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var m = _PF_LABELS[p && p.id];
@@ -6188,10 +6196,13 @@ function renderPortfolioSwitch() {
     // (and books sitting near $1M) looked frozen even though /api/portfolios refreshes them.
     var navStr = st.nav != null ? ccy + Math.round(st.nav).toLocaleString('en-US') : '—';
     var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>';
-    return '<button class="mm-pf-tab' + (p.id === _portfolio ? ' active' : '') + '" type="button" ' +
+    var archived = p.lifecycle === 'archived' || p.active === false;
+    var archiveChip = archived ? '<span class="mm-archive-chip">' + (document.documentElement.getAttribute('data-lang') === 'zh' ? '已归档' : 'ARCHIVED') + '</span>' : '';
+    var title = archived ? ((p.archived_reason || 'Frozen historical portfolio') + (p.superseded_by ? ' · successor: ' + p.superseded_by : '')) : (p.tagline || '');
+    return '<button class="mm-pf-tab' + (p.id === _portfolio ? ' active' : '') + (archived ? ' archived' : '') + '" type="button" ' +
       'aria-pressed="' + (p.id === _portfolio ? 'true' : 'false') + '" ' +
-      'data-pf="' + esc(p.id) + '" onclick="setPortfolio(\'' + esc(p.id) + '\')" title="' + esc(p.tagline || '') + '">' +
-      '<span class="mm-pf-name"><span class="mm-pf-dot ' + (p.kind === 'autonomous' ? 'autonomous' : (p.kind === 'heavyweight' ? 'heavyweight' : (p.kind === 'china_brain' ? 'china' : (p.kind === 'hk_brain' ? 'hk' : (p.kind === 'etf_brain' ? 'etf' : 'gated'))))) + '"></span>' + esc(_pfLabel(p)) + '</span>' +
+      'data-pf="' + esc(p.id) + '" onclick="setPortfolio(\'' + esc(p.id) + '\')" title="' + esc(title) + '">' +
+      '<span class="mm-pf-name"><span class="mm-pf-dot ' + (p.kind === 'autonomous' ? 'autonomous' : (p.kind === 'heavyweight' ? 'heavyweight' : (p.kind === 'china_brain' ? 'china' : (p.kind === 'hk_brain' ? 'hk' : (p.kind === 'etf_brain' ? 'etf' : 'gated'))))) + '"></span>' + esc(_pfLabel(p)) + archiveChip + '</span>' +
       '<span class="mm-pf-sub">' + sub + '</span></button>';
   }).join('');
   if (window.requestAnimationFrame) window.requestAnimationFrame(revealActivePortfolioTab);
@@ -6269,7 +6280,15 @@ async function loadPortfolios() {
     var r = await fetch('/api/portfolios');
     var d = r.ok ? await r.json() : null;
     if (d && d.portfolios) {
-      _portfolios = d.portfolios; renderPortfolioSwitch();
+      _portfolios = d.portfolios;
+      // The registry owns the product default. Explicit historical/workspace URLs keep their
+      // selected book, while the root dashboard follows the backend contract instead of a second
+      // hard-coded default that can drift during a future portfolio migration.
+      var routeOwnsBook = _path0 === '/research' || _path0 === '/desk' || _path0 === '/self';
+      if (!routeOwnsBook && d.default && _portfolios.some(function(p){ return p.id === d.default; })) {
+        _portfolio = d.default;
+      }
+      renderPortfolioSwitch();
       if (_pendingSelfSelect && _portfolios.some(function(p){ return p.id === 'self_directed'; })) {
         _pendingSelfSelect = false; setPortfolio('self_directed');
       }
@@ -6292,9 +6311,14 @@ function renderAutoBanner() {
                 : kind === 'china_brain' ? 'china'
                 : kind === 'hk_brain' ? 'hk'
                 : kind === 'etf_brain' ? 'etf' : 'autonomous';
-  if (badgeEl) { badgeEl.className = 'mm-auto-badge ' + badgeKind; badgeEl.textContent = 'Mastermind AI'; }
+  var archived = pf.lifecycle === 'archived' || pf.active === false;
+  if (badgeEl) {
+    badgeEl.className = 'mm-auto-badge ' + badgeKind;
+    badgeEl.textContent = archived ? (isZh ? '已归档历史' : 'Archived history') : 'Mastermind Portfolio';
+  }
   var bookName = _pfLabel(pf) || b.manager || (isZh ? '大脑账本' : 'Brain book');
   var bookTag  = pf.tagline || '';
+  if (archived) bookTag = (isZh ? '只读 · 已停止运行 · ' : 'Read-only · no longer running · ') + (pf.archived_reason || bookTag);
   // The China + HK books are fully localized in zh mode, so translate the tagline too rather than
   // leaving an English line over Chinese content (the book name itself comes from _pfLabel above).
   if (isZh && kind === 'china_brain') {
@@ -6493,23 +6517,57 @@ window.toggleDecisionLog = function() {
   renderDecisions();
 };
 
-// ── the Brain's thinking trace — closing reasoning + the data/tools it consulted ──
+function _decisionMemoHTML(d) {
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  var memo = d.decision_memo || {};
+  var labels = {
+    market_frame: ['Market frame','市场框架'], candidate_funnel: ['Candidate funnel','候选漏斗'],
+    selected: ['Why selected','入选理由'], rejected: ['Why rejected','拒绝理由'],
+    changes: ['Book changes','组合变更'], timing: ['Timing checks','时机检查'],
+    risk_deliberation: ['Risk review','风险复核'], alternatives: ['Alternatives','备选方案'],
+    lessons_applied: ['Lessons applied','应用经验'], context_gaps: ['Context gaps','信息缺口'],
+    delegation_summary: ['Delegated research','子代理研究']
+  };
+  var rows = [];
+  Object.keys(labels).forEach(function(k) {
+    if (memo[k] == null || memo[k] === '' || (Array.isArray(memo[k]) && !memo[k].length)) return;
+    var v = typeof memo[k] === 'string' ? memo[k] : JSON.stringify(memo[k], null, 2);
+    rows.push('<div class="mm-dec-memo-card"><div class="mm-dec-memo-k">' + esc(labels[k][isZh ? 1 : 0]) +
+      '</div><pre class="mm-dec-memo-v">' + esc(v) + '</pre></div>');
+  });
+  var governance = {
+    risk_posture: d.risk_posture, cash_rationale: d.cash_rationale,
+    expected_failure_mode: d.expected_failure_mode, evidence_planes: d.evidence_planes,
+    source_provenance: d.source_provenance, exit_decisions: d.exit_decisions,
+    allocation_review: d.allocation_review
+  };
+  var govClean = {};
+  Object.keys(governance).forEach(function(k){ if (governance[k] != null && governance[k] !== '') govClean[k] = governance[k]; });
+  if (Object.keys(govClean).length) rows.push('<div class="mm-dec-memo-card"><div class="mm-dec-memo-k">' +
+    (isZh ? '证据与治理' : 'Evidence & governance') + '</div><pre class="mm-dec-memo-v">' +
+    esc(JSON.stringify(govClean, null, 2)) + '</pre></div>');
+  return rows.length ? '<div class="mm-dec-memo">' + rows.join('') + '</div>' : '';
+}
+
+// Expandable, decision-relevant audit memo + closing write-up + consulted evidence.
+// Hidden internal chain-of-thought is never rendered.
 function _decReasoningBlock(d, i) {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var hasTrace = !!d.run_id;
   var hasText = !!(d.brain_text && String(d.brain_text).trim());
+  var memoHTML = _decisionMemoHTML(d);
   var tools = _toolSummary(d.tools_used);
-  if (!hasTrace && !hasText && !tools) return '';
-  var label = isZh ? '🧠 推理与数据来源' : '🧠 Reasoning & sources';
+  if (!hasTrace && !hasText && !tools && !memoHTML) return '';
+  var label = isZh ? '🧠 决策备忘录与证据' : '🧠 Decision memo & evidence';
   var toolsLine = tools ? '<div class="mm-dec-tools">' + (isZh ? '调用：' : 'Consulted: ') + tools + '</div>' : '';
-  var body = '';
+  var body = memoHTML;
   if (hasText) {
     // brain_text_zh comes from /api/decisions (cached_zh); fall back to English when absent
     var brainTxt = (isZh && d.brain_text_zh) ? d.brain_text_zh : d.brain_text;
     body += '<div class="mm-dec-think">' + esc(brainTxt) + '</div>';
   }
   body += '<div class="mm-dec-trace" id="dec-trace-' + i + '">' +
-    (hasTrace ? '<div class="mm-dec-trace-load">' + (isZh ? '加载推理步骤…' : 'Loading reasoning steps…') + '</div>' : '') + '</div>';
+    (hasTrace ? '<div class="mm-dec-trace-load">' + (isZh ? '加载工具证据…' : 'Loading tool evidence…') + '</div>' : '') + '</div>';
   // run_id is single-quoted (not JSON.stringify'd): the onclick attribute is itself
   // double-quoted, so a JSON string's double quotes would terminate it early and break
   // the handler — the section then never opened. Single quotes match toggleRun().
@@ -6545,19 +6603,18 @@ window.toggleDecReason = function(i, runId) {
     fetch('/api/runlog?run_id=' + encodeURIComponent(runId))
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(run) { traceEl.innerHTML = _renderRunTrace(run); })
-      .catch(function() { traceEl.innerHTML = '<div class="mm-dec-trace-load">reasoning trace unavailable</div>'; });
+      .catch(function() { traceEl.innerHTML = '<div class="mm-dec-trace-load">evidence trace unavailable</div>'; });
   }
 };
 
-// render the run-log steps: reasoning text, the tools it called (with args), and what came back
+// Render auditable tool calls/results. Internal reasoning blocks are intentionally omitted.
 function _renderRunTrace(run) {
   var steps = (run && run.steps) || [];
-  if (!steps.length) return '<div class="mm-dec-trace-load">no reasoning steps recorded for this run</div>';
+  if (!steps.length) return '<div class="mm-dec-trace-load">no additional tool evidence recorded for this run</div>';
   return '<div class="mm-trace">' + steps.map(function(s) {
     var type = s.type || '';
     if (type === 'reasoning') {
-      var txt = (s.detail || '').trim();
-      return txt ? '<div class="mm-trace-think">💭 ' + esc(txt) + '</div>' : '';
+      return '';
     }
     if (type === 'tool_call') {
       var name = String(s.tool || s.title || 'tool').replace(/^mcp__[a-z]+__/, '').replace(/^call /, '');
@@ -7191,6 +7248,14 @@ function renderLiveMarksStatus() {
   }
   var s = d.session || {}, pricing = d.pricing || {};
   var rows = d.positions || [];
+  if (d.archived) {
+    var frozenAt = d.frozen_as_of ? fmtDate(d.frozen_as_of) : '—';
+    host.className = 'mm-live-status snapshot';
+    host.innerHTML = '<span class="dot"></span><span>' + esc(isZh
+      ? ('已归档历史 · 冻结于 ' + frozenAt + ' · 不请求实时行情')
+      : ('Archived history · frozen ' + frozenAt + ' · no live pricing')) + '</span>';
+    return;
+  }
   var hasSnapshot = rows.some(function(p) { return p.quote_source === 'terminal_snapshot'; });
   var liveTimes = rows.map(function(p) { return p.quote_is_live ? p.quote_as_of : null; }).filter(Boolean);
   var latest = liveTimes.length ? liveTimes.sort().slice(-1)[0] : d.generated_at;
@@ -7284,6 +7349,8 @@ function _mergeLiveMarks(data) {
 function _scheduleLiveMarks(seconds) {
   clearTimeout(_liveTimer);
   if (document.hidden) return;
+  var meta = (_portfolios || []).find(function(p) { return p.id === _portfolio; });
+  if (meta && (meta.lifecycle === 'archived' || meta.active === false)) return;
   var delay = Math.max(30, Number(seconds) || 120) * 1000;
   _liveTimer = window.setTimeout(refreshLiveMarks, delay);
 }
@@ -7546,12 +7613,12 @@ document.addEventListener('langchange', function() {
 
 // open the Research / Desk view directly when the page is loaded at /research or /desk
 var _path0 = location.pathname.replace(/\/+$/, '');
-if (_path0 === '/research') showView('research');
-else if (_path0 === '/desk') showView('desk');
+if (_path0 === '/research') { _portfolio = 'flagship'; showView('research'); }
+else if (_path0 === '/desk') { _portfolio = 'flagship'; showView('desk'); }
 // /self can select its book before the deferred switcher metadata arrives.
 else if (_path0 === '/self') { _portfolio = 'self_directed'; _pendingSelfSelect = false; }
 
-applyPortfolioScope();   // default flagship → no-op visually; sets data-portfolio
+applyPortfolioScope();   // root defaults to active US Brain; historical routes select Flagship explicitly
 fetchAll({ showBar: true });            // initial full load (shows the loading bar)
 document.addEventListener('visibilitychange', function() {
   if (document.hidden) {

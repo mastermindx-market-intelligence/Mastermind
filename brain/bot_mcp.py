@@ -252,7 +252,22 @@ async def get_standouts(args):
 
 @tool("get_portfolio", "The bot's current paper book + track record.", {})
 async def get_portfolio(args):
-    return _json(_read_json(_ROOT / "data" / "portfolio" / "latest.json") or {"status": "no book yet"})
+    # This is the private Portfolio Advisor's own-book reader.  ``flagship`` remains the
+    # storage compatibility default, but it is archived and must never silently supply the
+    # active US advisor context.
+    from portfolio import registry
+
+    portfolio_id = registry.DASHBOARD_DEFAULT_ID
+    meta = registry.get(portfolio_id)
+    latest = _read_json(registry.data_dir(portfolio_id) / "latest.json")
+    if not latest:
+        return _json({"status": "no book yet", "portfolio_id": portfolio_id})
+    return _json({
+        **latest,
+        "portfolio_id": portfolio_id,
+        "active": registry.is_active(portfolio_id),
+        "lifecycle": meta.get("status", "active"),
+    })
 
 
 @tool("get_decision_matrix", "The MULTI-SIDED decision matrix for a name or theme — every lens (valuation, quality, growth, narrative, leadership, asymmetry, risk, policy/admin tilt, Fed, institutional flows, options, rate sensitivity, cross-asset, conviction) with its read + honest status, plus the confluence/divergence synthesis. ALWAYS call this before any verdict.",
@@ -538,7 +553,8 @@ async def get_anticipation(args):
       {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]})
 async def read_signal(args):
     p = (Path(args["path"]) if Path(args["path"]).is_absolute() else _ROOT / args["path"]).resolve()
-    if not any(str(p).startswith(str(r.resolve())) for r in _READ_ROOTS):
+    roots = [r.resolve() for r in _READ_ROOTS]
+    if not any(p == root or root in p.parents for root in roots):
         return _ok("DENIED: path outside the allowed data roots.")
     if any(p == r or r in p.parents for r in _DENY_ROOTS):
         _audit_denied_book_read(p)
@@ -559,7 +575,7 @@ def _audit_denied_book_read(p: Path) -> None:
         pass
 
 
-# ---------------- ACTION tools (write back to the app's review queue) ----------------
+# ------------ proposal/write-back tools (never mutate a portfolio or paper account) ------------
 @tool("save_research_note", "Persist a research note for the web app to render (Claude's conclusions/analysis).",
       {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"},
        "tickers": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "body"]})
@@ -592,16 +608,21 @@ async def flag_emerging_theme(args):
     return _ok(f"flagged emerging theme '{args['name']}' → web app.")
 
 
-@tool("recommend_action", "Log a paper recommendation (buy/trim/exit/watch) with rationale for review.",
+# Legacy compatibility handler for non-Portfolio callers.  It is deliberately NOT registered in
+# ``_ACTION`` below: the private Portfolio Advisor must use the validated proposal lifecycle, and
+# legacy ``status=paper`` rows must not contaminate that homogeneous queue.
+@tool("recommend_action", "LEGACY: log a paper recommendation outside the Portfolio Advisor queue.",
       {"type": "object", "properties": {"ticker": {"type": "string"},
        "action": {"type": "string", "enum": ["buy", "add", "trim", "exit", "watch"]},
        "rationale": {"type": "string"}}, "required": ["ticker", "action", "rationale"]})
 async def recommend_action(args):
-    _append(_RESEARCH / "recommendations.jsonl", {"source": "claude_cli", "status": "paper", **args})
-    return _ok(f"recommendation logged: {args['action']} {args['ticker']} (paper, for review).")
+    _append(_RESEARCH / "legacy_recommendations.jsonl",
+            {"source": "claude_cli", "status": "paper", **args})
+    return _ok(f"legacy recommendation logged: {args['action']} {args['ticker']} "
+               "(paper, outside the Portfolio Advisor queue).")
 
 
-# ---------------- evaluate -> research-paper -> trade (the user-pushed-name flow) ----------------
+# -------- evaluate -> research paper -> non-executing proposal (user-pushed-name flow) --------
 @tool("evaluate_gate",
       "PRELIMINARY GATE for a name the user wants you to consider adding. Runs the multi-sided "
       "decision matrix and returns whether it passes the engine's size gate (size_authority 'up' "
@@ -680,7 +701,8 @@ async def file_research_paper(args):
     report_md = rp._strip_leading_narration(args["report_md"])
     paper = {
         "schema": rp.SCHEMA, "id": f"{asof}-{t}", "ticker": t, "asof": asof,
-        "generated_at": rp._now(), "mode": "advisor", "model": "advisor-chat",
+        "generated_at": rp._now(), "mode": "portfolio_research_advisor",
+        "model": "portfolio-research-advisor",
         "price_at_review": price, "research_score": int(args["research_score"]),
         "viability": args["viability"], "recommend": bool(args["recommend"]),
         "confidence": args.get("confidence") or "medium", "fair_value": args.get("fair_value"),
@@ -698,7 +720,7 @@ async def file_research_paper(args):
             "combined": paper["combined"], "confirmed": paper["confirmed"],
             "research_score": paper["research_score"], "engine_score": paper["engine_score"],
             "viability": paper["viability"]}
-    verdict = ("CONFIRMED (combined >= 60) — you may add it."
+    verdict = ("CONFIRMED (combined >= 60) — eligible for a non-executing ADD proposal."
                if paper["confirmed"] else f"NOT confirmed ({paper['gate_reason']}) — do not add it.")
     return _ok(f"{PAPER_MARKER} {json.dumps(meta)}\n"
                f"Filed research paper {paper['id']} → Research dashboard. Conviction Index "
@@ -706,47 +728,69 @@ async def file_research_paper(args):
                f"{paper['research_score']}). {verdict}")
 
 
-@tool("execute_trade",
-      "Conduct an ad-hoc PAPER trade in the book — add / trim / exit ONE name. For an ADD you MUST "
-      "have already filed a CONFIRMED research paper for the ticker (combined >= 60); the tool "
-      "refuses an add otherwise. Trims and exits are always allowed (risk-down). Funds from cash, "
-      "never disturbs other positions, never executes a real trade — shows in Trades + live P&L. "
-      "After an add, tell the user it's been added and offer the research paper.",
+@tool("propose_portfolio_action",
+      "Queue a NON-EXECUTING ADD / TRIM / EXIT proposal from the private Mastermind Portfolio "
+      "Research Advisor. This tool accepts no size, shares, notional, price, or fill instruction; "
+      "scheduled deterministic portfolio engines remain the sole sizing and paper-execution "
+      "authority. An ADD proposal requires a CONFIRMED research paper. Urgency describes review "
+      "priority only and never authorizes execution.",
       {"type": "object", "properties": {
           "ticker": {"type": "string"},
           "action": {"type": "string", "enum": ["add", "trim", "exit"]},
-          "weight": {"type": "number"},
-          "thesis": {"type": "string"}},
-       "required": ["ticker", "action"]})
-async def execute_trade(args):
-    from portfolio import advisor_trade
+          "thesis": {"type": "string"},
+          "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                       "maxItems": 12},
+          "urgency": {"type": "string",
+                      "enum": ["routine", "next_cycle", "urgent_review"]}},
+       "required": ["ticker", "action", "thesis", "evidence", "urgency"]})
+async def propose_portfolio_action(args):
     from brain import research_paper as rp
+    from portfolio import advisor_trade
+
+    # Defense in depth for direct handler callers that bypass JSON-schema validation. A
+    # proposal carrying an order unit must be refused, not silently stripped and queued.
+    forbidden = sorted({"weight", "size", "shares", "notional", "price", "fill"} & set(args or {}))
+    if forbidden:
+        return _ok(
+            "REFUSED: Portfolio Advisor proposals cannot carry sizing or fill fields "
+            f"({', '.join(forbidden)}). No proposal queued and no paper account changed."
+        )
+
     t = (args.get("ticker") or "").upper()
     action = (args.get("action") or "").lower()
-    if action in ("add", "buy", "increase"):
+    if action == "add":
         paper = rp.latest_for(t)
         if not paper or not paper.get("confirmed"):
-            return _ok(f"REFUSED: no CONFIRMED research paper on file for {t}. Run the flow first — "
-                       f"evaluate_gate -> write + file_research_paper -> if confirmed, then add.")
-    res = advisor_trade.execute(t, action, weight=args.get("weight"), thesis=args.get("thesis"))
+            return _ok(
+                f"REFUSED: no CONFIRMED research paper on file for {t}. Run the flow first — "
+                "evaluate_gate -> write + file_research_paper -> if confirmed, propose ADD. "
+                "No proposal queued and no paper account changed."
+            )
+    res = advisor_trade.propose_action(
+        t,
+        action,
+        thesis=args.get("thesis") or "",
+        evidence=args.get("evidence") or [],
+        urgency=args.get("urgency") or "",
+        source="advisor_chat",
+    )
     if not res.get("ok"):
-        return _ok(f"trade NOT executed for {t}: {res.get('error', 'unknown')}")
-    try:
-        _append(_RESEARCH / "recommendations.jsonl",
-                {"source": "advisor_chat", "status": "executed_paper", "ticker": t,
-                 "action": action, "rationale": args.get("thesis") or "",
-                 **{k: res.get(k) for k in ("shares", "price", "value", "weight")}})
-    except Exception:
-        pass
-    return _ok(res["note"] + " (paper trade — shows in Trades + live P&L.)")
+        return _ok(
+            f"proposal NOT queued for {t}: {res.get('error', 'unknown')}. "
+            "No paper account changed."
+        )
+    proposal = res["proposal"]
+    return _ok(
+        f"PROPOSAL_QUEUED {json.dumps(proposal, ensure_ascii=False)}\n{res['note']}"
+    )
 
 
 _READ = [get_regime, get_overnight_tape, get_themes, get_standouts, get_portfolio, get_decision_matrix, get_divergences,
          get_altdata, get_news, get_intelligence, get_intel_hub, get_daily_briefing, get_intake_candidates,
          get_ticker_package, get_fundamentals, get_options, get_anticipation, get_quote,
          evaluate_gate, read_signal]
-_ACTION = [save_research_note, propose_thesis, flag_emerging_theme, recommend_action,
-           file_research_paper, execute_trade]
+_ACTION = [save_research_note, propose_thesis, flag_emerging_theme,
+           file_research_paper, propose_portfolio_action]
 _ALL = _READ + _ACTION
 SERVER_NAME = "bot"
 

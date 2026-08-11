@@ -1,9 +1,8 @@
 """Firm-level cross-book exposure — monitor AND binding cap (two layers, same module).
 
-Mastermind runs several independent paper books (flagship, autonomous/US Brain, heavyweight,
-china/CN Brain, hk/HK Brain, etf/ETF Brain). Each is sized in isolation by its own manager, so
-NOTHING in a single book sees the FIRM-WIDE picture: three Brains independently max-convicting
-the same name concentrates the firm even if every individual book is within its own mandate.
+Mastermind retains several historical paper books, but only autonomous/US Brain, china/CN Brain,
+and hk/HK Brain are active managed books. Each is sized in isolation by its own manager, so the
+firm monitor still needs an active-only cross-book view.
 
 TWO LAYERS:
 
@@ -11,15 +10,15 @@ TWO LAYERS:
      changes an allocation, queues an order, or touches a paper account. Display and alert use.
 
   2. headroom() / clamp_book() — BINDING firm cap (W3, Architecture Stage-6.3), DEFAULT ON.
-     Called by every US book's finalize path (flagship, autonomous, etf, heavyweight — four call
-     sites) BEFORE a book's target weights are committed. subtract-only invariant: headroom only
+     Called by the active US book's finalize path before target weights are committed. Historical
+     call sites in the archived runner implementations are unreachable. Subtract-only: headroom only
      clamps a book's target DOWN toward cash; it never raises it.  Absent peer data may not
      un-cap (returns +inf, leaving only per-book caps active), and a missing cluster config
      falls back to hard-coded defaults so the cap can never be silently removed.
 
     from portfolio import firm_exposure
     firm_exposure.summary()                   # read-only firm-exposure dict
-    firm_exposure.headroom("NVDA", "flagship")  # remaining weight the flagship may hold
+    firm_exposure.headroom("NVDA", "autonomous")  # remaining active-US name weight
 
 Honest about currency. NAVs are per-book base currency (USD for the US books, CNY for china, HKD
 for hk). Summing raw weights × NAV across books would silently add CNY to USD, so we aggregate
@@ -88,15 +87,17 @@ def _thresholds() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _book_ids() -> list[dict]:
-    """Brain/paper books to scan for pile-up detection (self_directed excluded — it is the user's
-    own book and the firm yardstick; it must never contribute to pile-up detection or headroom math,
-    so it is kept separate: see summary() `yardstick` key). Degrades to a static list."""
+    """Active Brain/paper books to scan for current pile-up detection.
+
+    ``self_directed`` remains the yardstick and archived books remain available through their own
+    historical APIs, but neither belongs in the *current* managed-firm risk perimeter.
+    """
     try:
         from portfolio import registry
-        return [m for m in registry.all_portfolios() if m.get("id") != "self_directed"]
+        return registry.active_portfolios(include_self_directed=False)
     except Exception:  # noqa: BLE001
         return [{"id": i, "currency": "USD"} for i in
-                ("flagship", "heavyweight", "autonomous", "etf", "china", "hk")]
+                ("autonomous", "china", "hk")]
 
 
 def _self_directed_meta() -> dict:
@@ -531,9 +532,10 @@ def summary(asof: str | None = None) -> dict:
 # The firm caps (cluster 0.30 / name 0.10) live in config/clusters.yml (unverified-prior), env-
 # overridable, with in-code fallbacks so a missing file never un-caps.
 
-# US books whose published latest.json is firm-aggregated. self_directed excluded (doesn't publish
-# until W5); china/hk excluded (non-USD, disjoint venue — a CNY A-share never piles into a US name).
-_FIRM_US_BOOKS = ("flagship", "autonomous", "etf", "heavyweight")
+# ACTIVE US books whose published latest.json is firm-aggregated. The retired Flagship,
+# Heavyweight, and ETF books intentionally remain absent: their frozen historical positions must
+# not steal headroom from their successor or trip the expected-peer freshness sentinel.
+_FIRM_US_BOOKS = ("autonomous",)
 
 
 def caps_enabled() -> bool:
@@ -677,8 +679,9 @@ def _peer_exposure(exclude_book: str,
 
     Returns ``{"by_cluster": {cid: weight}, "by_name": {TICKER: weight}, "n_peers": int,
     "sentinel_fired": bool}`` where each weight is the SUM across peer books of that book's
-    weight in the key — this is intentionally the additive firm contribution (four books each
-    at 0.08 in SMH ⇒ 0.32 firm-cluster weight), so a firm cap of 0.30 binds.
+    weight in the key — intentionally additive when multiple active same-market books exist.
+    Following consolidation the active US perimeter has one book, so its peer set is normally empty
+    and this layer cannot let archived holdings constrain the successor.
     Returns None when NO peer file could be read at all (the caller then returns +inf —
     absent peer data must not clamp).  A book that publishes an empty/corrupt file is simply
     skipped; the firm view is built from whatever peers DID publish (never raises).

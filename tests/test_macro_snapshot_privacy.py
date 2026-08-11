@@ -82,3 +82,54 @@ def test_projection_tolerates_junk_rows() -> None:
     assert macro_snapshot._project(
         [None, 42, {"ticker": "A"}], macro_snapshot._PUBLIC_POSITION_KEYS
     ) == [{"ticker": "A"}]
+
+
+def test_snapshot_defaults_to_active_us_product(monkeypatch) -> None:
+    monkeypatch.setattr(
+        macro_snapshot,
+        "_book",
+        lambda portfolio_id: {"id": portfolio_id}
+        if portfolio_id in {"flagship", "autonomous"}
+        else None,
+    )
+
+    payload = macro_snapshot.build()
+
+    assert payload["default_book"] == "autonomous"
+
+
+def test_archived_book_exposes_lifecycle_and_uses_frozen_performance(tmp_path, monkeypatch) -> None:
+    from app import web
+    from portfolio import paper_account, registry
+
+    book_dir = tmp_path / "flagship"
+    book_dir.mkdir()
+    (book_dir / "latest.json").write_text(
+        '{"as_of":"2026-08-08","positions":[],"rejected":[]}', encoding="utf-8"
+    )
+    monkeypatch.setattr(registry, "data_dir", lambda portfolio_id=None: book_dir)
+    monkeypatch.setattr(
+        paper_account,
+        "performance",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("archived snapshot must not call live performance")
+        ),
+    )
+    monkeypatch.setattr(
+        web,
+        "_archived_performance",
+        lambda portfolio_id: {
+            "archived": True,
+            "frozen_as_of": "2026-08-08",
+            "series": [{"date": "2026-08-08", "nav": 955_000.0}],
+        },
+    )
+
+    book = macro_snapshot._book("flagship")
+
+    assert book is not None
+    assert book["active"] is False
+    assert book["status"] == "archived"
+    assert book["archived"] is True
+    assert book["superseded_by"] == "autonomous"
+    assert book["performance"]["frozen_as_of"] == "2026-08-08"

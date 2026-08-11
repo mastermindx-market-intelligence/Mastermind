@@ -173,11 +173,13 @@ def test_fills_recorded(tmp_account: None, tmp_path: Path) -> None:
 def test_cash_never_goes_negative(tmp_account: None) -> None:
     from portfolio import paper_account
 
-    # try to deploy 200% — should be clamped to <= 1.0
+    # A malformed 200% executable target fails closed rather than being silently resized.
     oversized = {"AAPL": 1.0, "MSFT": 1.0}
-    paper_account.rebalance(oversized, _PRICES_1, "2026-01-02")
+    before = paper_account._load_account()
+    with pytest.raises(paper_account.InvalidTargetWeights, match="gross_above_one"):
+        paper_account.rebalance(oversized, _PRICES_1, "2026-01-02")
     state = paper_account._load_account()
-    assert state["cash"] >= -0.01  # effectively 0 or positive
+    assert state == before
 
 
 def test_mark_appends_nav_history(tmp_account: None) -> None:

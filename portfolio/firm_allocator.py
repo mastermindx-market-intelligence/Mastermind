@@ -240,9 +240,11 @@ def _compute(
 
     asof = (lifecycle.get("asof") or benchmark.get("asof") or date.today().isoformat())
 
-    # The books we consider (default: all registry books minus exemptions)
+    # The books we consider (default: ACTIVE managed books only). Archived books remain readable
+    # in historical artifacts but cannot receive even shadow capital or risk budget.
     if book_ids is None:
-        book_ids = [p["id"] for p in registry.all_portfolios() if p["id"] not in _EXEMPT]
+        book_ids = [p["id"] for p in registry.active_portfolios(include_self_directed=False)
+                    if p["id"] not in _EXEMPT]
 
     # ── Step 1: classify lifecycle state ──────────────────────────────────
     STATE_ACTIVE = "active"
@@ -463,7 +465,7 @@ def build_latest(
         bm = benchmark if benchmark is not None else _latest_benchmark()
         if mandate_packets is None:
             from portfolio import registry
-            all_ids = [p["id"] for p in registry.all_portfolios()]
+            all_ids = [p["id"] for p in registry.active_portfolios()]
             pkts = {bid: _latest_mandate_packet(bid) for bid in all_ids}
         else:
             pkts = mandate_packets

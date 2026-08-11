@@ -33,6 +33,10 @@ def is_substantive(row: Any) -> bool:
         return False
     if row.get("error"):
         return False
+    # A frozen/rejected proposal is valuable audit evidence but is not an accepted target and
+    # must never replace a successfully executed/queued decision from the same session date.
+    if row.get("decision_effective") is False:
+        return False
     return bool(row.get("holdings")) or bool(row.get("summary"))
 
 

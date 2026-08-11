@@ -174,6 +174,10 @@ def _wire(monkeypatch, tmp_path, *, pm_book=_PM_BOOK,
     # read_submission / the REAL submit_book tool all read+write under tmp (never the live book).
     # We deliberately keep those four REAL: they ARE the seam the bug lived in.
     monkeypatch.setattr(registry, "_ROOT", tmp_path, raising=False)
+    # This suite preserves the retired desk's historical internal contract in isolation. Production
+    # registry state remains archived and the separate archival suite proves all real entry points
+    # fail closed; explicitly unarchive only this synthetic fixture so its legacy plumbing is testable.
+    monkeypatch.setattr(registry, "is_archived", lambda portfolio_id: False)
     # the autonomous book's legacy dir also resolves off registry._ROOT only for non-legacy ids;
     # "autonomous" is non-legacy so the wrong-scope write also lands under tmp (no live pollution).
 

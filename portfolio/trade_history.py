@@ -51,8 +51,12 @@ def _load_fills(portfolio_id: str | None = None) -> list[dict]:
     return rows
 
 
-def history(live_prices: Optional[dict[str, float]] = None,
-            portfolio_id: str | None = None) -> list[dict]:
+def history(
+    live_prices: Optional[dict[str, float]] = None,
+    portfolio_id: str | None = None,
+    *,
+    account_state: dict | None = None,
+) -> list[dict]:
     """Return the complete blotter, NEWEST first. Each row:
 
         {date, ticker, action: 'buy'|'sell', shares, price, value, exit_price,
@@ -69,15 +73,23 @@ def history(live_prices: Optional[dict[str, float]] = None,
     # are genuinely open instead of displaying those stale residues as positions.
     authoritative_shares: dict[str, float] | None = None
     try:
-        from portfolio import paper_account
-        account_path = paper_account._paths(portfolio_id)["account"]
-        if account_path.exists():
-            account = paper_account._load_account(portfolio_id)
+        if account_state is not None:
+            account = account_state
             authoritative_shares = {
                 (ticker or "").upper(): max(0.0, float(pos.get("shares") or 0.0))
                 for ticker, pos in account.get("positions", {}).items()
                 if isinstance(pos, dict)
             }
+        else:
+            from portfolio import paper_account
+            account_path = paper_account._paths(portfolio_id)["account"]
+            if account_path.exists():
+                account = paper_account._load_account(portfolio_id)
+                authoritative_shares = {
+                    (ticker or "").upper(): max(0.0, float(pos.get("shares") or 0.0))
+                    for ticker, pos in account.get("positions", {}).items()
+                    if isinstance(pos, dict)
+                }
     except Exception:
         # A malformed/unavailable account must not hide otherwise valid fill history.
         authoritative_shares = None

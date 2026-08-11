@@ -16,11 +16,25 @@ from brain import advisor, cli_bridge
 # --------------------------------------------------------------------------- #
 def test_persona_encodes_doctrine():
     s = advisor.SYSTEM.lower()
-    assert "the brain" in s
+    assert "mastermind portfolio research advisor" in s
+    assert "not the public mastermind ai" in s
     assert "no real money" in s              # paper-only safety
     assert "decision_matrix" in s            # tool playbook present
-    # the evaluate -> research-paper -> trade protocol
-    assert "evaluate_gate" in s and "file_research_paper" in s and "execute_trade" in s
+    # evaluate -> research paper -> proposal; deterministic engines retain action authority
+    assert "evaluate_gate" in s and "file_research_paper" in s
+    assert "propose_portfolio_action" in s and "execute_trade" not in s
+    assert "cannot size an order" in s and "book did not change" in s
+
+
+def test_public_advisor_greeting_is_proposal_only():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent / "app" / "static" / "chat.js").read_text()
+    assert "queue an ADD proposal for deterministic review" in source
+    assert "No order is sized or filled here, and the book does not change" in source
+    assert "排队一份交由确定性引擎审核的加仓提案" in source
+    assert "decide whether to add it to the paper book" not in source
+    assert "再决定是否加入模拟组合" not in source
 
 
 def test_session_roundtrip(tmp_path, monkeypatch):
@@ -70,7 +84,9 @@ def _drain(agen):
 def test_chat_stream_maps_messages_to_events(monkeypatch):
     async def fake_query(*, prompt, options):
         # the advisor persona must be wired onto the SDK options
-        assert options.append_system_prompt and "the Brain" in options.append_system_prompt
+        assert options.append_system_prompt
+        assert "Mastermind Portfolio Research Advisor" in options.append_system_prompt
+        assert options.setting_sources == ["project"]
         yield _Assistant([
             _Block("text", text="Regime is Goldilocks."),
             _Block("tool_use", name="mcp__bot__get_regime", input={}),
@@ -185,11 +201,20 @@ def test_typed_tools_registered_and_armed():
         full = "mcp__bot__" + nm
         assert full in bot_mcp.TOOL_NAMES
         assert full in bot_mcp.armed_allowed_tools()
+    assert "mcp__bot__propose_portfolio_action" in bot_mcp.TOOL_NAMES
+    assert "mcp__bot__propose_portfolio_action" in bot_mcp.armed_allowed_tools()
+    assert "mcp__bot__execute_trade" not in bot_mcp.TOOL_NAMES
+    assert "mcp__bot__execute_trade" not in bot_mcp.armed_allowed_tools()
+    schema = bot_mcp.propose_portfolio_action.input_schema
+    assert set(schema["required"]) == {"ticker", "action", "thesis", "evidence", "urgency"}
+    assert not ({"weight", "size", "shares", "notional", "price", "fill"}
+                & set(schema["properties"]))
 
 
 def test_chat_stream_emits_paper_event(monkeypatch):
-    from brain import bot_mcp
     import json as _json
+
+    from brain import bot_mcp
 
     class _Blk:
         def __init__(self, **k):
@@ -222,6 +247,7 @@ def test_chat_stream_emits_paper_event(monkeypatch):
 
 def test_execute_fill_never_touches_other_positions(tmp_path, monkeypatch):
     import json as _json
+
     from portfolio import paper_account as pa
     monkeypatch.setattr(pa, "_DATA", tmp_path)
     monkeypatch.setattr(pa, "_ACCOUNT_PATH", tmp_path / "account.json")
@@ -244,20 +270,86 @@ def test_execute_fill_never_touches_other_positions(tmp_path, monkeypatch):
     assert pa.execute_fill("ZZZZ", "sell", price=5.0)["ok"] is False
 
 
-def test_advisor_trade_records_single_ledger_key(tmp_path, monkeypatch):
+def test_advisor_action_is_proposal_only_and_cannot_touch_paper_state(tmp_path, monkeypatch):
     import json as _json
-    from portfolio import paper_account as pa, position_log as pl, advisor_trade
-    monkeypatch.setattr(pa, "_DATA", tmp_path)
-    monkeypatch.setattr(pa, "_ACCOUNT_PATH", tmp_path / "account.json")
-    monkeypatch.setattr(pa, "_FILLS_PATH", tmp_path / "fills.jsonl")
-    monkeypatch.setattr(pl, "_LEDGER_PATH", tmp_path / "ledger.json")
-    res = advisor_trade.execute("AAPL", "add", weight=0.02, price=50.0, asof="2026-06-21")
-    assert res["ok"] and res["side"] == "buy"
-    led = _json.loads((tmp_path / "ledger.json").read_text())
-    assert list(led.keys()) == ["advisor:AAPL"]                # only one key touched
-    assert any(o["ticker"] == "AAPL" for o in pl.open_positions())
-    advisor_trade.execute("AAPL", "exit", price=55.0, asof="2026-06-22")
-    assert not any(o["ticker"] == "AAPL" for o in pl.open_positions())
+
+    from brain import bot_mcp
+    from brain import research_paper as rp
+    from portfolio import advisor_trade
+    from portfolio import paper_account as pa
+    from portfolio import position_log as pl
+
+    proposals = tmp_path / "recommendations.jsonl"
+    monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
+    monkeypatch.setattr(rp, "latest_for", lambda ticker: {"ticker": ticker, "confirmed": True})
+
+    # Any regression into the former mutation path fails loudly.
+    monkeypatch.setattr(pa, "execute_fill", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("Portfolio Advisor must not call paper_account.execute_fill")))
+    monkeypatch.setattr(pl, "record_manual", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("Portfolio Advisor must not write the position ledger")))
+
+    result = asyncio.run(bot_mcp.propose_portfolio_action.handler({
+        "ticker": "aapl",
+        "action": "add",
+        "thesis": "Services mix and device replacement improve earnings durability.",
+        "evidence": ["research:2026-06-21-AAPL", "decision_matrix:confluence=0.42"],
+        "urgency": "next_cycle",
+    }))
+    text = result["content"][0]["text"]
+    assert "PROPOSAL_QUEUED" in text and "no order was sized or filled" in text
+
+    row = _json.loads(proposals.read_text().strip())
+    assert row["schema"] == "portfolio_action_proposal.v1"
+    assert row["ticker"] == "AAPL" and row["action"] == "add"
+    assert row["status"] == "proposed" and row["executed"] is False
+    assert row["urgency"] == "next_cycle" and len(row["evidence"]) == 2
+    assert row["sizing_authority"] == "deterministic_scheduled_engine_only"
+    assert not ({"weight", "size", "shares", "notional", "price", "fill"} & set(row))
+    assert not hasattr(advisor_trade, "execute")
+
+
+def test_advisor_action_refuses_size_fields_before_writing(tmp_path, monkeypatch):
+    from brain import bot_mcp
+    from brain import research_paper as rp
+    from portfolio import advisor_trade
+
+    proposals = tmp_path / "recommendations.jsonl"
+    monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
+    monkeypatch.setattr(rp, "latest_for", lambda ticker: {"ticker": ticker, "confirmed": True})
+
+    result = asyncio.run(bot_mcp.propose_portfolio_action.handler({
+        "ticker": "AAPL",
+        "action": "add",
+        "thesis": "Confirmed research thesis.",
+        "evidence": ["research:2026-06-21-AAPL"],
+        "urgency": "next_cycle",
+        "weight": 0.03,  # direct handler call bypasses the MCP JSON-schema validator
+    }))
+    text = result["content"][0]["text"]
+    assert "REFUSED" in text and "weight" in text
+    assert "No proposal queued" in text and "no paper account changed" in text
+    assert not proposals.exists()
+
+
+def test_add_proposal_requires_confirmed_research(tmp_path, monkeypatch):
+    from brain import bot_mcp
+    from brain import research_paper as rp
+    from portfolio import advisor_trade
+
+    proposals = tmp_path / "recommendations.jsonl"
+    monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
+    monkeypatch.setattr(rp, "latest_for", lambda ticker: None)
+    result = asyncio.run(bot_mcp.propose_portfolio_action.handler({
+        "ticker": "AAPL",
+        "action": "add",
+        "thesis": "Not yet confirmed.",
+        "evidence": ["decision_matrix:preliminary"],
+        "urgency": "routine",
+    }))
+    text = result["content"][0]["text"]
+    assert "no CONFIRMED research paper" in text
+    assert "No proposal queued" in text and not proposals.exists()
 
 
 def test_history_roundtrip(tmp_path, monkeypatch):

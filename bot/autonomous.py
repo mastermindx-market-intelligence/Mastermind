@@ -1,16 +1,18 @@
-"""The autonomous portfolio — a free-form Opus Brain managing its own $1M paper book.
+"""US Brain v2 — the sole active US stock-alpha paper portfolio.
 
 Once per trading day (after the close), the Brain:
   1. sees its current book (cash, holdings, live P&L) + the macro regime,
   2. researches freely — our macro-dashboard data tools OR web search, its choice,
-  3. submits a COMPLETE target book, one rationale per holding (no gate, no research paper),
+  3. submits an explicit, auditable target book with one rationale per holding and explicit exits,
   4. and the deterministic layer rebalances the paper account to those weights at the latest
      close, marks NAV vs SPY, and logs the day's decision with the per-name rationale.
 
-The SIBLING of bot/phase2.py (the gated flagship), but with none of its discipline: no
-material-change gate, no sleeves, no confluence/veto/firebreaks, no research-paper
-requirement. The only hard constraint is paper cash — no leverage. Everything is scoped to
-portfolio_id="autonomous" so the flagship book is never touched.
+Prophet, Sector Central, Neural Web, Golden Oracle, Terminal technicals, and the wider Macro
+stack are research/context planes rather than automatic buy authority. The Brain selects and
+ranks common stocks; a deterministic allocator owns weights, and deterministic firebreaks own
+paper execution. Silence is not a sell instruction, ETFs are rejected, and very early reversals
+require a hard reason. Everything is scoped to portfolio_id="autonomous" so archived books are
+never touched.
 
 Run:  python -m bot.autonomous        (or the APScheduler 'autonomous_daily' job, or
                                         POST /api/autonomous/run)
@@ -29,6 +31,7 @@ PORTFOLIO_ID = "autonomous"
 SLEEVE = "brain"
 _ROOT = Path(__file__).resolve().parent.parent
 _MAX_TURNS = int(os.environ.get("AUTONOMOUS_MAX_TURNS", "30"))
+_ADVISOR_PROPOSAL_LIMIT = 24
 
 
 def _firm_clamp_freeze_autonomous(priceable: dict[str, float], exc: Exception) -> dict[str, float]:
@@ -101,6 +104,19 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
         armed = False
         out["cost_capped"] = True
 
+    # Snapshot only the proposals this PM turn is allowed to review. New proposals that arrive
+    # while the Brain is running remain pending for the next cycle instead of being silently
+    # marked not-selected without ever appearing in its context.
+    advisor_proposal_ids: list[str] = []
+    if armed:
+        try:
+            from portfolio import advisor_trade
+            pending = advisor_trade.pending_proposals(limit=_ADVISOR_PROPOSAL_LIMIT)
+            advisor_proposal_ids = [row["id"] for row in pending]
+            out["advisor_proposals_presented"] = len(advisor_proposal_ids)
+        except Exception as exc:  # noqa: BLE001 - optional context must never block the nightly PM
+            out["advisor_proposal_context_error"] = repr(exc)[:200]
+
     # 1. run the Brain (armed) → it researches and submits a target book with rationales
     from brain import autonomous_mcp
     autonomous_mcp.clear_submission(PORTFOLIO_ID)   # never replay yesterday's decision
@@ -126,8 +142,57 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
 
     # 2. read the submitted book
     submission = autonomous_mcp.read_submission(PORTFOLIO_ID)
-    decided = bool(submission and submission.get("holdings"))
+    # An all-cash target can be a valid explicit decision (for example, every current name has
+    # a reviewed hard exit). Presence of the v2 holdings list—not its truthiness—is the decision
+    # boundary; ``None`` still means the manager failed to submit and the prior book is carried.
+    decided = bool(submission and isinstance(submission.get("holdings"), list))
     out["decided"] = decided
+    target_status = "proposed" if decided else "rejected_no_submission"
+    effective_target: dict[str, float] | None = None
+    lesson_validation: dict = {"ok": True, "cited_ids": []}
+    if decided:
+        try:
+            from brain import portfolio_learning
+            lesson_validation = portfolio_learning.attach_lesson_trace(
+                PORTFOLIO_ID, asof, submission
+            )
+        except Exception as exc:  # noqa: BLE001 - citations fail closed; no trace can grant authority
+            raw_lessons = ((submission.get("decision_memo") or {}).get("lessons_applied")
+                           if isinstance(submission.get("decision_memo"), dict) else None)
+            lesson_validation = (
+                {"ok": True, "cited_ids": [],
+                 "warning": f"empty_trace_unavailable:{type(exc).__name__}"}
+                if not raw_lessons
+                else {"ok": False, "error": f"trace_validation_error:{type(exc).__name__}"}
+            )
+        out["lesson_citations"] = {
+            key: lesson_validation.get(key)
+            for key in ("ok", "error", "warning", "presentation_id", "cited_ids")
+            if lesson_validation.get(key) is not None
+        }
+        if lesson_validation.get("decision_id"):
+            out["lesson_citations"]["planned_decision_id"] = lesson_validation["decision_id"]
+        if lesson_validation.get("application_id"):
+            out["lesson_citations"]["planned_lesson_application_id"] = lesson_validation["application_id"]
+        if not lesson_validation.get("ok"):
+            decided = False
+            out["decided"] = False
+            target_status = "rejected_lesson_citations"
+    quote_fallbacks = sorted(
+        h.get("ticker")
+        for h in ((submission or {}).get("holdings") or [])
+        if h.get("holding_mark_source") == "account_avg_cost_fallback"
+    )
+    if decided and quote_fallbacks:
+        # Average cost proves the account still owns the line, but it is not a safe
+        # execution mark. Preserve the whole account until every held line is quoted.
+        decided = False
+        out["decided"] = False
+        out["decision_boundary_frozen"] = {
+            "reason": "held_position_quote_fallback",
+            "tickers": quote_fallbacks,
+        }
+        target_status = "frozen_held_quote_fallback"
 
     # 2b. PACKET GATE (ruling R6, Charter P2/P3/P8) — wire the DecisionPacket boundary.
     # Gate mode is controlled by MASTERMIND_PACKET_GATE (off | shadow[default] | enforce).
@@ -165,11 +230,13 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
                 decided = False
                 out["decided"] = decided
                 out["packet_rejected"] = True
+                target_status = "rejected_packet_gate"
         except Exception as _pg_exc:   # noqa: BLE001 — gate must never block the book
             out["packet_gate_error"] = repr(_pg_exc)[:200]
 
     # 3. price the universe we might trade (targets ∪ held ∪ SPY benchmark)
     held = list((paper_account._load_account(PORTFOLIO_ID).get("positions") or {}).keys())
+    held_set = set(held)
     target = {h["ticker"]: float(h.get("weight") or 0.0)
               for h in (submission.get("holdings") if decided else [])}
     prices: dict[str, float] = {}
@@ -194,9 +261,21 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     queued = False
     _safety = None
     _safety_overlay = {"gross_mult": 1.0}
+    _execution_quote_blocked = False
+    _settlement_receipt_id: str | None = None
     if decided:
-        priceable = {t: w for t, w in target.items() if t in prices}
-        skipped = sorted(t for t in target if t not in prices)
+        # A second quote read can transiently miss even though the trusted submission normalized a
+        # held line moments earlier.  Never turn that miss into target omission: retain held rows so
+        # a closed-market queue still carries them into the next open.  Only genuinely new,
+        # unpriceable additions are skipped.
+        carried_unpriceable = sorted(t for t in target if t in held_set and t not in prices)
+        priceable = {
+            t: w for t, w in target.items()
+            if t in prices or t in held_set
+        }
+        skipped = sorted(t for t in target if t not in prices and t not in held_set)
+        if carried_unpriceable:
+            out["carried_unpriceable_holdings"] = carried_unpriceable
         try:
             from portfolio import safety as _safety_mod
             if priceable:
@@ -216,11 +295,9 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
         except Exception as e:                           # noqa: BLE001 — never block the book
             out["safety_error"] = repr(e)[:200]
         # W3 B1 — FIRM-WIDE headroom clamp (Stage 6.3). Clamp this book's target DOWN so the firm-wide
-        # cluster/name caps hold across all US books (the audit: four books maxed the SAME SMH). Runs
-        # after the safety de-gross, before settle → the freed weight simply stays cash. Subtract-only;
-        # never raises a weight; byte-identical no-op when no peer file is readable. Flag-gated
-        # (MASTERMIND_FIRM_CAPS, default ON). Sequential: US Brain clamps against Flagship's freshly
-        # published book (Flagship builds first by design). Best-effort; never blocks the book.
+        # cluster/name caps hold across active books. Archived US books are excluded by the
+        # registry-aware exposure reader. Runs after safety de-gross and before settle; freed weight
+        # stays cash. It is subtract-only and best-effort.
         try:
             from portfolio import firm_exposure as _firm
             if _firm.caps_enabled():
@@ -234,11 +311,39 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
             # Uses _firm_clamp_freeze_autonomous (module-level) so the logic is testable.
             priceable = _firm_clamp_freeze_autonomous(priceable, e)
             out["firm_clamp_error"] = repr(e)[:200]
-        res = _settle.execute_or_queue(PORTFOLIO_ID, priceable, prices, asof)
+        res = _settle.execute_or_queue(
+            PORTFOLIO_ID,
+            priceable,
+            prices,
+            asof,
+            decision_snapshot=submission,
+        )
         executed = res.get("executed") or []
         queued = bool(res.get("queued"))
+        _settlement_receipt_id = res.get("settlement_receipt_id")
         if res.get("error"):
             out["rebalance_error"] = res["error"]
+        if res.get("skipped"):
+            out["execution_skipped"] = res["skipped"]
+        if res.get("unpriceable_exits"):
+            out["unpriceable_exits"] = res["unpriceable_exits"]
+        if res.get("unpriceable_targets"):
+            out["unpriceable_targets"] = res["unpriceable_targets"]
+        if res.get("skipped") in {
+            "unpriceable_exit_prices", "unpriceable_target_prices"
+        }:
+            _execution_quote_blocked = True
+            out["pending_target_retained"] = bool(res.get("pending_retained"))
+        if res.get("error"):
+            target_status = "rejected_execution_error"
+        elif res.get("skipped") and not queued:
+            target_status = f"rejected_{res['skipped']}"
+        elif queued:
+            target_status = "queued"
+            effective_target = dict(priceable)
+        else:
+            target_status = "executed"
+            effective_target = dict(priceable)
         if executed:   # reconcile the rationale-bearing ledger only when fills actually happened
             ledger_positions = [{"ticker": t, "sleeve": SLEEVE, "weight": w, "entry_price": prices.get(t)}
                                 for t, w in priceable.items()]
@@ -246,32 +351,145 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
                 position_log.update(ledger_positions, asof, portfolio_id=PORTFOLIO_ID)
             except Exception:
                 pass
+
+    lesson_application: dict | None = None
+    if target_status in {"executed", "queued"}:
+        try:
+            from brain import portfolio_learning
+            lesson_application = portfolio_learning.record_application(
+                PORTFOLIO_ID,
+                asof,
+                submission,
+                effective_target,
+                target_status=target_status,
+                executed_trades=executed,
+                settlement_receipt_id=_settlement_receipt_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - observational trace never changes the target
+            lesson_application = {
+                "ok": False,
+                "recorded": False,
+                "error": f"application_trace_error:{type(exc).__name__}",
+            }
+        out["lesson_application"] = lesson_application
+
+    # A proposal is consumed only after the trusted target has actually been accepted by the
+    # paper execution boundary.  A syntactically valid submission can still be frozen by quote
+    # recovery, rejected by the packet gate, or fail settlement; those proposals must remain
+    # pending so the next PM turn can review them again instead of losing context for a trade that
+    # never became an executable target.
+    if advisor_proposal_ids and target_status in {"executed", "queued"}:
+        try:
+            from portfolio import advisor_trade
+            out["advisor_proposal_review"] = advisor_trade.review_submitted_book(
+                submission,
+                asof=asof,
+                portfolio_id=PORTFOLIO_ID,
+                proposal_ids=advisor_proposal_ids,
+            )
+        except Exception as exc:  # noqa: BLE001 - proposal review cannot affect the final book
+            out["advisor_proposal_review"] = {
+                "ok": False,
+                "reviewed": 0,
+                "error": repr(exc)[:200],
+            }
+    elif advisor_proposal_ids:
+        out["advisor_proposal_review"] = {
+            "ok": True,
+            "reviewed": 0,
+            "deferred": True,
+            "reason": f"target_not_accepted:{target_status}",
+            "executed": False,
+        }
     out["executed"] = executed
     out["queued_for_open"] = queued
     out["market_open"] = _settle.is_open(PORTFOLIO_ID)
     out["skipped_unpriceable"] = skipped
 
     # 5. mark NAV vs SPY (idempotent per date)
-    try:
-        paper_account.mark(prices, asof, portfolio_id=PORTFOLIO_ID)
-    except Exception as e:                           # noqa: BLE001
-        out["mark_error"] = repr(e)[:200]
+    if _execution_quote_blocked:
+        # Keep the account boundary entirely write-free on an unpriceable intended exit.  A mark can
+        # initialize benchmark fields in account.json, so even that benign write waits for retry.
+        out["mark_skipped"] = "execution_quote_guard"
+    else:
+        try:
+            paper_account.mark(prices, asof, portfolio_id=PORTFOLIO_ID)
+        except Exception as e:                           # noqa: BLE001
+            out["mark_error"] = repr(e)[:200]
 
     # 6. publish the book contract + 7. append the daily decision log
-    payload = _build_payload(asof, submission, prices, executed, skipped, brain)
+    out["target_status"] = target_status
+    out["decision_effective"] = target_status in {"executed", "queued"}
+    payload = _build_payload(
+        asof,
+        submission,
+        prices,
+        executed,
+        skipped,
+        brain,
+        target_status=target_status,
+    )
     payload["safety"] = _safety                  # consumed risk backtest (drove the de-gross)
     payload["safety_overlay"] = _safety_overlay
     out["safety_overlay"] = _safety_overlay
+    _publish_ok = False
     try:
         from bridge import build_portfolio
         out["paths"] = build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
+        _publish_ok = True
     except Exception as e:                           # noqa: BLE001
         out["write_error"] = repr(e)[:200]
+    _decision_log_ok = False
     try:
-        _append_decision_log(asof, submission, executed, skipped, brain,
-                             packet_id=(_pgr.packet_id if _pgr else None))
+        _append_decision_log(
+            asof,
+            submission,
+            executed,
+            skipped,
+            brain,
+            packet_id=(_pgr.packet_id if _pgr else None),
+            target_status=target_status,
+            effective_target=effective_target,
+        )
+        _decision_log_ok = True
     except Exception:
         pass
+
+    # A direct market-open run may have committed through the WAL.  Its receipt is the crash-safe
+    # outbox for mark/publish provenance; acknowledge it only after this run completed both durable
+    # projections.  Otherwise the scheduler will finalize it idempotently on the next open.
+    _lesson_receipt_finalization = {"ok": True, "required": False}
+    if _settlement_receipt_id:
+        try:
+            from brain import portfolio_learning
+            _lesson_receipt_finalization = portfolio_learning.application_finalization_status(
+                PORTFOLIO_ID,
+                submission,
+                settlement_receipt_id=_settlement_receipt_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - receipt remains the retry outbox
+            _lesson_receipt_finalization = {
+                "ok": False,
+                "required": True,
+                "error": f"application_finalization_error:{type(exc).__name__}",
+            }
+        out["lesson_receipt_finalization"] = _lesson_receipt_finalization
+        if not _lesson_receipt_finalization.get("ok"):
+            out["settlement_receipt_retained"] = True
+    if (
+        _settlement_receipt_id
+        and _publish_ok
+        and _decision_log_ok
+        and not out.get("mark_error")
+        and _lesson_receipt_finalization.get("ok") is True
+    ):
+        try:
+            paper_account.acknowledge_settlement_receipt(
+                _settlement_receipt_id, PORTFOLIO_ID
+            )
+            out["settlement_receipt_acknowledged"] = True
+        except Exception as exc:  # noqa: BLE001 - leave the outbox for deterministic retry
+            out["settlement_receipt_ack_error"] = repr(exc)[:200]
 
     try:
         out["nav"] = round(paper_account.nav(prices, PORTFOLIO_ID), 2)
@@ -289,6 +507,15 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     except Exception:  # noqa: BLE001
         pass
 
+    try:
+        from brain import portfolio_learning
+        post = portfolio_learning.refresh_post_sell(PORTFOLIO_ID, asof)
+        lessons = portfolio_learning.derive_lessons(PORTFOLIO_ID)
+        out["learning"] = {"post_sell": post.get("summary"),
+                           "lessons_n": len(lessons.get("lessons") or [])}
+    except Exception:
+        pass
+
     return out
 
 
@@ -297,25 +524,30 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
 # ---------------------------------------------------------------------------
 
 _PERSONA = (
-    "You are the AUTONOMOUS PORTFOLIO MANAGER of a real-money-style $1,000,000 PAPER book. "
-    "You run once per trading day, after the US close. You have FULL discretion: you decide every "
-    "buy, sell, trim, and the cash level, and you rebalance the whole book daily. There is NO gate, "
-    "NO committee, NO research-paper requirement, and NO doctrine constraining you — only paper cash "
-    "(you cannot use leverage). \n\n"
-    "Idle cash earns ~4% annualized (a money-market sweep), so holding cash when you lack "
-    "high-conviction ideas is a REWARDED choice, not dead money — do not force marginal names just "
-    "to stay invested. \n\n"
-    "You have two research channels and may use EITHER or BOTH, your choice: (1) our in-house macro "
-    "dashboard via the mcp__bot__* tools (regime, themes, the single-name decision matrix, divergences, "
-    "alt-data, news, intel hub, fundamentals, options, anticipation, quotes) and (2) the open web via "
-    "WebSearch / WebFetch. Form your own view; you are not obliged to agree with the in-house engine. \n\n"
-    "Trade liquid US-listed equities and ETFs (use mcp__bot__get_quote to confirm a name is priceable "
-    "before you rely on it — names we cannot price are skipped). Manage risk yourself through "
-    "diversification, sizing, and cash. When you are done researching, call mcp__desk__submit_book ONCE "
-    "with your COMPLETE target book for today: every name you want to hold, its weight (fraction of NAV), "
-    "and a clear one-paragraph rationale for EACH holding (why you own it, now). Anything you currently "
-    "hold but omit will be SOLD. Be decisive and concrete; this book is graded on its realized NAV vs the "
-    "S&P 500."
+    "You are the accountable PM for US BRAIN v2, the sole active US stock-alpha PAPER portfolio. "
+    "The failed Flagship, Heavyweight and ETF boards are archived evidence, not peers to imitate. "
+    "Your job is capital preservation AND positive alpha: cash is a deliberate risk position, never "
+    "the default reward, and ETFs are prohibited substitutes for stock selection. There are usually "
+    "winning stocks even under a weak index; search defensives, rotation beneficiaries and idiosyncratic "
+    "leaders before accepting high cash. Only a verified crash or degraded evidence plane justifies a "
+    "low-gross posture, and you must state the rejected opportunities and cash opportunity cost.\n\n"
+    "Start with your current book, the compact market packet, Prophet board and Sector Central. Prophet "
+    "has already filtered useful setups, but it is discovery and plan geometry—not buy authority. Select "
+    "among its ideas intelligently, corroborate with sector leadership, fundamentals/narrative, Golden "
+    "Oracle and MACD-RSI/Stoch-RSI multi-timeframe timing, and investigate outside Prophet when the "
+    "evidence points elsewhere. Do not chase an extended entry. Let winners run while their sector, "
+    "trend and thesis remain intact; prefer trim-and-trail to reflexive full exits.\n\n"
+    "For independent read-heavy work, explicitly delegate at most three bounded tasks: signal-scout for "
+    "batch extraction, narrative-analyst for a small finalist set, and quant-coder only for a data-contract "
+    "question. Wait for their compact findings and synthesize the final decision yourself. Subagents are "
+    "read-only and may never call submit_book or determine size. You alone call submit_book exactly once.\n\n"
+    "Every submitted holding row is an explicit ADD, HOLD, or TRIM decision; TRIM needs evidence and an "
+    "ordinal intensity, while a full EXIT belongs only in exit_decisions. Omission never sells; provide an explicit exit "
+    "record with evidence and why-now. Reversing within three trading sessions requires a hard falsifier, technical "
+    "break, risk limit or material thesis change. Your proposed weights are advisory: the deterministic "
+    "allocator owns final sizing. Submit a structured decision memo covering funnel, selected/rejected "
+    "names, timing, alternatives, risks, context gaps and lessons applied. Do not reveal hidden chain-of-"
+    "thought; provide concise decision-relevant evidence and conclusions."
 )
 
 
@@ -346,11 +578,23 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
     positions = state.get("positions") or {}
     regime = _regime_brief()
 
-    lines = [f"# Autonomous book — daily decision for {asof}", ""]
+    lines = [f"# US Brain v2 — nightly stock-selection decision for {asof}", ""]
     if directive:
         lines += ["## ⚠ PRIORITY DIRECTIVE FOR THIS RUN", directive.strip(), ""]
     if regime:
         lines += [f"Macro regime (in-house read): {regime}", ""]
+    try:
+        from portfolio import advisor_trade
+        advisor_context = advisor_trade.prompt_context(limit=_ADVISOR_PROPOSAL_LIMIT)
+        if advisor_context:
+            lines += [advisor_context, ""]
+    except Exception:  # noqa: BLE001 - additive advisor context must not block the PM
+        advisor_context = ""
+    try:
+        from brain import portfolio_learning
+        lines += [portfolio_learning.prompt_block(PORTFOLIO_ID, asof=asof), ""]
+    except Exception:
+        pass
     # RISK GOVERNOR — the live risk-state block that governs sizing/gross (flag-gated; OFF → "").
     from brain import risk_lens
     brief = risk_lens.briefing("autonomous", regime=_regime_dict(), asof=asof, held=sorted(positions))
@@ -368,9 +612,9 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         pass
     if inaugural:
         lines += [
-            "This is your INAUGURAL run. The book is 100% cash: $1,000,000. Build the portfolio "
-            "from scratch — buy whatever you are convinced of, sized however you see fit (keep some "
-            "cash if you want).",
+            "This is the US v2 launch run. Build a stock-only portfolio from scratch. Call the compact "
+            "market, Prophet and sector tools first; do not backfill with ETFs. The deterministic layer "
+            "will convert conviction to weights.",
             "",
         ]
     else:
@@ -378,9 +622,10 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
                   f"({', '.join(sorted(positions)) or 'none'}). Call mcp__desk__get_my_book for the "
                   "full picture (weights, live P&L, and the rationale you last gave each name).", ""]
     lines += [
-        "Do your research now (in-house tools and/or the web — your call), then submit your complete "
-        "target book for today via mcp__desk__submit_book, with a one-paragraph rationale per holding. "
-        "Rebalance with conviction; you are accountable for the NAV.",
+        "Use the typed in-house packets before the web. Delegate only genuinely independent finalist "
+        "research, synthesize it yourself, then call mcp__desk__submit_book exactly once with every "
+        "required governance field, ADD/HOLD/TRIM intent for each row, and explicit full exits. You are accountable for decision quality and NAV; "
+        "the trusted allocator is accountable for weight and execution.",
     ]
     return "\n".join(lines)
 
@@ -390,8 +635,9 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
 # ---------------------------------------------------------------------------
 
 def _build_payload(asof: str, submission: dict | None, prices: dict, executed: list,
-                   skipped: list, brain: dict) -> dict:
+                   skipped: list, brain: dict, *, target_status: str = "executed") -> dict:
     from portfolio import market_calendar, paper_account, position_log, registry
+    from brain import decision_submission
     state = paper_account._load_account(PORTFOLIO_ID)
     pnl = paper_account.positions_pnl(prices, PORTFOLIO_ID)
     nav = paper_account.nav(prices, PORTFOLIO_ID)
@@ -426,45 +672,58 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
 
     gross = round(sum((p.get("weight") or 0.0) for p in positions), 4)
     decisions = []
-    summary = (submission or {}).get("summary")
+    narrative = decision_submission.effective_narrative_fields(submission, target_status)
+    summary = narrative.get("summary")
     if summary:
         decisions.append({"subject": "Autonomous book", "lean": summary,
-                          "thesis": (submission or {}).get("sold_note") or "",
+                          "thesis": narrative.get("sold_note") or "",
                           "logged_at": datetime.now(timezone.utc).isoformat()})
+    try:
+        from brain import portfolio_learning
+        lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
+    except Exception:
+        lesson_links = {}
     return {
         "as_of": asof,
         "portfolio_id": PORTFOLIO_ID,
-        "manager": "Mastermind AI (Codex-first)",
-        "kind": "autonomous",
+        "manager": "Mastermind Portfolio US Brain (Codex-first)",
+        "kind": "us_brain_v2",
         "regime": _regime_dict(),
         "gross": gross,
         "cash": round(1.0 - gross, 4) if gross <= 1.0 else 0.0,
         "cash_usd": round(cash, 2),
         "nav": round(nav, 2),
-        "summary": summary,
-        "sold_note": (submission or {}).get("sold_note"),
+        **narrative,
         "positions": positions,
         "decisions": decisions,
         "executed_today": executed,
         "skipped_unpriceable": skipped,
         "market_status": market_calendar.status(),
         "brain": {k: brain.get(k) for k in ("cost_usd", "tools_used", "model")},
+        **lesson_links,
     }
 
 
 def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          skipped: list, brain: dict,
-                         *, packet_id: str | None = None) -> None:
+                         *, packet_id: str | None = None,
+                         target_status: str = "rejected_unspecified",
+                         effective_target: dict[str, float] | None = None) -> None:
     from portfolio import registry
+    from brain import decision_submission
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        from brain import portfolio_learning
+        lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
+    except Exception:
+        lesson_links = {}
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
         "summary": (submission or {}).get("summary"),
         "sold_note": (submission or {}).get("sold_note"),
-        "holdings": [{"ticker": h.get("ticker"), "weight": h.get("weight"),
-                      "conviction": h.get("conviction"), "rationale": h.get("rationale")}
+        "holdings": [decision_submission.holding_audit_fields(h)
                      for h in ((submission or {}).get("holdings") or [])],
         "executed": executed,
         "skipped_unpriceable": skipped,
@@ -477,6 +736,12 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "model": brain.get("model") if isinstance(brain, dict) else None,
         "error": brain.get("error") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
+        **decision_submission.target_status_fields(target_status),
+        "effective_holdings": decision_submission.effective_holding_audit(
+            submission, effective_target, target_status
+        ),
+        **decision_submission.audit_fields(submission),
+        **lesson_links,
     }
     # idempotent per date: keep exactly one entry per asof (latest SUBSTANTIVE run wins — a
     # failed re-run must not erase a good book; see bot/decision_rows)
@@ -513,14 +778,16 @@ def load_decisions(limit: int = 60) -> list[dict]:
     return rows[:limit]
 
 
-def republish(asof: str | None = None) -> dict:
-    """Re-emit the autonomous book's published contract from the LAST submission + current marks —
+def republish(asof: str | None = None, *, submission: dict | None = None) -> dict:
+    """Re-emit the autonomous book's published contract from an accepted submission + current marks —
     no Brain call. Used by the open settle (bot/settle.py) so the dashboard reflects freshly-filled
-    positions. Idempotent per asof."""
+    positions.  Settlement passes the hash-bound queued snapshot; an explicit ``None`` falls back
+    to the current scratch submission only for manual compatibility. Idempotent per asof."""
     from portfolio import paper_account
     from brain import autonomous_mcp
     asof = asof or date.today().isoformat()
-    submission = autonomous_mcp.read_submission(PORTFOLIO_ID)
+    if submission is None:
+        submission = autonomous_mcp.read_submission(PORTFOLIO_ID)
     held = list((paper_account._load_account(PORTFOLIO_ID).get("positions") or {}).keys())
     target = {h["ticker"]: float(h.get("weight") or 0.0) for h in ((submission or {}).get("holdings") or [])}
     prices: dict[str, float] = {}
@@ -528,11 +795,53 @@ def republish(asof: str | None = None) -> dict:
         px = paper_account._current_price(t)
         if px and px > 0:
             prices[t] = px
-    payload = _build_payload(asof, submission, prices, [], [], {})
+    payload = _build_payload(
+        asof,
+        submission,
+        prices,
+        [],
+        [],
+        {},
+        target_status="executed",
+    )
     try:
         from bridge import build_portfolio
         build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
-        return {"ok": True, "holdings": len(target)}
+        try:
+            from brain import portfolio_learning
+            lesson_transition = portfolio_learning.settle_application(
+                PORTFOLIO_ID, submission, asof
+            )
+        except Exception as exc:  # noqa: BLE001 - fills/publish remain authoritative
+            lesson_transition = {
+                "ok": False,
+                "transitioned": False,
+                "error": f"application_transition_error:{type(exc).__name__}",
+            }
+        try:
+            lesson_finalization = portfolio_learning.application_finalization_status(
+                PORTFOLIO_ID, submission
+            )
+        except Exception as exc:  # noqa: BLE001 - finalizer must retain the receipt
+            lesson_finalization = {
+                "ok": False,
+                "required": True,
+                "error": f"application_finalization_error:{type(exc).__name__}",
+            }
+        if not lesson_finalization.get("ok"):
+            return {
+                "ok": False,
+                "error": "lesson_application_not_durable",
+                "holdings": len(target),
+                "lesson_application": lesson_transition,
+                "lesson_finalization": lesson_finalization,
+            }
+        return {
+            "ok": True,
+            "holdings": len(target),
+            "lesson_application": lesson_transition,
+            "lesson_finalization": lesson_finalization,
+        }
     except Exception as e:                               # noqa: BLE001
         return {"ok": False, "error": repr(e)[:200]}
 
