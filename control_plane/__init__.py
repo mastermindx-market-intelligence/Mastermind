@@ -7,7 +7,8 @@ guardrail    R3 severity taxonomy + GuardrailResult reporting dataclass.
 locks        Advisory file locks (fcntl.flock, non-blocking) per book/op.
 run_ledger   Job-level run records (extends brain/runlog scope — see docstring).
 flags        Enumerate every MASTERMIND_* env var currently set.
+worker_runtime  Local persisted Worker/Job lifecycle proof (Executive OS Phase 1A).
 
-Zero integration into existing call sites this wave (substrate-only).
+No implicit execution integration: runtime workers are registered labels only.
 No third-party dependencies; stdlib only.
 """
