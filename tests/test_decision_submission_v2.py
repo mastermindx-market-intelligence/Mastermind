@@ -377,6 +377,7 @@ def test_hold_quantization_never_rounds_valid_full_book_over_one(monkeypatch):
     from portfolio import paper_account
 
     tickers = [f"HOLD{i}" for i in range(6)]
+    monkeypatch.setattr(ds, "_instrument_identity", _common_identity)
     monkeypatch.setattr(
         ds,
         "_latest_holdings",

@@ -364,7 +364,9 @@ def test_get_quote_reports_cny_and_venue(iso, monkeypatch):
     out = asyncio.run(china_mcp.get_quote.handler({"ticker": "0700.HK"}))
     payload = json.loads(out["content"][0]["text"])
     assert payload["venue"] == "HK" and payload["currency"] == "HKD"
-    assert payload["priceable"] is True
+    assert payload["eligible"] is False
+    assert payload["quote_available"] is True
+    assert payload["priceable"] is False
     assert payload["price_local"] == pytest.approx(390.0)         # 50 USD * 7.8 = native HKD
     assert payload["base_currency"] == "CNY"
     assert payload["price_base"] == pytest.approx(350.0)          # 50 USD * 7.0 = CNY the book marks at

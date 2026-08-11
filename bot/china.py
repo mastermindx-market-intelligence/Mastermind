@@ -9,11 +9,10 @@ A-share close), the China Brain:
   4. and the deterministic layer rebalances the paper account to those weights at the latest
      close, marks NAV in CNY vs the CSI 300, and logs the day.
 
-The universe is ALL of Greater China: mainland A-shares (``*.SS`` / ``*.SZ``, quoted CNY), Hong
-Kong (``*.HK``, HKD), and US-listed China ADRs (USD). The book's base currency is **CNY**:
-A-shares are native, while HK (HKD) and ADR (USD) prices are converted to CNY at the prevailing
-rate (``portfolio.fx.usd_to_cny`` over the shared price store) so the single-currency NAV stays
-honest. Everything is scoped to portfolio_id="china" so no other book is touched.
+The executable universe is positively verified single-company mainland A-shares (``*.SS`` /
+``*.SZ``) only. ETFs, index funds, pooled products, warrants, Hong Kong listings, and ADRs are
+context at most and can never become holdings. The book is marked natively in CNY. Everything is
+scoped to portfolio_id="china" so no other book is touched.
 
 Run:  python -m bot.china        (or the APScheduler 'china_daily' job, or POST /api/china/run)
 """
@@ -482,7 +481,10 @@ _PERSONA = (
     "degraded feeds justify retreating primarily to cash. Preserve the market-specific process that has "
     "worked; do not import US or HK patterns without local evidence. \n\n"
     "Your universe is MAINLAND CHINA A-SHARES ONLY — Shanghai (``*.SS``) and Shenzhen (``*.SZ``) "
-    "listings, quoted in CNY (e.g. 600519.SS, 300750.SZ, 601318.SS). You MAY NOT hold Hong Kong "
+    "single-company shares positively verified by the trusted local stock master, quoted in CNY "
+    "(e.g. 600519.SS, 300750.SZ, 601318.SS). ETFs, index funds, pooled products, and warrants are "
+    "PROHIBITED holdings even when their ticker has an allowed suffix; they may be context only. "
+    "You MAY NOT hold Hong Kong "
     "(``*.HK``) names or US-listed ADRs — those belong to the separate HK book, and any non-A-share "
     "ticker you submit will be REJECTED by the desk. A-shares are native CNY; reason about portfolio "
     "impact and conviction, while the trusted layer owns exact CNY-NAV weights. \n\n"
@@ -491,9 +493,9 @@ _PERSONA = (
     "(the unified, corroborated A-share candidate funnel across the buy board, alpha leaders, and "
     "reversal watch), get_china_standouts, get_china_brief — and (2) the open web via WebSearch / "
     "WebFetch. Form your own view; you are not obliged to agree with the in-house engine. \n\n"
-    "ALWAYS confirm a name is priceable with mcp__china__get_quote before you rely on it — it "
-    "returns the venue, the local-currency price, and the CNY price the book will actually transact "
-    "at; a name with priceable=false will be SKIPPED. When you are done researching, call "
+    "ALWAYS confirm a name is eligible and priceable with mcp__china__get_quote before you rely on "
+    "it — it returns trusted identity status, venue, and CNY price; eligible=false or "
+    "priceable=false means it cannot enter the book. When you are done researching, call "
     "mcp__china__submit_book ONCE with your COMPLETE target book for today: every A-share you want to "
     "hold, its ADD/HOLD/TRIM intent, ordinal conviction, and a clear one-paragraph rationale for EACH holding. "
     "A TRIM must include evidence and light/standard/deep intensity; the allocator derives the reduction. "
@@ -567,9 +569,11 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
     if inaugural:
         lines += [
             "This is your INAUGURAL run. The book is 100% cash: ¥1,000,000 (CNY). Build the "
-            "A-share portfolio from scratch — buy whatever mainland A-shares (*.SS / *.SZ) you are "
+            "A-share portfolio from scratch — select positively verified single-company mainland "
+            "stocks (*.SS / *.SZ) you are "
             "convinced of and label each ADD with ordinal conviction. The trusted allocator will size "
-            "only those approved names; it will not force weak ideas. No HK or ADR names.",
+            "only those approved names; it will not force weak ideas. No ETFs, funds, indices, "
+            "warrants, HK names, or ADRs.",
             "",
         ]
     else:
@@ -581,7 +585,9 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         "your complete target book for today via mcp__china__submit_book, with a one-paragraph "
         "rationale per holding, ADD/HOLD/TRIM intent, all governance fields, a structured decision memo, and an explicit record "
         "for every exit. Confirm each name is priceable with get_quote first. Search deeper before choosing "
-        "high cash; you are accountable for selection and CNY NAV vs the CSI 300, while exact weights remain deterministic.",
+        "high cash; every holding must be a positively verified single-company stock, never an ETF "
+        "or fund. You are accountable for selection and CNY NAV vs the CSI 300, while exact weights "
+        "remain deterministic.",
     ]
     return "\n".join(lines)
 

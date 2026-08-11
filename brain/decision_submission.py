@@ -339,17 +339,48 @@ def _instrument_identity(ticker: str) -> dict[str, Any]:
     return instrument_policy.classify_us_instrument(ticker)
 
 
-def _mandate_migration_exit(ticker: str, identity: dict[str, Any]) -> dict[str, Any]:
-    """Deterministic, auditable exit for inherited ETFs in the stock-only US book."""
+def _instrument_identity_for_book(book: str, ticker: str) -> dict[str, Any]:
+    """Portfolio-aware identity while preserving the established US test seam."""
+    if book == "autonomous":
+        return _instrument_identity(ticker)
+    from portfolio import instrument_policy
+
+    return instrument_policy.classify_instrument(book, ticker)
+
+
+def _identity_executable_for_book(book: str, identity: dict[str, Any]) -> bool:
+    """Exact positive identity check used before normalized intent can advance."""
+    if identity.get("kind") != "common_stock" or identity.get("verified") is not True:
+        return False
+    return book == "autonomous" or identity.get("market") == book
+
+
+def _mandate_migration_exit(
+    book: str, ticker: str, identity: dict[str, Any]
+) -> dict[str, Any]:
+    """Deterministic, auditable exit for inherited prohibited instruments."""
     status = _clean_text(identity.get("status"), 200) or "verified_etf"
+    if book == "autonomous":
+        reason = "Inherited ETF violates the US Brain common-stock-only mandate."
+        why_now = "Remove inherited pre-v2 ETF inventory at the next priceable paper session."
+    else:
+        label = "CN Brain" if book == "china" else "HK Brain"
+        reason = (
+            f"Inherited ETF or pooled instrument violates the {label} "
+            "single-name-equity mandate."
+        )
+        why_now = (
+            "Remove inherited non-stock inventory at the next priceable local-market "
+            "paper session."
+        )
     return {
         "ticker": ticker,
         "action": "exit",
-        "reason": "Inherited ETF violates the US Brain common-stock-only mandate.",
+        "reason": reason,
         "reason_code": "legacy_instrument_migration",
         "evidence": [f"instrument_policy:{status}", "operator_directive:etfs_prohibited"],
         "falsifier": "None; ETF eligibility is prohibited by portfolio mandate.",
-        "why_now": "Remove inherited pre-v2 ETF inventory at the next priceable paper session.",
+        "why_now": why_now,
         "authority": "deterministic_stock_only_mandate",
         "identity_status": status,
     }
@@ -589,6 +620,15 @@ def normalize(
     """Return a trusted ``(payload, audit)`` for a regional Brain proposal."""
     args = args if isinstance(args, dict) else {}
     prior = _latest_holdings(book)
+    # The asset mandate belongs to the registry, not to an optional caller flag.
+    # ``stock_only`` remains as a compatibility opt-in for older internal callers,
+    # but passing False can never weaken an active AI portfolio's policy.
+    try:
+        from portfolio import registry
+
+        stock_only = bool(stock_only or registry.requires_single_name_equity(book))
+    except ValueError as exc:
+        raise DecisionBoundaryFreeze(f"unknown_portfolio:{book}") from exc
 
     exits: dict[str, dict] = {}
     requested_exits: list[dict] = []
@@ -648,7 +688,7 @@ def normalize(
             continue
         old = prior.get(ticker)
         identity = (
-            _instrument_identity(ticker)
+            _instrument_identity_for_book(book, ticker)
             if stock_only
             else {
                 "kind": "common_stock",
@@ -657,9 +697,11 @@ def normalize(
             }
         )
         identity_audit.append({"ticker": ticker, **identity})
-        if stock_only and identity["kind"] != "common_stock":
+        if stock_only and not _identity_executable_for_book(book, identity):
             if old:
-                if identity.get("kind") == "etf" and identity.get("verified") is True:
+                from portfolio import instrument_policy
+
+                if instrument_policy.liquidation_authorized(identity):
                     mandatory_exit_tickers.add(ticker)
                     mandatory_migrations.append(
                         {
@@ -676,7 +718,12 @@ def normalize(
                     f"held_instrument_identity_unverified:{ticker}:{identity.get('status')}"
                 )
             else:
-                rejected.append({"ticker": ticker, "reason": identity["status"]})
+                rejected.append(
+                    {
+                        "ticker": ticker,
+                        "reason": identity.get("status") or "unverified_instrument_identity",
+                    }
+                )
             continue
 
         requested_action = (
@@ -760,7 +807,7 @@ def normalize(
     blocked_early: list[str] = []
     blocked_exits: list[dict] = []
     effective_exits: list[dict] = [
-        _mandate_migration_exit(ticker, next(
+        _mandate_migration_exit(book, ticker, next(
             row for row in identity_audit if row.get("ticker") == ticker
         ))
         for ticker in sorted(mandatory_exit_tickers)
@@ -789,7 +836,7 @@ def normalize(
             continue
         exit_rec = exits.get(ticker)
         identity = (
-            _instrument_identity(ticker)
+            _instrument_identity_for_book(book, ticker)
             if stock_only
             else {
                 "kind": "common_stock",
@@ -797,10 +844,23 @@ def normalize(
                 "verified": True,
             }
         )
-        if stock_only and identity["kind"] != "common_stock":
+        legacy_verified_offvenue_stock = bool(
+            book in {"china", "hk"}
+            and identity.get("kind") == "common_stock"
+            and identity.get("verified") is True
+            and identity.get("market") in {"china", "hk"}
+            and identity.get("market") != book
+        )
+        if (
+            stock_only
+            and not _identity_executable_for_book(book, identity)
+            and not legacy_verified_offvenue_stock
+        ):
             identity_audit.append({"ticker": ticker, **identity})
-            if identity.get("kind") == "etf" and identity.get("verified") is True:
-                effective_exits.append(_mandate_migration_exit(ticker, identity))
+            from portfolio import instrument_policy
+
+            if instrument_policy.liquidation_authorized(identity):
+                effective_exits.append(_mandate_migration_exit(book, ticker, identity))
                 mandatory_migrations.append(
                     {
                         "ticker": ticker,

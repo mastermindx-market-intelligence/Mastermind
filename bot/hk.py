@@ -9,10 +9,9 @@ closes), the HK Brain:
   4. and the deterministic layer rebalances the paper account to those weights at the latest
      close, marks NAV in HKD vs the Hang Seng Index, and logs the day.
 
-The universe is HONG KONG listed names only: ``*.HK`` tickers quoted in HKD. The book's
-base currency is **HKD**: prices are sourced via Yahoo Finance (``data_layer.yahoo_feed``),
-and the NAV stays in HKD throughout — there is NO cross-FX conversion to CNY (unlike the
-China book, which converts HKD and USD prices to CNY). Everything is scoped to
+The executable universe is positively verified single-company Hong Kong equities only. ETFs,
+index funds, pooled products, warrants, mainland shares, and ADRs are context at most and can
+never become holdings. The book stays in HKD throughout. Everything is scoped to
 portfolio_id="hk" so no other book is touched.
 
 Run:  python -m bot.hk        (or the APScheduler 'hk_daily' job, or POST /api/hk/run)
@@ -476,8 +475,12 @@ _PERSONA = (
     "then document rejected opportunities and opportunity cost. Only verified crash conditions or degraded "
     "feeds justify retreating primarily to cash. Preserve HK-specific market structure and do not import "
     "mainland or US patterns without local evidence. \n\n"
-    "Your universe is HONG KONG LISTINGS ONLY — names with the ``*.HK`` suffix, quoted in HKD "
+    "Your universe is single-company Hong Kong equities ONLY — names positively verified by the "
+    "trusted local stock master with the ``*.HK`` suffix, quoted in HKD "
     "(e.g. 0700.HK Tencent, 9988.HK Alibaba, 3690.HK Meituan, 0939.HK CCB). You MAY NOT hold "
+    "ETFs, index funds, pooled products, or warrants: they are PROHIBITED holdings even when their "
+    "ticker has an allowed suffix; "
+    "they may be context only. You MAY NOT hold "
     "mainland A-shares (``*.SS`` / ``*.SZ``) or US-listed ADRs — those belong to the separate China "
     "book, and any non-HK ticker you submit will be REJECTED by the desk. HK names are native HKD; reason "
     "about portfolio impact and conviction, while the trusted layer owns exact HKD-NAV weights. \n\n"
@@ -486,9 +489,9 @@ _PERSONA = (
     "(the corroborated HK candidate funnel), get_china_standouts (the Hong-Kong buy board), "
     "get_china_brief — and (2) the open web via WebSearch / WebFetch. Form your own view; you are not "
     "obliged to agree with the in-house engine. \n\n"
-    "ALWAYS confirm a name is priceable with mcp__hk__get_quote before you rely on it — it "
-    "returns the venue, the local-currency price, and the HKD price the book will actually transact "
-    "at; a name with priceable=false will be SKIPPED. When you are done researching, call "
+    "ALWAYS confirm a name is eligible and priceable with mcp__hk__get_quote before you rely on it "
+    "— it returns trusted identity status, venue, and HKD price; eligible=false or priceable=false "
+    "means it cannot enter the book. When you are done researching, call "
     "mcp__hk__submit_book ONCE with your COMPLETE target book for today: every HK name you want to "
     "hold, its ADD/HOLD/TRIM intent, ordinal conviction, and a clear one-paragraph rationale for EACH holding. "
     "A TRIM must include evidence and light/standard/deep intensity; the allocator derives the reduction. "
@@ -562,9 +565,11 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
     if inaugural:
         lines += [
             "This is your INAUGURAL run. The book is 100% cash: HK$1,000,000 (HKD). Build the "
-            "Hong-Kong portfolio from scratch — buy whatever HK listings (*.HK) you are "
+            "Hong-Kong portfolio from scratch — select positively verified single-company HK "
+            "equities (*.HK) you are "
             "convinced of and label each ADD with ordinal conviction. The trusted allocator will size "
-            "only those approved names; it will not force weak ideas. No A-share or ADR names.",
+            "only those approved names; it will not force weak ideas. No ETFs, funds, indices, "
+            "warrants, A-share names, or ADRs.",
             "",
         ]
     else:
@@ -576,7 +581,9 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
         "your complete target book for today via mcp__hk__submit_book, with a one-paragraph "
         "rationale per holding, ADD/HOLD/TRIM intent, all governance fields, a structured decision memo, and an explicit record "
         "for every exit. Confirm each name is priceable with get_quote first. Search deeper before choosing "
-        "high cash; you are accountable for selection and HKD NAV vs the Hang Seng Index, while exact weights remain deterministic.",
+        "high cash; every holding must be a positively verified single-company equity, never an ETF "
+        "or fund. You are accountable for selection and HKD NAV vs the Hang Seng Index, while exact "
+        "weights remain deterministic.",
     ]
     return "\n".join(lines)
 

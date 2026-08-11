@@ -631,14 +631,15 @@ def _position_shares_for_mandate(state: dict[str, Any], ticker: str) -> float:
     return shares if math.isfinite(shares) and shares > 0.0 else 0.0
 
 
-def _validate_autonomous_transaction_mandate(
+def _validate_stock_only_transaction_mandate(
     transaction: dict[str, Any],
     *,
+    portfolio_id: str,
     before: dict[str, Any],
     after: dict[str, Any],
     fills: list[Any],
 ) -> None:
-    """Reject a legacy/malformed US WAL before it can mutate account or fill state.
+    """Reject a legacy/malformed AI-book WAL before it can mutate paper state.
 
     A WAL is executable authority.  After the common-stock-only cutover, replay must enforce the
     same mandate as a fresh rebalance instead of applying a pre-upgrade ETF buy and discovering the
@@ -652,10 +653,10 @@ def _validate_autonomous_transaction_mandate(
     constrained_positions_sha256: str | None = None
     if isinstance(transition, dict) and transition.get("kind") == "clear_pending_target":
         pending = transition.get("pending_payload")
-        incompatibility = pending_target_contract_error(pending, "autonomous")
+        incompatibility = pending_target_contract_error(pending, portfolio_id)
         if incompatibility:
             raise PaperTransactionConflict(
-                f"autonomous WAL pending target violates mandate: {incompatibility}"
+                f"{portfolio_id} WAL pending target violates mandate: {incompatibility}"
             )
         constraints = (
             pending.get("execution_constraints")
@@ -671,11 +672,11 @@ def _validate_autonomous_transaction_mandate(
             before_positions_sha256 = positions_sha256(before.get("positions"))
         except InvalidExecutionConstraints as exc:
             raise PaperTransactionConflict(
-                f"autonomous WAL positions snapshot is invalid: {exc.reason}"
+                f"{portfolio_id} WAL positions snapshot is invalid: {exc.reason}"
             ) from exc
         if before_positions_sha256 != constrained_positions_sha256:
             raise PaperTransactionConflict(
-                "autonomous WAL positions snapshot violates migration authority"
+                f"{portfolio_id} WAL positions snapshot violates migration authority"
             )
 
     for entry in fills:
@@ -689,10 +690,12 @@ def _validate_autonomous_transaction_mandate(
         if side not in {"buy", "sell"}:
             raise PaperTransactionConflict("autonomous WAL contains an invalid fill side")
         if side == "buy":
-            identity_error = instrument_policy.executable_common_stock_error(ticker)
+            identity_error = instrument_policy.executable_equity_error(
+                portfolio_id, ticker
+            )
             if identity_error:
                 raise PaperTransactionConflict(
-                    f"autonomous WAL BUY violates mandate: {identity_error}"
+                    f"{portfolio_id} WAL BUY violates mandate: {identity_error}"
                 )
         if ticker in preserved:
             raise PaperTransactionConflict(
@@ -709,10 +712,12 @@ def _validate_autonomous_transaction_mandate(
         before_shares = _position_shares_for_mandate(before, ticker)
         after_shares = _position_shares_for_mandate(after, ticker)
         if after_shares > before_shares + 1e-9:
-            identity_error = instrument_policy.executable_common_stock_error(ticker)
+            identity_error = instrument_policy.executable_equity_error(
+                portfolio_id, ticker
+            )
             if identity_error:
                 raise PaperTransactionConflict(
-                    f"autonomous WAL position increase violates mandate: {identity_error}"
+                    f"{portfolio_id} WAL position increase violates mandate: {identity_error}"
                 )
 
     for ticker in preserved:
@@ -747,9 +752,12 @@ def _recover_paper_transaction_unlocked(
     if transaction.get("account_after_sha256") != _content_sha256(after):
         raise PaperTransactionConflict("paper transaction after-state digest mismatch")
 
-    if portfolio_id == "autonomous":
-        _validate_autonomous_transaction_mandate(
+    from portfolio import registry
+
+    if registry.requires_single_name_equity(portfolio_id):
+        _validate_stock_only_transaction_mandate(
             transaction,
+            portfolio_id=portfolio_id,
             before=before,
             after=after,
             fills=fills,
@@ -1264,9 +1272,9 @@ def validate_target_weights(
     This is an authority boundary, not a convenience coercer: booleans, numeric strings, NaN,
     infinities, negative weights, individual weights above 100%, canonical ticker collisions, and
     gross exposure above 100% are rejected.  Zero rows carry no executable intent and are removed.
-    The ``autonomous`` book has an additional positive-identity requirement: every retained row
-    must resolve to a trusted common-stock contract.  That check is deliberately absent for the
-    regional books and the archived ETF book, which own different universe rules.
+    Registry-declared AI books have an additional positive-identity requirement: every retained
+    row must resolve to a trusted single-name-equity contract for that market.  The archived ETF
+    book and the user's self-directed book remain outside this mandate.
     """
     if not isinstance(target_weights, dict):
         raise InvalidTargetWeights("target_not_object")
@@ -1293,10 +1301,14 @@ def validate_target_weights(
         if weight > 1.0:
             raise InvalidTargetWeights(f"weight_above_one:{ticker}")
         if weight > 0.0:
-            if portfolio_id == "autonomous":
+            from portfolio import registry
+
+            if registry.requires_single_name_equity(portfolio_id):
                 from portfolio import instrument_policy
 
-                identity_error = instrument_policy.executable_common_stock_error(ticker)
+                identity_error = instrument_policy.executable_equity_error(
+                    portfolio_id, ticker
+                )
                 if identity_error:
                     raise InvalidTargetWeights(identity_error)
             canonical[ticker] = weight
@@ -1551,7 +1563,9 @@ def execute_fill(ticker: str, side: str, *, weight: float | None = None,
     # identity policy before even loading recoverable account state so it cannot become a side door
     # for an ETF or an unverified symbol.  Sells deliberately remain unrestricted: legacy ETF
     # inventory must always be exitable from the common-stock-only successor book.
-    if side == "buy" and portfolio_id == "autonomous":
+    from portfolio import registry
+
+    if side == "buy" and registry.requires_single_name_equity(portfolio_id):
         validate_target_weights(
             {ticker: 1.0},
             require_canonical_tickers=True,
@@ -1817,8 +1831,10 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
     pending = load_pending(portfolio_id)
     if not pending:
         return []
-    if portfolio_id == "autonomous":
-        # A pre-v2/manual pending-order artifact must not bypass the complete-target boundary.
+    from portfolio import registry
+
+    if registry.requires_single_name_equity(portfolio_id):
+        # A pre-policy/manual pending-order artifact must not bypass the complete-target boundary.
         # Validate every BUY before account recovery/mutation; SELL rows stay unrestricted so
         # inherited ETFs remain removable.
         buy_targets = {
@@ -2177,6 +2193,20 @@ def pending_target_contract_error(payload: dict[str, Any] | None,
             return "missing_or_incompatible_engine_version"
         if payload.get("portfolio_id") != "autonomous":
             return "portfolio_identity_mismatch"
+    elif portfolio_id in {"china", "hk"} and any(
+        key in payload
+        for key in ("asset_policy", "instrument_policy_version", "portfolio_id")
+    ):
+        # Pre-policy regional queues remain readable, but any queue that claims
+        # the new authority contract must match it exactly.
+        from portfolio import instrument_policy
+
+        if payload.get("portfolio_id") != portfolio_id:
+            return "portfolio_identity_mismatch"
+        if payload.get("asset_policy") != instrument_policy.POLICY_NAME:
+            return "missing_or_incompatible_asset_policy"
+        if payload.get("instrument_policy_version") != instrument_policy.POLICY_VERSION:
+            return "missing_or_incompatible_instrument_policy_version"
     try:
         target = validate_target_weights(
             payload.get("target"),
@@ -2247,13 +2277,24 @@ def quarantine_pending_target(portfolio_id: str | None, reason: str,
             "schema_version": PENDING_TARGET_SCHEMA_V2,
             "engine_version": US_BRAIN_ENGINE_V2,
             "portfolio_id": "autonomous",
+            "instrument_policy_version": "single_name_equity.v1",
             "target_weights": (
                 "canonical_positively_verified_us_common_stock_only_"
                 "finite_long_only_gross_lte_one"
             ),
         } if portfolio_id == "autonomous" else {
             "portfolio_id": portfolio_id or "flagship",
-            "target_weights": "canonical_finite_long_only_gross_lte_one",
+            "instrument_policy_version": (
+                "single_name_equity.v1"
+                if portfolio_id in {"china", "hk"}
+                else None
+            ),
+            "target_weights": (
+                "canonical_positively_verified_single_name_equity_only_"
+                "finite_long_only_gross_lte_one"
+                if portfolio_id in {"china", "hk"}
+                else "canonical_finite_long_only_gross_lte_one"
+            ),
         }),
         "observed_contract": {
             "schema_version": observed.get("schema_version"),
@@ -2393,6 +2434,12 @@ def save_pending_target(
             "engine_version": US_BRAIN_ENGINE_V2,
             "portfolio_id": "autonomous",
         })
+    if portfolio_id in {"autonomous", "china", "hk"}:
+        from portfolio import instrument_policy
+
+        payload["asset_policy"] = instrument_policy.POLICY_NAME
+        payload["instrument_policy_version"] = instrument_policy.POLICY_VERSION
+        payload["portfolio_id"] = portfolio_id
     if not isinstance(require_pending_absent, bool):
         raise TypeError("require_pending_absent must be boolean")
     with _paper_transaction_lock(portfolio_id):
