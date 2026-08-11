@@ -27,8 +27,9 @@ inject `price`/`prices`/`market_open`/`now` to pin behaviour.
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -491,9 +492,13 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
         px = marks.get(ticker, pos.get("avg_cost") or 0.0)
         mv = shares * px if px else None
         w = round(mv / nav, 6) if (mv is not None and nav > 0) else None
-        rows.append({"ticker": ticker, "shares": round(shares, 6),
-                     "market_value": round(mv, 2) if mv is not None else None,
-                     "weight": w})
+        rows.append({
+            "ticker": ticker,
+            "shares": round(shares, 6),
+            "current_price": round(marks[ticker], 4) if ticker in marks else None,
+            "market_value": round(mv, 2) if mv is not None else None,
+            "weight": w,
+        })
 
     doc = {
         "schema": "portfolio.v1",
@@ -516,7 +521,7 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
 
 
 def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
-         benchmark: str = "SPY") -> Optional[dict]:
+         benchmark: str = "SPY", mark_source: str = "self_directed_mark") -> Optional[dict]:
     """Snapshot this book's NAV to nav_history.jsonl (idempotent per date), so the CIO review and
     the improvement agenda see it alongside the paper_account books. Uses the SAME price resolution
     as book() (the injected marking layer first, then the legacy accessor) — a held name with no
@@ -529,8 +534,26 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     positions = state.get("positions", {})
 
     invested = 0.0
+    stored_mark_changed = False
     for ticker, pos in positions.items():
-        px = prices.get(ticker) or _current_price(ticker) or (pos.get("avg_cost") or 0.0)
+        observed = prices.get(ticker) or _current_price(ticker)
+        try:
+            observed = float(observed) if observed is not None else None
+        except (TypeError, ValueError):
+            observed = None
+        if observed is not None and math.isfinite(observed) and observed > 0:
+            previous_asof = str(pos.get("current_price_asof") or "")[:10]
+            try:
+                may_update = not previous_asof or date.fromisoformat(previous_asof) <= date.fromisoformat(asof)
+            except (TypeError, ValueError):
+                may_update = True
+            if may_update:
+                pos["current_price"] = round(observed, 4)
+                pos["current_price_asof"] = asof
+                pos["current_price_source"] = str(mark_source or "self_directed_mark")
+                pos["current_price_time_kind"] = "portfolio_mark_date"
+                stored_mark_changed = True
+        px = observed if observed is not None and observed > 0 else (pos.get("avg_cost") or 0.0)
         invested += (pos.get("shares") or 0.0) * px
     cash = state.get("cash", 0.0)
     nav = cash + invested
@@ -540,6 +563,8 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     if state.get("spy_shares") is None and spy_px and spy_px > 0:
         state["spy_shares"] = _STARTING_NAV / spy_px
         state["spy_inception_price"] = spy_px
+        stored_mark_changed = True
+    if stored_mark_changed:
         _save_account(state)
     spy_nav = state.get("spy_shares") * spy_px if (state.get("spy_shares") and spy_px) else None
 

@@ -144,6 +144,8 @@ def execute_or_queue(
     *,
     market_open: bool | None = None,
     decision_snapshot: dict | None = None,
+    execution_constraints: dict | None = None,
+    require_pending_absent: bool = False,
 ) -> dict:
     """Market-hours-aware execution for a Brain book. OPEN → settle any target queued on a prior
     closed session, then rebalance to `target` at the live marks (real fills). CLOSED → persist
@@ -159,8 +161,28 @@ def execute_or_queue(
             **registry.archived_run_result(pid, asof),
         }
     from portfolio import paper_account
+
+    def _save_pending() -> None:
+        """Persist this exact target, optionally with operator-only require-absent CAS."""
+        paper_account.save_pending_target(
+            target,
+            asof,
+            portfolio_id=pid,
+            decision_snapshot=decision_snapshot,
+            **(
+                {"execution_constraints": execution_constraints}
+                if execution_constraints is not None
+                else {}
+            ),
+            **(
+                {"require_pending_absent": True}
+                if require_pending_absent
+                else {}
+            ),
+        )
+
     try:
-        target = paper_account.validate_target_weights(target)
+        target = paper_account.validate_target_weights(target, portfolio_id=pid)
     except paper_account.InvalidTargetWeights as exc:
         return {
             "executed": [],
@@ -221,14 +243,17 @@ def execute_or_queue(
             # rather than the current one, is what needs the missing quote.  Retaining the old queue
             # could later sell a name the newest decision explicitly kept (or vice versa).
             try:
-                paper_account.save_pending_target(
-                    target,
-                    asof,
-                    portfolio_id=pid,
-                    decision_snapshot=decision_snapshot,
-                )
+                _save_pending()
                 retained = True
                 retry_queued = True
+            except paper_account.PendingTargetCASConflict as exc:
+                return {
+                    **out,
+                    "skipped": "pending_target_cas_conflict",
+                    "error": repr(exc)[:200],
+                    "pending_retained": True,
+                    "pending_recheck_stage": "atomic_save",
+                }
             except Exception as exc:  # noqa: BLE001 - execution remains stopped either way
                 retry_error = repr(exc)[:200]
                 # Atomic replacement preserves the old file on failure, but that is precisely the
@@ -270,12 +295,15 @@ def execute_or_queue(
         # remains the only entry point that executes an already-queued target without a newer PM
         # decision in hand.
         try:
-            paper_account.save_pending_target(
-                target,
-                asof,
-                portfolio_id=pid,
-                decision_snapshot=decision_snapshot,
-            )
+            _save_pending()
+        except paper_account.PendingTargetCASConflict as exc:
+            return {
+                **out,
+                "skipped": "pending_target_cas_conflict",
+                "error": repr(exc)[:200],
+                "pending_retained": True,
+                "pending_recheck_stage": "atomic_save",
+            }
         except Exception as exc:  # noqa: BLE001 - no account mutation is allowed after this failure
             out.update({
                 "error": repr(exc)[:200],
@@ -377,13 +405,15 @@ def execute_or_queue(
             out["settlement_receipt_error"] = repr(exc)[:240]
     else:
         try:
-            paper_account.save_pending_target(
-                target,
-                asof,
-                portfolio_id=pid,
-                decision_snapshot=decision_snapshot,
-            )
+            _save_pending()
             out["queued"] = True
+        except paper_account.PendingTargetCASConflict as e:
+            out.update({
+                "error": repr(e)[:200],
+                "skipped": "pending_target_cas_conflict",
+                "pending_retained": True,
+                "pending_recheck_stage": "atomic_save",
+            })
         except Exception as e:                                            # noqa: BLE001
             out["error"] = repr(e)[:200]
             try:
@@ -546,7 +576,9 @@ def _finalize_settlement_receipt(
     transaction_id = str(receipt.get("transaction_id") or "")
     settlement_asof = str(receipt.get("settlement_asof") or date.today().isoformat())[:10]
     target = paper_account.validate_target_weights(
-        receipt.get("target") or {}, require_canonical_tickers=True
+        receipt.get("target") or {},
+        require_canonical_tickers=True,
+        portfolio_id=pid,
     )
     before = dict(receipt.get("account_before_positions") or {})
     after = dict(receipt.get("account_after_positions") or {})
@@ -577,6 +609,18 @@ def _finalize_settlement_receipt(
         else None
     )
     failures: list[str] = []
+    if pid == "autonomous" and submission is not None:
+        try:
+            from portfolio import autonomous_migration
+            settlement_link = autonomous_migration.persist_settlement_link(receipt)
+        except Exception as exc:  # noqa: BLE001 - keep receipt until provenance is durable
+            settlement_link = {
+                "ok": False,
+                "error": repr(exc)[:240],
+            }
+            failures.append(f"migration_link:{exc!r}"[:240])
+    else:
+        settlement_link = {"ok": True, "applicable": False}
     try:
         position_log.update(
             [
@@ -605,6 +649,31 @@ def _finalize_settlement_receipt(
     )
     if isinstance(republished, dict) and republished.get("ok") is False:
         failures.append(f"republish:{republished.get('error') or 'failed'}"[:240])
+    if settlement_link.get("applicable") is True:
+        try:
+            from bot import autonomous
+            migration = (submission or {}).get("operator_migration") or {}
+            autonomous._append_decision_log(
+                settlement_asof,
+                submission,
+                executed,
+                [],
+                {
+                    "text": "Hash-bound legacy ETF migration settled through trusted open marks.",
+                    "run_id": migration.get("migration_id"),
+                    "tools_used": [
+                        "bot.settle.settle_open",
+                        "portfolio.paper_account.settle_target",
+                    ],
+                    "cost_usd": 0.0,
+                    "model": "deterministic_operator_migration",
+                    "error": None,
+                },
+                target_status="executed",
+                effective_target=target,
+            )
+        except Exception as exc:  # noqa: BLE001 - receipt retains this projection obligation
+            failures.append(f"migration_decision_log:{exc!r}"[:240])
 
     if failures:
         return {
@@ -617,6 +686,7 @@ def _finalize_settlement_receipt(
             "receipt_retained": True,
             "finalization_errors": failures,
             "republish": republished,
+            "migration_settlement_link": settlement_link,
         }
     try:
         paper_account.acknowledge_settlement_receipt(transaction_id, pid)
@@ -631,6 +701,7 @@ def _finalize_settlement_receipt(
             "receipt_retained": True,
             "finalization_errors": [f"ack:{exc!r}"[:240]],
             "republish": republished,
+            "migration_settlement_link": settlement_link,
         }
     result = {
         "ok": True,
@@ -638,6 +709,7 @@ def _finalize_settlement_receipt(
         "settled_to": sorted(target),
         "transaction_id": transaction_id,
         "receipt_acknowledged": True,
+        "migration_settlement_link": settlement_link,
     }
     if republished is not None:
         result["republish"] = republished

@@ -141,8 +141,9 @@ async def get_my_book(args):
 @tool("submit_book",
       "Submit the FINAL US stock portfolio once. Include every desired holding and an explicit "
       "exit_decisions record for each held name you intend to sell; omission alone NEVER sells. "
-      "ETFs are rejected and any legacy ETF is quarantined until an explicit "
-      "legacy_instrument_migration exit. For each row choose ADD, HOLD, or TRIM; TRIM requires "
+      "ETFs are prohibited. Any positively identified inherited ETF is removed from the target by "
+      "a deterministic legacy_instrument_migration exit; you cannot override that mandate with HOLD. "
+      "For each eligible common-stock row choose ADD, HOLD, or TRIM; TRIM requires "
       "evidence and an ordinal intensity. The trusted allocator alone computes weights, so any numeric "
       "weight is optional audit context and never authority. Each holding must state why-now, falsifier, "
       "source provenance, expected horizon and exit plan. Provide a structured decision_memo so the "
@@ -209,8 +210,8 @@ async def submit_book(args):
             + (" (scaled to remove leverage)" if payload.get("scaled_to_no_leverage") else "")
             + (f". Carried {len(audit['carried'])} omitted/early-exit name(s) pending an explicit valid exit"
                if audit.get("carried") else "")
-            + (f". Quarantined {len(audit['quarantined'])} legacy/non-stock holding(s) without trading them"
-               if audit.get("quarantined") else "")
+            + (f". Scheduled {len(audit['mandatory_instrument_migrations'])} inherited ETF mandate exit(s)"
+               if audit.get("mandatory_instrument_migrations") else "")
             + (". Execution will fail closed until held-position quotes recover"
                if audit.get("quote_fallback_holdings") else "")
             + (f". Rejected {len(audit['rejected'])} ETF/invalid name(s)" if audit.get("rejected") else "")

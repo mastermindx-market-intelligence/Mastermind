@@ -23,7 +23,7 @@ is correct — the live feeds still price the book.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -60,7 +60,12 @@ def price_local(ticker: str) -> float | None:
 
 
 def quote_local(ticker: str) -> dict | None:
-    """Terminal snapshot quote with file-mtime provenance; a local read, never a live fetch."""
+    """Terminal snapshot quote with market-date provenance; a local read, never a live fetch.
+
+    Modern stockdata contracts carry a top-level ``asof`` for the underlying daily bar.  Prefer
+    that over file mtime: deploy/sync time says when bytes moved, not when the market price was
+    observed, and must not let an old snapshot outrank a newer persisted portfolio close.
+    """
     t = (ticker or "").upper().strip()
     if not t:
         return None
@@ -68,17 +73,30 @@ def quote_local(ticker: str) -> dict | None:
         path = _ROOT / "vendor" / "macro" / "site" / _dir_for(t) / f"{t}.json"
         if not path.exists():
             return None
-        value = (json.loads(path.read_text()).get("tech") or {}).get("price")
+        payload = json.loads(path.read_text())
+        value = (payload.get("tech") or {}).get("price")
         if value is None or float(value) <= 0:
             return None
-        modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        age = max(0.0, (datetime.now(timezone.utc) - modified).total_seconds())
+        market_date = None
+        try:
+            market_date = date.fromisoformat(str(payload.get("asof"))[:10])
+        except (TypeError, ValueError):
+            pass
+        if market_date is not None:
+            quote_asof = market_date.isoformat()
+            age = max(0.0, float((datetime.now(timezone.utc).date() - market_date).days * 86_400))
+            time_kind = "snapshot_market_date"
+        else:
+            modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            quote_asof = modified.isoformat(timespec="seconds")
+            age = max(0.0, (datetime.now(timezone.utc) - modified).total_seconds())
+            time_kind = "snapshot_file_mtime"
         return {
             "ticker": t,
             "price_local": float(value),
             "source": "terminal_snapshot",
-            "as_of": modified.isoformat(timespec="seconds"),
-            "time_kind": "snapshot_file_mtime",
+            "as_of": quote_asof,
+            "time_kind": time_kind,
             "age_seconds": round(age, 1),
             "fresh": False,
         }

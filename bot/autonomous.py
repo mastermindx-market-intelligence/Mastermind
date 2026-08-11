@@ -85,6 +85,26 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     asof = asof or date.today().isoformat()
     out: dict = {"portfolio_id": PORTFOLIO_ID, "asof": asof,
                  "ran_at": datetime.now(timezone.utc).isoformat()}
+    # An operator-authorized legacy-ETF migration is an exact executable
+    # instruction, not yesterday's ordinary PM queue.  Do not let a nightly
+    # model turn clear or supersede it before the open settlement consumes it.
+    try:
+        from portfolio import autonomous_migration
+        if autonomous_migration.is_pending_migration():
+            return {
+                **out,
+                "skipped": "legacy_etf_migration_pending",
+                "decided": False,
+                "queued_for_open": True,
+                "paper_only": True,
+            }
+    except Exception as exc:  # noqa: BLE001 - an unreadable fence fails closed
+        return {
+            **out,
+            "skipped": "legacy_etf_migration_fence_unavailable",
+            "error": repr(exc)[:200],
+            "decided": False,
+        }
     today = _safe_date(asof)
     out["trading_day"] = market_calendar.is_trading_day(today) if today else None
 
@@ -643,18 +663,40 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
     nav = paper_account.nav(prices, PORTFOLIO_ID)
     cash = float(state.get("cash") or 0.0)
     rationale_by_tk = {h["ticker"].upper(): h for h in ((submission or {}).get("holdings") or [])}
+    migration_exits = {
+        str(row.get("ticker") or "").upper().strip(): row
+        for row in ((submission or {}).get("exit_decisions") or [])
+        if isinstance(row, dict)
+        and row.get("reason_code") == "legacy_instrument_migration"
+    }
 
     positions = []
     for tk, rec in pnl.items():
         mv = rec.get("market_value")
         h = rationale_by_tk.get(tk, {})
-        rationale = h.get("rationale")
+        migration = migration_exits.get(tk)
+        migration_pending = bool(migration) and target_status == "queued"
+        rationale = h.get("rationale") or ((migration or {}).get("reason"))
         entry = position_log.get_entry_info(SLEEVE, tk, portfolio_id=PORTFOLIO_ID)
         positions.append({
             "ticker": tk,
             "sleeve": SLEEVE,
             "weight": round(mv / nav, 4) if (mv and nav) else None,
-            "verdict": "hold",
+            "verdict": (
+                "exit_pending"
+                if migration_pending
+                else "mandate_violation"
+                if migration
+                else "hold"
+            ),
+            "migration_pending": migration_pending,
+            "mandate_status": (
+                "legacy_etf_exit_queued"
+                if migration_pending
+                else "legacy_etf_exit_blocked"
+                if migration
+                else None
+            ),
             "conviction": h.get("conviction"),
             "rationale": rationale,
             "opened_at": entry.get("opened_at"),
@@ -683,7 +725,7 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
         lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
     except Exception:
         lesson_links = {}
-    return {
+    payload = {
         "as_of": asof,
         "portfolio_id": PORTFOLIO_ID,
         "manager": "Mastermind Portfolio US Brain (Codex-first)",
@@ -702,6 +744,35 @@ def _build_payload(asof: str, submission: dict | None, prices: dict, executed: l
         "brain": {k: brain.get(k) for k in ("cost_usd", "tools_used", "model")},
         **lesson_links,
     }
+    operator_migration = (
+        (submission or {}).get("operator_migration")
+        if isinstance(submission, dict)
+        else None
+    )
+    if isinstance(operator_migration, dict):
+        actual_legacy_etfs = sorted(
+            set(migration_exits) & set(pnl)
+        )
+        payload["legacy_etf_migration"] = {
+            "schema": operator_migration.get("schema"),
+            "migration_id": operator_migration.get("migration_id"),
+            "paper_only": True,
+            "legacy_etfs": operator_migration.get("legacy_etfs") or [],
+            "preserved_common_stocks": operator_migration.get(
+                "preserved_common_stocks"
+            )
+            or [],
+            "actual_legacy_etfs_remaining": actual_legacy_etfs,
+            "status": (
+                "pending"
+                if target_status == "queued"
+                else "settled"
+                if target_status == "executed" and not actual_legacy_etfs
+                else "blocked"
+            ),
+            "target_status": target_status,
+        }
+    return payload
 
 
 def _append_decision_log(asof: str, submission: dict | None, executed: list,
@@ -784,9 +855,9 @@ def republish(asof: str | None = None, *, submission: dict | None = None) -> dic
     positions.  Settlement passes the hash-bound queued snapshot; an explicit ``None`` falls back
     to the current scratch submission only for manual compatibility. Idempotent per asof."""
     from portfolio import paper_account
-    from brain import autonomous_mcp
     asof = asof or date.today().isoformat()
     if submission is None:
+        from brain import autonomous_mcp
         submission = autonomous_mcp.read_submission(PORTFOLIO_ID)
     held = list((paper_account._load_account(PORTFOLIO_ID).get("positions") or {}).keys())
     target = {h["ticker"]: float(h.get("weight") or 0.0) for h in ((submission or {}).get("holdings") or [])}

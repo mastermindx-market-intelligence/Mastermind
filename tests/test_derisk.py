@@ -299,6 +299,7 @@ def _patch_brain_pa(monkeypatch, target):
     saved = {}
     pending = {"target": dict(target), "asof": "2026-06-23"}
     pa.load_pending_target = lambda pid=None: pending
+    pa._read_pending_target_payload = lambda pid=None: pending
     pa.preflight_pending_target = lambda pid=None: {"ok": True, "pending": pending}
     pa.save_pending_target = lambda tgt, asof, portfolio_id=None: saved.update({"t": dict(tgt)})
     import portfolio as _pf_pkg
@@ -316,11 +317,11 @@ def test_derisk_brain_drops_cracking_chain(monkeypatch):
     monkeypatch.setattr(D, "_gex_flip", lambda: (False, ""))
     monkeypatch.setattr(D, "_credit_gap", lambda: (False, ""))
     monkeypatch.setattr(D, "_theme_drop", lambda drivers: (False, ""))
-    saved = _patch_brain_pa(monkeypatch, {"NVDA": 0.3, "AVGO": 0.2, "XLP": 0.2})
+    saved = _patch_brain_pa(monkeypatch, {"NVDA": 0.3, "AVGO": 0.2, "KO": 0.2})
     res = D.derisk_brain("autonomous", "2026-06-23", regime={}, force=True)
     assert res["action"] == "revised_pending_target"
     assert "NVDA" not in saved["t"] and "AVGO" not in saved["t"]   # cracking adds blocked
-    assert "XLP" in saved["t"]
+    assert "KO" in saved["t"]
 
 
 def test_derisk_brain_scales_gross(monkeypatch):

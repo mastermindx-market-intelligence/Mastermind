@@ -74,6 +74,48 @@ _ensure_engine_canon()
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_us_common_stock_identity(monkeypatch):
+    """Supply positive company metadata for the real US stocks used by account-boundary tests.
+
+    Production authenticates a US target from Macro's canonical ``site/stockdata`` contract.
+    Hosted CI deliberately checks out only Macro's importable engine/lib surface and therefore has
+    no VPS-owned stockdata.  Keep the production policy fail-closed and inject the smallest honest
+    company contracts here instead of teaching runtime code a test-only symbol allowlist.
+
+    ETF and unknown-symbol tests remain real: no ETF or synthetic ticker appears in this fixture.
+    Individual tests can still replace ``_read_macro_json`` or ``classify_us_instrument`` after this
+    autouse fixture when exercising malformed/negative identity cases.
+    """
+    try:
+        from portfolio import instrument_policy
+
+        verified = {
+            "AAPL": ("Apple Inc.", "Information Technology"),
+            "MSFT": ("Microsoft Corporation", "Information Technology"),
+            "NVDA": ("NVIDIA Corporation", "Information Technology"),
+        }
+        original = instrument_policy._read_macro_json
+
+        def _read(relative: str):
+            prefix, suffix = "stockdata/", ".json"
+            if relative.startswith(prefix) and relative.endswith(suffix):
+                ticker = relative[len(prefix) : -len(suffix)].upper()
+                if ticker in verified:
+                    name, sector = verified[ticker]
+                    return {
+                        "ticker": ticker,
+                        "name": name,
+                        "sector": sector,
+                        "security_type": "common stock",
+                    }
+            return original(relative)
+
+        monkeypatch.setattr(instrument_policy, "_read_macro_json", _read)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _offline_llm_fuse(tmp_path, monkeypatch):
     """Make every ordinary pytest run incapable of spending live LLM tokens.
 
@@ -95,6 +137,17 @@ def _offline_llm_fuse(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     for slot in range(1, 21):
         monkeypatch.delenv(f"CLAUDE_CODE_OAUTH_TOKEN_{slot}", raising=False)
+    # Portfolio reasoning tests must not inherit live data-vendor entitlements.  Individual tests
+    # inject canary values explicitly when verifying the bounded MCP secret transport.
+    for key in (
+        "POLYGON_API_KEY",
+        "MASSIVE_API_KEY",
+        "FRED_API_KEY",
+        "FINNHUB_KEY",
+        "FINNHUB_API_KEY",
+        "TUSHARE_TOKEN",
+    ):
+        monkeypatch.delenv(key, raising=False)
     try:
         from brain import cli_bridge
         # Blocks both Agent SDK and subprocess/keychain access before either transport starts.

@@ -64,6 +64,14 @@ def test_active_us_brain_is_default_and_archived_books_are_frozen_history() -> N
     assert "Mastermind Portfolio" in HTML
 
 
+def test_active_us_brain_copy_is_common_stock_only_and_surfaces_queued_etf_exits() -> None:
+    assert "The active US Brain has one common-stock selection sleeve: ETFs are prohibited." in HTML
+    assert "Leadership: broad sector/factor ETFs" not in HTML
+    assert "'pos.v_exit_pending'" in HTML
+    assert "EXIT QUEUED" in HTML
+    assert "exit_pending: 'pos.v_exit_pending'" in HTML
+
+
 def test_private_advisor_ui_describes_proposals_not_execution() -> None:
     assert "Mastermind Portfolio Research Advisor" in CHAT
     assert "propose_portfolio_action" in CHAT

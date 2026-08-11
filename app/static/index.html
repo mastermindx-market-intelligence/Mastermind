@@ -345,6 +345,7 @@ body.page-mm td.l { text-align: left; }
 .mm-verdict-chip.add  { background: color-mix(in srgb, var(--up) 15%, var(--panel2));   color: var(--up);   border: 1px solid color-mix(in srgb, var(--up) 30%, transparent); }
 .mm-verdict-chip.hold { background: color-mix(in srgb, var(--muted) 15%, var(--panel2)); color: var(--muted); border: 1px solid var(--line); }
 .mm-verdict-chip.reduce, .mm-verdict-chip.trim { background: color-mix(in srgb, var(--warn) 15%, var(--panel2)); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
+.mm-verdict-chip.exit_pending { background: color-mix(in srgb, var(--down) 15%, var(--panel2)); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
 .mm-verdict-chip.avoid { background: color-mix(in srgb, var(--down) 15%, var(--panel2)); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
 
 #positions tbody tr.pos-row {
@@ -3351,12 +3352,13 @@ var I18N = {
   'pos.current_px':       { en: 'Current', zh: '现价' },
   'pos.unrealized':       { en: 'Unrealized P&L', zh: '未实现盈亏' },
   'pos.v_hold':           { en: 'HOLDING', zh: '持有中' },
+  'pos.v_exit_pending':   { en: 'EXIT QUEUED', zh: '已排队卖出' },
   'pos.v_add':            { en: 'ADDING', zh: '加仓中' },
   'pos.v_trim':           { en: 'TRIMMING', zh: '减仓中' },
   'pos.v_reduce':         { en: 'REDUCING', zh: '减仓中' },
   'pos.v_avoid':          { en: 'AVOID', zh: '回避' },
   'pos.v_watch':          { en: 'WATCHING', zh: '观察中' },
-  'help.sleeve':          { en: "The book splits into two sleeves. Leadership: broad sector/factor ETFs that rank top of the universe by 12-month relative strength and sit above their 200-day trend — owning the leaders mechanically. Conviction: hand-picked single names from the Brain's narrative theses, sized by multi-lens confluence.", zh: '组合分为两类仓位。领航仓：按12个月相对强弱排名居前、且站上200日趋势线的板块/因子ETF — 机械化持有领涨者。重仓：由"大脑"的叙事论点精选的个股，按多维度汇聚度定仓位。' },
+  'help.sleeve':          { en: "This label identifies each position's portfolio role. The active US Brain has one common-stock selection sleeve: ETFs are prohibited. Archived boards may retain their historical sleeve labels for audit only.", zh: '此标签表示每个持仓在组合中的职能。当前美股大脑只有一个个股筛选仓，禁止持有 ETF。已归档组合可保留历史仓位标签，仅供审计。' },
   'help.rs':              { en: 'Relative-Strength percentile — NOT RSI. Where this name\'s trailing 252-day return ranks against the universe: 100 = strongest momentum vs peers, 50 = middle, 0 = weakest. A cross-sectional leadership rank, not an overbought/oversold oscillator.', zh: '相对强弱百分位 — 不是RSI。该标的过去252日回报在全市场中的排名：100=动量最强，50=居中，0=最弱。这是横截面的领涨排名，并非超买超卖指标。' },
   // ── Trade blotter ──
   'trades.blotter_sub':   { en: 'Complete blotter — every individual fill', zh: '完整成交记录 — 每一笔交易' },
@@ -4577,7 +4579,7 @@ function renderPositions() {
     var curStr = (!p.pending && p.current_price != null) ? _ccySym() + Number(p.current_price).toFixed(2) : '—';
     var u = p.pending ? { cls: '', txt: '—' } : pnlCell(p.unrealized_pnl, p.unrealized_pct);
     // verdict → gerund (HOLDING / ADDING / TRIMMING …); CSS class stays the raw verdict
-    var vKey = { hold: 'pos.v_hold', add: 'pos.v_add', trim: 'pos.v_trim', reduce: 'pos.v_reduce', avoid: 'pos.v_avoid', watch: 'pos.v_watch' }[verdict];
+    var vKey = { hold: 'pos.v_hold', add: 'pos.v_add', trim: 'pos.v_trim', reduce: 'pos.v_reduce', avoid: 'pos.v_avoid', watch: 'pos.v_watch', exit_pending: 'pos.v_exit_pending' }[verdict];
     var vLabel = vKey ? t(vKey) : verdict.toUpperCase();
     var posName = securityName(p);
 
@@ -7257,6 +7259,13 @@ function renderLiveMarksStatus() {
     return;
   }
   var hasSnapshot = rows.some(function(p) { return p.quote_source === 'terminal_snapshot'; });
+  var persistedRows = rows.filter(function(p) {
+    return ['portfolio_eod', 'portfolio_snapshot', 'persisted_portfolio_mark'].indexOf(p.quote_source) >= 0;
+  });
+  var hasPersisted = persistedRows.length > 0;
+  var hasPriorEod = persistedRows.some(function(p) { return p.quote_source === 'portfolio_eod'; });
+  var persistedDates = persistedRows.map(function(p) { return p.quote_as_of; }).filter(Boolean);
+  var persistedAt = persistedDates.length ? persistedDates.sort().slice(-1)[0] : null;
   var liveTimes = rows.map(function(p) { return p.quote_is_live ? p.quote_as_of : null; }).filter(Boolean);
   var latest = liveTimes.length ? liveTimes.sort().slice(-1)[0] : d.generated_at;
   var stateEn = {
@@ -7274,8 +7283,13 @@ function renderLiveMarksStatus() {
   if (s.is_open) {
     if (!pricing.total_positions) {
       parts.push(isZh ? '暂无持仓需要报价' : 'no held tickers to price');
-    } else if (pricing.complete && !hasSnapshot) {
+    } else if (pricing.complete && !hasSnapshot && !hasPersisted) {
       parts.push((isZh ? '实时行情源检查于 ' : 'live feed checked ') + _liveTime(latest, s.timezone));
+    } else if (hasPriorEod) {
+      parts.push((isZh ? '部分持仓使用上一收盘日行情 ' : 'some positions use prior EOD ') +
+        (persistedAt ? fmtDate(persistedAt) : ''));
+    } else if (hasPersisted) {
+      parts.push(isZh ? '部分持仓使用上次已保存行情' : 'some positions use the last saved mark');
     } else {
       parts.push(isZh ? '部分行情使用快照回退' : 'partial pricing / snapshot fallback');
     }
@@ -7283,11 +7297,19 @@ function renderLiveMarksStatus() {
     parts.push(isZh ? ('约每' + refreshMin + '分钟刷新') :
       ('refreshes about every ' + refreshMin + ' min'));
   } else {
+    if (hasPriorEod) {
+      parts.push((isZh ? '上一收盘日价格 ' : 'last closed EOD ') +
+        (persistedAt ? fmtDate(persistedAt) : ''));
+    } else if (hasPersisted) {
+      parts.push((isZh ? '上次已保存价格 ' : 'last saved mark ') +
+        (persistedAt ? fmtDate(persistedAt) : ''));
+    }
     parts.push(isZh ? '未请求实时行情' : 'live feed asleep');
     parts.push((isZh ? '下次开市 ' : 'next open ') + _liveTime(s.next_open, s.timezone));
   }
   host.className = 'mm-live-status ' +
-    (s.is_open && pricing.complete && !hasSnapshot ? 'open' : (hasSnapshot ? 'snapshot' : ''));
+    (s.is_open && pricing.complete && !hasSnapshot && !hasPersisted
+      ? 'open' : ((hasSnapshot || hasPersisted) ? 'snapshot' : ''));
   host.innerHTML = '<span class="dot"></span><span>' + esc(parts.filter(Boolean).join(' · ')) + '</span>';
 }
 

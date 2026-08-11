@@ -76,6 +76,15 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False) -> dict:
         if registry.is_archived(pid):
             return {**out, "skipped": "portfolio_archived",
                     "superseded_by": registry.get(pid).get("superseded_by")}
+        if pid == "autonomous":
+            from portfolio import autonomous_migration
+            if autonomous_migration.is_pending_migration():
+                return {
+                    **out,
+                    "skipped": "legacy_etf_migration_pending",
+                    "queued_for_open": True,
+                    "paper_only": True,
+                }
         from bot import settle
         from data_layer import overnight
         from portfolio import paper_account
