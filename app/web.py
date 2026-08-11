@@ -4,6 +4,7 @@ the data contracts the page JS fetches at runtime.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 from portfolio import registry as _portfolio_registry
 
 _PRODUCT_DEFAULT_ID = _portfolio_registry.DASHBOARD_DEFAULT_ID
+_log = logging.getLogger(__name__)
 
 # Lazy import so the module loads even if brain/ isn't fully initialised yet
 def _cached_zh(text: str):
@@ -1266,13 +1268,14 @@ def api_forward_evaluation(portfolio: str | None = None,
         }, status_code=404)
     try:
         return JSONResponse(forward_evaluation.status(portfolio, asof))
-    except ValueError as exc:
+    except ValueError:
+        _log.warning("Rejected invalid forward-evaluation request", exc_info=True)
         return JSONResponse({
             "schema": forward_evaluation.STATUS_SCHEMA,
             "book": portfolio,
             "status": "invalid_request",
             "write_permitted": False,
-            "error": str(exc),
+            "error": "asof must be a valid ISO date (YYYY-MM-DD)",
         }, status_code=400)
 
 
@@ -2106,8 +2109,12 @@ def api_portfolio_learning() -> JSONResponse:
     try:
         from brain import portfolio_learning
         return JSONResponse(portfolio_learning.status())
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"schema": "mastermind_portfolio_learning.v1", "error": str(exc)})
+    except Exception:  # noqa: BLE001
+        _log.exception("Portfolio learning status read failed")
+        return JSONResponse({
+            "schema": "mastermind_portfolio_learning.v1",
+            "error": "portfolio learning unavailable",
+        })
 
 
 @router.get("/api/macro")

@@ -184,6 +184,20 @@ def test_not_started_and_archived_are_strict_no_write(isolated_root: Path) -> No
     assert not forward_evaluation._output_root().exists()
 
 
+@pytest.mark.parametrize("book", ["../autonomous", "autonomous/../../escape", "/tmp/escape"])
+def test_book_paths_reject_request_controlled_segments(isolated_root: Path, book: str) -> None:
+    from portfolio import forward_evaluation
+
+    for resolver in (
+        forward_evaluation._book_output_dir,
+        forward_evaluation._post_sell_path,
+        forward_evaluation._portfolio_data_dir,
+    ):
+        with pytest.raises(ValueError, match="unknown portfolio book"):
+            resolver(book)
+    assert not (isolated_root / "escape").exists()
+
+
 def test_start_is_create_once_and_corrupt_existing_marker_freezes(isolated_root: Path) -> None:
     from portfolio import forward_evaluation, registry
 

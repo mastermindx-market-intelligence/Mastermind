@@ -93,19 +93,40 @@ def _start_path() -> Path:
     return _output_root() / "start.json"
 
 
+def _canonical_book_id(book: str) -> str:
+    """Return only a registry-owned literal; never pass request text into a path."""
+    value = str(book or "").lower().strip()
+    if value == "flagship":
+        return "flagship"
+    if value == "heavyweight":
+        return "heavyweight"
+    if value == "autonomous":
+        return "autonomous"
+    if value == "etf":
+        return "etf"
+    if value == "china":
+        return "china"
+    if value == "hk":
+        return "hk"
+    if value == "self_directed":
+        return "self_directed"
+    raise ValueError("unknown portfolio book")
+
+
 def _book_output_dir(book: str) -> Path:
-    return _output_root() / book
+    return _output_root() / _canonical_book_id(book)
 
 
 def _post_sell_path(book: str) -> Path:
-    return _data_root() / "portfolio_learning" / book / "post_sell.json"
+    return _data_root() / "portfolio_learning" / _canonical_book_id(book) / "post_sell.json"
 
 
 def _portfolio_data_dir(book: str) -> Path:
-    meta = registry.get(book)
+    canonical = _canonical_book_id(book)
+    meta = registry.get(canonical)
     if meta.get("legacy"):
         return _data_root() / "portfolio"
-    return _data_root() / "portfolios" / book
+    return _data_root() / "portfolios" / canonical
 
 
 def _relative(path: Path) -> str:

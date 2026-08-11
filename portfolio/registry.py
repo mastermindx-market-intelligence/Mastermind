@@ -144,6 +144,42 @@ _DEFAULT_BENCHMARK = "SPY"
 
 _BY_ID = {p["id"]: p for p in PORTFOLIOS}
 
+def canonical_id(portfolio_id: str | None = None) -> str:
+    """Return the canonical id for a known book, or reject it before any filesystem use.
+
+    ``None`` retains the legacy storage default.  All other values must be an exact registry id;
+    aliases, whitespace, path-like values, and unknown ids fail closed.
+    """
+    candidate = DEFAULT_ID if portfolio_id is None else portfolio_id
+    if type(candidate) is not str:
+        raise ValueError(f"unknown portfolio id: {portfolio_id!r}")
+    # Return literals rather than the caller's value.  Besides being fail-closed, this makes the
+    # taint boundary obvious to static analysis and prevents a future path-normalisation shortcut.
+    if candidate == "flagship":
+        return "flagship"
+    if candidate == "heavyweight":
+        return "heavyweight"
+    if candidate == "autonomous":
+        return "autonomous"
+    if candidate == "etf":
+        return "etf"
+    if candidate == "china":
+        return "china"
+    if candidate == "hk":
+        return "hk"
+    if candidate == "self_directed":
+        return "self_directed"
+    raise ValueError(f"unknown portfolio id: {portfolio_id!r}")
+
+
+def _canonical_storage_id(portfolio_id: str | None = None) -> str:
+    """Return a literal allowlisted storage id, including explicitly retained shadow storage."""
+    if type(portfolio_id) is str and portfolio_id == "flagship_judgment":
+        # Retired Flagship judgment submissions remain readable at their historical isolated path.
+        # This is storage compatibility only; it is absent from PORTFOLIOS and never operational.
+        return "flagship_judgment"
+    return canonical_id(portfolio_id)
+
 
 def ids() -> list[str]:
     return [p["id"] for p in PORTFOLIOS]
@@ -216,14 +252,30 @@ def archived_run_result(portfolio_id: str, asof: str | None = None) -> dict:
 def data_dir(portfolio_id: str | None = None) -> Path:
     """The per-portfolio state directory.
 
-    ``flagship``/``None`` → the legacy ``data/portfolio/``; everything else →
-    ``data/portfolios/<id>/`` (an unknown id is sandboxed there too, never the legacy dir).
+    ``flagship``/``None`` → the legacy ``data/portfolio/``; every other known book → its
+    allowlisted directory under ``data/portfolios/``.  Unknown ids fail closed before a path is
+    constructed.
     """
-    pid = portfolio_id or DEFAULT_ID
-    meta = _BY_ID.get(pid)
-    if meta is not None and meta.get("legacy"):
+    pid = _canonical_storage_id(portfolio_id)
+    # Every path component below is a source literal.  The caller-provided value never reaches a
+    # filesystem expression, even after passing the exact-id allowlist above.
+    if pid == "flagship":
         return _ROOT / "data" / "portfolio"
-    return _ROOT / "data" / "portfolios" / pid
+    if pid == "heavyweight":
+        return _ROOT / "data" / "portfolios" / "heavyweight"
+    if pid == "autonomous":
+        return _ROOT / "data" / "portfolios" / "autonomous"
+    if pid == "etf":
+        return _ROOT / "data" / "portfolios" / "etf"
+    if pid == "china":
+        return _ROOT / "data" / "portfolios" / "china"
+    if pid == "hk":
+        return _ROOT / "data" / "portfolios" / "hk"
+    if pid == "self_directed":
+        return _ROOT / "data" / "portfolios" / "self_directed"
+    if pid == "flagship_judgment":
+        return _ROOT / "data" / "portfolios" / "flagship_judgment"
+    raise AssertionError("canonical portfolio storage id has no path")  # pragma: no cover
 
 
 def starting_nav(portfolio_id: str | None = None) -> float:
