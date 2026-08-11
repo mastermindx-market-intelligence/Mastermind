@@ -15,8 +15,8 @@ not evidence of alpha, better selection, or better exits. The pre-v2 US losses, 
 replay results, local tests, and a successful deployment are useful design and correctness evidence.
 None is forward performance evidence for v2.
 
-After the exact merged v2 commit is deployed and live health is proven, the architecture is frozen
-through a bounded evidence window. During that window:
+The exact merged v2 commit is deployed and live health is proven. The architecture is therefore
+frozen through a bounded evidence window. During that window:
 
 - no second US allocator, replacement portfolio architecture, or discretionary intraday PM;
 - no behavior-changing prompt, candidate, sizing, eligibility, holding, or exit-policy retune;
@@ -121,26 +121,48 @@ not increase a count. Replacing a corrected snapshot must preserve correction pr
 
 ### Current sample state
 
-As of this ruling, v2 is not deployed and the marker does not exist. These are the honest current
-counts, not placeholders:
+PR #15 was merged and deployed at exact commit
+`3c4ef7f8b823baa4bb032c76add1960fa6d5a0c7`. Live `/health` returned HTTP 200 with that exact
+commit, `paper_only=true`, the intended reasoning policy, and a healthy scheduler. The canonical
+marker is `active`. All three books are awaiting their first post-marker snapshot; these zero counts
+are the honest live state and provide no performance evidence:
 
 | Book | Evaluation state | Snapshots | Decisions | Effective decisions | Material changes | Fills | Full closes | Mature post-sell rows | Lesson applications |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| US Brain (`autonomous`) | `not_started` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| CN Brain (`china`) | `not_started` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| HK Brain (`hk`) | `not_started` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| US Brain (`autonomous`) | `awaiting_first_post_mark_snapshot` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| CN Brain (`china`) | `awaiting_first_post_mark_snapshot` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| HK Brain (`hk`) | `awaiting_first_post_mark_snapshot` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
-The deployment record below must be filled from live evidence, not inferred from Git:
+The deployment record below was captured from live evidence, not inferred from Git:
 
 | Field | Current value |
 |---|---|
-| Merged v2 SHA | not merged |
-| Deployed v2 SHA | not deployed |
-| Evaluation start | not started |
-| First eligible review session | not started |
-| 20-session checkpoint | not scheduled |
-| 40-session checkpoint | not scheduled |
-| 60-session architecture review | not scheduled |
+| Merged v2 SHA | `3c4ef7f8b823baa4bb032c76add1960fa6d5a0c7` |
+| Deployed v2 SHA | `3c4ef7f8b823baa4bb032c76add1960fa6d5a0c7` |
+| Release state | `active` |
+| Evaluation marker SHA-256 | `75d5182d55ffc7e569f50008d9293682cadf56130d42b00eaba23412e2e8585c` |
+| Evaluation start | `2026-08-11` |
+| First eligible review session | pending the first post-marker exact benchmark mark; book-specific |
+| 20-session checkpoint | each book's session 20 after its first eligible mark |
+| 40-session checkpoint | each book's session 40 after its first eligible mark |
+| 60-session architecture review | each book's session 60 after its first eligible mark |
+
+The canonical marker and the copy visible inside the service mount namespace have the same hash.
+`/api/portfolios` reports only `autonomous`, `china`, and `hk` as active portfolio brains; the
+Flagship, Heavyweight, and ETF scheduler entries are archived with no next run. Account and fill
+bytes were unchanged across cutover:
+
+| Book | `account.json` SHA-256 before/after | `fills.jsonl` SHA-256 before/after |
+|---|---|---|
+| `autonomous` | `75a954f706f9259b573d953f2f502e717fde0c17a6a5a0afd01dd9379651bfa3` | `a1d157a3dc4be429dff629c9e03bc33722568644fc158b75a70e97a5be98a36d` |
+| `china` | `b44a4974f6cbe93905fe235295f25577a068cf33eee3dff9ab5dee10d004cc98` | `a437823821ec52e261730a5c81ed4df2314de6f4de445a5cf8d409bcfb3e90cc` |
+| `hk` | `c54f156133f1b6035fa497e5a3b63ed6d0fa25be4243826d93c16873e00122f6` | `9c06db100d449429e100c16988d43847a056c78fd71aa00731262f510f69cf78` |
+
+The legacy autonomous pending target is absent from the executable path and has one recoverable,
+hash-matched quarantine receipt from scheduler startup. Authenticated Heavyweight and ETF manual-run
+routes returned HTTP 410 before any model call. `/api/portfolio_learning` reports a clean cold start:
+zero lessons, presentations, queued or executed applications, post-sell rows, and cross-market
+requests. Its live contract explicitly keeps public Mastermind AI state and authority separate.
 
 ### Legacy/pre-v2 evidence is a separate cohort
 
