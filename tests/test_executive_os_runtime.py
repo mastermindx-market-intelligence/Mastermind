@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pytest
 
@@ -157,7 +158,9 @@ def test_dispatch_assigns_worker_and_job_in_one_snapshot(tmp_path):
     assert persisted.jobs.get_job(job.job_id).status == JobStatus.RUNNING  # type: ignore[union-attr]
     assert persisted.jobs.get_job(job.job_id).assigned_worker_id == "claude-01"  # type: ignore[union-attr]
     assert persisted.jobs.get_job(job.job_id).assigned_quota_class == "fable-eligible"  # type: ignore[union-attr]
-    assert persisted.workers.get_worker("claude-01").status == WorkerStatus.BUSY  # type: ignore[union-attr]
+    # The identity summary advertises remaining capacity: another independent
+    # class is still available even though fable-eligible is busy.
+    assert persisted.workers.get_worker("claude-01").status == WorkerStatus.AVAILABLE  # type: ignore[union-attr]
     assert persisted.workers.get_worker("claude-01").active_job_id == job.job_id  # type: ignore[union-attr]
     assert (
         persisted.workers.get_worker("claude-01").quota_classes["fable-eligible"]  # type: ignore[union-attr]
@@ -411,7 +414,7 @@ def test_failed_job_releases_only_its_quota_class_and_can_requeue(tmp_path):
     worker = runtime.workers.get_worker("claude-01")
 
     assert failed.status == JobStatus.FAILED
-    assert worker is not None and worker.status == WorkerStatus.BUSY
+    assert worker is not None and worker.status == WorkerStatus.AVAILABLE
     assert worker.quota_classes["class-a"]["status"] == "AVAILABLE"
     assert worker.quota_classes["class-a"]["active_job_id"] is None
     assert worker.quota_classes["class-b"]["active_job_id"] == second.job_id
@@ -507,21 +510,24 @@ def test_omitted_quota_eligibility_defaults_without_wildcard_routing(tmp_path):
 
 def test_corrupt_snapshot_fails_closed_instead_of_resetting_state(tmp_path):
     runtime = _runtime(tmp_path)
-    runtime.store.path.parent.mkdir(parents=True)
-    runtime.store.path.write_text("{not-json", encoding="utf-8")
+    runtime.store.path.write_bytes(b"{not-sqlite")
 
     with pytest.raises(PersistenceError):
         runtime.jobs.create_job("must not overwrite corruption")
-    assert runtime.store.path.read_text(encoding="utf-8") == "{not-json"
+    assert runtime.store.path.read_bytes() == b"{not-sqlite"
 
 
-def test_unavailable_global_lock_prevents_unlocked_write(tmp_path, monkeypatch):
-    runtime = _runtime(tmp_path)
-    monkeypatch.setattr("control_plane.worker_runtime.locks.acquire", lambda *args, **kwargs: None)
-
-    with pytest.raises(PersistenceError, match="busy or its lock is unavailable"):
-        runtime.jobs.create_job("must remain unpersisted")
-    assert not runtime.store.path.exists()
+def test_unavailable_sqlite_writer_prevents_unlocked_write(tmp_path):
+    runtime = Runtime.at(tmp_path, busy_timeout_ms=0)
+    blocker = sqlite3.connect(runtime.store.path, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        with pytest.raises(PersistenceError, match="locked"):
+            runtime.jobs.create_job("must remain unpersisted")
+    finally:
+        blocker.rollback()
+        blocker.close()
+    assert runtime.jobs.list_jobs() == []
 
 
 def test_cli_round_trip_uses_the_same_persisted_state(tmp_path, capsys):

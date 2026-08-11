@@ -1,0 +1,1098 @@
+"""Durable supervisor for one isolated Executive Codex attempt.
+
+This module is deliberately a narrow composition layer.  The SQLite runtime
+owns queue/lease/transition authority, :mod:`control_plane.codex_worker` owns
+provider-process mechanics, and this supervisor makes their boundary explicit:
+
+* claim first, then launch exactly one process;
+* persist its PID/start/boot identity before marking the attempt RUNNING;
+* heartbeat while the process is live;
+* validate authority again before accepting a result;
+* persist a collection receipt before the terminal database transition; and
+* after restart, treat an absent or ambiguous process as LOST, never success.
+
+Importing this module starts no process and creates no scheduler integration.
+"""
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import json
+import os
+import pwd
+import signal
+import time
+from enum import Enum
+from pathlib import Path
+from typing import Any, Mapping, Protocol
+from uuid import uuid4
+
+from control_plane.codex_worker import (
+    CodexWorkerAdapter,
+    CollectionReceipt,
+    LaunchSpec,
+    ProcessIdentityError,
+    ProcessInspector,
+    ProcessRef,
+    ValidationReceipt,
+    WorkerRunStatus,
+)
+from control_plane.executive_authority import (
+    AuthorityDenied,
+    AuthorityPolicyError,
+    ExecutiveAuthorityPolicy,
+)
+from control_plane.executive_runtime import (
+    Attempt,
+    AttemptLease,
+    AttemptStatus,
+    Job,
+    JobPayload,
+    JobStatus,
+    Runtime,
+    RuntimeProofError,
+    StateConflict,
+)
+
+
+RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
+_ACTIVE_ATTEMPT_STATUSES = {
+    AttemptStatus.CLAIMED,
+    AttemptStatus.RUNNING,
+    AttemptStatus.CHECKPOINTED,
+    AttemptStatus.CANCEL_REQUESTED,
+}
+
+
+class SupervisorError(RuntimeProofError):
+    """The supervisor could not safely launch or accept an attempt."""
+
+
+class _ValidationCancelled(Exception):
+    """Durable cancellation won while a supervisor validation was running."""
+
+
+class ReconcileStatus(str, Enum):
+    """One restart-reconciliation outcome."""
+
+    EXPIRED_LOST = "EXPIRED_LOST"
+    MISSING_LOST = "MISSING_LOST"
+    MISSING_CANCELLED = "MISSING_CANCELLED"
+    REQUEUED = "REQUEUED"
+    LIVE_QUARANTINED = "LIVE_QUARANTINED"
+    AWAITING_LEASE_EXPIRY = "AWAITING_LEASE_EXPIRY"
+    IDENTITY_AMBIGUOUS = "IDENTITY_AMBIGUOUS"
+
+
+class ProcessPresence(str, Enum):
+    """PID/start/boot/PGID comparison result for one persisted invocation."""
+
+    LIVE = "LIVE"
+    ABSENT = "ABSENT"
+    UNKNOWN = "UNKNOWN"
+
+
+class PersistedProcessController(Protocol):
+    """Identity-safe process control seam, injectable in model-free tests."""
+
+    def presence(self, attempt: Attempt) -> ProcessPresence: ...
+
+    def absence_verified(self, attempt: Attempt) -> bool: ...
+
+    def terminate(self, attempt: Attempt) -> None: ...
+
+
+class IdentitySafeProcessController:
+    """Terminate a persisted local process group without trusting a bare PID."""
+
+    def __init__(
+        self,
+        inspector: ProcessInspector,
+        *,
+        term_grace_seconds: float = 2.0,
+        kill_grace_seconds: float = 5.0,
+        poll_seconds: float = 0.05,
+    ) -> None:
+        self.inspector = inspector
+        self.term_grace_seconds = float(term_grace_seconds)
+        self.kill_grace_seconds = float(kill_grace_seconds)
+        self.poll_seconds = float(poll_seconds)
+
+    def presence(self, attempt: Attempt) -> ProcessPresence:
+        if attempt.pid is None or attempt.pgid is None:
+            return ProcessPresence.UNKNOWN
+        if not attempt.process_start_identity or not attempt.boot_id:
+            return ProcessPresence.UNKNOWN
+        try:
+            if self.inspector.boot_session_id() != attempt.boot_id:
+                return ProcessPresence.ABSENT
+            identity, pgid = self.inspector.identity(attempt.pid)
+        except ProcessIdentityError:
+            # ProcessInspector intentionally fails closed when identity cannot be
+            # resolved.  Distinguish a truly absent PID from an extant PID whose
+            # identity is merely unreadable before authorizing LOST/requeue.
+            try:
+                os.kill(attempt.pid, 0)
+            except ProcessLookupError:
+                return ProcessPresence.ABSENT
+            except (PermissionError, OSError):
+                return ProcessPresence.UNKNOWN
+            return ProcessPresence.UNKNOWN
+        except Exception:
+            return ProcessPresence.UNKNOWN
+        if identity != attempt.process_start_identity or pgid != attempt.pgid:
+            return ProcessPresence.ABSENT
+        return ProcessPresence.LIVE
+
+    def _wait_for_absence(self, attempt: Attempt, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while True:
+            presence = self.presence(attempt)
+            group_presence = self._group_presence(attempt)
+            if (
+                presence is ProcessPresence.ABSENT
+                and group_presence is ProcessPresence.ABSENT
+            ):
+                return True
+            if (
+                presence is ProcessPresence.UNKNOWN
+                or group_presence is ProcessPresence.UNKNOWN
+            ):
+                raise SupervisorError(
+                    f"process or process-group identity became ambiguous for attempt {attempt.attempt_id}"
+                )
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(self.poll_seconds)
+
+    @staticmethod
+    def _group_presence(attempt: Attempt) -> ProcessPresence:
+        if attempt.pgid is None:
+            return ProcessPresence.UNKNOWN
+        try:
+            os.killpg(attempt.pgid, 0)
+        except ProcessLookupError:
+            return ProcessPresence.ABSENT
+        except (PermissionError, OSError):
+            return ProcessPresence.UNKNOWN
+        return ProcessPresence.LIVE
+
+    def absence_verified(self, attempt: Attempt) -> bool:
+        return (
+            self.presence(attempt) is ProcessPresence.ABSENT
+            and self._group_presence(attempt) is ProcessPresence.ABSENT
+        )
+
+    def _signal(self, attempt: Attempt, value: signal.Signals) -> bool:
+        if self.presence(attempt) is not ProcessPresence.LIVE:
+            return False
+        assert attempt.pgid is not None
+        try:
+            os.killpg(attempt.pgid, value)
+        except ProcessLookupError:
+            return False
+        except OSError as exc:
+            raise SupervisorError(
+                f"could not signal verified process group {attempt.pgid}: {exc}"
+            ) from exc
+        return True
+
+    def _signal_residual_group(
+        self, attempt: Attempt, value: signal.Signals
+    ) -> bool:
+        """Signal descendants after the verified group leader has exited.
+
+        This is used only inside one termination operation after SIGTERM was
+        sent while the full leader boot/start/PGID identity matched.  A live
+        group with the original PGID is therefore residual work that must be
+        killed before the attempt can be terminalized or requeued.
+        """
+
+        if self._group_presence(attempt) is not ProcessPresence.LIVE:
+            return False
+        assert attempt.pgid is not None
+        try:
+            os.killpg(attempt.pgid, value)
+        except ProcessLookupError:
+            return False
+        except OSError as exc:
+            raise SupervisorError(
+                f"could not signal residual process group {attempt.pgid}: {exc}"
+            ) from exc
+        return True
+
+    def terminate(self, attempt: Attempt) -> None:
+        presence = self.presence(attempt)
+        if presence is ProcessPresence.ABSENT:
+            if self._group_presence(attempt) is ProcessPresence.ABSENT:
+                return
+            raise SupervisorError(
+                f"attempt {attempt.attempt_id} leader exited before its process group"
+            )
+        if presence is not ProcessPresence.LIVE:
+            raise SupervisorError(
+                f"attempt {attempt.attempt_id} is not a verified live local process"
+            )
+        self._signal(attempt, signal.SIGTERM)
+        if self._wait_for_absence(attempt, self.term_grace_seconds):
+            return
+        # Re-resolve the full boot/start/PGID identity immediately before the
+        # destructive escalation so PID or process-group reuse is never signalled.
+        leader_presence = self.presence(attempt)
+        if leader_presence is ProcessPresence.LIVE:
+            escalated = self._signal(attempt, signal.SIGKILL)
+        elif leader_presence is ProcessPresence.ABSENT:
+            escalated = self._signal_residual_group(attempt, signal.SIGKILL)
+        else:
+            raise SupervisorError(
+                f"attempt {attempt.attempt_id} became ambiguous before SIGKILL"
+            )
+        if not escalated:
+            if self._wait_for_absence(attempt, 0):
+                return
+            raise SupervisorError(
+                f"attempt {attempt.attempt_id} could not be verified before SIGKILL"
+            )
+        if not self._wait_for_absence(attempt, self.kill_grace_seconds):
+            raise SupervisorError(
+                f"verified process group for attempt {attempt.attempt_id} survived SIGKILL"
+            )
+
+
+@dataclasses.dataclass(frozen=True)
+class ActiveRun:
+    """In-memory handle for one process whose identity is already durable."""
+
+    lease: AttemptLease = dataclasses.field(repr=False)
+    process_ref: ProcessRef
+    launch_spec: LaunchSpec
+
+
+@dataclasses.dataclass(frozen=True)
+class SupervisorReceipt:
+    job: Job
+    attempt: Attempt
+    collection: CollectionReceipt
+    collection_receipt_path: str
+    validations: tuple[ValidationReceipt, ...] = ()
+    validation_receipt_path: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "job": self.job.to_dict(),
+            "attempt": self.attempt.to_dict(),
+            "collection": _collection_to_dict(self.collection),
+            "collection_receipt_path": self.collection_receipt_path,
+            "validations": _jsonable(self.validations),
+            "validation_receipt_path": self.validation_receipt_path,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class ReconcileReceipt:
+    attempt_id: str
+    job_id: str
+    status: ReconcileStatus
+    process_was_live: bool
+    requeued: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        value = dataclasses.asdict(self)
+        value["status"] = self.status.value
+        return value
+
+
+def worker_result_schema(*, job_id: str, run_id: str, worker_id: str) -> dict[str, Any]:
+    """Return the strict final-output contract for one immutable attempt."""
+
+    string_list = {"type": "array", "items": {"type": "string"}}
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "job_id",
+            "run_id",
+            "worker_id",
+            "status",
+            "summary",
+            "completed_steps",
+            "current_state",
+            "artifacts",
+            "next_actions",
+            "errors",
+            "validations",
+        ],
+        "properties": {
+            "schema_version": {"type": "string", "const": RESULT_SCHEMA_VERSION},
+            "job_id": {"type": "string", "const": job_id},
+            "run_id": {"type": "string", "const": run_id},
+            "worker_id": {"type": "string", "const": worker_id},
+            "status": {"type": "string", "enum": ["COMPLETED", "FAILED"]},
+            "summary": {"type": "string"},
+            "completed_steps": string_list,
+            "current_state": {"type": "string"},
+            "artifacts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                },
+            },
+            "next_actions": string_list,
+            "errors": string_list,
+            "validations": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["argv", "exit_code"],
+                    "properties": {
+                        "argv": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                        },
+                        "exit_code": {"type": "integer"},
+                    },
+                },
+            },
+        },
+    }
+
+
+def _jsonable(value: Any) -> Any:
+    if dataclasses.is_dataclass(value):
+        return {field.name: _jsonable(getattr(value, field.name)) for field in dataclasses.fields(value)}
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _collection_to_dict(receipt: CollectionReceipt) -> dict[str, Any]:
+    return _jsonable(receipt)
+
+
+def _write_private_json(path: Path, value: Any) -> None:
+    """Create one owner-only, fsynced JSON receipt without overwriting evidence."""
+
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path.parent, 0o700)
+    payload = (json.dumps(value, sort_keys=True, ensure_ascii=False, indent=2) + "\n").encode(
+        "utf-8"
+    )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:  # pragma: no cover - defensive OS boundary
+                raise OSError("short write while persisting supervisor receipt")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _payload_from_output(output: Mapping[str, Any]) -> JobPayload:
+    artifacts: list[str] = []
+    for item in output.get("artifacts", []):
+        if isinstance(item, Mapping) and isinstance(item.get("path"), str):
+            artifacts.append(str(item["path"]))
+    return JobPayload(
+        summary=str(output.get("summary") or ""),
+        completed_steps=[str(item) for item in output.get("completed_steps", [])],
+        current_state=str(output.get("current_state") or ""),
+        artifacts=artifacts,
+        next_actions=[str(item) for item in output.get("next_actions", [])],
+        errors=[str(item) for item in output.get("errors", [])],
+    )
+
+
+def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
+    """Reject any model-authored validation claim.
+
+    The supervisor executes every persisted command itself before accepting
+    COMPLETED, so worker output must leave the compatibility field empty.
+    """
+
+    raw_validations = output.get("validations")
+    if not isinstance(raw_validations, list):
+        raise SupervisorError("worker result validations must be a list")
+    if raw_validations:
+        raise SupervisorError(
+            "worker result must leave validations=[]; supervisor validation is authoritative"
+        )
+    if str(output.get("status")) == "COMPLETED" and output.get("errors"):
+        raise SupervisorError("completed worker result contains errors")
+
+
+class ExecutiveSupervisor:
+    """Coordinate one durable job with one injected Codex process adapter."""
+
+    def __init__(
+        self,
+        runtime: Runtime,
+        adapter: CodexWorkerAdapter,
+        *,
+        codex_home: str | Path,
+        runs_root: str | Path | None = None,
+        worker_user: str | None = None,
+        heartbeat_interval_seconds: float | None = None,
+        inspector: ProcessInspector | None = None,
+        process_controller: PersistedProcessController | None = None,
+        validation_timeout_seconds: float = 300.0,
+        instance_id: str | None = None,
+    ) -> None:
+        self.runtime = runtime
+        self.adapter = adapter
+        self.codex_home = Path(codex_home).resolve()
+        self.runs_root = (
+            Path(runs_root).resolve()
+            if runs_root is not None
+            else runtime.store.root / "data" / "control_plane" / "runs"
+        )
+        if worker_user is None:
+            worker_user = pwd.getpwuid(os.geteuid()).pw_name
+        self.worker_user = str(worker_user)
+        default_interval = min(10.0, max(0.1, runtime.store.lease_seconds / 3))
+        self.heartbeat_interval_seconds = float(
+            default_interval
+            if heartbeat_interval_seconds is None
+            else heartbeat_interval_seconds
+        )
+        if self.heartbeat_interval_seconds <= 0:
+            raise SupervisorError("heartbeat interval must be positive")
+        self.inspector = inspector or adapter.inspector
+        self.process_controller = process_controller or IdentitySafeProcessController(
+            self.inspector
+        )
+        self.validation_timeout_seconds = float(validation_timeout_seconds)
+        if not 0.1 <= self.validation_timeout_seconds <= 3600:
+            raise SupervisorError("validation timeout must be between 0.1 and 3600 seconds")
+        self.instance_id = instance_id or f"supervisor-{uuid4().hex}"
+
+    def _job(self, job_id: str) -> Job:
+        job = self.runtime.jobs.get_job(job_id)
+        if job is None:
+            raise SupervisorError(f"job {job_id!r} does not exist")
+        return job
+
+    @staticmethod
+    def _revalidate_authority(job: Job, attempt: Attempt) -> None:
+        try:
+            decision = ExecutiveAuthorityPolicy.load().authorize(
+                job.requested_authorities,
+                worktree=job.worktree,
+                allowed_write_paths=job.allowed_write_paths,
+                validation_commands=job.validation_commands,
+            )
+        except (AuthorityDenied, AuthorityPolicyError) as exc:
+            raise SupervisorError(f"job authority no longer validates: {exc}") from exc
+        if decision.policy_sha256 != attempt.authority_policy_hash:
+            raise SupervisorError("authority policy changed after claim; result is rejected")
+
+    def _run_dir(self, attempt_id: str) -> Path:
+        return self.runs_root / attempt_id
+
+    def _write_schema(self, run_dir: Path, *, job: Job, attempt: Attempt) -> Path:
+        run_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
+        os.chmod(run_dir, 0o700)
+        input_dir = run_dir / "input"
+        input_dir.mkdir(mode=0o700)
+        schema_path = input_dir / "worker-result.schema.json"
+        _write_private_json(
+            schema_path,
+            worker_result_schema(
+                job_id=job.job_id,
+                run_id=attempt.attempt_id,
+                worker_id=attempt.worker_id,
+            ),
+        )
+        return schema_path
+
+    @staticmethod
+    def _prompt(job: Job, attempt: Attempt) -> str:
+        packet = {
+            "schema_version": "mastermind.executive_job_packet/v1",
+            "job_id": job.job_id,
+            "run_id": attempt.attempt_id,
+            "worker_id": attempt.worker_id,
+            "objective": job.objective,
+            "department": job.department,
+            "authorities": job.requested_authorities,
+            "allowed_write_paths": job.allowed_write_paths,
+            "validation_commands": job.validation_commands,
+            "base_sha": job.constraints.get("base_sha"),
+            "provider": job.constraints.get("provider"),
+            "model": job.constraints.get("model"),
+            "effort": job.constraints.get("effort"),
+            "cost_class": job.constraints.get("cost_class"),
+            "assigned_quota_class": attempt.quota_class,
+            "checkpoint": job.checkpoint,
+        }
+        return (
+            "You are the one-shot Mastermind Executive worker for the JSON job packet below.\n"
+            "Treat every authority and path as an exact allow-list. Do not push, open a PR, "
+            "merge, deploy, access credentials, call the network, or mutate financial/runtime "
+            "state. You may use read-only repository inspection and bounded edit operations "
+            "needed to write the declared paths. Do not execute or self-attest validation "
+            "commands; set validations=[] exactly. The supervisor will run every persisted "
+            "argv directly after your process exits. "
+            "Return only one JSON object matching the provided output schema; use status FAILED "
+            "and explain errors if the bounded task cannot be completed safely.\n\n"
+            + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
+        )
+
+    def _launch_spec(self, job: Job, lease: AttemptLease, schema_path: Path) -> LaunchSpec:
+        attempt = lease.attempt
+        quota = self.runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
+        if quota is None:
+            raise SupervisorError("claimed worker quota class disappeared")
+        if not job.worktree:
+            raise SupervisorError("real worker job requires an assigned isolated worktree")
+        model = quota.model or str(job.constraints.get("model") or "gpt-5.6-sol")
+        effort = quota.effort or str(job.constraints.get("effort") or "xhigh")
+        return LaunchSpec(
+            run_id=attempt.attempt_id,
+            job_id=job.job_id,
+            worker_id=attempt.worker_id,
+            workspace_path=Path(job.worktree),
+            run_dir=self._run_dir(attempt.attempt_id),
+            prompt=self._prompt(job, attempt),
+            result_schema_path=schema_path,
+            codex_home=self.codex_home,
+            authorities=tuple(job.requested_authorities),
+            model=model,
+            reasoning_effort=effort,
+            worker_user=self.worker_user,
+            expected_base_sha=str(job.constraints.get("base_sha") or "") or None,
+            allowed_artifact_paths=tuple(job.allowed_write_paths),
+            forbidden_paths=(self.runtime.store.path,),
+        )
+
+    def _fail_claim(self, lease: AttemptLease, message: str) -> Job:
+        return self.runtime.attempts.fail_attempt(
+            lease.attempt.attempt_id,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+            payload=JobPayload(
+                summary="Executive Codex launch failed",
+                current_state="failed before accepted result",
+                errors=[message[:3000]],
+            ),
+        )
+
+    async def start_job(self, job_id: str) -> ActiveRun:
+        """Claim and launch one job, persisting ProcessRef before RUNNING."""
+
+        lease = self.runtime.broker.claim(job_id, lease_owner=self.instance_id)
+        if lease is None:
+            raise SupervisorError(f"no eligible worker capacity for {job_id}")
+        job = self._job(job_id)
+        process_ref: ProcessRef | None = None
+        try:
+            schema_path = self._write_schema(
+                self._run_dir(lease.attempt.attempt_id), job=job, attempt=lease.attempt
+            )
+            spec = self._launch_spec(job, lease, schema_path)
+            process_ref = await self.adapter.start(spec)
+            self.runtime.attempts.record_process(
+                lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token,
+                pid=process_ref.pid,
+                pgid=process_ref.pgid,
+                process_start_identity=process_ref.process_start_identity,
+                boot_id=process_ref.boot_session_id,
+                provider_session_id=process_ref.provider_session_id,
+                stdout_path=process_ref.stdout_path,
+                stderr_path=process_ref.stderr_path,
+                result_path=process_ref.result_path,
+                launch_metadata={
+                    "launch_nonce": process_ref.launch_nonce,
+                    "base_sha": process_ref.base_sha,
+                    "binary": _jsonable(process_ref.binary),
+                    "authority_policy_hash": lease.attempt.authority_policy_hash,
+                    "authorities": job.requested_authorities,
+                    "quota_class": lease.attempt.quota_class,
+                },
+            )
+            self.runtime.attempts.mark_running(
+                lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token,
+            )
+            return ActiveRun(lease=lease, process_ref=process_ref, launch_spec=spec)
+        except Exception as exc:
+            if process_ref is not None:
+                try:
+                    await self.adapter.cancel(process_ref, "supervisor launch persistence failed")
+                except Exception as cancel_exc:
+                    raise SupervisorError(
+                        f"launch failed and process could not be safely cancelled: {cancel_exc}"
+                    ) from exc
+            try:
+                self._fail_claim(lease, f"{type(exc).__name__}: {exc}")
+            except RuntimeProofError:
+                # Preserve the original launch error.  A reconciler will fence
+                # an attempt whose lease changed before cleanup.
+                pass
+            if isinstance(exc, SupervisorError):
+                raise
+            raise SupervisorError(f"Codex launch failed: {type(exc).__name__}: {exc}") from exc
+
+    async def _collect_with_heartbeats(self, active: ActiveRun) -> CollectionReceipt:
+        task = asyncio.create_task(self.adapter.collect_result(active.process_ref))
+        attempt = active.lease.attempt
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {task}, timeout=self.heartbeat_interval_seconds
+                )
+                if task in done:
+                    return task.result()
+                job = self._job(attempt.job_id)
+                if job.status == JobStatus.CANCEL_REQUESTED:
+                    await self.adapter.cancel(active.process_ref, "durable cancellation request")
+                    return await task
+                self.runtime.attempts.heartbeat_attempt(
+                    attempt.attempt_id,
+                    fence_generation=attempt.fence_generation,
+                    lease_token=active.lease.lease_token,
+                )
+        except Exception:
+            if not task.done():
+                try:
+                    await self.adapter.cancel(active.process_ref, "supervisor ownership lost")
+                finally:
+                    await asyncio.gather(task, return_exceptions=True)
+            raise
+
+    def _persist_collection(self, active: ActiveRun, receipt: CollectionReceipt) -> Path:
+        path = active.launch_spec.run_dir / "output" / "collection-receipt.json"
+        _write_private_json(path, _collection_to_dict(receipt))
+        return path
+
+    async def _collect_validation_with_heartbeats(
+        self,
+        active: ActiveRun,
+        argv: list[str],
+    ) -> ValidationReceipt:
+        """Run one exact argv while retaining the same fenced lease ownership."""
+
+        attempt = active.lease.attempt
+        task = asyncio.create_task(
+            self.adapter.run_validation_argv(
+                active.launch_spec,
+                tuple(argv),
+                timeout_seconds=self.validation_timeout_seconds,
+            )
+        )
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {task}, timeout=self.heartbeat_interval_seconds
+                )
+                if task in done:
+                    return task.result()
+                job = self._job(attempt.job_id)
+                if job.status == JobStatus.CANCEL_REQUESTED:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                    raise _ValidationCancelled
+                self.runtime.attempts.heartbeat_attempt(
+                    attempt.attempt_id,
+                    fence_generation=attempt.fence_generation,
+                    lease_token=active.lease.lease_token,
+                )
+        except (_ValidationCancelled, StateConflict):
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            raise
+        except Exception as exc:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            raise SupervisorError(
+                f"supervisor validation could not run: {type(exc).__name__}: {exc}"
+            ) from exc
+
+    def _persist_validations(
+        self,
+        active: ActiveRun,
+        receipts: tuple[ValidationReceipt, ...],
+    ) -> Path:
+        path = active.launch_spec.run_dir / "output" / "supervisor-validation-receipt.json"
+        _write_private_json(
+            path,
+            {
+                "attempt_id": active.lease.attempt.attempt_id,
+                "job_id": active.lease.attempt.job_id,
+                "commands": _jsonable(receipts),
+            },
+        )
+        return path
+
+    async def _run_supervisor_validations(
+        self,
+        active: ActiveRun,
+        job: Job,
+    ) -> tuple[tuple[ValidationReceipt, ...], Path, str | None]:
+        receipts: list[ValidationReceipt] = []
+        for argv in job.validation_commands:
+            receipt = await self._collect_validation_with_heartbeats(active, argv)
+            receipts.append(receipt)
+            if (
+                receipt.exit_code != 0
+                or receipt.timed_out
+                or receipt.error is not None
+            ):
+                break
+        persisted = tuple(receipts)
+        path = self._persist_validations(active, persisted)
+        if len(persisted) != len(job.validation_commands):
+            return (
+                persisted,
+                path,
+                f"supervisor validation sequence stopped early; receipt: {path}",
+            )
+        failed = next(
+            (
+                item
+                for item in persisted
+                if item.exit_code != 0 or item.timed_out or item.error is not None
+            ),
+            None,
+        )
+        if failed is not None:
+            detail = failed.error or f"exit code {failed.exit_code}"
+            return (
+                persisted,
+                path,
+                f"supervisor validation failed for {list(failed.argv)!r}: {detail}; receipt: {path}",
+            )
+        return persisted, path, None
+
+    async def _terminalize(
+        self, active: ActiveRun, receipt: CollectionReceipt, receipt_path: Path
+    ) -> tuple[Job, tuple[ValidationReceipt, ...], Path | None]:
+        attempt = active.lease.attempt
+        fence = attempt.fence_generation
+        token = active.lease.lease_token
+        if receipt.result.exit_code is None:
+            raise SupervisorError("Codex process has no terminal exit code")
+        self.runtime.attempts.record_process_exit(
+            attempt.attempt_id,
+            fence_generation=fence,
+            lease_token=token,
+            exit_code=receipt.result.exit_code,
+            result_path=receipt.process_ref.result_path,
+            provider_session_id=receipt.result.provider_session_id,
+        )
+        job = self._job(attempt.job_id)
+        if job.status == JobStatus.CANCEL_REQUESTED:
+            cancelled = self.runtime.attempts.acknowledge_cancel(
+                attempt.attempt_id, fence_generation=fence, lease_token=token
+            )
+            return cancelled, (), None
+        output = receipt.result.structured_output
+        if receipt.result.status == WorkerRunStatus.SUCCEEDED and isinstance(output, Mapping):
+            validation_receipts: tuple[ValidationReceipt, ...] = ()
+            validation_path: Path | None = None
+            try:
+                self._revalidate_authority(job, self.runtime.attempts.get_attempt(attempt.attempt_id) or attempt)
+                _validate_output_scope(job, output)
+                payload = _payload_from_output(output)
+                if str(output.get("status")) == "COMPLETED":
+                    (
+                        validation_receipts,
+                        validation_path,
+                        validation_error,
+                    ) = await self._run_supervisor_validations(active, job)
+                    if validation_error is not None:
+                        raise SupervisorError(validation_error)
+                    # Cancellation can win while the final direct argv is
+                    # exiting; honour it before checkpoint/completion.
+                    job = self._job(attempt.job_id)
+                    if job.status == JobStatus.CANCEL_REQUESTED:
+                        cancelled = self.runtime.attempts.acknowledge_cancel(
+                            attempt.attempt_id,
+                            fence_generation=fence,
+                            lease_token=token,
+                        )
+                        return cancelled, validation_receipts, validation_path
+                self.runtime.attempts.checkpoint_attempt(
+                    attempt.attempt_id,
+                    fence_generation=fence,
+                    lease_token=token,
+                    payload=payload,
+                )
+                if str(output.get("status")) == "COMPLETED":
+                    completed = self.runtime.attempts.complete_attempt(
+                        attempt.attempt_id,
+                        fence_generation=fence,
+                        lease_token=token,
+                        payload=payload,
+                    )
+                    return completed, validation_receipts, validation_path
+                failed = self.runtime.attempts.fail_attempt(
+                    attempt.attempt_id,
+                    fence_generation=fence,
+                    lease_token=token,
+                    payload=payload,
+                )
+                return failed, validation_receipts, validation_path
+            except _ValidationCancelled:
+                cancelled = self.runtime.attempts.acknowledge_cancel(
+                    attempt.attempt_id,
+                    fence_generation=fence,
+                    lease_token=token,
+                )
+                return cancelled, validation_receipts, validation_path
+            except StateConflict:
+                # A concurrent cancel is the only stale-state transition this
+                # owner may acknowledge.  Fence/adoption/expiry races must
+                # propagate instead of being converted with a stale token.
+                current = self._job(attempt.job_id)
+                if current.status == JobStatus.CANCEL_REQUESTED:
+                    cancelled = self.runtime.attempts.acknowledge_cancel(
+                        attempt.attempt_id,
+                        fence_generation=fence,
+                        lease_token=token,
+                    )
+                    return cancelled, validation_receipts, validation_path
+                raise
+            except SupervisorError as exc:
+                current = self._job(attempt.job_id)
+                if current.status == JobStatus.CANCEL_REQUESTED:
+                    cancelled = self.runtime.attempts.acknowledge_cancel(
+                        attempt.attempt_id,
+                        fence_generation=fence,
+                        lease_token=token,
+                    )
+                    return cancelled, validation_receipts, validation_path
+                try:
+                    failed = self.runtime.attempts.fail_attempt(
+                        attempt.attempt_id,
+                        fence_generation=fence,
+                        lease_token=token,
+                        payload=JobPayload(
+                            summary="Worker result rejected",
+                            current_state=f"collection receipt: {receipt_path}",
+                            errors=[str(exc)],
+                        ),
+                    )
+                except StateConflict:
+                    current = self._job(attempt.job_id)
+                    if current.status != JobStatus.CANCEL_REQUESTED:
+                        raise
+                    failed = self.runtime.attempts.acknowledge_cancel(
+                        attempt.attempt_id,
+                        fence_generation=fence,
+                        lease_token=token,
+                    )
+                return failed, validation_receipts, validation_path
+        failed = self.runtime.attempts.fail_attempt(
+            attempt.attempt_id,
+            fence_generation=fence,
+            lease_token=token,
+            payload=JobPayload(
+                summary="Codex worker did not return an accepted result",
+                current_state=f"collection receipt: {receipt_path}",
+                errors=[receipt.result.error or receipt.result.status.value],
+            ),
+        )
+        return failed, (), None
+
+    async def finish_job(self, active: ActiveRun) -> SupervisorReceipt:
+        receipt = await self._collect_with_heartbeats(active)
+        receipt_path = self._persist_collection(active, receipt)
+        job, validations, validation_path = await self._terminalize(
+            active, receipt, receipt_path
+        )
+        attempt = self.runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+        if attempt is None:  # pragma: no cover - FK and transaction invariants
+            raise SupervisorError("terminal attempt disappeared")
+        return SupervisorReceipt(
+            job=job,
+            attempt=attempt,
+            collection=receipt,
+            collection_receipt_path=str(receipt_path),
+            validations=validations,
+            validation_receipt_path=(
+                str(validation_path) if validation_path is not None else None
+            ),
+        )
+
+    async def run_once(self, job_id: str) -> SupervisorReceipt:
+        """Claim, execute, validate, and terminalize exactly one queued job."""
+
+        return await self.finish_job(await self.start_job(job_id))
+
+    def _maybe_requeue(self, job_id: str) -> bool:
+        job = self._job(job_id)
+        if job.status != JobStatus.LOST or job.attempt_count >= job.attempt_limit:
+            return False
+        self.runtime.jobs.requeue_job(job_id)
+        return True
+
+    def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
+        """Inspect durable nonterminal attempts after a supervisor restart.
+
+        A live local child cannot be reconstructed because the in-memory JSONL
+        parser was lost.  It is identity-safely terminated and verified absent
+        before any fence rotation, cancellation acknowledgement, LOST state, or
+        requeue.  Ambiguous and provider-only identities remain quarantined.
+        """
+
+        outcomes: list[ReconcileReceipt] = []
+        for attempt in self.runtime.attempts.list_attempts():
+            if attempt.status not in _ACTIVE_ATTEMPT_STATUSES:
+                continue
+            presence = self.process_controller.presence(attempt)
+            process_was_live = presence is ProcessPresence.LIVE
+            if process_was_live:
+                self.process_controller.terminate(attempt)
+                if not self.process_controller.absence_verified(attempt):
+                    raise SupervisorError(
+                        f"attempt {attempt.attempt_id} remained live or ambiguous after termination"
+                    )
+                presence = ProcessPresence.ABSENT
+            elif (
+                presence is ProcessPresence.ABSENT
+                and not self.process_controller.absence_verified(attempt)
+            ):
+                presence = ProcessPresence.UNKNOWN
+            if presence is ProcessPresence.UNKNOWN:
+                outcomes.append(
+                    ReconcileReceipt(
+                        attempt_id=attempt.attempt_id,
+                        job_id=attempt.job_id,
+                        status=ReconcileStatus.IDENTITY_AMBIGUOUS,
+                        process_was_live=process_was_live,
+                    )
+                )
+                continue
+
+            # Reload after OS inspection.  A concurrent terminal mutation wins;
+            # never infer or overwrite it from the stale pre-inspection row.
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if current is None or current.status not in _ACTIVE_ATTEMPT_STATUSES:
+                continue
+            expired = self.runtime.attempts.reconcile_expired(
+                attempt_id=current.attempt_id
+            )
+            if expired:
+                expired_attempt = expired[0]
+                job = self._job(expired_attempt.job_id)
+                requeued = requeue_lost and self._maybe_requeue(job.job_id)
+                cancelled = job.status == JobStatus.CANCELLED
+                outcomes.append(
+                    ReconcileReceipt(
+                        attempt_id=expired_attempt.attempt_id,
+                        job_id=expired_attempt.job_id,
+                        status=(
+                            ReconcileStatus.MISSING_CANCELLED
+                            if cancelled
+                            else (
+                                ReconcileStatus.REQUEUED
+                                if requeued
+                                else ReconcileStatus.EXPIRED_LOST
+                            )
+                        ),
+                        process_was_live=process_was_live,
+                        requeued=requeued,
+                    )
+                )
+                continue
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if current is None or current.status not in _ACTIVE_ATTEMPT_STATUSES:
+                continue
+
+            if current.pid is None and current.provider_session_id is None:
+                outcomes.append(
+                    ReconcileReceipt(
+                        attempt_id=current.attempt_id,
+                        job_id=current.job_id,
+                        status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                        process_was_live=process_was_live,
+                    )
+                )
+                continue
+            try:
+                adopted = self.runtime.attempts.adopt_attempt(
+                    current.attempt_id,
+                    expected_fence_generation=current.fence_generation,
+                    lease_owner=self.instance_id,
+                )
+                if current.status == AttemptStatus.CANCEL_REQUESTED:
+                    self.runtime.attempts.acknowledge_cancel(
+                        current.attempt_id,
+                        fence_generation=adopted.attempt.fence_generation,
+                        lease_token=adopted.lease_token,
+                    )
+                    status = ReconcileStatus.MISSING_CANCELLED
+                    requeued = False
+                else:
+                    self.runtime.attempts.mark_lost(
+                        current.attempt_id,
+                        fence_generation=adopted.attempt.fence_generation,
+                        lease_token=adopted.lease_token,
+                        reason="process identity absent during supervisor restart",
+                        verified_process_absent=True,
+                    )
+                    requeued = requeue_lost and self._maybe_requeue(current.job_id)
+                    status = ReconcileStatus.REQUEUED if requeued else ReconcileStatus.MISSING_LOST
+            except StateConflict:
+                # Lease expiry or another reconciler may win after inspection.
+                # Only reconcile the process identity already proven absent.
+                newly_expired = self.runtime.attempts.reconcile_expired(
+                    attempt_id=current.attempt_id
+                )
+                if not newly_expired:
+                    raise
+                requeued = requeue_lost and self._maybe_requeue(current.job_id)
+                status = ReconcileStatus.REQUEUED if requeued else ReconcileStatus.EXPIRED_LOST
+            outcomes.append(
+                ReconcileReceipt(
+                    attempt_id=current.attempt_id,
+                    job_id=current.job_id,
+                    status=status,
+                    process_was_live=process_was_live,
+                    requeued=requeued,
+                )
+            )
+        return outcomes
+
+
+__all__ = [
+    "ActiveRun",
+    "ExecutiveSupervisor",
+    "IdentitySafeProcessController",
+    "PersistedProcessController",
+    "ProcessPresence",
+    "ReconcileReceipt",
+    "ReconcileStatus",
+    "RESULT_SCHEMA_VERSION",
+    "SupervisorError",
+    "SupervisorReceipt",
+    "worker_result_schema",
+]

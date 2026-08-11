@@ -1,4 +1,4 @@
-"""Operator CLI for the local Executive OS Phase 1A runtime proof.
+"""Compatibility operator CLI for the durable Executive OS runtime.
 
 Run from the repository root with ``python -m scripts.executive_os_phase1a``.
 No command in this module launches an AI provider or touches portfolio state.
@@ -49,12 +49,18 @@ def _payload(args: argparse.Namespace) -> JobPayload:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Persist and inspect the local Mastermind Executive OS Phase 1A state machine."
+        description=(
+            "Operate the Mastermind Executive OS compatibility state machine "
+            "backed by durable SQLite."
+        )
     )
     parser.add_argument(
         "--root",
         type=Path,
-        help="State root override; writes jobs/executive_os_phase1a/state.json beneath it.",
+        help=(
+            "Repository/state root override; the durable database is "
+            "data/control_plane/executive.sqlite3 beneath it."
+        ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

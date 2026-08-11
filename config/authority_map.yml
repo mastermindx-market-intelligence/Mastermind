@@ -30,6 +30,36 @@
 # changing this flag to its set/unset state may cause.
 # 'authority_level' is the minimum level required to execute that effect.
 
+# EXECUTIVE WORKER POLICY
+# -----------------------
+# A0-A7 remains the portfolio effect taxonomy below.  This separate section is
+# read by the Executive OS worker path before job creation and again before a
+# claim.  The Phase 1B code accepts exactly the four allowed capabilities shown
+# here; YAML alone cannot expand the grant.  Missing, unknown, or ambiguous
+# capabilities fail closed.
+executive_worker_policy:
+  schema_version: 1
+  allowed_capabilities:
+    - READ
+    - RESEARCH
+    - WRITE_BRANCH
+    - RUN_TESTS
+  denied_capabilities:
+    - OPEN_PR
+    - MERGE
+    - DEPLOY
+    - SERVICE_CONTROL
+    - CAPITAL_EXECUTION
+    - BILLING
+    - CREDENTIAL_ADMIN
+    - PUSH_BRANCH
+    - CROSS_REPO_PUBLISH
+    - PAPER_STATE_MUTATION
+    - DATA_DELETE
+  scope_requirements:
+    WRITE_BRANCH: assigned_workspace_and_declared_paths
+    RUN_TESTS: declared_argv_commands
+
 # ───────────────────────────────────────────────────────────────────────────────
 # FLAGS
 # ───────────────────────────────────────────────────────────────────────────────
