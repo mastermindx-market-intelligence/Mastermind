@@ -44,6 +44,8 @@ data/posture/
 data/deploy_lag.json
 catboost_info/
 data/portfolio_watch/
+data/governance/
+data/locks/
 
 # Session-local configuration, archives, and credential-bearing backups.
 .claude/launch.json
