@@ -85,7 +85,7 @@ from typing import NamedTuple
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SRC = _ROOT / "vendor" / "macro_src"            # the dedicated checkout (gitignored)
-_REMOTE = "https://github.com/chriswong6031-creator/macro.git"
+_REMOTE = "https://github.com/mastermindx-market-intelligence/macro.git"
 # cone-mode sparse set: `site` alone misses data/regime/latest.json (anchor 2).
 # engine/ + lib/ are LOAD-BEARING: the bot imports the macro analyzer as a library
 # (CLAUDE.md contract; loop/harness.py does `from engine import active_alloc, validation`,
