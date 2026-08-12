@@ -554,6 +554,21 @@ def test_shell_attribute_parsers_bind_the_requested_key_and_native_prefix() -> N
         assert 'sub(/^[^:]*:[[:space:]]*/, "")' not in source
 
 
+def test_bootstrap_uses_supported_user_identity_and_disable_operations() -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+
+    assert '-create "/Users/$name" GeneratedUID' not in source
+    assert 'read_attribute "/Users/$name" GeneratedUID' in source
+    assert (
+        '/usr/bin/pwpolicy -n /Local/Default -u "$name" -disableuser' in source
+    )
+    assert "ensure_authentication_disabled \"$name\"" in source
+    assert "assert_reviewed_authentication_authority \"$name\"" in source
+    assert "eDSAuthMethodNotSupported" in source
+    assert '"$status" -eq 11' in source
+    assert '"$state" = needs_disable' in source
+
+
 def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
     import pytest
 
