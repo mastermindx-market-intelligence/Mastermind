@@ -60,6 +60,12 @@ _TERMINAL_JOB_STATES = {
 }
 _ASSIGNMENT_SEAL_SCHEMA = "mastermind.executive_assignment_seal/v1"
 _WORKSPACE_ROTATION_SCHEMA = "mastermind.executive_workspace_rotation/v1"
+_REVIEWED_MACOS_ACCOUNT_GROUPS = {
+    "everyone": 12,
+    "localaccounts": 61,
+    "_lpoperator": 100,
+    "com.apple.access_disabled": 396,
+}
 
 
 class AcceptanceError(RuntimeError):
@@ -239,9 +245,20 @@ def _validate_raw_worker_probe_payload(
     expected_labels: set[str],
     worker_uid: int,
     worker_gid: int,
+    expected_supplementary_gids: set[int],
     expect_access: bool,
 ) -> None:
     supplementary = value.get("supplementary_gids")
+    supplementary_valid = isinstance(supplementary, list) and all(
+        type(group_id) is int for group_id in supplementary
+    )
+    observed_supplementary = (
+        set(supplementary) if supplementary_valid else set()
+    )
+    expected_vectors = {
+        frozenset(expected_supplementary_gids),
+        frozenset(expected_supplementary_gids - {worker_gid}),
+    }
     if (
         value.get("schema_version")
         != "mastermind.executive_raw_worker_path_probe/v1"
@@ -249,9 +266,9 @@ def _validate_raw_worker_probe_payload(
         or value.get("real_uid") != worker_uid
         or value.get("effective_gid") != worker_gid
         or value.get("real_gid") != worker_gid
-        or not isinstance(supplementary, list)
-        or any(not isinstance(group_id, int) for group_id in supplementary)
-        or set(supplementary) - {worker_gid}
+        or not supplementary_valid
+        or supplementary != sorted(observed_supplementary)
+        or frozenset(observed_supplementary) not in expected_vectors
     ):
         raise AcceptanceError("raw assignment probe used the wrong worker principal")
     results = value.get("results")
@@ -502,6 +519,41 @@ def _validate_protected_membership_snapshot(
     return effective
 
 
+def _validate_service_directory_group_sets(
+    *,
+    system_group_gids: Mapping[str, int],
+    control_groups: Sequence[int],
+    worker_groups: Sequence[int],
+    control_gid: int,
+    worker_gid: int,
+) -> set[int]:
+    if dict(system_group_gids) != _REVIEWED_MACOS_ACCOUNT_GROUPS:
+        raise AcceptanceError("reviewed macOS system group identities drifted")
+    common = {
+        _REVIEWED_MACOS_ACCOUNT_GROUPS["everyone"],
+        _REVIEWED_MACOS_ACCOUNT_GROUPS["localaccounts"],
+        _REVIEWED_MACOS_ACCOUNT_GROUPS["_lpoperator"],
+    }
+    access_disabled_gid = _REVIEWED_MACOS_ACCOUNT_GROUPS[
+        "com.apple.access_disabled"
+    ]
+    expected_control = common | {control_gid, worker_gid}
+    expected_worker = common | {worker_gid}
+    observed_control = set(control_groups)
+    observed_worker = set(worker_groups)
+    if observed_control not in (
+        expected_control,
+        expected_control | {access_disabled_gid},
+    ):
+        raise AcceptanceError("control account directory group set drifted")
+    if observed_worker not in (
+        expected_worker,
+        expected_worker | {access_disabled_gid},
+    ):
+        raise AcceptanceError("worker account directory group set drifted")
+    return observed_worker
+
+
 def _numeric_directory_census(
     record_type: str, attribute: str, *, label: str
 ) -> dict[str, int]:
@@ -594,6 +646,7 @@ class Acceptance:
         self.helper_pid: int | None = None
         self.nonexecutive_disabled_before: str | None = None
         self.protected_group_effective: dict[str, list[str]] = {}
+        self.worker_directory_gids: set[int] | None = None
 
     def _service_environment(self, user: str, home: Path) -> list[str]:
         return [
@@ -935,11 +988,14 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             label="raw worker-UID assignment path probe",
         )
         value = _json_output(completed, label="raw worker-UID assignment path probe")
+        if self.worker_directory_gids is None:
+            raise AcceptanceError("worker directory group census was not completed")
         _validate_raw_worker_probe_payload(
             value,
             expected_labels=set(paths),
             worker_uid=self.worker_identity.pw_uid,
             worker_gid=self.worker_group.gr_gid,
+            expected_supplementary_gids=self.worker_directory_gids,
             expect_access=expect_access,
         )
         return value
@@ -1053,14 +1109,24 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         if self.ops_group.gr_gid not in operator_groups:
             raise AcceptanceError("operator is not in the reviewed Executive ops group")
-        if set(
-            os.getgrouplist(CONTROL_USER, self.control_identity.pw_gid)
-        ) != {self.control_group.gr_gid, self.worker_group.gr_gid}:
-            raise AcceptanceError("control account supplementary groups drifted")
-        if set(
-            os.getgrouplist(WORKER_USER, self.worker_identity.pw_gid)
-        ) != {self.worker_group.gr_gid}:
-            raise AcceptanceError("worker account has a supplementary group")
+        try:
+            system_group_gids = {
+                name: grp.getgrnam(name).gr_gid
+                for name in _REVIEWED_MACOS_ACCOUNT_GROUPS
+            }
+        except KeyError as exc:
+            raise AcceptanceError("reviewed macOS system group is missing") from exc
+        self.worker_directory_gids = _validate_service_directory_group_sets(
+            system_group_gids=system_group_gids,
+            control_groups=os.getgrouplist(
+                CONTROL_USER, self.control_identity.pw_gid
+            ),
+            worker_groups=os.getgrouplist(
+                WORKER_USER, self.worker_identity.pw_gid
+            ),
+            control_gid=self.control_group.gr_gid,
+            worker_gid=self.worker_group.gr_gid,
+        )
         membership_snapshot = _live_directory_membership_snapshot(
             operator_user=self.operator_user
         )

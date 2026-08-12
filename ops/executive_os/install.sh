@@ -362,7 +362,8 @@ valid_uuid() {
 }
 
 sorted_words() {
-  /bin/echo "$1" | /usr/bin/awk '{for (index=1; index<=NF; index++) print $index}' \
+  /bin/echo "$1" \
+    | /usr/bin/awk '{for (field_number=1; field_number<=NF; field_number++) print $field_number}' \
     | /usr/bin/sort -u | /usr/bin/tr '\n' ' ' | /usr/bin/sed 's/[[:space:]]*$//'
 }
 
