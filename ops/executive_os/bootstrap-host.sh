@@ -85,6 +85,54 @@ sorted_words() {
     | /usr/bin/sort -u | /usr/bin/tr '\n' ' ' | /usr/bin/sed 's/[[:space:]]*$//'
 }
 
+assert_authentication_disabled() {
+  local name="$1"
+  local authority authority_err authority_error authority_out authority_status
+  local expected observed probe status
+  authority_out="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stdout.XXXXXX)"
+  authority_err="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stderr.XXXXXX)"
+  if LC_ALL=C LANG=C /usr/bin/dscl . -read "/Users/$name" AuthenticationAuthority \
+    >"$authority_out" 2>"$authority_err"; then
+    authority_status=0
+  else
+    authority_status=$?
+  fi
+  authority="$(/bin/cat "$authority_out")"
+  authority_error="$(/bin/cat "$authority_err")"
+  /bin/rm -f -- "$authority_out" "$authority_err"
+  [ "$authority_status" -eq 0 ] || {
+    /bin/echo "could not inspect the authentication authority for $name" >&2
+    exit 65
+  }
+  case "$authority|$authority_error" in
+    '|No such key: AuthenticationAuthority') authority='' ;;
+    'AuthenticationAuthority: ;DisabledUser;|') authority=';DisabledUser;' ;;
+    *)
+      /bin/echo "service account $name has an unreadable authentication authority" >&2
+      exit 65
+      ;;
+  esac
+  case "$authority" in
+    ''|';DisabledUser;') ;;
+    *)
+      /bin/echo "service account $name has an unreviewed authentication authority" >&2
+      exit 65
+      ;;
+  esac
+  probe="$(/usr/bin/uuidgen)"
+  if observed="$(LC_ALL=C LANG=C /usr/bin/dscl . -authonly "$name" "$probe" 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+  expected='<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)
+Authentication for node /Local/Default failed. (-14167, eDSAuthAccountDisabled)'
+  [ "$status" -eq 87 ] && [ "$observed" = "$expected" ] || {
+    /bin/echo "service account $name is not authentication-disabled" >&2
+    exit 65
+  }
+}
+
 ensure_numeric_unused() {
   local record_type="$1"
   local attribute="$2"
@@ -180,14 +228,11 @@ ensure_user() {
       /bin/echo "existing user $name does not have a disabled password" >&2
       exit 65
     }
-    [ "$(read_attribute "/Users/$name" AuthenticationAuthority)" = ";DisabledUser;" ] || {
-        /bin/echo "existing user $name is not authentication-disabled" >&2
-        exit 65
-    }
     valid_uuid "$(read_attribute "/Users/$name" GeneratedUID)" || {
       /bin/echo "existing user $name has no valid GeneratedUID" >&2
       exit 65
     }
+    assert_authentication_disabled "$name"
     return
   fi
   /usr/bin/dscl . -create "/Users/$name"
@@ -198,8 +243,8 @@ ensure_user() {
   /usr/bin/dscl . -create "/Users/$name" UserShell /usr/bin/false
   /usr/bin/dscl . -create "/Users/$name" IsHidden 1
   /usr/bin/dscl . -create "/Users/$name" Password '*'
-  /usr/bin/dscl . -create "/Users/$name" AuthenticationAuthority ';DisabledUser;'
   /usr/bin/dscl . -create "/Users/$name" GeneratedUID "$(/usr/bin/uuidgen)"
+  assert_authentication_disabled "$name"
 }
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
