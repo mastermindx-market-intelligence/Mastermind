@@ -242,21 +242,42 @@ verify_installed_runtime() {
 ensure_root_directory() {
   local path="$1"
   local mode="$2"
+  local normalized_mode observed_owner observed_group observed_mode observed_permissions
+  normalized_mode="${mode#0}"
   if [ -e "$path" ] || [ -L "$path" ]; then
     [ -d "$path" ] && [ ! -L "$path" ] || {
       /bin/echo "required directory is symlinked or has the wrong type: $path" >&2
       return 1
     }
-    [ "$(/usr/bin/stat -f '%u' "$path")" = "0" ] || {
-      /bin/echo "required directory is not root-owned: $path" >&2
-      return 1
-    }
   else
     /usr/bin/install -d -o root -g wheel -m "$mode" "$path"
   fi
-  /bin/chmod -N "$path"
-  /usr/sbin/chown root:wheel "$path"
-  /bin/chmod "$mode" "$path"
+
+  observed_owner="$(/usr/bin/stat -f '%u' "$path")"
+  observed_group="$(/usr/bin/stat -f '%g' "$path")"
+  observed_mode="$(/usr/bin/stat -f '%Lp' "$path")"
+  observed_permissions="$(/usr/bin/stat -f '%Sp' "$path")"
+
+  # Some SIP-managed macOS ancestors reject chmod -N even when they have no
+  # ACL. Do not mutate already-compliant metadata; clear or normalize only the
+  # individual property that actually drifted.
+  case "$observed_permissions" in
+    *+) /bin/chmod -N "$path" ;;
+  esac
+  if [ "$observed_owner:$observed_group" != "0:0" ]; then
+    /usr/sbin/chown root:wheel "$path"
+  fi
+  if [ "$observed_mode" != "$normalized_mode" ]; then
+    /bin/chmod "$mode" "$path"
+  fi
+
+  [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "0:0:$normalized_mode" ] || {
+    /bin/echo "required directory metadata could not be normalized: $path" >&2
+    return 1
+  }
+  case "$(/usr/bin/stat -f '%Sp' "$path")" in
+    *+) /bin/echo "required directory ACL could not be cleared: $path" >&2; return 1 ;;
+  esac
 }
 
 assert_runtime_not_in_use() {
