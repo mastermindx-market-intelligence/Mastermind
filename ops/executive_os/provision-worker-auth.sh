@@ -67,11 +67,30 @@ for absolute_path in "$PROVIDER_HOME" "$CODEX_BINARY"; do
 done
 
 read_dscl_attribute() {
-  /usr/bin/dscl . -read "$1" "$2" 2>/dev/null \
-    | /usr/bin/awk '
-        NR == 1 {sub(/^[^:]*:[[:space:]]*/, ""); value=$0; next}
+  local record="$1"
+  local attribute="$2"
+  LC_ALL=C LANG=C /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
+    | /usr/bin/awk -v attribute="$attribute" '
+        NR == 1 {
+          standard=attribute ":"
+          native="dsAttrTypeNative:" attribute ":"
+          if (index($0, standard) == 1) {
+            value=substr($0, length(standard) + 1)
+          } else if (index($0, native) == 1) {
+            value=substr($0, length(native) + 1)
+          } else {
+            malformed=1
+            next
+          }
+          sub(/^[[:space:]]*/, "", value)
+          next
+        }
         {value=value " " $0}
-        END {gsub(/^[[:space:]]+|[[:space:]]+$/, "", value); print value}
+        END {
+          if (NR == 0 || malformed) exit 65
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+          print value
+        }
       '
 }
 
