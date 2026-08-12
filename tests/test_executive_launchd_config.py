@@ -516,6 +516,44 @@ def test_disabled_authentication_policy_parser_is_exact() -> None:
         _authentication_authority_values(77, b"", b"permission denied\n")
 
 
+def test_directory_attribute_parser_accepts_standard_and_native_keys() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _parse_directory_attribute,
+    )
+
+    assert _parse_directory_attribute("UniqueID", b"UniqueID: 450\n") == "450"
+    assert (
+        _parse_directory_attribute("IsHidden", b"dsAttrTypeNative:IsHidden: 1\n")
+        == "1"
+    )
+    assert (
+        _parse_directory_attribute(
+            "RealName", b"RealName:\n _mastermind_exec service account\n"
+        )
+        == "_mastermind_exec service account"
+    )
+    with pytest.raises(AcceptanceError, match="wrong key"):
+        _parse_directory_attribute("IsHidden", b"Different:IsHidden: 1\n")
+    with pytest.raises(AcceptanceError, match="empty"):
+        _parse_directory_attribute("IsHidden", b"")
+
+
+def test_shell_attribute_parsers_bind_the_requested_key_and_native_prefix() -> None:
+    for name in (
+        "bootstrap-host.sh",
+        "install.sh",
+        "provision-worker-auth.sh",
+    ):
+        source = (OPS / name).read_text(encoding="utf-8")
+        assert '-v attribute="$attribute"' in source
+        assert 'native="dsAttrTypeNative:" attribute ":"' in source
+        assert "if (NR == 0 || malformed) exit 65" in source
+        assert 'sub(/^[^:]*:[[:space:]]*/, "")' not in source
+
+
 def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
     import pytest
 

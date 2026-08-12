@@ -297,15 +297,28 @@ def _empty_directory(path: Path, *, label: str) -> None:
         raise AcceptanceError(f"{label} is not clean; archive it before acceptance")
 
 
+def _parse_directory_attribute(attribute: str, stdout: bytes) -> str:
+    lines = stdout.decode("utf-8", errors="strict").splitlines()
+    if not lines:
+        raise AcceptanceError("directory attribute output is empty")
+    standard_prefix = f"{attribute}:"
+    native_prefix = f"dsAttrTypeNative:{attribute}:"
+    first = lines[0]
+    if first.startswith(standard_prefix):
+        value = first[len(standard_prefix) :]
+    elif first.startswith(native_prefix):
+        value = first[len(native_prefix) :]
+    else:
+        raise AcceptanceError("directory attribute output has the wrong key")
+    return " ".join([value, *lines[1:]]).strip()
+
+
 def _directory_attribute(record: str, attribute: str) -> str:
     completed = _run(
         ["/usr/bin/dscl", ".", "-read", record, attribute],
         label=f"directory attribute {record} {attribute}",
     )
-    text = completed.stdout.decode("utf-8", errors="strict").splitlines()
-    if not text or ":" not in text[0]:
-        raise AcceptanceError("directory attribute output is malformed")
-    return text[0].split(":", 1)[1].strip()
+    return _parse_directory_attribute(attribute, completed.stdout)
 
 
 def _authentication_probe_is_disabled(
