@@ -104,10 +104,9 @@ sorted_words() {
     | /usr/bin/sort -u | /usr/bin/tr '\n' ' ' | /usr/bin/sed 's/[[:space:]]*$//'
 }
 
-assert_authentication_disabled() {
+assert_reviewed_authentication_authority() {
   local name="$1"
   local authority authority_err authority_error authority_out authority_status
-  local expected observed probe status
   authority_out="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stdout.XXXXXX)"
   authority_err="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stderr.XXXXXX)"
   if LC_ALL=C LANG=C /usr/bin/dscl . -read "/Users/$name" AuthenticationAuthority \
@@ -138,18 +137,60 @@ assert_authentication_disabled() {
       exit 65
       ;;
   esac
+}
+
+authentication_state() {
+  local name="$1"
+  local disabled_expected observed probe status unsupported_expected
   probe="$(/usr/bin/uuidgen)"
   if observed="$(LC_ALL=C LANG=C /usr/bin/dscl . -authonly "$name" "$probe" 2>&1)"; then
     status=0
   else
     status=$?
   fi
-  expected='<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)
+  disabled_expected='<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)
 Authentication for node /Local/Default failed. (-14167, eDSAuthAccountDisabled)'
-  [ "$status" -eq 87 ] && [ "$observed" = "$expected" ] || {
+  unsupported_expected='<dscl_cmd> DS Error: -14091 (eDSAuthMethodNotSupported)
+Authentication for node /Local/Default failed. (-14091, eDSAuthMethodNotSupported)'
+  if [ "$status" -eq 87 ] && [ "$observed" = "$disabled_expected" ]; then
+    /bin/echo disabled
+    return
+  fi
+  if [ "$status" -eq 11 ] && [ "$observed" = "$unsupported_expected" ]; then
+    /bin/echo needs_disable
+    return
+  fi
+  /bin/echo "service account $name has an unreviewed authentication state" >&2
+  return 65
+}
+
+assert_authentication_disabled() {
+  local name="$1"
+  local state
+  assert_reviewed_authentication_authority "$name"
+  state="$(authentication_state "$name")" || {
+    /bin/echo "could not inspect authentication for service account $name" >&2
+    exit 65
+  }
+  [ "$state" = disabled ] || {
     /bin/echo "service account $name is not authentication-disabled" >&2
     exit 65
   }
+}
+
+ensure_authentication_disabled() {
+  local name="$1"
+  local state
+  assert_reviewed_authentication_authority "$name"
+  state="$(authentication_state "$name")" || exit 65
+  if [ "$state" = needs_disable ]; then
+    LC_ALL=C LANG=C /usr/bin/pwpolicy -n /Local/Default -u "$name" -disableuser \
+      >/dev/null 2>&1 || {
+      /bin/echo "could not disable authentication for service account $name" >&2
+      exit 65
+    }
+  fi
+  assert_authentication_disabled "$name"
 }
 
 ensure_numeric_unused() {
@@ -251,7 +292,7 @@ ensure_user() {
       /bin/echo "existing user $name has no valid GeneratedUID" >&2
       exit 65
     }
-    assert_authentication_disabled "$name"
+    ensure_authentication_disabled "$name"
     return
   fi
   /usr/bin/dscl . -create "/Users/$name"
@@ -262,8 +303,11 @@ ensure_user() {
   /usr/bin/dscl . -create "/Users/$name" UserShell /usr/bin/false
   /usr/bin/dscl . -create "/Users/$name" IsHidden 1
   /usr/bin/dscl . -create "/Users/$name" Password '*'
-  /usr/bin/dscl . -create "/Users/$name" GeneratedUID "$(/usr/bin/uuidgen)"
-  assert_authentication_disabled "$name"
+  valid_uuid "$(read_attribute "/Users/$name" GeneratedUID)" || {
+    /bin/echo "new user $name has no valid auto-generated GeneratedUID" >&2
+    exit 65
+  }
+  ensure_authentication_disabled "$name"
 }
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
