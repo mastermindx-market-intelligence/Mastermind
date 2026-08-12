@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import os
-import signal
+import pwd
 import stat
 import subprocess
 import sys
@@ -213,6 +214,24 @@ def _schema() -> dict:
     }
 
 
+def _passing_canary() -> dict:
+    return {
+        "schema_version": cw.SECRET_CANARY_SCHEMA_VERSION,
+        "passed": True,
+        "checks": {
+            "control_service_environment": "DENIED",
+            "administrative_checkout": "DENIED",
+            "executive_database": "DENIED",
+            "other_worker_home": "DENIED",
+            "forbidden_production_path": "DENIED",
+        },
+        "receipt_sha256": "a" * 64,
+        "control_environment_probe_sha256": "b" * 64,
+        "observed_at": "2026-08-11T00:00:00Z",
+        "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
+    }
+
+
 def _fixture(
     tmp_path: Path,
     *,
@@ -343,6 +362,68 @@ def test_success_uses_exact_one_shot_argv_empty_env_and_private_logs(tmp_path: P
     assert capture["prompt"] == "success"
 
 
+def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: Path):
+    prompt = "private task packet that must only be hashed"
+
+    async def exercise():
+        adapter, spec, workspace, run_dir = _fixture(tmp_path, prompt=prompt)
+        run_dir.chmod(0o770)
+        spec = dataclasses.replace(
+            spec,
+            expected_worker_uid=os.geteuid(),
+            expected_worker_gid=os.getegid(),
+            worker_user=pwd.getpwuid(os.geteuid()).pw_name,
+            shared_run_gid=os.getegid(),
+            secret_canary_verdict=_passing_canary(),
+            require_secret_canary=True,
+        )
+        (spec.codex_home / "auth.json").write_text(
+            '{"token":"dedicated-auth-secret-canary"}', encoding="utf-8"
+        )
+        ref = await adapter.start(spec)
+        attestation = adapter.launch_attestation(ref)
+        receipt = await adapter.collect_result(ref)
+        return ref, attestation, receipt, spec, workspace
+
+    ref, attestation, receipt, spec, workspace = asyncio.run(exercise())
+    document = attestation.to_dict()
+    assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
+    assert document["schema_version"] == cw.LAUNCH_ATTESTATION_SCHEMA_VERSION
+    assert document["executable_path"] == str(Path(attestation.binary.real_path))
+    assert len(document["permission_profile_sha256"]) == 64
+    assert document["prompt_sha256"] == hashlib.sha256(prompt.encode()).hexdigest()
+    assert document["expected_base_sha"] == spec.expected_base_sha
+    assert document["observed_base_sha"] == spec.expected_base_sha
+    assert document["workspace_identity"]["path"] == str(workspace.resolve())
+    assert document["worker_identity"]["effective_uid"] == os.geteuid()
+    assert document["worker_identity"]["effective_gid"] == os.getegid()
+    assert document["provider_home_identity"]["path"] == str(spec.codex_home.resolve())
+    assert document["secret_canary_verdict"]["passed"] is True
+    assert document["launch_nonce"] == ref.launch_nonce
+    assert document["process_identity"]["pid"] == ref.pid
+    assert document["process_identity"]["pgid"] == ref.pgid
+    assert document["process_identity"]["session_id"] == ref.session_id == ref.pid
+    assert document["process_identity"]["effective_uid"] == ref.effective_uid
+    assert sorted(document["environment_keys"]) == document["environment_keys"]
+    serialized = json.dumps(document, sort_keys=True)
+    assert prompt not in serialized
+    assert "dedicated-auth-secret-canary" not in serialized
+    assert "lease_token" not in serialized
+
+
+def test_required_secret_canary_fails_before_spawn(tmp_path: Path):
+    adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    spec = dataclasses.replace(
+        spec,
+        require_secret_canary=True,
+        expected_worker_uid=os.geteuid(),
+        expected_worker_gid=os.getegid(),
+        worker_user=pwd.getpwuid(os.geteuid()).pw_name,
+    )
+    with pytest.raises(cw.LaunchValidationError, match="secret canary"):
+        asyncio.run(adapter.start(spec))
+
+
 def test_write_branch_switches_permission_profile_and_hashes_allowed_artifact(tmp_path: Path):
     async def exercise():
         adapter, spec, workspace, run_dir = _fixture(
@@ -374,6 +455,120 @@ def test_write_branch_switches_permission_profile_and_hashes_allowed_artifact(tm
     assert f'{exact}="write"' in filesystem_override
     assert '":minimal"' not in filesystem_override
     assert 'permissions.mastermind_exec_write.extends=":read-only"' in argv
+
+
+def test_permission_profile_denies_shared_roots_then_reopens_only_current_assignment(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, workspace, run_dir = _fixture(
+        tmp_path,
+        authority=None,
+        authorities=("READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"),
+        allowed_artifacts=("artifact.txt",),
+    )
+    shared_workspace_root = tmp_path / "shared-workspaces"
+    shared_run_root = tmp_path / "shared-runs"
+    current_workspace = shared_workspace_root / "job-1-attempt-1"
+    current_run = shared_run_root / "attempt-1"
+    sibling_workspace = shared_workspace_root / "job-2-attempt-1"
+    sibling_run = shared_run_root / "attempt-2"
+    for path in (current_workspace, current_run, sibling_workspace, sibling_run):
+        path.mkdir(parents=True, mode=0o700)
+    def identity(path: Path) -> dict:
+        info = path.lstat()
+        return {
+            "path": str(path),
+            "device": info.st_dev,
+            "inode": info.st_ino,
+            "mode": stat.S_IMODE(info.st_mode),
+            "uid": info.st_uid,
+            "gid": info.st_gid,
+            "mtime_ns": info.st_mtime_ns,
+        }
+
+    manifest = {
+        "schema_version": cw.ISOLATION_MANIFEST_SCHEMA_VERSION,
+        "roots": sorted(
+            (identity(shared_workspace_root), identity(shared_run_root)),
+            key=lambda value: value["path"],
+        ),
+        "entries": sorted(
+            (
+                {
+                    "root_path": str(shared_workspace_root),
+                    "disposition": "CURRENT_WORKSPACE",
+                    "identity": identity(current_workspace),
+                },
+                {
+                    "root_path": str(shared_workspace_root),
+                    "disposition": "DENY",
+                    "identity": identity(sibling_workspace),
+                },
+                {
+                    "root_path": str(shared_run_root),
+                    "disposition": "CURRENT_RUN",
+                    "identity": identity(current_run),
+                },
+                {
+                    "root_path": str(shared_run_root),
+                    "disposition": "DENY",
+                    "identity": identity(sibling_run),
+                },
+            ),
+            key=lambda value: value["identity"]["path"],
+        ),
+        "workspace_path": str(current_workspace),
+        "run_dir": str(current_run),
+    }
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    spec = dataclasses.replace(
+        spec,
+        workspace_path=current_workspace,
+        run_dir=current_run,
+        result_schema_path=current_run / "input" / "worker-result.schema.json",
+        isolation_roots=(shared_workspace_root, shared_run_root),
+        isolation_denied_paths=(sibling_workspace, sibling_run),
+        isolation_manifest=manifest,
+        isolation_manifest_sha256=manifest_sha256,
+    )
+
+    rendered = next(
+        value
+        for value in adapter._permission_overrides(spec, current_workspace)
+        if value.startswith("permissions.mastermind_exec_write.filesystem=")
+    )
+
+    sibling_workspace_deny = f'{json.dumps(str(sibling_workspace))}="deny"'
+    current_workspace_read = f'{json.dumps(str(current_workspace / "**"))}="read"'
+    sibling_run_deny = f'{json.dumps(str(sibling_run / "**"))}="deny"'
+    current_run_read = f'{json.dumps(str(current_run / "**"))}="read"'
+    current_output_write = f'{json.dumps(str(current_run / "output" / "**"))}="write"'
+
+    assert sibling_workspace_deny in rendered
+    assert sibling_run_deny in rendered
+    assert current_workspace_read in rendered
+    assert current_run_read in rendered
+    assert current_output_write in rendered
+    assert f'{json.dumps(str(sibling_workspace / "**"))}="read"' not in rendered
+    assert f'{json.dumps(str(sibling_run / "**"))}="read"' not in rendered
+    assert f'{json.dumps(str(shared_workspace_root))}="deny"' not in rendered
+    assert f'{json.dumps(str(shared_run_root / "**"))}="deny"' not in rendered
+    assert rendered.index(sibling_workspace_deny) < rendered.index(current_workspace_read)
+    assert rendered.index(sibling_run_deny) < rendered.index(current_run_read)
+    # Sensitive members of the current assignment are re-denied after the
+    # broad current-workspace read grant.
+    protected_git = f'{json.dumps(str(current_workspace / ".git" / "**"))}="deny"'
+    protected_env = f'{json.dumps(str(current_workspace / ".env"))}="deny"'
+    assert rendered.index(current_workspace_read) < rendered.index(protected_git)
+    assert rendered.index(current_workspace_read) < rendered.index(protected_env)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Codex sandbox probe requires macOS")
@@ -466,6 +661,10 @@ def test_real_codex_sandbox_profile_enforces_exact_write_and_sensitive_denials(
     assert probe(controller_db, os.O_RDONLY).returncode != 0
     assert probe(controller_wal, os.O_RDONLY).returncode != 0
     assert probe(Path(spec.codex_home) / "auth.json", os.O_RDONLY).returncode != 0
+    # The read-only base profile must not make the interactive user's home or
+    # unrelated Git/credential material ambiently readable.  The probe opens
+    # only a directory descriptor and never enumerates or reads its contents.
+    assert probe(Path.home(), os.O_RDONLY).returncode != 0
 
     native_adapter = cw.CodexWorkerAdapter(binary)
     receipt = asyncio.run(

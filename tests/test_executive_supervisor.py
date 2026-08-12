@@ -14,6 +14,7 @@ import pytest
 from control_plane.codex_worker import (
     BinaryAttestation,
     CollectionReceipt,
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     ProcessIdentityError,
     ProcessRef,
     ValidationReceipt,
@@ -72,6 +73,23 @@ class FakeProcessController:
         self.terminated_attempt_ids.append(attempt.attempt_id)
         self.inspector.live = False
 
+    def uid_sweep_receipt(self, attempt):
+        return {
+            "schema_version": "mastermind.executive_uid_sweep/v1",
+            "passed": True,
+            "reason": (
+                "run_terminal"
+                if attempt.attempt_id in self.terminated_attempt_ids
+                else "status_absence"
+            ),
+            "residual_pids_before": (
+                [attempt.pid]
+                if attempt.attempt_id in self.terminated_attempt_ids
+                else []
+            ),
+            "residual_pids_after": [],
+        }
+
 
 class UnknownProcessController:
     def presence(self, attempt) -> ProcessPresence:
@@ -94,6 +112,7 @@ class FakeAdapter:
         direct_validation_exit_code: int = 0,
         direct_validation_delay: float = 0.0,
         reported_validations: bool = False,
+        ambiguous_start: bool = False,
     ) -> None:
         self.inspector = inspector
         self.output_status = output_status
@@ -101,6 +120,7 @@ class FakeAdapter:
         self.direct_validation_exit_code = direct_validation_exit_code
         self.direct_validation_delay = direct_validation_delay
         self.reported_validations = reported_validations
+        self.ambiguous_start = ambiguous_start
         self.direct_validation_calls: list[tuple[str, ...]] = []
         self.spec = None
         self.ref = None
@@ -150,7 +170,20 @@ class FakeAdapter:
             binary=binary,
             base_sha="b" * 40,
         )
+        if self.ambiguous_start:
+            raise ConnectionError("fixture lost broker start response")
         return self.ref
+
+    async def cleanup_unbound_run(self, run_id: str):
+        assert self.ref is not None and self.ref.run_id == run_id
+        self.inspector.live = False
+        return {
+            "schema_version": "mastermind.executive_uid_sweep/v1",
+            "reason": "status_absence",
+            "residual_pids_before": [],
+            "residual_pids_after": [],
+            "passed": True,
+        }
 
     async def collect_result(self, ref):
         assert ref == self.ref and self.spec is not None
@@ -198,6 +231,74 @@ class FakeAdapter:
             result_sha256=hashlib.sha256(Path(ref.result_path).read_bytes()).hexdigest(),
         )
 
+    def launch_attestation(self, ref):
+        assert self.spec is not None and ref == self.ref
+        return {
+            "schema_version": LAUNCH_ATTESTATION_SCHEMA_VERSION,
+            "created_at": ref.started_at,
+            "executable_path": ref.binary.real_path,
+            "binary": {
+                "path": ref.binary.path,
+                "real_path": ref.binary.real_path,
+                "version": ref.binary.version,
+                "sha256": ref.binary.sha256,
+                "team_identifier": ref.binary.team_identifier,
+                "size": ref.binary.size,
+                "device": ref.binary.device,
+                "inode": ref.binary.inode,
+                "mode": ref.binary.mode,
+                "uid": ref.binary.uid,
+                "gid": ref.binary.gid,
+                "mtime_ns": ref.binary.mtime_ns,
+            },
+            "rendered_argv": [ref.binary.real_path, "exec", "--json", "-"],
+            "environment_keys": ["CODEX_HOME", "HOME", "PATH"],
+            "permission_profile_sha256": "c" * 64,
+            "prompt_sha256": hashlib.sha256(self.spec.prompt.encode()).hexdigest(),
+            "expected_base_sha": self.spec.expected_base_sha,
+            "observed_base_sha": ref.base_sha,
+            "workspace_identity": {"path": str(self.spec.workspace_path)},
+            "worker_identity": {
+                "requested_user": self.spec.worker_user,
+                "effective_uid": os.geteuid(),
+                "effective_gid": os.getegid(),
+            },
+            "provider_home_identity": {"path": str(self.spec.codex_home)},
+            "secret_canary_verdict": {
+                "schema_version": "mastermind.executive_secret_canary/v1",
+                "passed": True,
+            },
+            "launch_nonce": ref.launch_nonce,
+            "process_identity": {
+                "pid": ref.pid,
+                "pgid": ref.pgid,
+                "session_id": ref.pid,
+                "start_identity": ref.process_start_identity,
+                "boot_id": ref.boot_session_id,
+                "effective_uid": os.geteuid(),
+                "effective_gid": os.getegid(),
+                "real_uid": os.geteuid(),
+                "real_gid": os.getegid(),
+            },
+        }
+
+    def uid_sweep_receipt(self, ref):
+        assert ref == self.ref
+        return {
+            "schema_version": "mastermind.executive_uid_sweep/v1",
+            "observed_at": "2026-08-11T00:00:01+00:00",
+            "reason": "run_terminal",
+            "worker_uid": os.geteuid(),
+            "broker_pid": 42419,
+            "residual_pids_before": [],
+            "residual_pids_after": [],
+            "signal_name": "SIGKILL",
+            "signal_sent": False,
+            "quiescent_observations": 2,
+            "passed": True,
+            "found_residuals": False,
+        }
+
     async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
         assert spec == self.spec
         exact = tuple(argv)
@@ -242,8 +343,8 @@ def _runtime_and_job(
             }
         },
     )
-    workspace = tmp_path / "isolated-workspace"
-    workspace.mkdir(mode=0o700)
+    workspace = tmp_path / "workspaces" / "isolated-workspace"
+    workspace.mkdir(mode=0o700, parents=True)
     job = runtime.jobs.create_job(
         "Create the bounded proof artifact",
         worktree=str(workspace.resolve()),
@@ -272,9 +373,26 @@ def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> Execu
         adapter,  # type: ignore[arg-type]
         codex_home=codex_home,
         runs_root=tmp_path / "runs",
+        isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
         heartbeat_interval_seconds=0.01,
         inspector=adapter.inspector,
         process_controller=FakeProcessController(adapter.inspector),
+        secret_canary_verdict={
+            "schema_version": "mastermind.executive_secret_canary/v1",
+            "passed": True,
+            "checks": {
+                "control_service_environment": "DENIED",
+                "administrative_checkout": "DENIED",
+                "executive_database": "DENIED",
+                "other_worker_home": "DENIED",
+                "forbidden_production_path": "DENIED",
+            },
+            "receipt_sha256": "a" * 64,
+            "control_environment_probe_sha256": "b" * 64,
+            "observed_at": "2026-08-11T00:00:00Z",
+            "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
+        },
+        require_complete_launch_attestation=True,
         instance_id="supervisor-fixture",
     )
 
@@ -290,8 +408,30 @@ def test_run_once_persists_process_checkpoint_result_receipt_and_reopens(tmp_pat
     assert receipt.attempt.status is AttemptStatus.COMPLETED
     assert receipt.attempt.pid == inspector.pid
     assert receipt.attempt.process_start_identity == inspector.start_identity
-    assert receipt.attempt.checkpoint_sequence == 1
+    assert receipt.attempt.checkpoint_sequence == 2
+    assert (
+        receipt.attempt.launch_metadata["launch_attestation"]["schema_version"]
+        == LAUNCH_ATTESTATION_SCHEMA_VERSION
+    )
+    launch_evidence = Path(receipt.attempt.launch_metadata["launch_attestation_path"])
+    assert launch_evidence.is_file()
+    assert stat.S_IMODE(launch_evidence.stat().st_mode) == 0o600
+    assert adapter.spec.prompt not in launch_evidence.read_text(encoding="utf-8")
+    event_types = [
+        event.event_type
+        for event in runtime.events.list_events(attempt_id=receipt.attempt.attempt_id)
+    ]
+    assert event_types.index("ATTEMPT_PROCESS_RECORDED") < event_types.index(
+        "ATTEMPT_RUNNING"
+    )
+    assert event_types.index("ATTEMPT_RUNNING") < event_types.index(
+        "JOB_CHECKPOINTED"
+    )
     assert adapter.spec.expected_base_sha == "b" * 40
+    assert adapter.spec.isolation_roots == (
+        (tmp_path / "workspaces").resolve(),
+        (tmp_path / "runs").resolve(),
+    )
     assert f'"base_sha": "{"b" * 40}"' in adapter.spec.prompt
     assert "set validations=[] exactly" in adapter.spec.prompt
     assert receipt.job.checkpoint is not None
@@ -303,7 +443,9 @@ def test_run_once_persists_process_checkpoint_result_receipt_and_reopens(tmp_pat
     assert evidence.exists()
     assert stat.S_IMODE(evidence.stat().st_mode) == 0o600
     persisted = json.loads(evidence.read_text(encoding="utf-8"))
-    assert persisted["result"]["status"] == "SUCCEEDED"
+    assert persisted["schema_version"] == "mastermind.executive_collection_evidence/v1"
+    assert persisted["collection"]["result"]["status"] == "SUCCEEDED"
+    assert persisted["uid_sweep"]["passed"] is True
     assert "lease_token" not in evidence.read_text(encoding="utf-8")
     assert adapter.direct_validation_calls == [("/usr/bin/true",)]
     validation_evidence = Path(receipt.validation_receipt_path or "")
@@ -312,6 +454,15 @@ def test_run_once_persists_process_checkpoint_result_receipt_and_reopens(tmp_pat
     validation_payload = json.loads(validation_evidence.read_text(encoding="utf-8"))
     assert validation_payload["commands"][0]["argv"] == ["/usr/bin/true"]
     assert validation_payload["commands"][0]["exit_code"] == 0
+    assert validation_payload["uid_sweep"]["passed"] is True
+    seal_evidence = Path(receipt.assignment_seal_receipt_path or "")
+    assert seal_evidence.is_file()
+    assert stat.S_IMODE(seal_evidence.stat().st_mode) == 0o600
+    seal_payload = json.loads(seal_evidence.read_text(encoding="utf-8"))
+    assert seal_payload["schema_version"] == "mastermind.executive_assignment_seal/v1"
+    assert seal_payload["uid_sweep"]["passed"] is True
+    assert seal_payload["paths"]["workspace"]["after"]["mode"] == 0o700
+    assert seal_payload["paths"]["run"]["after"]["mode"] == 0o700
 
     reopened = Runtime.at(tmp_path)
     reopened_job = reopened.jobs.get_job(job_id)
@@ -319,6 +470,54 @@ def test_run_once_persists_process_checkpoint_result_receipt_and_reopens(tmp_pat
     assert reopened_job is not None and reopened_job.status is JobStatus.COMPLETED
     assert reopened_attempt is not None and reopened_attempt.status is AttemptStatus.COMPLETED
     assert reopened_attempt.result == reopened_job.result
+
+
+def test_terminal_state_is_not_persisted_when_assignment_seal_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    def fail_seal(*_args, **_kwargs):
+        from control_plane.executive_workspace import AssignmentSealError
+
+        raise AssignmentSealError("fixture seal failure")
+
+    monkeypatch.setattr(
+        "control_plane.executive_supervisor.seal_control_owned_paths", fail_seal
+    )
+
+    with pytest.raises(Exception, match="seal failure"):
+        asyncio.run(supervisor.run_once(job_id))
+
+    job = runtime.jobs.get_job(job_id)
+    assert job is not None and job.status is JobStatus.CHECKPOINTED
+    attempt = runtime.attempts.get_attempt(job.current_attempt_id or "")
+    assert attempt is not None and attempt.status is AttemptStatus.CHECKPOINTED
+
+
+def test_ambiguous_start_is_cleaned_swept_sealed_before_failed_state(tmp_path: Path):
+    runtime, job_id, workspace = _runtime_and_job(tmp_path)
+    adapter = FakeAdapter(FakeInspector(), ambiguous_start=True)
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+
+    with pytest.raises(Exception, match="launch failed"):
+        asyncio.run(supervisor.start_job(job_id))
+
+    job = runtime.jobs.get_job(job_id)
+    assert job is not None and job.status is JobStatus.FAILED
+    attempt = runtime.attempts.get_attempt(job.current_attempt_id or "")
+    assert attempt is not None and attempt.status is AttemptStatus.FAILED
+    seal_path = (
+        runtime.store.path.parent
+        / "assignment-seal-receipts"
+        / attempt.attempt_id
+        / "assignment-seal-receipt.json"
+    )
+    seal = json.loads(seal_path.read_text(encoding="utf-8"))
+    assert seal["uid_sweep"]["reason"] == "status_absence"
+    assert stat.S_IMODE(workspace.stat().st_mode) == 0o700
+    assert stat.S_IMODE((tmp_path / "runs" / attempt.attempt_id).stat().st_mode) == 0o700
 
 
 def test_restart_missing_process_rotates_fence_marks_lost_preserves_checkpoint_and_requeues(
@@ -343,13 +542,22 @@ def test_restart_missing_process_rotates_fence_marks_lost_preserves_checkpoint_a
     outcomes = restarted.reconcile_restart(requeue_lost=True)
 
     assert len(outcomes) == 1
-    assert outcomes[0].status is ReconcileStatus.REQUEUED
-    assert outcomes[0].requeued is True
+    assert outcomes[0].status is ReconcileStatus.MISSING_LOST
+    assert outcomes[0].requeued is False
+    absence_evidence = Path(outcomes[0].uid_sweep_receipt_path or "")
+    assert absence_evidence.is_file()
+    absence_payload = json.loads(absence_evidence.read_text(encoding="utf-8"))
+    assert absence_payload["uid_sweep"]["reason"] == "status_absence"
     attempt = reopened.attempts.get_attempt(active.lease.attempt.attempt_id)
     job = reopened.jobs.get_job(job_id)
     assert attempt is not None and attempt.status is AttemptStatus.LOST
     assert attempt.fence_generation == original_fence + 1
-    assert job is not None and job.status is JobStatus.QUEUED
+    assert job is not None and job.status is JobStatus.LOST
+    seal_evidence = Path(outcomes[0].assignment_seal_receipt_path or "")
+    assert seal_evidence.is_file()
+    assert json.loads(seal_evidence.read_text(encoding="utf-8"))["uid_sweep"][
+        "reason"
+    ] == "status_absence"
     assert job.checkpoint is not None
     assert job.checkpoint["summary"] == "checkpoint before abrupt death"
     with pytest.raises(StateConflict):
@@ -371,15 +579,23 @@ def test_restart_live_process_is_terminated_verified_absent_then_lost_and_requeu
     restarted = _supervisor(reopened, tmp_path, FakeAdapter(inspector))
     outcomes = restarted.reconcile_restart()
 
-    assert [item.status for item in outcomes] == [ReconcileStatus.REQUEUED]
+    assert [item.status for item in outcomes] == [ReconcileStatus.MISSING_LOST]
     assert outcomes[0].process_was_live is True
+    reconciliation_evidence = Path(outcomes[0].uid_sweep_receipt_path or "")
+    assert reconciliation_evidence.is_file()
+    assert stat.S_IMODE(reconciliation_evidence.stat().st_mode) == 0o600
+    reconciliation_payload = json.loads(
+        reconciliation_evidence.read_text(encoding="utf-8")
+    )
+    assert reconciliation_payload["uid_sweep"]["passed"] is True
+    assert "lease_token" not in reconciliation_evidence.read_text(encoding="utf-8")
     assert restarted.process_controller.terminated_attempt_ids == [
         active.lease.attempt.attempt_id
     ]
     attempt = reopened.attempts.get_attempt(active.lease.attempt.attempt_id)
     job = reopened.jobs.get_job(job_id)
     assert attempt is not None and attempt.status is AttemptStatus.LOST
-    assert job is not None and job.status is JobStatus.QUEUED
+    assert job is not None and job.status is JobStatus.LOST
 
 
 def test_restart_cancel_requested_live_process_is_terminated_before_cancel_ack(
@@ -421,7 +637,7 @@ def test_restart_expired_live_process_is_terminated_before_expiry_requeue(tmp_pa
     restarted = _supervisor(reopened, tmp_path, FakeAdapter(inspector))
     outcomes = restarted.reconcile_restart()
 
-    assert [item.status for item in outcomes] == [ReconcileStatus.REQUEUED]
+    assert [item.status for item in outcomes] == [ReconcileStatus.EXPIRED_LOST]
     assert outcomes[0].process_was_live is True
     assert restarted.process_controller.terminated_attempt_ids == [
         active.lease.attempt.attempt_id
@@ -450,8 +666,8 @@ def test_restart_expired_ambiguous_process_remains_active_and_is_not_requeued(tm
     assert [item.status for item in outcomes] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
     attempt = reopened.attempts.get_attempt(active.lease.attempt.attempt_id)
     job = reopened.jobs.get_job(job_id)
-    assert attempt is not None and attempt.status is AttemptStatus.RUNNING
-    assert job is not None and job.status is JobStatus.RUNNING
+    assert attempt is not None and attempt.status is AttemptStatus.CHECKPOINTED
+    assert job is not None and job.status is JobStatus.CHECKPOINTED
 
 
 def test_identity_safe_termination_escalates_when_leader_exits_but_descendants_survive(

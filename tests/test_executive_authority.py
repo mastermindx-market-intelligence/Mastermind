@@ -30,6 +30,10 @@ _EXPECTED_REQUIRED_DENIES = frozenset(
         "CAPITAL_EXECUTION",
         "BILLING",
         "CREDENTIAL_ADMIN",
+        "PUSH_BRANCH",
+        "CROSS_REPO_PUBLISH",
+        "PAPER_STATE_MUTATION",
+        "DATA_DELETE",
     }
 )
 
@@ -67,6 +71,14 @@ def test_checked_in_policy_has_exact_phase1b_allow_set_and_mandatory_denies():
     assert PHASE1B_REQUIRED_DENIES == _EXPECTED_REQUIRED_DENIES
     assert _EXPECTED_REQUIRED_DENIES.issubset(policy.denied)
     assert policy.allowed.isdisjoint(policy.denied)
+
+
+def test_runtime_authority_reader_has_no_mutable_yaml_package_dependency():
+    source = (_ROOT / "control_plane" / "executive_authority.py").read_text(
+        encoding="utf-8"
+    )
+    assert "import yaml" not in source
+    assert "yaml.safe_load" not in source
 
 
 def test_policy_hash_is_sha256_of_exact_reviewed_bytes_and_flows_to_decision():

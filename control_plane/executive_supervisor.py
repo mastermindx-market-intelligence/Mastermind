@@ -17,19 +17,23 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 import os
 import pwd
 import signal
+import stat
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.codex_worker import (
     CodexWorkerAdapter,
     CollectionReceipt,
+    ISOLATION_MANIFEST_SCHEMA_VERSION,
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     LaunchSpec,
     ProcessIdentityError,
     ProcessInspector,
@@ -53,6 +57,10 @@ from control_plane.executive_runtime import (
     RuntimeProofError,
     StateConflict,
 )
+from control_plane.executive_workspace import (
+    AssignmentSealError,
+    seal_control_owned_paths,
+)
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
@@ -66,6 +74,10 @@ _ACTIVE_ATTEMPT_STATUSES = {
 
 class SupervisorError(RuntimeProofError):
     """The supervisor could not safely launch or accept an attempt."""
+
+
+class TerminalAssignmentSealError(SupervisorError):
+    """A worker assignment could not be sealed before terminal state."""
 
 
 class _ValidationCancelled(Exception):
@@ -276,6 +288,7 @@ class SupervisorReceipt:
     collection_receipt_path: str
     validations: tuple[ValidationReceipt, ...] = ()
     validation_receipt_path: str | None = None
+    assignment_seal_receipt_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -285,6 +298,7 @@ class SupervisorReceipt:
             "collection_receipt_path": self.collection_receipt_path,
             "validations": _jsonable(self.validations),
             "validation_receipt_path": self.validation_receipt_path,
+            "assignment_seal_receipt_path": self.assignment_seal_receipt_path,
         }
 
 
@@ -295,6 +309,8 @@ class ReconcileReceipt:
     status: ReconcileStatus
     process_was_live: bool
     requeued: bool = False
+    uid_sweep_receipt_path: str | None = None
+    assignment_seal_receipt_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
@@ -453,7 +469,14 @@ class ExecutiveSupervisor:
         *,
         codex_home: str | Path,
         runs_root: str | Path | None = None,
+        isolation_roots: Sequence[str | Path] = (),
+        receipts_root: str | Path | None = None,
         worker_user: str | None = None,
+        worker_uid: int | None = None,
+        worker_gid: int | None = None,
+        shared_run_gid: int | None = None,
+        secret_canary_verdict: Mapping[str, Any] | None = None,
+        require_complete_launch_attestation: bool = False,
         heartbeat_interval_seconds: float | None = None,
         inspector: ProcessInspector | None = None,
         process_controller: PersistedProcessController | None = None,
@@ -468,9 +491,25 @@ class ExecutiveSupervisor:
             if runs_root is not None
             else runtime.store.root / "data" / "control_plane" / "runs"
         )
+        configured_isolation_roots = tuple(Path(value) for value in isolation_roots)
+        if any(not value.is_absolute() for value in configured_isolation_roots):
+            raise SupervisorError("worker isolation roots must be absolute")
+        self.isolation_roots = tuple(
+            value.resolve(strict=False) for value in configured_isolation_roots
+        )
+        self.receipts_root = (
+            Path(receipts_root).resolve() if receipts_root is not None else None
+        )
         if worker_user is None:
             worker_user = pwd.getpwuid(os.geteuid()).pw_name
         self.worker_user = str(worker_user)
+        self.worker_uid = int(worker_uid) if worker_uid is not None else None
+        self.worker_gid = int(worker_gid) if worker_gid is not None else None
+        self.shared_run_gid = int(shared_run_gid) if shared_run_gid is not None else None
+        self.secret_canary_verdict = dict(secret_canary_verdict or {})
+        self.require_complete_launch_attestation = bool(
+            require_complete_launch_attestation
+        )
         default_interval = min(10.0, max(0.1, runtime.store.lease_seconds / 3))
         self.heartbeat_interval_seconds = float(
             default_interval
@@ -511,11 +550,124 @@ class ExecutiveSupervisor:
     def _run_dir(self, attempt_id: str) -> Path:
         return self.runs_root / attempt_id
 
+    @staticmethod
+    def _isolation_manifest(
+        roots: Sequence[Path], *, workspace: Path, run_dir: Path
+    ) -> tuple[tuple[Path, ...], Mapping[str, Any], str | None]:
+        if not roots:
+            return (), {}, None
+        def identity(path: Path, info: os.stat_result) -> dict[str, Any]:
+            return {
+                "path": str(path),
+                "device": int(info.st_dev),
+                "inode": int(info.st_ino),
+                "mode": stat.S_IMODE(info.st_mode),
+                "uid": int(info.st_uid),
+                "gid": int(info.st_gid),
+                "mtime_ns": int(info.st_mtime_ns),
+            }
+
+        denied: set[Path] = set()
+        assignments = {workspace.resolve(strict=True), run_dir.resolve(strict=True)}
+        canonical_roots: list[Path] = []
+        root_documents: list[dict[str, Any]] = []
+        entry_documents: list[dict[str, Any]] = []
+        for lexical in roots:
+            info = lexical.lstat()
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise SupervisorError("worker isolation roots must be real directories")
+            canonical = lexical.resolve(strict=True)
+            info = canonical.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            if info.st_uid != os.geteuid() or mode & 0o022:
+                raise SupervisorError(
+                    "worker isolation roots must be control-owned and non-worker-writable"
+                )
+            canonical_roots.append(canonical)
+            root_documents.append(identity(canonical, info))
+            assigned = {path for path in assignments if path.parent == canonical}
+            for path in assignments:
+                try:
+                    relative = path.relative_to(canonical)
+                except ValueError:
+                    continue
+                if len(relative.parts) != 1:
+                    raise SupervisorError(
+                        "assigned workspace and run must be direct isolation-root children"
+                    )
+            try:
+                entries = list(os.scandir(canonical))
+            except OSError as exc:
+                raise SupervisorError("worker isolation root cannot be enumerated") from exc
+            observed: set[Path] = set()
+            for entry in entries:
+                candidate = canonical / entry.name
+                try:
+                    entry_info = entry.stat(follow_symlinks=False)
+                except OSError as exc:
+                    raise SupervisorError(
+                        "worker isolation-root entry cannot be inspected"
+                    ) from exc
+                if entry.is_symlink() or not stat.S_ISDIR(entry_info.st_mode):
+                    raise SupervisorError(
+                        "worker isolation roots may contain only real assignment directories"
+                    )
+                resolved = candidate.resolve(strict=True)
+                observed.add(resolved)
+                if resolved == workspace:
+                    disposition = "CURRENT_WORKSPACE"
+                elif resolved == run_dir:
+                    disposition = "CURRENT_RUN"
+                else:
+                    disposition = "DENY"
+                    denied.add(resolved)
+                entry_documents.append(
+                    {
+                        "root_path": str(canonical),
+                        "disposition": disposition,
+                        "identity": identity(resolved, entry_info),
+                    }
+                )
+            if not assigned.issubset(observed):
+                raise SupervisorError(
+                    "assigned path disappeared during isolation-root enumeration"
+                )
+        manifest = {
+            "schema_version": ISOLATION_MANIFEST_SCHEMA_VERSION,
+            "roots": sorted(root_documents, key=lambda value: str(value["path"])),
+            "entries": sorted(
+                entry_documents,
+                key=lambda value: str(value["identity"]["path"]),
+            ),
+            "workspace_path": str(workspace.resolve(strict=True)),
+            "run_dir": str(run_dir.resolve(strict=True)),
+        }
+        payload = json.dumps(
+            manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        return (
+            tuple(sorted(denied, key=str)),
+            manifest,
+            hashlib.sha256(payload).hexdigest(),
+        )
+
+    def _receipt_path(self, attempt_id: str, name: str, *, legacy: Path) -> Path:
+        if self.receipts_root is None:
+            return legacy
+        directory = self.receipts_root / attempt_id
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(directory, 0o700)
+        return directory / name
+
     def _write_schema(self, run_dir: Path, *, job: Job, attempt: Attempt) -> Path:
         run_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
-        os.chmod(run_dir, 0o700)
+        os.chmod(run_dir, 0o770 if self.shared_run_gid is not None else 0o700)
         input_dir = run_dir / "input"
-        input_dir.mkdir(mode=0o700)
+        input_dir.mkdir(mode=0o750 if self.shared_run_gid is not None else 0o700)
         schema_path = input_dir / "worker-result.schema.json"
         _write_private_json(
             schema_path,
@@ -525,6 +677,14 @@ class ExecutiveSupervisor:
                 worker_id=attempt.worker_id,
             ),
         )
+        if self.shared_run_gid is not None:
+            for path, mode in (
+                (run_dir, 0o770),
+                (input_dir, 0o750),
+                (schema_path, 0o640),
+            ):
+                os.chown(path, -1, self.shared_run_gid)
+                os.chmod(path, mode)
         return schema_path
 
     @staticmethod
@@ -569,12 +729,23 @@ class ExecutiveSupervisor:
             raise SupervisorError("real worker job requires an assigned isolated worktree")
         model = quota.model or str(job.constraints.get("model") or "gpt-5.6-sol")
         effort = quota.effort or str(job.constraints.get("effort") or "xhigh")
+        workspace = Path(job.worktree).resolve(strict=True)
+        run_dir = self._run_dir(attempt.attempt_id).resolve(strict=True)
+        (
+            isolation_denied,
+            isolation_manifest,
+            isolation_manifest_sha256,
+        ) = self._isolation_manifest(
+            self.isolation_roots,
+            workspace=workspace,
+            run_dir=run_dir,
+        )
         return LaunchSpec(
             run_id=attempt.attempt_id,
             job_id=job.job_id,
             worker_id=attempt.worker_id,
-            workspace_path=Path(job.worktree),
-            run_dir=self._run_dir(attempt.attempt_id),
+            workspace_path=workspace,
+            run_dir=run_dir,
             prompt=self._prompt(job, attempt),
             result_schema_path=schema_path,
             codex_home=self.codex_home,
@@ -584,8 +755,71 @@ class ExecutiveSupervisor:
             worker_user=self.worker_user,
             expected_base_sha=str(job.constraints.get("base_sha") or "") or None,
             allowed_artifact_paths=tuple(job.allowed_write_paths),
+            isolation_roots=self.isolation_roots,
+            isolation_denied_paths=isolation_denied,
+            isolation_manifest=isolation_manifest,
+            isolation_manifest_sha256=isolation_manifest_sha256,
             forbidden_paths=(self.runtime.store.path,),
+            expected_worker_uid=self.worker_uid,
+            expected_worker_gid=self.worker_gid,
+            shared_run_gid=self.shared_run_gid,
+            secret_canary_verdict=self.secret_canary_verdict,
+            require_secret_canary=self.require_complete_launch_attestation,
         )
+
+    def _launch_metadata(
+        self,
+        *,
+        job: Job,
+        lease: AttemptLease,
+        spec: LaunchSpec,
+        process_ref: ProcessRef,
+    ) -> dict[str, Any]:
+        attestation_reader = getattr(self.adapter, "launch_attestation", None)
+        if callable(attestation_reader):
+            attestation_value = attestation_reader(process_ref)
+            attestation = (
+                attestation_value.to_dict()
+                if hasattr(attestation_value, "to_dict")
+                else _jsonable(attestation_value)
+            )
+        else:
+            attestation = {
+                "schema_version": "mastermind.executive_launch_attestation/legacy-partial",
+                "launch_nonce": process_ref.launch_nonce,
+                "observed_base_sha": process_ref.base_sha,
+                "binary": _jsonable(process_ref.binary),
+                "process_identity": {
+                    "pid": process_ref.pid,
+                    "pgid": process_ref.pgid,
+                    "start_identity": process_ref.process_start_identity,
+                    "boot_id": process_ref.boot_session_id,
+                },
+            }
+        if self.require_complete_launch_attestation and (
+            not isinstance(attestation, dict)
+            or attestation.get("schema_version") != LAUNCH_ATTESTATION_SCHEMA_VERSION
+        ):
+            raise SupervisorError("worker adapter did not provide a complete launch attestation")
+        payload = (
+            json.dumps(attestation, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            .encode("utf-8")
+        )
+        receipt_path = self._receipt_path(
+            lease.attempt.attempt_id,
+            "launch-attestation.json",
+            legacy=spec.run_dir / "input" / "launch-attestation.json",
+        )
+        _write_private_json(receipt_path, attestation)
+        return {
+            "schema_version": "mastermind.executive_process_launch/v1",
+            "launch_attestation": attestation,
+            "launch_attestation_sha256": hashlib.sha256(payload).hexdigest(),
+            "launch_attestation_path": str(receipt_path),
+            "authority_policy_hash": lease.attempt.authority_policy_hash,
+            "authorities": job.requested_authorities,
+            "quota_class": lease.attempt.quota_class,
+        }
 
     def _fail_claim(self, lease: AttemptLease, message: str) -> Job:
         return self.runtime.attempts.fail_attempt(
@@ -607,12 +841,20 @@ class ExecutiveSupervisor:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
         job = self._job(job_id)
         process_ref: ProcessRef | None = None
+        start_invoked = False
         try:
             schema_path = self._write_schema(
                 self._run_dir(lease.attempt.attempt_id), job=job, attempt=lease.attempt
             )
             spec = self._launch_spec(job, lease, schema_path)
+            start_invoked = True
             process_ref = await self.adapter.start(spec)
+            launch_metadata = self._launch_metadata(
+                job=job,
+                lease=lease,
+                spec=spec,
+                process_ref=process_ref,
+            )
             self.runtime.attempts.record_process(
                 lease.attempt.attempt_id,
                 fence_generation=lease.attempt.fence_generation,
@@ -625,19 +867,37 @@ class ExecutiveSupervisor:
                 stdout_path=process_ref.stdout_path,
                 stderr_path=process_ref.stderr_path,
                 result_path=process_ref.result_path,
-                launch_metadata={
-                    "launch_nonce": process_ref.launch_nonce,
-                    "base_sha": process_ref.base_sha,
-                    "binary": _jsonable(process_ref.binary),
-                    "authority_policy_hash": lease.attempt.authority_policy_hash,
-                    "authorities": job.requested_authorities,
-                    "quota_class": lease.attempt.quota_class,
-                },
+                launch_metadata=launch_metadata,
             )
             self.runtime.attempts.mark_running(
                 lease.attempt.attempt_id,
                 fence_generation=lease.attempt.fence_generation,
                 lease_token=lease.lease_token,
+                required_launch_attestation_schema=(
+                    LAUNCH_ATTESTATION_SCHEMA_VERSION
+                    if self.require_complete_launch_attestation
+                    else None
+                ),
+            )
+            # Persist a useful recovery point while the worker is still live.
+            # A control-service crash therefore cannot erase the fact that the
+            # exact process identity and complete launch attestation crossed
+            # the durable RUNNING boundary. The terminal worker checkpoint is
+            # a later sequence and may never arrive after a restart/kill.
+            self.runtime.attempts.checkpoint_attempt(
+                lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token,
+                payload=JobPayload(
+                    summary="Authorized worker launch accepted",
+                    completed_steps=[
+                        "process identity and launch attestation persisted"
+                    ],
+                    current_state="worker process running under supervisor",
+                    next_actions=[
+                        "collect a schema-valid result or reconcile the attempt as LOST"
+                    ],
+                ),
             )
             return ActiveRun(lease=lease, process_ref=process_ref, launch_spec=spec)
         except Exception as exc:
@@ -648,12 +908,48 @@ class ExecutiveSupervisor:
                     raise SupervisorError(
                         f"launch failed and process could not be safely cancelled: {cancel_exc}"
                     ) from exc
-            try:
-                self._fail_claim(lease, f"{type(exc).__name__}: {exc}")
-            except RuntimeProofError:
-                # Preserve the original launch error.  A reconciler will fence
-                # an attempt whose lease changed before cleanup.
-                pass
+            unbound_sweep: Mapping[str, Any] | None = None
+            if start_invoked and process_ref is None:
+                cleanup = getattr(self.adapter, "cleanup_unbound_run", None)
+                if callable(cleanup):
+                    try:
+                        unbound_sweep = await cleanup(lease.attempt.attempt_id)
+                        self._validate_terminal_uid_sweep(unbound_sweep)
+                    except Exception as cleanup_exc:
+                        raise SupervisorError(
+                            "ambiguous launch could not prove the unbound run absent"
+                        ) from cleanup_exc
+            # If the adapter cannot clean an unbound start, retain the active
+            # claim.  The service observes that durable state and quarantines;
+            # it must never publish a false terminal failure.
+            if not start_invoked or process_ref is not None or unbound_sweep is not None:
+                try:
+                    sweep = (
+                        self._active_terminal_uid_sweep(
+                            ActiveRun(
+                                lease=lease,
+                                process_ref=process_ref,
+                                launch_spec=spec,
+                            )
+                        )
+                        if process_ref is not None
+                        else unbound_sweep
+                    )
+                    self._seal_terminal_assignment(
+                        attempt_id=lease.attempt.attempt_id,
+                        job_id=job.job_id,
+                        workspace=job.worktree or "",
+                        run_dir=self._run_dir(lease.attempt.attempt_id),
+                        uid_sweep=sweep,
+                        require_uid_sweep=start_invoked,
+                    )
+                    self._fail_claim(lease, f"{type(exc).__name__}: {exc}")
+                except TerminalAssignmentSealError:
+                    raise
+                except RuntimeProofError:
+                    # Preserve the original launch error.  A reconciler will
+                    # fence an attempt whose lease changed before cleanup.
+                    pass
             if isinstance(exc, SupervisorError):
                 raise
             raise SupervisorError(f"Codex launch failed: {type(exc).__name__}: {exc}") from exc
@@ -686,9 +982,144 @@ class ExecutiveSupervisor:
             raise
 
     def _persist_collection(self, active: ActiveRun, receipt: CollectionReceipt) -> Path:
-        path = active.launch_spec.run_dir / "output" / "collection-receipt.json"
-        _write_private_json(path, _collection_to_dict(receipt))
+        path = self._receipt_path(
+            active.lease.attempt.attempt_id,
+            "collection-receipt.json",
+            legacy=active.launch_spec.run_dir / "output" / "collection-receipt.json",
+        )
+        collection = _collection_to_dict(receipt)
+        sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
+        if callable(sweep_reader):
+            uid_sweep = _jsonable(sweep_reader(active.process_ref))
+            payload: Any = {
+                "schema_version": "mastermind.executive_collection_evidence/v1",
+                "collection": collection,
+                "uid_sweep": uid_sweep,
+            }
+        else:
+            if self.require_complete_launch_attestation:
+                raise SupervisorError(
+                    "complete remote collection has no dedicated-UID sweep receipt"
+                )
+            payload = collection
+        _write_private_json(path, payload)
         return path
+
+    def _terminal_assignment_receipt_path(self, attempt_id: str) -> Path:
+        return self._receipt_path(
+            attempt_id,
+            "assignment-seal-receipt.json",
+            legacy=(
+                self.runtime.store.path.parent
+                / "assignment-seal-receipts"
+                / attempt_id
+                / "assignment-seal-receipt.json"
+            ),
+        )
+
+    @staticmethod
+    def _validate_terminal_uid_sweep(value: Any) -> Mapping[str, Any]:
+        if (
+            not isinstance(value, Mapping)
+            or value.get("schema_version") != "mastermind.executive_uid_sweep/v1"
+            or value.get("passed") is not True
+            or value.get("residual_pids_after") != []
+        ):
+            raise TerminalAssignmentSealError(
+                "terminal assignment has no passing final dedicated-UID sweep"
+            )
+        return value
+
+    def _seal_terminal_assignment(
+        self,
+        *,
+        attempt_id: str,
+        job_id: str,
+        workspace: str | Path,
+        run_dir: str | Path,
+        uid_sweep: Mapping[str, Any] | None,
+        require_uid_sweep: bool | None = None,
+    ) -> Path:
+        """Persist revocation evidence before any durable terminal transition."""
+
+        sweep_required = (
+            self.require_complete_launch_attestation
+            if require_uid_sweep is None
+            else bool(require_uid_sweep)
+        )
+        if sweep_required:
+            verified_sweep: Mapping[str, Any] | None = self._validate_terminal_uid_sweep(
+                uid_sweep
+            )
+        else:
+            verified_sweep = uid_sweep
+        try:
+            seal = seal_control_owned_paths(
+                {"run": run_dir, "workspace": workspace},
+                control_uid=os.geteuid(),
+            )
+        except AssignmentSealError as exc:
+            raise TerminalAssignmentSealError(str(exc)) from exc
+        payload = {
+            **seal,
+            "attempt_id": attempt_id,
+            "job_id": job_id,
+            "uid_sweep": _jsonable(verified_sweep),
+        }
+        path = self._terminal_assignment_receipt_path(attempt_id)
+        try:
+            _write_private_json(path, payload)
+        except FileExistsError:
+            # A control crash can occur after the seal receipt is durable but
+            # before SQLite crosses its terminal boundary.  Reconciliation may
+            # safely reuse only a private receipt with this exact assignment.
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+                info = path.lstat()
+            except (OSError, ValueError, TypeError) as exc:
+                raise TerminalAssignmentSealError(
+                    "existing assignment seal receipt cannot be verified"
+                ) from exc
+            if (
+                not isinstance(existing, dict)
+                or existing.get("schema_version")
+                != "mastermind.executive_assignment_seal/v1"
+                or existing.get("passed") is not True
+                or existing.get("attempt_id") != attempt_id
+                or existing.get("job_id") != job_id
+                or not stat.S_ISREG(info.st_mode)
+                or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) & 0o077
+            ):
+                raise TerminalAssignmentSealError(
+                    "existing assignment seal receipt identity drifted"
+                )
+        except OSError as exc:
+            raise TerminalAssignmentSealError(
+                "assignment seal receipt could not be persisted"
+            ) from exc
+        return path
+
+    def _active_terminal_uid_sweep(
+        self, active: ActiveRun
+    ) -> Mapping[str, Any] | None:
+        sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
+        if not callable(sweep_reader):
+            if self.require_complete_launch_attestation:
+                raise TerminalAssignmentSealError(
+                    "complete terminalization has no dedicated-UID sweep receipt"
+                )
+            return None
+        try:
+            value = sweep_reader(active.process_ref)
+        except Exception as exc:
+            raise TerminalAssignmentSealError(
+                "terminal dedicated-UID sweep could not be read"
+            ) from exc
+        if self.require_complete_launch_attestation:
+            return self._validate_terminal_uid_sweep(value)
+        return value if isinstance(value, Mapping) else None
 
     async def _collect_validation_with_heartbeats(
         self,
@@ -705,18 +1136,23 @@ class ExecutiveSupervisor:
                 timeout_seconds=self.validation_timeout_seconds,
             )
         )
+        cancellation_requested = False
         try:
             while True:
                 done, _ = await asyncio.wait(
                     {task}, timeout=self.heartbeat_interval_seconds
                 )
                 if task in done:
-                    return task.result()
+                    receipt = task.result()
+                    if cancellation_requested:
+                        raise _ValidationCancelled
+                    return receipt
                 job = self._job(attempt.job_id)
                 if job.status == JobStatus.CANCEL_REQUESTED:
-                    task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
-                    raise _ValidationCancelled
+                    # The direct validation already crossed the broker boundary.
+                    # Wait for its bounded timeout/UID sweep instead of dropping
+                    # the control request while a worker-UID process may remain.
+                    cancellation_requested = True
                 self.runtime.attempts.heartbeat_attempt(
                     attempt.attempt_id,
                     fence_generation=attempt.fence_generation,
@@ -740,15 +1176,28 @@ class ExecutiveSupervisor:
         active: ActiveRun,
         receipts: tuple[ValidationReceipt, ...],
     ) -> Path:
-        path = active.launch_spec.run_dir / "output" / "supervisor-validation-receipt.json"
-        _write_private_json(
-            path,
-            {
-                "attempt_id": active.lease.attempt.attempt_id,
-                "job_id": active.lease.attempt.job_id,
-                "commands": _jsonable(receipts),
-            },
+        path = self._receipt_path(
+            active.lease.attempt.attempt_id,
+            "supervisor-validation-receipt.json",
+            legacy=(
+                active.launch_spec.run_dir
+                / "output"
+                / "supervisor-validation-receipt.json"
+            ),
         )
+        payload: dict[str, Any] = {
+            "attempt_id": active.lease.attempt.attempt_id,
+            "job_id": active.lease.attempt.job_id,
+            "commands": _jsonable(receipts),
+        }
+        sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
+        if callable(sweep_reader):
+            payload["uid_sweep"] = _jsonable(sweep_reader(active.process_ref))
+        elif self.require_complete_launch_attestation:
+            raise SupervisorError(
+                "complete remote validation has no dedicated-UID sweep receipt"
+            )
+        _write_private_json(path, payload)
         return path
 
     async def _run_supervisor_validations(
@@ -793,10 +1242,24 @@ class ExecutiveSupervisor:
 
     async def _terminalize(
         self, active: ActiveRun, receipt: CollectionReceipt, receipt_path: Path
-    ) -> tuple[Job, tuple[ValidationReceipt, ...], Path | None]:
+    ) -> tuple[Job, tuple[ValidationReceipt, ...], Path | None, Path]:
         attempt = active.lease.attempt
         fence = attempt.fence_generation
         token = active.lease.lease_token
+        seal_path: Path | None = None
+
+        def ensure_sealed() -> Path:
+            nonlocal seal_path
+            if seal_path is None:
+                seal_path = self._seal_terminal_assignment(
+                    attempt_id=attempt.attempt_id,
+                    job_id=attempt.job_id,
+                    workspace=active.launch_spec.workspace_path,
+                    run_dir=active.launch_spec.run_dir,
+                    uid_sweep=self._active_terminal_uid_sweep(active),
+                )
+            return seal_path
+
         if receipt.result.exit_code is None:
             raise SupervisorError("Codex process has no terminal exit code")
         self.runtime.attempts.record_process_exit(
@@ -809,10 +1272,11 @@ class ExecutiveSupervisor:
         )
         job = self._job(attempt.job_id)
         if job.status == JobStatus.CANCEL_REQUESTED:
+            ensure_sealed()
             cancelled = self.runtime.attempts.acknowledge_cancel(
                 attempt.attempt_id, fence_generation=fence, lease_token=token
             )
-            return cancelled, (), None
+            return cancelled, (), None, ensure_sealed()
         output = receipt.result.structured_output
         if receipt.result.status == WorkerRunStatus.SUCCEEDED and isinstance(output, Mapping):
             validation_receipts: tuple[ValidationReceipt, ...] = ()
@@ -833,12 +1297,18 @@ class ExecutiveSupervisor:
                     # exiting; honour it before checkpoint/completion.
                     job = self._job(attempt.job_id)
                     if job.status == JobStatus.CANCEL_REQUESTED:
+                        ensure_sealed()
                         cancelled = self.runtime.attempts.acknowledge_cancel(
                             attempt.attempt_id,
                             fence_generation=fence,
                             lease_token=token,
                         )
-                        return cancelled, validation_receipts, validation_path
+                        return (
+                            cancelled,
+                            validation_receipts,
+                            validation_path,
+                            ensure_sealed(),
+                        )
                 self.runtime.attempts.checkpoint_attempt(
                     attempt.attempt_id,
                     fence_generation=fence,
@@ -846,50 +1316,68 @@ class ExecutiveSupervisor:
                     payload=payload,
                 )
                 if str(output.get("status")) == "COMPLETED":
+                    ensure_sealed()
                     completed = self.runtime.attempts.complete_attempt(
                         attempt.attempt_id,
                         fence_generation=fence,
                         lease_token=token,
                         payload=payload,
                     )
-                    return completed, validation_receipts, validation_path
+                    return completed, validation_receipts, validation_path, ensure_sealed()
+                ensure_sealed()
                 failed = self.runtime.attempts.fail_attempt(
                     attempt.attempt_id,
                     fence_generation=fence,
                     lease_token=token,
                     payload=payload,
                 )
-                return failed, validation_receipts, validation_path
+                return failed, validation_receipts, validation_path, ensure_sealed()
             except _ValidationCancelled:
+                ensure_sealed()
                 cancelled = self.runtime.attempts.acknowledge_cancel(
                     attempt.attempt_id,
                     fence_generation=fence,
                     lease_token=token,
                 )
-                return cancelled, validation_receipts, validation_path
+                return cancelled, validation_receipts, validation_path, ensure_sealed()
+            except TerminalAssignmentSealError:
+                raise
             except StateConflict:
                 # A concurrent cancel is the only stale-state transition this
                 # owner may acknowledge.  Fence/adoption/expiry races must
                 # propagate instead of being converted with a stale token.
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
+                    ensure_sealed()
                     cancelled = self.runtime.attempts.acknowledge_cancel(
                         attempt.attempt_id,
                         fence_generation=fence,
                         lease_token=token,
                     )
-                    return cancelled, validation_receipts, validation_path
+                    return (
+                        cancelled,
+                        validation_receipts,
+                        validation_path,
+                        ensure_sealed(),
+                    )
                 raise
             except SupervisorError as exc:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
+                    ensure_sealed()
                     cancelled = self.runtime.attempts.acknowledge_cancel(
                         attempt.attempt_id,
                         fence_generation=fence,
                         lease_token=token,
                     )
-                    return cancelled, validation_receipts, validation_path
+                    return (
+                        cancelled,
+                        validation_receipts,
+                        validation_path,
+                        ensure_sealed(),
+                    )
                 try:
+                    ensure_sealed()
                     failed = self.runtime.attempts.fail_attempt(
                         attempt.attempt_id,
                         fence_generation=fence,
@@ -904,12 +1392,14 @@ class ExecutiveSupervisor:
                     current = self._job(attempt.job_id)
                     if current.status != JobStatus.CANCEL_REQUESTED:
                         raise
+                    ensure_sealed()
                     failed = self.runtime.attempts.acknowledge_cancel(
                         attempt.attempt_id,
                         fence_generation=fence,
                         lease_token=token,
                     )
-                return failed, validation_receipts, validation_path
+                return failed, validation_receipts, validation_path, ensure_sealed()
+        ensure_sealed()
         failed = self.runtime.attempts.fail_attempt(
             attempt.attempt_id,
             fence_generation=fence,
@@ -920,12 +1410,12 @@ class ExecutiveSupervisor:
                 errors=[receipt.result.error or receipt.result.status.value],
             ),
         )
-        return failed, (), None
+        return failed, (), None, ensure_sealed()
 
     async def finish_job(self, active: ActiveRun) -> SupervisorReceipt:
         receipt = await self._collect_with_heartbeats(active)
         receipt_path = self._persist_collection(active, receipt)
-        job, validations, validation_path = await self._terminalize(
+        job, validations, validation_path, seal_path = await self._terminalize(
             active, receipt, receipt_path
         )
         attempt = self.runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
@@ -940,6 +1430,7 @@ class ExecutiveSupervisor:
             validation_receipt_path=(
                 str(validation_path) if validation_path is not None else None
             ),
+            assignment_seal_receipt_path=str(seal_path),
         )
 
     async def run_once(self, job_id: str) -> SupervisorReceipt:
@@ -951,8 +1442,67 @@ class ExecutiveSupervisor:
         job = self._job(job_id)
         if job.status != JobStatus.LOST or job.attempt_count >= job.attempt_limit:
             return False
+        if self.require_complete_launch_attestation:
+            # A complete terminal attempt has a sealed workspace.  Only the
+            # service's explicit requeue path may archive it and prepare a fresh
+            # worker-accessible assignment before returning the Job to QUEUED.
+            return False
         self.runtime.jobs.requeue_job(job_id)
         return True
+
+    def _persist_reconciliation_evidence(
+        self,
+        outcome: ReconcileReceipt,
+        *,
+        uid_sweep: Mapping[str, Any] | None,
+    ) -> ReconcileReceipt:
+        if uid_sweep is None:
+            return outcome
+        path = self._receipt_path(
+            outcome.attempt_id,
+            "reconciliation-receipt.json",
+            legacy=(
+                self.runtime.store.path.parent
+                / "reconciliation-receipts"
+                / outcome.attempt_id
+                / "reconciliation-receipt.json"
+            ),
+        )
+        _write_private_json(
+            path,
+            {
+                "schema_version": "mastermind.executive_reconciliation_evidence/v1",
+                "outcome": outcome.to_dict(),
+                "uid_sweep": _jsonable(uid_sweep),
+            },
+        )
+        return dataclasses.replace(outcome, uid_sweep_receipt_path=str(path))
+
+    def _restart_uid_sweep(self, attempt: Attempt) -> Mapping[str, Any] | None:
+        sweep_reader = getattr(self.process_controller, "uid_sweep_receipt", None)
+        if not callable(sweep_reader):
+            if self.require_complete_launch_attestation:
+                raise SupervisorError(
+                    "complete restart reconciliation has no dedicated-UID sweep receipt"
+                )
+            return None
+        try:
+            sweep = sweep_reader(attempt)
+        except Exception as exc:
+            if self.require_complete_launch_attestation:
+                raise SupervisorError(
+                    "complete restart reconciliation could not obtain a dedicated-UID sweep"
+                ) from exc
+            return None
+        if (
+            not isinstance(sweep, Mapping)
+            or sweep.get("schema_version") != "mastermind.executive_uid_sweep/v1"
+            or sweep.get("passed") is not True
+        ):
+            raise SupervisorError(
+                "restart reconciliation received a non-passing dedicated-UID sweep"
+            )
+        return sweep
 
     def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
         """Inspect durable nonterminal attempts after a supervisor restart.
@@ -969,6 +1519,7 @@ class ExecutiveSupervisor:
                 continue
             presence = self.process_controller.presence(attempt)
             process_was_live = presence is ProcessPresence.LIVE
+            uid_sweep: Mapping[str, Any] | None = None
             if process_was_live:
                 self.process_controller.terminate(attempt)
                 if not self.process_controller.absence_verified(attempt):
@@ -976,11 +1527,14 @@ class ExecutiveSupervisor:
                         f"attempt {attempt.attempt_id} remained live or ambiguous after termination"
                     )
                 presence = ProcessPresence.ABSENT
-            elif (
-                presence is ProcessPresence.ABSENT
-                and not self.process_controller.absence_verified(attempt)
-            ):
-                presence = ProcessPresence.UNKNOWN
+            if presence is ProcessPresence.ABSENT:
+                if not self.process_controller.absence_verified(attempt):
+                    presence = ProcessPresence.UNKNOWN
+                else:
+                    # This must be fresh for an initially absent process too;
+                    # otherwise a broker-restart race can rotate the fence on
+                    # the strength of an old startup observation.
+                    uid_sweep = self._restart_uid_sweep(attempt)
             if presence is ProcessPresence.UNKNOWN:
                 outcomes.append(
                     ReconcileReceipt(
@@ -997,6 +1551,18 @@ class ExecutiveSupervisor:
             current = self.runtime.attempts.get_attempt(attempt.attempt_id)
             if current is None or current.status not in _ACTIVE_ATTEMPT_STATUSES:
                 continue
+            job_before_terminal = self._job(current.job_id)
+            if not job_before_terminal.worktree:
+                raise TerminalAssignmentSealError(
+                    "persisted worker attempt has no assigned workspace to seal"
+                )
+            seal_path = self._seal_terminal_assignment(
+                attempt_id=current.attempt_id,
+                job_id=current.job_id,
+                workspace=job_before_terminal.worktree,
+                run_dir=self._run_dir(current.attempt_id),
+                uid_sweep=uid_sweep,
+            )
             expired = self.runtime.attempts.reconcile_expired(
                 attempt_id=current.attempt_id
             )
@@ -1006,20 +1572,24 @@ class ExecutiveSupervisor:
                 requeued = requeue_lost and self._maybe_requeue(job.job_id)
                 cancelled = job.status == JobStatus.CANCELLED
                 outcomes.append(
-                    ReconcileReceipt(
-                        attempt_id=expired_attempt.attempt_id,
-                        job_id=expired_attempt.job_id,
-                        status=(
-                            ReconcileStatus.MISSING_CANCELLED
-                            if cancelled
-                            else (
-                                ReconcileStatus.REQUEUED
-                                if requeued
-                                else ReconcileStatus.EXPIRED_LOST
-                            )
+                    self._persist_reconciliation_evidence(
+                        ReconcileReceipt(
+                            attempt_id=expired_attempt.attempt_id,
+                            job_id=expired_attempt.job_id,
+                            status=(
+                                ReconcileStatus.MISSING_CANCELLED
+                                if cancelled
+                                else (
+                                    ReconcileStatus.REQUEUED
+                                    if requeued
+                                    else ReconcileStatus.EXPIRED_LOST
+                                )
+                            ),
+                            process_was_live=process_was_live,
+                            requeued=requeued,
+                            assignment_seal_receipt_path=str(seal_path),
                         ),
-                        process_was_live=process_was_live,
-                        requeued=requeued,
+                        uid_sweep=uid_sweep,
                     )
                 )
                 continue
@@ -1029,11 +1599,15 @@ class ExecutiveSupervisor:
 
             if current.pid is None and current.provider_session_id is None:
                 outcomes.append(
-                    ReconcileReceipt(
-                        attempt_id=current.attempt_id,
-                        job_id=current.job_id,
-                        status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
-                        process_was_live=process_was_live,
+                    self._persist_reconciliation_evidence(
+                        ReconcileReceipt(
+                            attempt_id=current.attempt_id,
+                            job_id=current.job_id,
+                            status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                            process_was_live=process_was_live,
+                            assignment_seal_receipt_path=str(seal_path),
+                        ),
+                        uid_sweep=uid_sweep,
                     )
                 )
                 continue
@@ -1072,12 +1646,16 @@ class ExecutiveSupervisor:
                 requeued = requeue_lost and self._maybe_requeue(current.job_id)
                 status = ReconcileStatus.REQUEUED if requeued else ReconcileStatus.EXPIRED_LOST
             outcomes.append(
-                ReconcileReceipt(
-                    attempt_id=current.attempt_id,
-                    job_id=current.job_id,
-                    status=status,
-                    process_was_live=process_was_live,
-                    requeued=requeued,
+                self._persist_reconciliation_evidence(
+                    ReconcileReceipt(
+                        attempt_id=current.attempt_id,
+                        job_id=current.job_id,
+                        status=status,
+                        process_was_live=process_was_live,
+                        requeued=requeued,
+                        assignment_seal_receipt_path=str(seal_path),
+                    ),
+                    uid_sweep=uid_sweep,
                 )
             )
         return outcomes

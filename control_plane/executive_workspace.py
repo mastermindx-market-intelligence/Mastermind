@@ -8,10 +8,12 @@ remote before the worker starts.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import os
 import re
+import stat
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Sequence
 
 
@@ -22,6 +24,10 @@ class WorkspaceError(RuntimeError):
     """A job workspace could not be prepared without sharing authority."""
 
 
+class AssignmentSealError(WorkspaceError):
+    """A terminal worker assignment could not be made control-private."""
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkspaceReceipt:
     source_repository: str
@@ -30,9 +36,100 @@ class WorkspaceReceipt:
     branch: str
     remote_count: int
     git_dir_is_private: bool
+    workspace_uid: int
+    workspace_gid: int
+    workspace_mode: int
 
     def to_dict(self) -> dict[str, object]:
         return dataclasses.asdict(self)
+
+
+def _seal_identity(path: Path, info: os.stat_result) -> dict[str, object]:
+    return {
+        "path": str(path),
+        "device": int(info.st_dev),
+        "inode": int(info.st_ino),
+        "mode": stat.S_IMODE(info.st_mode),
+        "uid": int(info.st_uid),
+        "gid": int(info.st_gid),
+        "mtime_ns": int(info.st_mtime_ns),
+    }
+
+
+def seal_control_owned_paths(
+    paths: dict[str, str | Path],
+    *,
+    control_uid: int | None = None,
+) -> dict[str, object]:
+    """Remove worker traversal at control-owned assignment boundaries.
+
+    Worker-created descendants can remain worker-owned: after the terminal UID
+    sweep there are no live worker file descriptors, and mode ``0700`` on each
+    control-owned assignment root makes every descendant unreachable to the
+    worker principal.  Every requested boundary is attempted even if another
+    fails; successful revocations are never rolled back.
+    """
+
+    if not paths or any(
+        not isinstance(label, str) or not label or not Path(value).is_absolute()
+        for label, value in paths.items()
+    ):
+        raise AssignmentSealError("assignment seal requires named absolute paths")
+    expected_uid = os.geteuid() if control_uid is None else int(control_uid)
+    canonical_values = [Path(value).resolve(strict=False) for value in paths.values()]
+    if len(canonical_values) != len(set(canonical_values)):
+        raise AssignmentSealError("assignment seal paths must be distinct")
+
+    sealed: dict[str, dict[str, object]] = {}
+    errors: list[str] = []
+    for label, raw_path in sorted(paths.items()):
+        path = Path(raw_path)
+        descriptor: int | None = None
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+            before = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(before.st_mode)
+                or before.st_uid != expected_uid
+                or stat.S_IMODE(before.st_mode) & 0o007
+            ):
+                raise AssignmentSealError(
+                    f"{label} boundary is not a control-owned protected directory"
+                )
+            before_identity = _seal_identity(path.resolve(strict=True), before)
+            os.fchmod(descriptor, 0o700)
+            os.fsync(descriptor)
+            after = os.fstat(descriptor)
+            after_identity = _seal_identity(path.resolve(strict=True), after)
+            stable_fields = ("device", "inode", "uid", "gid")
+            if any(
+                before_identity[field] != after_identity[field]
+                for field in stable_fields
+            ) or after_identity["mode"] != 0o700:
+                raise AssignmentSealError(f"{label} boundary did not seal to mode 0700")
+            sealed[label] = {
+                "before": before_identity,
+                "after": after_identity,
+                "worker_traversal_revoked": True,
+            }
+        except (AssignmentSealError, OSError) as exc:
+            errors.append(f"{label}:{type(exc).__name__}")
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+    if errors or len(sealed) != len(paths):
+        raise AssignmentSealError(
+            "terminal assignment seal failed closed: " + ",".join(errors)
+        )
+    return {
+        "schema_version": "mastermind.executive_assignment_seal/v1",
+        "sealed_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+        "control_uid": expected_uid,
+        "paths": sealed,
+        "passed": True,
+    }
 
 
 def _git_env(home: Path) -> dict[str, str]:
@@ -81,6 +178,8 @@ def prepare_credentialless_clone(
     job_id: str,
     base_sha: str,
     branch: str | None = None,
+    shared_gid: int | None = None,
+    shared_write_paths: Sequence[str] = (),
 ) -> WorkspaceReceipt:
     """Create one independent, no-remote clone beneath ``workspace_root``.
 
@@ -90,6 +189,32 @@ def prepare_credentialless_clone(
     safe_job_id = str(job_id).strip()
     if not _JOB_ID_RE.fullmatch(safe_job_id):
         raise WorkspaceError("job_id is unsafe for a workspace name")
+    if shared_write_paths and shared_gid is None:
+        raise WorkspaceError("shared_write_paths requires shared_gid")
+    normalized_write_paths: list[PurePosixPath] = []
+    for raw in shared_write_paths:
+        if (
+            not isinstance(raw, str)
+            or not raw
+            or "\\" in raw
+            or "\x00" in raw
+            or any(character in raw for character in "*?[")
+        ):
+            raise WorkspaceError("shared write paths must be exact repository-relative paths")
+        parsed = PurePosixPath(raw)
+        if parsed.is_absolute() or any(part in {"", ".", ".."} for part in parsed.parts):
+            raise WorkspaceError("shared write paths must be canonical and repository-relative")
+        if (
+            parsed.parts[0] in {".git", ".codex"}
+            or parsed.as_posix() == "config.toml"
+            or any(part == ".env" or part.startswith(".env.") for part in parsed.parts)
+        ):
+            raise WorkspaceError("shared write path targets protected metadata")
+        normalized_write_paths.append(parsed)
+    if len(normalized_write_paths) != len(
+        {path.as_posix() for path in normalized_write_paths}
+    ):
+        raise WorkspaceError("shared write paths contain duplicates")
     source = Path(source_repository).expanduser().resolve()
     root = Path(workspace_root).expanduser().resolve()
     if not source.is_dir():
@@ -127,6 +252,57 @@ def prepare_credentialless_clone(
     git_dir = destination / ".git"
     if actual_base != resolved_base or status or remaining or not git_dir.is_dir():
         raise WorkspaceError("prepared workspace failed its clean, exact-SHA, no-remote self-check")
+    if shared_gid is not None:
+        for current_root, directory_names, file_names in os.walk(
+            destination, topdown=True, followlinks=False
+        ):
+            current = Path(current_root)
+            for candidate in [current, *(current / name for name in directory_names)]:
+                info = candidate.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    continue
+                os.chown(candidate, -1, int(shared_gid))
+                os.chmod(candidate, 0o750)
+            for name in file_names:
+                candidate = current / name
+                info = candidate.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    continue
+                os.chown(candidate, -1, int(shared_gid))
+                original = stat.S_IMODE(info.st_mode)
+                group_execute = 0o010 if original & 0o111 else 0
+                os.chmod(candidate, (original & 0o700) | 0o040 | group_execute)
+
+        for relative in normalized_write_paths:
+            current = destination
+            for part in relative.parts[:-1]:
+                candidate = current / part
+                if os.path.lexists(candidate):
+                    info = candidate.lstat()
+                    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                        raise WorkspaceError(
+                            "shared write path crosses a non-directory or symlink"
+                        )
+                else:
+                    candidate.mkdir(mode=0o750)
+                os.chown(candidate, -1, int(shared_gid))
+                os.chmod(candidate, 0o750)
+                current = candidate
+            parent = current
+            os.chown(parent, -1, int(shared_gid))
+            os.chmod(parent, 0o770)
+            target = parent / relative.name
+            if os.path.lexists(target):
+                info = target.lstat()
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                    raise WorkspaceError(
+                        "shared write target must be a regular non-symlink file"
+                    )
+                original = stat.S_IMODE(info.st_mode)
+                group_execute = 0o010 if original & 0o111 else 0
+                os.chown(target, -1, int(shared_gid))
+                os.chmod(target, (original & 0o700) | 0o060 | group_execute)
+    workspace_info = destination.lstat()
     return WorkspaceReceipt(
         source_repository=str(source),
         workspace_path=str(destination),
@@ -134,4 +310,7 @@ def prepare_credentialless_clone(
         branch=selected_branch,
         remote_count=0,
         git_dir_is_private=True,
+        workspace_uid=workspace_info.st_uid,
+        workspace_gid=workspace_info.st_gid,
+        workspace_mode=stat.S_IMODE(workspace_info.st_mode),
     )
