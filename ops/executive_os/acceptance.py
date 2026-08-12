@@ -308,6 +308,66 @@ def _directory_attribute(record: str, attribute: str) -> str:
     return text[0].split(":", 1)[1].strip()
 
 
+def _authentication_probe_is_disabled(
+    returncode: int, stdout: bytes, stderr: bytes
+) -> bool:
+    expected_stdout = (
+        b"Authentication for node /Local/Default failed. "
+        b"(-14167, eDSAuthAccountDisabled)"
+    )
+    expected_stderr = b"<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)"
+    return (
+        returncode == 87
+        and stdout.strip() == expected_stdout
+        and stderr.strip() == expected_stderr
+    )
+
+
+def _authentication_authority_values(
+    returncode: int, stdout: bytes, stderr: bytes
+) -> tuple[str, ...]:
+    if returncode != 0:
+        raise AcceptanceError(
+            f"authentication authority read failed with exit {returncode}"
+        )
+    if stdout == b"" and stderr == b"No such key: AuthenticationAuthority\n":
+        return ()
+    if stdout == b"AuthenticationAuthority: ;DisabledUser;\n" and stderr == b"":
+        return (";DisabledUser;",)
+    raise AcceptanceError("authentication authority output is malformed")
+
+
+def _read_authentication_authority(account: str) -> tuple[str, ...]:
+    completed = _run(
+        [
+            "/usr/bin/dscl",
+            ".",
+            "-read",
+            f"/Users/{account}",
+            "AuthenticationAuthority",
+        ],
+        label=f"authentication authority for {account}",
+        check=False,
+        env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+    )
+    return _authentication_authority_values(
+        completed.returncode, completed.stdout, completed.stderr
+    )
+
+
+def _assert_authentication_disabled(account: str) -> None:
+    completed = _run(
+        ["/usr/bin/dscl", ".", "-authonly", account, secrets.token_hex(32)],
+        label=f"authentication probe for {account}",
+        check=False,
+        env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+    )
+    if not _authentication_probe_is_disabled(
+        completed.returncode, completed.stdout, completed.stderr
+    ):
+        raise AcceptanceError(f"service account {account} is not authentication-disabled")
+
+
 def _directory_values(record: str, attribute: str) -> tuple[str, ...]:
     completed = _run(
         ["/usr/bin/dscl", ".", "-read", record, attribute],
@@ -315,7 +375,10 @@ def _directory_values(record: str, attribute: str) -> tuple[str, ...]:
         check=False,
     )
     if completed.returncode != 0:
-        return ()
+        raise AcceptanceError(
+            f"directory values {record} {attribute} failed with exit "
+            f"{completed.returncode}"
+        )
     lines = completed.stdout.decode("utf-8", errors="strict").splitlines()
     if not lines or ":" not in lines[0]:
         return ()
@@ -959,13 +1022,18 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 "UserShell": "/usr/bin/false",
                 "IsHidden": "1",
                 "Password": "*",
-                "AuthenticationAuthority": ";DisabledUser;",
             }
             if any(
                 _directory_attribute(f"/Users/{account}", key) != expected
                 for key, expected in expected_attributes.items()
             ):
                 raise AcceptanceError(f"service account {account} attributes drifted")
+            authority = _read_authentication_authority(account)
+            if authority not in ((), (";DisabledUser;",)):
+                raise AcceptanceError(
+                    f"service account {account} authentication authority drifted"
+                )
+            _assert_authentication_disabled(account)
         operator_groups = os.getgrouplist(
             self.operator_user,
             self.operator_identity.pw_gid,

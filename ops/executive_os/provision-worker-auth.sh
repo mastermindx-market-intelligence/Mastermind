@@ -75,6 +75,54 @@ read_dscl_attribute() {
       '
 }
 
+verify_authentication_disabled() {
+  local name="$1"
+  local authority authority_err authority_error authority_out authority_status
+  local expected observed probe status
+  authority_out="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stdout.XXXXXX)"
+  authority_err="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stderr.XXXXXX)"
+  if LC_ALL=C LANG=C /usr/bin/dscl . -read "/Users/$name" AuthenticationAuthority \
+    >"$authority_out" 2>"$authority_err"; then
+    authority_status=0
+  else
+    authority_status=$?
+  fi
+  authority="$(/bin/cat "$authority_out")"
+  authority_error="$(/bin/cat "$authority_err")"
+  /bin/rm -f -- "$authority_out" "$authority_err"
+  [ "$authority_status" -eq 0 ] || {
+    /bin/echo "could not inspect the authentication authority for $name" >&2
+    exit 65
+  }
+  case "$authority|$authority_error" in
+    '|No such key: AuthenticationAuthority') authority='' ;;
+    'AuthenticationAuthority: ;DisabledUser;|') authority=';DisabledUser;' ;;
+    *)
+      /bin/echo "worker account has an unreadable authentication authority" >&2
+      exit 65
+      ;;
+  esac
+  case "$authority" in
+    ''|';DisabledUser;') ;;
+    *)
+      /bin/echo "worker account has an unreviewed authentication authority" >&2
+      exit 65
+      ;;
+  esac
+  probe="$(/usr/bin/uuidgen)"
+  if observed="$(LC_ALL=C LANG=C /usr/bin/dscl . -authonly "$name" "$probe" 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+  expected='<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)
+Authentication for node /Local/Default failed. (-14167, eDSAuthAccountDisabled)'
+  [ "$status" -eq 87 ] && [ "$observed" = "$expected" ] || {
+    /bin/echo "worker account is not authentication-disabled" >&2
+    exit 65
+  }
+}
+
 run_codex_as_worker() {
   /usr/bin/sudo -n -u "$WORKER_USER" -g "$WORKER_GROUP" \
     /usr/bin/env -i \
@@ -99,11 +147,11 @@ run_codex_as_worker() {
 [ "$(read_dscl_attribute "/Users/$WORKER_USER" PrimaryGroupID)" = "$WORKER_GID" ] \
   && [ "$(read_dscl_attribute "/Users/$WORKER_USER" NFSHomeDirectory)" = "$PROVIDER_HOME" ] \
   && [ "$(read_dscl_attribute "/Users/$WORKER_USER" UserShell)" = "/usr/bin/false" ] \
-  && [ "$(read_dscl_attribute "/Users/$WORKER_USER" Password)" = "*" ] \
-  && [ "$(read_dscl_attribute "/Users/$WORKER_USER" AuthenticationAuthority)" = ";DisabledUser;" ] || {
+  && [ "$(read_dscl_attribute "/Users/$WORKER_USER" Password)" = "*" ] || {
     /bin/echo "worker account does not match the bootstrapped disabled-account policy" >&2
     exit 65
   }
+verify_authentication_disabled "$WORKER_USER"
 
 [ -d "$PROVIDER_HOME" ] && [ ! -L "$PROVIDER_HOME" ] || {
   /bin/echo "worker provider home must be a real directory: $PROVIDER_HOME" >&2

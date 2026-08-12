@@ -465,6 +465,57 @@ def test_host_scripts_census_all_directory_membership_representations() -> None:
         assert "NR==1 {print $1}" not in source
 
 
+def test_service_accounts_use_supported_disabled_authentication_policy_check() -> None:
+    for name in (
+        "bootstrap-host.sh",
+        "install.sh",
+        "provision-worker-auth.sh",
+    ):
+        source = (OPS / name).read_text(encoding="utf-8")
+        assert "/usr/bin/dscl" in source
+        assert "-authonly" in source
+        assert "-14167" in source
+        assert "eDSAuthAccountDisabled" in source
+        assert '-create "/Users/$name" AuthenticationAuthority' not in source
+
+    acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
+    assert '["/usr/bin/dscl", ".", "-authonly"' in acceptance
+    assert "-14167" in acceptance
+    assert "eDSAuthAccountDisabled" in acceptance
+
+
+def test_disabled_authentication_policy_parser_is_exact() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _authentication_authority_values,
+        _authentication_probe_is_disabled,
+    )
+
+    disabled_stdout = (
+        b"Authentication for node /Local/Default failed. "
+        b"(-14167, eDSAuthAccountDisabled)\n"
+    )
+    disabled_stderr = b"<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)\n"
+    assert _authentication_probe_is_disabled(87, disabled_stdout, disabled_stderr)
+    assert not _authentication_probe_is_disabled(0, disabled_stdout, disabled_stderr)
+    assert not _authentication_probe_is_disabled(
+        87, disabled_stdout, b"<dscl_cmd> DS Error: -14090 (eDSAuthFailed)\n"
+    )
+    assert not _authentication_probe_is_disabled(87, b"unexpected", disabled_stderr)
+    assert _authentication_authority_values(
+        0, b"", b"No such key: AuthenticationAuthority\n"
+    ) == ()
+    assert _authentication_authority_values(
+        0, b"AuthenticationAuthority: ;DisabledUser;\n", b""
+    ) == (";DisabledUser;",)
+    with pytest.raises(AcceptanceError, match="malformed"):
+        _authentication_authority_values(0, b"", b"unexpected\n")
+    with pytest.raises(AcceptanceError, match="exit 77"):
+        _authentication_authority_values(77, b"", b"permission denied\n")
+
+
 def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
     import pytest
 

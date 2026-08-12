@@ -115,7 +115,9 @@ def test_worker_auth_provisioning_requires_root_macos_and_bootstrap_identity() -
     assert "run bootstrap-host.sh first" in source
     assert "NFSHomeDirectory" in source
     assert 'UserShell)" = "/usr/bin/false"' in source
-    assert "AuthenticationAuthority" in source
+    assert "/usr/bin/dscl" in source
+    assert "-authonly" in source
+    assert "eDSAuthAccountDisabled" in source
     assert '"$WORKER_UID:$WORKER_GID:700"' in source
 
 

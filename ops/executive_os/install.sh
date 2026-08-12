@@ -347,6 +347,54 @@ sorted_words() {
     | /usr/bin/sort -u | /usr/bin/tr '\n' ' ' | /usr/bin/sed 's/[[:space:]]*$//'
 }
 
+verify_authentication_disabled() {
+  local name="$1"
+  local authority authority_err authority_error authority_out authority_status
+  local expected observed probe status
+  authority_out="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stdout.XXXXXX)"
+  authority_err="$(/usr/bin/mktemp /private/tmp/mastermind-authority.stderr.XXXXXX)"
+  if LC_ALL=C LANG=C /usr/bin/dscl . -read "/Users/$name" AuthenticationAuthority \
+    >"$authority_out" 2>"$authority_err"; then
+    authority_status=0
+  else
+    authority_status=$?
+  fi
+  authority="$(/bin/cat "$authority_out")"
+  authority_error="$(/bin/cat "$authority_err")"
+  /bin/rm -f -- "$authority_out" "$authority_err"
+  [ "$authority_status" -eq 0 ] || {
+    /bin/echo "could not inspect the authentication authority for $name" >&2
+    exit 65
+  }
+  case "$authority|$authority_error" in
+    '|No such key: AuthenticationAuthority') authority='' ;;
+    'AuthenticationAuthority: ;DisabledUser;|') authority=';DisabledUser;' ;;
+    *)
+      /bin/echo "service account $name has an unreadable authentication authority" >&2
+      exit 65
+      ;;
+  esac
+  case "$authority" in
+    ''|';DisabledUser;') ;;
+    *)
+      /bin/echo "service account $name has an unreviewed authentication authority" >&2
+      exit 65
+      ;;
+  esac
+  probe="$(/usr/bin/uuidgen)"
+  if observed="$(LC_ALL=C LANG=C /usr/bin/dscl . -authonly "$name" "$probe" 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+  expected='<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)
+Authentication for node /Local/Default failed. (-14167, eDSAuthAccountDisabled)'
+  [ "$status" -eq 87 ] && [ "$observed" = "$expected" ] || {
+    /bin/echo "service account $name is not authentication-disabled" >&2
+    exit 65
+  }
+}
+
 numeric_owners() {
   local record_type="$1"
   local attribute="$2"
@@ -380,8 +428,7 @@ verify_service_account() {
     && [ "$(read_dscl_attribute "/Users/$name" NFSHomeDirectory)" = "$home" ] \
     && [ "$(read_dscl_attribute "/Users/$name" UserShell)" = "/usr/bin/false" ] \
     && [ "$(read_dscl_attribute "/Users/$name" IsHidden)" = "1" ] \
-    && [ "$(read_dscl_attribute "/Users/$name" Password)" = "*" ] \
-    && [ "$(read_dscl_attribute "/Users/$name" AuthenticationAuthority)" = ";DisabledUser;" ] || {
+    && [ "$(read_dscl_attribute "/Users/$name" Password)" = "*" ] || {
       /bin/echo "service account $name attributes differ from the disabled-account policy" >&2
       exit 65
     }
@@ -389,6 +436,7 @@ verify_service_account() {
     /bin/echo "service account $name has no valid GeneratedUID" >&2
     exit 65
   }
+  verify_authentication_disabled "$name"
 }
 
 verify_group_members() {
