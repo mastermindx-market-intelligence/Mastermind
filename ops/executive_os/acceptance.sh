@@ -12,7 +12,7 @@ umask 077
   exit 69
 }
 
-SCRIPT_DIR="$(cd -P "$(dirname "$0")" && /bin/pwd)"
+SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 CONTROL_PLIST="/Library/LaunchDaemons/com.mastermind.executive.control.plist"
 [ -r "$CONTROL_PLIST" ] || {
   /bin/echo "private installed control plist is unavailable; run install.sh first" >&2

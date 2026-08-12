@@ -22,8 +22,16 @@ OPERATOR_USER=""
 PYTHON_BINARY=""
 PYTHON_RUNTIME_ROOT=""
 PYTHON_TEAM_ID="BMM5U3QVKW"
+PYTHON_VERSION="3.12.10"
+PYTHON_PACKAGE_SHA256="8373e58da4ea146b3eb1c1f9834f19a319440b6b679b06050b1f9ee3237aa8e4"
+PYTHON_BINARY_SHA256="d4f152f2a753c94e0e7935c8ebbe6b2609979e1df7898422b577d0076383d08b"
+PYTHON_FRAMEWORK_SHA256="14e61fb22a897d238248dfd8fe3b472b4541338c293368b4747803055b8bb3aa"
+PINNED_PYTHON_RUNTIME_ROOT="/Library/Frameworks/Python.framework/Versions/3.12"
+PINNED_PYTHON_BINARY="$PINNED_PYTHON_RUNTIME_ROOT/bin/python3.12"
+PYTHON_RUNTIME_RECEIPT="/Library/Application Support/MastermindExecutive/python-runtime.json"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
 CODEX_VERSION="0.147.0"
+CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
 
 usage() {
   /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [options]" >&2
@@ -66,6 +74,12 @@ case "$OPERATOR_USER" in *[!A-Za-z0-9_.-]*) /bin/echo "operator account name is 
   /bin/echo "install requires --python-binary and --python-runtime-root for a pre-provisioned root-owned signed Python 3.12 standard-library runtime" >&2
   exit 65
 }
+[ "$PYTHON_RUNTIME_ROOT" = "$PINNED_PYTHON_RUNTIME_ROOT" ] \
+  && [ "$PYTHON_BINARY" = "$PINNED_PYTHON_BINARY" ] \
+  && [ "$PYTHON_TEAM_ID" = "BMM5U3QVKW" ] || {
+    /bin/echo "install requires the exact reviewed Executive Python runtime path and PSF signer" >&2
+    exit 65
+  }
 case "$EXPECTED_SHA" in
   *[!0-9a-f]*|'') /bin/echo "expected SHA must be lowercase hexadecimal" >&2; exit 65 ;;
 esac
@@ -87,6 +101,20 @@ fi
   /bin/echo "Python runtime root must be a direct directory" >&2
   exit 65
 }
+for python_ancestor in \
+  /Library \
+  /Library/Frameworks \
+  /Library/Frameworks/Python.framework \
+  /Library/Frameworks/Python.framework/Versions; do
+  [ -d "$python_ancestor" ] && [ ! -L "$python_ancestor" ] \
+    && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$python_ancestor")" = "0:0:755" ] || {
+      /bin/echo "Python runtime ancestor is not a direct root:wheel mode 0755 directory: $python_ancestor" >&2
+      exit 65
+    }
+  case "$(/usr/bin/stat -f '%Sp' "$python_ancestor")" in
+    *+) /bin/echo "Python runtime ancestor has a filesystem ACL: $python_ancestor" >&2; exit 65 ;;
+  esac
+done
 case "$PYTHON_BINARY" in
   "$PYTHON_RUNTIME_ROOT"/*) ;;
   *) /bin/echo "Python binary must be contained by its pinned runtime root" >&2; exit 65 ;;
@@ -108,12 +136,16 @@ if [ -n "$(/usr/bin/find "$PYTHON_RUNTIME_ROOT" ! -user root -print -quit)" ]; t
   /bin/echo "Python runtime contains a non-root-owned object" >&2
   exit 65
 fi
+if [ -n "$(/usr/bin/find "$PYTHON_RUNTIME_ROOT" ! -group wheel -print -quit)" ]; then
+  /bin/echo "Python runtime contains an object outside the wheel group" >&2
+  exit 65
+fi
 if [ -n "$(/usr/bin/find "$PYTHON_RUNTIME_ROOT" -perm +022 -print -quit)" ]; then
   /bin/echo "Python runtime contains a group/other-writable object" >&2
   exit 65
 fi
 while IFS= read -r -d '' runtime_link; do
-  runtime_target="$(/usr/bin/realpath "$runtime_link")" || {
+  runtime_target="$(/usr/bin/readlink -f "$runtime_link")" || {
     /bin/echo "Python runtime contains a dangling symlink" >&2
     exit 65
   }
@@ -136,8 +168,140 @@ OBSERVED_PYTHON_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PYTHON_BINARY" 2>&1 
   /bin/echo "Python runtime signer team is not the explicit allowlist" >&2
   exit 65
 }
-"$PYTHON_BINARY" -I -S -B -c 'import asyncio,ctypes,hashlib,json,plistlib,sqlite3,ssl,sys; assert sys.version_info[:2] == (3, 12)' || {
-  /bin/echo "pinned runtime is not Python 3.12 with the required standard library" >&2
+OBSERVED_PYTHON_BINARY_SHA256="$(/usr/bin/shasum -a 256 "$PYTHON_BINARY" | /usr/bin/awk '{print $1}')"
+OBSERVED_PYTHON_FRAMEWORK_SHA256="$(/usr/bin/shasum -a 256 "$PYTHON_RUNTIME_ROOT/Python" | /usr/bin/awk '{print $1}')"
+[ "$OBSERVED_PYTHON_BINARY_SHA256" = "$PYTHON_BINARY_SHA256" ] \
+  && [ "$OBSERVED_PYTHON_FRAMEWORK_SHA256" = "$PYTHON_FRAMEWORK_SHA256" ] || {
+    /bin/echo "Python runtime bytes differ from the reviewed package allowlist" >&2
+    exit 65
+  }
+"$PYTHON_BINARY" -I -S -B -c 'import asyncio,ctypes,hashlib,json,plistlib,sqlite3,ssl,sys; assert sys.version.split()[0] == "3.12.10"' || {
+  /bin/echo "pinned runtime is not exact Python 3.12.10 with the required standard library" >&2
+  exit 65
+}
+"$PYTHON_BINARY" -I -S -B - "$PYTHON_RUNTIME_ROOT" "$PYTHON_BINARY" <<'PY' || {
+import _ctypes
+import _sqlite3
+import _ssl
+import asyncio
+import ctypes
+import pathlib
+import sqlite3
+import ssl
+import sys
+import sysconfig
+
+
+class DlInfo(ctypes.Structure):
+    _fields_ = [
+        ("dli_fname", ctypes.c_char_p),
+        ("dli_fbase", ctypes.c_void_p),
+        ("dli_sname", ctypes.c_char_p),
+        ("dli_saddr", ctypes.c_void_p),
+    ]
+
+
+root = pathlib.Path(sys.argv[1]).resolve(strict=True)
+expected_binary = pathlib.Path(sys.argv[2]).resolve(strict=True)
+
+
+def require_inside(raw: str, label: str) -> pathlib.Path:
+    observed = pathlib.Path(raw).resolve(strict=True)
+    if observed != root and root not in observed.parents:
+        raise RuntimeError(f"{label} escapes the pinned runtime root")
+    return observed
+
+
+if pathlib.Path(sys.executable).resolve(strict=True) != expected_binary:
+    raise RuntimeError("live Python executable differs from the attested binary")
+if pathlib.Path(sys.prefix).resolve(strict=True) != root:
+    raise RuntimeError("live Python prefix differs from the attested runtime root")
+if pathlib.Path(sys.base_prefix).resolve(strict=True) != root:
+    raise RuntimeError("live Python base prefix differs from the attested runtime root")
+
+require_inside(sysconfig.get_path("stdlib"), "standard library")
+for module in (asyncio, sqlite3, ssl, _ctypes, _sqlite3, _ssl):
+    origin = getattr(module, "__file__", None)
+    if not isinstance(origin, str):
+        raise RuntimeError(f"module {module.__name__} has no file origin")
+    require_inside(origin, f"module {module.__name__}")
+
+libc = ctypes.CDLL(None)
+libc.dladdr.argtypes = (ctypes.c_void_p, ctypes.POINTER(DlInfo))
+libc.dladdr.restype = ctypes.c_int
+info = DlInfo()
+address = ctypes.cast(ctypes.pythonapi.Py_GetVersion, ctypes.c_void_p)
+if libc.dladdr(address, ctypes.byref(info)) != 1 or not info.dli_fname:
+    raise RuntimeError("could not attest the loaded Python framework")
+require_inside(info.dli_fname.decode("utf-8"), "loaded Python framework")
+PY
+  /bin/echo "live Python runtime or module origin escapes the pinned root" >&2
+  exit 65
+}
+[ -f "$PYTHON_RUNTIME_RECEIPT" ] && [ ! -L "$PYTHON_RUNTIME_RECEIPT" ] \
+  && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PYTHON_RUNTIME_RECEIPT")" = "0:0:400:1" ] || {
+    /bin/echo "Python runtime provenance receipt is missing or has unsafe metadata" >&2
+    exit 65
+  }
+case "$(/usr/bin/stat -f '%Sp' "$PYTHON_RUNTIME_RECEIPT")" in
+  *+) /bin/echo "Python runtime provenance receipt has a filesystem ACL" >&2; exit 65 ;;
+esac
+"$PYTHON_BINARY" -I -S -B - "$PYTHON_RUNTIME_RECEIPT" "$PYTHON_RUNTIME_ROOT" \
+  "$PYTHON_BINARY" "$PYTHON_VERSION" "$PYTHON_TEAM_ID" "$PYTHON_PACKAGE_SHA256" \
+  "$PYTHON_BINARY_SHA256" "$PYTHON_FRAMEWORK_SHA256" <<'PY' || {
+import hashlib
+import json
+import pathlib
+import sys
+
+(
+    receipt_path, runtime_root, python_binary, version, team, package_sha,
+    binary_sha, framework_sha,
+) = sys.argv[1:]
+receipt = json.loads(pathlib.Path(receipt_path).read_text(encoding="utf-8"))
+expected_keys = {
+    "schema_version", "python_version", "runtime_root", "python_binary",
+    "team_identifier", "package_sha256", "python_binary_sha256",
+    "python_framework_sha256", "prior_runtime_archive",
+    "prior_runtime_receipt_archive",
+}
+if set(receipt) != expected_keys:
+    raise RuntimeError("Python runtime receipt shape differs from v1")
+expected = {
+    "schema_version": "mastermind.executive_python_runtime/v1",
+    "python_version": version,
+    "runtime_root": runtime_root,
+    "python_binary": python_binary,
+    "team_identifier": team,
+    "package_sha256": package_sha,
+    "python_binary_sha256": binary_sha,
+    "python_framework_sha256": framework_sha,
+}
+for key, value in expected.items():
+    if receipt.get(key) != value:
+        raise RuntimeError(f"Python runtime receipt mismatch: {key}")
+prior = receipt.get("prior_runtime_archive")
+if not isinstance(prior, str):
+    raise RuntimeError("Python runtime receipt prior archive must be a string")
+if prior and not prior.startswith(
+    "/Library/Application Support/MastermindExecutive/python-archive/prior-3.12-"
+):
+    raise RuntimeError("Python runtime receipt prior archive escapes its fixed root")
+prior_receipt = receipt.get("prior_runtime_receipt_archive")
+if not isinstance(prior_receipt, str):
+    raise RuntimeError("Python runtime prior receipt archive must be a string")
+if prior_receipt and not prior_receipt.startswith(
+    "/Library/Application Support/MastermindExecutive/python-archive/prior-receipt-3.12-"
+):
+    raise RuntimeError("Python runtime prior receipt archive escapes its fixed root")
+for path, expected_sha in (
+    (pathlib.Path(python_binary), binary_sha),
+    (pathlib.Path(runtime_root) / "Python", framework_sha),
+):
+    if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha:
+        raise RuntimeError("Python runtime receipt hash differs from installed bytes")
+PY
+  /bin/echo "Python runtime provenance receipt validation failed" >&2
   exit 65
 }
 [ -x "$CODEX_BINARY" ] && [ ! -L "$CODEX_BINARY" ] || {
@@ -423,6 +587,10 @@ INSTALLED_VERSION="$("$INSTALLED_CODEX" --version 2>/dev/null | /usr/bin/awk '$1
   exit 65
 }
 INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{print $1}')"
+[ "$INSTALLED_HASH" = "$CODEX_SHA256" ] || {
+  /bin/echo "installed Codex bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+  exit 65
+}
 [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$INSTALLED_CODEX")" = "0:0:555" ] || {
   /bin/echo "installed Codex is not root:wheel mode 0555" >&2
   exit 65

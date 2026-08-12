@@ -1,17 +1,19 @@
 # Mastermind Executive OS — Phase 1C-A Secure Supervisor
 
-**Status (2026-08-11): implementation and deterministic verification are
-complete; real-host acceptance is BLOCKED.** This workstation session is UID
-501 and cannot perform the required one-time root bootstrap without an
-interactive administrator credential. The dedicated `_mastermind_exec` and
-`_mastermind_worker` accounts, system LaunchDaemons, protected runtime roots,
-and launchd acceptance receipts therefore do not exist yet. No successful
+**Status (2026-08-12): implementation and deterministic verification are
+complete; real-host acceptance is pending the two-stage administrator
+procedure.** The current session cannot supply an interactive administrator
+password or approve the dedicated worker's OpenAI device login. No successful
 launchd-supervised Codex, interrupted/requeue, canary, or recovery receipt is
 claimed in this document.
 
-Phase 1C-A is not complete, merged, deployed, or live until the acceptance
-procedure in section 11 passes from the exact `origin/master` merge SHA and the
-receipt inventory in section 12 is replaced with observed values.
+There is no circular requirement to call the PR head `origin/master`. PR #25's
+code may merge after deterministic CI and review pass, but that merge alone is
+not Phase completion or live host proof. The authoritative acceptance must then
+run from a clean checkout whose `HEAD` and `origin/master` equal the same exact
+post-merge SHA. Its non-secret receipt inventory is recorded in a follow-up
+evidence PR. Phase 1C-A remains incomplete and not live until that procedure
+passes and section 12 contains observed values.
 
 ## 1. Bounded outcome
 
@@ -362,28 +364,49 @@ re-verifies. Any failure after sidecar removal or replacement restores and
 verifies the prior bytes. The rollback set is retained after success until an
 operator deliberately archives it outside this workflow.
 
-## 11. Exact host commands
+## 11. Two-stage host procedure
 
-These commands are the reviewed procedure, not evidence that they ran. Replace
-the three absolute prerequisites with host-specific values. The source checkout
-must be clean and its `HEAD` and `origin/master` must equal `MERGE_SHA`.
+The complete operator-facing commands and password/device-login explanation are
+in `ops/executive_os/HOST_PREREQUISITES.md`. These commands are the reviewed
+procedure, not evidence that they ran.
+
+### 11.1 Pre-merge review — no administrator action
+
+The clean pushed PR head must pass deterministic CI, CodeQL, and security
+review. It may then merge as inert code. No PR-head script receives `sudo`, no
+service account or credential is created, and no runtime or LaunchDaemon is
+installed before merge. The merge must not be described as host-accepted or
+Phase-complete.
+
+### 11.2 Mandatory post-merge acceptance
+
+After merge, fetch again. The source checkout must be clean, contain the PR
+merge, and have `HEAD == origin/master == MERGE_SHA`. The complete copy/paste
+commands, including a unique detached worktree, bootstrap, runtime provisioning
+and verification, dedicated worker device login, install, and acceptance are in
+`ops/executive_os/HOST_PREREQUISITES.md`. The core immutable inputs are:
 
 ```bash
-MERGE_SHA=<40-hex-origin-master-merge-sha>
-SOURCE_REPO=/absolute/clean/mastermind-checkout
-PYTHON_BINARY=/absolute/root-owned-python-3.12/bin/python3.12
-PYTHON_RUNTIME_ROOT=/absolute/root-owned-python-3.12
+MERGE_SHA=<40-hex-current-origin-master-sha-containing-pr-25>
+SOURCE_REPO=/absolute/unique/clean/exact-origin-master-worktree
+PYTHON_RUNTIME_ROOT=/Library/Frameworks/Python.framework/Versions/3.12
+PYTHON_BINARY="$PYTHON_RUNTIME_ROOT/bin/python3.12"
+PYTHON_TEAM_IDENTIFIER=BMM5U3QVKW
 OPERATOR_USER=chriswong
 
-sudo /bin/bash ops/executive_os/bootstrap-host.sh \
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/bootstrap-host.sh" \
   --operator-user "$OPERATOR_USER"
-
-sudo /bin/bash ops/executive_os/install.sh \
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-python-runtime.sh"
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-python-runtime.sh" --verify-only
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh"
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" --verify-only
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
   --source-repo "$SOURCE_REPO" \
   --expected-sha "$MERGE_SHA" \
   --operator-user "$OPERATOR_USER" \
   --python-binary "$PYTHON_BINARY" \
-  --python-runtime-root "$PYTHON_RUNTIME_ROOT"
+  --python-runtime-root "$PYTHON_RUNTIME_ROOT" \
+  --python-team-identifier "$PYTHON_TEAM_IDENTIFIER"
 
 sudo /bin/bash \
   "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/acceptance.sh" \
@@ -408,6 +431,27 @@ Acceptance must additionally record:
 
 No tmux, Terminal scrollback, desktop login, or uncommitted checkout may be used
 as acceptance state.
+
+### 11.3 Evidence-preserving retry
+
+If acceptance fails after it creates mutable runtime state, do not delete that
+state. Run the installed exact-SHA retry helper:
+
+```bash
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/acceptance-retry.sh" \
+  --expected-sha "$MERGE_SHA"
+```
+
+It disables and stops only the two Executive LaunchDaemons, sweeps the two
+dedicated service UIDs, moves the prior database, receipts, backups,
+workspaces/runs, canary fixtures, and worker state to the root-only fixed archive
+`/var/db/mastermind-executive-acceptance-archive/<sha>/<run>/`, and recreates
+empty canonical roots. It preserves installed code/config and the dedicated
+worker auth without reading credential contents. Signal interruption produces
+an `INCOMPLETE` archive receipt, preserves anything already moved, restores the
+canonical directory skeleton, and leaves services stopped; rerunning the helper
+is therefore safe and does not overwrite earlier evidence.
 
 ## 12. Required acceptance receipts
 
@@ -453,6 +497,9 @@ The committed test surface is designed to cover:
 | typed broker, peer UID, UID sweep, remote receipts | `tests/test_executive_worker_broker.py` |
 | distinct-principal/path-free secret canary | `tests/test_executive_canary.py` |
 | online backup, tamper, restore, rollback | `tests/test_executive_backup.py` |
+| evidence-preserving, signal-safe acceptance retry | `tests/test_executive_acceptance_retry.py` |
+| pinned PSF runtime provisioning and live-origin binding | `tests/test_executive_python_runtime_provisioner.py` |
+| dedicated worker-only Codex device authentication | `tests/test_executive_worker_auth_provisioner.py` |
 
 Hosted Linux CI proves deterministic code and protocol semantics only. Tests
 using mocks do not prove macOS UIDs, launchd, Seatbelt, native Codex, signatures,
@@ -461,11 +508,13 @@ mandatory opt-in real-host acceptance lane.
 
 Current local deterministic evidence on the audited branch is:
 
-- 210 focused Executive OS tests passed and one opt-in platform test skipped;
+- 234 focused Executive OS tests passed and one opt-in platform test skipped;
 - the opt-in native Codex Seatbelt profile test separately passed on this Mac;
-- the exact hermetic governance test selection passed with two platform skips;
-- the exact Portfolio v2 safety gate passed with one platform skip using the
-  CI-pinned Macro engine SHA; and
+- the exact hermetic governance test selection passed 357 tests with two
+  platform skips;
+- the exact Portfolio v2 safety gate remains delegated to hosted CI because the
+  ambient development Python lacks its declared `claude-agent-sdk` dependency;
+  the previously green PR run used the CI-pinned Macro engine SHA; and
 - source compilation, shell syntax checks, `plutil` validation, and diff
   whitespace checks passed.
 

@@ -149,6 +149,17 @@ def test_uninstall_preserves_runtime_and_install_does_not_embed_secrets() -> Non
     assert "no ambient Python fallback" in prerequisites
 
 
+def test_host_scripts_use_tools_available_at_absolute_macos_paths() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    assert "/usr/bin/realpath" not in install
+    assert 'runtime_target="$(/usr/bin/readlink -f "$runtime_link")"' in install
+
+    for name in ("acceptance.sh", "service-control.sh"):
+        source = (OPS / name).read_text(encoding="utf-8")
+        assert '$(/usr/bin/dirname "$0")' in source
+        assert '$(dirname "$0")' not in source
+
+
 def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None:
     control = _plist(CONTROL)
     argv = control["ProgramArguments"]

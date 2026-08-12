@@ -8,7 +8,7 @@ CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
-SCRIPT_DIR="$(cd -P "$(dirname "$0")" && /bin/pwd)"
+SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 
 usage() {
   /bin/echo "usage: $0 {start|stop|restart|status}" >&2
