@@ -1,0 +1,211 @@
+"""launchd entrypoint for the distinct-UID Executive Codex worker broker.
+
+The JSON config is intentionally secret-free and root-owned.  Provider
+authentication remains only in the dedicated worker ``CODEX_HOME`` referenced
+by the config; no credential value is accepted on argv or in the plist.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import signal
+import stat
+import sys
+from pathlib import Path
+from typing import Any
+
+_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
+from control_plane.codex_worker import CodexWorkerAdapter
+from control_plane.executive_worker_broker import (
+    BrokerPolicy,
+    DedicatedUIDSweeper,
+    ExecutiveWorkerBroker,
+    WorkerBrokerError,
+    activate_launchd_socket,
+)
+
+
+CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v1"
+_OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
+_CONFIG_FIELDS = frozenset(
+    {
+        "schema_version",
+        "control_uid",
+        "worker_uid",
+        "worker_gid",
+        "worker_user",
+        "worker_id",
+        "workspace_root",
+        "run_root",
+        "provider_home",
+        "codex_binary",
+        "allowed_codex_versions",
+        "required_team_identifier",
+        "launchd_socket_name",
+        "uid_sweep_receipt",
+        "require_secret_canary",
+    }
+)
+
+
+class WorkerConfigError(WorkerBrokerError):
+    """The root-owned worker configuration is unsafe or malformed."""
+
+
+def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
+    lexical = Path(path)
+    if not lexical.is_absolute():
+        raise WorkerConfigError("worker config path must be absolute")
+    info = lexical.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise WorkerConfigError("worker config must be a regular non-symlink file")
+    if stat.S_IMODE(info.st_mode) & 0o022:
+        raise WorkerConfigError("worker config must not be writable by group or other")
+    if require_root_owner and info.st_uid != 0:
+        raise WorkerConfigError("worker config must be owned by root")
+    try:
+        raw = lexical.read_bytes()
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkerConfigError("worker config is not valid UTF-8 JSON") from exc
+    if not isinstance(value, dict) or set(value) != _CONFIG_FIELDS:
+        raise WorkerConfigError("worker config fields do not match the schema")
+    if value.get("schema_version") != CONFIG_SCHEMA_VERSION:
+        raise WorkerConfigError("worker config schema version is unsupported")
+    versions = value.get("allowed_codex_versions")
+    if (
+        not isinstance(versions, list)
+        or not versions
+        or len(versions) > 4
+        or any(not isinstance(item, str) or not item for item in versions)
+        or len(versions) != len(set(versions))
+    ):
+        raise WorkerConfigError("allowed_codex_versions must be a small non-empty set")
+    for field in (
+        "workspace_root",
+        "run_root",
+        "provider_home",
+        "codex_binary",
+        "uid_sweep_receipt",
+    ):
+        if not isinstance(value.get(field), str) or not Path(value[field]).is_absolute():
+            raise WorkerConfigError(f"{field} must be an absolute path")
+    if value.get("required_team_identifier") != _OPENAI_TEAM_IDENTIFIER:
+        raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
+    if value.get("require_secret_canary") is not True:
+        raise WorkerConfigError("production worker config must require the secret canary")
+    return value
+
+
+def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
+    policy = BrokerPolicy(
+        control_uid=int(config["control_uid"]),
+        worker_uid=int(config["worker_uid"]),
+        worker_gid=int(config["worker_gid"]),
+        worker_user=str(config["worker_user"]),
+        worker_id=str(config["worker_id"]),
+        workspace_root=Path(config["workspace_root"]),
+        run_root=Path(config["run_root"]),
+        provider_home=Path(config["provider_home"]),
+        require_secret_canary=True,
+    )
+    if os.geteuid() != policy.worker_uid or os.getegid() != policy.worker_gid:
+        raise WorkerConfigError("worker broker is not running as its configured OS principal")
+    adapter = CodexWorkerAdapter(
+        Path(config["codex_binary"]),
+        allowed_versions=frozenset(config["allowed_codex_versions"]),
+        required_team_identifier=str(config["required_team_identifier"]),
+    )
+    sweeper = DedicatedUIDSweeper(
+        policy.worker_uid,
+        receipt_path=Path(config["uid_sweep_receipt"]),
+    )
+    return ExecutiveWorkerBroker(adapter, policy, sweeper)
+
+
+async def _serve(config: dict[str, Any]) -> None:
+    broker = _build_broker(config)
+    activated = activate_launchd_socket(str(config["launchd_socket_name"]))
+    task = asyncio.create_task(broker.serve(activated))
+    stopping = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def request_stop() -> None:
+        stopping.set()
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(signum, request_stop)
+        except NotImplementedError:  # pragma: no cover - Unix service only
+            pass
+    stop_task = asyncio.create_task(stopping.wait())
+    done, _ = await asyncio.wait({task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    if task in done:
+        stop_task.cancel()
+        await asyncio.gather(stop_task, return_exceptions=True)
+        await task
+        return
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    try:
+        await broker.shutdown()
+    finally:
+        activated.close()
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run or validate the distinct-UID Executive Codex worker broker."
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    serve = sub.add_parser("serve", help="Claim the launchd socket and serve typed requests.")
+    serve.add_argument("--config", type=Path, required=True)
+    check = sub.add_parser("check-config", help="Validate a worker config without launching.")
+    check.add_argument("--config", type=Path, required=True)
+    check.add_argument(
+        "--allow-non-root-owner-for-test",
+        action="store_true",
+        help="Test-only escape hatch; the launchd serve path always requires root ownership.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    try:
+        if args.command == "serve" and Path.cwd().resolve(strict=True) != _ROOT:
+            raise WorkerConfigError("worker must run from its installed release root")
+        if args.command == "check-config":
+            value = _load_config(
+                args.config,
+                require_root_owner=not args.allow_non_root_owner_for_test,
+            )
+            print(
+                json.dumps(
+                    {
+                        "schema_version": CONFIG_SCHEMA_VERSION,
+                        "valid": True,
+                        "worker_id": value["worker_id"],
+                        "worker_uid": value["worker_uid"],
+                        "control_uid": value["control_uid"],
+                        "launchd_socket_name": value["launchd_socket_name"],
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+        config = _load_config(args.config, require_root_owner=True)
+        asyncio.run(_serve(config))
+        return 0
+    except (WorkerBrokerError, OSError, ValueError) as exc:
+        print(f"worker broker error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

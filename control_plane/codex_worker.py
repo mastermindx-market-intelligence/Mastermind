@@ -86,6 +86,18 @@ _JSONL_EVENT_TYPES = frozenset({
     "error",
 })
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+LAUNCH_ATTESTATION_SCHEMA_VERSION = "mastermind.executive_launch_attestation/v1"
+SECRET_CANARY_SCHEMA_VERSION = "mastermind.executive_secret_canary/v1"
+ISOLATION_MANIFEST_SCHEMA_VERSION = "mastermind.executive_isolation_manifest/v1"
+_SECRET_CANARY_CHECKS = frozenset(
+    {
+        "control_service_environment",
+        "administrative_checkout",
+        "executive_database",
+        "other_worker_home",
+        "forbidden_production_path",
+    }
+)
 
 
 class CodexWorkerError(RuntimeError):
@@ -136,6 +148,61 @@ class BinaryAttestation:
 
 
 @dataclasses.dataclass(frozen=True)
+class ProcessIdentity:
+    """Boot-scoped process identity including the OS-principal boundary."""
+
+    start_identity: str
+    pgid: int
+    session_id: int
+    effective_uid: int
+    effective_gid: int
+    real_uid: int
+    real_gid: int
+
+
+@dataclasses.dataclass(frozen=True)
+class LaunchAttestation:
+    """Complete, secret-free launch receipt persisted before RUNNING."""
+
+    schema_version: str
+    created_at: str
+    executable_path: str
+    binary: BinaryAttestation
+    rendered_argv: tuple[str, ...]
+    environment_keys: tuple[str, ...]
+    permission_profile_sha256: str
+    prompt_sha256: str
+    expected_base_sha: str | None
+    observed_base_sha: str
+    workspace_identity: Mapping[str, Any]
+    worker_identity: Mapping[str, Any]
+    provider_home_identity: Mapping[str, Any]
+    secret_canary_verdict: Mapping[str, Any]
+    launch_nonce: str
+    process_identity: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "created_at": self.created_at,
+            "executable_path": self.executable_path,
+            "binary": dataclasses.asdict(self.binary),
+            "rendered_argv": list(self.rendered_argv),
+            "environment_keys": list(self.environment_keys),
+            "permission_profile_sha256": self.permission_profile_sha256,
+            "prompt_sha256": self.prompt_sha256,
+            "expected_base_sha": self.expected_base_sha,
+            "observed_base_sha": self.observed_base_sha,
+            "workspace_identity": dict(self.workspace_identity),
+            "worker_identity": dict(self.worker_identity),
+            "provider_home_identity": dict(self.provider_home_identity),
+            "secret_canary_verdict": dict(self.secret_canary_verdict),
+            "launch_nonce": self.launch_nonce,
+            "process_identity": dict(self.process_identity),
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class LaunchSpec:
     """Immutable inputs for one authorized, non-interactive Codex turn."""
 
@@ -159,10 +226,21 @@ class LaunchSpec:
     worker_user: str = "mastermind-worker"
     expected_base_sha: str | None = None
     allowed_artifact_paths: tuple[str, ...] = ()
+    # The control principal freezes every existing sibling assignment before
+    # launch.  The worker cannot enumerate the control-owned 0710 roots.
+    isolation_roots: tuple[Path, ...] = ()
+    isolation_denied_paths: tuple[Path, ...] = ()
+    isolation_manifest: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    isolation_manifest_sha256: str | None = None
     forbidden_paths: tuple[Path, ...] = ()
     max_artifacts: int = _MAX_ARTIFACTS
     max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
     max_artifact_total_bytes: int = _MAX_ARTIFACT_TOTAL_BYTES
+    expected_worker_uid: int | None = None
+    expected_worker_gid: int | None = None
+    shared_run_gid: int | None = None
+    secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    require_secret_canary: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -180,6 +258,11 @@ class ProcessRef:
     started_at: str
     binary: BinaryAttestation
     base_sha: str
+    session_id: int | None = None
+    effective_uid: int | None = None
+    effective_gid: int | None = None
+    real_uid: int | None = None
+    real_gid: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -338,6 +421,7 @@ class _RunState:
     stderr_fd: int
     violation: asyncio.Event
     process_wait_task: asyncio.Task[int]
+    launch_attestation: LaunchAttestation
     stdout_task: asyncio.Task[None] | None = None
     stderr_task: asyncio.Task[None] | None = None
     monitor_task: asyncio.Task[None] | None = None
@@ -368,6 +452,121 @@ def _sha256_path(path: Path, *, max_bytes: int | None = None) -> str:
                 raise ResultValidationError(f"file exceeds {max_bytes} byte limit: {path}")
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _canonical_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _path_identity(path: Path) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    info = resolved.lstat()
+    return {
+        "path": str(resolved),
+        "device": int(info.st_dev),
+        "inode": int(info.st_ino),
+        "mode": stat.S_IMODE(info.st_mode),
+        "uid": int(info.st_uid),
+        "gid": int(info.st_gid),
+        "mtime_ns": int(info.st_mtime_ns),
+    }
+
+
+_SENSITIVE_ARG_RE = re.compile(
+    r"(?i)(authorization|credential|lease[_-]?token|password|secret|token)"
+)
+
+
+def _redact_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    """Return an audit-safe argv without ever serializing credential values."""
+
+    redacted: list[str] = []
+    hide_next = False
+    for raw in argv:
+        value = str(raw)
+        if hide_next:
+            redacted.append("<redacted>")
+            hide_next = False
+            continue
+        if _SENSITIVE_ARG_RE.search(value):
+            if "=" in value:
+                redacted.append(value.split("=", 1)[0] + "=<redacted>")
+            else:
+                redacted.append(value)
+                hide_next = True
+            continue
+        redacted.append(value)
+    return tuple(redacted)
+
+
+def validate_secret_canary_verdict(
+    value: Mapping[str, Any] | None,
+    *,
+    require_passed: bool,
+) -> dict[str, Any]:
+    """Validate a hash/status-only canary receipt; raw sentinel values are forbidden."""
+
+    if not value:
+        if require_passed:
+            raise LaunchValidationError("a passing distinct-principal secret canary is required")
+        return {
+            "schema_version": SECRET_CANARY_SCHEMA_VERSION,
+            "passed": False,
+            "status": "NOT_PROVIDED",
+            "checks": {},
+        }
+    try:
+        document = json.loads(
+            json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+        )
+    except (TypeError, ValueError) as exc:
+        raise LaunchValidationError(f"secret canary verdict is not JSON data: {exc}") from exc
+    if not isinstance(document, dict):
+        raise LaunchValidationError("secret canary verdict must be a mapping")
+    allowed_top = {
+        "schema_version",
+        "passed",
+        "checks",
+        "receipt_sha256",
+        "control_environment_probe_sha256",
+        "observed_at",
+        "worker_auth_exception",
+    }
+    if set(document) != allowed_top:
+        raise LaunchValidationError("secret canary verdict fields are incomplete or unknown")
+    if document.get("schema_version") != SECRET_CANARY_SCHEMA_VERSION:
+        raise LaunchValidationError("secret canary verdict schema is unsupported")
+    checks = document.get("checks")
+    if not isinstance(checks, dict) or set(checks) != _SECRET_CANARY_CHECKS:
+        raise LaunchValidationError("secret canary verdict is missing required checks")
+    if any(result != "DENIED" for result in checks.values()):
+        raise LaunchValidationError("every unrelated secret canary check must be DENIED")
+    digest = document.get("receipt_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise LaunchValidationError("secret canary verdict requires a receipt SHA-256")
+    probe_digest = document.get("control_environment_probe_sha256")
+    if (
+        not isinstance(probe_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", probe_digest) is None
+    ):
+        raise LaunchValidationError(
+            "secret canary verdict requires a control-environment probe SHA-256"
+        )
+    if document.get("worker_auth_exception") != "DEDICATED_CODEX_HOME_ONLY":
+        raise LaunchValidationError("worker authentication exception is not explicit")
+    if document.get("passed") is not True:
+        raise LaunchValidationError("secret canary verdict did not pass")
+    observed_at = document.get("observed_at")
+    if not isinstance(observed_at, str) or not observed_at:
+        raise LaunchValidationError("secret canary verdict requires an observation time")
+    return document
 
 
 def _read_limited(path: Path, maximum: int) -> bytes:
@@ -551,7 +750,7 @@ class ProcessInspector:
         # as a cross-restart recovery identity on non-macOS hosts.
         return f"adapter-{os.getpid()}"
 
-    def identity(self, pid: int) -> tuple[str, int]:
+    def inspect(self, pid: int) -> ProcessIdentity:
         if platform.system() == "Darwin":
             libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
             proc_pidinfo = libproc.proc_pidinfo
@@ -569,16 +768,56 @@ class ProcessInspector:
             if returned != size or int(info.pbi_pid) != pid:
                 raise ProcessIdentityError(f"cannot resolve macOS process identity for pid {pid}")
             identity = f"{info.pbi_start_tvsec}.{info.pbi_start_tvusec:06d}"
-            return identity, int(info.pbi_pgid)
+            try:
+                session_id = os.getsid(pid)
+            except OSError as exc:
+                raise ProcessIdentityError(
+                    f"cannot resolve macOS process session for pid {pid}"
+                ) from exc
+            return ProcessIdentity(
+                start_identity=identity,
+                pgid=int(info.pbi_pgid),
+                session_id=int(session_id),
+                effective_uid=int(info.pbi_uid),
+                effective_gid=int(info.pbi_gid),
+                real_uid=int(info.pbi_ruid),
+                real_gid=int(info.pbi_rgid),
+            )
 
         try:
             pgid = os.getpgid(pid)
+            session_id = os.getsid(pid)
         except ProcessLookupError as exc:
             raise ProcessIdentityError(f"process {pid} is absent") from exc
-        result = _run_checked(["/bin/ps", "-o", "lstart=", "-p", str(pid)])
+        result = _run_checked(
+            ["/bin/ps", "-o", "lstart=,uid=,gid=", "-p", str(pid)]
+        )
         if result.returncode != 0 or not result.stdout.strip():
             raise ProcessIdentityError(f"cannot resolve process start time for pid {pid}")
-        return result.stdout.strip(), pgid
+        fields = result.stdout.strip().rsplit(maxsplit=2)
+        if len(fields) != 3:
+            raise ProcessIdentityError(f"cannot parse process principal for pid {pid}")
+        start_identity, uid_text, gid_text = fields
+        try:
+            uid = int(uid_text)
+            gid = int(gid_text)
+        except ValueError as exc:
+            raise ProcessIdentityError(f"cannot parse process principal for pid {pid}") from exc
+        return ProcessIdentity(
+            start_identity=start_identity,
+            pgid=int(pgid),
+            session_id=int(session_id),
+            effective_uid=uid,
+            effective_gid=gid,
+            real_uid=uid,
+            real_gid=gid,
+        )
+
+    def identity(self, pid: int) -> tuple[str, int]:
+        """Compatibility projection used by the Phase 1B cancellation path."""
+
+        identity = self.inspect(pid)
+        return identity.start_identity, identity.pgid
 
 
 def _normalise_relative_path(value: str) -> str:
@@ -664,6 +903,24 @@ def _ensure_private_directory(path: Path) -> Path:
         raise LaunchValidationError(f"private path is not a real directory: {path}")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise LaunchValidationError(f"private directory is accessible to group/other: {path}")
+    return path.resolve(strict=True)
+
+
+def _ensure_run_directory(path: Path, *, shared_gid: int | None) -> Path:
+    """Accept either worker-private 0700 or one explicit control/worker group root."""
+
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise LaunchValidationError(f"run path is not a real directory: {path}")
+    mode = stat.S_IMODE(info.st_mode)
+    if mode & 0o007:
+        raise LaunchValidationError(f"run directory is accessible to other users: {path}")
+    if mode & 0o070:
+        if shared_gid is None or info.st_gid != int(shared_gid) or mode & 0o070 != 0o070:
+            raise LaunchValidationError(
+                f"run directory group boundary does not match the configured worker group: {path}"
+            )
     return path.resolve(strict=True)
 
 
@@ -1266,15 +1523,59 @@ class CodexWorkerAdapter:
         run_lexical = Path(spec.run_dir)
         if not run_lexical.is_absolute():
             raise LaunchValidationError("run_dir must be absolute")
-        run_dir = _ensure_private_directory(run_lexical)
+        run_dir = _ensure_run_directory(
+            run_lexical,
+            shared_gid=(int(spec.shared_run_gid) if spec.shared_run_gid is not None else None),
+        )
         if _is_relative_to(run_dir, workspace) or _is_relative_to(workspace, run_dir):
             raise LaunchValidationError("run_dir and workspace must be disjoint")
+        self._validate_isolation_manifest(
+            spec, workspace, run_dir, verify_filesystem=True
+        )
         home = _ensure_private_directory(run_dir / "home")
         tmp = _ensure_private_directory(run_dir / "tmp")
         _ensure_private_directory(run_dir / "logs")
         _ensure_private_directory(run_dir / "output")
 
         codex_home = _validate_codex_home(Path(spec.codex_home))
+        if (spec.expected_worker_uid is None) != (spec.expected_worker_gid is None):
+            raise LaunchValidationError("expected worker UID and GID must be configured together")
+        if spec.require_secret_canary and spec.expected_worker_uid is None:
+            raise LaunchValidationError(
+                "a complete canary launch requires an expected OS worker principal"
+            )
+        if spec.expected_worker_uid is not None:
+            expected_uid = int(spec.expected_worker_uid)
+            expected_gid = int(spec.expected_worker_gid)
+            if os.geteuid() != expected_uid or os.getegid() != expected_gid:
+                raise LaunchValidationError(
+                    "Codex adapter is not running as the configured worker principal"
+                )
+            try:
+                worker_account = pwd.getpwnam(spec.worker_user)
+            except KeyError as exc:
+                raise LaunchValidationError("configured worker account does not exist") from exc
+            if worker_account.pw_uid != expected_uid or worker_account.pw_gid != expected_gid:
+                raise LaunchValidationError("configured worker account UID/GID does not match")
+            for label, protected_path in (
+                ("provider home", codex_home),
+                ("provider auth", codex_home / "auth.json"),
+            ):
+                if protected_path.lstat().st_uid != expected_uid:
+                    raise LaunchValidationError(
+                        f"{label} is not owned by the configured worker principal"
+                    )
+            workspace_info = workspace.lstat()
+            shared_workspace = (
+                spec.shared_run_gid is not None
+                and workspace_info.st_gid == int(spec.shared_run_gid)
+                and stat.S_IMODE(workspace_info.st_mode) & 0o050 == 0o050
+                and stat.S_IMODE(workspace_info.st_mode) & 0o007 == 0
+            )
+            if workspace_info.st_uid != expected_uid and not shared_workspace:
+                raise LaunchValidationError(
+                    "workspace is neither worker-owned nor inside the configured shared group boundary"
+                )
         schema_path = Path(spec.result_schema_path)
         if not schema_path.is_absolute():
             raise LaunchValidationError("result schema path must be absolute")
@@ -1309,7 +1610,201 @@ class CodexWorkerAdapter:
             raise LaunchValidationError("max_artifact_total_bytes exceeds adapter ceiling")
         return workspace, run_dir, home, tmp, baseline, schema
 
-    def _denied_filesystem_paths(self, spec: LaunchSpec, workspace: Path) -> list[str]:
+    @staticmethod
+    def _deny_tree(values: set[str], path: Path) -> None:
+        resolved = str(path.resolve(strict=False))
+        values.add(resolved)
+        values.add(resolved + "/**")
+
+    @staticmethod
+    def _protected_workspace_paths(workspace: Path) -> set[str]:
+        values: set[str] = set()
+        for path in (
+            workspace / ".git",
+            workspace / ".codex",
+        ):
+            CodexWorkerAdapter._deny_tree(values, path)
+        values.update(
+            {
+                str(workspace / "config.toml"),
+                str(workspace / ".env"),
+                str(workspace / ".env.*"),
+            }
+        )
+        return values
+
+    @staticmethod
+    def _user_home_denials(
+        spec: LaunchSpec, workspace: Path, run_dir: Path
+    ) -> set[str]:
+        users_root = Path("/Users")
+        if any(_is_relative_to(path, users_root) for path in (workspace, run_dir)):
+            if spec.isolation_roots:
+                raise LaunchValidationError(
+                    "secure worker assignments must not be placed beneath /Users"
+                )
+            # Compatibility for the local Phase 1B seam.  Complete Phase 1C
+            # launches always configure control-owned roots outside /Users.
+            return set()
+        return {"/Users", "/Users/**"}
+
+    @staticmethod
+    def _validate_isolation_identity(value: Any, *, label: str) -> dict[str, Any]:
+        if not isinstance(value, dict) or set(value) != {
+            "path",
+            "device",
+            "inode",
+            "mode",
+            "uid",
+            "gid",
+            "mtime_ns",
+        }:
+            raise LaunchValidationError(f"{label} has an invalid identity shape")
+        path = value.get("path")
+        if not isinstance(path, str) or not Path(path).is_absolute():
+            raise LaunchValidationError(f"{label} path must be absolute")
+        if any(
+            not isinstance(value.get(field), int) or isinstance(value.get(field), bool)
+            for field in ("device", "inode", "mode", "uid", "gid", "mtime_ns")
+        ):
+            raise LaunchValidationError(f"{label} identity fields must be integers")
+        return value
+
+    def _validate_isolation_manifest(
+        self,
+        spec: LaunchSpec,
+        workspace: Path,
+        run_dir: Path,
+        *,
+        verify_filesystem: bool,
+    ) -> None:
+        if not spec.isolation_roots:
+            if (
+                spec.isolation_denied_paths
+                or spec.isolation_manifest
+                or spec.isolation_manifest_sha256 is not None
+            ):
+                raise LaunchValidationError(
+                    "isolation manifest fields require configured isolation roots"
+                )
+            return
+        manifest = spec.isolation_manifest
+        if not isinstance(manifest, Mapping) or set(manifest) != {
+            "schema_version",
+            "roots",
+            "entries",
+            "workspace_path",
+            "run_dir",
+        }:
+            raise LaunchValidationError("isolation manifest shape is invalid")
+        if manifest.get("schema_version") != ISOLATION_MANIFEST_SCHEMA_VERSION:
+            raise LaunchValidationError("isolation manifest schema is unsupported")
+        digest = spec.isolation_manifest_sha256
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or _canonical_sha256(manifest) != digest
+        ):
+            raise LaunchValidationError("isolation sibling manifest digest does not match")
+        if manifest.get("workspace_path") != str(workspace) or manifest.get(
+            "run_dir"
+        ) != str(run_dir):
+            raise LaunchValidationError("isolation manifest assignment identity drifted")
+        root_values = manifest.get("roots")
+        entry_values = manifest.get("entries")
+        if (
+            not isinstance(root_values, list)
+            or not root_values
+            or len(root_values) > 8
+            or not isinstance(entry_values, list)
+            or len(entry_values) > 256
+        ):
+            raise LaunchValidationError("isolation manifest lists are outside safe bounds")
+        roots = [
+            self._validate_isolation_identity(value, label="isolation root")
+            for value in root_values
+        ]
+        root_paths = [str(value["path"]) for value in roots]
+        configured_roots = sorted(
+            str(Path(value).resolve(strict=False)) for value in spec.isolation_roots
+        )
+        if root_paths != sorted(root_paths) or root_paths != configured_roots:
+            raise LaunchValidationError("isolation manifest roots are incomplete or unordered")
+        entries: list[tuple[str, str, str, dict[str, Any]]] = []
+        for raw in entry_values:
+            if not isinstance(raw, dict) or set(raw) != {
+                "root_path",
+                "disposition",
+                "identity",
+            }:
+                raise LaunchValidationError("isolation manifest entry shape is invalid")
+            root_path = raw.get("root_path")
+            disposition = raw.get("disposition")
+            if root_path not in root_paths or disposition not in {
+                "CURRENT_WORKSPACE",
+                "CURRENT_RUN",
+                "DENY",
+            }:
+                raise LaunchValidationError("isolation manifest entry policy is invalid")
+            identity = self._validate_isolation_identity(
+                raw.get("identity"), label="isolation entry"
+            )
+            entry_path = str(identity["path"])
+            if Path(entry_path).parent != Path(str(root_path)):
+                raise LaunchValidationError(
+                    "isolation manifest entry is not a direct root child"
+                )
+            entries.append((entry_path, str(root_path), str(disposition), identity))
+        if [item[0] for item in entries] != sorted(item[0] for item in entries):
+            raise LaunchValidationError("isolation manifest entries are not ordered")
+        if len({item[0] for item in entries}) != len(entries):
+            raise LaunchValidationError("isolation manifest entries contain duplicates")
+        dispositions = {item[0]: item[2] for item in entries}
+        expected_denied = sorted(
+            str(Path(value).resolve(strict=False))
+            for value in spec.isolation_denied_paths
+        )
+        observed_denied = sorted(
+            path for path, _root, disposition, _identity in entries if disposition == "DENY"
+        )
+        if observed_denied != expected_denied:
+            raise LaunchValidationError("isolation denial list is incomplete")
+        if dispositions.get(str(workspace)) != "CURRENT_WORKSPACE" or dispositions.get(
+            str(run_dir)
+        ) != "CURRENT_RUN":
+            raise LaunchValidationError("isolation manifest omits a current assignment")
+        if verify_filesystem:
+            for identity in [*roots, *(item[3] for item in entries)]:
+                if _path_identity(Path(str(identity["path"]))) != identity:
+                    raise LaunchValidationError(
+                        "isolation manifest filesystem identity changed before launch"
+                    )
+
+    def _isolation_denied_filesystem_paths(
+        self, spec: LaunchSpec, workspace: Path, run_dir: Path
+    ) -> set[str]:
+        # The worker is intentionally blind to every macOS user home except the
+        # exact assigned paths re-opened by ``_permission_overrides``.  This is
+        # important even when a host root was omitted from configuration: a
+        # read-only base profile must not make an administrative checkout or
+        # another user's secrets ambiently readable.
+        self._validate_isolation_manifest(
+            spec, workspace, run_dir, verify_filesystem=False
+        )
+        values = self._user_home_denials(spec, workspace, run_dir)
+        for path in spec.isolation_roots:
+            if not Path(path).is_absolute():
+                raise LaunchValidationError("isolation roots must be absolute")
+        for path in spec.isolation_denied_paths:
+            lexical = Path(path)
+            if not lexical.is_absolute():
+                raise LaunchValidationError("isolation denied paths must be absolute")
+            self._deny_tree(values, lexical)
+        return values
+
+    def _sensitive_denied_filesystem_paths(
+        self, spec: LaunchSpec, workspace: Path
+    ) -> set[str]:
         try:
             real_home = Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve()
         except (KeyError, OSError):
@@ -1322,11 +1817,6 @@ class CodexWorkerAdapter:
             str(real_home / ".aws" / "**"),
             str(real_home / ".codex" / "auth.json"),
             str(codex_home / "**"),
-            str(workspace / ".git" / "**"),
-            str(workspace / ".codex" / "**"),
-            str(workspace / "config.toml"),
-            str(workspace / ".env"),
-            str(workspace / ".env.*"),
             str(_PROJECT_ROOT / ".git" / "**"),
             str(_PROJECT_ROOT / "data" / "**"),
             str(_PROJECT_ROOT / ".env"),
@@ -1338,6 +1828,7 @@ class CodexWorkerAdapter:
             "/etc/mastermind*.env",
             "/root/**",
         }
+        values.update(self._protected_workspace_paths(workspace))
         for path in spec.forbidden_paths:
             lexical = Path(path)
             if not lexical.is_absolute():
@@ -1352,19 +1843,50 @@ class CodexWorkerAdapter:
             values.add(resolved + "-shm")
             values.add(resolved + "-journal")
             values.add(resolved + "-*")
-        return sorted(values)
+        return values
+
+    def _denied_filesystem_paths(self, spec: LaunchSpec, workspace: Path) -> list[str]:
+        return sorted(
+            self._isolation_denied_filesystem_paths(
+                spec, workspace, Path(spec.run_dir).resolve(strict=False)
+            )
+            | self._sensitive_denied_filesystem_paths(spec, workspace)
+        )
 
     def _permission_overrides(self, spec: LaunchSpec, workspace: Path) -> list[str]:
         write = "WRITE_BRANCH" in _authority_set(spec)
         profile_name = "mastermind_exec_write" if write else "mastermind_exec_read"
+        run_dir = Path(spec.run_dir).resolve(strict=False)
+        # Insertion order is deliberate.  Broad user/shared-root denials land
+        # first; the exact assigned workspace and run are then re-opened; and
+        # sensitive paths inside those assignments are denied last.  Codex's
+        # filesystem map also resolves the exact child entries more narrowly
+        # than their shared-root parent, so this remains safe independent of
+        # whether the renderer uses last-match or most-specific precedence.
         filesystem: dict[str, str] = {
-            str(workspace / "**"): "read",
+            denied: "deny"
+            for denied in sorted(
+                self._isolation_denied_filesystem_paths(spec, workspace, run_dir)
+            )
         }
+        filesystem[str(workspace)] = "read"
+        filesystem[str(workspace / "**")] = "read"
+        filesystem[str(run_dir)] = "read"
+        filesystem[str(run_dir / "**")] = "read"
+        for writable_run_path in (
+            run_dir / "home",
+            run_dir / "tmp",
+            run_dir / "validation-home",
+            run_dir / "validation-tmp",
+            run_dir / "output",
+        ):
+            filesystem[str(writable_run_path)] = "write"
+            filesystem[str(writable_run_path / "**")] = "write"
         if write:
             for relative in spec.allowed_artifact_paths:
                 pattern = _normalise_relative_path(relative)
                 filesystem[str(workspace / pattern)] = "write"
-        for denied in self._denied_filesystem_paths(spec, workspace):
+        for denied in sorted(self._sensitive_denied_filesystem_paths(spec, workspace)):
             filesystem[denied] = "deny"
         rendered = ",".join(
             f"{json.dumps(key)}={json.dumps(value)}" for key, value in filesystem.items()
@@ -1587,7 +2109,10 @@ class CodexWorkerAdapter:
         run_lexical = Path(spec.run_dir)
         if not run_lexical.is_absolute():
             raise LaunchValidationError("run_dir must be absolute")
-        run_dir = _ensure_private_directory(run_lexical)
+        run_dir = _ensure_run_directory(
+            run_lexical,
+            shared_gid=(int(spec.shared_run_gid) if spec.shared_run_gid is not None else None),
+        )
         if _is_relative_to(run_dir, workspace) or _is_relative_to(workspace, run_dir):
             raise LaunchValidationError("run_dir and workspace must be disjoint")
         validation_home = _ensure_private_directory(run_dir / "validation-home")
@@ -1742,6 +2267,10 @@ class CodexWorkerAdapter:
         workspace, run_dir, home, tmp, baseline, _schema = self._validate_spec(spec)
         _assert_binary_unchanged(self.binary)
         codex_home = _validate_codex_home(Path(spec.codex_home))
+        canary_verdict = validate_secret_canary_verdict(
+            spec.secret_canary_verdict,
+            require_passed=bool(spec.require_secret_canary),
+        )
         schema_path = Path(spec.result_schema_path).resolve(strict=True)
         stdout_path = run_dir / "logs" / "stdout.jsonl"
         stderr_path = run_dir / "logs" / "stderr.log"
@@ -1756,13 +2285,14 @@ class CodexWorkerAdapter:
             result_fd = _create_private_file(result_path)
             os.close(result_fd)
             argv = self._argv(spec, workspace, schema_path, result_path, home, tmp)
+            environment = self._environment(spec, home, tmp, codex_home)
             process = await asyncio.create_subprocess_exec(
                 *argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(workspace),
-                env=self._environment(spec, home, tmp, codex_home),
+                env=environment,
                 start_new_session=True,
                 limit=128 * 1024,
             )
@@ -1780,10 +2310,24 @@ class CodexWorkerAdapter:
             os.close(stderr_fd)
             raise CodexWorkerError("Codex process pipes were not created")
         try:
-            start_identity, pgid = self.inspector.identity(process.pid)
+            observed_identity = self.inspector.inspect(process.pid)
+            start_identity = observed_identity.start_identity
+            pgid = observed_identity.pgid
             boot_id = self.inspector.boot_session_id()
             if pgid != process.pid:
                 raise ProcessIdentityError("new Codex process did not become its own process group")
+            if observed_identity.session_id != process.pid:
+                raise ProcessIdentityError("new Codex process did not become its own session")
+            if (
+                spec.expected_worker_uid is not None
+                and observed_identity.effective_uid != int(spec.expected_worker_uid)
+            ):
+                raise ProcessIdentityError("Codex process effective UID does not match worker")
+            if (
+                spec.expected_worker_gid is not None
+                and observed_identity.effective_gid != int(spec.expected_worker_gid)
+            ):
+                raise ProcessIdentityError("Codex process effective GID does not match worker")
         except Exception:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -1807,6 +2351,59 @@ class CodexWorkerAdapter:
             started_at=_utc_now(),
             binary=self.binary,
             base_sha=baseline.head,
+            session_id=observed_identity.session_id,
+            effective_uid=observed_identity.effective_uid,
+            effective_gid=observed_identity.effective_gid,
+            real_uid=observed_identity.real_uid,
+            real_gid=observed_identity.real_gid,
+        )
+        try:
+            observed_user = pwd.getpwuid(observed_identity.effective_uid).pw_name
+        except KeyError:
+            observed_user = None
+        permission_profile = {
+            "permission_overrides": self._permission_overrides(spec, workspace),
+            "isolation_manifest_sha256": spec.isolation_manifest_sha256,
+            "network_enabled": False,
+            "disabled_features": list(_DISABLED_FEATURES),
+            "shell_environment_policy": "include_only",
+        }
+        launch_attestation = LaunchAttestation(
+            schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
+            created_at=_utc_now(),
+            executable_path=self.binary.real_path,
+            binary=self.binary,
+            rendered_argv=_redact_argv(argv),
+            environment_keys=tuple(sorted(environment)),
+            permission_profile_sha256=_canonical_sha256(permission_profile),
+            prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
+            expected_base_sha=spec.expected_base_sha,
+            observed_base_sha=baseline.head,
+            workspace_identity={**_path_identity(workspace), "git_head": baseline.head},
+            worker_identity={
+                "requested_user": spec.worker_user,
+                "observed_user": observed_user,
+                "expected_uid": spec.expected_worker_uid,
+                "expected_gid": spec.expected_worker_gid,
+                "effective_uid": observed_identity.effective_uid,
+                "effective_gid": observed_identity.effective_gid,
+                "real_uid": observed_identity.real_uid,
+                "real_gid": observed_identity.real_gid,
+            },
+            provider_home_identity=_path_identity(codex_home),
+            secret_canary_verdict=canary_verdict,
+            launch_nonce=ref.launch_nonce,
+            process_identity={
+                "pid": ref.pid,
+                "pgid": ref.pgid,
+                "session_id": ref.session_id,
+                "start_identity": ref.process_start_identity,
+                "boot_id": ref.boot_session_id,
+                "effective_uid": ref.effective_uid,
+                "effective_gid": ref.effective_gid,
+                "real_uid": ref.real_uid,
+                "real_gid": ref.real_gid,
+            },
         )
         parser = _JSONLState()
         state = _RunState(
@@ -1819,6 +2416,7 @@ class CodexWorkerAdapter:
             stderr_fd=stderr_fd,
             violation=asyncio.Event(),
             process_wait_task=asyncio.create_task(process.wait()),
+            launch_attestation=launch_attestation,
             status=WorkerRunStatus.RUNNING,
         )
         self._runs[spec.run_id] = state
@@ -1850,6 +2448,11 @@ class CodexWorkerAdapter:
             process.stdin.close()
         state.monitor_task = asyncio.create_task(self._monitor(state))
         return ref
+
+    def launch_attestation(self, ref: ProcessRef) -> LaunchAttestation:
+        """Return the immutable complete launch receipt for a known invocation."""
+
+        return self._state_for(ref).launch_attestation
 
     def _state_for(self, ref: ProcessRef) -> _RunState:
         state = self._runs.get(ref.run_id)
@@ -2286,15 +2889,20 @@ __all__ = [
     "CodexWorkerAdapter",
     "CodexWorkerError",
     "CollectionReceipt",
+    "LAUNCH_ATTESTATION_SCHEMA_VERSION",
+    "LaunchAttestation",
     "LaunchSpec",
     "LaunchValidationError",
     "ProcessIdentityError",
+    "ProcessIdentity",
     "ProcessInspector",
     "ProcessRef",
     "ResultValidationError",
+    "SECRET_CANARY_SCHEMA_VERSION",
     "ValidationReceipt",
     "WorkerResult",
     "WorkerRunStatus",
     "attest_codex_binary",
+    "validate_secret_canary_verdict",
     "validate_json_schema",
 ]

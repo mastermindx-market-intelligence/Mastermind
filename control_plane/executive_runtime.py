@@ -2332,6 +2332,7 @@ class AttemptRegistry:
         *,
         fence_generation: int,
         lease_token: str,
+        required_launch_attestation_schema: str | None = None,
     ) -> Attempt:
         """Fence the CLAIMED -> RUNNING transition after invocation identity is durable."""
         timestamp = self.store.now_ms()
@@ -2348,6 +2349,72 @@ class AttemptRegistry:
                 raise StateConflict(
                     f"attempt {attempt_id} has no durable process/provider identity"
                 )
+            if required_launch_attestation_schema is not None:
+                metadata = _json_loads(row["launch_metadata_json"], fallback={})
+                attestation = (
+                    metadata.get("launch_attestation")
+                    if isinstance(metadata, dict)
+                    else None
+                )
+                required = {
+                    "schema_version",
+                    "created_at",
+                    "executable_path",
+                    "binary",
+                    "rendered_argv",
+                    "environment_keys",
+                    "permission_profile_sha256",
+                    "prompt_sha256",
+                    "expected_base_sha",
+                    "observed_base_sha",
+                    "workspace_identity",
+                    "worker_identity",
+                    "provider_home_identity",
+                    "secret_canary_verdict",
+                    "launch_nonce",
+                    "process_identity",
+                }
+                if not isinstance(attestation, dict) or not required.issubset(attestation):
+                    raise StateConflict(
+                        f"attempt {attempt_id} has no complete launch attestation"
+                    )
+                if attestation.get("schema_version") != required_launch_attestation_schema:
+                    raise StateConflict(
+                        f"attempt {attempt_id} launch attestation schema is not accepted"
+                    )
+                if not isinstance(attestation.get("rendered_argv"), list) or not attestation[
+                    "rendered_argv"
+                ]:
+                    raise StateConflict("launch attestation has no rendered argv")
+                environment_keys = attestation.get("environment_keys")
+                if (
+                    not isinstance(environment_keys, list)
+                    or any(not isinstance(key, str) or not key for key in environment_keys)
+                    or len(environment_keys) != len(set(environment_keys))
+                ):
+                    raise StateConflict("launch attestation environment allow-list is invalid")
+                for digest_field in ("permission_profile_sha256", "prompt_sha256"):
+                    digest = attestation.get(digest_field)
+                    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                        raise StateConflict(
+                            f"launch attestation {digest_field} is not a SHA-256"
+                        )
+                canary = attestation.get("secret_canary_verdict")
+                if not isinstance(canary, dict) or canary.get("passed") is not True:
+                    raise StateConflict("launch attestation secret canary did not pass")
+                process_identity = attestation.get("process_identity")
+                if not isinstance(process_identity, dict) or any(
+                    process_identity.get(key) != expected
+                    for key, expected in (
+                        ("pid", row["pid"]),
+                        ("pgid", row["pgid"]),
+                        ("start_identity", row["process_start_identity"]),
+                        ("boot_id", row["boot_id"]),
+                    )
+                ):
+                    raise StateConflict(
+                        "launch attestation process identity differs from durable columns"
+                    )
             updated = connection.execute(
                 """
                 UPDATE attempts SET status='RUNNING',updated_at_ms=?,version=version+1

@@ -440,6 +440,15 @@ def test_process_identity_is_durable_and_running_transition_is_fenced(tmp_path):
     assert recorded.process_start_identity == "start-ticks-99"
     assert recorded.boot_id == "boot-a"
     assert recorded.launch_metadata == {"argv": ["worker", "run"]}
+    with pytest.raises(StateConflict, match="complete launch attestation"):
+        runtime.attempts.mark_running(
+            attempt_id,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+            required_launch_attestation_schema=(
+                "mastermind.executive_launch_attestation/v1"
+            ),
+        )
     with pytest.raises(StateConflict, match="already has a process identity"):
         runtime.attempts.record_process(
             attempt_id,

@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Sequence
-
-import yaml
 
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +28,10 @@ PHASE1B_REQUIRED_DENIES = frozenset(
         "CAPITAL_EXECUTION",
         "BILLING",
         "CREDENTIAL_ADMIN",
+        "PUSH_BRANCH",
+        "CROSS_REPO_PUBLISH",
+        "PAPER_STATE_MUTATION",
+        "DATA_DELETE",
     }
 )
 
@@ -39,6 +42,98 @@ class AuthorityPolicyError(RuntimeError):
 
 class AuthorityDenied(AuthorityPolicyError):
     """A requested effect is outside the Phase 1B worker grant."""
+
+
+_POLICY_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_POLICY_VALUE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _parse_executive_policy(raw: bytes) -> dict[str, Any]:
+    """Parse only the deliberately tiny Executive policy YAML subset.
+
+    The always-on service must not inherit a mutable third-party Python package
+    tree merely to read four scalar/list fields.  This strict parser accepts the
+    checked-in block and the same plain mapping/list shape emitted by PyYAML in
+    tests; every YAML feature outside that subset fails closed.
+    """
+
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise AuthorityPolicyError("Executive worker authority policy is unreadable") from exc
+    if "\t" in text or "\x00" in text:
+        raise AuthorityPolicyError("Executive worker authority policy is unreadable")
+    lines = text.splitlines()
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip() == "executive_worker_policy:"
+    ]
+    if len(starts) != 1:
+        raise AuthorityPolicyError("authority_map.yml has no unique executive_worker_policy mapping")
+    block: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if line and not line.startswith((" ", "#")):
+            break
+        if line.startswith("  "):
+            block.append(line)
+    result: dict[str, Any] = {}
+    current_list: str | None = None
+    in_scopes = False
+    for raw_line in block:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw_line.startswith("  - ") and current_list is not None:
+            value = stripped[2:]
+            if _POLICY_KEY_RE.fullmatch(value) is None:
+                raise AuthorityPolicyError("invalid executive_worker_policy shape")
+            result[current_list].append(value)
+            continue
+        if raw_line.startswith("    ") and not raw_line.startswith("      "):
+            if current_list is not None and stripped.startswith("- "):
+                value = stripped[2:]
+                if _POLICY_KEY_RE.fullmatch(value) is None:
+                    raise AuthorityPolicyError("invalid executive_worker_policy shape")
+                result[current_list].append(value)
+                continue
+            if in_scopes and ":" in stripped and not stripped.startswith("-"):
+                key, value = (part.strip() for part in stripped.split(":", 1))
+                if (
+                    _POLICY_KEY_RE.fullmatch(key) is None
+                    or _POLICY_VALUE_RE.fullmatch(value) is None
+                    or key in result["scope_requirements"]
+                ):
+                    raise AuthorityPolicyError("invalid executive_worker_policy shape")
+                result["scope_requirements"][key] = value
+                continue
+            raise AuthorityPolicyError("invalid executive_worker_policy shape")
+        if not raw_line.startswith("  ") or raw_line.startswith("   ") or ":" not in stripped:
+            raise AuthorityPolicyError("invalid executive_worker_policy shape")
+        key, value = (part.strip() for part in stripped.split(":", 1))
+        if key in result:
+            raise AuthorityPolicyError("invalid executive_worker_policy shape")
+        current_list = None
+        in_scopes = False
+        if key == "schema_version" and value:
+            result[key] = value
+        elif key in {"allowed_capabilities", "denied_capabilities"} and not value:
+            result[key] = []
+            current_list = key
+        elif key == "scope_requirements" and not value:
+            result[key] = {}
+            in_scopes = True
+        else:
+            raise AuthorityPolicyError("invalid executive_worker_policy shape")
+    required = {
+        "schema_version",
+        "allowed_capabilities",
+        "denied_capabilities",
+        "scope_requirements",
+    }
+    if set(result) != required:
+        raise AuthorityPolicyError("invalid executive_worker_policy shape")
+    return result
 
 
 def _capabilities(values: Iterable[str] | str | None) -> tuple[str, ...]:
@@ -113,13 +208,7 @@ class ExecutiveAuthorityPolicy:
             raw = policy_path.read_bytes()
         except OSError as exc:
             raise AuthorityPolicyError(f"Executive worker authority policy is unavailable: {exc}") from exc
-        try:
-            document = yaml.safe_load(raw) or {}
-        except Exception as exc:
-            raise AuthorityPolicyError(f"Executive worker authority policy is unreadable: {exc}") from exc
-        section = document.get("executive_worker_policy") if isinstance(document, dict) else None
-        if not isinstance(section, dict):
-            raise AuthorityPolicyError("authority_map.yml has no executive_worker_policy mapping")
+        section = _parse_executive_policy(raw)
         try:
             schema_version = int(section["schema_version"])
             allowed = frozenset(str(item).strip().upper() for item in section["allowed_capabilities"])

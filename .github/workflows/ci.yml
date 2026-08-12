@@ -55,7 +55,7 @@ jobs:
 
       - name: Validate shell scripts
         run: |
-          find scripts -type f -name '*.sh' -print0 |
+          find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
       - name: Run hermetic governance gate
@@ -72,6 +72,14 @@ jobs:
           tests/test_executive_os_sqlite.py
           tests/test_executive_supervisor.py
           tests/test_executive_workspace.py
+          tests/test_executive_backup.py
+          tests/test_executive_canary.py
+          tests/test_executive_service.py
+          tests/test_executive_worker_broker.py
+          tests/test_executive_launchd_config.py
+          tests/test_executive_acceptance_retry.py
+          tests/test_executive_python_runtime_provisioner.py
+          tests/test_executive_worker_auth_provisioner.py
 
       - name: Run Portfolio v2 safety gate
         run: >-
