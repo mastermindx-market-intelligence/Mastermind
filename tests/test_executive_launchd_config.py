@@ -569,6 +569,60 @@ def test_bootstrap_uses_supported_user_identity_and_disable_operations() -> None
     assert '"$state" = needs_disable' in source
 
 
+def test_host_word_sorting_avoids_bsd_awk_index_builtin() -> None:
+    for name in ("bootstrap-host.sh", "install.sh"):
+        source = (OPS / name).read_text(encoding="utf-8")
+        assert "for (index=" not in source
+        assert "for (field_number=1; field_number<=NF; field_number++)" in source
+
+
+def test_acceptance_requires_exact_reviewed_macos_directory_group_sets() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _validate_service_directory_group_sets,
+    )
+
+    system = {
+        "everyone": 12,
+        "localaccounts": 61,
+        "_lpoperator": 100,
+        "com.apple.access_disabled": 396,
+    }
+    worker = _validate_service_directory_group_sets(
+        system_group_gids=system,
+        control_groups=[450, 451, 12, 61, 100],
+        worker_groups=[451, 12, 61, 396, 100],
+        control_gid=450,
+        worker_gid=451,
+    )
+    assert worker == {451, 12, 61, 396, 100}
+    assert _validate_service_directory_group_sets(
+        system_group_gids=system,
+        control_groups=[450, 451, 12, 61, 100, 396],
+        worker_groups=[451, 12, 61, 100],
+        control_gid=450,
+        worker_gid=451,
+    ) == {451, 12, 61, 100}
+    with pytest.raises(AcceptanceError, match="worker account"):
+        _validate_service_directory_group_sets(
+            system_group_gids=system,
+            control_groups=[450, 451, 12, 61, 100],
+            worker_groups=[451, 12, 61, 396, 100, 999],
+            control_gid=450,
+            worker_gid=451,
+        )
+    with pytest.raises(AcceptanceError, match="system group"):
+        _validate_service_directory_group_sets(
+            system_group_gids={**system, "everyone": 999},
+            control_groups=[450, 451, 12, 61, 100],
+            worker_groups=[451, 12, 61, 396, 100],
+            control_gid=450,
+            worker_gid=451,
+        )
+
+
 def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
     import pytest
 
@@ -708,6 +762,7 @@ def test_acceptance_raw_worker_probe_requires_eacces_for_every_operation() -> No
         expected_labels={"workspace"},
         worker_uid=451,
         worker_gid=451,
+        expected_supplementary_gids={451},
         expect_access=False,
     )
     allowed = _raw_probe_payload(allowed=True)
@@ -716,8 +771,42 @@ def test_acceptance_raw_worker_probe_requires_eacces_for_every_operation() -> No
         expected_labels={"workspace"},
         worker_uid=451,
         worker_gid=451,
+        expected_supplementary_gids={451},
         expect_access=True,
     )
+
+    ambient = copy.deepcopy(denied)
+    ambient["supplementary_gids"] = [12, 61, 100, 396, 451]
+    _validate_raw_worker_probe_payload(
+        ambient,
+        expected_labels={"workspace"},
+        worker_uid=451,
+        worker_gid=451,
+        expected_supplementary_gids={12, 61, 100, 396, 451},
+        expect_access=False,
+    )
+    unexpected = copy.deepcopy(ambient)
+    unexpected["supplementary_gids"].append(999)
+    with pytest.raises(AcceptanceError, match="wrong worker principal"):
+        _validate_raw_worker_probe_payload(
+            unexpected,
+            expected_labels={"workspace"},
+            worker_uid=451,
+            worker_gid=451,
+            expected_supplementary_gids={12, 61, 100, 396, 451},
+            expect_access=False,
+        )
+    malformed = copy.deepcopy(denied)
+    malformed["supplementary_gids"] = [{}]
+    with pytest.raises(AcceptanceError, match="wrong worker principal"):
+        _validate_raw_worker_probe_payload(
+            malformed,
+            expected_labels={"workspace"},
+            worker_uid=451,
+            worker_gid=451,
+            expected_supplementary_gids={451},
+            expect_access=False,
+        )
 
     ambiguous = copy.deepcopy(denied)
     ambiguous["results"]["workspace"]["stat"]["errno_name"] = "EPERM"
@@ -727,6 +816,7 @@ def test_acceptance_raw_worker_probe_requires_eacces_for_every_operation() -> No
             expected_labels={"workspace"},
             worker_uid=451,
             worker_gid=451,
+            expected_supplementary_gids={451},
             expect_access=False,
         )
 
