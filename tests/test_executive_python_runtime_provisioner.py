@@ -124,6 +124,24 @@ def test_runtime_provisioner_hardens_ancestors_tree_and_symlinks() -> None:
     assert "TeamIdentifier" in source
 
 
+def test_runtime_provisioner_does_not_mutate_compliant_sip_ancestors() -> None:
+    source = _source()
+    helper = source.split("ensure_root_directory() {", 1)[1].split("\n}\n", 1)[0]
+    assert 'case "$observed_permissions" in' in helper
+    assert 'normalized_mode="${mode#0}"' in helper
+    assert '*+) /bin/chmod -N "$path"' in helper
+    assert 'if [ "$observed_owner:$observed_group" != "0:0" ]; then' in helper
+    assert 'if [ "$observed_mode" != "$normalized_mode" ]; then' in helper
+    assert helper.index('case "$observed_permissions" in') < helper.index(
+        '/bin/chmod -N "$path"'
+    )
+    owner_guard = 'if [ "$observed_owner:$observed_group" != "0:0" ]; then'
+    assert helper.index(owner_guard) < helper.index('/usr/sbin/chown root:wheel "$path"')
+    assert helper.index('if [ "$observed_mode" != "$normalized_mode" ]; then') < helper.index(
+        '/bin/chmod "$mode" "$path"'
+    )
+
+
 def test_runtime_replacement_is_staged_and_quiescent_before_adjacent_swap() -> None:
     source = _source()
     stage_copy = '/usr/bin/ditto --noqtn "$CANDIDATE" "$INSTALL_STAGE"'
