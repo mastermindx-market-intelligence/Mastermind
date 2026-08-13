@@ -64,6 +64,45 @@ Every candidate tried is recorded in `macro.candidates_tried` with the path and 
 was rejected (`missing`, `no scripts/agentos.py`, `no agentos/ store`), so an
 unresolved packet is diagnosable without re-running anything.
 
+## Operational wiring (workstation — Phase 1D-B, 2026-08-13)
+
+On the Mac Studio the ladder's default rungs cannot serve organizational state: the
+intended sibling `../Macro Dashboard` is a **user-parked working copy** (detached
+feature HEAD from 2026-07-14, thousands of local changes) that nothing maintains and
+whose git state is user-owned, and `vendor/macro` is the intentionally stale engine
+pin. The canonical read root is therefore rung 2, wired once:
+
+- **Read root:** `/Users/chriswong/Documents/Cluade/macro-agentos-canon` — a
+  **locked, detached worktree of the existing Macro repository**, checked out at
+  `origin/main`. It shares the Macro object store, so it is *not* a second clone,
+  mirror, or state store — it is a read window whose lock reason names this
+  consumer. Nothing else may write there; `git -C … status --porcelain` must stay
+  empty.
+- **Delivery:** `~/.zshenv` exports
+  `MASTERMIND_MACRO_ROOT=/Users/chriswong/Documents/Cluade/macro-agentos-canon`.
+  `.zshenv` is sourced by every zsh invocation, interactive or not, so any fresh
+  session, subshell, or tool-spawned shell resolves without a per-invocation path.
+- **Refresh (explicit act, never hidden in the reader):**
+
+  ```bash
+  git -C "$MASTERMIND_MACRO_ROOT" fetch origin main
+  git -C "$MASTERMIND_MACRO_ROOT" checkout --detach origin/main
+  ```
+
+  The reader itself stays zero-network by contract. Staleness is always visible:
+  the packet prints `macro.sha`, and the embedded brief carries its own input-age
+  fields — a stale read is a labeled read, not a silent one.
+- **Runtime seat (follow-up, deliberately not smuggled):** when CEO-seat sessions
+  run under the installed Phase 1C system runtime, the same variable belongs in its
+  *reviewed* environment (`mastermind.executive_control_config/v1` /
+  launchd plist) — a schema-touching change that must go through review, not an ad
+  hoc key.
+
+Acceptance receipt (2026-08-13): a cold shell on merged master ran
+`python3 scripts/ceo_boot_packet.py --json` with no flags; it resolved
+`resolved_via: "env"`, `packet.degraded == []`, grounded on Mastermind `b38c18dc`
+and Macro `7794929`, and the canon tree was byte-identical before and after.
+
 ## JSON schema — `mastermind.ceo_boot_packet.v1`
 
 | Key | Type | Meaning |
