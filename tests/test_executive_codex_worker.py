@@ -232,6 +232,63 @@ def _passing_canary() -> dict:
     }
 
 
+def test_native_binary_attestation_allows_bounded_cold_codesign_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = tmp_path / "codex"
+    binary.write_bytes(b"\xcf\xfa\xed\xfe" + b"fixture")
+    binary.chmod(0o500)
+    calls: list[tuple[tuple[str, ...], float]] = []
+
+    def run_checked(argv, *, timeout=10.0):
+        command = tuple(str(value) for value in argv)
+        calls.append((command, timeout))
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "codex-cli 0.147.0\n", "")
+        if "--verify" in command:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(
+            command, 1, "", "TeamIdentifier=2DC432GLL2\n"
+        )
+
+    monkeypatch.setattr(cw.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cw, "_run_checked", run_checked)
+
+    attestation = cw.attest_codex_binary(
+        binary,
+        allowed_versions=frozenset({"0.147.0"}),
+    )
+
+    assert attestation.team_identifier == "2DC432GLL2"
+    codesign_calls = [call for call in calls if call[0][0] == "/usr/bin/codesign"]
+    assert len(codesign_calls) == 2
+    assert {timeout for _argv, timeout in codesign_calls} == {60.0}
+    assert any("--verify" in argv and "--strict" in argv for argv, _ in codesign_calls)
+
+
+def test_native_binary_attestation_timeout_is_typed_and_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = tmp_path / "codex"
+    binary.write_bytes(b"\xcf\xfa\xed\xfe" + b"fixture")
+    binary.chmod(0o500)
+
+    def run_checked(argv, *, timeout=10.0):
+        command = tuple(str(value) for value in argv)
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, "codex-cli 0.147.0\n", "")
+        raise subprocess.TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(cw.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(cw, "_run_checked", run_checked)
+
+    with pytest.raises(
+        cw.BinaryAttestationError,
+        match="codesign.*timed out after 60 seconds",
+    ):
+        cw.attest_codex_binary(binary)
+
+
 def _fixture(
     tmp_path: Path,
     *,

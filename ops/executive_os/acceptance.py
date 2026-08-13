@@ -808,7 +808,7 @@ class Acceptance:
         code = (
             "import json,sys; "
             "from control_plane.executive_worker_broker import WorkerBrokerClient; "
-            "value=WorkerBrokerClient(sys.argv[1]).request_sync('status',{}); "
+            "value=WorkerBrokerClient(sys.argv[1],timeout_seconds=90.0).request_sync('status',{}); "
             "print(json.dumps(value,sort_keys=True,separators=(',',':')))"
         )
         completed = _run(
@@ -827,6 +827,7 @@ class Acceptance:
                 os.fspath(WORKER_SOCKET),
             ],
             cwd=self.release,
+            timeout=120.0,
             label="worker broker status",
         )
         value = _json_output(completed, label="worker broker status")
