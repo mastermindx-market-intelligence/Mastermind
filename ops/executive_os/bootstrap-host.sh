@@ -324,8 +324,8 @@ ensure_user "$CONTROL_USER" "$CONTROL_UID" "$CONTROL_GID" "$CONTROL_HOME"
 ensure_user "$WORKER_USER" "$WORKER_UID" "$WORKER_GID" "$PROVIDER_HOME"
 
 # Control may inspect worker-created run artifacts through the worker primary
-# group. The worker LaunchDaemon sets InitGroups=false, so the worker receives
-# no supplementary control/operator groups.
+# group. The worker's fixed root wrapper clears launchd's inherited group list
+# before dropping to this primary GID and execing the persistent broker.
 /usr/sbin/dseditgroup -o edit -a "$CONTROL_USER" -t user "$WORKER_GROUP"
 /usr/sbin/dseditgroup -o edit -a "$OPERATOR_USER" -t user "$OPS_GROUP"
 

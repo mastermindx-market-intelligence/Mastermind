@@ -27,7 +27,9 @@ system launchd
   │    ├─ private SQLite/WAL + receipts + backups
   │    ├─ launchd-activated AF_UNIX operator socket
   │    └─ typed requests to the worker broker
-  └─ worker LaunchDaemon (_mastermind_worker)
+  └─ worker LaunchDaemon (fixed root drop wrapper)
+       ├─ clears launchd supplementary groups
+       ├─ drops irreversibly to _mastermind_worker
        ├─ dedicated CODEX_HOME
        ├─ launchd-activated AF_UNIX broker socket
        ├─ one active Codex process at a time
@@ -105,16 +107,19 @@ The reviewed default identities are:
 
 | Principal | UID/GID | Owns | Must not own/read |
 |---|---:|---|---|
-| root installer only | 0/0 | release, Python trust root, native Codex copy, launchd plists, secret injection file | never runs a Codex Job |
+| root installer/drop wrapper | 0/0 | release, Python trust root, native Codex copy, launchd plists, secret injection file; fixed worker UID/GID transition | never runs a Codex Job; wrapper drops before broker exec |
 | `_mastermind_exec` | 450/450 | DB, policy/admin clone, control home, receipts, backups, operator service | worker provider auth |
 | `_mastermind_worker` | 451/451 | dedicated CODEX_HOME and worker broker state; current assigned workspace/run write surface | DB, control environment, other homes, production credentials, unrelated Git metadata |
 | `_mastermind_ops` | GID 453 | permission to reach the bounded operator socket | no direct DB or worker-broker access |
 
 Both service accounts have disabled passwords/authentication, hidden records,
-`/usr/bin/false` shells, pinned homes, and checked group membership. The worker
-LaunchDaemon sets `InitGroups=false`; it receives no supplementary groups. The
-control account may join the worker primary group so it can collect the current
-run's artifacts.
+`/usr/bin/false` shells, pinned homes, and checked group membership. On Darwin,
+`InitGroups=false` suppresses `initgroups(3)` but does not clear system
+launchd's inherited group list. The worker LaunchDaemon therefore begins in a
+fixed root-owned wrapper which calls `setgroups([])`, selects only worker
+GID/UID 451, verifies the resulting identity, and immediately `execve`s the
+persistent broker. The control account may join the worker primary group so it
+can collect the current run's artifacts.
 
 Bootstrap, install preflight, and acceptance census every local account and
 group record rather than trusting only named memberships. Duplicate UID/GID
@@ -123,8 +128,10 @@ membership in protected groups fail closed. The release manifest likewise
 records and rechecks root:wheel ownership, type, mode, content hash, ACL absence,
 and non-symlink identity for every installed object.
 
-Root is an installer, not a resident executor. The two persistent services run
-as distinct non-root UIDs. The worker broker accepts only the kernel-reported
+Root is not a resident executor. It installs the system and performs only the
+fixed, input-free worker privilege transition needed to clear launchd's group
+inheritance. After the same-PID exec, the two persistent services run as
+distinct non-root UIDs. The worker broker accepts only the kernel-reported
 control UID through `getpeereid`; it rejects its own worker UID even if that UID
 can obtain a socket descriptor.
 
@@ -495,6 +502,7 @@ The committed test surface is designed to cover:
 | success, cancel, restart, LOST/requeue, terminal seal, event order | `tests/test_executive_supervisor.py` |
 | bounded AF_UNIX service, quarantine, no scheduler import | `tests/test_executive_service.py` |
 | typed broker, peer UID, UID sweep, remote receipts | `tests/test_executive_worker_broker.py` |
+| root-to-worker group clearing and fail-closed privilege drop | `tests/test_executive_worker_wrapper.py` |
 | distinct-principal/path-free secret canary | `tests/test_executive_canary.py` |
 | online backup, tamper, restore, rollback | `tests/test_executive_backup.py` |
 | evidence-preserving, signal-safe acceptance retry | `tests/test_executive_acceptance_retry.py` |
@@ -508,9 +516,9 @@ mandatory opt-in real-host acceptance lane.
 
 Current local deterministic evidence on the audited branch is:
 
-- 234 focused Executive OS tests passed and one opt-in platform test skipped;
+- 259 focused Executive OS tests passed and one opt-in platform test skipped;
 - the opt-in native Codex Seatbelt profile test separately passed on this Mac;
-- the exact hermetic governance test selection passed 357 tests with two
+- the exact hermetic governance test selection passed 381 tests with two
   platform skips;
 - the exact Portfolio v2 safety gate remains delegated to hosted CI because the
   ambient development Python lacks its declared `claude-agent-sdk` dependency;

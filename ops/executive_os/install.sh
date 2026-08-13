@@ -1,6 +1,7 @@
 #!/bin/bash
-# Install one clean exact-SHA Executive OS release and two non-root system
-# LaunchDaemons. Root is used only for this bootstrap/install operation.
+# Install one clean exact-SHA Executive OS release and two system LaunchDaemons.
+# The worker job uses a fixed root wrapper only to clear inherited groups and
+# drop irreversibly to the dedicated non-root broker principal before exec.
 set -euo pipefail
 umask 077
 
@@ -867,11 +868,12 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
   "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
   "$WORKER_PLIST" -- \
   "$PYTHON_BINARY" -I -S -B \
-  "$RELEASE_ROOT/scripts/executive_os_phase1c_worker.py" \
-  serve --config "$WORKER_CONFIG"
+  "$RELEASE_ROOT/scripts/executive_os_phase1c_worker_wrapper.py" \
+  --config "$WORKER_CONFIG" \
+  --release-root "$RELEASE_ROOT"
 /usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$WORKER_PLIST"
-/usr/bin/plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"
-/usr/bin/plutil -replace GroupName -string "$WORKER_GROUP" "$WORKER_PLIST"
+/usr/bin/plutil -replace UserName -string root "$WORKER_PLIST"
+/usr/bin/plutil -replace GroupName -string wheel "$WORKER_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.HOME -string "$PROVIDER_HOME" "$WORKER_PLIST"
 /usr/bin/plutil -replace Sockets.WorkerBroker.SockPathName -string /var/run/mastermind-executive/worker.sock "$WORKER_PLIST"
 # The controller owns the connect-only path. launchd passes the already-open
