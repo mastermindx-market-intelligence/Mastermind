@@ -59,6 +59,42 @@ requires the job's stated acceptance evidence — the tests, artifacts, or live
 verification the job named. "It should work" is not evidence, and neither is a green
 run of a suite that cannot observe the change.
 
+## Agent OS — the organizational knowledge plane
+
+Canonical store: the **Macro repo's `agentos/`** directory
+(`/Users/chriswong/Documents/Cluade/Macro Dashboard`, GitHub
+`mastermindx-market-intelligence/macro`) — workstream records (`WS-*`), decision
+records (`DEC-*`), discovery records (`DSC-*`), and session handoffs. This is where
+"checkpoint discoveries where the next session will find them" lives whenever the fact
+crosses sessions, accounts, or models — account-local chat memory is not company
+memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
+`research/MASTERMIND_AGENT_HANDOFF_PROTOCOL.md`.
+
+- **Read at task start.** A job belonging to an existing Mastermind workstream starts
+  by reading its `WS-*` record, its latest handoff, and the decisions/discoveries they
+  cite. `do_not_redo` entries are binding unless refuted with new evidence. Records are
+  context, not permission — the source-of-truth order above is unchanged, and Agent OS
+  enters it at layer 6 (evidence), not above it.
+- **Write on real events, in the Macro repo.** A durable decision (`DEC-*`: question,
+  answer, rationale, alternatives rejected, evidence), a verified non-obvious discovery
+  (`DSC-*`: requires both a falsifier and a so-what), or a handoff when claimed work
+  transfers to another session or pauses in a state another session must resume.
+  Records ship as normal Macro PRs. Do NOT create a second Agent OS store, or a local
+  decisions/discoveries mirror, in this repository — the same one-source-per-concept
+  law (Charter P7) behind `duplicate_control_planes`.
+- **Boundaries (Agent OS invariant I1).** It is a knowledge plane, never a control
+  plane: it never decides whether work may run, never dispatches or schedules, and
+  never ranks company priorities — the strategic state and the improvement agenda own
+  priority; this repo's `control_plane/` owns execution, leases, and liveness. A
+  workstream `claim:` note is an author's note in git, never evidence a worker is
+  currently alive. Decisions do not live in `governance.jsonl`: an
+  `executive_decision` event there cites the durable `DEC:<KEY>`, one direction, no
+  fork.
+- **Sanctioned read bridge.** `scripts/ceo_boot_packet.py` (Phase 1D-A, #44) is the
+  one-way read path — Executive OS reads the Agent OS brief via
+  `agentos.py brief --json --no-remember`, and there is no write path back. Keep it
+  one-way.
+
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole
   intelligence stack: `engine/` (~199 modules), `lib/store.py`, `data/` (parquet store),

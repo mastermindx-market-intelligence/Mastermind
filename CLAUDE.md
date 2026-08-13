@@ -40,6 +40,25 @@ changes; do not rebuild an existing system without evidence it is unusable.
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
 
+## Agent OS — the organizational knowledge plane
+
+Durable org memory — workstreams (`WS-*`), decisions (`DEC-*`), discoveries (`DSC-*`),
+session handoffs — lives in the Macro repo's `agentos/`
+(`/Users/chriswong/Documents/Cluade/Macro Dashboard`; rules: `agentos/README.md` there;
+handoff protocol: Macro `research/MASTERMIND_AGENT_HANDOFF_PROTOCOL.md`). At task start
+on an existing workstream: read its `WS-*` record, its latest handoff, and the cited
+`DEC:`/`DSC:` records; `do_not_redo` is binding unless refuted with new evidence. Write
+on real events, as normal Macro PRs: `DEC-*` for a choice with durable consequences,
+`DSC-*` for a verified non-obvious fact (falsifier + so-what required), a handoff when
+claimed work transfers or pauses. Account-local chat memory is not company memory.
+Boundaries: knowledge plane, never a control plane (invariant I1) — it never gates
+execution, never ranks priorities (strategic state + improvement agenda own that), and
+a `claim:` note is never liveness (`control_plane/` owns that). Decisions do not live in
+`governance.jsonl` — an `executive_decision` event cites the durable `DEC:<KEY>`. No
+second store or local mirror in this repo (Charter P7 / `duplicate_control_planes`).
+Read bridge: `scripts/ceo_boot_packet.py` reads the brief one-way
+(`agentos.py brief --json --no-remember`); there is no write path back.
+
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole
   intelligence stack: `engine/` (~199 modules), `lib/store.py`, `data/` (parquet store),
