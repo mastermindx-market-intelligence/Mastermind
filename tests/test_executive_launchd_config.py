@@ -645,6 +645,43 @@ def test_canary_activation_uses_bounded_control_command_not_signal() -> None:
     assert "signal.SIGHUP" not in acceptance
 
 
+def test_acceptance_canonicalizes_canary_paths_like_control_service(tmp_path: Path) -> None:
+    from ops.executive_os.acceptance import _canonical_canary_paths
+
+    physical = tmp_path / "private/var/db/mastermind-executive"
+    physical.mkdir(parents=True)
+    alias = tmp_path / "var"
+    alias.symlink_to(tmp_path / "private/var", target_is_directory=True)
+    config = {
+        "runtime_root": str(alias / "db/mastermind-executive/control/db"),
+        "proof_source_repository": str(
+            alias / "db/mastermind-executive/control/admin-checkout" / ("a" * 40)
+        ),
+        "worker_provider_home": str(
+            alias / "db/mastermind-executive/workers/codex-01/provider-home"
+        ),
+    }
+
+    paths = _canonical_canary_paths(config)
+    assert paths == {
+        "runtime_root": physical / "control/db",
+        "database": physical / "control/db/data/control_plane/executive.sqlite3",
+        "administrative_checkout_sentinel": (
+            physical
+            / "control/admin-checkout"
+            / ("a" * 40)
+            / ".git/executive-secret-canary"
+        ),
+        "other_worker_home_sentinel": (
+            physical / "canary-fixtures/other-worker-home/sentinel"
+        ),
+        "forbidden_production_sentinel": (
+            physical / "canary-fixtures/production-like/sentinel"
+        ),
+        "codex_home": physical / "workers/codex-01/provider-home",
+    }
+
+
 def test_service_accounts_use_supported_disabled_authentication_policy_check() -> None:
     for name in (
         "bootstrap-host.sh",
