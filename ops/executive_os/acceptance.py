@@ -1160,6 +1160,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         dirty = _run(
             [
                 "/usr/bin/git",
+                "--no-optional-locks",
                 "-C",
                 self.source_repository,
                 "status",

@@ -527,7 +527,7 @@ HEAD_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD)"
   /bin/echo "source checkout HEAD is not the exact expected SHA" >&2
   exit 65
 }
-[ -z "$(/usr/bin/git -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=normal)" ] || {
+[ -z "$(/usr/bin/git --no-optional-locks -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=normal)" ] || {
   /bin/echo "source checkout is not clean" >&2
   exit 65
 }

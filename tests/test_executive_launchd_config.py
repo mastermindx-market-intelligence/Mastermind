@@ -475,6 +475,23 @@ def test_host_scripts_census_all_directory_membership_representations() -> None:
         assert "NR==1 {print $1}" not in source
 
 
+def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() -> None:
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
+
+    assert (
+        '/usr/bin/git --no-optional-locks -C "$SOURCE_REPO" status '
+        "--porcelain=v1 --untracked-files=normal"
+    ) in install
+    assert (
+        '"/usr/bin/git",\n'
+        '                "--no-optional-locks",\n'
+        '                "-C",\n'
+        '                self.source_repository,\n'
+        '                "status",'
+    ) in acceptance
+
+
 def test_service_accounts_use_supported_disabled_authentication_policy_check() -> None:
     for name in (
         "bootstrap-host.sh",
