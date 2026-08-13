@@ -41,6 +41,7 @@ DEFAULT_BUSY_TIMEOUT_MS = 5_000
 _ROOT = Path(__file__).resolve().parent.parent
 _DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
 _WORKER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_COMMAND_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class RuntimeProofError(RuntimeError):
@@ -822,6 +823,31 @@ class RuntimeStore:
             ),
         )
 
+    def find_event_by_command_id(self, command_id: str) -> dict[str, Any] | None:
+        """Return the essentials of the event that owns ``command_id``, or None.
+
+        The reconciliation half of the UNIQUE ``command_id`` index: a caller that
+        names its command can ask whether that command already committed instead
+        of issuing it twice.  Read-only, no new table, no new store.
+        """
+
+        with self.read() as connection:
+            row = connection.execute(
+                """
+                SELECT event_type,job_id,payload_json,created_at_ms
+                FROM events WHERE command_id=?
+                """,
+                (str(command_id),),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "event_type": str(row["event_type"]),
+            "job_id": row["job_id"],
+            "payload": _json_loads(row["payload_json"], fallback={}),
+            "created_at_ms": int(row["created_at_ms"]),
+        }
+
     def snapshot(self) -> dict[str, Any]:
         """Compatibility/debug snapshot assembled from authoritative rows."""
         runtime = Runtime.from_store(self)
@@ -1454,10 +1480,30 @@ class JobRegistry:
         requested_authorities: str | list[str] | tuple[str, ...] | None = None,
         allowed_write_paths: list[str] | tuple[str, ...] | None = None,
         validation_commands: list[list[str]] | tuple[tuple[str, ...], ...] | None = None,
+        command_id: str | None = None,
+        provenance: dict[str, Any] | None = None,
     ) -> Job:
+        """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
+
+        ``command_id`` lets a bounded caller name the creation command instead of
+        taking the default ``uuid4().hex``.  The events table declares
+        ``command_id TEXT NOT NULL UNIQUE``, so that is what makes a duplicate
+        submission atomic rather than merely unlikely: two concurrent creators
+        with the same command id both insert a job row, but the second one's
+        event INSERT is rejected *inside* its transaction, and its job row rolls
+        back with it.  Exactly one Job survives, with no advisory lock.
+
+        ``provenance`` is recorded under the created event's payload for callers
+        that must record who asked and on what grounding.  It changes no job
+        column and confers no authority.
+        """
         objective = str(objective).strip()
         if not objective:
             raise StateConflict("objective is required")
+        if command_id is not None and _COMMAND_ID_RE.fullmatch(str(command_id)) is None:
+            # A caller-named command id becomes a durable UNIQUE key, so its
+            # shape is fenced here rather than trusted from the call site.
+            raise StateConflict("command_id must be a bounded identifier")
         if int(attempt_limit) <= 0:
             raise StateConflict("attempt_limit must be positive")
         normalized_constraints = _normalise_constraints(constraints)
@@ -1510,13 +1556,17 @@ class JobRegistry:
                     timestamp,
                 ),
             )
+            event_payload: dict[str, Any] = {"status": JobStatus.QUEUED.value}
+            if provenance is not None:
+                event_payload["provenance"] = dict(provenance)
             self.store.append_event(
                 connection,
                 aggregate_type="job",
                 aggregate_id=job_id,
                 event_type="JOB_CREATED",
                 job_id=job_id,
-                payload={"status": JobStatus.QUEUED.value},
+                payload=event_payload,
+                command_id=command_id,
                 timestamp_ms=timestamp,
             )
         job = self.get_job(job_id)

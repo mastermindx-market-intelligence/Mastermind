@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
+from control_plane import ceo_intent
 from control_plane.executive_runtime import (
     Job,
     JobStatus,
@@ -1352,6 +1353,38 @@ class ExecutiveControlService:
         if command == "dispatch":
             self._exact_args(args, {"job_id"})
             return await self._dispatch_job(self._id(args["job_id"], "job_id"))
+        if command == "submit-ceo-intent":
+            # The bounded CEO write bridge (Phase 1E-A).  It validates one typed
+            # envelope, lets the existing authority policy adjudicate it inside
+            # create_job, and returns a receipt naming the resulting QUEUED Job.
+            # It adds NO execution behaviour: submission is not dispatch, and a
+            # CEO-created job is structurally undispatchable by this service
+            # because `dispatch`/`requeue` accept only the fixed proof job.
+            # ``CeoIntentError`` subclasses ValueError precisely so a refusal
+            # lands on the existing `request_failed` code above rather than the
+            # opaque `internal_error` path.
+            self._exact_args(args, {"intent"})
+            return _jsonable(
+                await asyncio.to_thread(
+                    ceo_intent.submit_intent,
+                    runtime,
+                    args["intent"],
+                    # An intent's worktree is fenced to the host's reviewed jobs
+                    # workspace root.  `proof_workspace_root` IS that root (it is
+                    # `jobs/workspaces` in control.json, not a proof-only
+                    # directory) — the field keeps its Phase 1C name because
+                    # renaming it would be a control-config schema change.
+                    workspace_root=self.config.proof_workspace_root,
+                )
+            )
+        if command == "ceo-intent-status":
+            # Read-back only.  The durable JOB_CREATED event plus the Job row are
+            # the whole record; no status store is introduced.
+            self._exact_args(args, {"intent_id"})
+            intent_id = self._id(args["intent_id"], "intent_id")
+            return _jsonable(
+                await asyncio.to_thread(ceo_intent.resolve_intent, runtime, intent_id)
+            )
         if command == "cancel":
             self._exact_args(args, {"job_id"})
             return _jsonable(runtime.jobs.cancel_job(self._id(args["job_id"], "job_id")))
