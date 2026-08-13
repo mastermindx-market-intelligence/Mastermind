@@ -134,6 +134,32 @@ def _safe_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _canonical_canary_paths(config: Mapping[str, Any]) -> dict[str, Path]:
+    """Rebuild the service's canonical secret-canary path binding exactly."""
+
+    runtime_root = Path(config["runtime_root"]).resolve(strict=False)
+    try:
+        host_root = runtime_root.parents[1]
+    except IndexError as exc:
+        raise AcceptanceError("Executive runtime root cannot bind canary fixtures") from exc
+    return {
+        "runtime_root": runtime_root,
+        "database": runtime_root / "data/control_plane/executive.sqlite3",
+        "administrative_checkout_sentinel": (
+            Path(config["proof_source_repository"]).resolve(strict=False)
+            / ".git"
+            / "executive-secret-canary"
+        ),
+        "other_worker_home_sentinel": (
+            host_root / "canary-fixtures/other-worker-home/sentinel"
+        ),
+        "forbidden_production_sentinel": (
+            host_root / "canary-fixtures/production-like/sentinel"
+        ),
+        "codex_home": Path(config["worker_provider_home"]).resolve(strict=False),
+    }
+
+
 def _durable_assignment_paths(
     job: Mapping[str, Any],
     attempt: Mapping[str, Any],
@@ -1445,7 +1471,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
 
     def initialize_runtime_and_fixtures(self) -> None:
         control_home = Path(self.control_identity.pw_dir)
-        runtime_root = Path(self.config["runtime_root"])
+        paths = _canonical_canary_paths(self.config)
+        runtime_root = paths["runtime_root"]
         _run(
             [
                 *self._service_environment(CONTROL_USER, control_home),
@@ -1464,21 +1491,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             cwd=self.release,
             label="control-principal database initialization",
         )
-        database = runtime_root / "data" / "control_plane" / "executive.sqlite3"
+        database = paths["database"]
         if not database.is_file():
             raise AcceptanceError("control principal did not initialize the Executive database")
 
-        admin_sentinel = (
-            Path(self.config["proof_source_repository"])
-            / ".git"
-            / "executive-secret-canary"
-        )
-        other_sentinel = (
-            RUNTIME_ROOT / "canary-fixtures" / "other-worker-home" / "sentinel"
-        )
-        production_sentinel = (
-            RUNTIME_ROOT / "canary-fixtures" / "production-like" / "sentinel"
-        )
+        admin_sentinel = paths["administrative_checkout_sentinel"]
+        other_sentinel = paths["other_worker_home_sentinel"]
+        production_sentinel = paths["forbidden_production_sentinel"]
         protected = [admin_sentinel, other_sentinel, production_sentinel]
         for path in protected:
             self._create_sentinel(path)
@@ -1489,15 +1508,11 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         environment_probe: Mapping[str, Any],
         environment_probe_sha256: str,
     ) -> None:
-        runtime_root = Path(self.config["runtime_root"])
-        database = runtime_root / "data" / "control_plane" / "executive.sqlite3"
-        admin_sentinel = (
-            Path(self.config["proof_source_repository"])
-            / ".git"
-            / "executive-secret-canary"
-        )
-        other_sentinel = RUNTIME_ROOT / "canary-fixtures" / "other-worker-home" / "sentinel"
-        production_sentinel = RUNTIME_ROOT / "canary-fixtures" / "production-like" / "sentinel"
+        paths = _canonical_canary_paths(self.config)
+        database = paths["database"]
+        admin_sentinel = paths["administrative_checkout_sentinel"]
+        other_sentinel = paths["other_worker_home_sentinel"]
+        production_sentinel = paths["forbidden_production_sentinel"]
         canary_argv = [
             *self._service_environment(
                 WORKER_USER,
@@ -1529,7 +1544,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             "--forbidden-production-sentinel",
             production_sentinel,
             "--codex-home",
-            self.config["worker_provider_home"],
+            paths["codex_home"],
         ]
         completed = _run(
             canary_argv,
