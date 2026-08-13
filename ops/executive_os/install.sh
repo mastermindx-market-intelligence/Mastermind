@@ -1,7 +1,6 @@
 #!/bin/bash
-# Install one clean exact-SHA Executive OS release and two system LaunchDaemons.
-# The worker job uses a fixed root wrapper only to clear inherited groups and
-# drop irreversibly to the dedicated non-root broker principal before exec.
+# Install one clean exact-SHA Executive OS release and two non-root system
+# LaunchDaemons. Root is used only for this bootstrap/install operation.
 set -euo pipefail
 umask 077
 
@@ -558,6 +557,39 @@ AUTH_PATH="$PROVIDER_HOME/auth.json"
 
 verify_service_account "$CONTROL_USER" "$CONTROL_UID" "$CONTROL_GID" "$CONTROL_HOME"
 verify_service_account "$WORKER_USER" "$WORKER_UID" "$WORKER_GID" "$PROVIDER_HOME"
+
+verify_reviewed_system_group() {
+  local name="$1"
+  local gid="$2"
+  [ "$(read_dscl_attribute "/Groups/$name" PrimaryGroupID)" = "$gid" ] || {
+    /bin/echo "reviewed macOS system group identity drifted: $name" >&2
+    exit 65
+  }
+}
+verify_reviewed_system_group everyone 12
+verify_reviewed_system_group localaccounts 61
+verify_reviewed_system_group _lpoperator 100
+verify_reviewed_system_group com.apple.access_disabled 396
+
+normalize_numeric_groups() {
+  /bin/echo "$1" | /usr/bin/tr ' ' '\n' \
+    | /usr/bin/awk '/^[0-9]+$/{print $1}' \
+    | /usr/bin/sort -nu | /usr/bin/tr '\n' ' ' \
+    | /usr/bin/sed 's/[[:space:]]*$//'
+}
+WORKER_DIRECTORY_GIDS="$(normalize_numeric_groups "$(/usr/bin/id -G "$WORKER_USER")")"
+WORKER_GROUPS_BASE="$(normalize_numeric_groups "$WORKER_GID 12 61 100")"
+WORKER_GROUPS_DISABLED="$(normalize_numeric_groups "$WORKER_GID 12 61 100 396")"
+if [ "$WORKER_DIRECTORY_GIDS" != "$WORKER_GROUPS_BASE" ] \
+  && [ "$WORKER_DIRECTORY_GIDS" != "$WORKER_GROUPS_DISABLED" ]; then
+  /bin/echo "worker account has an unreviewed macOS directory group vector" >&2
+  exit 65
+fi
+WORKER_SUPPLEMENTARY_GIDS="$(
+  /bin/echo "$WORKER_DIRECTORY_GIDS" | /usr/bin/tr ' ' '\n' \
+    | /usr/bin/awk -v primary="$WORKER_GID" '$1 != primary {print $1}' \
+    | /usr/bin/tr '\n' ' ' | /usr/bin/sed 's/[[:space:]]*$//'
+)"
 verify_group_members "$CONTROL_GROUP" "$CONTROL_GID" "$CONTROL_USER" ""
 verify_group_members "$WORKER_GROUP" "$WORKER_GID" "$WORKER_USER" "$CONTROL_USER"
 verify_group_members "_mastermind_ops" "$OPS_GID" "" "$OPERATOR_USER"
@@ -806,17 +838,18 @@ fi
 }
 
 PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$WORKER_CONFIG" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
-  "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" <<'PY'
+  "$WORKER_SUPPLEMENTARY_GIDS" "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" <<'PY'
 import json, os, pathlib, sys
 (
-    destination, control_uid, worker_uid, worker_gid, workspace_root,
+    destination, control_uid, worker_uid, worker_gid, supplementary_gids, workspace_root,
     run_root, provider_home, codex_binary, codex_version,
 ) = sys.argv[1:]
 value = {
-    "schema_version": "mastermind.executive_worker_broker_config/v1",
+    "schema_version": "mastermind.executive_worker_broker_config/v2",
     "control_uid": int(control_uid),
     "worker_uid": int(worker_uid),
     "worker_gid": int(worker_gid),
+    "allowed_supplementary_gids": [int(value) for value in supplementary_gids.split()],
     "worker_user": "_mastermind_worker",
     "worker_id": "codex-01",
     "workspace_root": workspace_root,
@@ -868,12 +901,11 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
   "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
   "$WORKER_PLIST" -- \
   "$PYTHON_BINARY" -I -S -B \
-  "$RELEASE_ROOT/scripts/executive_os_phase1c_worker_wrapper.py" \
-  --config "$WORKER_CONFIG" \
-  --release-root "$RELEASE_ROOT"
+  "$RELEASE_ROOT/scripts/executive_os_phase1c_worker.py" \
+  serve --config "$WORKER_CONFIG"
 /usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$WORKER_PLIST"
-/usr/bin/plutil -replace UserName -string root "$WORKER_PLIST"
-/usr/bin/plutil -replace GroupName -string wheel "$WORKER_PLIST"
+/usr/bin/plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"
+/usr/bin/plutil -replace GroupName -string "$WORKER_GROUP" "$WORKER_PLIST"
 /usr/bin/plutil -replace EnvironmentVariables.HOME -string "$PROVIDER_HOME" "$WORKER_PLIST"
 /usr/bin/plutil -replace Sockets.WorkerBroker.SockPathName -string /var/run/mastermind-executive/worker.sock "$WORKER_PLIST"
 # The controller owns the connect-only path. launchd passes the already-open

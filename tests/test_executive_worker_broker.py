@@ -215,6 +215,9 @@ def _fixture(tmp_path: Path):
         workspace_root=workspace_root,
         run_root=run_root,
         provider_home=provider_home,
+        allowed_supplementary_gids=frozenset(
+            set(os.getgroups()) - {worker_gid}
+        ),
     )
     adapter = FakeAdapter()
     sweeper = FakeSweeper()
@@ -319,6 +322,37 @@ def test_broker_rejects_wrong_peer_and_unknown_operation(tmp_path: Path) -> None
             )
 
     asyncio.run(scenario())
+
+
+def test_broker_requires_exact_root_owned_ambient_group_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker, _adapter, sweeper, _peer, _spec = _fixture(tmp_path)
+    primary = broker.policy.worker_gid
+    broker.policy = dataclasses.replace(
+        broker.policy,
+        allowed_supplementary_gids=frozenset({12, 61, 100, 396}),
+    )
+    monkeypatch.setattr(
+        "control_plane.executive_worker_broker.os.getgroups",
+        lambda: [primary, 12, 61, 100, 396],
+    )
+    assert broker.initialize().passed is True
+    assert sweeper.calls == ["broker_startup"]
+
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    other, _adapter, _sweeper, _peer, _spec = _fixture(other_root)
+    other.policy = dataclasses.replace(
+        other.policy,
+        allowed_supplementary_gids=frozenset({12, 61, 100, 396}),
+    )
+    monkeypatch.setattr(
+        "control_plane.executive_worker_broker.os.getgroups",
+        lambda: [primary, 12, 61, 100, 396, 999],
+    )
+    with pytest.raises(DedicatedUIDError, match="supplementary groups differ"):
+        other.initialize()
 
 
 def test_broker_enforces_roots_principal_and_declared_argv(tmp_path: Path) -> None:

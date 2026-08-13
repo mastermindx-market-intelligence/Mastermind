@@ -338,6 +338,7 @@ class BrokerPolicy:
     workspace_root: Path
     run_root: Path
     provider_home: Path
+    allowed_supplementary_gids: frozenset[int] = frozenset()
     require_secret_canary: bool = True
     max_request_bytes: int = _MAX_REQUEST_BYTES
 
@@ -348,6 +349,11 @@ class BrokerPolicy:
             raise WorkerBrokerError("worker UID must be non-root and distinct from control UID")
         if int(self.worker_gid) <= 0:
             raise WorkerBrokerError("worker GID must be non-root")
+        if (
+            any(type(group_id) is not int or group_id <= 0 for group_id in self.allowed_supplementary_gids)
+            or int(self.worker_gid) in self.allowed_supplementary_gids
+        ):
+            raise WorkerBrokerError("allowed supplementary GIDs are invalid")
         if not _ID_RE.fullmatch(self.worker_id):
             raise WorkerBrokerError("worker_id is invalid")
         if not self.worker_user or any(character.isspace() for character in self.worker_user):
@@ -776,9 +782,9 @@ class ExecutiveWorkerBroker:
             return self.startup_sweep
         if os.geteuid() != self.policy.worker_uid or os.getegid() != self.policy.worker_gid:
             raise DedicatedUIDError("broker process does not match the configured worker UID/GID")
-        unexpected_groups = set(os.getgroups()) - {self.policy.worker_gid}
-        if unexpected_groups:
-            raise DedicatedUIDError("worker broker has unexpected supplementary groups")
+        observed_groups = set(os.getgroups()) - {self.policy.worker_gid}
+        if observed_groups != set(self.policy.allowed_supplementary_gids):
+            raise DedicatedUIDError("worker broker supplementary groups differ from policy")
         self.startup_sweep = self.sweeper.sweep("broker_startup")
         self.last_sweep = self.startup_sweep
         return self.startup_sweep
