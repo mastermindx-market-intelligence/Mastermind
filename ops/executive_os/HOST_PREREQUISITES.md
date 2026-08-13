@@ -167,7 +167,7 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
 
 Installation leaves both LaunchDaemons disabled and stopped. Run the installed
 wrapper for the first start, per-PID canary quarantine, worker-principal live
-probe, SIGHUP activation, fault injection, cleanup, restore drill, and
+probe, private-socket canary activation, fault injection, cleanup, restore drill, and
 no-public-listener proof:
 
 ```bash

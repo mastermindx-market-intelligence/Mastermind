@@ -14,11 +14,10 @@ import hashlib
 import json
 import os
 import re
-import signal
 import stat
 import sys
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
 from control_plane.executive_service import (
@@ -101,6 +100,7 @@ def _parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("status", "Show service and startup-reconciliation status."),
         ("health", "Check SQLite migration and integrity health."),
+        ("activate-canary", "Validate and activate the current PID-bound canary."),
         ("workers", "List durable worker identities."),
         ("jobs", "List durable Jobs."),
         ("register-worker", "Register the single configured Codex worker."),
@@ -446,6 +446,8 @@ def _load_canary_envelope(
 
 def _service_from_config(
     raw: Mapping[str, Any],
+    *,
+    canary_loader: Callable[[], Mapping[str, Any]] | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_worker_broker import (
@@ -476,7 +478,7 @@ def _service_from_config(
     )
     # A persisted receipt from another service instance is never startup
     # authority. Every new PID starts quarantined and can activate only after a
-    # fresh same-PID worker probe followed by SIGHUP.
+    # fresh same-PID worker probe followed by the private activation command.
     canary: dict[str, Any] = {}
 
     def supervisor_factory(runtime):
@@ -520,6 +522,7 @@ def _service_from_config(
         supervisor_factory=supervisor_factory,
         activated_socket=listener,
         service_state="AWAITING_CANARY",
+        canary_loader=canary_loader,
     )
 
 
@@ -531,46 +534,28 @@ async def _serve_from_config(config_path: Path) -> None:
         expected_release_sha=str(raw["proof_base_sha"]),
     )
     canary_path = Path(raw["secret_canary_receipt_path"])
-    service = _service_from_config(raw)
-    loop = asyncio.get_running_loop()
-    reload_requested = asyncio.Event()
-    try:
-        loop.add_signal_handler(signal.SIGHUP, reload_requested.set)
-    except (NotImplementedError, RuntimeError):  # pragma: no cover - Darwin service path
-        pass
 
-    async def reload_canary() -> None:
-        while True:
-            await reload_requested.wait()
-            reload_requested.clear()
-            attestation = _load_control_environment_attestation(
-                Path(raw["control_environment_attestation_path"]),
-                config_path=config_path,
-                expected_release_sha=str(raw["proof_base_sha"]),
-            )
-            verdict = _load_canary_envelope(
-                canary_path,
-                raw=raw,
-                control_attestation=attestation,
-            )
-            await service.activate_canary(verdict)
+    def load_canary() -> Mapping[str, Any]:
+        attestation = _load_control_environment_attestation(
+            Path(raw["control_environment_attestation_path"]),
+            config_path=config_path,
+            expected_release_sha=str(raw["proof_base_sha"]),
+        )
+        return _load_canary_envelope(
+            canary_path,
+            raw=raw,
+            control_attestation=attestation,
+        )
 
-    reloader = asyncio.create_task(reload_canary(), name="executive-canary-reloader")
-    try:
-        await service.serve_until_stopped()
-    finally:
-        reloader.cancel()
-        await asyncio.gather(reloader, return_exceptions=True)
-        try:
-            loop.remove_signal_handler(signal.SIGHUP)
-        except (NotImplementedError, RuntimeError):
-            pass
+    service = _service_from_config(raw, canary_loader=load_canary)
+    await service.serve_until_stopped()
 
 
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     if args.command in {
         "status",
         "health",
+        "activate-canary",
         "workers",
         "jobs",
         "register-worker",

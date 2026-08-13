@@ -306,6 +306,7 @@ class ExecutiveControlService:
         backup_backend: BackupBackendProtocol | None = None,
         activated_socket: socket.socket | None = None,
         service_state: str = "READY",
+        canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
@@ -343,6 +344,7 @@ class ExecutiveControlService:
         if service_state not in {"READY", "AWAITING_CANARY"}:
             raise ValueError("service_state must be READY or AWAITING_CANARY")
         self._service_state = service_state
+        self._canary_loader = canary_loader
         self.instance_id = f"executive-service-{uuid4().hex}"
 
     @property
@@ -1307,10 +1309,19 @@ class ExecutiveControlService:
         if command == "health":
             self._exact_args(args, set())
             return self._database_health()
+        if command == "activate-canary":
+            self._exact_args(args, set())
+            if self._service_state != "AWAITING_CANARY":
+                raise StateConflict("Executive control service is not awaiting a canary")
+            if self._canary_loader is None:
+                raise ServiceError("Executive control service has no canary loader")
+            verdict = await asyncio.to_thread(self._canary_loader)
+            await self.activate_canary(verdict)
+            return {"service_state": self._service_state}
         if self._service_state != "READY":
             raise StateConflict(
                 f"Executive control service is {self._service_state}; "
-                "only status and health are available"
+                "only status, health, and canary activation are available"
             )
         if command == "workers":
             self._exact_args(args, set())

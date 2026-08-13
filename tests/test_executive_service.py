@@ -918,12 +918,32 @@ def test_canary_envelope_binds_live_control_probe_and_inner_receipt(tmp_path: Pa
         )
 
 
-def test_awaiting_canary_quarantine_allows_only_status_and_health(
+def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
     tmp_path: Path, short_socket_root: Path
 ):
     async def exercise():
         config = _config(tmp_path, socket_root=short_socket_root)
         holder = {}
+        verdict = {
+            "schema_version": "mastermind.executive_secret_canary/v1",
+            "passed": True,
+            "checks": {
+                "control_service_environment": "DENIED",
+                "administrative_checkout": "DENIED",
+                "executive_database": "DENIED",
+                "other_worker_home": "DENIED",
+                "forbidden_production_path": "DENIED",
+            },
+            "receipt_sha256": "b" * 64,
+            "control_environment_probe_sha256": "c" * 64,
+            "observed_at": "2026-08-11T00:00:00Z",
+            "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
+        }
+        loader_calls = []
+
+        def load_canary():
+            loader_calls.append(True)
+            return verdict
 
         def factory(runtime):
             holder["supervisor"] = _FakeSupervisor(runtime)
@@ -935,6 +955,7 @@ def test_awaiting_canary_quarantine_allows_only_status_and_health(
             config,
             supervisor_factory=factory,
             service_state="AWAITING_CANARY",
+            canary_loader=load_canary,
         )
         await service.start()
         try:
@@ -945,28 +966,44 @@ def test_awaiting_canary_quarantine_allows_only_status_and_health(
             assert denied["ok"] is False
             assert "AWAITING_CANARY" in denied["error"]["message"]
             assert holder["supervisor"].requeue_values == []
-
-            verdict = {
-                "schema_version": "mastermind.executive_secret_canary/v1",
-                "passed": True,
-                "checks": {
-                    "control_service_environment": "DENIED",
-                    "administrative_checkout": "DENIED",
-                    "executive_database": "DENIED",
-                    "other_worker_home": "DENIED",
-                    "forbidden_production_path": "DENIED",
-                },
-                "receipt_sha256": "b" * 64,
-                "control_environment_probe_sha256": "c" * 64,
-                "observed_at": "2026-08-11T00:00:00Z",
-                "worker_auth_exception": "DEDICATED_CODEX_HOME_ONLY",
-            }
-            await service.activate_canary(verdict)
+            rejected = await _request(
+                service, "activate-canary", {"receipt_path": "/unreviewed"}
+            )
+            assert rejected["ok"] is False
+            assert loader_calls == []
+            activated = await _request(service, "activate-canary")
+            assert activated["result"] == {"service_state": "READY"}
             ready = await _request(service, "status")
             assert ready["result"]["service_state"] == "READY"
+            assert loader_calls == [True]
             assert holder["supervisor"].secret_canary_verdict == verdict
             assert holder["supervisor"].require_complete_launch_attestation is True
             assert holder["supervisor"].requeue_values == [False]
+            repeated = await _request(service, "activate-canary")
+            assert repeated["ok"] is False
+            assert loader_calls == [True]
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_canary_activation_fails_closed_without_loader(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise():
+        service, _holder = _service(
+            tmp_path,
+            socket_root=short_socket_root,
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            response = await _request(service, "activate-canary")
+            assert response["ok"] is False
+            assert "no canary loader" in response["error"]["message"]
+            status = await _request(service, "status")
+            assert status["result"]["service_state"] == "AWAITING_CANARY"
         finally:
             await service.close()
 
