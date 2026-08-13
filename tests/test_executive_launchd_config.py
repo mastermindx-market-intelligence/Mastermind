@@ -227,6 +227,39 @@ def test_environment_probe_validates_cross_uid_ps_identity(monkeypatch) -> None:
         probe._expected_identity(json.dumps(identity), 4242, observed)
 
 
+def test_environment_probe_uses_posix_session_id_not_darwin_sess(
+    monkeypatch,
+) -> None:
+    from scripts import executive_os_phase1c_env_probe as probe
+
+    completed = subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout=b"4242 4200 Tue Aug 12 19:00:00 2026 450 450 450 450\n",
+        stderr=b"",
+    )
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        return completed
+
+    monkeypatch.setattr(probe.subprocess, "run", fake_run)
+    monkeypatch.setattr(probe.os, "getsid", lambda pid: 4200)
+
+    _raw, identity = probe._identity(4242)
+    assert "sess=" not in captured["argv"][2]
+    assert identity == {
+        "pid": 4242,
+        "pgid": 4200,
+        "session_id": 4200,
+        "effective_uid": 450,
+        "effective_gid": 450,
+        "real_uid": 450,
+        "real_gid": 450,
+    }
+
+
 def test_acceptance_prepares_control_owned_receipt_container(
     tmp_path, monkeypatch
 ) -> None:

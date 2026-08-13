@@ -38,7 +38,7 @@ def _identity(pid: int) -> tuple[bytes, dict[str, int]]:
         [
             "/bin/ps",
             "-o",
-            "pid=,pgid=,sess=,lstart=,uid=,gid=,ruid=,rgid=",
+            "pid=,pgid=,lstart=,uid=,gid=,ruid=,rgid=",
             "-p",
             str(pid),
         ],
@@ -53,13 +53,13 @@ def _identity(pid: int) -> tuple[bytes, dict[str, int]]:
         raise ProbeError("ps_identity_unavailable")
     raw = completed.stdout.strip()
     fields = raw.split()
-    if len(fields) != 12:
+    if len(fields) != 11:
         raise ProbeError("ps_identity_malformed")
     try:
         observed = {
             "pid": int(fields[0]),
             "pgid": int(fields[1]),
-            "session_id": int(fields[2]),
+            "session_id": os.getsid(pid),
             "effective_uid": int(fields[-4]),
             "effective_gid": int(fields[-3]),
             "real_uid": int(fields[-2]),
