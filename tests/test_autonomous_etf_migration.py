@@ -659,6 +659,7 @@ def test_settlement_link_is_durable_before_ack_and_deduplicates_retry(
     assert first["migration_settlement_link"]["deduplicated"] is False
     receipts = paper_account.pending_settlement_receipts("autonomous")
     assert len(receipts) == 1
+    receipt_transaction_id = receipts[0]["transaction_id"]
 
     links = [
         row for row in _audit(migration_book)
@@ -690,15 +691,12 @@ def test_settlement_link_is_durable_before_ack_and_deduplicates_retry(
         for line in (migration_book / "decisions.jsonl").read_text().splitlines()
         if line.strip()
     ]
-    assert len(
-        [
-            row for row in decisions
-            if row.get("asof") == "2026-08-11" and row.get("target_status") == "queued"
-        ]
-    ) == 1
-    assert len(
-        [
-            row for row in decisions
-            if row.get("asof") == "2026-08-12" and row.get("target_status") == "executed"
-        ]
-    ) == 1
+    # The exact accepted row transitions in place; settlement must not create a second date row.
+    settled = [
+        row for row in decisions
+        if row.get("asof") == "2026-08-11" and row.get("target_status") == "executed"
+    ]
+    assert len(settled) == 1
+    assert settled[0]["settled_asof"] == "2026-08-12"
+    assert settled[0]["settlement_transaction_id"] == receipt_transaction_id
+    assert not [row for row in decisions if row.get("asof") == "2026-08-12"]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -324,6 +325,116 @@ def test_forced_derisk_quarantines_legacy_target_before_tripwire_or_rewrite(
     assert json.loads(quarantined[0].read_text()) == legacy
 
 
+def test_derisk_rewrite_holds_one_book_lock_across_read_compute_and_save(
+    isolated_books, monkeypatch
+):
+    """A fresh PM queue cannot replace the inspected target mid de-risk rewrite."""
+    from bot import derisk
+    from portfolio import fragility_chain, paper_account
+
+    depth = {"value": 0}
+    events: list[tuple[str, int]] = []
+
+    @contextmanager
+    def tracked_lock(portfolio_id=None):
+        depth["value"] += 1
+        events.append(("lock_enter", depth["value"]))
+        try:
+            yield
+        finally:
+            events.append(("lock_exit", depth["value"]))
+            depth["value"] -= 1
+
+    def preflight(portfolio_id=None):
+        events.append(("preflight", depth["value"]))
+        return {
+            "ok": True,
+            "pending": {"target": {"AAPL": 0.80}, "asof": "2026-08-12"},
+        }
+
+    def save(target, asof, portfolio_id=None, **kwargs):
+        events.append(("save", depth["value"]))
+
+    monkeypatch.setattr(paper_account, "_paper_transaction_lock", tracked_lock)
+    monkeypatch.setattr(paper_account, "preflight_pending_target", preflight)
+    monkeypatch.setattr(paper_account, "save_pending_target", save)
+    monkeypatch.setattr(
+        derisk,
+        "tripwire",
+        lambda *args, **kwargs: {
+            "trigger": True,
+            "severity": 2,
+            "reasons": ["confirmed_test_unwind"],
+            "state": "risk_off",
+            "risk_state": {"gross_cap": 0.55, "allow_adds": True},
+        },
+    )
+    monkeypatch.setattr(
+        fragility_chain,
+        "assess_book",
+        lambda *args, **kwargs: {"blocked_chains": []},
+    )
+    monkeypatch.setattr(derisk, "_write_artifact", lambda *args, **kwargs: None)
+
+    result = derisk.derisk_brain("autonomous", "2026-08-12", force=True)
+
+    assert result["action"] == "revised_pending_target"
+    assert ("preflight", 1) in events
+    assert ("save", 1) in events
+    assert events[0] == ("lock_enter", 1)
+    assert events[-1] == ("lock_exit", 1)
+
+
+def test_pending_preflight_holds_book_lock_across_recovery_reads_and_classification(
+    isolated_books, monkeypatch
+):
+    """A concurrent valid replacement cannot be quarantined from a stale preflight read."""
+    from portfolio import paper_account
+
+    depth = {"value": 0}
+    observations: list[tuple[str, int]] = []
+
+    @contextmanager
+    def tracked_lock(portfolio_id=None):
+        depth["value"] += 1
+        try:
+            yield
+        finally:
+            depth["value"] -= 1
+
+    monkeypatch.setattr(paper_account, "_paper_transaction_lock", tracked_lock)
+    monkeypatch.setattr(
+        paper_account,
+        "recover_paper_transaction",
+        lambda portfolio_id=None: observations.append(("recover", depth["value"])),
+    )
+    monkeypatch.setattr(
+        paper_account,
+        "_read_pending_target_payload",
+        lambda portfolio_id=None: observations.append(("raw", depth["value"])) or None,
+    )
+    monkeypatch.setattr(
+        paper_account,
+        "load_pending_target",
+        lambda portfolio_id=None: observations.append(("validated", depth["value"])) or None,
+    )
+    monkeypatch.setattr(
+        paper_account,
+        "pending_target_file_exists",
+        lambda portfolio_id=None: observations.append(("exists", depth["value"])) or False,
+    )
+
+    result = paper_account.preflight_pending_target("autonomous")
+
+    assert result == {"ok": True, "pending": None}
+    assert observations == [
+        ("recover", 1),
+        ("raw", 1),
+        ("validated", 1),
+        ("exists", 1),
+    ]
+
+
 def test_forced_overnight_watch_quarantines_before_tape_derisk_or_runner(
     isolated_books, monkeypatch
 ):
@@ -393,11 +504,18 @@ def test_valid_us_v2_target_settles_normally(isolated_books, monkeypatch):
     )
 
     settled = paper_account.settle_target(
-        {"AAPL": 201.0}, "2026-08-10", portfolio_id="autonomous"
+        {"AAPL": 201.0, "SPY": 500.0},
+        "2026-08-10",
+        portfolio_id="autonomous",
     )
 
     assert settled == {"AAPL": 0.15}
-    assert calls == [({"AAPL": 0.15}, {"AAPL": 201.0}, "2026-08-10", "autonomous")]
+    assert calls == [(
+        {"AAPL": 0.15},
+        {"AAPL": 201.0, "SPY": 500.0},
+        "2026-08-10",
+        "autonomous",
+    )]
     assert paper_account.load_pending_target("autonomous") is None
 
 
@@ -420,8 +538,11 @@ def test_unversioned_regional_pending_targets_remain_compatible(
         lambda target, prices, asof, portfolio_id=None, **kwargs: calls.append(target),
     )
 
+    benchmark = "000300.SS" if portfolio_id == "china" else "^HSI"
     settled = paper_account.settle_target(
-        {ticker: 100.0}, "2026-08-10", portfolio_id=portfolio_id
+        {ticker: 100.0, benchmark: 500.0},
+        "2026-08-10",
+        portfolio_id=portfolio_id,
     )
 
     assert settled == {ticker: 0.20}

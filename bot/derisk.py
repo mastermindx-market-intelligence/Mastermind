@@ -671,90 +671,97 @@ def derisk_brain(pid: str, asof: str | None = None, *, regime: dict | None = Non
     except Exception as e:  # noqa: BLE001
         return {**out, "error": f"import: {e!r}"[:160]}
 
-    preflight = paper_account.preflight_pending_target(pid)
-    if not preflight["ok"]:
-        return {
-            **out,
-            "skipped": preflight["skipped"],
-            "quarantined": True,
-            "quarantine": preflight["quarantine"],
-        }
-    pt = preflight["pending"]
-    if not pt or not (pt.get("target")):
-        return {**out, "skipped": "nothing_queued"}
+    # One serializable read/modify/write transaction.  Without this outer boundary a new PM target
+    # can land after preflight but before the deterministic rewrite, then be overwritten by a cut
+    # computed from the stale target.  ``save_pending_target`` nests this same lock reentrantly.
+    with paper_account._paper_transaction_lock(pid):
+        preflight = paper_account.preflight_pending_target(pid)
+        if not preflight["ok"]:
+            return {
+                **out,
+                "skipped": preflight["skipped"],
+                "quarantined": True,
+                "quarantine": preflight["quarantine"],
+            }
+        pt = preflight["pending"]
+        if not pt or not (pt.get("target")):
+            return {**out, "skipped": "nothing_queued"}
 
-    regime = regime if regime is not None else _regime()
-    tw = tripwire(pid, asof, regime=regime)
-    out["tripwire"] = {k: tw.get(k) for k in ("trigger", "severity", "reasons", "state")}
-    if not (force or tw["trigger"]):
-        return {**out, "skipped": "no_trigger"}
+        regime = regime if regime is not None else _regime()
+        tw = tripwire(pid, asof, regime=regime)
+        out["tripwire"] = {k: tw.get(k) for k in ("trigger", "severity", "reasons", "state")}
+        if not (force or tw["trigger"]):
+            return {**out, "skipped": "no_trigger"}
 
-    rs = tw["risk_state"]
-    # Apply the same severity-decoupled cap used in derisk_flagship so pending-target revisions
-    # are also bounded by the ladder (sev2→0.70, sev3→0.55) even when state is risk_on/cap=1.0.
-    state_gross_cap = _f(rs.get("gross_cap")) or 1.0
-    sev = tw.get("severity", 0)
-    sev_cap = _severity_cap(sev)
-    eff_cap = min(state_gross_cap, sev_cap) if sev_cap is not None else state_gross_cap
-    # E2.2: the posture notch composes into the Brain-book cutter identically (min(); charter P7).
-    # Flag OFF ⇒ dead block, eff_cap byte-identical to W1.
-    posture_notch_cap = None
-    try:
-        from brain import posture_decider as _pd
-        if _pd.posture_flag():
-            _rec = _pd.latest() or {}
-            _pn = _f(_rec.get("posture_notch_cap"))
-            if _pn is not None and _pn > 0:
-                posture_notch_cap = _pn
-                eff_cap = min(eff_cap, _pn)
-    except Exception:  # noqa: BLE001 — P2
-        pass
-    target = {str(k).upper(): _f(v) or 0.0 for k, v in (pt["target"] or {}).items()}
+        rs = tw["risk_state"]
+        # Apply the same severity-decoupled cap used in derisk_flagship so pending-target revisions
+        # are also bounded by the ladder (sev2→0.70, sev3→0.55) even when state is risk_on/cap=1.0.
+        state_gross_cap = _f(rs.get("gross_cap")) or 1.0
+        sev = tw.get("severity", 0)
+        sev_cap = _severity_cap(sev)
+        eff_cap = min(state_gross_cap, sev_cap) if sev_cap is not None else state_gross_cap
+        # E2.2: the posture notch composes into the Brain-book cutter identically (min(); charter P7).
+        # Flag OFF ⇒ dead block, eff_cap byte-identical to W1.
+        posture_notch_cap = None
+        try:
+            from brain import posture_decider as _pd
+            if _pd.posture_flag():
+                _rec = _pd.latest() or {}
+                _pn = _f(_rec.get("posture_notch_cap"))
+                if _pn is not None and _pn > 0:
+                    posture_notch_cap = _pn
+                    eff_cap = min(eff_cap, _pn)
+        except Exception:  # noqa: BLE001 — P2
+            pass
+        target = {str(k).upper(): _f(v) or 0.0 for k, v in (pt["target"] or {}).items()}
 
-    try:
-        fr = fragility_chain.assess_book([{"ticker": k, "weight": v} for k, v in target.items()], rs)
-        blocked = set(fr.get("blocked_chains") or [])
-    except Exception:  # noqa: BLE001
-        blocked = set()
-
-    # (1) drop names in a cracking chain when adds are off (risk_off)
-    if rs.get("allow_adds") is False and blocked:
-        kept = {}
-        for k, v in target.items():
-            try:
-                if fragility_chain.chains_of(k) & blocked:
-                    continue
-            except Exception:  # noqa: BLE001
-                pass
-            kept[k] = v
-        target = kept
-    # (2) scale gross down to the effective cap (severity-decoupled; subtract-only)
-    gross = round(sum(target.values()), 4)
-    scaled = False
-    if gross > eff_cap > 0:
-        sc = eff_cap / gross
-        target = {k: round(v * sc, 4) for k, v in target.items()}
-        scaled = True
-
-    try:
-        decision_snapshot = pt.get("decision_snapshot")
-        if decision_snapshot is None:
-            paper_account.save_pending_target(target, asof, portfolio_id=pid)
-        else:
-            paper_account.save_pending_target(
-                target,
-                asof,
-                portfolio_id=pid,
-                decision_snapshot=decision_snapshot,
+        try:
+            fr = fragility_chain.assess_book(
+                [{"ticker": k, "weight": v} for k, v in target.items()], rs
             )
-    except Exception as e:  # noqa: BLE001
-        return {**out, "error": f"save: {e!r}"[:160]}
+            blocked = set(fr.get("blocked_chains") or [])
+        except Exception:  # noqa: BLE001
+            blocked = set()
 
-    result = {**out, "action": "revised_pending_target", "gross_before": gross,
-              "gross_cap": eff_cap, "state_gross_cap": state_gross_cap,
-              "severity_cap": sev_cap, "posture_notch_cap": posture_notch_cap, "eff_cap": eff_cap,
-              "scaled": scaled, "dropped_chains": sorted(blocked), "reasons": tw["reasons"],
-              "n_names": len(target), "cut_scope": sorted(_DERISKED_SLEEVES)}
+        # (1) drop names in a cracking chain when adds are off (risk_off)
+        if rs.get("allow_adds") is False and blocked:
+            kept = {}
+            for k, v in target.items():
+                try:
+                    if fragility_chain.chains_of(k) & blocked:
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+                kept[k] = v
+            target = kept
+        # (2) scale gross down to the effective cap (severity-decoupled; subtract-only)
+        gross = round(sum(target.values()), 4)
+        scaled = False
+        if gross > eff_cap > 0:
+            sc = eff_cap / gross
+            target = {k: round(v * sc, 4) for k, v in target.items()}
+            scaled = True
+
+        try:
+            decision_snapshot = pt.get("decision_snapshot")
+            if decision_snapshot is None:
+                paper_account.save_pending_target(target, asof, portfolio_id=pid)
+            else:
+                paper_account.save_pending_target(
+                    target,
+                    asof,
+                    portfolio_id=pid,
+                    decision_snapshot=decision_snapshot,
+                )
+        except Exception as e:  # noqa: BLE001
+            return {**out, "error": f"save: {e!r}"[:160]}
+
+        result = {**out, "action": "revised_pending_target", "gross_before": gross,
+                  "gross_cap": eff_cap, "state_gross_cap": state_gross_cap,
+                  "severity_cap": sev_cap, "posture_notch_cap": posture_notch_cap,
+                  "eff_cap": eff_cap, "scaled": scaled, "dropped_chains": sorted(blocked),
+                  "reasons": tw["reasons"], "n_names": len(target),
+                  "cut_scope": sorted(_DERISKED_SLEEVES)}
     _write_artifact(asof, pid, result)
     return result
 

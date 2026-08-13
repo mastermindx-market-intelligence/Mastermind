@@ -687,7 +687,7 @@ def test_queued_operator_migration_preserves_exact_shares_through_two_x_price_dr
     paper_account._save_account(drifted, "autonomous")
 
     paper_account.settle_target(
-        {"AAPL": 200.0, "USMV": 100.0},
+        {"AAPL": 200.0, "USMV": 100.0, "SPY": 500.0},
         "2026-08-12",
         portfolio_id="autonomous",
     )
@@ -865,7 +865,7 @@ def test_migration_held_lot_drift_freezes_and_retains_exact_queue(
         match="positions_snapshot_mismatch",
     ):
         paper_account.settle_target(
-            {"AAPL": 200.0, "USMV": 100.0, "NVDA": 50.0},
+            {"AAPL": 200.0, "USMV": 100.0, "NVDA": 50.0, "SPY": 500.0},
             "2026-08-12",
             portfolio_id="autonomous",
         )

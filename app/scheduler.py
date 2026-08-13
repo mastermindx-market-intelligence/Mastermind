@@ -116,6 +116,45 @@ def _skip_event(job: str, book: str):
         pass
 
 
+_BENIGN_SETTLEMENT_SKIPS = frozenset({"market_closed", "nothing_queued"})
+
+
+def _require_settlement_success(result: object, *, job: str) -> None:
+    """Raise when a scheduled settlement did not finish its durable projection contract.
+
+    ``settle_us`` and ``settle_asia`` return one result per active book.  A closed market or an
+    empty queue is an expected scheduler no-op; every other ``ok=False`` result is actionable.
+    Receipt retention and finalization errors remain failures even if a malformed caller happens
+    to label the envelope ``ok=True``.
+    """
+    if not isinstance(result, dict) or not result:
+        raise RuntimeError(f"{job} returned no per-book settlement result")
+    failures: list[str] = []
+    for book, raw in result.items():
+        if not isinstance(raw, dict):
+            failures.append(f"{book}:invalid_result")
+            continue
+        skipped = str(raw.get("skipped") or "")
+        finalization_errors = raw.get("finalization_errors") or []
+        if raw.get("receipt_retained") is True:
+            failures.append(f"{book}:receipt_retained")
+        elif raw.get("settlement_receipt_error"):
+            failures.append(f"{book}:settlement_receipt_error")
+        elif finalization_errors:
+            failures.append(
+                f"{book}:finalization_errors={','.join(map(str, finalization_errors))[:180]}"
+            )
+        elif raw.get("ok") is True:
+            continue
+        elif skipped in _BENIGN_SETTLEMENT_SKIPS:
+            continue
+        else:
+            detail = skipped or str(raw.get("error") or "ok_false")
+            failures.append(f"{book}:{detail[:180]}")
+    if failures:
+        raise RuntimeError(f"{job} incomplete: {'; '.join(failures)}"[:500])
+
+
 # ---------------------------------------------------------------------------
 # RETRY-AT-EARLIEST-RESET ("don't miss decision days")
 # ---------------------------------------------------------------------------
@@ -606,11 +645,14 @@ def _settle_pending_job():
             _ledger_end(handle, "skip", severity="ADVISORY_ONLY")
             return
         try:
-            try:
-                from bot import settle as _settle
-                _settle.settle_us()  # autonomous only
-            except Exception as exc:  # noqa: BLE001
-                _step_failed_event("settle_pending", "autonomous", "settle_us", exc)
+            from bot import settle as _settle
+            settlement = _settle.settle_us()  # autonomous only
+            _require_settlement_success(settlement, job="settle_pending")
+        except Exception as exc:  # noqa: BLE001 - outer wrapper records the failed run
+            _step_failed_event(
+                "settle_pending", "autonomous", "settle_us", exc, severity="HARD_STOP"
+            )
+            raise
         finally:
             lock_auto.release()
         _ledger_end(handle, "ok")
@@ -646,7 +688,13 @@ def _settle_brain_asia_job():
             return
         try:
             from bot import settle as _settle
-            _settle.settle_asia()  # china + hk
+            settlement = _settle.settle_asia()  # china + hk
+            _require_settlement_success(settlement, job="settle_brain_asia")
+        except Exception as exc:  # noqa: BLE001 - outer wrapper records the failed run
+            _step_failed_event(
+                "settle_brain_asia", "china+hk", "settle_asia", exc, severity="HARD_STOP"
+            )
+            raise
         finally:
             lock_hk.release()
             lock_china.release()
@@ -1138,6 +1186,17 @@ def _daily_mark_job():
                 _step_failed_event("daily_mark", pid, f"lock_held:{pid}", RuntimeError("lock held — skipping mark"))
                 continue
             with _book_lock:
+                # A committed settlement receipt exclusively owns all account and NAV projections
+                # until its exact receipt-captured mark/publication is durable.  Daily marking must
+                # not interleave newer cash/price state with an older retained settlement.
+                if paper_account.pending_settlement_receipts(pid):
+                    _step_failed_event(
+                        "daily_mark",
+                        pid,
+                        f"settlement_receipt_pending:{pid}",
+                        RuntimeError("settlement receipt pending — mark deferred"),
+                    )
+                    continue
                 # cash sweep first: idle cash earns ~4%/yr (money-market), idempotent per date, so the
                 # NAV we mark below already reflects today's accrued cash. Best-effort (never raises).
                 paper_account.accrue_cash_yield(_today_iso(), portfolio_id=pid)

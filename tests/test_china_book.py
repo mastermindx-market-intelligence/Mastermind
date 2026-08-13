@@ -663,23 +663,30 @@ def test_api_decisions_attaches_security_names_for_every_region(iso, monkeypatch
         (cdir / "decisions.jsonl").write_text(json.dumps({
             "asof": "2026-06-22", "ts": "2026-06-22T00:00:00+00:00",
             "executed": [{"ticker": ticker, "side": "buy", "shares": 10, "value": 1000.0}],
-            "holdings": [{"ticker": ticker, "weight": 0.5, "rationale": "core"}]}) + "\n")
+            "holdings": [{"ticker": ticker, "weight": 0.5, "rationale": "core"}],
+            "effective_holdings": [{"ticker": ticker, "weight": 0.5,
+                                    "rationale": "accepted target"}]}) + "\n")
         d = json.loads(web.api_decisions(portfolio=pid).body)["decisions"][0]
         assert d["executed"][0]["name"] == want                          # name on the buy/sell chip
         assert d["holdings"][0]["name"] == want                          # name on the holding row
+        assert d["effective_holdings"][0]["name"] == want                # queued/executed target
         if pid == "hk":
             assert d["executed"][0]["name_zh"] == "腾讯控股"
             assert d["holdings"][0]["name_zh"] == "腾讯控股"
+            assert d["effective_holdings"][0]["name_zh"] == "腾讯控股"
 
     adir = registry.data_dir("autonomous")
     adir.mkdir(parents=True, exist_ok=True)
     (adir / "decisions.jsonl").write_text(json.dumps({
         "asof": "2026-06-22", "ts": "2026-06-22T00:00:00+00:00",
         "executed": [{"ticker": "AAPL", "side": "buy", "shares": 10, "value": 1000.0}],
-        "holdings": [{"ticker": "AAPL", "weight": 0.5, "rationale": "core"}]}) + "\n")
+        "holdings": [{"ticker": "AAPL", "weight": 0.5, "rationale": "core"}],
+        "effective_holdings": [{"ticker": "AAPL", "weight": 0.5,
+                                "rationale": "accepted target"}]}) + "\n")
     ud = json.loads(web.api_decisions(portfolio="autonomous").body)["decisions"][0]
     assert ud["executed"][0]["name"] == "Apple Inc"
     assert ud["holdings"][0]["name"] == "Apple Inc"
+    assert ud["effective_holdings"][0]["name"] == "Apple Inc"
 
 
 def test_api_decisions_sell_chips_show_pct_and_realized_pnl(iso, monkeypatch):

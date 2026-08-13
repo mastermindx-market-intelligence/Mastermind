@@ -339,6 +339,66 @@ def _brain_book_module(portfolio: str):
     return importlib.import_module(name) if name else None
 
 
+def _sha256_identity(value: Any) -> bool:
+    """True only for the lowercase digest form persisted by the paper ledger."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _decision_execution_receipt_verified(row: Any) -> bool:
+    """Require complete receipt/fill identity before an API row may claim FILLED.
+
+    Historical decision rows stored display summaries in ``executed`` without immutable fill ids.
+    They remain useful audit records, but only the settlement reconciler's transaction id, receipt
+    hash, and exact fill-id vector prove that those summaries came from the durable fill ledger.
+    An empty, receipt-bound vector is valid evidence of a settled target that required no trade.
+    """
+    if not isinstance(row, dict) or row.get("target_status") != "executed":
+        return False
+    decision_id = str(row.get("decision_id") or "")
+    decision_suffix = decision_id.removeprefix("decision.v1.")
+    try:
+        accepted_asof = date.fromisoformat(str(row.get("accepted_asof") or ""))
+        settled_asof = date.fromisoformat(str(row.get("settled_asof") or ""))
+    except (TypeError, ValueError):
+        return False
+    if (
+        settled_asof < accepted_asof
+        or not _sha256_identity(row.get("submission_sha256"))
+        or not _sha256_identity(row.get("target_sha256"))
+        or not decision_id.startswith("decision.v1.")
+        or len(decision_suffix) != 24
+        or any(char not in "0123456789abcdef" for char in decision_suffix)
+    ):
+        return False
+    transaction_id = row.get("settlement_transaction_id")
+    if not _sha256_identity(transaction_id) or not _sha256_identity(
+        row.get("settlement_receipt_sha256")
+    ):
+        return False
+    fill_ids = row.get("settlement_fill_ids")
+    executed = row.get("executed")
+    if not isinstance(fill_ids, list) or not isinstance(executed, list):
+        return False
+    if len(fill_ids) != len(executed) or any(not _sha256_identity(value) for value in fill_ids):
+        return False
+    if len(set(fill_ids)) != len(fill_ids):
+        return False
+    for index, fill in enumerate(executed):
+        if (
+            not isinstance(fill, dict)
+            or fill.get("transaction_id") != transaction_id
+            or fill.get("fill_id") != fill_ids[index]
+            or fill.get("side") not in {"buy", "sell"}
+            or not str(fill.get("ticker") or "").strip()
+        ):
+            return False
+    return True
+
+
 def _account_tickers(portfolio_id: str | None = None) -> list[str]:
     """Tickers currently held in a paper account (for live marks)."""
     try:
@@ -407,7 +467,12 @@ def _live_prices(tickers: list[str], *, refresh: bool | None = None) -> dict[str
     return out
 
 
-def _book_marks(portfolio_id: str | None = None, *, refresh: bool | None = None) -> dict[str, float]:
+def _book_marks(
+    portfolio_id: str | None = None,
+    *,
+    refresh: bool | None = None,
+    tickers: list[str] | None = None,
+) -> dict[str, float]:
     """Current marks for a book's held names, in the book's BASE currency — the dashboard's live
     valuation preview for NAV / per-position P&L.
 
@@ -422,7 +487,7 @@ def _book_marks(portfolio_id: str | None = None, *, refresh: bool | None = None)
     value with provenance through ``_book_quote_provenance``; that display carry is never exposed to
     settlement or rebalance code.
     """
-    tickers = _account_tickers(portfolio_id)
+    tickers = list(tickers) if tickers is not None else _account_tickers(portfolio_id)
     if not tickers:
         return {}
     resolved_pid = portfolio_id
@@ -1593,9 +1658,23 @@ def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONRespons
             d["today"] = str(d.get("asof") or "")[:10] == today_iso
             _attach_security_names(d.get("executed"))
             _attach_security_names(d.get("holdings"))
+            _attach_security_names(d.get("effective_holdings"))
+            receipt_verified = _decision_execution_receipt_verified(d)
+            if receipt_verified:
+                d["execution_evidence_status"] = "receipt_verified"
+            elif d.get("target_status") == "executed" or d.get("executed"):
+                # Older rows may contain plausible-looking trade summaries, but no immutable
+                # receipt/fill lineage.  Preserve them for audit without upgrading them to fills.
+                d["execution_evidence_status"] = "legacy_unverified"
+            else:
+                # Never trust a persisted display classification; derive it on every read.
+                d["execution_evidence_status"] = "none"
+            sell_asof = str(d.get("settled_asof") or d.get("asof") or "")[:10]
             for rec in (d.get("executed") or []):
                 if rec.get("side") == "sell":
-                    det = _sell.get((d.get("asof"), (rec.get("ticker") or "").upper()))
+                    # A queued decision can settle on a later session.  FIFO P&L belongs to the
+                    # actual settlement day, never the proposal/acceptance day.
+                    det = _sell.get((sell_asof, (rec.get("ticker") or "").upper()))
                     if det:
                         for k in ("pct_of_position", "realized_pnl", "realized_pct"):
                             if det.get(k) is not None and rec.get(k) is None:
@@ -1606,7 +1685,7 @@ def api_decisions(portfolio: str = "autonomous", limit: int = 60) -> JSONRespons
                     zh = _cached_zh(v)
                     if zh:
                         d[fld + "_zh"] = zh
-            for h in (d.get("holdings") or []):
+            for h in (d.get("holdings") or []) + (d.get("effective_holdings") or []):
                 r = h.get("rationale")
                 if r:
                     zh = _cached_zh(r)
@@ -1889,6 +1968,233 @@ def api_outcome_ledger() -> JSONResponse:
                          "lens_weights": weights, "records": rec_out})
 
 
+def _pending_target_projection(
+    portfolio: str,
+    *,
+    prices: dict[str, float],
+    market_status: dict[str, Any],
+    account_state: dict[str, Any] | None,
+    pending_read: tuple[str, dict[str, Any] | None] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Project one valid full-target queue into receipt-honest dashboard intent.
+
+    A Brain ``pending_target.json`` is a complete desired book, not a fill ledger and not a
+    share-sized order list.  The dashboard therefore exposes every target/current comparison in a
+    dedicated audit object, while returning only actionable rows for the legacy Pending Orders
+    panel.  In particular, an unchanged carried holding remains auditable but is not presented as
+    an order.
+
+    This helper is deliberately read-only.  ``load_pending_target`` validates without quarantine,
+    and its account view was loaded by the route through ``_load_account_file`` (bypassing
+    transaction recovery).  A GET must never recover a WAL, quarantine a queue, or otherwise
+    change executable state.
+    """
+    from portfolio import paper_account, registry
+
+    empty = {"portfolio": portfolio, "status": "none", "rows": []}
+    if registry.is_archived(portfolio) or not registry.is_active(portfolio):
+        return empty, []
+    meta = registry.get(portfolio)
+    if meta.get("manager") != "brain":
+        return empty, []
+
+    if pending_read is None:
+        try:
+            pending = paper_account.load_pending_target(portfolio)
+        except Exception:  # noqa: BLE001 - a read failure is not executable intent
+            return {"portfolio": portfolio, "status": "unavailable", "rows": []}, []
+        if pending is None:
+            # Presence plus a failed validating read means malformed/incompatible executable state.
+            # Report that fail-closed condition without invoking quarantine/preflight; those paths
+            # belong solely to settlement/startup.
+            try:
+                target_exists = paper_account.pending_target_file_exists(portfolio)
+            except Exception:  # noqa: BLE001 - path/read uncertainty fails closed
+                return {"portfolio": portfolio, "status": "unavailable", "rows": []}, []
+            pending_status = "invalid" if target_exists else "none"
+        else:
+            pending_status = "queued"
+    else:
+        pending_status, pending = pending_read
+
+    if pending_status != "queued" or not isinstance(pending, dict):
+        if pending_status == "none":
+            return empty, []
+        return {"portfolio": portfolio, "status": pending_status, "rows": []}, []
+
+    projection: dict[str, Any] = {
+        "portfolio": portfolio,
+        "status": "queued",
+        "rows": [],
+    }
+    for source_key in ("asof", "queued_at", "schema_version", "engine_version"):
+        value = pending.get(source_key)
+        if value is not None:
+            projection[source_key] = value
+    fill_after = market_status.get("next_open")
+    if isinstance(fill_after, str) and fill_after.strip():
+        projection["fill_after"] = fill_after
+
+    targets = pending["target"]  # canonical and validated by load_pending_target()
+    try:
+        if account_state is None:
+            raise ValueError("account unavailable")
+        account = account_state
+        positions = paper_account.canonical_positive_positions(account.get("positions"))
+    except Exception:  # noqa: BLE001 - fail closed; never leak account/runtime details
+        projection["comparison_status"] = "account_unavailable"
+        projection["rows"] = [
+            {
+                "ticker": ticker,
+                "action": "comparison_unavailable",
+                "target_weight": float(weight),
+                "status": "queued",
+                "source": "pending_target",
+            }
+            for ticker, weight in sorted(targets.items())
+        ]
+        return projection, []
+
+    normalized_prices = {
+        str(ticker).upper(): float(price)
+        for ticker, price in (prices or {}).items()
+        if (
+            isinstance(ticker, str)
+            and isinstance(price, (int, float))
+            and not isinstance(price, bool)
+            and math.isfinite(float(price))
+            and float(price) > 0.0
+        )
+    }
+    raw_cash = account.get("cash")
+    cash_valid = (
+        isinstance(raw_cash, (int, float))
+        and not isinstance(raw_cash, bool)
+        and math.isfinite(float(raw_cash))
+        and float(raw_cash) >= 0.0
+    )
+    all_relevant_priced = all(
+        ticker in normalized_prices for ticker in (set(positions) | set(targets))
+    )
+    current_weights: dict[str, float] | None = None
+    nav: float | None = None
+    if cash_valid and all_relevant_priced:
+        nav = float(raw_cash) + math.fsum(
+            lot["shares"] * normalized_prices[ticker]
+            for ticker, lot in positions.items()
+        )
+        if math.isfinite(nav) and nav > 0.0:
+            current_weights = {
+                ticker: (lot["shares"] * normalized_prices[ticker]) / nav
+                for ticker, lot in positions.items()
+            }
+    projection["comparison_status"] = (
+        "current_weights_available" if current_weights is not None else "prices_unavailable"
+    )
+    no_trade_band_frac = paper_account._no_trade_band_frac()
+    min_position_frac = paper_account._min_position_frac()
+    constraints = pending.get("execution_constraints")
+    preserved: set[str] = set()
+    if isinstance(constraints, dict):
+        preserved = set(constraints.get("tickers") or [])
+        try:
+            positions_match = (
+                paper_account.positions_sha256(account.get("positions"))
+                == constraints.get("positions_sha256")
+            )
+        except Exception:  # noqa: BLE001 - invalid comparison cannot grant actionability
+            positions_match = False
+        if not positions_match:
+            projection["comparison_status"] = "constraint_snapshot_mismatch"
+
+    audit_rows: list[dict[str, Any]] = []
+    actionable_rows: list[dict[str, Any]] = []
+    for ticker in sorted(set(targets) | set(positions)):
+        target_weight = float(targets.get(ticker, 0.0))
+        is_held = ticker in positions
+        current_weight = current_weights.get(ticker) if current_weights is not None else None
+        px = normalized_prices.get(ticker)
+        suppressed_by: str | None = None
+
+        if projection["comparison_status"] == "constraint_snapshot_mismatch":
+            action, side = "blocked", None
+            suppressed_by = "execution_constraint_snapshot"
+        elif ticker in preserved:
+            # The one privileged migration constraint pins the exact existing lot even when its
+            # target weight and live mark imply a resize.  It is a carry, never a pending order.
+            action, side = "hold", "hold"
+            suppressed_by = "preserve_existing_shares"
+        elif current_weights is None or nav is None:
+            action, side = "comparison_unavailable", None
+            suppressed_by = "prices_unavailable"
+        elif not is_held:
+            if target_weight < min_position_frac - 1e-9:
+                action, side = "filtered", None
+                suppressed_by = "minimum_position"
+            elif px is None:
+                action, side = "unpriceable", None
+                suppressed_by = "missing_price"
+            else:
+                desired_shares = (target_weight * nav) / px
+                if paper_account._buyable_shares(desired_shares, px, nav) <= 1e-9:
+                    action, side = "filtered", None
+                    suppressed_by = "buy_dust"
+                else:
+                    action, side = "buy", "buy"
+        elif target_weight <= 0.0:
+            if px is None:
+                action, side = "unpriceable", None
+                suppressed_by = "missing_exit_price"
+            else:
+                action, side = "exit", "sell"
+        elif px is None:
+            action, side = "unpriceable", None
+            suppressed_by = "missing_price"
+        else:
+            held_shares = positions[ticker]["shares"]
+            target_shares = (target_weight * nav) / px
+            share_delta = target_shares - held_shares
+            delta_value = abs(share_delta) * px
+            if abs(share_delta) <= 1e-9 or delta_value < no_trade_band_frac * nav:
+                action, side = "hold", "hold"
+                suppressed_by = "no_trade_band" if abs(share_delta) > 1e-9 else None
+            elif share_delta > 0.0:
+                if paper_account._buyable_shares(share_delta, px, nav) <= 1e-9:
+                    action, side = "hold", "hold"
+                    suppressed_by = "buy_dust"
+                else:
+                    action, side = "add", "buy"
+            else:
+                # Sells are never dust-filtered; a trim at the band boundary is executable.
+                action, side = "trim", "sell"
+
+        row: dict[str, Any] = {
+            "ticker": ticker,
+            "action": action,
+            "target_weight": target_weight,
+            "status": "queued",
+            "source": "pending_target",
+        }
+        if side is not None:
+            row["side"] = side
+        if suppressed_by is not None:
+            row["suppressed_by"] = suppressed_by
+        if current_weight is not None:
+            row["current_weight"] = round(current_weight, 8)
+        if pending.get("asof") is not None:
+            row["placed_asof"] = pending["asof"]
+        if pending.get("queued_at") is not None:
+            row["queued_at"] = pending["queued_at"]
+        if "fill_after" in projection:
+            row["fill_after"] = projection["fill_after"]
+        audit_rows.append(row)
+        if side in {"buy", "sell"}:
+            actionable_rows.append(dict(row))
+
+    projection["rows"] = audit_rows
+    return projection, actionable_rows
+
+
 @router.get("/api/trades")
 def api_trades(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     """Open/closed position summaries PLUS a complete per-fill blotter (`history`):
@@ -1927,31 +2233,124 @@ def api_trades(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             })
 
         from portfolio import market_calendar, paper_account, position_log
-        # Venue-restricted books (china=*.SS/*.SZ CNY, hk=*.HK HKD) must mark their open lots in BASE
-        # currency via _book_marks — _live_prices filters to bare US names, so it returns {} for these
-        # books and the blotter's still-open lots showed NULL unrealized P&L (the Positions panel used
-        # _book_marks and worked). US books keep the US-only _live_prices path.
+        # Account, fills, and executable queue state form one paper transaction.  Hold the same
+        # per-book lock as the writer while reading that snapshot, but never invoke WAL recovery
+        # from a GET.  An outstanding WAL is an explicit transient-unavailable state: mixing its
+        # partially applied account/fills would be more misleading than temporarily showing none.
         venue_book = bool(registry.venues(portfolio))
-        prices = _book_marks(portfolio) if venue_book else _live_prices(_account_tickers(portfolio))
-        history = trade_history.history(prices, portfolio_id=portfolio)
-        pending = paper_account.load_pending(portfolio)
-        open_positions = position_log.open_positions(portfolio_id=portfolio)
-        closed_positions = position_log.closed_positions(portfolio_id=portfolio)
+        with paper_account._paper_transaction_lock(portfolio):
+            if paper_account._transaction_path(portfolio).exists():
+                if venue_book:
+                    from portfolio import china_calendar
+                    market_status = china_calendar.status(
+                        venue="HK" if portfolio == "hk" else "CN"
+                    )
+                else:
+                    market_status = market_calendar.status()
+                return JSONResponse({
+                    "open": [],
+                    "closed": [],
+                    "history": [],
+                    "pending": [],
+                    "pending_target": {
+                        "portfolio": portfolio,
+                        "status": "unavailable",
+                        "comparison_status": "transaction_pending",
+                        "rows": [],
+                    },
+                    "market": market_status,
+                    "snapshot_status": "transaction_pending",
+                })
+
+            try:
+                history_account: dict[str, Any] | None = paper_account._load_account_file(
+                    portfolio,
+                    strict=True,
+                )
+                account_status = "coherent"
+            except Exception:  # noqa: BLE001 - a GET never repairs or replaces account state
+                history_account = None
+                account_status = "account_unavailable"
+
+            try:
+                target_payload = paper_account.load_pending_target(portfolio)
+                if target_payload is not None:
+                    pending_read = ("queued", target_payload)
+                elif paper_account.pending_target_file_exists(portfolio):
+                    pending_read = ("invalid", None)
+                else:
+                    pending_read = ("none", None)
+            except Exception:  # noqa: BLE001 - fail closed without quarantine/mutation
+                target_payload = None
+                pending_read = ("unavailable", None)
+
+            held_tickers = sorted(
+                (history_account.get("positions") or {})
+                if isinstance(history_account, dict)
+                and isinstance(history_account.get("positions"), dict)
+                else []
+            )
+            target_tickers = sorted(
+                (target_payload.get("target") or {})
+                if isinstance(target_payload, dict)
+                and isinstance(target_payload.get("target"), dict)
+                else []
+            )
+            wanted_tickers = sorted(set(held_tickers) | set(target_tickers))
+
+            # Venue-restricted books mark in base currency.  US books include pending-target names,
+            # not only existing holdings, so min-position/whole-share/dust classification follows
+            # the allocator instead of blindly calling every positive target a BUY.
+            prices = (
+                _book_marks(portfolio, tickers=wanted_tickers)
+                if venue_book
+                else _live_prices(wanted_tickers)
+            )
+            history = trade_history.history(
+                prices,
+                portfolio_id=portfolio,
+                # ``positions=None`` deliberately tells the FIFO reader that authoritative open
+                # shares are unknown.  Passing {} would incorrectly close every historical BUY;
+                # passing None would invoke recovery-capable account loading.
+                account_state=(
+                    history_account
+                    if history_account is not None
+                    else {"positions": None}
+                ),
+            )
+            pending = paper_account.load_pending(portfolio)
+            open_positions = position_log.open_positions(portfolio_id=portfolio)
+            closed_positions = position_log.closed_positions(portfolio_id=portfolio)
+            # Market-status strip: venue books report their own exchange, not NYSE.
+            if venue_book:
+                from portfolio import china_calendar
+                market_status = china_calendar.status(
+                    venue="HK" if portfolio == "hk" else "CN"
+                )
+            else:
+                market_status = market_calendar.status()
+            pending_target, target_actions = _pending_target_projection(
+                portfolio,
+                prices=prices,
+                market_status=market_status,
+                account_state=history_account,
+                pending_read=pending_read,
+            )
+
         _attach_security_names([*open_positions, *closed_positions, *history, *pending])
-        # Market-status strip: the venue books report their own exchange (HKEX for hk, A-share for
-        # china), not the NYSE calendar the US books use.
-        if venue_book:
-            from portfolio import china_calendar
-            market_status = china_calendar.status(venue="HK" if portfolio == "hk" else "CN")
-        else:
-            market_status = market_calendar.status()
+        _attach_security_names(target_actions)
+        _attach_security_names(pending_target.get("rows"))
+        pending = [*pending, *target_actions]
         return JSONResponse({
             "open": open_positions,
             "closed": closed_positions,
             "history": history,
-            # PENDING orders queued while the market is closed — fill at next open
             "pending": pending,
+            # Complete Brain target intent.  ``rows`` also includes unchanged carries, while the
+            # legacy list above contains only allocator-actionable directions and never fills.
+            "pending_target": pending_target,
             "market": market_status,
+            "snapshot_status": account_status,
         })
     except Exception as exc:
         return JSONResponse({"open": [], "closed": [], "history": [],

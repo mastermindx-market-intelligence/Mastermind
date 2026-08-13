@@ -571,6 +571,10 @@ body.page-mm td.l { text-align: left; }
 .mm-pend-block { margin: 6px 0 18px; padding: 12px 14px; background: color-mix(in srgb, var(--warn) 5%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 22%, var(--line)); border-radius: 12px; }
 .mm-pend-head { font-size: 13px; font-weight: 800; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mm-pend-sub { font-size: 11px; font-weight: 400; color: var(--muted); }
+.mm-pend-alert { margin: 6px 0 18px; padding: 10px 13px; font-size: 12px; line-height: 1.45;
+  color: var(--text); background: color-mix(in srgb,var(--warn) 7%,var(--panel));
+  border: 1px solid color-mix(in srgb,var(--warn) 28%,var(--line)); border-radius: 10px; }
+.mm-pend-alert.error { background: color-mix(in srgb,var(--down) 7%,var(--panel)); border-color: color-mix(in srgb,var(--down) 30%,var(--line)); }
 .mm-closed-banner { display: flex; align-items: center; gap: 9px; margin: 2px 0 14px; padding: 9px 13px; font-size: 12px; line-height: 1.45; color: var(--text);
   background: color-mix(in srgb, var(--warn) 8%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--line)); border-radius: 10px; }
 .mm-closed-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent); }
@@ -1323,6 +1327,7 @@ body.page-mm .mm-pnl-neg { color: var(--down); font-variant-numeric: tabular-num
 body.page-mm .mm-side-chip { display: inline-block; padding: 1px 8px; border-radius: 5px; font-size: 10px; font-weight: 700; letter-spacing: .03em; }
 body.page-mm .mm-side-chip.buy  { background: color-mix(in srgb, var(--up) 15%, var(--panel2));   color: var(--up); }
 body.page-mm .mm-side-chip.sell { background: color-mix(in srgb, var(--down) 15%, var(--panel2)); color: var(--down); }
+body.page-mm .mm-side-chip.hold { background: color-mix(in srgb, var(--muted) 15%, var(--panel2)); color: var(--muted); }
 
 /* ── top nav (Dashboard / Research view switch) ──────────────────────────── */
 body.page-mm #mm-nav { position: relative; z-index: 60; display: flex; align-items: center; gap: 14px;
@@ -2514,8 +2519,18 @@ html[data-theme="light"] body.page-mm {
 .mm-dec{border:1px solid var(--border,rgba(127,127,127,.22));border-radius:12px;padding:13px 15px;background:var(--panel,rgba(127,127,127,.05))}
 .mm-dec.mm-dec-today{border-color:color-mix(in srgb,var(--up) 45%,var(--border,rgba(127,127,127,.22)));box-shadow:inset 3px 0 0 var(--up);background:color-mix(in srgb,var(--up) 5%,var(--panel,rgba(127,127,127,.05)))}
 .mm-dec-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px}
+.mm-dec-head-main{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .mm-dec-date{font-weight:800;font-size:13px;font-variant-numeric:tabular-nums}
 .mm-dec-cost{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.mm-dec-status{display:inline-flex;align-items:center;padding:2px 7px;border-radius:6px;font-size:9px;font-weight:900;
+  letter-spacing:.055em;text-transform:uppercase;border:1px solid var(--line);white-space:nowrap}
+.mm-dec-status.filled{color:var(--up);background:color-mix(in srgb,var(--up) 13%,var(--panel2));border-color:color-mix(in srgb,var(--up) 32%,transparent)}
+.mm-dec-status.queued{color:var(--warn);background:color-mix(in srgb,var(--warn) 13%,var(--panel2));border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
+.mm-dec-status.rejected{color:var(--down);background:color-mix(in srgb,var(--down) 13%,var(--panel2));border-color:color-mix(in srgb,var(--down) 32%,transparent)}
+.mm-dec-status.nochange{color:var(--muted);background:color-mix(in srgb,var(--muted) 10%,var(--panel2))}
+.mm-dec-status.unknown{color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,var(--panel2));border-color:color-mix(in srgb,var(--warn) 25%,transparent)}
+.mm-dec-settled{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.mm-dec-state-note{font-size:11.5px;line-height:1.45;color:var(--muted);margin:-1px 0 8px}
 .mm-dec-sum{color:var(--text);font-size:13px;line-height:1.55;margin-bottom:8px}
 .mm-dec-memo{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin:8px 0}
 .mm-dec-memo-card{border:1px solid var(--line);border-radius:9px;background:var(--panel2);padding:9px 10px;min-width:0}
@@ -2527,8 +2542,13 @@ html[data-theme="light"] body.page-mm {
 .mm-trade-chip.sell{color:var(--down,#dc2626);background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.30)}
 .mm-trade-chip-nm{font-weight:500;opacity:.75}
 .mm-dec-holdings{margin-top:8px;display:flex;flex-direction:column;gap:7px}
+.mm-dec-holdings-head{font-size:10px;font-weight:850;letter-spacing:.065em;text-transform:uppercase;color:var(--muted);margin-bottom:1px}
 .mm-dec-h{font-size:12.5px;line-height:1.5}
 .mm-dec-h b{font-variant-numeric:tabular-nums}
+.mm-dec-action{display:inline-block;font-size:9px;font-weight:850;text-transform:uppercase;letter-spacing:.035em;
+  padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:1px;color:var(--muted);background:rgba(127,127,127,.13)}
+.mm-dec-action.pending{color:var(--warn);background:color-mix(in srgb,var(--warn) 13%,var(--panel2))}
+.mm-dec-action.audit{color:var(--down);background:color-mix(in srgb,var(--down) 12%,var(--panel2))}
 .mm-dec-conv{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:1px}
 .mm-dec-conv.high{color:#16a34a;background:rgba(22,163,74,.14)}
 .mm-dec-conv.medium{color:#d97706;background:rgba(217,119,6,.14)}
@@ -3198,17 +3218,25 @@ var I18N = {
   'trades.closed':        { en: 'Closed', zh: '平仓日期' },
   'trades.exit_reason':   { en: 'Exit Reason', zh: '退出原因' },
   'trades.no_closed':     { en: 'No closed positions yet.', zh: '暂无已平仓记录。' },
-  'trades.no_fills_pending': { en: 'No executed fills yet — the orders above are queued and fill at the next open.', zh: '尚无成交 — 上方订单已挂起，将于下次开盘成交。' },
-  // Pending orders (queued while the market is closed → fill at next open)
+  'trades.no_fills_pending': { en: 'No executed fills yet — queued actions above are not positions.', zh: '尚无成交 — 上方排队操作并非当前持仓。' },
+  // Pending orders / accepted target actions awaiting deterministic settlement
   'pend.title':           { en: 'Pending Orders', zh: '待成交订单' },
-  'pend.sub':             { en: 'Queued while the market is closed — fill at the next open, at the market price', zh: '休市期间挂单 — 下次开盘按市价成交' },
+  'pend.sub':             { en: 'Queued for deterministic settlement — not yet in Positions or Trade History', zh: '等待确定性结算 — 尚未计入持仓或交易历史' },
   'pend.est_px':          { en: 'Est. Price', zh: '预估价格' },
   'pend.est_val':         { en: 'Est. Value', zh: '预估金额' },
-  'pend.fills':           { en: 'Fills', zh: '成交时点' },
+  'pend.fills':           { en: 'Settlement', zh: '结算状态' },
   'pend.fills_at_lbl':    { en: 'at open', zh: '开盘' },
+  'pend.awaiting_lbl':    { en: 'awaiting settlement', zh: '等待结算' },
+  'pend.no_trade_lbl':    { en: 'no trade required', zh: '无需交易' },
   'pend.status':          { en: 'PENDING', zh: '待成交' },
   'pend.none':            { en: 'No orders queued.', zh: '暂无挂单。' },
-  'pend.est_note':        { en: 'Estimated prices are the previous close — orders fill at the actual market price when the session opens.', zh: '预估价格为上一交易日收盘价 — 开盘后按实际市价成交。' },
+  'pend.est_note':        { en: 'Any estimates use the previous close. Actual prices appear only after a recorded fill.', zh: '预估值采用上一收盘价；只有记录成交后才会显示实际价格。' },
+  'pend.invalid':         { en: 'Queued target is invalid and cannot execute. It remains visible for operator review.', zh: '排队目标无效，无法执行；已保留供运营人员检查。' },
+  'pend.unavailable':     { en: 'Queued-target status is temporarily unavailable. No execution is being claimed.', zh: '暂时无法读取排队目标状态；系统未声称已有成交。' },
+  'pend.account_unavailable': { en: 'Target is queued, but the account snapshot is unavailable, so no buy or sell direction is inferred.', zh: '目标已排队，但账户快照不可用，因此不会推断买卖方向。' },
+  'pend.transaction_pending': { en: 'Account settlement is in progress. Trade history is withheld until one coherent snapshot is available.', zh: '账户正在结算；在获得一致快照前暂不显示交易历史。' },
+  'pend.prices_unavailable': { en: 'Target is queued, but complete comparison prices are unavailable. Actions remain unclassified.', zh: '目标已排队，但比较价格不完整；操作方向暂未分类。' },
+  'pend.constraint_mismatch': { en: 'Target is queued, but its protected account snapshot no longer matches. No action is projected.', zh: '目标已排队，但受保护的账户快照已不匹配；不会预测任何操作。' },
   'pos.closed_banner':    { en: 'Market closed — orders are queued and fill at the next open at the market price. Prices shown are estimates (previous close).', zh: '休市中 — 订单已挂起，将于下次开盘按市价成交。所示价格为预估（上一收盘价）。' },
   'pos.fills_at':         { en: 'fills', zh: '成交' },
   // Brain log
@@ -3366,6 +3394,7 @@ var I18N = {
   'trades.action':        { en: 'Action', zh: '操作' },
   'trades.buy':           { en: 'BUY', zh: '买入' },
   'trades.sell':          { en: 'SELL', zh: '卖出' },
+  'trades.hold':          { en: 'HOLD', zh: '持有' },
   'trades.shares':        { en: 'Shares', zh: '股数' },
   'trades.exit_px':       { en: 'Exit Price', zh: '退出价格' },
   'trades.realized':      { en: 'Realized', zh: '已实现' },
@@ -4746,29 +4775,60 @@ window.toggleExpand = function(idx) {
   if (thisRow) thisRow.style.background = isOpen ? '' : 'color-mix(in srgb, var(--link) 10%, var(--panel))';
 };
 
-// PENDING orders block — queued while the market is closed, fill at the next open.
+// PENDING action block — accepted targets/orders that have not produced fill evidence yet.
+function _pendingOrderSide(o) {
+  // New pending-target rows carry an explicit side.  Older account-order rows may only
+  // have an action (or neither), so retain BUY solely as the legacy fallback.
+  var raw = String((o && (o.side || o.action)) || '').toLowerCase().trim();
+  if (raw === 'sell' || raw === 'trim' || raw === 'exit' || raw === 'reduce') return 'sell';
+  if (raw === 'hold' || raw === 'quarantine_hold') return 'hold';
+  return 'buy';
+}
+
+function _pendingTruthNoticeHtml() {
+  var target = (_trades && _trades.pending_target) || null;
+  if (!target || typeof target !== 'object') return '';
+  var status = String(target.status || '').toLowerCase();
+  var comparison = String(target.comparison_status || '').toLowerCase();
+  var key = '';
+  var errorTone = false;
+  if (comparison === 'transaction_pending') key = 'pend.transaction_pending';
+  else if (status === 'invalid') { key = 'pend.invalid'; errorTone = true; }
+  else if (status === 'unavailable') key = 'pend.unavailable';
+  else if (comparison === 'account_unavailable') key = 'pend.account_unavailable';
+  else if (comparison === 'prices_unavailable') key = 'pend.prices_unavailable';
+  else if (comparison === 'constraint_snapshot_mismatch') { key = 'pend.constraint_mismatch'; errorTone = true; }
+  return key ? '<div class="mm-pend-alert' + (errorTone ? ' error' : '') + '">' + t(key) + '</div>' : '';
+}
+
 function _pendingOrdersHtml() {
   var pend = (_trades && _trades.pending) || [];
-  if (!pend.length) return '';
+  var truthNotice = _pendingTruthNoticeHtml();
+  if (!pend.length) return truthNotice;
   var head = '<div class="mm-pend-head"><span class="mm-pend-chip">' + t('pend.status') + '</span> ' +
     '<span class="l-en">Pending Orders</span><span class="l-zh">待成交订单</span> ' +
     '<span class="mm-pend-sub">· ' + t('pend.sub') + '</span></div>';
   var rows = '';
   pend.forEach(function(o) {
+    var side = _pendingOrderSide(o);
+    var sideLabel = side === 'sell' ? t('trades.sell') : (side === 'hold' ? t('trades.hold') : t('trades.buy'));
+    var settlement = side === 'hold'
+      ? t('pend.no_trade_lbl')
+      : (o.fill_after ? t('pend.fills_at_lbl') + ' ' + fmtDate(o.fill_after) : t('pend.awaiting_lbl'));
     var shares = o.shares != null ? Number(o.shares).toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—';
     var estPx = o.est_price != null ? _ccySym() + Number(o.est_price).toFixed(2) : '—';
     var estVal = o.est_value != null ? _ccySym() + Math.round(o.est_value).toLocaleString() : '—';
     var orderName = securityName(o);
     rows += '<tr>' +
       '<td><span class="pos-ticker">' + esc(o.ticker || '—') + '</span>' + (orderName ? '<span class="pos-name" style="display:block;font-size:11px;color:var(--muted);font-weight:500;line-height:1.2">' + esc(orderName) + '</span>' : '') + '</td>' +
-      '<td><span class="mm-side-chip buy">' + t('trades.buy') + '</span></td>' +
+      '<td><span class="mm-side-chip ' + side + '">' + sideLabel + '</span></td>' +
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + shares + '</td>' +
       '<td style="font-variant-numeric:tabular-nums">' + estPx + '</td>' +
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + estVal + '</td>' +
-      '<td class="l" style="font-variant-numeric:tabular-nums;color:var(--muted)">' + t('pend.fills_at_lbl') + ' ' + (o.fill_after ? fmtDate(o.fill_after) : '—') + '</td>' +
+      '<td class="l" style="font-variant-numeric:tabular-nums;color:var(--muted)">' + settlement + '</td>' +
     '</tr>';
   });
-  return '<div class="mm-pend-block">' + head +
+  return truthNotice + '<div class="mm-pend-block">' + head +
     '<div class="mm-table-wrap"><table><thead><tr>' +
       '<th>' + t('trades.ticker') + '</th>' +
       '<th>' + t('trades.action') + '</th>' +
@@ -4792,7 +4852,7 @@ function renderTrades() {
   if (!hist.length) {
     el.innerHTML = h2 + pendHtml +
       '<div class="mm-empty"><span class="mm-empty-icon">○</span>' +
-      (pendHtml ? t('trades.no_fills_pending') : t('trades.no_history')) + '</div>';
+      (((data.pending || []).length) ? t('trades.no_fills_pending') : t('trades.no_history')) + '</div>';
     return;
   }
 
@@ -6453,7 +6513,10 @@ function renderDecisions() {
   }
   var shown = _decisionsExpanded ? _decisions : _decisions.slice(0, DECISION_PREVIEW_COUNT);
   host.innerHTML = shown.map(function(d, i) {
-    var trades = (d.executed || []).map(function(tr) {
+    var truth = _decisionPresentation(d, isZh);
+    // Only durable execution receipts create BUY/SELL fill chips.  Target holdings and
+    // decision_effective are deliberately never treated as proof of a transaction.
+    var trades = truth.executed.map(function(tr) {
       var v = tr.value != null ? ' ' + _ccySym() + Number(tr.value).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '';
       var trName = securityName(tr);
       var tNm = (trName && trName !== tr.ticker) ? ' <span class="mm-trade-chip-nm">' + esc(trName) + '</span>' : '';
@@ -6474,14 +6537,15 @@ function renderDecisions() {
       return '<span class="mm-trade-chip ' + (tr.side === 'buy' ? 'buy' : 'sell') + '">' +
         (tr.side === 'buy' ? 'BUY' : 'SELL') + ' ' + esc(tr.ticker) + tNm + v + extra + '</span>';
     }).join('');
-    var holds = (d.holdings || []).map(function(h) {
+    var holds = truth.rows.map(function(h) {
       var conv = (h.conviction || '').toLowerCase();
       var chip = conv ? '<span class="mm-dec-conv ' + conv + '">' + esc(conv) + '</span>' : '';
+      var actionChip = _decisionActionChip(h, truth.kind, isZh);
       var hRat = (isZh && h.rationale_zh) ? h.rationale_zh : (h.rationale || '');
       var holdingName = securityName(h);
       var hNm = (holdingName && holdingName !== h.ticker) ? ' <span style="color:var(--muted);font-weight:500">' + esc(holdingName) + '</span>' : '';
       return '<div class="mm-dec-h"><b>' + esc(h.ticker) + '</b>' + hNm + ' ' +
-        (h.weight != null ? pct(h.weight) : '') + chip + ' — ' + esc(hRat) + '</div>';
+        (h.weight != null ? pct(h.weight) : '') + actionChip + chip + (hRat ? ' — ' + esc(hRat) : '') + '</div>';
     }).join('');
     var skip = (d.skipped_unpriceable && d.skipped_unpriceable.length) ?
       '<div class="mm-dec-skip">' + (isZh ? '无法定价（已跳过）：' : 'Unpriceable (skipped): ') + esc(d.skipped_unpriceable.join(', ')) + '</div>' : '';
@@ -6491,12 +6555,18 @@ function renderDecisions() {
     var decSum = (isZh && d.summary_zh) ? d.summary_zh : d.summary;
     // decisions logged today (d.today, set server-side) get a "NEW" tag + a highlighted card
     var newBadge = d.today ? '<span class="mm-new-badge">' + (isZh ? '新' : 'NEW') + '</span>' : '';
+    var statusBadge = '<span class="mm-dec-status ' + truth.kind + '">' + esc(truth.label) + '</span>';
+    var settledBadge = truth.settledAsOf
+      ? '<span class="mm-dec-settled">' + (isZh ? '结算 ' : 'settled ') + fmtDate(truth.settledAsOf) + '</span>'
+      : '';
+    var holdingsHead = holds ? '<div class="mm-dec-holdings-head">' + esc(truth.rowsLabel) + '</div>' : '';
     return '<div class="mm-dec' + (d.today ? ' mm-dec-today' : '') + '">' +
-      '<div class="mm-dec-head"><span><span class="mm-dec-date">' + esc(d.asof || '') + '</span>' + newBadge + '</span><span class="mm-dec-cost">' + cost + '</span></div>' +
+      '<div class="mm-dec-head"><span class="mm-dec-head-main"><span class="mm-dec-date">' + esc(d.asof || '') + '</span>' + newBadge + statusBadge + settledBadge + '</span><span class="mm-dec-cost">' + cost + '</span></div>' +
+      '<div class="mm-dec-state-note">' + esc(truth.note) + '</div>' +
       (decSum ? '<div class="mm-dec-sum">' + esc(decSum) + '</div>' : '') +
       (trades ? '<div class="mm-dec-trades">' + trades + '</div>' : '') +
       sold +
-      (holds ? '<div class="mm-dec-holdings">' + holds + '</div>' : '') +
+      (holds ? '<div class="mm-dec-holdings">' + holdingsHead + holds + '</div>' : '') +
       skip +
       _decReasoningBlock(d, i) +
     '</div>';
@@ -6512,6 +6582,107 @@ function renderDecisions() {
         : (isZh ? '查看更多 ' + remaining + ' 条' : 'See ' + remaining + ' more');
     }
   }
+}
+
+function _decisionPresentation(d, isZh) {
+  d = d && typeof d === 'object' ? d : {};
+  var targetStatus = String(d.target_status || '').toLowerCase().trim();
+  var evidenceStatus = String(d.execution_evidence_status || '').toLowerCase().trim();
+  var recorded = Array.isArray(d.executed) ? d.executed.filter(function(x) {
+    return x && typeof x === 'object';
+  }) : [];
+  // Receipt identity is the gate for a fill claim.  Legacy trade summaries stay in the journal's
+  // narrative/audit payload, but never become BUY/SELL chips or an EXECUTED/FILLED badge.
+  var receiptVerified = evidenceStatus === 'receipt_verified';
+  var executed = receiptVerified ? recorded : [];
+  var effective = Array.isArray(d.effective_holdings) ? d.effective_holdings : null;
+  var proposed = Array.isArray(d.holdings) ? d.holdings : [];
+  var kind, label, note, rowsLabel, rows, settledAsOf = null;
+
+  if (receiptVerified && executed.length) {
+    kind = 'filled';
+    label = isZh ? '已执行 / 已成交' : 'EXECUTED / FILLED';
+    note = isZh ? '上方成交标签来自实际执行记录；持仓与交易历史仍为账户事实来源。'
+                : 'Fill chips above come from execution records; Positions and Trade History remain the account truth.';
+    rowsLabel = isZh ? '成交后的目标仓位' : 'Post-execution target positions';
+    rows = effective !== null ? effective : proposed;
+    settledAsOf = d.settled_asof || null;
+  } else if (receiptVerified && targetStatus === 'executed') {
+    kind = 'nochange';
+    label = isZh ? '已结算 — 无交易' : 'SETTLED — NO TRADE';
+    note = isZh ? '结算凭证已验证，但确定性配置器无需买卖；没有成交。'
+                : 'Receipt verified; the deterministic allocator required no buy or sell, so there are no fills.';
+    rowsLabel = isZh ? '结算后的目标 — 持有不变' : 'Settled target — holdings unchanged';
+    rows = effective !== null ? effective : proposed;
+    settledAsOf = d.settled_asof || null;
+  } else if (targetStatus === 'queued') {
+    kind = 'queued';
+    label = isZh ? '已排队 — 尚未执行' : 'QUEUED — NOT YET EXECUTED';
+    note = isZh ? '目标已获接受并等待确定性结算；目前没有任何成交记录。'
+                : 'Target accepted for deterministic settlement; no fill is recorded yet.';
+    rowsLabel = isZh ? '拟议目标仓位 — 非当前持仓' : 'Proposed target positions — not current holdings';
+    // Accepted v2 rows expose the rail-adjusted target.  A legacy queued row may lack that
+    // projection; its raw proposal stays visible only under the explicit proposed label.
+    rows = effective !== null ? effective : proposed;
+  } else if (targetStatus && targetStatus !== 'executed') {
+    kind = 'rejected';
+    label = isZh ? '未应用 / 已拒绝' : 'NOT APPLIED / REJECTED';
+    var statusReason = targetStatus.replace(/[^a-z0-9_-]/g, '').slice(0, 80).replace(/_/g, ' ');
+    note = isZh ? '提案未应用到账户（状态：' + statusReason + '）。'
+                : 'Proposal was not applied to the account (status: ' + statusReason + ').';
+    rowsLabel = isZh ? '已拒绝提案 — 仅供审计，并非持仓' : 'Rejected proposal — audit only, not holdings';
+    // Rejected rows intentionally use only the raw proposal.  effective_holdings is neither
+    // expected nor allowed to turn a rejected proposal into something that looks owned.
+    rows = proposed;
+  } else if (targetStatus === 'executed') {
+    kind = 'unknown';
+    label = isZh ? '历史执行 — 未验证' : 'LEGACY EXECUTION — UNVERIFIED';
+    note = isZh ? '此历史记录缺少可验证的结算凭证或成交标识；不会显示为成交。'
+                : 'This historical row lacks verifiable settlement receipt/fill identity and is not presented as a fill.';
+    rowsLabel = isZh ? '历史目标快照 — 非成交凭证' : 'Legacy target snapshot — not fill evidence';
+    rows = effective !== null ? effective : proposed;
+  } else {
+    // Missing lifecycle metadata means UNKNOWN.  It does not prove that an allocator evaluated the
+    // target and chose to do nothing, so calling this NO CHANGE would invent a lifecycle outcome.
+    kind = 'unknown';
+    label = isZh ? '历史状态未知' : 'LEGACY STATUS UNKNOWN';
+    note = isZh ? '此历史决策没有执行生命周期元数据；它不是成交凭证，也不证明无交易。'
+                : 'This historical decision has no execution lifecycle metadata; it is neither fill evidence nor proof of no trade.';
+    rowsLabel = isZh ? '历史决策快照 — 执行状态未知' : 'Legacy decision snapshot — execution status unknown';
+    rows = effective !== null ? effective : proposed;
+  }
+
+  rows = (rows || []).filter(function(x) {
+    return x && typeof x === 'object' && x.ticker;
+  });
+  return {kind: kind, label: label, note: note, rowsLabel: rowsLabel, rows: rows,
+          executed: executed, settledAsOf: settledAsOf};
+}
+
+function _decisionActionChip(h, kind, isZh) {
+  var action = String((h && (h.action_effective || h.action_requested || h.action)) || '').toLowerCase().trim();
+  if (kind === 'nochange') {
+    return '<span class="mm-dec-action">' + (isZh ? '无需交易 / 持有' : 'NO TRADE / HOLD') + '</span>';
+  }
+  if (!action) return '';
+  var hold = action === 'hold' || action === 'quarantine_hold';
+  var labels;
+  var tone = '';
+  if (kind === 'queued') {
+    tone = action === 'add' || action === 'trim' || action === 'exit' ? ' pending' : '';
+    labels = hold ? ['EXISTING HOLD', '现有持仓']
+      : action === 'add' ? ['PENDING ADD', '待加仓']
+      : action === 'trim' ? ['PENDING TRIM', '待减仓']
+      : action === 'exit' ? ['PENDING EXIT', '待退出']
+      : [action.toUpperCase(), action];
+  } else if (kind === 'rejected') {
+    tone = ' audit';
+    labels = [(hold ? 'PROPOSED HOLD' : 'PROPOSED ' + action.toUpperCase()),
+              (hold ? '拟议持有' : '拟议' + action)];
+  } else {
+    labels = [hold ? 'HOLD' : action.toUpperCase(), hold ? '持有' : action];
+  }
+  return '<span class="mm-dec-action' + tone + '">' + esc(labels[isZh ? 1 : 0]) + '</span>';
 }
 
 window.toggleDecisionLog = function() {

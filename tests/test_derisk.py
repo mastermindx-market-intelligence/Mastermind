@@ -295,6 +295,8 @@ def test_sweep_us_invokes_active_us_brain_only(monkeypatch):
 
 # ───────────────────────────── brain pending-target de-risk ─────────────────────────────
 def _patch_brain_pa(monkeypatch, target):
+    from contextlib import nullcontext
+
     pa = types.ModuleType("portfolio.paper_account")
     saved = {}
     pending = {"target": dict(target), "asof": "2026-06-23"}
@@ -302,6 +304,7 @@ def _patch_brain_pa(monkeypatch, target):
     pa._read_pending_target_payload = lambda pid=None: pending
     pa.preflight_pending_target = lambda pid=None: {"ok": True, "pending": pending}
     pa.save_pending_target = lambda tgt, asof, portfolio_id=None: saved.update({"t": dict(tgt)})
+    pa._paper_transaction_lock = lambda pid=None: nullcontext()
     import portfolio as _pf_pkg
     from portfolio import fragility_chain as _real_fc
     monkeypatch.setattr(_pf_pkg, "paper_account", pa, raising=False)

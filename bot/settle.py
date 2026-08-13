@@ -26,10 +26,40 @@ books (china, hk) use ``portfolio.china_calendar`` (A-share session). Both expos
 from __future__ import annotations
 
 from datetime import date
+import math
+from typing import Callable
 
 import bot  # noqa: F401  -> vendor/macro onto sys.path
 
 _ASIA = {"china", "hk"}
+
+_SETTLEMENT_STATE_BLOCK_SKIPS = frozenset({
+    "settlement_recovery_failed",
+    "settlement_receipt_unreadable",
+    "settlement_finalization_pending",
+})
+
+
+def settlement_projection_block_reason(result: dict | None) -> str | None:
+    """Return why a runner must not project mutable scratch state after settlement.
+
+    A receipt id is useful when the exact outbox can be finalized immediately, but it is not the
+    only proof that executable state is unresolved.  Recovery/read failures and any retained
+    receipt also fence mark/publication/decision projection even when the receipt identity itself
+    could not be read.
+    """
+    if not isinstance(result, dict):
+        return None
+    if result.get("outstanding_settlement_receipt_id"):
+        return "outstanding_settlement_receipt"
+    skipped = str(result.get("skipped") or "")
+    if skipped in _SETTLEMENT_STATE_BLOCK_SKIPS:
+        return skipped
+    if result.get("receipt_retained") is True:
+        return "settlement_receipt_retained"
+    if result.get("settlement_receipt_error"):
+        return "settlement_receipt_unreadable"
+    return None
 
 
 def _calendar(pid: str):
@@ -146,13 +176,29 @@ def execute_or_queue(
     decision_snapshot: dict | None = None,
     execution_constraints: dict | None = None,
     require_pending_absent: bool = False,
+    queued_projection_locked: Callable[[dict[str, float]], None] | None = None,
+    _locked: bool = False,
 ) -> dict:
     """Market-hours-aware execution for a Brain book. OPEN → settle any target queued on a prior
     closed session, then rebalance to `target` at the live marks (real fills). CLOSED → persist
     `target` to settle at the next open; book NO fills (no off-hours trading, no churn on re-run).
     Returns {executed: [...], queued: bool, market_open: bool, error?}. `prices` is the same marks
     the book uses for NAV, so fills and NAV stay consistent."""
-    from portfolio import registry
+    from portfolio import paper_account, registry
+    if not _locked:
+        with paper_account._paper_transaction_lock(pid):
+            return execute_or_queue(
+                pid,
+                target,
+                prices,
+                asof,
+                market_open=market_open,
+                decision_snapshot=decision_snapshot,
+                execution_constraints=execution_constraints,
+                require_pending_absent=require_pending_absent,
+                queued_projection_locked=queued_projection_locked,
+                _locked=True,
+            )
     if registry.is_archived(pid):
         return {
             "executed": [],
@@ -160,15 +206,18 @@ def execute_or_queue(
             "market_open": False,
             **registry.archived_run_result(pid, asof),
         }
-    from portfolio import paper_account
-
-    def _save_pending() -> None:
+    def _save_pending(*, project_queued: bool = False) -> None:
         """Persist this exact target, optionally with operator-only require-absent CAS."""
         paper_account.save_pending_target(
             target,
             asof,
             portfolio_id=pid,
             decision_snapshot=decision_snapshot,
+            **(
+                {"_after_save_locked": lambda: queued_projection_locked(dict(target))}
+                if project_queued and queued_projection_locked is not None
+                else {}
+            ),
             **(
                 {"execution_constraints": execution_constraints}
                 if execution_constraints is not None
@@ -194,7 +243,12 @@ def execute_or_queue(
         }
     if market_open is None:
         market_open = is_open(pid)
-    out: dict = {"executed": [], "queued": False, "market_open": bool(market_open)}
+    out: dict = {
+        "executed": [],
+        "queued": False,
+        "market_open": bool(market_open),
+        "accepted_target": dict(target),
+    }
     try:
         recovered_at_entry = paper_account.recover_paper_transaction(pid)
         outstanding_receipts = paper_account.pending_settlement_receipts(pid)
@@ -210,7 +264,7 @@ def execute_or_queue(
             **out,
             "skipped": "settlement_finalization_pending",
             "settlement_recovered": True,
-            "settlement_receipt_id": receipt.get("transaction_id"),
+            "outstanding_settlement_receipt_id": receipt.get("transaction_id"),
             "receipt_retained": True,
         }
     before = dict((paper_account._load_account(pid).get("positions") or {}))
@@ -243,9 +297,10 @@ def execute_or_queue(
             # rather than the current one, is what needs the missing quote.  Retaining the old queue
             # could later sell a name the newest decision explicitly kept (or vice versa).
             try:
-                _save_pending()
+                _save_pending(project_queued=True)
                 retained = True
                 retry_queued = True
+                out["queued_projection_written"] = queued_projection_locked is not None
             except paper_account.PendingTargetCASConflict as exc:
                 return {
                     **out,
@@ -295,7 +350,8 @@ def execute_or_queue(
         # remains the only entry point that executes an already-queued target without a newer PM
         # decision in hand.
         try:
-            _save_pending()
+            _save_pending(project_queued=True)
+            out["queued_projection_written"] = queued_projection_locked is not None
         except paper_account.PendingTargetCASConflict as exc:
             return {
                 **out,
@@ -340,7 +396,12 @@ def execute_or_queue(
                 pass
             return out
         try:
-            paper_account.settle_target(prices, asof, portfolio_id=pid)
+            paper_account.settle_target(
+                prices,
+                asof,
+                portfolio_id=pid,
+                _price_sources={ticker: "decision_mark" for ticker in prices},
+            )
         except paper_account.PendingTargetQuarantined as exc:
             # A v1 autonomous target must never be followed by the current-session rebalance in the
             # same call: quarantine is an explicit fail-closed outcome, not a partial success.
@@ -394,6 +455,10 @@ def execute_or_queue(
             except Exception:  # noqa: BLE001
                 pass
             if not recovery or recovery.get("status") != "committed":
+                out["queued"] = paper_account.pending_target_file_exists(pid)
+                out["queued_projection_written"] = (
+                    out["queued"] and queued_projection_locked is not None
+                )
                 return out
         after = dict((paper_account._load_account(pid).get("positions") or {}))
         out["executed"] = _diff_trades(before, after, prices)
@@ -402,11 +467,18 @@ def execute_or_queue(
             if receipts:
                 out["settlement_receipt_id"] = receipts[0].get("transaction_id")
         except Exception as exc:  # noqa: BLE001 - committed state remains fenced by its receipt
-            out["settlement_receipt_error"] = repr(exc)[:240]
+            receipt_error = repr(exc)[:240]
+            out.update({
+                "skipped": "settlement_receipt_unreadable",
+                "error": receipt_error,
+                "settlement_receipt_error": receipt_error,
+                "receipt_retained": True,
+            })
     else:
         try:
-            _save_pending()
+            _save_pending(project_queued=True)
             out["queued"] = True
+            out["queued_projection_written"] = queued_projection_locked is not None
         except paper_account.PendingTargetCASConflict as e:
             out.update({
                 "error": repr(e)[:200],
@@ -574,33 +646,83 @@ def _finalize_settlement_receipt(
     from portfolio import paper_account, position_log, registry
 
     transaction_id = str(receipt.get("transaction_id") or "")
-    settlement_asof = str(receipt.get("settlement_asof") or date.today().isoformat())[:10]
-    target = paper_account.validate_target_weights(
-        receipt.get("target") or {},
-        require_canonical_tickers=True,
-        portfolio_id=pid,
-    )
-    before = dict(receipt.get("account_before_positions") or {})
-    after = dict(receipt.get("account_after_positions") or {})
-    bench = registry.benchmark(pid)
-    symbols = set(before) | set(after) | set(target) | {bench}
-    prices, sources = _price_and_sources(
-        pid, symbols, _open_price_fn=_open_price_fn
-    )
-    # If a live quote vanished after the fill committed, the immutable paper-fill price remains a
-    # truthful mark for completing this recovery projection.  It is never used to invent a fill.
-    for fill in receipt.get("fills") or []:
-        if not isinstance(fill, dict):
-            continue
-        ticker = str(fill.get("ticker") or "").upper()
-        try:
-            price = float(fill.get("price") or 0.0)
-        except (TypeError, ValueError):
-            price = 0.0
-        if ticker and price > 0 and ticker not in prices:
-            prices[ticker] = price
-            sources[ticker] = "committed_fill"
-
+    raw_settlement_asof = receipt.get("settlement_asof")
+    try:
+        settlement_asof = date.fromisoformat(str(raw_settlement_asof)).isoformat()
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "skipped": "settlement_finalization_pending",
+            "transaction_id": transaction_id,
+            "settlement_recovered": recovered,
+            "receipt_retained": True,
+            "finalization_errors": ["receipt_invalid_settlement_date_evidence"],
+        }
+    if raw_settlement_asof != settlement_asof:
+        return {
+            "ok": False,
+            "skipped": "settlement_finalization_pending",
+            "transaction_id": transaction_id,
+            "settlement_recovered": recovered,
+            "receipt_retained": True,
+            "finalization_errors": ["receipt_invalid_settlement_date_evidence"],
+        }
+    try:
+        target = paper_account.validate_target_weights(
+            receipt.get("target") or {},
+            require_canonical_tickers=True,
+            portfolio_id=pid,
+        )
+        before = paper_account.canonical_positive_positions(
+            receipt.get("account_before_positions")
+        )
+        after = paper_account.canonical_positive_positions(
+            receipt.get("account_after_positions")
+        )
+        prices = paper_account.validated_settlement_receipt_prices(receipt)
+        paper_account.settlement_receipt_fills_are_durable(receipt, pid)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "skipped": "settlement_finalization_pending",
+            "transaction_id": transaction_id,
+            "settlement_recovered": recovered,
+            "receipt_retained": True,
+            "finalization_errors": [f"receipt_integrity:{exc!r}"[:240]],
+        }
+    try:
+        current_account = paper_account._load_account_file(pid, strict=True)
+        current_positions = paper_account.canonical_positive_positions(
+            current_account.get("positions")
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "skipped": "settlement_finalization_pending",
+            "transaction_id": transaction_id,
+            "settlement_recovered": recovered,
+            "receipt_retained": True,
+            "finalization_errors": [f"account_state:{exc!r}"[:240]],
+        }
+    identity_after = receipt["transaction_identity"]["account_after"]
+    if (
+        current_positions != after
+        or current_account.get("cash") != identity_after.get("cash")
+        or current_account.get("last_paper_transaction_id") != transaction_id
+    ):
+        return {
+            "ok": False,
+            "skipped": "settlement_finalization_pending",
+            "transaction_id": transaction_id,
+            "settlement_recovered": recovered,
+            "receipt_retained": True,
+            "finalization_errors": ["account_state_drifted_after_settlement"],
+        }
+    raw_sources = receipt.get("settlement_price_sources") or {}
+    sources = {
+        ticker: str(raw_sources.get(ticker) or "settlement_snapshot")
+        for ticker in prices
+    }
     executed = _diff_trades(before, after, prices, sources=sources)
     decision = receipt.get("decision_snapshot") or {}
     submission = (
@@ -622,16 +744,26 @@ def _finalize_settlement_receipt(
     else:
         settlement_link = {"ok": True, "applicable": False}
     try:
+        # The accepted target is intent, not proof that any of its rows became holdings.  Project
+        # the receipt-bound account-after snapshot so a suppressed/tiny zero-fill buy cannot open
+        # a phantom position in the durable ledger.  Derive weights from the same immutable marks
+        # and cash snapshot instead of copying advisory target weights.
+        position_values = {
+            ticker: float(lot["shares"]) * prices[ticker]
+            for ticker, lot in after.items()
+        }
+        settled_nav = float(identity_after["cash"]) + sum(position_values.values())
+        if not math.isfinite(settled_nav) or settled_nav <= 0.0:
+            raise ValueError("receipt account-after NAV is invalid")
         position_log.update(
             [
                 {
                     "ticker": ticker,
                     "sleeve": "brain",
-                    "weight": weight,
-                    "entry_price": prices.get(ticker),
+                    "weight": round(position_values[ticker] / settled_nav, 4),
+                    "entry_price": lot["avg_cost"],
                 }
-                for ticker, weight in target.items()
-                if ticker in prices
+                for ticker, lot in after.items()
             ],
             settlement_asof,
             portfolio_id=pid,
@@ -639,41 +771,70 @@ def _finalize_settlement_receipt(
     except Exception as exc:  # noqa: BLE001 - keep receipt for a later exact retry
         failures.append(f"position_log:{exc!r}"[:240])
     try:
-        paper_account.mark(prices, settlement_asof, portfolio_id=pid)
+        paper_account.mark(
+            prices,
+            settlement_asof,
+            portfolio_id=pid,
+            mark_source="settlement_receipt",
+            _settlement_receipt_id=transaction_id,
+        )
     except Exception as exc:  # noqa: BLE001 - keep receipt for a later exact retry
         failures.append(f"mark:{exc!r}"[:240])
-    republished = (
-        _republish(pid, settlement_asof, submission=submission)
-        if submission is not None
-        else _republish(pid, settlement_asof)
-    )
-    if isinstance(republished, dict) and republished.get("ok") is False:
-        failures.append(f"republish:{republished.get('error') or 'failed'}"[:240])
-    if settlement_link.get("applicable") is True:
-        try:
-            from bot import autonomous
-            migration = (submission or {}).get("operator_migration") or {}
-            autonomous._append_decision_log(
-                settlement_asof,
-                submission,
-                executed,
-                [],
+    publication_submission = submission
+    if publication_submission is None:
+        # Pre-v2 regional/operator queues can carry valid numeric authority without a PM memo.
+        # Publish only receipt-bound facts: the exact target and a conspicuous provenance gap.
+        # Never consult mutable scratch state and never invent ticker-specific rationale.
+        publication_submission = {
+            "schema": "mastermind.receipt_only_settlement.v1",
+            "holdings": [
                 {
-                    "text": "Hash-bound legacy ETF migration settled through trusted open marks.",
-                    "run_id": migration.get("migration_id"),
-                    "tools_used": [
-                        "bot.settle.settle_open",
-                        "portfolio.paper_account.settle_target",
-                    ],
-                    "cost_usd": 0.0,
-                    "model": "deterministic_operator_migration",
-                    "error": None,
-                },
-                target_status="executed",
-                effective_target=target,
+                    "ticker": ticker,
+                    "weight": weight,
+                    "action": "settled_target",
+                    "action_effective": "settled_target",
+                    "rationale": "Legacy queued target settled; original PM memo unavailable.",
+                }
+                for ticker, weight in sorted(target.items())
+            ],
+            "summary": (
+                "Legacy queued target settled from its immutable paper receipt; "
+                "the original PM memo was not captured."
+            ),
+            "receipt_only_projection": True,
+            "settlement_transaction_id": transaction_id,
+        }
+    republished = _republish(
+        pid,
+        settlement_asof,
+        submission=publication_submission,
+        settlement_prices=prices,
+    )
+    # A hash-bound Brain receipt is not publish-complete merely because the helper returned
+    # without raising.  ``republish`` also owns the durable learning transition; only its explicit
+    # ok=True contract proves both publication and learning completed before acknowledgement.
+    if not isinstance(republished, dict) or republished.get("ok") is not True:
+        publish_error = (
+            republished.get("error")
+            if isinstance(republished, dict)
+            else "missing_explicit_success"
+        )
+        failures.append(f"republish:{publish_error or 'failed'}"[:240])
+    decision_reconciliation = {"ok": True, "applicable": submission is not None}
+    if submission is not None:
+        try:
+            from bot import decision_rows
+            decision_reconciliation = decision_rows.reconcile_settlement(
+                pid, receipt, executed
             )
         except Exception as exc:  # noqa: BLE001 - receipt retains this projection obligation
-            failures.append(f"migration_decision_log:{exc!r}"[:240])
+            decision_reconciliation = {"ok": False, "error": repr(exc)[:240]}
+            failures.append(f"decision_reconciliation:{exc!r}"[:240])
+        else:
+            if not isinstance(decision_reconciliation, dict) or (
+                decision_reconciliation.get("ok") is not True
+            ):
+                failures.append("decision_reconciliation:missing_explicit_success")
 
     if failures:
         return {
@@ -687,6 +848,7 @@ def _finalize_settlement_receipt(
             "finalization_errors": failures,
             "republish": republished,
             "migration_settlement_link": settlement_link,
+            "decision_reconciliation": decision_reconciliation,
         }
     try:
         paper_account.acknowledge_settlement_receipt(transaction_id, pid)
@@ -702,6 +864,7 @@ def _finalize_settlement_receipt(
             "finalization_errors": [f"ack:{exc!r}"[:240]],
             "republish": republished,
             "migration_settlement_link": settlement_link,
+            "decision_reconciliation": decision_reconciliation,
         }
     result = {
         "ok": True,
@@ -710,6 +873,7 @@ def _finalize_settlement_receipt(
         "transaction_id": transaction_id,
         "receipt_acknowledged": True,
         "migration_settlement_link": settlement_link,
+        "decision_reconciliation": decision_reconciliation,
     }
     if republished is not None:
         result["republish"] = republished
@@ -718,9 +882,82 @@ def _finalize_settlement_receipt(
     return result
 
 
+def reconcile_direct_settlement_receipt(
+    pid: str,
+    transaction_id: str,
+    executed: list[dict],
+) -> dict:
+    """Bind a direct-open decision to its exact receipt before the caller may ACK it."""
+    from portfolio import paper_account
+
+    with paper_account._paper_transaction_lock(pid):
+        try:
+            matches = [
+                receipt
+                for receipt in paper_account.pending_settlement_receipts(pid)
+                if receipt.get("transaction_id") == transaction_id
+            ]
+        except Exception as exc:
+            return {
+                "ok": False,
+                "skipped": "settlement_finalization_pending",
+                "transaction_id": transaction_id,
+                "receipt_retained": True,
+                "finalization_errors": [f"receipt_integrity:{exc!r}"[:240]],
+            }
+        if len(matches) != 1:
+            raise RuntimeError("direct settlement receipt identity is unavailable")
+        from bot import decision_rows
+        return decision_rows.reconcile_settlement(pid, matches[0], executed)
+
+
+def finalize_direct_settlement_receipt(pid: str, transaction_id: str) -> dict:
+    """Finalize and ACK one exact direct-open receipt through the shared durable path.
+
+    Direct daily runners already hold their current decision in memory, but that mutable scratch
+    state is not settlement authority.  Resolve the committed outbox by transaction id and reuse
+    the same receipt-only projection path as scheduler recovery.  The helper reads no live quote:
+    position log (including an empty zero-fill projection), NAV mark, publication + learning, and
+    decision reconciliation must all explicitly succeed before the receipt can be acknowledged.
+    """
+    from portfolio import paper_account
+
+    with paper_account._paper_transaction_lock(pid):
+        try:
+            matches = [
+                receipt
+                for receipt in paper_account.pending_settlement_receipts(pid)
+                if receipt.get("transaction_id") == transaction_id
+            ]
+        except Exception as exc:
+            return {
+                "ok": False,
+                "skipped": "settlement_finalization_pending",
+                "transaction_id": transaction_id,
+                "receipt_retained": True,
+                "finalization_errors": [f"receipt_integrity:{exc!r}"[:240]],
+            }
+        if len(matches) != 1:
+            return {
+                "ok": False,
+                "skipped": "settlement_finalization_pending",
+                "transaction_id": transaction_id,
+                "receipt_retained": True,
+                "finalization_errors": [
+                    "direct_settlement_receipt_identity_unavailable"
+                ],
+            }
+        return _finalize_settlement_receipt(
+            pid,
+            matches[0],
+            recovered=False,
+        )
+
+
 def settle_open(pid: str, asof: str | None = None,
                 *,
-                _open_price_fn=None) -> dict:
+                _open_price_fn=None,
+                _locked: bool = False) -> dict:
     """At `pid`'s market OPEN, fill the queued target (decided on a prior closed session) with one
     rebalance at the live open marks, re-mark NAV, and republish the book contract so the dashboard
     shows the filled positions. No-op (safe) if the market is closed or nothing is queued.
@@ -729,11 +966,15 @@ def settle_open(pid: str, asof: str | None = None,
     price fallback); each trade in ``executed`` carries a ``fill_price_source`` stamp so mixed
     semantics are auditable in the blotter.  ``_open_price_fn`` is an injection point for tests.
     """
-    from portfolio import registry
+    from portfolio import paper_account, registry
+    if not _locked:
+        with paper_account._paper_transaction_lock(pid):
+            return settle_open(
+                pid, asof, _open_price_fn=_open_price_fn, _locked=True
+            )
     asof = asof or date.today().isoformat()
     if registry.is_archived(pid):
         return {"ok": False, **registry.archived_run_result(pid, asof)}
-    from portfolio import paper_account, position_log
     if not is_open(pid):
         return {"ok": False, "skipped": "market_closed"}
     try:
@@ -758,13 +999,6 @@ def settle_open(pid: str, asof: str | None = None,
     pending = preflight["pending"]
     if not pending:
         return {"ok": False, "skipped": "nothing_queued"}
-    decision_record = pending.get("decision_snapshot") or {}
-    settled_submission = (
-        decision_record.get("submission")
-        if isinstance(decision_record, dict)
-        and isinstance(decision_record.get("submission"), dict)
-        else None
-    )
     bench = registry.benchmark(pid)
     sym_set = set(_held(pid)) | {bench} | set(pending.get("target") or {})
     prices, sources = _price_and_sources(pid, sym_set, _open_price_fn=_open_price_fn)
@@ -785,7 +1019,22 @@ def settle_open(pid: str, asof: str | None = None,
         }
     recovered_transaction = None
     try:
-        target = paper_account.settle_target(prices, asof, portfolio_id=pid) or {}
+        target = paper_account.settle_target(
+            prices,
+            asof,
+            portfolio_id=pid,
+            _price_sources=sources,
+        )
+        if target is None:
+            receipts = paper_account.pending_settlement_receipts(pid)
+            if receipts:
+                return _finalize_settlement_receipt(
+                    pid,
+                    receipts[0],
+                    _open_price_fn=_open_price_fn,
+                    recovered=True,
+                )
+            return {"ok": False, "skipped": "queue_consumed_concurrently"}
     except paper_account.PendingTargetQuarantined as exc:
         # The target changed between preflight and settlement.  The paper-account boundary rechecked
         # it and quarantined the incompatible replacement before any account write.
@@ -857,42 +1106,34 @@ def settle_open(pid: str, asof: str | None = None,
             pid,
             receipts[0],
             _open_price_fn=_open_price_fn,
-            recovered=recovered_transaction is not None,
+            recovered=recovered_before_preflight is not None or recovered_transaction is not None,
         )
-    after = dict((paper_account._load_account(pid).get("positions") or {}))
-    # Pass sources so each trade row is stamped with fill_price_source for auditability.
-    executed = _diff_trades(before, after, prices, sources=sources)
-    try:
-        position_log.update([{"ticker": t, "sleeve": "brain", "weight": w, "entry_price": prices.get(t)}
-                             for t, w in target.items() if t in prices], asof, portfolio_id=pid)
-    except Exception:
-        pass
-    try:
-        paper_account.mark(prices, asof, portfolio_id=pid)
-    except Exception:
-        pass
-    republished = (
-        _republish(pid, asof, submission=settled_submission)
-        if settled_submission is not None
-        else _republish(pid, asof)
-    )
-    result = {"ok": True, "executed": executed, "settled_to": sorted(target)}
-    if republished is not None:
-        result["republish"] = republished
-    if recovered_transaction is not None:
-        result["settlement_recovered"] = True
-        result["transaction_id"] = recovered_transaction.get("transaction_id")
-    return result
+    return {
+        "ok": False,
+        "skipped": "settlement_receipt_missing",
+        "receipt_retained": False,
+        "settled_to": sorted(target),
+    }
 
 
-def _republish(pid: str, asof: str, *, submission: dict | None = None) -> dict | None:
+def _republish(
+    pid: str,
+    asof: str,
+    *,
+    submission: dict | None = None,
+    settlement_prices: dict[str, float] | None = None,
+) -> dict | None:
     """Re-emit the book's published contract after a settle (so the dashboard reflects the fills),
     via the book module's republish(). Best-effort; never raises."""
     try:
         import importlib
         mod = importlib.import_module(f"bot.{pid}")
         if hasattr(mod, "republish"):
-            return mod.republish(asof, submission=submission)
+            return mod.republish(
+                asof,
+                submission=submission,
+                settlement_prices=settlement_prices,
+            )
     except Exception as exc:  # noqa: BLE001 - settlement is committed; surface publish failure
         return {"ok": False, "error": repr(exc)[:200]}
     return None

@@ -58,6 +58,7 @@ _DECISION_ID_RE = re.compile(r"^decision\.v1\.[0-9a-f]{24}$")
 _APPLICATION_ID_RE = re.compile(r"^application\.v1\.[0-9a-f]{24}$")
 _PRESENTATION_ID_RE = re.compile(r"^presentation\.v1\.[0-9a-f]{24}$")
 _TRANSACTION_ID_RE = re.compile(r"^[0-9a-f]{64}$")
+_MAX_TARGET_LINEAGE_TRANSITIONS = 20
 
 # Context requests are intentionally typed and bounded.  A Brain may identify a
 # missing plane; a separate orchestrator/operator still decides whether to build it.
@@ -183,10 +184,21 @@ def _append_jsonl(path: Path, row: dict) -> bool:
     """Append one complete transition and report whether it reached the local ledger."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        created = not path.exists()
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, default=str, ensure_ascii=False) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
+        if created:
+            try:
+                dir_fd = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                # The row itself is durable even on filesystems that reject directory fsync.
+                pass
         return True
     except Exception:
         return False
@@ -1344,7 +1356,109 @@ def _execution_proof_sha256(row: dict) -> str:
             "settlement_receipt_sha256", "settled_fills", "authority", "evidence_cohort",
         )
     }
+    # Keep exact pre-lineage transitions readable.  New transitions seal both the immutable
+    # accepted target and the final deterministic-rewrite chain; including either field opts the
+    # row into the complete modern proof shape.
+    if "accepted_target_sha256" in row or "target_lineage" in row:
+        proof["accepted_target_sha256"] = row.get("accepted_target_sha256")
+        proof["target_lineage"] = row.get("target_lineage")
     return _sha256(proof)
+
+
+def _validated_target_lineage(
+    decision_snapshot: dict,
+    accepted_target_sha256: str,
+    final_target_sha256: str,
+) -> tuple[bool, list[dict]]:
+    """Validate one bounded, unambiguous accepted-target -> final-target hash chain.
+
+    ``paper_account`` compacts long rewrite histories into one root-to-tail bridge followed by the
+    latest transitions, so a compacted list remains a complete linear chain.  Exact (non-rewritten)
+    legacy snapshots may omit both the accepted digest and lineage; contradictory metadata still
+    fails closed.
+    """
+    accepted_hash = str(accepted_target_sha256 or "")
+    final_hash = str(final_target_sha256 or "")
+    if (
+        not isinstance(decision_snapshot, dict)
+        or not _TRANSACTION_ID_RE.fullmatch(accepted_hash)
+        or not _TRANSACTION_ID_RE.fullmatch(final_hash)
+        or str(decision_snapshot.get("target_sha256") or "") != final_hash
+    ):
+        return False, []
+
+    declared_accepted = decision_snapshot.get("accepted_target_sha256")
+    raw_lineage = decision_snapshot.get("target_lineage")
+    if accepted_hash == final_hash:
+        if declared_accepted not in {None, "", accepted_hash}:
+            return False, []
+        if raw_lineage is not None and raw_lineage != []:
+            return False, []
+        return True, []
+
+    if (
+        declared_accepted != accepted_hash
+        or not isinstance(raw_lineage, list)
+        or not 0 < len(raw_lineage) <= _MAX_TARGET_LINEAGE_TRANSITIONS
+    ):
+        return False, []
+    current = accepted_hash
+    seen = {current}
+    lineage: list[dict] = []
+    for transition in raw_lineage:
+        if not isinstance(transition, dict):
+            return False, []
+        source = str(transition.get("from_target_sha256") or "")
+        destination = str(transition.get("to_target_sha256") or "")
+        if (
+            source != current
+            or not _TRANSACTION_ID_RE.fullmatch(source)
+            or not _TRANSACTION_ID_RE.fullmatch(destination)
+            or destination in seen
+        ):
+            return False, []
+        lineage.append(dict(transition))
+        seen.add(destination)
+        current = destination
+    return current == final_hash, lineage
+
+
+def _valid_transition_target_lineage(current: dict, row: dict) -> bool:
+    """Validate the transition's final target against the immutable initial application target."""
+    accepted_hash = str(
+        current.get("accepted_target_sha256") or current.get("target_sha256") or ""
+    )
+    final_hash = str(row.get("target_sha256") or "")
+    has_modern_proof = (
+        "accepted_target_sha256" in row or "target_lineage" in row
+    )
+    if not has_modern_proof:
+        # Compatibility is deliberately narrow: the old proof shape can represent only an exact,
+        # non-rewritten target.
+        return accepted_hash == final_hash == str(current.get("target_sha256") or "")
+    if (
+        row.get("accepted_target_sha256") != accepted_hash
+        or "target_lineage" not in row
+    ):
+        return False
+    valid, lineage = _validated_target_lineage(
+        {
+            "accepted_target_sha256": row.get("accepted_target_sha256"),
+            "target_sha256": final_hash,
+            "target_lineage": row.get("target_lineage"),
+        },
+        accepted_hash,
+        final_hash,
+    )
+    if not valid or lineage != row.get("target_lineage"):
+        return False
+    if current.get("executed") is True:
+        return (
+            current.get("accepted_target_sha256") == accepted_hash
+            and current.get("target_sha256") == final_hash
+            and current.get("target_lineage") == lineage
+        )
+    return True
 
 
 def _valid_execution_transition(current: dict, row: dict) -> bool:
@@ -1365,7 +1479,7 @@ def _valid_execution_transition(current: dict, row: dict) -> bool:
         or row.get("decision_id") != current.get("decision_id")
         or row.get("presentation_id") != current.get("presentation_id")
         or row.get("accepted_asof") != current.get("accepted_asof")
-        or row.get("target_sha256") != current.get("target_sha256")
+        or not _valid_transition_target_lineage(current, row)
         or not _valid_settled_fills(row.get("settled_fills"), transaction_id, executed_at)
     ):
         return False
@@ -1374,6 +1488,10 @@ def _valid_execution_transition(current: dict, row: dict) -> bool:
             current.get("settlement_transaction_id") == transaction_id
             and current.get("settlement_receipt_sha256") == row.get("settlement_receipt_sha256")
             and current.get("settled_fills") == row.get("settled_fills")
+            and current.get("accepted_target_sha256")
+            == row.get("accepted_target_sha256")
+            and current.get("target_sha256") == row.get("target_sha256")
+            and current.get("target_lineage") == row.get("target_lineage")
         )
     return True
 
@@ -1445,18 +1563,27 @@ def _execution_transition_payload(
     *,
     settled_asof: str,
 ) -> dict:
-    expected_hash = str(application.get("target_sha256") or "")
+    accepted_hash = str(
+        application.get("accepted_target_sha256")
+        or application.get("target_sha256")
+        or ""
+    )
     receipt_hash = str(receipt.get("target_sha256") or "")
     receipt_target = receipt.get("target")
     decision = receipt.get("decision_snapshot") or {}
     bound_hash = str(decision.get("target_sha256") or "") if isinstance(decision, dict) else ""
+    lineage_ok, target_lineage = _validated_target_lineage(
+        decision if isinstance(decision, dict) else {},
+        accepted_hash,
+        receipt_hash,
+    )
     if (
-        receipt.get("schema") != "paper_settlement_receipt.v1"
+        receipt.get("schema") != "paper_settlement_receipt.v2"
         or not isinstance(receipt_target, dict)
-        or not expected_hash
-        or receipt_hash != expected_hash
-        or bound_hash != expected_hash
-        or _target_sha256(receipt_target) != expected_hash
+        or not accepted_hash
+        or not lineage_ok
+        or bound_hash != receipt_hash
+        or _target_sha256(receipt_target) != receipt_hash
     ):
         return {"ok": False, "error": "settlement_target_hash_mismatch"}
     transaction_id = str(receipt.get("transaction_id") or "")
@@ -1503,7 +1630,9 @@ def _execution_transition_payload(
         "settlement_verified": True,
         "execution_evidence": "hash_bound_paper_settlement_receipt",
         "settlement_receipt_sha256": _sha256(receipt),
+        "accepted_target_sha256": accepted_hash,
         "target_sha256": receipt_hash,
+        "target_lineage": target_lineage,
         "settled_fills": [
             {
                 key: fill.get(key)
@@ -1600,11 +1729,20 @@ def _recover_application_from_receipt(
         return {"ok": False, "error": "receipt_target_missing"}
     target_hash = _target_sha256(target)
     decision = receipt.get("decision_snapshot") or {}
+    accepted_target_hash = str(
+        decision.get("accepted_target_sha256") or target_hash
+    ) if isinstance(decision, dict) else target_hash
+    lineage_ok, _ = _validated_target_lineage(
+        decision if isinstance(decision, dict) else {},
+        accepted_target_hash,
+        target_hash,
+    )
     if (
         receipt.get("target_sha256") != target_hash
         or not isinstance(decision, dict)
         or decision.get("target_sha256") != target_hash
         or str(decision.get("accepted_asof") or "")[:10] != accepted_asof
+        or not lineage_ok
     ):
         return {"ok": False, "error": "receipt_target_or_asof_mismatch"}
     row = {
@@ -1620,7 +1758,7 @@ def _recover_application_from_receipt(
         "lesson_ids": cited_ids,
         "lesson_basis": [presented[lesson_id] for lesson_id in cited_ids],
         "submission_sha256": submission_hash,
-        "target_sha256": target_hash,
+        "target_sha256": accepted_target_hash,
         "target_status": "queued",
         "executed": False,
         "executed_at": None,
@@ -1714,7 +1852,12 @@ def record_application(
             None,
         )
         if current is not None:
-            if current.get("target_sha256") != target_hash:
+            current_accepted_hash = str(
+                current.get("accepted_target_sha256")
+                or current.get("target_sha256")
+                or ""
+            )
+            if current_accepted_hash != target_hash:
                 return {"ok": False, "recorded": False, "error": "application_target_conflict"}
             if target_status == "executed":
                 if current.get("executed") is True:

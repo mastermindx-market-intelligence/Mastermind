@@ -256,6 +256,9 @@ def test_queued_application_executes_only_via_exact_hash_bound_receipt(monkeypat
     assert transitioned["application"]["executed"] is True
     assert transitioned["application"]["settlement_verified"] is True
     assert transitioned["application"]["settlement_transaction_id"] == receipt["transaction_id"]
+    assert transitioned["application"]["accepted_target_sha256"] == queued["target_sha256"]
+    assert transitioned["application"]["target_sha256"] == queued["target_sha256"]
+    assert transitioned["application"]["target_lineage"] == []
     assert replay["deduplicated"] is True
     finalization = pl.application_finalization_status(
         "autonomous",
@@ -265,6 +268,165 @@ def test_queued_application_executes_only_via_exact_hash_bound_receipt(monkeypat
     assert finalization["ok"] is True
     rows = (tmp_path / "learning" / "autonomous" / "applications.jsonl").read_text().splitlines()
     assert len(rows) == 2
+
+
+def test_queued_application_accepts_complete_deterministic_derisk_lineage(
+    monkeypatch, tmp_path,
+):
+    from portfolio import paper_account, registry
+
+    monkeypatch.setattr(pl, "_DIR", tmp_path / "learning")
+    monkeypatch.setattr(registry, "_ROOT", tmp_path / "runtime")
+    lesson_id = _lesson_file(tmp_path / "learning", "autonomous")
+    pl.prompt_block("autonomous", asof="2026-08-11")
+    submission = _submission([lesson_id])
+    pl.attach_lesson_trace("autonomous", "2026-08-11", submission)
+    paper_account._save_account(
+        {
+            "inception_date": "2026-08-01",
+            "starting_nav": 1_000_000.0,
+            "cash": 1_000_000.0,
+            "positions": {},
+            "spy_shares": None,
+            "spy_inception_price": None,
+        },
+        "autonomous",
+    )
+    accepted_target = {"AAPL": 0.20}
+    final_target = {"AAPL": 0.10}
+    paper_account.save_pending_target(
+        accepted_target,
+        "2026-08-11",
+        portfolio_id="autonomous",
+        decision_snapshot=submission,
+    )
+    queued = pl.record_application(
+        "autonomous",
+        "2026-08-11",
+        submission,
+        accepted_target,
+        target_status="queued",
+    )["application"]
+    pending = json.loads(
+        paper_account._pending_target_path("autonomous").read_text(encoding="utf-8")
+    )
+    paper_account.save_pending_target(
+        final_target,
+        "2026-08-11",
+        portfolio_id="autonomous",
+        decision_snapshot=pending["decision_snapshot"],
+    )
+
+    paper_account.settle_target(
+        {"AAPL": 100.0, "SPY": 700.0},
+        "2026-08-12",
+        portfolio_id="autonomous",
+    )
+    receipt = paper_account.pending_settlement_receipts("autonomous")[0]
+    transitioned = pl.settle_application("autonomous", submission, "2026-08-12")
+
+    accepted_hash = pl._target_sha256(accepted_target)
+    final_hash = pl._target_sha256(final_target)
+    assert transitioned["ok"] is True and transitioned["transitioned"] is True
+    application = transitioned["application"]
+    assert queued["target_sha256"] == accepted_hash
+    assert application["accepted_target_sha256"] == accepted_hash
+    assert application["target_sha256"] == final_hash
+    assert application["target_lineage"] == receipt["decision_snapshot"]["target_lineage"]
+    assert application["target_lineage"] == [{
+        "from_target_sha256": accepted_hash,
+        "to_target_sha256": final_hash,
+        "rebound_asof": "2026-08-11",
+        "reason": "deterministic_risk_rewrite",
+    }]
+    persisted = [
+        json.loads(line)
+        for line in (
+            tmp_path / "learning" / "autonomous" / "applications.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+    ]
+    transition = persisted[-1]
+    assert transition["accepted_target_sha256"] == accepted_hash
+    assert transition["target_sha256"] == final_hash
+    assert transition["execution_proof_sha256"] == pl._execution_proof_sha256(transition)
+
+
+@pytest.mark.parametrize("mutation", [
+    "declared_accepted_mismatch",
+    "broken_source",
+    "truncated_destination",
+    "cycle",
+    "over_limit",
+])
+def test_derisk_lineage_fails_closed_when_broken_ambiguous_or_unbounded(
+    monkeypatch, tmp_path, mutation,
+):
+    monkeypatch.setattr(pl, "_DIR", tmp_path)
+    lesson_id = _lesson_file(tmp_path, "autonomous")
+    pl.prompt_block("autonomous", asof="2026-08-11")
+    submission = _submission([lesson_id])
+    pl.attach_lesson_trace("autonomous", "2026-08-11", submission)
+    accepted_target = {"AAPL": 0.20}
+    final_target = {"AAPL": 0.10}
+    queued = pl.record_application(
+        "autonomous",
+        "2026-08-11",
+        submission,
+        accepted_target,
+        target_status="queued",
+    )["application"]
+    accepted_hash = queued["target_sha256"]
+    final_hash = pl._target_sha256(final_target)
+    trace = submission["_lesson_trace"]
+    lineage = [{
+        "from_target_sha256": accepted_hash,
+        "to_target_sha256": final_hash,
+        "rebound_asof": "2026-08-11",
+        "reason": "deterministic_risk_rewrite",
+    }]
+    decision = {
+        "target_sha256": final_hash,
+        "accepted_target_sha256": accepted_hash,
+        "accepted_asof": "2026-08-11",
+        "target_lineage": lineage,
+        "submission": submission,
+    }
+    if mutation == "declared_accepted_mismatch":
+        decision["accepted_target_sha256"] = "1" * 64
+    elif mutation == "broken_source":
+        decision["target_lineage"][0]["from_target_sha256"] = "2" * 64
+    elif mutation == "truncated_destination":
+        decision["target_lineage"][0]["to_target_sha256"] = "3" * 64
+    elif mutation == "cycle":
+        middle = "4" * 64
+        decision["target_lineage"] = [
+            {"from_target_sha256": accepted_hash, "to_target_sha256": middle},
+            {"from_target_sha256": middle, "to_target_sha256": accepted_hash},
+            {"from_target_sha256": accepted_hash, "to_target_sha256": final_hash},
+        ]
+    else:
+        nodes = [accepted_hash] + [f"{index:064x}" for index in range(1, 21)] + [final_hash]
+        decision["target_lineage"] = [
+            {"from_target_sha256": source, "to_target_sha256": destination}
+            for source, destination in zip(nodes[:-1], nodes[1:], strict=True)
+        ]
+    receipt = {
+        "schema": "paper_settlement_receipt.v2",
+        "transaction_id": "a" * 64,
+        "portfolio_id": "autonomous",
+        "settlement_asof": "2026-08-12",
+        "target": final_target,
+        "target_sha256": final_hash,
+        "decision_snapshot": decision,
+        "fills": [],
+    }
+    assert trace["application_id"] == queued["application_id"]
+    monkeypatch.setattr(pl, "_receipt_for_application", lambda *args: receipt)
+
+    result = pl.settle_application("autonomous", submission, "2026-08-12")
+
+    assert result == {"ok": False, "error": "settlement_target_hash_mismatch"}
+    assert pl.applications("autonomous")[0]["executed"] is False
 
 
 def test_executed_application_without_verified_receipt_writes_no_row(monkeypatch, tmp_path):
@@ -369,6 +531,91 @@ def test_applications_ignore_malformed_hand_authored_execution_transitions(
         assert len(observed) == 1, label
         assert observed[0]["executed"] is False, label
         assert "settlement_transaction_id" not in observed[0], label
+
+
+@pytest.mark.parametrize(
+    ("mutation", "promotes"),
+    [
+        ("valid", True),
+        ("missing_accepted", False),
+        ("broken_source", False),
+        ("cycle", False),
+        ("over_limit", False),
+    ],
+)
+def test_applications_promote_only_complete_bounded_derisk_transition_lineage(
+    monkeypatch, tmp_path, mutation, promotes,
+):
+    monkeypatch.setattr(pl, "_DIR", tmp_path)
+    lesson_id = _lesson_file(tmp_path, "autonomous")
+    pl.prompt_block("autonomous", asof="2026-08-11")
+    submission = _submission([lesson_id])
+    pl.attach_lesson_trace("autonomous", "2026-08-11", submission)
+    initial = pl.record_application(
+        "autonomous",
+        "2026-08-11",
+        submission,
+        {"AAPL": 0.20},
+        target_status="queued",
+    )["application"]
+    accepted_hash = initial["target_sha256"]
+    final_hash = pl._target_sha256({"AAPL": 0.10})
+    transaction_id = "a" * 64
+    transition = {
+        "schema": "portfolio.lesson_application_transition.v1",
+        "application_id": initial["application_id"],
+        "decision_id": initial["decision_id"],
+        "presentation_id": initial["presentation_id"],
+        "book": "autonomous",
+        "accepted_asof": initial["accepted_asof"],
+        "accepted_target_sha256": accepted_hash,
+        "target_sha256": final_hash,
+        "target_lineage": [{
+            "from_target_sha256": accepted_hash,
+            "to_target_sha256": final_hash,
+        }],
+        "target_status": "executed",
+        "executed": True,
+        "executed_at": "2026-08-12",
+        "settlement_verified": True,
+        "settlement_transaction_id": transaction_id,
+        "settlement_receipt_sha256": "c" * 64,
+        "execution_evidence": "hash_bound_paper_settlement_receipt",
+        "settled_fills": [],
+        "authority": pl.APPLICATION_AUTHORITY,
+        "evidence_cohort": pl.LESSON_TRACE_COHORT,
+    }
+    if mutation == "missing_accepted":
+        transition.pop("accepted_target_sha256")
+    elif mutation == "broken_source":
+        transition["target_lineage"][0]["from_target_sha256"] = "1" * 64
+    elif mutation == "cycle":
+        middle = "2" * 64
+        transition["target_lineage"] = [
+            {"from_target_sha256": accepted_hash, "to_target_sha256": middle},
+            {"from_target_sha256": middle, "to_target_sha256": accepted_hash},
+            {"from_target_sha256": accepted_hash, "to_target_sha256": final_hash},
+        ]
+    elif mutation == "over_limit":
+        nodes = [accepted_hash] + [f"{index:064x}" for index in range(1, 21)] + [final_hash]
+        transition["target_lineage"] = [
+            {"from_target_sha256": source, "to_target_sha256": destination}
+            for source, destination in zip(nodes[:-1], nodes[1:], strict=True)
+        ]
+    transition["execution_proof_sha256"] = pl._execution_proof_sha256(transition)
+    assert pl._append_jsonl(
+        tmp_path / "autonomous" / "applications.jsonl", transition
+    )
+
+    observed = pl.applications("autonomous")[0]
+
+    assert observed["executed"] is promotes
+    if promotes:
+        assert observed["accepted_target_sha256"] == accepted_hash
+        assert observed["target_sha256"] == final_hash
+    else:
+        assert observed["target_sha256"] == accepted_hash
+        assert "settlement_transaction_id" not in observed
 
 
 def test_hash_mismatch_cannot_advance_queued_application(monkeypatch, tmp_path):

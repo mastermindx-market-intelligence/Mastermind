@@ -48,7 +48,6 @@ def _patch_regional_run(
     monkeypatch.setattr(packet_gate, "process", lambda *args, **kwargs: _Packet())
     if stub_publish:
         monkeypatch.setattr(build_portfolio, "write", lambda *args, **kwargs: {})
-    monkeypatch.setattr(module, "_append_decision_log", lambda *args, **kwargs: None)
     monkeypatch.setattr(module, "_translate_report", lambda *args, **kwargs: False)
     monkeypatch.setattr(mandate_packet, "build", lambda *args, **kwargs: {})
     monkeypatch.setattr(mandate_packet, "write_packet", lambda *args, **kwargs: None)
@@ -142,7 +141,6 @@ def test_legacy_offvenue_omission_carries_until_explicit_exit(
 
     monkeypatch.setattr(packet_gate, "process", lambda *args, **kwargs: _Packet())
     monkeypatch.setattr(build_portfolio, "write", lambda *args, **kwargs: {})
-    monkeypatch.setattr(module, "_append_decision_log", lambda *args, **kwargs: None)
     monkeypatch.setattr(module, "_translate_report", lambda *args, **kwargs: False)
     monkeypatch.setattr(mandate_packet, "build", lambda *args, **kwargs: {})
     monkeypatch.setattr(mandate_packet, "write_packet", lambda *args, **kwargs: None)
@@ -196,6 +194,7 @@ def test_legacy_offvenue_omission_carries_until_explicit_exit(
         "shares": 1.0,
         "price": 100.0,
         "value": 100.0,
+        "fill_price_source": "decision_mark",
     }]
     assert paper_account._load_account(portfolio_id)["positions"] == {}
     fills = [
@@ -302,7 +301,7 @@ def test_regional_closed_queue_drops_unpriceable_add_but_keeps_missing_holding(
     # Both quotes recover later, but settlement may use only the snapshotted executable target.
     monkeypatch.setattr(settle, "is_open", lambda pid: True)
     monkeypatch.setattr(paper_account, "_current_price", lambda ticker: 100.0)
-    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: {"ok": True})
     settled = settle.settle_open(portfolio_id, "2026-08-10")
 
     positions = paper_account._load_account(portfolio_id)["positions"]

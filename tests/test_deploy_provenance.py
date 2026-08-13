@@ -269,6 +269,25 @@ def test_activation_gate_order_and_canonical_lock_are_explicit():
     assert "flock -x -w 30 9" in script
 
 
+@pytest.mark.parametrize("artifact", ["paper_transaction.json", "settlement_receipts/old.json"])
+def test_deploy_refuses_unresolved_pre_v2_settlement_state(tmp_path, artifact):
+    env, events, old_sha, _new_sha = _fake_transport(tmp_path, fail_new_release=False)
+    path = tmp_path / "live-data" / "portfolios" / "china" / artifact
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(DEPLOY_SCRIPT)], env=env, text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 1
+    # The service is stopped before the runtime-state gate and only the bounded rollback restart
+    # occurs; the incompatible release is never started.
+    assert events.read_text(encoding="utf-8").splitlines() == [old_sha]
+    assert "unresolved paper settlement state blocks receipt-schema upgrade" in result.stdout
+    assert not (tmp_path / "live-data" / "portfolio_forward_evaluation" / "start.json").exists()
+
+
 @pytest.mark.parametrize("mutation_flag", [
     "FAKE_MUTATE_ACCOUNT_ON_RESTART",
     "FAKE_MUTATE_FILLS_ON_RESTART",
