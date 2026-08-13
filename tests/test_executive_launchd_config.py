@@ -227,6 +227,54 @@ def test_environment_probe_validates_cross_uid_ps_identity(monkeypatch) -> None:
         probe._expected_identity(json.dumps(identity), 4242, observed)
 
 
+def test_acceptance_prepares_control_owned_receipt_container(
+    tmp_path, monkeypatch
+) -> None:
+    import pytest
+
+    from ops.executive_os import acceptance
+
+    monkeypatch.setattr(acceptance, "_assert_no_acl", lambda path: None)
+    receipt_root = tmp_path / "acceptance" / ("a" * 40)
+    acceptance._prepare_acceptance_receipt_root(
+        receipt_root,
+        control_uid=os.geteuid(),
+        control_gid=os.getegid(),
+    )
+
+    for path in (receipt_root.parent, receipt_root):
+        info = path.lstat()
+        assert info.st_uid == os.geteuid()
+        assert info.st_gid == os.getegid()
+        assert stat.S_IMODE(info.st_mode) == 0o700
+
+    with pytest.raises(acceptance.AcceptanceError, match="already exists"):
+        acceptance._prepare_acceptance_receipt_root(
+            receipt_root,
+            control_uid=os.geteuid(),
+            control_gid=os.getegid(),
+        )
+
+
+def test_acceptance_rejects_existing_receipt_container_metadata_drift(
+    tmp_path, monkeypatch
+) -> None:
+    import pytest
+
+    from ops.executive_os import acceptance
+
+    monkeypatch.setattr(acceptance, "_assert_no_acl", lambda path: None)
+    container = tmp_path / "acceptance"
+    container.mkdir(mode=0o755)
+
+    with pytest.raises(acceptance.AcceptanceError, match="container metadata drifted"):
+        acceptance._prepare_acceptance_receipt_root(
+            container / ("a" * 40),
+            control_uid=os.geteuid(),
+            control_gid=os.getegid(),
+        )
+
+
 def test_control_wrapper_post_exec_argv_contains_no_canary_name(
     monkeypatch,
 ) -> None:

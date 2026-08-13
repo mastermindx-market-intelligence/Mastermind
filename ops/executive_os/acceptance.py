@@ -624,6 +624,55 @@ def _assert_no_acl(path: Path) -> None:
         raise AcceptanceError(f"unexpected filesystem ACL: {path}")
 
 
+def _prepare_acceptance_receipt_root(
+    receipt_root: Path,
+    *,
+    control_uid: int,
+    control_gid: int,
+) -> None:
+    parent = receipt_root.parent
+    try:
+        parent_info = parent.lstat()
+    except FileNotFoundError:
+        try:
+            parent.mkdir(mode=0o700)
+            os.chown(parent, control_uid, control_gid)
+            os.chmod(parent, 0o700)
+            parent_info = parent.lstat()
+        except OSError as exc:
+            raise AcceptanceError(
+                "acceptance receipt container could not be created safely"
+            ) from exc
+    if (
+        stat.S_ISLNK(parent_info.st_mode)
+        or not stat.S_ISDIR(parent_info.st_mode)
+        or parent_info.st_uid != control_uid
+        or parent_info.st_gid != control_gid
+        or stat.S_IMODE(parent_info.st_mode) != 0o700
+    ):
+        raise AcceptanceError("acceptance receipt container metadata drifted")
+    _assert_no_acl(parent)
+
+    if receipt_root.exists() or receipt_root.is_symlink():
+        raise AcceptanceError("an acceptance directory already exists for this SHA")
+    try:
+        receipt_root.mkdir(mode=0o700)
+        os.chown(receipt_root, control_uid, control_gid)
+        os.chmod(receipt_root, 0o700)
+        receipt_info = receipt_root.lstat()
+    except OSError as exc:
+        raise AcceptanceError("acceptance receipt root could not be created safely") from exc
+    if (
+        stat.S_ISLNK(receipt_info.st_mode)
+        or not stat.S_ISDIR(receipt_info.st_mode)
+        or receipt_info.st_uid != control_uid
+        or receipt_info.st_gid != control_gid
+        or stat.S_IMODE(receipt_info.st_mode) != 0o700
+    ):
+        raise AcceptanceError("acceptance receipt root metadata drifted")
+    _assert_no_acl(receipt_root)
+
+
 class Acceptance:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
@@ -1356,11 +1405,11 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             _empty_directory(Path(self.config[field]), label=label)
         if Path(self.config["secret_canary_receipt_path"]).exists():
             raise AcceptanceError("a prior secret-canary receipt exists")
-        if self.receipt_root.exists() or self.receipt_root.is_symlink():
-            raise AcceptanceError("an acceptance directory already exists for this SHA")
-        self.receipt_root.mkdir(parents=True, mode=0o700)
-        os.chown(self.receipt_root, self.control_identity.pw_uid, self.control_group.gr_gid)
-        os.chmod(self.receipt_root, 0o700)
+        _prepare_acceptance_receipt_root(
+            self.receipt_root,
+            control_uid=self.control_identity.pw_uid,
+            control_gid=self.control_group.gr_gid,
+        )
         self.nonexecutive_disabled_before = self._nonexecutive_disabled_digest()
         self._write_json(
             "nonexecutive-launchd-before.json",
