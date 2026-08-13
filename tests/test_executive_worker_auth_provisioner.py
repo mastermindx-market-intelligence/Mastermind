@@ -73,6 +73,19 @@ def test_worker_auth_provisioner_pins_official_native_codex() -> None:
     assert 'OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY"' in source
 
 
+def test_worker_auth_runs_codex_only_from_private_provider_home() -> None:
+    source = _source()
+    helper = source.split("run_codex_as_worker() {", maxsplit=1)[1].split(
+        "\n}\n", maxsplit=1
+    )[0]
+    assert 'cd -- "$PROVIDER_HOME"' in helper
+    assert 'PWD="$PROVIDER_HOME"' in helper
+    assert helper.index('cd -- "$PROVIDER_HOME"') < helper.index("/usr/bin/sudo -n")
+    assert helper.index('PWD="$PROVIDER_HOME"') < helper.index(
+        '"$PINNED_CODEX_BINARY" "$@"'
+    )
+
+
 def test_worker_auth_verification_is_strict_and_non_disclosing() -> None:
     source = _source()
     assert "--verify-only" in source
