@@ -214,6 +214,34 @@ if ! "${SSH[@]}" "$BOXHOST" "systemctl stop '$SVC'"; then
   fail_release "service stop before forward evaluation baseline failed"
 fi
 
+# Receipt v2 strengthens the immutable settlement preimage.  A pre-release WAL or older receipt
+# must be finalized by the currently deployed code before the runtime reader changes; deploying
+# across one would strand a committed book behind an intentionally fail-closed schema boundary.
+SETTLEMENT_STATE_GATE=""
+if ! SETTLEMENT_STATE_GATE="$("${SSH[@]}" "$BOXHOST" \
+  "set -e
+   for book in autonomous china hk; do
+     book_dir='$LIVE_DATA_PATH/portfolios/'\"\$book\"
+     if [ -e \"\$book_dir/paper_transaction.json\" ]; then
+       printf 'unresolved_wal:%s\\n' \"\$book\"
+       exit 21
+     fi
+     if [ -d \"\$book_dir/settlement_receipts\" ] \
+        && find \"\$book_dir/settlement_receipts\" -maxdepth 1 -type f -name '*.json' \
+             -print -quit | grep -q .; then
+       printf 'unfinalized_receipt:%s\\n' \"\$book\"
+       exit 22
+     fi
+   done
+   printf 'clean\\n'" 2>&1)"; then
+  printf '%s\n' "$SETTLEMENT_STATE_GATE" >>"$LOG"
+  fail_release "unresolved paper settlement state blocks receipt-schema upgrade"
+fi
+printf '%s\n' "$SETTLEMENT_STATE_GATE" >>"$LOG"
+if [[ "$SETTLEMENT_STATE_GATE" != "clean" ]]; then
+  fail_release "paper settlement state gate returned an invalid result"
+fi
+
 # Bind the pending cohort to the exact canonical US account/fill bytes observed while no service
 # writer can run.  Missing or unreadable authority artifacts are a release failure, never an empty
 # baseline.  The hashes stay in the deploy process only; runtime state remains on the VPS.

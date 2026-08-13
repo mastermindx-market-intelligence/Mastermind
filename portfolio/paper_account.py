@@ -18,12 +18,13 @@ import json
 import math
 import os
 import fcntl
+import threading
 from copy import deepcopy
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timezone
 from numbers import Real
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
 
 import bot  # noqa: F401  -> vendor/macro onto sys.path
@@ -36,6 +37,7 @@ _DATA = _ROOT / "data" / "portfolio"
 _ACCOUNT_PATH = _DATA / "account.json"
 _FILLS_PATH = _DATA / "fills.jsonl"
 _NAV_PATH = _DATA / "nav_history.jsonl"
+_PAPER_LOCK_STATE = threading.local()
 
 
 def _pending_path() -> Path:
@@ -129,6 +131,25 @@ def _buyable_shares(shares: float, px: float, nav_now: float) -> float:
     if q * px < _min_trade_frac() * max(nav_now, 0.0):
         return 0.0
     return q
+
+
+def _persisted_positive_number(value: float, digits: int) -> float:
+    """Round ordinary fill facts compactly without collapsing a real dust exit to zero."""
+    raw = float(value)
+    rounded = round(raw, digits)
+    if rounded > 0.0:
+        return rounded
+    precise = round(raw, 12)
+    return precise if precise > 0.0 else raw
+
+
+def _persisted_fill_facts(shares: float, price: float, value: float) -> dict[str, float]:
+    """Canonical display precision with positive sub-cent/sub-quantum exits preserved exactly."""
+    return {
+        "shares": _persisted_positive_number(shares, 6),
+        "price": _persisted_positive_number(price, 4),
+        "value": _persisted_positive_number(value, 2),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +258,23 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
             pass
 
 
+def _durable_unlink(path: Path) -> None:
+    """Remove one runtime-state file and durably publish the directory change."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    try:
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except OSError:
+        # Match atomic replacement: unlink is complete even where directory fsync is unsupported.
+        pass
+
+
 def _save_account(state: dict[str, Any], portfolio_id: str | None = None) -> None:
     _ensure_dir(portfolio_id)
     _atomic_write_bytes(
@@ -271,15 +309,20 @@ def accrue_cash_yield(asof: str, portfolio_id: str | None = None,
     assumes. Only the cash value changes; ``mark()``'s idempotent nav_history write is untouched."""
     rate = _cash_yield_rate() if annual_rate is None else float(annual_rate)
     try:
-        state = _load_account(portfolio_id)
-        cash = float(state.get("cash") or 0.0)
-        if state.get("cash_yield_through") == asof or cash <= 0 or rate <= 0:
-            return round(cash, 2)
-        cash = round(cash * (1.0 + rate / _TRADING_DAYS), 2)
-        state["cash"] = cash
-        state["cash_yield_through"] = asof
-        _save_account(state, portfolio_id)
-        return cash
+        with _paper_transaction_lock(portfolio_id):
+            state = _load_account(portfolio_id)
+            cash = float(state.get("cash") or 0.0)
+            # A committed settlement receipt owns the exact post-transaction cash until all
+            # projections are durable. Accrual waits rather than changing the dated NAV preimage.
+            if pending_settlement_receipts(portfolio_id):
+                return round(cash, 2)
+            if state.get("cash_yield_through") == asof or cash <= 0 or rate <= 0:
+                return round(cash, 2)
+            cash = round(cash * (1.0 + rate / _TRADING_DAYS), 2)
+            state["cash"] = cash
+            state["cash_yield_through"] = asof
+            _save_account(state, portfolio_id)
+            return cash
     except Exception:  # noqa: BLE001 — the sweep is additive; never break a build/mark
         try:
             return round(float(_load_account(portfolio_id).get("cash") or 0.0), 2)
@@ -289,10 +332,21 @@ def accrue_cash_yield(asof: str, portfolio_id: str | None = None,
 
 def _append_jsonl(path: Path, record: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    created = not path.exists()
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, default=str) + "\n")
         fh.flush()
         os.fsync(fh.fileno())
+    if created:
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # The appended row is durable even where the filesystem rejects directory fsync.
+            pass
 
 
 def _load_jsonl(path: Path) -> list[dict]:
@@ -321,7 +375,12 @@ def _load_jsonl(path: Path) -> list[dict]:
 # guessing or booking a duplicate fill.  The artifact is removed only after account, fills, and the
 # exact pending target (when settlement supplied one) have all reached their committed state.
 PAPER_TRANSACTION_SCHEMA = "paper_transaction.v1"
-PAPER_SETTLEMENT_RECEIPT_SCHEMA = "paper_settlement_receipt.v1"
+PAPER_SETTLEMENT_RECEIPT_SCHEMA = "paper_settlement_receipt.v2"
+# Fill shares are persisted to six decimal places while the authoritative account snapshot keeps
+# the engine's full-precision float.  Each persisted fill can therefore explain at most half one
+# share quantum of representation drift; receipt validation must never use an unbounded relative
+# tolerance that grows with position size.
+_PERSISTED_FILL_SHARE_QUANTUM = 0.000001
 
 
 class PaperTransactionConflict(RuntimeError):
@@ -345,14 +404,28 @@ def _settlement_receipt_path(
 
 @contextmanager
 def _paper_transaction_lock(portfolio_id: str | None = None):
-    """Serialize prepare/replay within one paper book across scheduler/API processes."""
+    """Serialize one book across processes, while allowing same-thread nested boundaries."""
     path = _paths(portfolio_id)["data"] / ".paper_transaction.lock"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+b") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    key = str(path.resolve())
+    depths = getattr(_PAPER_LOCK_STATE, "depths", None)
+    if depths is None:
+        depths = {}
+        _PAPER_LOCK_STATE.depths = depths
+    if depths.get(key, 0):
+        depths[key] += 1
         try:
             yield
         finally:
+            depths[key] -= 1
+        return
+    with path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        depths[key] = 1
+        try:
+            yield
+        finally:
+            depths.pop(key, None)
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
@@ -423,18 +496,42 @@ def _repair_partial_jsonl_tail(path: Path) -> None:
     _atomic_write_bytes(path, raw + b"\n")
 
 
-def _pending_clear_transition(portfolio_id: str | None = None) -> dict[str, Any]:
+def _pending_clear_transition(
+    portfolio_id: str | None = None,
+    *,
+    prices: dict[str, float] | None = None,
+    price_sources: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Capture the exact queued target that a successful settlement is allowed to remove."""
     path = _pending_target_path(portfolio_id)
     pending_payload = _read_pending_target_payload(portfolio_id)
-    return {
+    settlement_prices = {
+        str(ticker).upper().strip(): float(price)
+        for ticker, price in (prices or {}).items()
+        if (
+            isinstance(ticker, str)
+            and ticker.strip()
+            and isinstance(price, Real)
+            and not isinstance(price, bool)
+            and math.isfinite(float(price))
+            and float(price) > 0.0
+        )
+    }
+    transition = {
         "kind": "clear_pending_target",
         "filename": path.name,
         "before_sha256": _file_sha256(path),
         # This is the accepted executable instruction, including its hash-bound structured PM
         # decision.  It becomes the recovery outbox if account/fill commit outlives the caller.
         "pending_payload": deepcopy(pending_payload),
+        "settlement_prices": settlement_prices,
     }
+    if price_sources:
+        transition["settlement_price_sources"] = {
+            ticker: str(price_sources.get(ticker) or "settlement_snapshot")
+            for ticker in settlement_prices
+        }
+    return transition
 
 
 def _write_settlement_receipt(
@@ -469,6 +566,15 @@ def _write_settlement_receipt(
         for entry in (transaction.get("fills") or [])
         if isinstance(entry, dict) and isinstance(entry.get("record"), dict)
     ]
+    identity = transaction.get("identity")
+    if not isinstance(identity, dict) or _content_sha256(identity) != transaction_id:
+        raise PaperTransactionConflict("settlement transaction identity preimage is invalid")
+    account_before = transaction.get("account_before")
+    if (
+        not isinstance(account_before, dict)
+        or identity.get("account_before_sha256") != _content_sha256(account_before)
+    ):
+        raise PaperTransactionConflict("settlement transaction before-state preimage is invalid")
     receipt = {
         "schema": PAPER_SETTLEMENT_RECEIPT_SCHEMA,
         "transaction_id": transaction_id,
@@ -483,11 +589,20 @@ def _write_settlement_receipt(
         "decision_snapshot": deepcopy(pending.get("decision_snapshot")),
         "queued_asof": pending.get("asof"),
         "fills": fills,
+        # The transaction id is the external anchor: account.json retains it even for zero-fill
+        # target settlements.  Keeping the exact preimage here lets recovery detect any change to
+        # captured prices, cash, positions, target, or fills rather than trusting a self-rehash.
+        "transaction_identity": deepcopy(identity),
+        "account_before": deepcopy(account_before),
         "account_before_positions": deepcopy(
             (transaction.get("account_before") or {}).get("positions") or {}
         ),
         "account_after_positions": deepcopy(
             (transaction.get("account_after") or {}).get("positions") or {}
+        ),
+        "settlement_prices": deepcopy(transition.get("settlement_prices") or {}),
+        "settlement_price_sources": deepcopy(
+            transition.get("settlement_price_sources") or {}
         ),
     }
     if constraints is not None:
@@ -506,6 +621,333 @@ def _write_settlement_receipt(
         return existing
     _atomic_write_bytes(path, encoded)
     return receipt
+
+
+def validated_settlement_receipt_fills(receipt: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return fills only when IDs, date, and the committed account transition all agree.
+
+    A deterministic fill id proves only that a row is internally self-consistent; it is not a
+    signature.  Bind the complete signed share flow back to the receipt's immutable before/after
+    account snapshots so a changed-and-re-ID'd row, omitted fill, or unexplained position mutation
+    cannot become settlement authority.
+    """
+    transaction_id = str(receipt.get("transaction_id") or "")
+    fills = receipt.get("fills")
+    settlement_asof = receipt.get("settlement_asof")
+    if (
+        len(transaction_id) != 64
+        or any(ch not in "0123456789abcdef" for ch in transaction_id)
+        or not isinstance(fills, list)
+        or not isinstance(settlement_asof, str)
+    ):
+        raise PaperTransactionConflict("settlement receipt fill lineage is invalid")
+    identity = receipt.get("transaction_identity")
+    account_before = receipt.get("account_before")
+    if (
+        not isinstance(identity, dict)
+        or _content_sha256(identity) != transaction_id
+        or identity.get("schema") != PAPER_TRANSACTION_SCHEMA
+        or identity.get("portfolio_id") != receipt.get("portfolio_id")
+        or identity.get("asof") != settlement_asof
+        or not isinstance(account_before, dict)
+        or identity.get("account_before_sha256") != _content_sha256(account_before)
+    ):
+        raise PaperTransactionConflict("settlement receipt transaction preimage is invalid")
+    identity_after = identity.get("account_after")
+    identity_fills = identity.get("fills")
+    identity_followup = identity.get("followup")
+    if (
+        not isinstance(identity_after, dict)
+        or not isinstance(identity_fills, list)
+        or not isinstance(identity_followup, dict)
+        or identity_followup.get("kind") != "clear_pending_target"
+    ):
+        raise PaperTransactionConflict("settlement receipt transaction preimage is invalid")
+    pending_payload = identity_followup.get("pending_payload")
+    if not isinstance(pending_payload, dict):
+        raise PaperTransactionConflict("settlement receipt transaction preimage is invalid")
+    if (
+        receipt.get("pending_target_sha256") != identity_followup.get("before_sha256")
+        or receipt.get("target") != pending_payload.get("target")
+        or receipt.get("decision_snapshot") != pending_payload.get("decision_snapshot")
+        or receipt.get("queued_asof") != pending_payload.get("asof")
+        or receipt.get("settlement_prices") != identity_followup.get("settlement_prices")
+        or receipt.get("settlement_price_sources")
+        != (identity_followup.get("settlement_price_sources") or {})
+        or receipt.get("account_before_positions") != (account_before.get("positions") or {})
+        or receipt.get("account_after_positions") != (identity_after.get("positions") or {})
+    ):
+        raise PaperTransactionConflict("settlement receipt bound preimage fields disagree")
+    unsigned_fills = [
+        {
+            key: value
+            for key, value in fill.items()
+            if key not in {"fill_id", "transaction_id"}
+        }
+        for fill in fills
+        if isinstance(fill, dict)
+    ]
+    if unsigned_fills != identity_fills:
+        raise PaperTransactionConflict("settlement receipt fill preimage disagrees")
+    try:
+        canonical_settlement_asof = date.fromisoformat(settlement_asof).isoformat()
+    except ValueError as exc:
+        raise PaperTransactionConflict(
+            "settlement receipt fill date lineage is invalid"
+        ) from exc
+    if settlement_asof != canonical_settlement_asof:
+        raise PaperTransactionConflict("settlement receipt fill date lineage is invalid")
+
+    def _snapshot_shares(field: str) -> dict[str, float]:
+        snapshot = receipt.get(field)
+        if not isinstance(snapshot, dict):
+            raise PaperTransactionConflict(
+                "settlement receipt position lineage is invalid"
+            )
+        shares_by_ticker: dict[str, float] = {}
+        for raw_ticker, raw_position in snapshot.items():
+            ticker = _canonical_target_ticker(raw_ticker)
+            if (
+                not ticker
+                or raw_ticker != ticker
+                or not isinstance(raw_position, dict)
+            ):
+                raise PaperTransactionConflict(
+                    "settlement receipt position lineage is invalid"
+                )
+            raw_shares = raw_position.get("shares")
+            if not isinstance(raw_shares, Real) or isinstance(raw_shares, bool):
+                raise PaperTransactionConflict(
+                    "settlement receipt position lineage is invalid"
+                )
+            shares = float(raw_shares)
+            if not math.isfinite(shares) or shares < 0.0:
+                raise PaperTransactionConflict(
+                    "settlement receipt position lineage is invalid"
+                )
+            shares_by_ticker[ticker] = shares
+        return shares_by_ticker
+
+    before_shares = _snapshot_shares("account_before_positions")
+    after_shares = _snapshot_shares("account_after_positions")
+    raw_before_cash = account_before.get("cash")
+    raw_after_cash = identity_after.get("cash")
+    if (
+        not isinstance(raw_before_cash, Real)
+        or isinstance(raw_before_cash, bool)
+        or not isinstance(raw_after_cash, Real)
+        or isinstance(raw_after_cash, bool)
+        or not math.isfinite(float(raw_before_cash))
+        or not math.isfinite(float(raw_after_cash))
+        or float(raw_before_cash) < 0.0
+        or float(raw_after_cash) < 0.0
+    ):
+        raise PaperTransactionConflict("settlement receipt cash lineage is invalid")
+    validated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    signed_fill_shares: dict[str, float] = {}
+    fill_counts: dict[str, int] = {}
+    signed_fill_cash = 0.0
+    for index, record in enumerate(fills):
+        if not isinstance(record, dict):
+            raise PaperTransactionConflict("settlement receipt contains a malformed fill")
+        ticker = _canonical_target_ticker(record.get("ticker"))
+        side = str(record.get("side") or "").lower().strip()
+        if not ticker or record.get("ticker") != ticker or side not in {"buy", "sell"}:
+            raise PaperTransactionConflict("settlement receipt fill instrument is invalid")
+        if record.get("date") != canonical_settlement_asof:
+            raise PaperTransactionConflict(
+                "settlement receipt fill date does not match settlement"
+            )
+        numeric: dict[str, float] = {}
+        for key in ("shares", "price", "value"):
+            raw = record.get(key)
+            if not isinstance(raw, Real) or isinstance(raw, bool):
+                raise PaperTransactionConflict("settlement receipt fill facts are invalid")
+            value = float(raw)
+            if not math.isfinite(value) or value <= 0.0:
+                raise PaperTransactionConflict("settlement receipt fill facts are invalid")
+            numeric[key] = value
+        # The engine persists shares to 6dp, price to 4dp, and value to cents.  Independent
+        # rounding can move their displayed product by roughly shares*0.00005 plus
+        # price*0.0000005; tolerate only that mathematically bounded representation error.
+        rounding_bound = (
+            numeric["shares"] * 0.00005
+            + numeric["price"] * 0.0000005
+            + 0.005
+        )
+        if abs(numeric["shares"] * numeric["price"] - numeric["value"]) > (
+            rounding_bound + 1e-9
+        ):
+            raise PaperTransactionConflict("settlement receipt fill value is inconsistent")
+        if record.get("transaction_id") != transaction_id:
+            raise PaperTransactionConflict("settlement receipt fill transaction is invalid")
+        fill_id = str(record.get("fill_id") or "")
+        expected_id = hashlib.sha256(
+            _canonical_json_bytes({
+                "transaction_id": transaction_id,
+                "index": index,
+                "fill": {
+                    key: value
+                    for key, value in record.items()
+                    if key not in {"fill_id", "transaction_id"}
+                },
+            })
+        ).hexdigest()
+        if fill_id != expected_id or fill_id in seen:
+            raise PaperTransactionConflict("settlement receipt deterministic fill id is invalid")
+        seen.add(fill_id)
+        signed_fill_shares[ticker] = signed_fill_shares.get(ticker, 0.0) + (
+            numeric["shares"] if side == "buy" else -numeric["shares"]
+        )
+        signed_fill_cash += numeric["value"] if side == "sell" else -numeric["value"]
+        fill_counts[ticker] = fill_counts.get(ticker, 0) + 1
+        validated.append(deepcopy(record))
+
+    for ticker in sorted(
+        set(before_shares) | set(after_shares) | set(signed_fill_shares)
+    ):
+        account_delta = after_shares.get(ticker, 0.0) - before_shares.get(ticker, 0.0)
+        persisted_fill_delta = signed_fill_shares.get(ticker, 0.0)
+        # Summing N independently rounded 6dp fills permits at most N half-quanta of absolute
+        # drift.  The fixed epsilon covers binary-float arithmetic; it never scales with shares.
+        tolerance = (
+            fill_counts.get(ticker, 0) * _PERSISTED_FILL_SHARE_QUANTUM / 2.0
+            + 1e-9
+        )
+        if abs(account_delta - persisted_fill_delta) > tolerance:
+            raise PaperTransactionConflict(
+                f"settlement receipt fills do not explain account share delta: {ticker}"
+            )
+    # Each fill value is persisted to cents, so aggregate cash can differ from the engine's
+    # unrounded internal values by at most half a cent per fill.
+    cash_delta = float(raw_after_cash) - float(raw_before_cash)
+    cash_tolerance = len(validated) * 0.005 + 1e-8
+    if abs(cash_delta - signed_fill_cash) > cash_tolerance:
+        raise PaperTransactionConflict(
+            "settlement receipt fills do not explain account cash delta"
+        )
+    return validated
+
+
+def _canonical_settlement_price_symbol(value: Any) -> str:
+    """Canonical executable/benchmark symbol accepted in settlement price evidence."""
+    if not isinstance(value, str):
+        return ""
+    symbol = value.upper().strip()
+    if symbol.startswith("^"):
+        tail = symbol[1:]
+        if tail and len(symbol) <= 16 and all(
+            char.isalnum() or char in ".-" for char in tail
+        ):
+            return symbol
+        return ""
+    return _canonical_target_ticker(value)
+
+
+def validated_settlement_receipt_prices(
+    receipt: dict[str, Any],
+) -> dict[str, float]:
+    """Return exact settlement marks only when coverage and immutable fill prices agree."""
+    raw_prices = receipt.get("settlement_prices")
+    if not isinstance(raw_prices, dict):
+        raise PaperTransactionConflict(
+            "settlement receipt price evidence is invalid"
+        )
+    prices: dict[str, float] = {}
+    for raw_symbol, raw_price in raw_prices.items():
+        symbol = _canonical_settlement_price_symbol(raw_symbol)
+        if not symbol or raw_symbol != symbol:
+            raise PaperTransactionConflict(
+                "settlement receipt price symbol is noncanonical"
+            )
+        if not isinstance(raw_price, Real) or isinstance(raw_price, bool):
+            raise PaperTransactionConflict(
+                "settlement receipt price evidence is invalid"
+            )
+        price = float(raw_price)
+        if not math.isfinite(price) or price <= 0.0:
+            raise PaperTransactionConflict(
+                "settlement receipt price evidence is invalid"
+            )
+        prices[symbol] = price
+
+    target = validate_target_weights(
+        receipt.get("target"),
+        require_canonical_tickers=True,
+        portfolio_id=str(receipt.get("portfolio_id") or "flagship"),
+    )
+    required = set(target)
+    for field in ("account_before_positions", "account_after_positions"):
+        snapshot = receipt.get(field)
+        if not isinstance(snapshot, dict):
+            raise PaperTransactionConflict(
+                "settlement receipt position lineage is invalid"
+            )
+        required.update(snapshot)
+    from portfolio import registry
+    required.add(registry.benchmark(str(receipt.get("portfolio_id") or "flagship")))
+    missing = sorted(required - set(prices))
+    if missing:
+        raise PaperTransactionConflict(
+            "settlement receipt price coverage is incomplete: " + ",".join(missing)
+        )
+
+    fills = validated_settlement_receipt_fills(receipt)
+    for fill in fills:
+        ticker = str(fill["ticker"])
+        fill_price = float(fill["price"])
+        # Fills persist the session price at 4dp while the captured mark may retain more digits.
+        if abs(prices[ticker] - fill_price) > 0.00005 + 1e-12:
+            raise PaperTransactionConflict(
+                f"settlement receipt price contradicts fill: {ticker}"
+            )
+    return prices
+
+
+def settlement_receipt_fills_are_durable(
+    receipt: dict[str, Any],
+    portfolio_id: str | None = None,
+) -> bool:
+    """Prove every receipt fill is present byte-for-value in the durable trade blotter.
+
+    The account transition, public positions, and decision log must never advance past a receipt
+    whose fill rows are absent or changed in ``fills.jsonl``.  Legacy rows without deterministic
+    IDs remain readable, but malformed JSON and duplicate/conflicting receipt IDs fail closed.
+    """
+    expected = validated_settlement_receipt_fills(receipt)
+    if not expected:
+        return True
+    path = _paths(portfolio_id)["fills"]
+    if not path.exists():
+        raise PaperTransactionConflict("settlement receipt fills are absent from trade history")
+    observed: dict[str, dict[str, Any]] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as exc:
+        raise PaperTransactionConflict("settlement trade history is unreadable") from exc
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception as exc:
+            raise PaperTransactionConflict("settlement trade history is malformed") from exc
+        if not isinstance(row, dict):
+            raise PaperTransactionConflict("settlement trade history contains a non-object row")
+        fill_id = row.get("fill_id")
+        if fill_id is None:
+            continue
+        if not isinstance(fill_id, str) or fill_id in observed:
+            raise PaperTransactionConflict("settlement trade history fill identity is invalid")
+        observed[fill_id] = row
+    for fill in expected:
+        durable = observed.get(fill["fill_id"])
+        if durable != fill:
+            raise PaperTransactionConflict(
+                "settlement receipt fill is absent or differs in trade history"
+            )
+    return True
 
 
 def pending_settlement_receipts(portfolio_id: str | None = None) -> list[dict[str, Any]]:
@@ -543,6 +985,8 @@ def pending_settlement_receipts(portfolio_id: str | None = None) -> list[dict[st
         )
         if row.get("target_sha256") != _target_sha256(target):
             raise PaperTransactionConflict("settlement receipt target digest mismatch")
+        validated_settlement_receipt_fills(row)
+        validated_settlement_receipt_prices(row)
         rows.append(row)
     rows.sort(key=lambda row: (str(row.get("committed_at") or ""), row["transaction_id"]))
     return rows
@@ -557,11 +1001,10 @@ def acknowledge_settlement_receipt(
     if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
         raise ValueError("invalid settlement receipt transaction id")
     path = _settlement_receipt_path(value, portfolio_id)
-    try:
-        path.unlink()
-        return True
-    except FileNotFoundError:
+    if not path.exists():
         return False
+    _durable_unlink(path)
+    return True
 
 
 def _pending_orders_transition(
@@ -806,7 +1249,7 @@ def _recover_paper_transaction_unlocked(
 
     receipt = _write_settlement_receipt(transaction, portfolio_id)
     _apply_transaction_followup(transaction, portfolio_id)
-    _transaction_path(portfolio_id).unlink()
+    _durable_unlink(_transaction_path(portfolio_id))
     result = {
         "transaction_id": transaction.get("transaction_id"),
         "portfolio_id": transaction.get("portfolio_id"),
@@ -834,9 +1277,19 @@ def _commit_account_and_fills(
     followup: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Prepare and commit one replay-safe paper mutation."""
+    try:
+        canonical_asof = date.fromisoformat(asof).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise PaperTransactionConflict("paper transaction asof is not a canonical ISO date") from exc
+    if asof != canonical_asof:
+        raise PaperTransactionConflict("paper transaction asof is not a canonical ISO date")
     with _paper_transaction_lock(portfolio_id):
         if _transaction_path(portfolio_id).exists():
             _recover_paper_transaction_unlocked(portfolio_id)
+        if pending_settlement_receipts(portfolio_id):
+            raise PaperTransactionConflict(
+                "paper mutation blocked by an unfinalized settlement receipt"
+            )
 
         before_snapshot = deepcopy(before)
         after_snapshot = deepcopy(after)
@@ -849,12 +1302,16 @@ def _commit_account_and_fills(
             "portfolio_id": str(portfolio_id or "flagship"),
             "asof": str(asof),
             "account_before_sha256": _content_sha256(before_snapshot),
-            "account_after": after_snapshot,
-            "fills": raw_fills,
-            "followup": followup,
+            "account_after": deepcopy(after_snapshot),
+            "fills": deepcopy(raw_fills),
+            "followup": deepcopy(followup),
         }
         transaction_id = hashlib.sha256(_canonical_json_bytes(seed)).hexdigest()
-        if before_snapshot != after_snapshot or raw_fills:
+        is_target_settlement = (
+            isinstance(followup, dict)
+            and followup.get("kind") == "clear_pending_target"
+        )
+        if before_snapshot != after_snapshot or raw_fills or is_target_settlement:
             after_snapshot["last_paper_transaction_id"] = transaction_id
 
         fill_entries: list[dict[str, Any]] = []
@@ -881,6 +1338,7 @@ def _commit_account_and_fills(
             "account_after_sha256": _content_sha256(after_snapshot),
             "fills": fill_entries,
             "followup": followup,
+            "identity": seed,
         }
         _write_transaction(transaction, portfolio_id)
         return _recover_paper_transaction_unlocked(portfolio_id)
@@ -1441,9 +1899,7 @@ def rebalance(
                 "date": asof,
                 "ticker": ticker,
                 "side": "sell",
-                "shares": round(sell_shares, 6),
-                "price": round(px, 4),
-                "value": round(value, 2),
+                **_persisted_fill_facts(sell_shares, px, value),
             })
 
     # Close out only tickers GENUINELY dropped from the target *and* carrying a trusted price this
@@ -1465,9 +1921,7 @@ def rebalance(
                 "date": asof,
                 "ticker": ticker,
                 "side": "sell",
-                "shares": round(sell_shares, 6),
-                "price": round(px, 4),
-                "value": round(value, 2),
+                **_persisted_fill_facts(sell_shares, px, value),
             })
 
     # ---- process buys ----
@@ -1506,9 +1960,7 @@ def rebalance(
                 "date": asof,
                 "ticker": ticker,
                 "side": "buy",
-                "shares": round(buy_shares, 6),
-                "price": round(px, 4),
-                "value": round(value, 2),
+                **_persisted_fill_facts(buy_shares, px, value),
             })
 
     for ticker, original_lot in preserved_lots.items():
@@ -1598,7 +2050,7 @@ def execute_fill(ticker: str, side: str, *, weight: float | None = None,
         else:
             state["positions"][ticker] = {"shares": shares, "avg_cost": px}
         fill = {"date": asof, "ticker": ticker, "side": "buy",
-                "shares": round(shares, 6), "price": round(px, 4), "value": round(value, 2)}
+                **_persisted_fill_facts(shares, px, value)}
     else:                                                        # sell / trim / exit
         if not pos or pos["shares"] <= 1e-9:
             return {"ok": False, "ticker": ticker, "error": "no position to sell"}
@@ -1611,7 +2063,7 @@ def execute_fill(ticker: str, side: str, *, weight: float | None = None,
         if pos["shares"] < 1e-9:
             del state["positions"][ticker]
         fill = {"date": asof, "ticker": ticker, "side": "sell",
-                "shares": round(sell, 6), "price": round(px, 4), "value": round(value, 2)}
+                **_persisted_fill_facts(sell, px, value)}
 
     _commit_account_and_fills(
         before_state,
@@ -1878,7 +2330,7 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
             del state["positions"][ticker]
         fills.append({
             "date": asof, "ticker": ticker, "side": "sell",
-            "shares": round(sell, 6), "price": round(px, 4), "value": round(value, 2),
+            **_persisted_fill_facts(sell, px, value),
             "from_pending": True,
         })
 
@@ -1906,7 +2358,7 @@ def fill_pending(prices: dict[str, float], asof: str, portfolio_id: str | None =
             state["positions"][ticker] = {"shares": buy, "avg_cost": px}
         fills.append({
             "date": asof, "ticker": ticker, "side": "buy",
-            "shares": round(buy, 6), "price": round(px, 4), "value": round(value, 2),
+            **_persisted_fill_facts(buy, px, value),
             "from_pending": True,
         })
     _commit_account_and_fills(
@@ -2063,7 +2515,21 @@ def _pending_decision_record(
                 "rebound_asof": asof,
                 "reason": "deterministic_risk_rewrite",
             })
-            record["target_lineage"] = lineage[-20:]
+            if len(lineage) > 20:
+                tail = lineage[-19:]
+                root = str(record.get("accepted_target_sha256") or lineage[0].get(
+                    "from_target_sha256"
+                ) or "")
+                bridge_to = str(tail[0].get("from_target_sha256") or "")
+                lineage = [{
+                    "from_target_sha256": root,
+                    "to_target_sha256": bridge_to,
+                    "rebound_asof": asof,
+                    "reason": "deterministic_risk_rewrite_compacted",
+                    "compacted_transitions": len(record.get("target_lineage") or []) - 18,
+                }] + tail
+            record["target_lineage"] = lineage
+        record.setdefault("accepted_target_sha256", previous or digest)
         record["target_sha256"] = digest
         record["portfolio_id"] = pid
         record["last_bound_asof"] = asof
@@ -2074,6 +2540,7 @@ def _pending_decision_record(
         "portfolio_id": pid,
         "accepted_asof": asof,
         "target_sha256": digest,
+        "accepted_target_sha256": digest,
         "submission": supplied,
     }
 
@@ -2308,6 +2775,15 @@ def quarantine_pending_target(portfolio_id: str | None, reason: str,
     }
     try:
         source.replace(destination)
+        try:
+            dir_fd = os.open(data_dir, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # The atomic rename remains fail-closed where directory fsync is unavailable.
+            pass
         record["status"] = "quarantined"
     except Exception as exc:  # noqa: BLE001 - failure remains a hard, non-executing stop
         record["status"] = "quarantine_failed"
@@ -2344,7 +2820,11 @@ def quarantine_pending_target(portfolio_id: str | None, reason: str,
     return record
 
 
-def preflight_pending_target(portfolio_id: str | None = None) -> dict[str, Any]:
+def preflight_pending_target(
+    portfolio_id: str | None = None,
+    *,
+    _locked: bool = False,
+) -> dict[str, Any]:
     """Validate queued executable state before any consumer may inspect or rewrite its target.
 
     This is the single cutover boundary used by settlement, deterministic de-risk, and overnight
@@ -2352,6 +2832,12 @@ def preflight_pending_target(portfolio_id: str | None = None) -> dict[str, Any]:
     file has been recoverably quarantined (or its quarantine move failed closed).  Missing queues
     and valid regional legacy queues remain ordinary ``ok=True`` outcomes.
     """
+    # Validation and a possible quarantine are one compare-and-act boundary.  Otherwise a valid
+    # PM queue written after our read could be renamed based on the stale artifact we inspected.
+    if not _locked:
+        with _paper_transaction_lock(portfolio_id):
+            return preflight_pending_target(portfolio_id, _locked=True)
+
     # Finish any already-prepared settlement first.  In particular, a crash/failure after account
     # and fills committed but before queue deletion must clear that exact old queue before it can be
     # mistaken for a fresh instruction.
@@ -2392,6 +2878,7 @@ def save_pending_target(
     decision_snapshot: dict[str, Any] | None = None,
     execution_constraints: dict[str, Any] | None = None,
     require_pending_absent: bool = False,
+    _after_save_locked: Callable[[], None] | None = None,
 ) -> None:
     """Atomically persist the latest decided target and its accepted PM provenance.
 
@@ -2413,6 +2900,15 @@ def save_pending_target(
         asof=asof,
         portfolio_id=portfolio_id,
     )
+    if decision is not None:
+        # Once an accepted queue was atomically paired with a decision-ledger claim, deterministic
+        # risk rewrites must retain that reconciliation requirement.  A later rewrite has no new
+        # callback because it inherits the original decision; clearing the flag would let a
+        # missing/mismatched row masquerade as a pre-ledger legacy queue at settlement.
+        decision["decision_log_required"] = bool(
+            decision.get("decision_log_required") is True
+            or _after_save_locked is not None
+        )
     constraints = _validated_execution_constraints(
         execution_constraints,
         target=target,
@@ -2442,6 +2938,8 @@ def save_pending_target(
         payload["portfolio_id"] = portfolio_id
     if not isinstance(require_pending_absent, bool):
         raise TypeError("require_pending_absent must be boolean")
+    if _after_save_locked is not None and not callable(_after_save_locked):
+        raise TypeError("_after_save_locked must be callable")
     with _paper_transaction_lock(portfolio_id):
         path = _pending_target_path(portfolio_id)
         if constraints is not None:
@@ -2458,15 +2956,22 @@ def save_pending_target(
                 )
         if require_pending_absent and path.exists():
             raise PendingTargetCASConflict(portfolio_id)
-        tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        try:
-            tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-            os.replace(tmp, path)
-        finally:
+        prior_payload = path.read_bytes() if path.exists() else None
+        _atomic_write_bytes(
+            path,
+            json.dumps(payload, indent=2, default=str).encode("utf-8"),
+        )
+        if _after_save_locked is not None:
             try:
-                tmp.unlink()
-            except FileNotFoundError:
-                pass
+                _after_save_locked()
+            except Exception:
+                # The queue and its user-facing decision claim are one logical publication.
+                # Restore the prior executable intent when that projection cannot be written.
+                if prior_payload is None:
+                    _durable_unlink(path)
+                else:
+                    _atomic_write_bytes(path, prior_payload)
+                raise
 
 
 def _read_pending_target_payload(portfolio_id: str | None = None) -> dict | None:
@@ -2496,14 +3001,13 @@ def load_pending_target(portfolio_id: str | None = None) -> dict | None:
 
 
 def clear_pending_target(portfolio_id: str | None = None) -> None:
-    try:
-        _pending_target_path(portfolio_id).unlink()
-    except FileNotFoundError:
-        pass
+    _durable_unlink(_pending_target_path(portfolio_id))
 
 
 def settle_target(prices: dict[str, float], asof: str,
-                  portfolio_id: str | None = None) -> dict | None:
+                  portfolio_id: str | None = None, *,
+                  _price_sources: dict[str, str] | None = None,
+                  _locked: bool = False) -> dict | None:
     """If a target was queued while the market was closed, rebalance to it now (at the open marks)
     and clear it. Returns the settled target dict, or None if nothing was queued. Paper-only.
 
@@ -2513,12 +3017,42 @@ def settle_target(prices: dict[str, float], asof: str,
     ``UnpriceableExitPrices`` is raised before an account write and the pending target is retained
     for a later retry.
     """
+    try:
+        canonical_asof = date.fromisoformat(asof).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise PaperTransactionConflict("settlement asof is not a canonical ISO date") from exc
+    if asof != canonical_asof:
+        raise PaperTransactionConflict("settlement asof is not a canonical ISO date")
+    if not _locked:
+        with _paper_transaction_lock(portfolio_id):
+            return settle_target(
+                prices,
+                asof,
+                portfolio_id=portfolio_id,
+                _price_sources=_price_sources,
+                _locked=True,
+            )
     preflight = preflight_pending_target(portfolio_id)
     if not preflight["ok"]:
         raise PendingTargetQuarantined(preflight["quarantine"])
     pt = preflight["pending"]
     if not pt:
         return None
+    # A modern Brain queue and its user-facing ledger row are one logical publication.  A crash
+    # between the two durable file writes must fail before account/fill mutation, not after it.
+    decision_snapshot = pt.get("decision_snapshot")
+    if isinstance(decision_snapshot, dict) and (
+        decision_snapshot.get("decision_log_required") is True
+    ):
+        try:
+            from bot import decision_rows
+            decision_rows.validate_queued_decision_snapshot(
+                str(portfolio_id or "flagship"), decision_snapshot
+            )
+        except Exception as exc:
+            raise PaperTransactionConflict(
+                f"required queued decision projection is unavailable: {exc}"
+            ) from exc
     # Preflight already applied this validator in strict-persisted mode.  Re-validate here to close
     # a future refactor/TOCTOU seam and to pass canonical weights into the rebalance engine.
     target = validate_target_weights(
@@ -2543,6 +3077,16 @@ def settle_target(prices: dict[str, float], asof: str,
         prices,
         portfolio_id=portfolio_id,
     )
+    # A target settlement also writes the dated benchmark-relative NAV projection.  Capture that
+    # benchmark mark in the same immutable transaction preimage as the execution prices.  Reject a
+    # low-level caller before account/fill mutation when it omits the benchmark; otherwise the
+    # commit would manufacture an outbox receipt that can never pass finalization.
+    from portfolio import registry
+    benchmark = registry.benchmark(portfolio_id)
+    if not _trusted_execution_price(prices.get(benchmark)):
+        missing_prices["tickers"] = sorted(
+            set(missing_prices["tickers"]) | {benchmark}
+        )
     if missing_prices["tickers"]:
         raise UnpriceableExitPrices(
             missing_prices["tickers"],
@@ -2550,7 +3094,9 @@ def settle_target(prices: dict[str, float], asof: str,
             exit_tickers=missing_prices["exit_tickers"],
             positive_target_tickers=missing_prices["positive_target_tickers"],
         )
-    followup = _pending_clear_transition(portfolio_id)
+    followup = _pending_clear_transition(
+        portfolio_id, prices=prices, price_sources=_price_sources
+    )
     rebalance(
         target,
         prices,
@@ -2573,12 +3119,37 @@ def settle_target(prices: dict[str, float], asof: str,
 
 def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
          benchmark: str | None = None, *,
-         mark_source: str = "paper_account_mark") -> None:
+         mark_source: str = "paper_account_mark",
+         _settlement_receipt_id: str | None = None,
+         _locked: bool = False) -> None:
     """Snapshot NAV to nav_history.jsonl. Also initialises the benchmark shares on first call.
 
     The benchmark symbol is registry-resolved per book. Its normalized shares remain in the
     back-compat ``spy_shares`` slot, while ``benchmark_symbol`` records which index those shares
     belong to so a benchmark change can never reuse the old instrument's scale."""
+    if not _locked:
+        with _paper_transaction_lock(portfolio_id):
+            return mark(
+                prices,
+                asof,
+                portfolio_id=portfolio_id,
+                benchmark=benchmark,
+                mark_source=mark_source,
+                _settlement_receipt_id=_settlement_receipt_id,
+                _locked=True,
+            )
+    receipts = pending_settlement_receipts(portfolio_id)
+    if receipts:
+        if (
+            len(receipts) != 1
+            or _settlement_receipt_id != receipts[0].get("transaction_id")
+            or mark_source != "settlement_receipt"
+        ):
+            raise PaperTransactionConflict(
+                "NAV mark blocked by an unfinalized settlement receipt"
+            )
+    elif _settlement_receipt_id is not None:
+        raise PaperTransactionConflict("NAV mark settlement receipt is unavailable")
     state = _load_account(portfolio_id)
     bench = benchmark or _benchmark_for(portfolio_id)
 
@@ -2665,8 +3236,15 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
             if r.get("date") != asof:
                 rows.append(r)
     rows.append(record)
+    # A delayed receipt retry may repair an older settlement date after newer daily marks exist.
+    # Preserve chronological ledger order so readers that consume the final/previous rows never
+    # mistake the repaired older mark for the current session.
+    rows.sort(key=lambda row: str(row.get("date") or ""))
     _ensure_dir(portfolio_id)
-    nav_path.write_text("\n".join(json.dumps(r, default=str) for r in rows) + "\n")
+    _atomic_write_bytes(
+        nav_path,
+        ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8"),
+    )
 
 
 # ---------------------------------------------------------------------------

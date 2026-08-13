@@ -205,79 +205,60 @@ def test_price_wrapper_returns_prices_only(monkeypatch):
 # settle_open — integration: fill_price_source on executed trades
 # ---------------------------------------------------------------------------
 
+def _seed_pending_book(tmp_path, monkeypatch, ticker: str) -> None:
+    """Create a real isolated paper queue so receipt requirements stay under test."""
+    from bot import autonomous
+    from portfolio import paper_account, registry
+
+    monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    paper_account._save_account(
+        {
+            "inception_date": "2026-07-01",
+            "starting_nav": 1_000_000.0,
+            "cash": 1_000_000.0,
+            "positions": {},
+            "spy_shares": None,
+            "spy_inception_price": None,
+        },
+        "autonomous",
+    )
+    submission = {
+        "holdings": [
+            {"ticker": ticker, "weight": 0.5, "action_effective": "add"}
+        ],
+        "summary": "receipt-bound source test",
+    }
+    autonomous._append_decision_log(
+        "2026-07-01",
+        submission,
+        [],
+        [],
+        {},
+        target_status="queued",
+        effective_target={ticker: 0.5},
+    )
+    paper_account.save_pending_target(
+        {ticker: 0.5},
+        "2026-07-01",
+        portfolio_id="autonomous",
+        decision_snapshot=submission,
+    )
+
+
 def test_settle_open_stamps_fill_price_source(tmp_path, monkeypatch):
     """settle_open passes sources through to _diff_trades, so executed trades get the stamp.
 
     We monkeypatch the minimal paper_account seam and inject a fake open-price function
     to drive the whole path offline.
     """
-    import types
     from bot import settle
-    from portfolio import paper_account, registry
 
     pid = "autonomous"
     asof = "2026-07-02"
-
-    # --- isolate paper_account state to tmp_path ---
-    monkeypatch.setattr(paper_account, "_DB_ROOT",
-                        tmp_path / "data" / "portfolio", raising=False)
-
-    # Seed a pending target so settle_open does not short-circuit on nothing_queued.
-    # We fake the paper_account functions that settle_open calls, to avoid real SQLite.
-    fake_account: dict = {
-        "cash": 1_000_000.0,
-        "positions": {},
-        "spy_shares": None,
-    }
-
-    monkeypatch.setattr(paper_account, "_load_account",
-                        lambda pid_: fake_account, raising=False)
-    monkeypatch.setattr(paper_account, "load_pending_target",
-                        lambda pid_: {
-                            "target": {"AAPL": 0.5},
-                            "asof": asof,
-                            "schema_version": paper_account.PENDING_TARGET_SCHEMA_V2,
-                            "engine_version": paper_account.US_BRAIN_ENGINE_V2,
-                            "portfolio_id": "autonomous",
-                        },
-                        raising=False)
-    monkeypatch.setattr(paper_account, "settle_target",
-                        lambda prices, asof_, portfolio_id=None: {"AAPL": 0.5},
-                        raising=False)
-    monkeypatch.setattr(paper_account, "mark",
-                        lambda *a, **kw: None, raising=False)
-
-    # After settle_target the account has a position in AAPL.
-    # settle_open calls _load_account at least 3 times:
-    #   0: _held(pid) to gather held symbols
-    #   1: the explicit "before" snapshot (direct call in settle_open)
-    #   2: the explicit "after" snapshot (direct call in settle_open, post-settle_target)
-    # Return empty positions for calls 0 and 1 (before trade), and a filled position for call 2.
-    call_count = {"n": 0}
-    def fake_load_account(pid_):
-        n = call_count["n"]
-        call_count["n"] += 1
-        if n < 2:
-            return {"cash": 1_000_000.0, "positions": {}}       # held/before
-        return {"cash": 500_000.0, "positions": {"AAPL": {"shares": 10.0, "avg_cost": 200.0}}}  # after
-    monkeypatch.setattr(paper_account, "_load_account", fake_load_account, raising=False)
+    _seed_pending_book(tmp_path, monkeypatch, "AAPL")
 
     # Stub is_open to return True so the settle proceeds.
     monkeypatch.setattr(settle, "is_open", lambda pid_: True, raising=False)
-
-    # Stub registry.benchmark.
-    monkeypatch.setattr(registry, "benchmark", lambda pid_: "SPY", raising=False)
-    monkeypatch.setattr(registry, "currency", lambda pid_: "USD", raising=False)
-
-    # Stub position_log.update to no-op.
-    try:
-        from portfolio import position_log
-        monkeypatch.setattr(position_log, "update", lambda *a, **kw: None, raising=False)
-    except Exception:
-        pass
-
-    # Stub _republish to no-op.
-    monkeypatch.setattr(settle, "_republish", lambda pid_, asof_: None, raising=False)
 
     # Inject an open-price function that always returns polygon_open.
     def fake_open_fn(ticker):
@@ -295,42 +276,11 @@ def test_settle_open_stamps_fill_price_source(tmp_path, monkeypatch):
 def test_settle_open_fill_source_falls_back_to_last_price(tmp_path, monkeypatch):
     """When polygon and yahoo are both unavailable, fill_price_source='last_price' on the trade."""
     from bot import settle
-    from portfolio import paper_account, registry
 
     pid = "autonomous"
     asof = "2026-07-02"
-
-    call_count = {"n": 0}
-    def fake_load_account(pid_):
-        n = call_count["n"]
-        call_count["n"] += 1
-        if n < 2:
-            return {"cash": 1_000_000.0, "positions": {}}
-        return {"cash": 500_000.0, "positions": {"MSFT": {"shares": 5.0, "avg_cost": 410.0}}}
-    monkeypatch.setattr(paper_account, "_load_account", fake_load_account, raising=False)
-    monkeypatch.setattr(paper_account, "load_pending_target",
-                        lambda pid_: {
-                            "target": {"MSFT": 0.5},
-                            "asof": asof,
-                            "schema_version": paper_account.PENDING_TARGET_SCHEMA_V2,
-                            "engine_version": paper_account.US_BRAIN_ENGINE_V2,
-                            "portfolio_id": "autonomous",
-                        },
-                        raising=False)
-    monkeypatch.setattr(paper_account, "settle_target",
-                        lambda prices, asof_, portfolio_id=None: {"MSFT": 0.5},
-                        raising=False)
-    monkeypatch.setattr(paper_account, "mark",
-                        lambda *a, **kw: None, raising=False)
+    _seed_pending_book(tmp_path, monkeypatch, "MSFT")
     monkeypatch.setattr(settle, "is_open", lambda pid_: True, raising=False)
-    monkeypatch.setattr(registry, "benchmark", lambda pid_: "SPY", raising=False)
-    monkeypatch.setattr(registry, "currency", lambda pid_: "USD", raising=False)
-    try:
-        from portfolio import position_log
-        monkeypatch.setattr(position_log, "update", lambda *a, **kw: None, raising=False)
-    except Exception:
-        pass
-    monkeypatch.setattr(settle, "_republish", lambda pid_, asof_: None, raising=False)
 
     # last_price fallback: polygon and yahoo both return None but paper returns a price.
     def fake_open_fn(ticker):

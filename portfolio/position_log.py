@@ -6,9 +6,11 @@ Crash-safe: a corrupt or missing file starts fresh.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 _ROOT = Path(__file__).resolve().parent.parent
 _LEDGER_PATH = _ROOT / "data" / "portfolio" / "positions_ledger.json"
@@ -95,7 +97,28 @@ def _load(portfolio_id: str | None = None) -> dict[str, Any]:
 def _save(ledger: dict[str, Any], portfolio_id: str | None = None) -> None:
     path = _ledger_path(portfolio_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(ledger, indent=2, default=str, ensure_ascii=False))
+    payload = json.dumps(ledger, indent=2, default=str, ensure_ascii=False).encode("utf-8")
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with tmp.open("wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # Atomic replacement still prevents a partial ledger where directory fsync is absent.
+            pass
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def update(positions: list[dict], asof_iso: str, portfolio_id: str | None = None,

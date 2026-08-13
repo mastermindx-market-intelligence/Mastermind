@@ -80,7 +80,7 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
                    directive: str | None = None) -> dict:
     """Run one autonomous turn end-to-end. Best-effort: every step degrades gracefully so a
     missing credential / price never leaves the book in a half-traded state."""
-    from portfolio import market_calendar, paper_account, position_log, registry
+    from portfolio import market_calendar, paper_account, registry
 
     asof = asof or date.today().isoformat()
     out: dict = {"portfolio_id": PORTFOLIO_ID, "asof": asof,
@@ -283,6 +283,9 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     _safety_overlay = {"gross_mult": 1.0}
     _execution_quote_blocked = False
     _settlement_receipt_id: str | None = None
+    _outstanding_settlement_receipt_id: str | None = None
+    _settlement_projection_block: str | None = None
+    _queued_decision_projected = False
     if decided:
         # A second quote read can transiently miss even though the trusted submission normalized a
         # held line moments earlier.  Never turn that miss into target omission: retain held rows so
@@ -337,10 +340,38 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
             prices,
             asof,
             decision_snapshot=submission,
+            queued_projection_locked=lambda accepted_target: _append_decision_log(
+                asof,
+                submission,
+                [],
+                skipped,
+                brain,
+                packet_id=(_pgr.packet_id if _pgr else None),
+                target_status="queued",
+                effective_target=accepted_target,
+                _locked=True,
+            ),
         )
         executed = res.get("executed") or []
         queued = bool(res.get("queued"))
+        accepted_target = res.get("accepted_target")
         _settlement_receipt_id = res.get("settlement_receipt_id")
+        _outstanding_settlement_receipt_id = res.get(
+            "outstanding_settlement_receipt_id"
+        )
+        _settlement_projection_block = _settle.settlement_projection_block_reason(res)
+        _queued_decision_projected = bool(res.get("queued_projection_written"))
+        if _settlement_projection_block:
+            out["settlement_state_blocked"] = True
+            out["settlement_state_block_reason"] = _settlement_projection_block
+        if res.get("settlement_receipt_error"):
+            out["settlement_receipt_error"] = res["settlement_receipt_error"]
+        if res.get("receipt_retained") is True and not _outstanding_settlement_receipt_id:
+            out["settlement_receipt_retained"] = True
+        if _outstanding_settlement_receipt_id:
+            out["outstanding_settlement_receipt_id"] = (
+                _outstanding_settlement_receipt_id
+            )
         if res.get("error"):
             out["rebalance_error"] = res["error"]
         if res.get("skipped"):
@@ -354,24 +385,20 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
         }:
             _execution_quote_blocked = True
             out["pending_target_retained"] = bool(res.get("pending_retained"))
-        if res.get("error"):
-            target_status = "rejected_execution_error"
-        elif res.get("skipped") and not queued:
-            target_status = f"rejected_{res['skipped']}"
+        if _settlement_projection_block:
+            target_status = (
+                f"rejected_{res.get('skipped') or _settlement_projection_block}"
+            )
         elif queued:
             target_status = "queued"
-            effective_target = dict(priceable)
+            effective_target = dict(accepted_target or priceable)
+        elif res.get("error"):
+            target_status = "rejected_execution_error"
+        elif res.get("skipped"):
+            target_status = f"rejected_{res['skipped']}"
         else:
             target_status = "executed"
-            effective_target = dict(priceable)
-        if executed:   # reconcile the rationale-bearing ledger only when fills actually happened
-            ledger_positions = [{"ticker": t, "sleeve": SLEEVE, "weight": w, "entry_price": prices.get(t)}
-                                for t, w in priceable.items()]
-            try:
-                position_log.update(ledger_positions, asof, portfolio_id=PORTFOLIO_ID)
-            except Exception:
-                pass
-
+            effective_target = dict(accepted_target or priceable)
     lesson_application: dict | None = None
     if target_status in {"executed", "queued"}:
         try:
@@ -392,6 +419,16 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
                 "error": f"application_trace_error:{type(exc).__name__}",
             }
         out["lesson_application"] = lesson_application
+        if _queued_decision_projected and target_status == "queued":
+            try:
+                from bot import decision_rows
+                out["decision_lesson_links"] = decision_rows.refresh_lesson_links(
+                    PORTFOLIO_ID, asof, submission, target_status="queued"
+                )
+            except Exception as exc:  # noqa: BLE001 - keep executable queue and surface audit lag
+                out["decision_lesson_links"] = {
+                    "ok": False, "error": repr(exc)[:200]
+                }
 
     # A proposal is consumed only after the trusted target has actually been accepted by the
     # paper execution boundary.  A syntactically valid submission can still be frozen by quote
@@ -427,7 +464,15 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     out["skipped_unpriceable"] = skipped
 
     # 5. mark NAV vs SPY (idempotent per date)
-    if _execution_quote_blocked:
+    if _settlement_receipt_id:
+        # The shared receipt finalizer marks from immutable settlement evidence.  Do not perform a
+        # second scratch-price projection here; the receipt must remain until every projection lands.
+        out["mark_deferred_to_settlement_receipt"] = True
+    elif _settlement_projection_block:
+        # execute_or_queue rejected this run before accepting its target.  The older committed
+        # receipt/state is the sole projection authority; never mark from this run's scratch quotes.
+        out["mark_skipped"] = _settlement_projection_block
+    elif _execution_quote_blocked:
         # Keep the account boundary entirely write-free on an unpriceable intended exit.  A mark can
         # initialize benchmark fields in account.json, so even that benign write waits for retry.
         out["mark_skipped"] = "execution_quote_guard"
@@ -440,76 +485,101 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
     # 6. publish the book contract + 7. append the daily decision log
     out["target_status"] = target_status
     out["decision_effective"] = target_status in {"executed", "queued"}
-    payload = _build_payload(
-        asof,
-        submission,
-        prices,
-        executed,
-        skipped,
-        brain,
-        target_status=target_status,
-    )
-    payload["safety"] = _safety                  # consumed risk backtest (drove the de-gross)
-    payload["safety_overlay"] = _safety_overlay
     out["safety_overlay"] = _safety_overlay
     _publish_ok = False
-    try:
-        from bridge import build_portfolio
-        out["paths"] = build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
-        _publish_ok = True
-    except Exception as e:                           # noqa: BLE001
-        out["write_error"] = repr(e)[:200]
-    _decision_log_ok = False
-    try:
-        _append_decision_log(
+    if _settlement_receipt_id:
+        out["publish_deferred_to_settlement_receipt"] = True
+    elif _settlement_projection_block:
+        out["publish_skipped"] = _settlement_projection_block
+    else:
+        payload = _build_payload(
             asof,
             submission,
+            prices,
             executed,
             skipped,
             brain,
-            packet_id=(_pgr.packet_id if _pgr else None),
             target_status=target_status,
-            effective_target=effective_target,
         )
+        payload["safety"] = _safety              # consumed risk backtest (drove the de-gross)
+        payload["safety_overlay"] = _safety_overlay
+        try:
+            from bridge import build_portfolio
+            out["paths"] = build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
+            _publish_ok = True
+        except Exception as e:                       # noqa: BLE001
+            out["write_error"] = repr(e)[:200]
+    _decision_log_ok = False
+    if _queued_decision_projected:
         _decision_log_ok = True
-    except Exception:
-        pass
+    elif _settlement_projection_block:
+        out["decision_log_skipped"] = _settlement_projection_block
+    else:
+        try:
+            _append_decision_log(
+                asof,
+                submission,
+                executed,
+                skipped,
+                brain,
+                packet_id=(_pgr.packet_id if _pgr else None),
+                target_status=target_status,
+                effective_target=effective_target,
+            )
+            _decision_log_ok = True
+        except Exception as exc:
+            out["decision_log_error"] = repr(exc)[:240]
 
-    # A direct market-open run may have committed through the WAL.  Its receipt is the crash-safe
-    # outbox for mark/publish provenance; acknowledge it only after this run completed both durable
-    # projections.  Otherwise the scheduler will finalize it idempotently on the next open.
-    _lesson_receipt_finalization = {"ok": True, "required": False}
+    # A direct market-open run uses the same exact-receipt finalizer as scheduler recovery.  This
+    # makes position projection (including zero fills), mark, publication + learning, and decision
+    # reconciliation hard ACK prerequisites and removes scratch-price/provenance duplication.
     if _settlement_receipt_id:
         try:
-            from brain import portfolio_learning
-            _lesson_receipt_finalization = portfolio_learning.application_finalization_status(
-                PORTFOLIO_ID,
-                submission,
-                settlement_receipt_id=_settlement_receipt_id,
+            _receipt_finalization = _settle.finalize_direct_settlement_receipt(
+                PORTFOLIO_ID, _settlement_receipt_id
             )
-        except Exception as exc:  # noqa: BLE001 - receipt remains the retry outbox
-            _lesson_receipt_finalization = {
+        except Exception as exc:  # noqa: BLE001 - receipt remains the retry authority
+            _receipt_finalization = {
                 "ok": False,
-                "required": True,
-                "error": f"application_finalization_error:{type(exc).__name__}",
+                "receipt_retained": True,
+                "finalization_errors": [repr(exc)[:240]],
             }
-        out["lesson_receipt_finalization"] = _lesson_receipt_finalization
-        if not _lesson_receipt_finalization.get("ok"):
-            out["settlement_receipt_retained"] = True
-    if (
-        _settlement_receipt_id
-        and _publish_ok
-        and _decision_log_ok
-        and not out.get("mark_error")
-        and _lesson_receipt_finalization.get("ok") is True
-    ):
-        try:
-            paper_account.acknowledge_settlement_receipt(
-                _settlement_receipt_id, PORTFOLIO_ID
+        out["settlement_receipt_finalization"] = _receipt_finalization
+        if _receipt_finalization.get("ok") is True:
+            out["settlement_receipt_acknowledged"] = bool(
+                _receipt_finalization.get("receipt_acknowledged")
             )
-            out["settlement_receipt_acknowledged"] = True
-        except Exception as exc:  # noqa: BLE001 - leave the outbox for deterministic retry
-            out["settlement_receipt_ack_error"] = repr(exc)[:200]
+            out["decision_receipt_reconciliation"] = (
+                _receipt_finalization.get("decision_reconciliation")
+            )
+            # Preserve an explicit empty receipt fill-set: zero-fill is settlement truth, not a
+            # signal to fall back to a mutable before/after diff from the runner.
+            if "executed" in _receipt_finalization:
+                out["executed"] = _receipt_finalization["executed"]
+        else:
+            out["settlement_receipt_retained"] = True
+    elif _outstanding_settlement_receipt_id:
+        # A previous run committed the numeric transaction but crashed before every durable
+        # projection landed.  Finish that exact immutable receipt; this run remains rejected and
+        # must not masquerade as the owner of the older fills or decision row.
+        try:
+            _outstanding_finalization = _settle.finalize_direct_settlement_receipt(
+                PORTFOLIO_ID, _outstanding_settlement_receipt_id
+            )
+        except Exception as exc:  # noqa: BLE001 - receipt remains the retry authority
+            _outstanding_finalization = {
+                "ok": False,
+                "receipt_retained": True,
+                "finalization_errors": [repr(exc)[:240]],
+            }
+        out["outstanding_settlement_receipt_finalization"] = _outstanding_finalization
+        _outstanding_acknowledged = bool(
+            _outstanding_finalization.get("ok") is True
+            and _outstanding_finalization.get("receipt_acknowledged") is True
+        )
+        out["outstanding_settlement_receipt_acknowledged"] = _outstanding_acknowledged
+        out["outstanding_settlement_receipt_retained"] = not _outstanding_acknowledged
+        out["settlement_receipt_retained"] = not _outstanding_acknowledged
 
     try:
         out["nav"] = round(paper_account.nav(prices, PORTFOLIO_ID), 2)
@@ -779,7 +849,8 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          skipped: list, brain: dict,
                          *, packet_id: str | None = None,
                          target_status: str = "rejected_unspecified",
-                         effective_target: dict[str, float] | None = None) -> None:
+                         effective_target: dict[str, float] | None = None,
+                         _locked: bool = False) -> None:
     from portfolio import registry
     from brain import decision_submission
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
@@ -789,6 +860,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
     except Exception:
         lesson_links = {}
+    from bot import decision_rows
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -808,6 +880,9 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "error": brain.get("error") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
         **decision_submission.target_status_fields(target_status),
+        **decision_rows.accepted_identity_fields(
+            PORTFOLIO_ID, asof, submission, effective_target, target_status
+        ),
         "effective_holdings": decision_submission.effective_holding_audit(
             submission, effective_target, target_status
         ),
@@ -816,19 +891,16 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
     }
     # idempotent per date: keep exactly one entry per asof (latest SUBSTANTIVE run wins — a
     # failed re-run must not erase a good book; see bot/decision_rows)
-    from bot import decision_rows
-    existing = []
-    if p.exists():
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                existing.append(json.loads(line))
-            except Exception:
-                continue
-    rows = decision_rows.replace_for_asof(existing, entry, asof)
-    p.write_text("\n".join(json.dumps(r, default=str, ensure_ascii=False) for r in rows) + "\n")
+    from portfolio import paper_account
+    def _persist() -> None:
+        existing = decision_rows.read_rows(p)
+        rows = decision_rows.replace_for_asof(existing, entry, asof)
+        decision_rows.write_rows(p, rows)
+    if _locked:
+        _persist()
+    else:
+        with paper_account._paper_transaction_lock(PORTFOLIO_ID):
+            _persist()
 
 
 def load_decisions(limit: int = 60) -> list[dict]:
@@ -849,7 +921,12 @@ def load_decisions(limit: int = 60) -> list[dict]:
     return rows[:limit]
 
 
-def republish(asof: str | None = None, *, submission: dict | None = None) -> dict:
+def republish(
+    asof: str | None = None,
+    *,
+    submission: dict | None = None,
+    settlement_prices: dict[str, float] | None = None,
+) -> dict:
     """Re-emit the autonomous book's published contract from an accepted submission + current marks —
     no Brain call. Used by the open settle (bot/settle.py) so the dashboard reflects freshly-filled
     positions.  Settlement passes the hash-bound queued snapshot; an explicit ``None`` falls back
@@ -861,11 +938,12 @@ def republish(asof: str | None = None, *, submission: dict | None = None) -> dic
         submission = autonomous_mcp.read_submission(PORTFOLIO_ID)
     held = list((paper_account._load_account(PORTFOLIO_ID).get("positions") or {}).keys())
     target = {h["ticker"]: float(h.get("weight") or 0.0) for h in ((submission or {}).get("holdings") or [])}
-    prices: dict[str, float] = {}
-    for t in set(target) | set(held) | {"SPY"}:
-        px = paper_account._current_price(t)
-        if px and px > 0:
-            prices[t] = px
+    prices: dict[str, float] = dict(settlement_prices or {})
+    if settlement_prices is None:
+        for t in set(target) | set(held) | {"SPY"}:
+            px = paper_account._current_price(t)
+            if px and px > 0:
+                prices[t] = px
     payload = _build_payload(
         asof,
         submission,

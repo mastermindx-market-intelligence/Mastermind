@@ -471,7 +471,11 @@ def test_settle_target_round_trip(iso, monkeypatch):
     monkeypatch.setattr(paper_account, "_current_price", lambda t: {"SPY": 740.0}.get(t))
     paper_account.save_pending_target({"XLK": 0.5}, "2026-06-22", portfolio_id="etf")
     assert paper_account.load_pending_target("etf")["target"] == {"XLK": 0.5}
-    settled = paper_account.settle_target({"XLK": 200.0}, "2026-06-22", portfolio_id="etf")
+    settled = paper_account.settle_target(
+        {"XLK": 200.0, "SPY": 740.0},
+        "2026-06-22",
+        portfolio_id="etf",
+    )
     assert settled == {"XLK": 0.5}
     assert "XLK" in (paper_account._load_account("etf").get("positions") or {})
     assert paper_account.load_pending_target("etf") is None        # cleared

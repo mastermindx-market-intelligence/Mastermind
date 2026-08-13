@@ -397,12 +397,28 @@ def test_execute_or_queue_unresolved_transaction_returns_without_auto_recovery_r
 def test_settle_open_reports_recovered_pending_clear_as_success(
     isolated_books, monkeypatch
 ):
-    from bot import settle
+    from bot import autonomous, settle
     from portfolio import paper_account
 
     target, prices = BOOK_CASES["autonomous"]
     _seed_fresh(paper_account, "autonomous")
-    paper_account.save_pending_target(target, "2026-08-08", portfolio_id="autonomous")
+    submission = {
+        "holdings": [
+            {"ticker": ticker, "weight": weight, "action_effective": "add"}
+            for ticker, weight in target.items()
+        ],
+        "summary": "receipt-bound recovery",
+    }
+    autonomous._append_decision_log(
+        "2026-08-08", submission, [], [], {},
+        target_status="queued", effective_target=target,
+    )
+    paper_account.save_pending_target(
+        target,
+        "2026-08-08",
+        portfolio_id="autonomous",
+        decision_snapshot=submission,
+    )
     real_clear = paper_account.clear_pending_target
     failed = {"done": False}
 
@@ -414,7 +430,7 @@ def test_settle_open_reports_recovered_pending_clear_as_success(
 
     monkeypatch.setattr(paper_account, "clear_pending_target", transient_clear)
     monkeypatch.setattr(settle, "is_open", lambda pid: True)
-    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: {"ok": True})
     monkeypatch.setattr(paper_account, "mark", lambda *args, **kwargs: None)
 
     def open_price(ticker):

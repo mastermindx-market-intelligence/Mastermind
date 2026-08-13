@@ -230,7 +230,15 @@ def test_active_us_run_reviews_only_snapshotted_proposals_after_final_submission
         }), encoding="utf-8")
         return {"ok": True, "text": "submitted", "cost_usd": 0.0, "model": "test"}
 
-    def fake_settle(portfolio_id, target, prices, asof, *, decision_snapshot=None):
+    def fake_settle(
+        portfolio_id,
+        target,
+        prices,
+        asof,
+        *,
+        decision_snapshot=None,
+        queued_projection_locked=None,
+    ):
         assert decision_snapshot and decision_snapshot.get("schema") == "mastermind.target_book.v2"
         settle_calls.append(dict(target))
         return {"executed": [], "queued": False}

@@ -141,7 +141,7 @@ def test_settle_open_unpriceable_exit_writes_nothing_and_retains_pending(
 
     monkeypatch.setattr(paper_account, "_save_account", forbidden_save)
     monkeypatch.setattr(settle, "is_open", lambda pid: True)
-    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: {"ok": True})
 
     def missing_aapl(ticker):
         return (500.0, "polygon_open") if ticker == "SPY" else (None, "last_price")
@@ -390,7 +390,7 @@ def test_settle_open_executes_and_clears_pending_once_exit_is_priceable(
     _seed_aapl(paper_account)
     paper_account.save_pending_target({}, "2026-08-08", portfolio_id="autonomous")
     monkeypatch.setattr(settle, "is_open", lambda pid: True)
-    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(settle, "_republish", lambda *args, **kwargs: {"ok": True})
 
     def priced(ticker):
         return (120.0, "polygon_open") if ticker == "AAPL" else (500.0, "polygon_open")
@@ -451,7 +451,12 @@ def test_complete_target_waits_for_every_positive_price_then_settles_once(
     with pytest.raises(paper_account.UnpriceableExitPrices) as stopped:
         paper_account.settle_target({}, "2026-08-09", portfolio_id=portfolio_id)
 
-    assert stopped.value.tickers == [ticker]
+    benchmark = {
+        "autonomous": "SPY",
+        "china": "000300.SS",
+        "hk": "^HSI",
+    }[portfolio_id]
+    assert stopped.value.tickers == sorted([ticker, benchmark])
     assert stopped.value.positive_target_tickers == [ticker]
     assert stopped.value.exit_tickers == []
     assert account_path.read_bytes() == account_before
@@ -460,7 +465,9 @@ def test_complete_target_waits_for_every_positive_price_then_settles_once(
     assert not fills_path.exists() or fills_path.read_text().strip() == ""
 
     settled = paper_account.settle_target(
-        {ticker: 100.0}, "2026-08-10", portfolio_id=portfolio_id
+        {ticker: 100.0, benchmark: 500.0},
+        "2026-08-10",
+        portfolio_id=portfolio_id,
     )
     assert settled == target
     assert paper_account.pending_target_file_exists(portfolio_id) is False

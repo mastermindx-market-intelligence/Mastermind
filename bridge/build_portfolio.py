@@ -7,11 +7,39 @@ renders site/portfolio.html from this same JSON; here we own the contract.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from uuid import uuid4
 
 import bot  # noqa: F401
 
 _ROOT = Path(__file__).resolve().parent.parent
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """Durably replace one published contract without exposing a partial document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    try:
+        with tmp.open("wb") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        try:
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # Atomic replacement still prevents a partial contract where dir fsync is unavailable.
+            pass
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def write(payload: dict, portfolio_id: str | None = None) -> dict:
@@ -30,6 +58,7 @@ def write(payload: dict, portfolio_id: str | None = None) -> dict:
     hub = base / "latest.json"
     site = base / "portfolio.json"   # site/ in prod; local mirror here
     base.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(payload, indent=2, default=str, ensure_ascii=False).encode("utf-8")
     for p in (hub, site):
-        p.write_text(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
+        _atomic_write_bytes(p, encoded)
     return {"hub": str(hub), "site": str(site)}
