@@ -631,6 +631,20 @@ def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() ->
     ) in acceptance
 
 
+def test_canary_activation_uses_bounded_control_command_not_signal() -> None:
+    service = (ROOT / "control_plane" / "executive_service.py").read_text(
+        encoding="utf-8"
+    )
+    cli = (ROOT / "scripts" / "executive_os_phase1c.py").read_text(encoding="utf-8")
+    acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
+
+    assert 'command == "activate-canary"' in service
+    assert '("activate-canary", "Validate and activate' in cli
+    assert 'self._control_request("activate-canary")' in acceptance
+    assert "signal.SIGHUP" not in cli
+    assert "signal.SIGHUP" not in acceptance
+
+
 def test_service_accounts_use_supported_disabled_authentication_policy_check() -> None:
     for name in (
         "bootstrap-host.sh",

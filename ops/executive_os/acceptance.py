@@ -1674,23 +1674,14 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             environment_probe=environment_probe,
             environment_probe_sha256=environment_probe_sha256,
         )
-        try:
-            os.kill(control_pid, signal.SIGHUP)
-        except ProcessLookupError as exc:
-            raise AcceptanceError("control service disappeared before canary reload") from exc
-        deadline = time.monotonic() + 30.0
-        while time.monotonic() < deadline:
-            if self._launchd_pid(CONTROL_LABEL) != control_pid:
-                raise AcceptanceError("SIGHUP canary reload changed the live control PID")
-            try:
-                state = self._control_request("status")["result"]
-            except AcceptanceError:
-                time.sleep(0.25)
-                continue
-            if state.get("service_state") == "READY":
-                return
-            time.sleep(0.25)
-        raise AcceptanceError("live control service did not reload the canary envelope")
+        activation = self._control_request("activate-canary")
+        if activation["result"].get("service_state") != "READY":
+            raise AcceptanceError("live control service did not activate the canary envelope")
+        if self._launchd_pid(CONTROL_LABEL) != control_pid:
+            raise AcceptanceError("canary activation changed the live control PID")
+        state = self._control_request("status")["result"]
+        if state.get("service_state") != "READY":
+            raise AcceptanceError("live control service did not remain READY after activation")
 
     def start_and_attest_services(self) -> tuple[int, int]:
         _run(

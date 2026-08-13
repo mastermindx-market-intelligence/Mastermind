@@ -214,7 +214,7 @@ The launchd plist never contains the value. The worker-principal probe checks
 `launchctl print`, `ps eww`, and Darwin `KERN_PROCARGS2` against that exact PID
 and value commitment. The composite receipt binds the current PID/start/boot,
 worker UID/GID, config/release/Python digests, probe statuses, protected-path
-denials, and dedicated-auth exception. A same-PID `SIGHUP` validates the fresh
+denials, and dedicated-auth exception. A same-PID private control-socket command validates the fresh
 receipt and moves the service to `READY`; a restart creates a new PID and must
 repeat the proof.
 
