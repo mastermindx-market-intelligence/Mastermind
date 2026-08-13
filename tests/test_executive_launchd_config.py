@@ -645,6 +645,13 @@ def test_canary_activation_uses_bounded_control_command_not_signal() -> None:
     assert "signal.SIGHUP" not in acceptance
 
 
+def test_acceptance_allows_bounded_cold_worker_attestation_startup() -> None:
+    acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
+
+    assert "WorkerBrokerClient(sys.argv[1],timeout_seconds=90.0)" in acceptance
+    assert 'timeout=120.0,\n            label="worker broker status"' in acceptance
+
+
 def test_acceptance_canonicalizes_canary_paths_like_control_service(tmp_path: Path) -> None:
     from ops.executive_os.acceptance import _canonical_canary_paths
 

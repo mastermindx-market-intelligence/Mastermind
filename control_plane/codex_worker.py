@@ -47,6 +47,7 @@ from uuid import uuid4
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
 _SAFE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+_CODE_SIGNATURE_TIMEOUT_SECONDS = 60.0
 _MAX_PROMPT_BYTES = 1 * 1024 * 1024
 _MAX_SCHEMA_BYTES = 1 * 1024 * 1024
 _MAX_RESULT_BYTES = 1 * 1024 * 1024
@@ -608,6 +609,19 @@ def _run_checked(argv: Sequence[str], *, timeout: float = 10.0) -> subprocess.Co
     return result
 
 
+def _run_binary_attestation_command(
+    argv: Sequence[str], *, timeout: float
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return _run_checked(argv, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        executable = Path(argv[0]).name if argv else "unknown"
+        raise BinaryAttestationError(
+            f"Codex binary attestation command {executable!r} timed out "
+            f"after {timeout:.0f} seconds"
+        ) from exc
+
+
 def attest_codex_binary(
     binary_path: str | os.PathLike[str],
     *,
@@ -640,7 +654,9 @@ def attest_codex_binary(
     }:
         raise BinaryAttestationError("Codex executable is not a native Mach-O binary")
 
-    version_run = _run_checked([str(path), "--version"], timeout=10.0)
+    version_run = _run_binary_attestation_command(
+        [str(path), "--version"], timeout=10.0
+    )
     if version_run.returncode != 0:
         raise BinaryAttestationError(
             f"Codex version probe failed: {(version_run.stderr or version_run.stdout)[-500:]}"
@@ -654,10 +670,16 @@ def attest_codex_binary(
 
     team_identifier: str | None = None
     if platform.system() == "Darwin":
-        verify = _run_checked(["/usr/bin/codesign", "--verify", "--strict", str(path)])
+        verify = _run_binary_attestation_command(
+            ["/usr/bin/codesign", "--verify", "--strict", str(path)],
+            timeout=_CODE_SIGNATURE_TIMEOUT_SECONDS,
+        )
         if verify.returncode != 0:
             raise BinaryAttestationError(f"Codex code signature invalid: {verify.stderr[-500:]}")
-        details = _run_checked(["/usr/bin/codesign", "-dv", "--verbose=4", str(path)])
+        details = _run_binary_attestation_command(
+            ["/usr/bin/codesign", "-dv", "--verbose=4", str(path)],
+            timeout=_CODE_SIGNATURE_TIMEOUT_SECONDS,
+        )
         code_text = details.stdout + "\n" + details.stderr
         team_match = re.search(r"^TeamIdentifier=(.+)$", code_text, re.MULTILINE)
         team_identifier = team_match.group(1).strip() if team_match else None
