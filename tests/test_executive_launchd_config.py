@@ -47,17 +47,14 @@ def _assert_private_unix_socket(socket_config: dict, *, mode: int) -> None:
     assert forbidden.isdisjoint(socket_config)
 
 
-def test_launchd_templates_pin_control_and_privilege_drop_worker() -> None:
+def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
     control = _plist(CONTROL)
     worker = _plist(WORKER)
     assert control["Label"] == "com.mastermind.executive.control"
     assert worker["Label"] == "com.mastermind.executive.worker.codex"
     assert control["UserName"] == "__CONTROL_USER__"
-    # system launchd retains its own supplementary groups when InitGroups is
-    # false.  The fixed root wrapper clears them before immediately execing the
-    # persistent broker as the dedicated worker principal.
-    assert worker["UserName"] == "root"
-    assert worker["GroupName"] == "wheel"
+    assert worker["UserName"] == "__WORKER_USER__"
+    assert worker["GroupName"] == "__WORKER_GROUP__"
     assert control["UserName"] != worker["UserName"]
     assert worker["InitGroups"] is False
 
@@ -105,11 +102,10 @@ def test_launchd_templates_pin_control_and_privilege_drop_worker() -> None:
                 "-I",
                 "-S",
                 "-B",
-                "__WORKER_WRAPPER__",
+                "__WORKER_ENTRYPOINT__",
+                "serve",
                 "--config",
                 "__WORKER_CONFIG__",
-                "--release-root",
-                "__RELEASE_ROOT__",
             ]
         assert set(value["EnvironmentVariables"]) == expected_environment
 
@@ -426,9 +422,52 @@ def test_installer_replaces_whole_program_argument_arrays() -> None:
     assert "plutil -replace ProgramArguments." not in install
     assert '"$CONTROL_PLIST" --' in install
     assert '"$WORKER_PLIST" --' in install
-    assert 'scripts/executive_os_phase1c_worker_wrapper.py"' in install
-    assert 'plutil -replace UserName -string root "$WORKER_PLIST"' in install
-    assert 'plutil -replace GroupName -string wheel "$WORKER_PLIST"' in install
+    assert 'scripts/executive_os_phase1c_worker.py"' in install
+    assert 'plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"' in install
+    assert 'plutil -replace GroupName -string "$WORKER_GROUP" "$WORKER_PLIST"' in install
+    assert 'WORKER_SUPPLEMENTARY_GIDS' in install
+    assert 'worker account has an unreviewed macOS directory group vector' in install
+    assert 'verify_reviewed_system_group com.apple.access_disabled 396' in install
+
+
+def test_worker_config_requires_sorted_exact_ambient_group_allowlist(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    from scripts.executive_os_phase1c_worker import WorkerConfigError, _load_config
+
+    value = {
+        "schema_version": "mastermind.executive_worker_broker_config/v2",
+        "control_uid": 450,
+        "worker_uid": 451,
+        "worker_gid": 451,
+        "allowed_supplementary_gids": [12, 61, 100, 396],
+        "worker_user": "_mastermind_worker",
+        "worker_id": "codex-01",
+        "workspace_root": "/private/workspaces",
+        "run_root": "/private/runs",
+        "provider_home": "/private/provider-home",
+        "codex_binary": "/private/bin/codex",
+        "allowed_codex_versions": ["0.147.0"],
+        "required_team_identifier": "2DC432GLL2",
+        "launchd_socket_name": "WorkerBroker",
+        "uid_sweep_receipt": "/private/state/uid-sweep.json",
+        "require_secret_canary": True,
+    }
+    path = tmp_path / "worker.json"
+    path.write_text(json.dumps(value), encoding="utf-8")
+    path.chmod(0o440)
+    assert _load_config(path, require_root_owner=False)[
+        "allowed_supplementary_gids"
+    ] == [12, 61, 100, 396]
+
+    value["allowed_supplementary_gids"] = [12, 61, 999, 100]
+    path.chmod(0o640)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    path.chmod(0o440)
+    with pytest.raises(WorkerConfigError, match="supplementary groups"):
+        _load_config(path, require_root_owner=False)
 
 
 def test_launchd_program_argument_renderer_is_exact_and_atomic(tmp_path: Path) -> None:

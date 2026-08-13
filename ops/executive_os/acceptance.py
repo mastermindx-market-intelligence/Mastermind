@@ -834,7 +834,8 @@ class Acceptance:
         if (
             value.get("worker_uid") != self.worker_identity.pw_uid
             or value.get("worker_gid") != self.worker_group.gr_gid
-            or value.get("supplementary_gids") != []
+            or value.get("supplementary_gids")
+            != self.worker_config.get("allowed_supplementary_gids")
             or not isinstance(value.get("startup_sweep"), dict)
             or value["startup_sweep"].get("passed") is not True
             or value.get("quarantined_reason") is not None
@@ -1326,6 +1327,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             self.worker_config.get("worker_uid") != self.worker_identity.pw_uid
             or self.worker_config.get("control_uid") != self.control_identity.pw_uid
             or self.worker_config.get("worker_gid") != self.worker_group.gr_gid
+            or self.worker_directory_gids is None
+            or self.worker_config.get("allowed_supplementary_gids")
+            != sorted(self.worker_directory_gids - {self.worker_group.gr_gid})
         ):
             raise AcceptanceError("installed worker config differs from exact host policy")
         for shared_root in (
@@ -1384,13 +1388,10 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             "-I",
             "-S",
             "-B",
-            os.fspath(
-                self.release / "scripts" / "executive_os_phase1c_worker_wrapper.py"
-            ),
+            os.fspath(self.release / "scripts" / "executive_os_phase1c_worker.py"),
+            "serve",
             "--config",
             os.fspath(WORKER_CONFIG),
-            "--release-root",
-            os.fspath(self.release),
         ]
         if control_plist.get("ProgramArguments") != expected_control_argv:
             raise AcceptanceError("installed control ProgramArguments drifted")
@@ -1400,8 +1401,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             control_plist.get("WorkingDirectory") != os.fspath(self.release)
             or worker_plist.get("WorkingDirectory") != os.fspath(self.release)
             or control_plist.get("UserName") != CONTROL_USER
-            or worker_plist.get("UserName") != "root"
-            or worker_plist.get("GroupName") != "wheel"
+            or worker_plist.get("UserName") != WORKER_USER
+            or worker_plist.get("GroupName") != WORKER_GROUP
             or worker_plist.get("InitGroups") is not False
         ):
             raise AcceptanceError("installed launchd execution contract drifted")

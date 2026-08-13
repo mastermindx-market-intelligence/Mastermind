@@ -76,7 +76,6 @@ jobs:
           tests/test_executive_canary.py
           tests/test_executive_service.py
           tests/test_executive_worker_broker.py
-          tests/test_executive_worker_wrapper.py
           tests/test_executive_launchd_config.py
           tests/test_executive_acceptance_retry.py
           tests/test_executive_python_runtime_provisioner.py

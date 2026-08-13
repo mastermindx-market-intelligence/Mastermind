@@ -30,14 +30,19 @@ from control_plane.executive_worker_broker import (
 )
 
 
-CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v1"
+CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v2"
 _OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
+_REVIEWED_AMBIENT_GID_SETS = (
+    frozenset({12, 61, 100}),
+    frozenset({12, 61, 100, 396}),
+)
 _CONFIG_FIELDS = frozenset(
     {
         "schema_version",
         "control_uid",
         "worker_uid",
         "worker_gid",
+        "allowed_supplementary_gids",
         "worker_user",
         "worker_id",
         "workspace_root",
@@ -99,6 +104,16 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
     if value.get("require_secret_canary") is not True:
         raise WorkerConfigError("production worker config must require the secret canary")
+    allowed_groups = value.get("allowed_supplementary_gids")
+    if (
+        not isinstance(allowed_groups, list)
+        or len(allowed_groups) > 8
+        or any(type(group_id) is not int or group_id <= 0 for group_id in allowed_groups)
+        or allowed_groups != sorted(set(allowed_groups))
+        or int(value["worker_gid"]) in allowed_groups
+        or frozenset(allowed_groups) not in _REVIEWED_AMBIENT_GID_SETS
+    ):
+        raise WorkerConfigError("allowed supplementary groups are invalid")
     return value
 
 
@@ -107,6 +122,7 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
         control_uid=int(config["control_uid"]),
         worker_uid=int(config["worker_uid"]),
         worker_gid=int(config["worker_gid"]),
+        allowed_supplementary_gids=frozenset(config["allowed_supplementary_gids"]),
         worker_user=str(config["worker_user"]),
         worker_id=str(config["worker_id"]),
         workspace_root=Path(config["workspace_root"]),
