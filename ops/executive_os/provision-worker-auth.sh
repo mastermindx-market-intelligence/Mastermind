@@ -143,15 +143,22 @@ Authentication for node /Local/Default failed. (-14167, eDSAuthAccountDisabled)'
 }
 
 run_codex_as_worker() {
-  /usr/bin/sudo -n -u "$WORKER_USER" -g "$WORKER_GROUP" \
-    /usr/bin/env -i \
-      HOME="$PROVIDER_HOME" \
-      CODEX_HOME="$PROVIDER_HOME" \
-      LANG="C.UTF-8" \
-      LC_ALL="C.UTF-8" \
-      NO_COLOR="1" \
-      PATH="/usr/bin:/bin" \
-      "$PINNED_CODEX_BINARY" "$@"
+  (
+    # Codex loads project .codex/config.toml layers from the current working
+    # directory upward. Never let this dedicated principal discover an
+    # operator checkout or the operator's personal ~/.codex configuration.
+    cd -- "$PROVIDER_HOME"
+    exec /usr/bin/sudo -n -u "$WORKER_USER" -g "$WORKER_GROUP" \
+      /usr/bin/env -i \
+        HOME="$PROVIDER_HOME" \
+        CODEX_HOME="$PROVIDER_HOME" \
+        PWD="$PROVIDER_HOME" \
+        LANG="C.UTF-8" \
+        LC_ALL="C.UTF-8" \
+        NO_COLOR="1" \
+        PATH="/usr/bin:/bin" \
+        "$PINNED_CODEX_BINARY" "$@"
+  )
 }
 
 /usr/bin/id "$WORKER_USER" >/dev/null 2>&1 || {
