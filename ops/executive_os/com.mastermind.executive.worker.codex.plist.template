@@ -10,17 +10,18 @@
     <string>-I</string>
     <string>-S</string>
     <string>-B</string>
-    <string>__WORKER_ENTRYPOINT__</string>
-    <string>serve</string>
+    <string>__WORKER_WRAPPER__</string>
     <string>--config</string>
     <string>__WORKER_CONFIG__</string>
+    <string>--release-root</string>
+    <string>__RELEASE_ROOT__</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__RELEASE_ROOT__</string>
   <key>UserName</key>
-  <string>__WORKER_USER__</string>
+  <string>root</string>
   <key>GroupName</key>
-  <string>__WORKER_GROUP__</string>
+  <string>wheel</string>
   <key>InitGroups</key>
   <false/>
   <key>RunAtLoad</key>

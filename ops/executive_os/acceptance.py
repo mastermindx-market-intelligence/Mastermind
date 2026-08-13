@@ -1384,10 +1384,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             "-I",
             "-S",
             "-B",
-            os.fspath(self.release / "scripts" / "executive_os_phase1c_worker.py"),
-            "serve",
+            os.fspath(
+                self.release / "scripts" / "executive_os_phase1c_worker_wrapper.py"
+            ),
             "--config",
             os.fspath(WORKER_CONFIG),
+            "--release-root",
+            os.fspath(self.release),
         ]
         if control_plist.get("ProgramArguments") != expected_control_argv:
             raise AcceptanceError("installed control ProgramArguments drifted")
@@ -1397,7 +1400,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             control_plist.get("WorkingDirectory") != os.fspath(self.release)
             or worker_plist.get("WorkingDirectory") != os.fspath(self.release)
             or control_plist.get("UserName") != CONTROL_USER
-            or worker_plist.get("UserName") != WORKER_USER
+            or worker_plist.get("UserName") != "root"
+            or worker_plist.get("GroupName") != "wheel"
+            or worker_plist.get("InitGroups") is not False
         ):
             raise AcceptanceError("installed launchd execution contract drifted")
         if any(
