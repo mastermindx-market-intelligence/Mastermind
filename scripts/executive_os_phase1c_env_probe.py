@@ -144,7 +144,25 @@ def _command_probe(
     return "DENIED" if completed.returncode != 0 else "ABSENT"
 
 
-def _kern_procargs2(pid: int, name: bytes, value_sha256: str) -> str:
+def _is_kern_procargs_denial(observed_errno: int, *, target_uid: int) -> bool:
+    if target_uid == os.geteuid():
+        return False
+    # XNU's sysctl_procargsx intentionally returns EINVAL for a cross-UID
+    # reader. For an unrestricted target the size query can succeed before
+    # the data query reaches that UID check; a restricted target can reject
+    # the size query itself. EPERM/EACCES remain valid MAC-policy denials.
+    return observed_errno in {errno.EACCES, errno.EPERM, errno.EINVAL}
+
+
+def _kern_procargs2(
+    pid: int,
+    name: bytes,
+    value_sha256: str,
+    *,
+    target_uid: int,
+) -> str:
+    if target_uid == os.geteuid():
+        raise ProbeError("kern_procargs2_target_not_cross_uid")
     libc = ctypes.CDLL(None, use_errno=True)
     sysctl = libc.sysctl
     sysctl.argtypes = [
@@ -160,17 +178,17 @@ def _kern_procargs2(pid: int, name: bytes, value_sha256: str) -> str:
     size = ctypes.c_size_t()
     if sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0:
         observed = ctypes.get_errno()
-        if observed in {errno.EACCES, errno.EPERM}:
+        if _is_kern_procargs_denial(observed, target_uid=target_uid):
             return "DENIED"
-        raise ProbeError("kern_procargs2_size_ambiguous")
+        raise ProbeError(f"kern_procargs2_size_errno_{observed}")
     if size.value <= 0 or size.value > 1024 * 1024:
         raise ProbeError("kern_procargs2_size_invalid")
     buffer = ctypes.create_string_buffer(size.value)
     if sysctl(mib, 3, buffer, ctypes.byref(size), None, 0) != 0:
         observed = ctypes.get_errno()
-        if observed in {errno.EACCES, errno.EPERM}:
+        if _is_kern_procargs_denial(observed, target_uid=target_uid):
             return "DENIED"
-        raise ProbeError("kern_procargs2_read_ambiguous")
+        raise ProbeError(f"kern_procargs2_read_errno_{observed}")
     payload = bytes(buffer.raw[: size.value])
     if _contains_secret(payload, name, value_sha256):
         raise ProbeError("kern_procargs2_observed_canary")
@@ -230,6 +248,7 @@ def main() -> int:
                 args.pid,
                 name,
                 args.sentinel_value_sha256,
+                target_uid=control_identity["effective_uid"],
             ),
         }
         after, after_identity = _identity(args.pid)

@@ -260,6 +260,20 @@ def test_environment_probe_uses_posix_session_id_not_darwin_sess(
     }
 
 
+def test_kern_procargs_denial_classification_is_cross_uid_and_exact(
+    monkeypatch,
+) -> None:
+    import errno
+
+    from scripts import executive_os_phase1c_env_probe as probe
+
+    monkeypatch.setattr(probe.os, "geteuid", lambda: 451)
+    for observed in (errno.EACCES, errno.EPERM, errno.EINVAL):
+        assert probe._is_kern_procargs_denial(observed, target_uid=450)
+        assert not probe._is_kern_procargs_denial(observed, target_uid=451)
+    assert not probe._is_kern_procargs_denial(errno.EIO, target_uid=450)
+
+
 def test_acceptance_prepares_control_owned_receipt_container(
     tmp_path, monkeypatch
 ) -> None:
