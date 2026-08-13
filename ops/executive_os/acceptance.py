@@ -1559,6 +1559,14 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 attestation["config_sha256"],
                 "--release-manifest-sha256",
                 attestation["release_manifest_sha256"],
+                "--control-process-identity-json",
+                json.dumps(
+                    identity,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
                 "--expected-worker-uid",
                 str(self.worker_identity.pw_uid),
                 "--expected-worker-gid",
@@ -1566,7 +1574,16 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             ],
             cwd=self.release,
             label="worker-principal live control environment probe",
+            check=False,
         )
+        if probe.returncode != 0:
+            redacted = probe.stderr.decode("ascii", errors="ignore").strip()
+            matched = re.fullmatch(r"environment probe error: ([a-z0-9_]+)", redacted)
+            code = matched.group(1) if matched is not None else "redacted_error_unavailable"
+            raise AcceptanceError(
+                "worker-principal live control environment probe failed "
+                f"({code})"
+            )
         probe_receipt = _json_output(probe, label="worker-principal environment probe")
         if probe_receipt.get("passed") is not True:
             raise AcceptanceError("worker-principal environment probe did not pass")

@@ -181,6 +181,50 @@ def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None
     assert "KERN_PROCARGS2" in probe
     assert '"/bin/launchctl", "print"' in probe
     assert '"/bin/ps", "eww"' in probe
+    assert "ProcessInspector" not in probe
+
+
+def test_environment_probe_validates_cross_uid_ps_identity(monkeypatch) -> None:
+    import pytest
+
+    from scripts import executive_os_phase1c_env_probe as probe
+
+    identity = {
+        "pid": 4242,
+        "pgid": 4242,
+        "session_id": 4242,
+        "start_identity": "1723500000.123456",
+        "boot_id": "00000000-0000-4000-8000-000000000001",
+        "effective_uid": 450,
+        "effective_gid": 450,
+        "real_uid": 450,
+        "real_gid": 450,
+    }
+    observed = {
+        key: identity[key]
+        for key in (
+            "pid",
+            "pgid",
+            "session_id",
+            "effective_uid",
+            "effective_gid",
+            "real_uid",
+            "real_gid",
+        )
+    }
+    completed = subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout=(identity["boot_id"] + "\n").encode(),
+        stderr=b"",
+    )
+    monkeypatch.setattr(probe.subprocess, "run", lambda *args, **kwargs: completed)
+
+    assert probe._expected_identity(json.dumps(identity), 4242, observed) == identity
+
+    observed["effective_uid"] = 451
+    with pytest.raises(probe.ProbeError, match="expected_identity_mismatch"):
+        probe._expected_identity(json.dumps(identity), 4242, observed)
 
 
 def test_control_wrapper_post_exec_argv_contains_no_canary_name(
