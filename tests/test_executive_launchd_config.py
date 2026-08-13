@@ -5,7 +5,6 @@ import plistlib
 import json
 import copy
 import os
-import re
 import stat
 import subprocess
 import sys
@@ -276,30 +275,41 @@ def test_control_wrapper_post_exec_argv_contains_no_canary_name(
     assert wrapper.SENTINEL_NAME in captured["env"]
 
 
-def test_installer_program_argument_indices_match_template_payload_slots() -> None:
+def test_installer_replaces_whole_program_argument_arrays() -> None:
     install = (OPS / "install.sh").read_text(encoding="utf-8")
-    expected = {
-        "CONTROL_PLIST": {
-            0: "__PYTHON_BINARY__",
-            4: "__CONTROL_WRAPPER__",
-            6: "__CONTROL_CONFIG__",
-            8: "__CONTROL_SENTINEL_FILE__",
-            10: "__CONTROL_ENV_ATTESTATION__",
-            12: "__RELEASE_ROOT__",
-        },
-        "WORKER_PLIST": {
-            0: "__PYTHON_BINARY__",
-            4: "__WORKER_ENTRYPOINT__",
-            7: "__WORKER_CONFIG__",
-        },
-    }
-    templates = {"CONTROL_PLIST": _plist(CONTROL), "WORKER_PLIST": _plist(WORKER)}
-    for variable, slots in expected.items():
-        argv = templates[variable]["ProgramArguments"]
-        for index, placeholder in slots.items():
-            assert argv[index] == placeholder
-            pattern = rf"plutil -replace ProgramArguments\.{index} -string .*\$\{{?{variable}\}}?"
-            assert re.search(pattern, install), (variable, index)
+    assert "render_launchd_program_arguments.py" in install
+    assert install.count("render_launchd_program_arguments.py") == 2
+    assert "plutil -replace ProgramArguments." not in install
+    assert '"$CONTROL_PLIST" --' in install
+    assert '"$WORKER_PLIST" --' in install
+
+
+def test_launchd_program_argument_renderer_is_exact_and_atomic(tmp_path: Path) -> None:
+    from ops.executive_os.render_launchd_program_arguments import (
+        render_program_arguments,
+    )
+
+    control = tmp_path / "control.plist"
+    control.write_bytes(CONTROL.read_bytes())
+    control.chmod(0o640)
+    expected = [
+        "/runtime/python3.12",
+        "-I",
+        "-S",
+        "-B",
+        "/release with spaces/control_wrapper.py",
+        "--config",
+        "/private/control.json",
+    ]
+    before = control.stat()
+    render_program_arguments(control, expected)
+    after = control.stat()
+    with control.open("rb") as handle:
+        rendered = plistlib.load(handle)
+    assert rendered["ProgramArguments"] == expected
+    assert not any("__" in value for value in rendered["ProgramArguments"])
+    assert stat.S_IMODE(after.st_mode) == stat.S_IMODE(before.st_mode)
+    assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
 
 
 def test_worker_entrypoint_imports_under_exact_isolated_plist_shape() -> None:

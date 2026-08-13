@@ -842,12 +842,15 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$CONTROL_LABEL.plist.template" "$CONTROL_PLIST"
 /usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$WORKER_LABEL.plist.template" "$WORKER_PLIST"
 
-/usr/bin/plutil -replace ProgramArguments.0 -string "$PYTHON_BINARY" "$CONTROL_PLIST"
-/usr/bin/plutil -replace ProgramArguments.4 -string "$RELEASE_ROOT/scripts/executive_os_phase1c_control_wrapper.py" "$CONTROL_PLIST"
-/usr/bin/plutil -replace ProgramArguments.6 -string "$CONTROL_CONFIG" "$CONTROL_PLIST"
-/usr/bin/plutil -replace ProgramArguments.8 -string "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST"
-/usr/bin/plutil -replace ProgramArguments.10 -string "$CONTROL_ENV_ATTESTATION" "$CONTROL_PLIST"
-/usr/bin/plutil -replace ProgramArguments.12 -string "$RELEASE_ROOT" "$CONTROL_PLIST"
+"$PYTHON_BINARY" -I -S -B \
+  "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
+  "$CONTROL_PLIST" -- \
+  "$PYTHON_BINARY" -I -S -B \
+  "$RELEASE_ROOT/scripts/executive_os_phase1c_control_wrapper.py" \
+  --config "$CONTROL_CONFIG" \
+  --sentinel-file "$CONTROL_SENTINEL_FILE" \
+  --attestation "$CONTROL_ENV_ATTESTATION" \
+  --release-root "$RELEASE_ROOT"
 /usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$CONTROL_PLIST"
 /usr/bin/plutil -replace UserName -string "$CONTROL_USER" "$CONTROL_PLIST"
 /usr/bin/plutil -replace GroupName -string "$CONTROL_GROUP" "$CONTROL_PLIST"
@@ -860,9 +863,12 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 /usr/sbin/chown root:wheel "$CONTROL_PLIST"
 /bin/chmod 0644 "$CONTROL_PLIST"
 
-/usr/bin/plutil -replace ProgramArguments.0 -string "$PYTHON_BINARY" "$WORKER_PLIST"
-/usr/bin/plutil -replace ProgramArguments.4 -string "$RELEASE_ROOT/scripts/executive_os_phase1c_worker.py" "$WORKER_PLIST"
-/usr/bin/plutil -replace ProgramArguments.7 -string "$WORKER_CONFIG" "$WORKER_PLIST"
+"$PYTHON_BINARY" -I -S -B \
+  "$RELEASE_ROOT/ops/executive_os/render_launchd_program_arguments.py" \
+  "$WORKER_PLIST" -- \
+  "$PYTHON_BINARY" -I -S -B \
+  "$RELEASE_ROOT/scripts/executive_os_phase1c_worker.py" \
+  serve --config "$WORKER_CONFIG"
 /usr/bin/plutil -replace WorkingDirectory -string "$RELEASE_ROOT" "$WORKER_PLIST"
 /usr/bin/plutil -replace UserName -string "$WORKER_USER" "$WORKER_PLIST"
 /usr/bin/plutil -replace GroupName -string "$WORKER_GROUP" "$WORKER_PLIST"
