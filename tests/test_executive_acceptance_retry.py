@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -220,3 +221,71 @@ def test_unsafe_archive_target_fails_before_service_stop(tmp_path, monkeypatch):
         retry.run()
     assert stopped == []
     assert not retry.layout.archive_root.exists()
+
+
+# ---------------------------------------------------------------------------
+# `_uid_processes` is an INDEPENDENT dedicated-UID quiescence census (separate
+# from the broker's own sweep) that runs as root immediately before the release
+# is archived.  A false "quiescent" here archives state out from under a live
+# worker, so every projection and parse rule below is fail-closed.
+# ---------------------------------------------------------------------------
+
+
+def _census(monkeypatch, stdout: str, returncode: int = 0):
+    """Patch the module-local `_run`, so nothing outside this module is touched."""
+
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *, label, check=True):
+        seen.append([str(value) for value in argv])
+        if check and returncode != 0:
+            raise retry_module.RetryError(f"{label} failed with exit {returncode}")
+        return subprocess.CompletedProcess(
+            list(argv), returncode, stdout.encode("ascii"), b""
+        )
+
+    monkeypatch.setattr(retry_module, "_run", fake_run)
+    return seen
+
+
+def test_uid_census_counts_real_and_saved_uid_processes(monkeypatch):
+    # columns: svuid ruid uid pid
+    seen = _census(
+        monkeypatch,
+        "0 0 0 1\n"  # pid 1 is never a residual
+        "451 451 451 451\n"  # plain worker process
+        "451 451 0 999\n"  # setuid helper: ruid=451, euid=0
+        "451 0 0 555\n"  # reachable ONLY via the saved uid
+        "0 0 451 888\n"  # euid-only: not signal-reachable, counted anyway
+        "777 777 777 777\n",  # unrelated principal
+    )
+    found = retry_module.AcceptanceRetry._uid_processes({451})
+    assert seen[0][:3] == ["/bin/ps", "-axo", "svuid=,ruid=,uid=,pid="]
+    # 999 and 555 are exactly what an effective-uid-only census misses.
+    assert found[451] == [451, 555, 888, 999]
+    assert 1 not in found[451]
+
+
+def test_uid_census_reports_quiescence_for_an_absent_uid(monkeypatch):
+    _census(monkeypatch, "0 0 0 1\n777 777 777 777\n")
+    assert retry_module.AcceptanceRetry._uid_processes({451}) == {451: []}
+
+
+def test_uid_census_refuses_a_wrong_arity_projection(monkeypatch):
+    _census(monkeypatch, "0 0 0 1\n451 451 451 451\n451 451 999\n")
+    with pytest.raises(retry_module.RetryError, match="malformed"):
+        retry_module.AcceptanceRetry._uid_processes({451})
+
+
+def test_uid_census_refuses_a_non_numeric_projection(monkeypatch):
+    _census(monkeypatch, "0 0 0 1\n451 451 451 notapid\n")
+    with pytest.raises(retry_module.RetryError, match="malformed"):
+        retry_module.AcceptanceRetry._uid_processes({451})
+
+
+def test_uid_census_refuses_an_empty_projection(monkeypatch):
+    """rc 0 with no rows must never read as proven quiescence."""
+
+    _census(monkeypatch, "")
+    with pytest.raises(retry_module.RetryError, match="empty"):
+        retry_module.AcceptanceRetry._uid_processes({451})
