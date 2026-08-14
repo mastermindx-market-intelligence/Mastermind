@@ -438,7 +438,7 @@ def test_worker_config_requires_sorted_exact_ambient_group_allowlist(
     from scripts.executive_os_phase1c_worker import WorkerConfigError, _load_config
 
     value = {
-        "schema_version": "mastermind.executive_worker_broker_config/v2",
+        "schema_version": "mastermind.executive_worker_broker_config/v3",
         "control_uid": 450,
         "worker_uid": 451,
         "worker_gid": 451,
@@ -449,6 +449,7 @@ def test_worker_config_requires_sorted_exact_ambient_group_allowlist(
         "run_root": "/private/runs",
         "provider_home": "/private/provider-home",
         "codex_binary": "/private/bin/codex",
+        "codex_attestation_receipt": "/private/state/codex-attestation.json",
         "allowed_codex_versions": ["0.147.0"],
         "required_team_identifier": "2DC432GLL2",
         "launchd_socket_name": "WorkerBroker",
@@ -692,7 +693,16 @@ def test_canary_activation_uses_bounded_control_command_not_signal() -> None:
     assert "signal.SIGHUP" not in acceptance
 
 
-def test_acceptance_allows_bounded_cold_worker_attestation_startup() -> None:
+def test_acceptance_allows_a_bounded_worker_broker_startup_window() -> None:
+    # Renamed: the worker no longer has a cold codesign/--version
+    # attestation path at startup (control_plane.codex_worker.
+    # load_codex_attestation_receipt replaced it -- see
+    # tests/test_executive_codex_attestation_receipt.py), so a bound this
+    # generous is no longer justified by *that* cost specifically. It is
+    # kept as a general allowance for the broker's other real startup work
+    # (the UID sweep, socket activation, interpreter start under
+    # LowPriorityIO=true throttling) -- this test only pins that the bound
+    # still exists and has not silently shrunk.
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
     assert "WorkerBrokerClient(sys.argv[1],timeout_seconds=90.0)" in acceptance

@@ -20,7 +20,11 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
-from control_plane.codex_worker import CodexWorkerAdapter
+from control_plane.codex_worker import (
+    BinaryAttestationError,
+    CodexWorkerAdapter,
+    load_codex_attestation_receipt,
+)
 from control_plane.executive_worker_broker import (
     BrokerPolicy,
     DedicatedUIDSweeper,
@@ -30,7 +34,7 @@ from control_plane.executive_worker_broker import (
 )
 
 
-CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v2"
+CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v3"
 _OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
 _REVIEWED_AMBIENT_GID_SETS = (
     frozenset({12, 61, 100}),
@@ -49,6 +53,7 @@ _CONFIG_FIELDS = frozenset(
         "run_root",
         "provider_home",
         "codex_binary",
+        "codex_attestation_receipt",
         "allowed_codex_versions",
         "required_team_identifier",
         "launchd_socket_name",
@@ -96,6 +101,7 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         "run_root",
         "provider_home",
         "codex_binary",
+        "codex_attestation_receipt",
         "uid_sweep_receipt",
     ):
         if not isinstance(value.get(field), str) or not Path(value[field]).is_absolute():
@@ -132,8 +138,23 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
     )
     if os.geteuid() != policy.worker_uid or os.getegid() != policy.worker_gid:
         raise WorkerConfigError("worker broker is not running as its configured OS principal")
+    # Fast, no-subprocess path: the receipt was attested once, warm, at
+    # normal priority, by install.sh running as root.  Loading it here (one
+    # open+fstat of the receipt, one open+fstat of the binary) is what keeps
+    # a throttled, loaded worker daemon off the slow cold trust-service and
+    # --version subprocess path that caused the real-host startup timeout
+    # this mechanism fixes -- see
+    # control_plane.codex_worker.load_codex_attestation_receipt.  There is no
+    # fallback to attest_codex_binary here: a missing or unsafe receipt must
+    # refuse to start, never silently re-pay the cost this removes.
+    binary_attestation = load_codex_attestation_receipt(
+        Path(config["codex_attestation_receipt"]),
+        expected_binary_path=Path(config["codex_binary"]),
+        expected_owner_gid=policy.worker_gid,
+    )
     adapter = CodexWorkerAdapter(
         Path(config["codex_binary"]),
+        binary_attestation=binary_attestation,
         allowed_versions=frozenset(config["allowed_codex_versions"]),
         required_team_identifier=str(config["required_team_identifier"]),
     )
@@ -201,6 +222,19 @@ def main(argv: list[str] | None = None) -> int:
                 args.config,
                 require_root_owner=not args.allow_non_root_owner_for_test,
             )
+            # install.sh runs check-config as the worker principal itself
+            # (sudo -u "$WORKER_USER" ... check-config) -- the one moment
+            # before launchd is trusted with the daemon that anything runs
+            # AS the receipt's actual reader.  Exercise the exact
+            # receipt-load step _build_broker takes at real startup here
+            # too, so a broken or unreadable receipt fails installation
+            # loudly and up front, not only later and silently when
+            # launchd first starts the daemon.
+            load_codex_attestation_receipt(
+                Path(value["codex_attestation_receipt"]),
+                expected_binary_path=Path(value["codex_binary"]),
+                expected_owner_gid=int(value["worker_gid"]),
+            )
             print(
                 json.dumps(
                     {
@@ -218,7 +252,12 @@ def main(argv: list[str] | None = None) -> int:
         config = _load_config(args.config, require_root_owner=True)
         asyncio.run(_serve(config))
         return 0
-    except (WorkerBrokerError, OSError, ValueError) as exc:
+    except (WorkerBrokerError, BinaryAttestationError, OSError, ValueError) as exc:
+        # BinaryAttestationError (and its CodexAttestationReceiptError subclass
+        # raised by _build_broker) is not a WorkerBrokerError -- without this
+        # arm a fail-closed receipt/identity refusal would propagate as a raw
+        # Python traceback instead of the one clean, bounded line below, which
+        # is the operator's actual diagnostic surface in worker stderr.
         print(f"worker broker error: {exc}", file=sys.stderr)
         return 2
 

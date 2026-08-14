@@ -209,3 +209,29 @@ the exact same `acceptance.sh` command. An interrupted archive is marked
 `INCOMPLETE`; its already moved evidence is retained, canonical directories are
 recreated, and running the retry helper again completes preparation without
 overwriting the earlier archive.
+
+## Worker refuses to start: Codex binary identity changed
+
+The worker daemon attests the Codex binary once, at install time, and pins
+its cheap filesystem identity (inode, size, mtime, ctime, and more) in a
+root-owned receipt instead of re-running `codesign`/`--version` on every
+start. This is a deliberate availability tradeoff: **any** change to the
+installed binary's identity -- even a byte-identical repair that lands on a
+new inode -- makes the worker refuse to start, and launchd will keep
+respawning and re-refusing it roughly every 10 seconds until fixed.
+
+If the worker LaunchDaemon is respawn-looping and
+`/var/log/mastermind-executive/worker/stderr.log` shows `worker broker
+error: codex binary identity mismatch at startup: ...` or `codex
+attestation receipt is missing or unreadable`, the on-disk Codex binary no
+longer matches what was recorded at install time. Common, benign causes: an
+operator repaired or replaced the binary in place, a backup restore, a host
+migration, or an APFS snapshot rollback.
+
+**Remedy:** re-run `install.sh` for the same release. The receipt is always
+rewritten unconditionally from whatever binary is currently installed (see
+`ops/executive_os/install.sh`'s codex attestation receipt writer), so a
+benign identity change self-heals on the next install run. A genuinely
+tampered or wrong binary will instead fail the pre-existing `codesign
+--verify --strict` / exact SHA-256 checks in `install.sh` itself before a
+new receipt is ever written -- which is the correct, fail-closed outcome.
