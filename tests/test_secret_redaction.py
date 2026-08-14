@@ -409,17 +409,20 @@ def test_requests_style_url_exception_is_redacted(monkeypatch):
     these today; this proves the sanitizer a future logger must use.
     """
     monkeypatch.setenv("POLYGON_API_KEY", FAKE_POLYGON_KEY)
-    exc_text = (
+    diagnosis = (
         "HTTPSConnectionPool(host='api.polygon.io', port=443): Max retries exceeded "
         "with url: /v2/aggs/ticker/AAPL/range/1/day/2026-01-01/2026-08-14"
-        f"?adjusted=true&sort=asc&limit=50000&apiKey={FAKE_POLYGON_KEY}"
+        "?adjusted=true&sort=asc&limit=50000&apiKey="
     )
 
-    out = sanitize_external_text(exc_text)
+    out = sanitize_external_text(diagnosis + FAKE_POLYGON_KEY)
 
     assert FAKE_POLYGON_KEY not in out
-    assert REDACTION in out
-    assert "api.polygon.io" in out, "over-redaction: the useful diagnosis is gone"
+    # Asserted by equality rather than by probing for a surviving substring: this
+    # pins that the key is the ONLY thing removed, so an over-redacting rule change
+    # that ate the host or the request path fails here too.  (A substring probe for
+    # the hostname would also read to CodeQL as incomplete URL sanitization.)
+    assert out == diagnosis + REDACTION
 
 
 def test_massive_api_key_is_covered_too(monkeypatch):
