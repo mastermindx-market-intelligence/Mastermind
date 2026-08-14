@@ -69,6 +69,9 @@ _PROOF_VALIDATION = (
         "assert 'Job:' in t and 'Attempt:' in t and 'Base SHA:' in t"
     ),
 )
+# A local peer that goes away mid-reply is a normal condition, not a service
+# fault: the reply (very often an error envelope) simply has nowhere to land.
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 class ServiceError(RuntimeProofError):
@@ -685,7 +688,7 @@ class ExecutiveControlService:
             writer.close()
             try:
                 await writer.wait_closed()
-            except (BrokenPipeError, ConnectionResetError):
+            except _CLIENT_GONE:
                 pass
 
     async def _send_error(self, writer: asyncio.StreamWriter, code: str, message: str) -> None:
@@ -703,8 +706,14 @@ class ExecutiveControlService:
                     },
                 }
             )
-        writer.write(raw)
-        await writer.drain()
+        try:
+            writer.write(raw)
+            await writer.drain()
+        except _CLIENT_GONE:
+            # Delivery path only: the peer disconnected while this reply was in
+            # flight.  Nothing the service decided changes, and the caller's
+            # `finally` still tears the connection down.
+            return
 
     @staticmethod
     def _request(request: Any) -> tuple[str, dict[str, Any]]:
