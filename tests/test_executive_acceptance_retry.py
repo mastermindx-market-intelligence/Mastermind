@@ -231,20 +231,61 @@ def test_unsafe_archive_target_fails_before_service_stop(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _census(monkeypatch, stdout: str, returncode: int = 0):
-    """Patch the module-local `_run`, so nothing outside this module is touched."""
+# The pid the fake census `ps` reports for itself.  Absent from every fixture
+# below, so excluding it can never be mistaken for excluding a fixture row.
+_FAKE_CENSUS_PID = 4242
+
+
+class _FakeCensusProcess:
+    """A `Popen` stand-in for the census `ps`, with an excludable `pid`."""
+
+    def __init__(self, argv, *, returncode: int, stdout: bytes, pid: int) -> None:
+        self.args = argv
+        self.pid = pid
+        self.returncode = returncode
+        self.killed = False
+        self._stdout = stdout
+
+    def __enter__(self) -> "_FakeCensusProcess":
+        return self
+
+    def __exit__(self, *_exc_info) -> bool:
+        return False
+
+    def communicate(self, input=None, timeout=None):
+        return self._stdout, b""
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def wait(self, timeout=None) -> int:
+        return self.returncode
+
+
+def _census(monkeypatch, stdout: str, returncode: int = 0, pid: int = _FAKE_CENSUS_PID):
+    """Patch `subprocess.Popen`, delegating anything that is not our `ps`.
+
+    The census captures its own child's pid, so it spawns through `Popen`
+    rather than the module-local `_run`.  `Popen` is an attribute of the shared
+    `subprocess` module, so every non-`/bin/ps` caller is handed the real
+    implementation instead of a stub.
+    """
 
     seen: list[list[str]] = []
+    real_popen = subprocess.Popen
 
-    def fake_run(argv, *, label, check=True):
+    def fake_popen(argv, **kwargs):
+        if not (isinstance(argv, (list, tuple)) and str(argv[0]) == "/bin/ps"):
+            return real_popen(argv, **kwargs)
         seen.append([str(value) for value in argv])
-        if check and returncode != 0:
-            raise retry_module.RetryError(f"{label} failed with exit {returncode}")
-        return subprocess.CompletedProcess(
-            list(argv), returncode, stdout.encode("ascii"), b""
+        return _FakeCensusProcess(
+            list(argv), returncode=returncode, stdout=stdout.encode("ascii"), pid=pid
         )
 
-    monkeypatch.setattr(retry_module, "_run", fake_run)
+    monkeypatch.setattr(retry_module.subprocess, "Popen", fake_popen)
     return seen
 
 
@@ -272,6 +313,11 @@ def test_uid_census_reports_quiescence_for_an_absent_uid(monkeypatch):
 
 
 def test_uid_census_refuses_a_wrong_arity_projection(monkeypatch):
+    # Scope note (measured): this pins the OUTCOME, not the explicit arity
+    # check.  Deleting `if len(fields) != 4` leaves this green, because the
+    # generator unpack then raises `ValueError` and the handler re-raises the
+    # identical "malformed" message.  Same redundancy as the broker's
+    # projection; both are left exactly as #51 wrote them.
     _census(monkeypatch, "0 0 0 1\n451 451 451 451\n451 451 999\n")
     with pytest.raises(retry_module.RetryError, match="malformed"):
         retry_module.AcceptanceRetry._uid_processes({451})
@@ -289,3 +335,34 @@ def test_uid_census_refuses_an_empty_projection(monkeypatch):
     _census(monkeypatch, "")
     with pytest.raises(retry_module.RetryError, match="empty"):
         retry_module.AcceptanceRetry._uid_processes({451})
+
+
+def test_uid_census_refuses_a_non_zero_ps_exit(monkeypatch):
+    """A ps that exits non-zero must refuse, never census its partial output."""
+
+    _census(monkeypatch, "0 0 0 1\n451 451 451 451\n", returncode=1)
+    with pytest.raises(retry_module.RetryError, match="failed with exit 1"):
+        retry_module.AcceptanceRetry._uid_processes({451})
+
+
+def test_uid_census_drops_its_own_ps_child(monkeypatch):
+    """The census must not count the `ps` it just spawned.
+
+    `/bin/ps` is setuid root, so a census run by uid W sees its own child as
+    `ruid=W euid=0` and the saved/real/effective union matches it on `ruid`.
+    `_quiesce_dedicated_uids` re-censuses in a loop until the set is empty, so
+    a self-counting census can never converge and wedges the retry path.  The
+    pid is captured from the spawn, so command name and liveness -- both
+    properties a genuine residual can share -- are never consulted.
+    """
+
+    _census(
+        monkeypatch,
+        "0 0 0 1\n"
+        "451 451 451 451\n"  # a genuine worker process
+        f"0 451 0 {_FAKE_CENSUS_PID}\n",  # the census's OWN setuid-root ps child
+    )
+    found = retry_module.AcceptanceRetry._uid_processes({451})
+    assert _FAKE_CENSUS_PID not in found[451]
+    # Dropping our own child must not blind the census to a real residual.
+    assert found[451] == [451]

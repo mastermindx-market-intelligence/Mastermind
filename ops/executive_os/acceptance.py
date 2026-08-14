@@ -968,7 +968,23 @@ class Acceptance:
             cwd=self.release,
             timeout=120.0,
             label="worker broker status",
+            check=False,
         )
+        if completed.returncode != 0:
+            # This probe runs a `python -c` snippet, so a non-zero exit is an
+            # uncaught traceback on STDERR, not a structured envelope on
+            # stdout -- `_refusal_detail`'s stderr fallback is the load-bearing
+            # path here.  Without it a broker that refuses to start (a failed
+            # startup UID sweep, say) arrives as a bare `exit 1` naming no
+            # cause.  Scoped to this probe: `_run` stays silent elsewhere.
+            failure = f"worker broker status failed with exit {completed.returncode}"
+            detail = _refusal_detail(
+                completed,
+                secrets_to_redact=self._refusal_redactions(),
+            )
+            if detail is None:
+                raise AcceptanceError(f"{failure} (no structured refusal reason available)")
+            raise AcceptanceError(f"{failure}: {detail}")
         value = _json_output(completed, label="worker broker status")
         if (
             value.get("worker_uid") != self.worker_identity.pw_uid

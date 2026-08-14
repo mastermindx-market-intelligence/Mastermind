@@ -483,6 +483,175 @@ def test_run_still_returns_the_completed_process_when_check_is_disabled():
 
 
 # ---------------------------------------------------------------------------
+# 5b. `_broker_status` names WHY the broker refused to answer
+#
+# Phase 1C acceptance failed at `worker broker status failed with exit 1` with
+# no reason attached: the probe runs a `python -c` snippet, so a broker that
+# refuses to start raises there and the traceback goes to STDERR -- which
+# `_run(check=True)` discarded.  The stderr fallback is the load-bearing path
+# for this probe; there is no structured envelope to prefer.
+# ---------------------------------------------------------------------------
+
+
+def _broker_status_stub(tmp_path: Path):
+    """An ``Acceptance`` bound only to what ``_broker_status`` reads."""
+
+    instance = _acceptance_stub(tmp_path)
+    instance.control_identity = SimpleNamespace(pw_dir=str(tmp_path))
+    instance.worker_identity = SimpleNamespace(pw_uid=451)
+    instance.worker_group = SimpleNamespace(gr_gid=451)
+    instance.worker_config = {"allowed_supplementary_gids": []}
+    # The real `_write_bytes` chowns to the dedicated control principal, which
+    # exists only on the reviewed host; receipt persistence is not under test.
+    instance.persisted = {}
+    instance._write_json = instance.persisted.__setitem__
+    return instance
+
+
+_STARTUP_SWEEP_TRACEBACK = (
+    b'Traceback (most recent call last):\n'
+    b'  File "<string>", line 1, in <module>\n'
+    b"control_plane.executive_worker_broker.DedicatedUIDError: "
+    b"worker UID did not become quiescent after SIGKILL\n"
+)
+
+
+def test_broker_status_failure_names_the_stderr_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    completed = _completed(returncode=1, stderr=_STARTUP_SWEEP_TRACEBACK)
+    _stub_subprocess(monkeypatch, completed)
+    instance = _broker_status_stub(tmp_path)
+
+    with pytest.raises(acceptance.AcceptanceError) as raised:
+        instance._broker_status("worker-broker-startup.json")
+
+    message = str(raised.value)
+    prefix = "worker broker status failed with exit 1: "
+    assert message.startswith(prefix)
+    # The actual cause, not a bare exit code.
+    assert "worker UID did not become quiescent after SIGKILL" in message
+    # Bounded and single-line: the sanitizer collapsed the traceback.
+    assert "\n" not in message
+    assert len(message) - len(prefix) <= acceptance._REFUSAL_DETAIL_LIMIT + len(
+        acceptance._REFUSAL_TRUNCATION_MARKER
+    )
+
+
+def test_broker_status_failure_bounds_an_enormous_stderr_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A runaway traceback must be truncated, not pasted into the error.
+
+    Deliberately built from short words, so the length bound is what truncates
+    it -- a long unbroken run would be redacted as secret-shaped first and
+    would prove the wrong rule.
+    """
+
+    completed = _completed(
+        returncode=1,
+        stderr=b'  File "<string>", line 1, in <module>\n' * 2_000,
+    )
+    _stub_subprocess(monkeypatch, completed)
+    instance = _broker_status_stub(tmp_path)
+
+    with pytest.raises(acceptance.AcceptanceError) as raised:
+        instance._broker_status("worker-broker-startup.json")
+
+    message = str(raised.value)
+    prefix = "worker broker status failed with exit 1: "
+    assert message.endswith(acceptance._REFUSAL_TRUNCATION_MARKER)
+    assert len(message) - len(prefix) == acceptance._REFUSAL_DETAIL_LIMIT + len(
+        acceptance._REFUSAL_TRUNCATION_MARKER
+    )
+
+
+def test_broker_status_failure_redacts_a_secret_shaped_stderr_fragment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The probe's stderr is external text: it goes through the SAME sanitizer."""
+
+    completed = _completed(
+        returncode=1,
+        stderr=f"RuntimeError: refused for token {SECRET_HEX}\n".encode("utf-8"),
+    )
+    _stub_subprocess(monkeypatch, completed)
+    instance = _broker_status_stub(tmp_path)
+
+    with pytest.raises(acceptance.AcceptanceError) as raised:
+        instance._broker_status("worker-broker-startup.json")
+
+    message = str(raised.value)
+    assert SECRET_HEX not in message
+    assert acceptance._REFUSAL_REDACTION in message
+
+
+def test_broker_status_failure_without_any_reason_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Never invent a cause: silence is reported as silence, not as a guess."""
+
+    _stub_subprocess(monkeypatch, _completed(returncode=1))
+    instance = _broker_status_stub(tmp_path)
+
+    with pytest.raises(acceptance.AcceptanceError) as raised:
+        instance._broker_status("worker-broker-startup.json")
+
+    assert str(raised.value) == (
+        "worker broker status failed with exit 1 (no structured refusal reason available)"
+    )
+
+
+def test_broker_status_success_path_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A zero exit still parses, still attests, and still persists the receipt."""
+
+    value = {
+        "worker_uid": 451,
+        "worker_gid": 451,
+        "supplementary_gids": [],
+        "startup_sweep": {"passed": True},
+        "quarantined_reason": None,
+    }
+    completed = _completed(
+        returncode=0,
+        stdout=(json.dumps(value) + "\n").encode("utf-8"),
+    )
+    _stub_subprocess(monkeypatch, completed)
+    instance = _broker_status_stub(tmp_path)
+
+    assert instance._broker_status("worker-broker-startup.json") == value
+    assert instance.persisted == {"worker-broker-startup.json": value}
+
+
+def test_broker_status_still_refuses_a_zero_exit_that_fails_attestation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The exit-code path must not become the only gate on the attestation."""
+
+    value = {
+        "worker_uid": 451,
+        "worker_gid": 451,
+        "supplementary_gids": [],
+        "startup_sweep": {"passed": False},
+        "quarantined_reason": None,
+    }
+    _stub_subprocess(
+        monkeypatch,
+        _completed(returncode=0, stdout=(json.dumps(value) + "\n").encode("utf-8")),
+    )
+    instance = _broker_status_stub(tmp_path)
+
+    with pytest.raises(acceptance.AcceptanceError) as raised:
+        instance._broker_status("worker-broker-startup.json")
+
+    assert str(raised.value) == (
+        "worker broker did not attest the dedicated principal boundary"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 6. A client that disconnects during error delivery
 # ---------------------------------------------------------------------------
 

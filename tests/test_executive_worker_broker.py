@@ -5,12 +5,14 @@ import asyncio
 import contextlib
 import dataclasses
 import hashlib
+import itertools
 import json
 import os
 import signal
 import socket
 import stat
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -1044,13 +1046,62 @@ _PS_ROWS_SAVED_UID_ONLY = (
     (451, 0, 0, 555),
 )
 
-_REAL_SUBPROCESS_RUN = subprocess.run
+# The pid the fake `/bin/ps` reports for ITSELF.  Deliberately absent from every
+# table above, so excluding it can never be confused with excluding a fixture.
+_FAKE_PS_PID = 4242
+
+# The projection's own setuid-root `ps` child, exactly as the host prints it:
+# ruid=451 (the caller) with euid=0 (the setuid bit).  Matching the union on
+# `ruid` is what made the enumeration self-referential.
+_PS_ROWS_WITH_THE_ENUMERATIONS_OWN_CHILD = (
+    (0, 0, 0, 1),
+    (451, 451, 451, 451),  # the broker itself
+    (0, 451, 0, _FAKE_PS_PID),  # <- our own `ps`, spawned one syscall ago
+    (777, 777, 777, 777),
+)
+
+_REAL_SUBPROCESS_POPEN = subprocess.Popen
 
 
-def _fake_ps(rows_holder: list):
+class _FakePsProcess:
+    """A `Popen` stand-in whose `pid` the caller is expected to exclude.
+
+    Only the surface `_ps_pids_for_uid` uses is modelled: the context-manager
+    protocol, `pid`, `communicate`, `returncode`, and the `kill`/`wait` reap
+    path a timeout takes.
+    """
+
+    def __init__(self, argv, *, returncode: int, stdout: str, stderr: str, pid: int) -> None:
+        self.args = argv
+        self.pid = pid
+        self.returncode = returncode
+        self.killed = False
+        self._stdout = stdout
+        self._stderr = stderr
+
+    def __enter__(self) -> "_FakePsProcess":
+        return self
+
+    def __exit__(self, *_exc_info) -> bool:
+        return False
+
+    def communicate(self, input=None, timeout=None):
+        return self._stdout, self._stderr
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def wait(self, timeout=None) -> int:
+        return self.returncode
+
+
+def _fake_ps(rows_holder: list, *, pid: int = _FAKE_PS_PID):
     """A `/bin/ps` that honours whichever uid columns the caller requests.
 
-    `subprocess.run` is an attribute of the shared `subprocess` module, so
+    `subprocess.Popen` is an attribute of the shared `subprocess` module, so
     patching it is process-wide for the duration of the test.  Anything that is
     not our `/bin/ps` probe therefore DELEGATES to the real implementation
     instead of asserting, so an unrelated caller cannot be broken by the patch.
@@ -1061,14 +1112,14 @@ def _fake_ps(rows_holder: list):
 
     index = {"svuid": 0, "ruid": 1, "uid": 2, "euid": 2, "pid": 3}
 
-    def run(argv, **kwargs):
+    def popen(argv, **kwargs):
         if not (
             isinstance(argv, (list, tuple))
             and len(argv) >= 3
             and argv[0] == "/bin/ps"
             and "-axo" in argv
         ):
-            return _REAL_SUBPROCESS_RUN(argv, **kwargs)
+            return _REAL_SUBPROCESS_POPEN(argv, **kwargs)
         columns = [item.rstrip("=") for item in argv[argv.index("-axo") + 1].split(",")]
         known = [item for item in columns if item in index]
         unknown = [item for item in columns if item not in index]
@@ -1076,14 +1127,15 @@ def _fake_ps(rows_holder: list):
             " ".join(str(row[index[column]]) for column in known) + "\n"
             for row in rows_holder[0]
         )
-        return subprocess.CompletedProcess(
+        return _FakePsProcess(
             argv,
-            1 if unknown else 0,
-            text,
-            f"ps: {unknown[0]}: keyword not found\n" if unknown else "",
+            returncode=1 if unknown else 0,
+            stdout=text,
+            stderr=f"ps: {unknown[0]}: keyword not found\n" if unknown else "",
+            pid=pid,
         )
 
-    return run
+    return popen
 
 
 def test_uid_enumeration_counts_the_real_uid_the_broadcast_can_kill(
@@ -1091,7 +1143,7 @@ def test_uid_enumeration_counts_the_real_uid_the_broadcast_can_kill(
 ) -> None:
     holder = [_PS_ROWS_WITH_SETUID_RESIDUAL]
     monkeypatch.setattr(
-        "control_plane.executive_worker_broker.subprocess.run", _fake_ps(holder)
+        "control_plane.executive_worker_broker.subprocess.Popen", _fake_ps(holder)
     )
     pids = _ps_pids_for_uid(451)
     # ruid=451/uid=0: reachable by Darwin's kill(-1) broadcast and invisible to
@@ -1137,7 +1189,7 @@ def test_uid_enumeration_counts_a_saved_uid_only_process(
 
     holder = [_PS_ROWS_SAVED_UID_ONLY]
     monkeypatch.setattr(
-        "control_plane.executive_worker_broker.subprocess.run", _fake_ps(holder)
+        "control_plane.executive_worker_broker.subprocess.Popen", _fake_ps(holder)
     )
     assert 555 in _ps_pids_for_uid(451)
 
@@ -1147,7 +1199,7 @@ def test_uid_enumeration_still_proves_quiescence_for_an_absent_uid(
 ) -> None:
     holder = [_PS_ROWS_QUIESCENT]
     monkeypatch.setattr(
-        "control_plane.executive_worker_broker.subprocess.run", _fake_ps(holder)
+        "control_plane.executive_worker_broker.subprocess.Popen", _fake_ps(holder)
     )
     assert _ps_pids_for_uid(451) == (451,)
     signals: list[tuple[int, int]] = []
@@ -1174,14 +1226,14 @@ def test_uid_enumeration_fails_closed_without_a_saved_uid_column(
     holder = [_PS_ROWS_WITH_SETUID_RESIDUAL]
     fake = _fake_ps(holder)
 
-    def run(argv, **kwargs):
+    def popen(argv, **kwargs):
         # Drop `svuid` the way a ps without that keyword would: non-zero exit
         # AND short rows.  Either signal alone must fail the proof closed.
         if isinstance(argv, (list, tuple)) and argv[0] == "/bin/ps":
             argv = [item.replace("svuid=,", "nosuchcol=,") for item in argv]
         return fake(argv, **kwargs)
 
-    monkeypatch.setattr("control_plane.executive_worker_broker.subprocess.run", run)
+    monkeypatch.setattr("control_plane.executive_worker_broker.subprocess.Popen", popen)
     with pytest.raises(DedicatedUIDError, match="cannot inspect"):
         _ps_pids_for_uid(451)
 
@@ -1189,16 +1241,28 @@ def test_uid_enumeration_fails_closed_without_a_saved_uid_column(
 def test_uid_enumeration_refuses_a_wrong_arity_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Short rows must raise, not be skipped -- skipping them fakes absence."""
+    """Short rows must raise, not be skipped -- skipping them fakes absence.
 
-    def run(argv, **_kwargs):
+    Scope note (measured): this pins the OUTCOME, not the explicit arity check.
+    Deleting `if len(fields) != 4` leaves this test green, because unpacking
+    the generator then raises `ValueError` and the handler below re-raises the
+    identical "malformed" message.  The two guards are redundant by
+    construction and cannot be told apart from the outside; the explicit check
+    is defense in depth, deliberately left exactly as #51 wrote it.
+    """
+
+    def popen(argv, **_kwargs):
         # Exit 0 (so the returncode check cannot help) with one short row
         # among well-formed ones.
-        return subprocess.CompletedProcess(
-            argv, 0, "0 0 0 1\n451 451 451 451\n451 451 999\n", ""
+        return _FakePsProcess(
+            argv,
+            returncode=0,
+            stdout="0 0 0 1\n451 451 451 451\n451 451 999\n",
+            stderr="",
+            pid=_FAKE_PS_PID,
         )
 
-    monkeypatch.setattr("control_plane.executive_worker_broker.subprocess.run", run)
+    monkeypatch.setattr("control_plane.executive_worker_broker.subprocess.Popen", popen)
     with pytest.raises(DedicatedUIDError, match="malformed"):
         _ps_pids_for_uid(451)
 
@@ -1208,12 +1272,16 @@ def test_uid_enumeration_refuses_a_non_numeric_projection(
 ) -> None:
     """A non-numeric column must raise, not be skipped."""
 
-    def run(argv, **_kwargs):
-        return subprocess.CompletedProcess(
-            argv, 0, "0 0 0 1\n451 451 451 451\n451 451 451 notapid\n", ""
+    def popen(argv, **_kwargs):
+        return _FakePsProcess(
+            argv,
+            returncode=0,
+            stdout="0 0 0 1\n451 451 451 451\n451 451 451 notapid\n",
+            stderr="",
+            pid=_FAKE_PS_PID,
         )
 
-    monkeypatch.setattr("control_plane.executive_worker_broker.subprocess.run", run)
+    monkeypatch.setattr("control_plane.executive_worker_broker.subprocess.Popen", popen)
     with pytest.raises(DedicatedUIDError, match="malformed"):
         _ps_pids_for_uid(451)
 
@@ -1230,8 +1298,10 @@ def test_uid_enumeration_refuses_an_empty_projection(
     """
 
     monkeypatch.setattr(
-        "control_plane.executive_worker_broker.subprocess.run",
-        lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, "", ""),
+        "control_plane.executive_worker_broker.subprocess.Popen",
+        lambda argv, **_kwargs: _FakePsProcess(
+            argv, returncode=0, stdout="", stderr="", pid=_FAKE_PS_PID
+        ),
     )
     with pytest.raises(DedicatedUIDError, match="empty"):
         _ps_pids_for_uid(451)
@@ -1247,6 +1317,181 @@ def test_uid_enumeration_refuses_an_empty_projection(
     # The sweeper must propagate, not hand back a passing receipt.
     with pytest.raises(DedicatedUIDError, match="empty"):
         sweeper.sweep("test")
+
+
+# ---------------------------------------------------------------------------
+# The enumeration must not count ITSELF.  `/bin/ps` is setuid root, so the
+# child this projection spawns is observed as `ruid=<caller> euid=0` and the
+# real-uid term of the union matches it.  The sweeper then sees one residual on
+# every observation -- a FRESH transient pid each time -- and can never reach
+# quiescence, so the broker's startup sweep raises and the broker never serves.
+# ---------------------------------------------------------------------------
+
+
+def test_uid_enumeration_does_not_count_its_own_ps_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The projection's own `ps` pid must be dropped from the result."""
+
+    holder = [_PS_ROWS_WITH_THE_ENUMERATIONS_OWN_CHILD]
+    monkeypatch.setattr(
+        "control_plane.executive_worker_broker.subprocess.Popen", _fake_ps(holder)
+    )
+    pids = _ps_pids_for_uid(451)
+    # The row IS in the table and DOES match the union on `ruid`; it is the
+    # captured-pid exclusion, not the union, that keeps it out of the result.
+    assert (0, 451, 0, _FAKE_PS_PID) in _PS_ROWS_WITH_THE_ENUMERATIONS_OWN_CHILD
+    assert _FAKE_PS_PID not in pids
+    # Excluding our own child must not blind the projection to anything else.
+    assert pids == (451,)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="setuid /bin/ps is a Darwin property")
+def test_real_uid_enumeration_does_not_count_its_own_ps_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same property, against the real `/bin/ps` on the real host.
+
+    This is the regression proof.  At f1ff438 the spawned child's pid IS in the
+    returned tuple, because `/bin/ps` is setuid root (`-rwsr-xr-x root wheel`)
+    and therefore prints `ruid=<caller> euid=0 svuid=0` for itself, which the
+    union matches on `ruid`.  The pid is captured from the spawn rather than
+    guessed, so the assertion cannot drift.
+    """
+
+    spawned: list[int] = []
+    real_popen = subprocess.Popen
+
+    def recording_popen(argv, **kwargs):
+        process = real_popen(argv, **kwargs)
+        spawned.append(process.pid)
+        return process
+
+    monkeypatch.setattr(
+        "control_plane.executive_worker_broker.subprocess.Popen", recording_popen
+    )
+    pids = _ps_pids_for_uid(os.getuid())
+
+    assert len(spawned) == 1, "the projection must spawn exactly one ps"
+    assert spawned[0] not in pids
+    # The caller owns live processes, so an empty result would mean the
+    # exclusion swallowed the table rather than one row of it.
+    assert pids
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="setuid /bin/ps is a Darwin property")
+def test_real_uid_enumeration_never_counts_a_reader_it_spawned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Across repeated observations, no `ps` this module spawned may appear.
+
+    The sweeper observes in a loop, so the regression's real shape is a stream
+    of one-shot residual pids -- a different one every pass, none of them ever
+    killable because each is already gone.  Deliberately checked against EVERY
+    observation, not just its own: a reader pid must never be visible to any of
+    them.  Live-host churn cannot fake this, because these pids are ours.
+    """
+
+    spawned: list[int] = []
+    real_popen = subprocess.Popen
+
+    def recording_popen(argv, **kwargs):
+        process = real_popen(argv, **kwargs)
+        spawned.append(process.pid)
+        return process
+
+    monkeypatch.setattr(
+        "control_plane.executive_worker_broker.subprocess.Popen", recording_popen
+    )
+    uid = os.getuid()
+    observations = [set(_ps_pids_for_uid(uid)) for _ in range(4)]
+
+    assert len(spawned) == 4
+    for index, observed in enumerate(observations):
+        leaked = observed & set(spawned)
+        assert not leaked, f"observation {index} counted reader pid(s) {sorted(leaked)}"
+
+
+def test_a_self_counting_lister_can_never_satisfy_the_sweeper() -> None:
+    """Pin the contract the self-count violated: residuals must reach EMPTY.
+
+    Modelling the regression directly -- a lister that yields a fresh transient
+    pid on every call -- the sweeper must exhaust its timeout and raise, never
+    certify quiescence.  Quiescence is deliberately NOT relaxed to tolerate
+    this: a sweeper that shrugged off "one process, a different pid each time"
+    would also shrug off a genuine respawning escape.
+    """
+
+    counter = itertools.count(9000)
+    observations: list[int] = []
+
+    def self_counting_lister(_uid: int) -> tuple[int, ...]:
+        pid = next(counter)
+        observations.append(pid)
+        return (pid,)
+
+    sweeper = DedicatedUIDSweeper(
+        451,
+        current_uid=lambda: 451,
+        current_pid=lambda: 451,
+        process_lister=self_counting_lister,
+        kill_fn=lambda _target, _value: None,
+        sleep_fn=lambda _seconds: None,
+        timeout_seconds=0.05,
+    )
+    with pytest.raises(DedicatedUIDError, match="did not become quiescent"):
+        sweeper.sweep("test")
+    # Every observation saw a DIFFERENT pid: the set never shrank, so no amount
+    # of retrying or SIGKILL broadcasting could ever have helped.
+    assert len(set(observations)) == len(observations) > 1
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="setuid /bin/ps is a Darwin property")
+def test_the_real_projection_satisfies_the_sweeper_contract() -> None:
+    """The real projection, under the real sweeper, converges for an idle uid.
+
+    Same sweeper and same quiescence rule as the test above; only the lister
+    differs.  Run against a uid that owns nothing, so the broadcast must never
+    fire -- `kill_fn` failing the test is the assertion that it did not.
+    """
+
+    absent_uid = _an_absent_uid()
+    sweeper = DedicatedUIDSweeper(
+        absent_uid,
+        current_uid=lambda: absent_uid,
+        current_pid=lambda: os.getpid(),
+        process_lister=_ps_pids_for_uid,
+        kill_fn=lambda _target, _value: pytest.fail("an absent uid has nothing to kill"),
+        sleep_fn=lambda _seconds: None,
+    )
+    receipt = sweeper.sweep("test")
+    assert receipt.residual_pids_before == ()
+    assert receipt.residual_pids_after == ()
+    assert receipt.passed is True
+    assert receipt.signal_sent is False
+
+
+def _an_absent_uid() -> int:
+    """A uid owning no process in any of the three columns, from one `ps`."""
+
+    completed = subprocess.run(
+        ["/bin/ps", "-axo", "svuid=,ruid=,uid=,pid="],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=30,
+    )
+    present = {
+        int(field)
+        for line in completed.stdout.splitlines()
+        if len(line.split()) == 4
+        for field in line.split()[:3]
+    }
+    for candidate in range(60000, 60100):
+        if candidate not in present:
+            return candidate
+    pytest.skip("no unused uid available on this host")
 
 
 def test_best_effort_envelope_never_masks_the_interrupt(tmp_path: Path) -> None:
