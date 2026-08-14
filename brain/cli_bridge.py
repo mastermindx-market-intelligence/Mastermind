@@ -25,6 +25,8 @@ import yaml
 
 import bot  # noqa: F401
 
+from common.redaction import sanitize_external_text
+
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
 _CLAUDE_AGENT_NAMES = (
@@ -473,12 +475,29 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 break
 
             except Exception as e:
-                _sdk_exc_repr = repr(e)[:200]
+                # Two derivations of the same exception, on purpose.
+                #
+                # _sdk_exc_classify never leaves this process.  Keeping it at the
+                # established 200-char slice is load-bearing: key_rotor.classify_failure
+                # returns None outright above 600 characters, so handing it the full
+                # repr would silently stop cooling keys on verbose auth failures.
+                # (Redaction itself would not break classification -- the phrases it
+                # matches are short English, untouched by shape rules -- but there is
+                # no reason to route an escape-path transform through this seam.)
+                _sdk_exc_classify = repr(e)[:200]
+                # _sdk_exc_repr is the only form that ESCAPES — response body, run log.
+                # It is redacted from the FULL repr and bounded afterwards.  Bounding
+                # first would be the leak: a 200-char cut can leave a secret-shaped run
+                # shorter than the 32-character match threshold, and the surviving
+                # prefix would then print verbatim.  The Agent SDK surfaces the Claude
+                # Code CLI's own stderr, which on an auth failure can echo
+                # CLAUDE_CODE_OAUTH_TOKEN.
+                _sdk_exc_repr = sanitize_external_text(repr(e), limit=200)
                 # Classify the exception representation for key failures
                 _classified = None
                 if _pool and _key_id is not None:
                     try:
-                        _classified = _kr.classify_failure(_sdk_exc_repr)
+                        _classified = _kr.classify_failure(_sdk_exc_classify)
                     except Exception:
                         pass
 

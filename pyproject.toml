@@ -37,6 +37,7 @@ include = [
     "bot",
     "brain",
     "bridge",
+    "common",
     "control_plane",
     "data_layer",
     "loop",

@@ -29,6 +29,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app import auth   # reuse _supabase_url / _supabase_anon / _supabase_decode
+from common.redaction import REDACTION, sanitize_external_text
 
 log = logging.getLogger("mastermind.account")
 
@@ -139,12 +140,33 @@ async def _user_put(token: str, body: dict):
 
 
 def _sb_err(r) -> str:
+    """Supabase's own error text, SANITIZED, for a client-facing response body.
+
+    Every caller hands this straight back over HTTP, so the upstream body is
+    externally-produced text reaching a client: it is bounded and shape-redacted
+    (``common.redaction``) rather than trusted.  We do not control what Supabase
+    puts in its error payloads, and the service-role key this module holds
+    (``SUPABASE_SERVICE_ROLE_KEY`` — a ``eyJ…`` JWT or ``sb_secret_…``) is
+    exactly the kind of string that must never survive the trip.
+
+    Falls back to the generic status line when the upstream message is absent,
+    unusable, or redacted away to nothing — never returns an empty error, and
+    never returns a bare ``<redacted>`` that tells the user nothing.
+    """
+    status = getattr(r, "status_code", "error")
+    generic = f"Request failed ({status})."
     try:
         j = r.json()
-        return (j.get("msg") or j.get("error_description") or j.get("message")
-                or j.get("error") or f"Request failed ({r.status_code}).")
+        raw = (j.get("msg") or j.get("error_description") or j.get("message")
+               or j.get("error"))
     except Exception:  # noqa: BLE001
-        return f"Request failed ({r.status_code})."
+        return generic
+    message = sanitize_external_text(raw)
+    # A body that was ONLY a secret sanitizes to "<redacted>" — technically safe,
+    # but useless in a panel. Fall through to the status line instead.
+    if not message.replace(REDACTION, "").strip(" .,:;-—'\"()[]{}"):
+        return generic
+    return message
 
 
 def _login_method(user: dict):
