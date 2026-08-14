@@ -732,6 +732,307 @@ def _assert_binary_unchanged(attestation: BinaryAttestation) -> None:
         raise BinaryAttestationError("attested Codex binary changed before launch")
 
 
+# ---------------------------------------------------------------------------
+# Install-time Codex attestation receipt
+# ---------------------------------------------------------------------------
+# ``ops/executive_os/install.sh`` runs as root, warm, at normal process
+# priority.  It pays the real cost of attestation exactly once -- a
+# ``codesign --verify --strict`` on the ~220 MB Codex binary plus a
+# ``--version`` probe -- and records the verdict plus the binary's cheap
+# filesystem identity in a root-owned receipt.  ``CodexWorkerAdapter``, run
+# from the *worker* daemon under ``ProcessType=Background`` +
+# ``LowPriorityIO=true`` throttling (deliberately unchanged by this
+# mechanism), no longer has to repeat that cost -- and therefore no longer
+# has a codesign/--version call on its startup path that a cold trust-service
+# cache, host load, or I/O throttling can push past a timeout.
+CODEX_ATTESTATION_RECEIPT_SCHEMA_VERSION = "mastermind.executive_codex_attestation/v1"
+
+# The fields pinned in the receipt and re-checked against a fresh
+# ``os.fstat`` at every worker startup.  ``ctime_ns`` is the load-bearing
+# tamper signal: unlike ``mtime_ns`` (which any writer can backdate with
+# ``utimes``), nothing can set ``st_ctime_ns`` directly -- the kernel stamps
+# it on every metadata or content change.  A same-size, same-content,
+# same-mtime replacement written to a *new* inode still changes both
+# ``inode`` and ``ctime_ns``.  This does NOT catch an attacker who is
+# already root and willing to fabricate ctime at the filesystem level (e.g.
+# raw device manipulation) -- that attacker already owns the machine and
+# every other control on it, including this one.
+_CODEX_RECEIPT_IDENTITY_FIELDS: tuple[str, ...] = (
+    "device",
+    "inode",
+    "size",
+    "mode",
+    "uid",
+    "gid",
+    "mtime_ns",
+    "ctime_ns",
+)
+_CODEX_RECEIPT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "path",
+        "version",
+        "team_identifier",
+        "sha256",
+        "recorded_at",
+        "identity",
+    }
+)
+_MAX_CODEX_RECEIPT_BYTES = 64 * 1024
+# Thin and universal Mach-O magic values, in both byte orders -- the same
+# set attest_codex_binary checks.  Costs one 4-byte read on an already-open
+# descriptor; dropping it would save nothing measurable.
+_MACHO_MAGIC = frozenset(
+    {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}
+)
+
+
+class CodexAttestationReceiptError(BinaryAttestationError):
+    """The install-time Codex attestation receipt is missing, unsafe, or stale."""
+
+
+def _open_regular_nofollow(path: Path) -> int:
+    """Open ``path`` for reading without following a trailing symlink.
+
+    Callers ``fstat`` the returned descriptor rather than checking with
+    ``lstat`` and opening afterward, so there is no window between the
+    safety check and the read it protects.  ``O_NOFOLLOW`` is required, not
+    best-effort: a platform without it would silently follow a symlink
+    instead of refusing, which is exactly the TOCTOU this function exists
+    to close.
+    """
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise CodexAttestationReceiptError(
+            "this platform has no O_NOFOLLOW; refusing to open without symlink protection"
+        )
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    return os.open(path, flags)
+
+
+def _fstat_identity(fd: int) -> dict[str, int]:
+    info = os.fstat(fd)
+    return {
+        "device": info.st_dev,
+        "inode": info.st_ino,
+        "size": info.st_size,
+        "mode": stat.S_IMODE(info.st_mode),
+        "uid": info.st_uid,
+        "gid": info.st_gid,
+        "mtime_ns": info.st_mtime_ns,
+        "ctime_ns": info.st_ctime_ns,
+    }
+
+
+def _verify_codex_binary_identity(binary_path: Path, identity: Mapping[str, Any]) -> None:
+    """Refuse to start if the Codex binary's cheap filesystem identity drifted.
+
+    Opens ``binary_path`` exactly once and calls ``fstat`` on that single
+    descriptor -- never stat-then-open, which would leave a TOCTOU race
+    between the check and the open.  Every pinned field is compared; a
+    mismatch names the specific field that moved so the operator does not
+    have to guess from a bare "attestation failed".
+
+    This intentionally never recomputes the binary's SHA-256 here: reading
+    the full ~220 MB binary on every worker startup is exactly the cost this
+    mechanism exists to remove.  The SHA-256 recorded in the receipt is for
+    install-time audit and provenance only.
+    """
+
+    try:
+        fd = _open_regular_nofollow(binary_path)
+    except OSError as exc:
+        raise CodexAttestationReceiptError(
+            f"codex binary named by the attestation receipt is missing or unreadable: "
+            f"{binary_path}"
+        ) from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise CodexAttestationReceiptError(
+                "codex binary named by the attestation receipt is not a regular file"
+            )
+        if platform.system() == "Darwin":
+            magic = os.read(fd, 4)
+            if magic not in _MACHO_MAGIC:
+                raise CodexAttestationReceiptError(
+                    "codex binary named by the attestation receipt is not a native "
+                    "Mach-O binary"
+                )
+        observed = _fstat_identity(fd)
+    finally:
+        os.close(fd)
+    for field in _CODEX_RECEIPT_IDENTITY_FIELDS:
+        expected_value = identity[field]
+        observed_value = observed[field]
+        if observed_value != expected_value:
+            raise CodexAttestationReceiptError(
+                "codex binary identity mismatch at startup: "
+                f"{field} changed since install-time attestation "
+                f"(receipt={expected_value!r}, observed={observed_value!r}); "
+                "remedy: re-run install.sh for this release, which always "
+                "re-attests the current binary and rewrites the receipt"
+            )
+
+
+def load_codex_attestation_receipt(
+    receipt_path: str | os.PathLike[str],
+    *,
+    expected_binary_path: str | os.PathLike[str],
+    expected_owner_gid: int,
+    expected_owner_uid: int = 0,
+) -> BinaryAttestation:
+    """Build a ``BinaryAttestation`` from an install-time receipt, fail-closed.
+
+    This is the fast path ``CodexWorkerAdapter.__init__`` takes at every
+    worker startup: one ``open``+``fstat`` of the receipt and one
+    ``open``+``fstat`` of the Codex binary -- no ``codesign`` invocation, no
+    ``--version`` subprocess, no re-read of the binary's bytes.  Those were
+    already paid for once, warm, at normal process priority, by
+    ``ops/executive_os/install.sh`` running as root; see that script for the
+    write side that produces this receipt.
+
+    The receipt file itself must be root-owned, mode 0440, a direct regular
+    file with exactly one hard link, and not a symlink.  Mode 0440 (rather
+    than the 0400 this repo's ``PYTHON_RUNTIME_RECEIPT`` uses for its
+    root-to-root-only provenance file) is deliberate: this receipt's reader
+    is the non-root worker process, so its own primary group -- passed in as
+    ``expected_owner_gid`` -- needs read access; only root can ever write or
+    replace it.  There is no path through this function that falls back to
+    re-attesting the binary from scratch on a missing or unsafe receipt --
+    that would silently reintroduce the exact slow cold-start path (a
+    ``codesign`` call that can block on a cold trust-service cache under
+    throttling and load) this mechanism exists to remove. Every failure is a
+    refusal to start, naming the specific check that failed.
+    """
+
+    path = Path(receipt_path)
+    if not path.is_absolute():
+        raise CodexAttestationReceiptError("codex attestation receipt path must be absolute")
+    try:
+        fd = _open_regular_nofollow(path)
+    except OSError as exc:
+        raise CodexAttestationReceiptError(
+            f"codex attestation receipt is missing or unreadable: {path}"
+        ) from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise CodexAttestationReceiptError(
+                "codex attestation receipt must be a direct regular file"
+            )
+        if info.st_nlink != 1:
+            raise CodexAttestationReceiptError(
+                "codex attestation receipt must have exactly one hard link"
+            )
+        if info.st_uid != int(expected_owner_uid):
+            raise CodexAttestationReceiptError("codex attestation receipt is not root-owned")
+        if info.st_gid != int(expected_owner_gid):
+            raise CodexAttestationReceiptError(
+                "codex attestation receipt has an unexpected group owner"
+            )
+        if stat.S_IMODE(info.st_mode) != 0o440:
+            raise CodexAttestationReceiptError("codex attestation receipt has an unsafe mode")
+        if info.st_size > _MAX_CODEX_RECEIPT_BYTES:
+            raise CodexAttestationReceiptError(
+                "codex attestation receipt exceeds its size limit"
+            )
+        raw = os.read(fd, _MAX_CODEX_RECEIPT_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > _MAX_CODEX_RECEIPT_BYTES:
+        raise CodexAttestationReceiptError("codex attestation receipt exceeds its size limit")
+    try:
+        document = json.loads(raw.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt is not valid UTF-8 JSON"
+        ) from exc
+    if not isinstance(document, dict) or set(document) != _CODEX_RECEIPT_FIELDS:
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt fields do not match the schema"
+        )
+    if document.get("schema_version") != CODEX_ATTESTATION_RECEIPT_SCHEMA_VERSION:
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt schema version is unsupported"
+        )
+    for field in ("path", "version", "sha256", "recorded_at"):
+        if not isinstance(document.get(field), str) or not document[field]:
+            raise CodexAttestationReceiptError(
+                f"codex attestation receipt field {field!r} is invalid"
+            )
+    if re.fullmatch(r"[0-9a-f]{64}", document["sha256"]) is None:
+        raise CodexAttestationReceiptError("codex attestation receipt sha256 is malformed")
+    team_identifier = document.get("team_identifier")
+    if team_identifier is not None and not isinstance(team_identifier, str):
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt team_identifier is invalid"
+        )
+    expected_binary = Path(expected_binary_path)
+    if document["path"] != str(expected_binary):
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt binary path does not match the configured codex_binary"
+        )
+    identity = document.get("identity")
+    if not isinstance(identity, dict) or set(identity) != set(_CODEX_RECEIPT_IDENTITY_FIELDS):
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt identity fields do not match the schema"
+        )
+    for field in _CODEX_RECEIPT_IDENTITY_FIELDS:
+        if type(identity[field]) is not int:
+            raise CodexAttestationReceiptError(
+                f"codex attestation receipt identity field {field!r} is not an integer"
+            )
+
+    # Compare the recorded identity against a fresh fstat of the real binary
+    # BEFORE asserting the two static invariants below.  A field-specific
+    # mismatch (a swap, an edit) is a more specific and more actionable
+    # diagnosis than a generic "not root-owned" -- and checking the dynamic
+    # comparison first means a receipt that is internally self-consistent
+    # (recorded and observed AGREE) but still describes an invalid binary
+    # -- not root-owned, or group/other-writable -- is what reaches the
+    # static checks below.
+    _verify_codex_binary_identity(expected_binary, identity)
+
+    # attest_codex_binary asserted these two on every cold start (a fresh
+    # os.access(X_OK)/mode check plus never trusting a group/other-writable
+    # or non-root-owned executable); the receipt now carries the binary's
+    # mode and uid instead of re-probing them, so the same invariants are
+    # asserted against the RECORDED values here -- which, by this point,
+    # are also known to match the binary's real, current filesystem state.
+    if identity["uid"] != 0:
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt records a non-root-owned binary"
+        )
+    if identity["mode"] & 0o022:
+        raise CodexAttestationReceiptError(
+            "codex attestation receipt records a group/other-writable binary"
+        )
+
+    try:
+        real_path = str(expected_binary.resolve(strict=True))
+    except OSError as exc:
+        raise CodexAttestationReceiptError(
+            f"codex binary named by the attestation receipt could not be resolved: "
+            f"{expected_binary}"
+        ) from exc
+
+    return BinaryAttestation(
+        path=str(expected_binary),
+        real_path=real_path,
+        version=document["version"],
+        sha256=document["sha256"],
+        team_identifier=team_identifier,
+        size=identity["size"],
+        device=identity["device"],
+        inode=identity["inode"],
+        mode=identity["mode"],
+        uid=identity["uid"],
+        gid=identity["gid"],
+        mtime_ns=identity["mtime_ns"],
+    )
+
+
 class _ProcBSDInfo(ctypes.Structure):
     # sys/proc_info.h, PROC_PIDTBSDINFO, macOS 26.  Native alignment is intentional.
     _fields_ = [
@@ -2907,7 +3208,9 @@ __all__ = [
     "ArtifactReceipt",
     "BinaryAttestation",
     "BinaryAttestationError",
+    "CODEX_ATTESTATION_RECEIPT_SCHEMA_VERSION",
     "CancelReceipt",
+    "CodexAttestationReceiptError",
     "CodexWorkerAdapter",
     "CodexWorkerError",
     "CollectionReceipt",
@@ -2925,6 +3228,7 @@ __all__ = [
     "WorkerResult",
     "WorkerRunStatus",
     "attest_codex_binary",
+    "load_codex_attestation_receipt",
     "validate_secret_canary_verdict",
     "validate_json_schema",
 ]

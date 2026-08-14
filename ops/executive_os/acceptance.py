@@ -1456,6 +1456,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             Path(self.config["worker_provider_home"]),
             CONTROL_CONFIG,
             WORKER_CONFIG,
+            Path(self.worker_config["codex_attestation_receipt"]),
             CONTROL_PLIST,
             WORKER_PLIST,
         ):
@@ -1487,6 +1488,51 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             != sorted(self.worker_directory_gids - {self.worker_group.gr_gid})
         ):
             raise AcceptanceError("installed worker config differs from exact host policy")
+        # Tamper-evidence for the receipt rests entirely on its parent chain
+        # being root-owned and non-group/other-writable: a writable ancestor
+        # lets a non-root actor delete-and-replace $SYSTEM_ROOT wholesale
+        # (directory-entry removal is governed by the PARENT's write bit,
+        # not the child's own mode), silently turning "non-root cannot
+        # forge the receipt" into "can". The existing ACL loop above already
+        # covers SYSTEM_ROOT; this adds the uid/mode half, for SYSTEM_ROOT
+        # and its own macOS-owned ancestors.
+        for ancestor in (Path("/Library"), Path("/Library/Application Support"), SYSTEM_ROOT):
+            ancestor_info = ancestor.lstat()
+            if (
+                stat.S_ISLNK(ancestor_info.st_mode)
+                or not stat.S_ISDIR(ancestor_info.st_mode)
+                or ancestor_info.st_uid != 0
+                or stat.S_IMODE(ancestor_info.st_mode) & 0o022
+            ):
+                raise AcceptanceError(
+                    "Codex attestation receipt ancestor is not a root-owned, "
+                    f"non-group/other-writable directory: {ancestor}"
+                )
+        codex_receipt_path = Path(self.worker_config["codex_attestation_receipt"])
+        codex_receipt_info = codex_receipt_path.lstat()
+        if (
+            stat.S_ISLNK(codex_receipt_info.st_mode)
+            or not stat.S_ISREG(codex_receipt_info.st_mode)
+            or codex_receipt_info.st_uid != 0
+            or codex_receipt_info.st_gid != self.worker_group.gr_gid
+            or stat.S_IMODE(codex_receipt_info.st_mode) != 0o440
+            or codex_receipt_info.st_nlink != 1
+        ):
+            raise AcceptanceError(
+                "Codex attestation receipt metadata differs from its install-time contract"
+            )
+        codex_receipt = _safe_json(codex_receipt_path)
+        if (
+            codex_receipt.get("schema_version") != "mastermind.executive_codex_attestation/v1"
+            or codex_receipt.get("path") != self.worker_config.get("codex_binary")
+            or codex_receipt.get("team_identifier")
+            != self.worker_config.get("required_team_identifier")
+            or codex_receipt.get("version")
+            not in self.worker_config.get("allowed_codex_versions", [])
+        ):
+            raise AcceptanceError(
+                "Codex attestation receipt content differs from the installed worker policy"
+            )
         for shared_root in (
             Path(self.config["proof_workspace_root"]),
             Path(self.config["worker_runs_root"]),

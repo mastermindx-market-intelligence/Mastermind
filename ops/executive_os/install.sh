@@ -543,6 +543,10 @@ RUNTIME_ROOT="/var/db/mastermind-executive"
 RELEASE_ROOT="$SYSTEM_ROOT/releases/$EXPECTED_SHA"
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 WORKER_CONFIG="$SYSTEM_ROOT/config/worker-codex.json"
+# Version-addressed, like $INSTALLED_CODEX below: a future Codex version bump
+# gets its own fresh receipt instead of colliding with (and fail-closed
+# refusing to overwrite or silently reuse) an older version's receipt.
+CODEX_ATTESTATION_RECEIPT="$SYSTEM_ROOT/codex-attestation-$CODEX_VERSION.json"
 CONTROL_HOME="$RUNTIME_ROOT/control/home"
 PROVIDER_HOME="$RUNTIME_ROOT/workers/codex-01/provider-home"
 WORKSPACE_ROOT="$RUNTIME_ROOT/jobs/workspaces"
@@ -837,15 +841,168 @@ fi
   exit 65
 }
 
+# --- BEGIN codex attestation receipt writer ---
+# Record the installed Codex binary's attested identity, root-owned and
+# immutable, so the worker daemon can validate it at every startup without
+# ever shelling out to codesign or `--version` again (see
+# control_plane.codex_worker.load_codex_attestation_receipt). Mode 0440 --
+# not the 0:0:400:1 this repo's PYTHON_RUNTIME_RECEIPT uses for its
+# root-to-root-only provenance file -- is deliberate: the worker process is
+# this receipt's reader, so its own primary group needs read access; only
+# root can ever write or replace it.
+#
+# Always rewritten, unconditionally, on every install run: the receipt is
+# already version-addressed (its filename embeds $CODEX_VERSION), so an
+# existence guard here buys nothing except a way to get permanently stuck.
+# A guard that skips rewriting when the file already exists cannot recover
+# from the binary being replaced byte-identically at a fresh inode --
+# operator repair, backup restore, host migration, and APFS snapshot
+# rollback all do exactly that -- because the unconditional validation
+# below would then fail forever: nothing would ever re-attest the new
+# binary, and install.sh's EXIT trap leaves both daemons disabled and
+# booted out, so Executive OS would stay down with no recorded remedy
+# short of an operator manually deleting the receipt. Final ownership
+# (root:$WORKER_GROUP) and mode (0440) are set on the temp file BEFORE the
+# rename, so there is no window -- once the receipt becomes visible at its
+# final path -- during which it is not yet exactly correct: an interrupt
+# before the rename leaves only a harmless orphaned temp file beside an
+# untouched (or absent) prior receipt, and an interrupt after the rename
+# leaves a fully-correct one.
+#
+# Tamper-evidence for the receipt rests entirely on its parent chain being
+# root-owned and non-group/other-writable: directory-entry removal is
+# governed by the PARENT's write bit, not the child's own mode, so a
+# writable ancestor lets a non-root actor delete-and-replace $SYSTEM_ROOT
+# wholesale regardless of how tightly the receipt itself is locked down.
+for receipt_ancestor in /Library "/Library/Application Support" "$SYSTEM_ROOT"; do
+  [ -d "$receipt_ancestor" ] && [ ! -L "$receipt_ancestor" ] || {
+    /bin/echo "Codex attestation receipt ancestor is not a direct directory: $receipt_ancestor" >&2
+    exit 65
+  }
+  RECEIPT_ANCESTOR_UID="$(/usr/bin/stat -f '%u' "$receipt_ancestor")"
+  RECEIPT_ANCESTOR_MODE="$(/usr/bin/stat -f '%Lp' "$receipt_ancestor")"
+  [ "$RECEIPT_ANCESTOR_UID" = "0" ] && [ "$((8#$RECEIPT_ANCESTOR_MODE & 8#022))" -eq 0 ] || {
+    /bin/echo "Codex attestation receipt ancestor is not root-owned and non-group/other-writable: $receipt_ancestor" >&2
+    exit 65
+  }
+  case "$(/usr/bin/stat -f '%Sp' "$receipt_ancestor")" in
+    *+) /bin/echo "Codex attestation receipt ancestor has a filesystem ACL: $receipt_ancestor" >&2; exit 65 ;;
+  esac
+done
+"$PYTHON_BINARY" -I -S -B - "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX" \
+  "$CODEX_VERSION" "$INSTALLED_TEAM" "$INSTALLED_HASH" "$WORKER_GID" <<'PY' || {
+import json, os, pathlib, stat, sys
+from datetime import datetime, timezone
+
+destination, binary_path, version, team, sha256, worker_gid = sys.argv[1:]
+path = pathlib.Path(binary_path)
+flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+fd = os.open(path, flags)
+try:
+    info = os.fstat(fd)
+finally:
+    os.close(fd)
+if not stat.S_ISREG(info.st_mode):
+    raise RuntimeError("installed Codex binary is not a regular file")
+receipt = {
+    "schema_version": "mastermind.executive_codex_attestation/v1",
+    "path": str(path),
+    "version": version,
+    "team_identifier": team,
+    "sha256": sha256,
+    "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    "identity": {
+        "device": info.st_dev,
+        "inode": info.st_ino,
+        "size": info.st_size,
+        "mode": stat.S_IMODE(info.st_mode),
+        "uid": info.st_uid,
+        "gid": info.st_gid,
+        "mtime_ns": info.st_mtime_ns,
+        "ctime_ns": info.st_ctime_ns,
+    },
+}
+out = pathlib.Path(destination)
+temporary = out.with_name(f".{out.name}.{os.getpid()}.tmp")
+temporary.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+# The creating process is root, so the temp file's owner is already root;
+# -1 leaves uid untouched and fixes only the group. Both the group and the
+# mode land BEFORE the rename -- see the block comment above.
+os.chown(temporary, -1, int(worker_gid))
+os.chmod(temporary, 0o440)
+os.replace(temporary, out)
+PY
+  /bin/echo "failed to record the Codex binary attestation receipt" >&2
+  exit 65
+}
+# --- END codex attestation receipt writer ---
+[ -f "$CODEX_ATTESTATION_RECEIPT" ] && [ ! -L "$CODEX_ATTESTATION_RECEIPT" ] \
+  && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$CODEX_ATTESTATION_RECEIPT")" = "0:$WORKER_GID:440:1" ] || {
+    /bin/echo "Codex binary attestation receipt is missing or has unsafe metadata" >&2
+    exit 65
+  }
+case "$(/usr/bin/stat -f '%Sp' "$CODEX_ATTESTATION_RECEIPT")" in
+  *+) /bin/echo "Codex binary attestation receipt has a filesystem ACL" >&2; exit 65 ;;
+esac
+"$PYTHON_BINARY" -I -S -B - "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX" \
+  "$CODEX_VERSION" "$INSTALLED_TEAM" "$INSTALLED_HASH" <<'PY' || {
+import json, os, pathlib, stat, sys
+
+receipt_path, binary_path, version, team, sha256 = sys.argv[1:]
+receipt = json.loads(pathlib.Path(receipt_path).read_text(encoding="utf-8"))
+expected_keys = {
+    "schema_version", "path", "version", "team_identifier", "sha256",
+    "recorded_at", "identity",
+}
+if set(receipt) != expected_keys:
+    raise RuntimeError("Codex attestation receipt shape differs from v1")
+if receipt.get("schema_version") != "mastermind.executive_codex_attestation/v1":
+    raise RuntimeError("Codex attestation receipt schema version mismatch")
+expected = {"path": binary_path, "version": version, "team_identifier": team, "sha256": sha256}
+for key, value in expected.items():
+    if receipt.get(key) != value:
+        raise RuntimeError(f"Codex attestation receipt mismatch: {key}")
+identity = receipt.get("identity")
+expected_identity_fields = {
+    "device", "inode", "size", "mode", "uid", "gid", "mtime_ns", "ctime_ns",
+}
+if not isinstance(identity, dict) or set(identity) != expected_identity_fields:
+    raise RuntimeError("Codex attestation receipt identity shape differs from v1")
+path = pathlib.Path(binary_path)
+flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+fd = os.open(path, flags)
+try:
+    info = os.fstat(fd)
+finally:
+    os.close(fd)
+observed = {
+    "device": info.st_dev,
+    "inode": info.st_ino,
+    "size": info.st_size,
+    "mode": stat.S_IMODE(info.st_mode),
+    "uid": info.st_uid,
+    "gid": info.st_gid,
+    "mtime_ns": info.st_mtime_ns,
+    "ctime_ns": info.st_ctime_ns,
+}
+for key, value in observed.items():
+    if identity.get(key) != value:
+        raise RuntimeError(f"Codex attestation receipt identity differs from installed binary: {key}")
+PY
+  /bin/echo "Codex binary attestation receipt validation failed" >&2
+  exit 65
+}
+
 PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$WORKER_CONFIG" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
-  "$WORKER_SUPPLEMENTARY_GIDS" "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" <<'PY'
+  "$WORKER_SUPPLEMENTARY_GIDS" "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" \
+  "$CODEX_ATTESTATION_RECEIPT" <<'PY'
 import json, os, pathlib, sys
 (
     destination, control_uid, worker_uid, worker_gid, supplementary_gids, workspace_root,
-    run_root, provider_home, codex_binary, codex_version,
+    run_root, provider_home, codex_binary, codex_version, codex_attestation_receipt,
 ) = sys.argv[1:]
 value = {
-    "schema_version": "mastermind.executive_worker_broker_config/v2",
+    "schema_version": "mastermind.executive_worker_broker_config/v3",
     "control_uid": int(control_uid),
     "worker_uid": int(worker_uid),
     "worker_gid": int(worker_gid),
@@ -856,6 +1013,7 @@ value = {
     "run_root": run_root,
     "provider_home": provider_home,
     "codex_binary": codex_binary,
+    "codex_attestation_receipt": codex_attestation_receipt,
     "allowed_codex_versions": [codex_version],
     "required_team_identifier": "2DC432GLL2",
     "launchd_socket_name": "WorkerBroker",
@@ -916,7 +1074,7 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/worker/stdout.log "$WORKER_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/worker/stderr.log "$WORKER_PLIST"
 
-for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST"; do
+for installed_policy_file in "$CONTROL_CONFIG" "$WORKER_CONFIG" "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_SENTINEL_FILE" "$CONTROL_PLIST" "$WORKER_PLIST"; do
   case "$(/usr/bin/stat -f '%Sp' "$installed_policy_file")" in
     *+) /bin/echo "installed policy file has a filesystem ACL: $installed_policy_file" >&2; exit 65 ;;
   esac
