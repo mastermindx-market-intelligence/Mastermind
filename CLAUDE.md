@@ -57,7 +57,11 @@ a `claim:` note is never liveness (`control_plane/` owns that). Decisions do not
 `governance.jsonl` — an `executive_decision` event cites the durable `DEC:<KEY>`. No
 second store or local mirror in this repo (Charter P7 / `duplicate_control_planes`).
 Read bridge: `scripts/ceo_boot_packet.py` reads the brief one-way
-(`agentos.py brief --json --no-remember`); there is no write path back.
+(`agentos.py brief --json --no-remember`); there is no write path back. Phase 2b
+reuses that resolver/collector to annotate `brain/improvement_agenda.py` only after
+ranking and only through explicit `{workstream, wave}` references. The Improvement
+Agenda remains the sole priority queue; the boot packet ignores legacy
+`brief.unblocked` for rendering and recommendations.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole

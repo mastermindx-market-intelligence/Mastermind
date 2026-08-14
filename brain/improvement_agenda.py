@@ -43,12 +43,19 @@ that source to a no-op, never a raise), P6 (the mistake-machinery loop closes in
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _OUT = _ROOT / "data" / "agenda"
 _VALIDATION_DIR = _ROOT / "research" / "eyes" / "validation_runs"
+
+# Agent OS contributes dependency/readiness only.  The Improvement Agenda remains
+# the sole priority engine: this payload is joined after rank/age have been frozen.
+READINESS_SCHEMA = "agentos.readiness.v1"
+_READINESS_STATES = {"ready", "blocked", "in_progress", "done", "unknown"}
 
 # ── fix_type / owner vocabulary (documented so the writer + tests share one contract) ────────────
 FIX_CONFIG = "config-tune"      # a doctrine.yml (unverified-prior) constant → self_tune candidate
@@ -97,14 +104,75 @@ def _isodate(asof: date | None) -> str:
     return (asof or date.today()).isoformat()
 
 
+def _not_applicable_readiness() -> dict:
+    """Structured N/A for agenda items with no explicit Agent OS identity."""
+    return {
+        "state": "not_applicable",
+        "reason_code": "no_agentos_ref",
+        "reason": "No explicit Agent OS reference; readiness is not applicable.",
+        "depends_on": [],
+        "unmet_dependencies": [],
+    }
+
+
+def _unknown_readiness(reason_code: str, reason: str) -> dict:
+    """Fail-open readiness for an explicitly linked item whose input cannot answer."""
+    return {
+        "state": "unknown",
+        "reason_code": reason_code,
+        "reason": reason,
+        "depends_on": [],
+        "unmet_dependencies": [],
+    }
+
+
+def _legacy_artifact_readiness() -> dict:
+    """UNKNOWN for persisted agenda rows created before Phase 2b annotations."""
+    return _unknown_readiness(
+        "legacy_artifact",
+        "Rebuild required: this persisted agenda predates readiness annotations.",
+    )
+
+
+def _normalise_agentos_ref(value: Mapping | None) -> dict | None:
+    """Return the stable Agent OS identity, refusing ambiguous partial references."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("agentos_ref must be an object or null")
+    workstream = value.get("workstream")
+    wave = value.get("wave")
+    if not isinstance(workstream, str) or not workstream.strip():
+        raise ValueError("agentos_ref.workstream must be a non-empty string")
+    if workstream != workstream.strip():
+        raise ValueError("agentos_ref.workstream must not have surrounding whitespace")
+    if wave is not None and (not isinstance(wave, str) or not wave.strip()):
+        raise ValueError("agentos_ref.wave must be a non-empty string or null")
+    if isinstance(wave, str) and wave != wave.strip():
+        raise ValueError("agentos_ref.wave must not have surrounding whitespace")
+    return {"workstream": workstream, "wave": wave}
+
+
 def _item(item_id: str, klass: str, title: str, *, evidence: list[str], suggested_fix: str,
           fix_type: str, expected_impact: str, owner: str, severity: float = 0.0,
-          extra: dict | None = None) -> dict:
+          extra: dict | None = None, agentos_ref: Mapping | None = None) -> dict:
     """One ranked agenda item. `item_id` is the stable dedup key (survives across weeks so the same
     open item carries forward with age instead of re-appearing fresh). `severity` ∈ [0,1] is the
     per-item bump on top of the class weight. P3: `evidence` MUST be non-empty or the item is dropped
     by the builder (an item with no evidence is exactly the un-argued assertion the charter forbids)."""
     rank_score = _CLASS_WEIGHT.get(klass, 30) + round(10.0 * max(0.0, min(1.0, severity)), 2)
+    try:
+        normalised_ref = _normalise_agentos_ref(agentos_ref)
+        readiness = _not_applicable_readiness()
+    except ValueError as exc:
+        # A malformed optional reference must not make its entire accountability
+        # source disappear behind the source-level fail-open guard. Keep the item,
+        # publish a safe null identity, and make the annotation failure explicit.
+        normalised_ref = None
+        readiness = _unknown_readiness(
+            "malformed_ref",
+            f"Agenda item has a malformed Agent OS reference: {exc}.",
+        )
     d = {
         "id": item_id,
         "class": klass,
@@ -115,6 +183,10 @@ def _item(item_id: str, klass: str, title: str, *, evidence: list[str], suggeste
         "expected_impact": expected_impact,
         "owner": owner,
         "rank_score": rank_score,
+        # Phase 2b forbids title/prose inference.  Constructors opt in only with a
+        # stable {workstream, wave} identity; every current constructor is unmapped.
+        "agentos_ref": normalised_ref,
+        "readiness": readiness,
     }
     if extra:
         d["extra"] = extra
@@ -906,15 +978,306 @@ def _carry_forward(items: list[dict], asof: date) -> list[dict]:
     return items
 
 
+def _readiness_input(
+    *,
+    schema: str | None,
+    available: bool,
+    macro_root: Path | None,
+    macro_sha: str | None,
+    resolved_via: str | None,
+    degraded: list[str],
+    sensitive_paths: list[Path] | None = None,
+) -> dict:
+    """Public provenance for the optional Agent OS readiness annotation.
+
+    The agenda API is public, so local checkout topology is never part of this
+    artifact.  The root basename, git SHA, and resolver rung are sufficient
+    provenance; known absolute paths are reduced to their display-safe labels in
+    warnings as well as in ``macro_root``.
+    """
+    paths = [path for path in [macro_root, _ROOT, *(sensitive_paths or [])]
+             if isinstance(path, Path)]
+
+    def public_warning(value: object) -> str:
+        warning = str(value)
+        for path in sorted(paths, key=lambda row: len(os.fspath(row)), reverse=True):
+            raw = os.fspath(path)
+            if path.is_absolute() and raw:
+                warning = warning.replace(raw, path.name or "<root>")
+        return warning
+
+    return {
+        "schema": schema,
+        "available": available,
+        # GET /api/agenda is public.  Preserve root identity without exposing the
+        # host username or absolute filesystem topology; SHA + resolver rung carry
+        # the durable provenance.
+        "macro_root": (macro_root.name or "<root>") if macro_root is not None else None,
+        "macro_sha": macro_sha,
+        "resolved_via": resolved_via,
+        "degraded": [public_warning(row) for row in degraded],
+    }
+
+
+def _agentos_bridge():
+    """Lazy access to the already-sanctioned PR #44 read bridge.
+
+    Keeping this import behind the weekly build preserves the agenda module's cheap,
+    side-effect-free import path while still reusing the single Macro-root resolver,
+    brief subprocess contract, and git provenance probe.
+    """
+    from control_plane import ceo_boot_packet
+    return ceo_boot_packet
+
+
+def _validate_readiness_envelope(payload: object) -> tuple[dict[tuple[str, str | None], dict], str | None]:
+    """Validate the additive, non-ranked Agent OS envelope and build an exact-key index.
+
+    Unknown additive fields are tolerated.  A malformed record or duplicate identity
+    invalidates the whole optional input: partial joins would make two agenda items
+    appear to have different evidence quality merely because projection failed midway.
+    """
+    if not isinstance(payload, dict):
+        return {}, "brief.readiness must be an object"
+    if payload.get("schema") != READINESS_SCHEMA:
+        return {}, f"brief.readiness schema must be {READINESS_SCHEMA!r}"
+    records = payload.get("records")
+    if not isinstance(records, list):
+        return {}, "brief.readiness.records must be a list"
+    degraded = payload.get("degraded")
+    if not isinstance(degraded, list) or not all(isinstance(row, str) for row in degraded):
+        return {}, "brief.readiness.degraded must be a list of strings"
+
+    index: dict[tuple[str, str | None], dict] = {}
+    for position, raw in enumerate(records):
+        where = f"brief.readiness.records[{position}]"
+        if not isinstance(raw, dict):
+            return {}, f"{where} must be an object"
+        workstream = raw.get("workstream")
+        wave = raw.get("wave")
+        state = raw.get("state")
+        reason_code = raw.get("reason_code")
+        reason = raw.get("reason")
+        depends_on = raw.get("depends_on")
+        unmet = raw.get("unmet_dependencies")
+        source = raw.get("source")
+        if not isinstance(workstream, str) or not workstream.strip():
+            return {}, f"{where}.workstream must be a non-empty string"
+        if workstream != workstream.strip():
+            return {}, f"{where}.workstream must not have surrounding whitespace"
+        if wave is not None and (not isinstance(wave, str) or not wave.strip()):
+            return {}, f"{where}.wave must be a non-empty string or null"
+        if isinstance(wave, str) and wave != wave.strip():
+            return {}, f"{where}.wave must not have surrounding whitespace"
+        if state not in _READINESS_STATES:
+            return {}, f"{where}.state is invalid"
+        # Agent OS owns reason-code semantics.  Consumers validate structure and
+        # tolerate future additive codes rather than pinning producer vocabulary.
+        if not isinstance(reason_code, str) or not reason_code:
+            return {}, f"{where}.reason_code must be a non-empty string"
+        if not isinstance(reason, str):
+            return {}, f"{where}.reason must be a string"
+        if not isinstance(depends_on, list) or not all(isinstance(row, str) for row in depends_on):
+            return {}, f"{where}.depends_on must be a list of strings"
+        if not isinstance(unmet, list) or not all(isinstance(row, str) for row in unmet):
+            return {}, f"{where}.unmet_dependencies must be a list of strings"
+        if not isinstance(source, str) or not source:
+            return {}, f"{where}.source must be a non-empty string"
+
+        identity = (workstream, wave)
+        if identity in index:
+            wave_label = wave if wave is not None else "<workstream>"
+            return {}, f"brief.readiness has duplicate identity {workstream}#{wave_label}"
+        index[identity] = {
+            "state": state,
+            "reason_code": reason_code,
+            "reason": reason,
+            "depends_on": list(depends_on),
+            "unmet_dependencies": list(unmet),
+        }
+    return index, None
+
+
+def _load_agentos_readiness() -> tuple[
+    dict[tuple[str, str | None], dict], dict, str | None
+]:
+    """Read readiness through the existing one-way CEO-brief bridge.
+
+    Returns ``(index, readiness_input, failure_code)``.  ``failure_code`` is
+    ``macro_unavailable`` for an absent/old brief, ``malformed_payload`` for a bad
+    Phase 2b envelope, and ``None`` when exact joins are safe.  This function makes
+    no network call and writes no state; ``collect_brief`` always supplies
+    ``--no-remember``.
+    """
+    macro_root: Path | None = None
+    resolved_via: str | None = None
+    macro_sha: str | None = None
+    warnings: list[str] = []
+    try:
+        bridge = _agentos_bridge()
+        macro_root, resolved_via, candidates = bridge.resolve_macro_root(None, os.environ, _ROOT)
+    except Exception as exc:  # noqa: BLE001 -- optional orientation input fails open
+        bridge = None
+        candidates = []
+        warnings.append(f"Agent OS root resolution failed ({type(exc).__name__})")
+
+    if macro_root is None:
+        if not warnings:
+            tried = "; ".join(
+                f"{row.get('via')} ({row.get('reason')})"
+                for row in candidates
+            ) or "no candidates"
+            warnings.append(f"no Agent OS store resolved; tried: {tried}")
+        candidate_paths = [
+            Path(str(row.get("path"))) for row in candidates
+            if isinstance(row, dict) and row.get("path")
+        ]
+        return {}, _readiness_input(
+            schema=None,
+            available=False,
+            macro_root=None,
+            macro_sha=None,
+            resolved_via=None,
+            degraded=warnings,
+            sensitive_paths=candidate_paths,
+        ), "macro_unavailable"
+
+    try:
+        macro_sha = bridge._git_sha(macro_root)
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(
+            f"macro git sha unreadable at {macro_root.name or '<root>'} "
+            f"({type(exc).__name__})"
+        )
+    if macro_sha is None and not any("macro git sha unreadable" in row for row in warnings):
+        warnings.append(f"macro git sha unreadable at {macro_root.name or '<root>'}")
+
+    try:
+        brief, brief_warnings = bridge.collect_brief(
+            macro_root,
+            timeout=bridge.DEFAULT_TIMEOUT,
+            since=None,
+            now=None,
+        )
+        warnings.extend(brief_warnings)
+    except Exception as exc:  # noqa: BLE001 -- collect_brief promises no raise; keep caller whole
+        brief = None
+        warnings.append(f"agentos brief collection failed ({type(exc).__name__})")
+
+    if not isinstance(brief, dict):
+        if not warnings:
+            warnings.append("agentos brief is unavailable")
+        return {}, _readiness_input(
+            schema=None,
+            available=False,
+            macro_root=macro_root,
+            macro_sha=macro_sha,
+            resolved_via=resolved_via,
+            degraded=warnings,
+        ), "macro_unavailable"
+
+    payload = brief.get("readiness")
+    if payload is None:
+        warnings.append("brief.readiness is absent (old Agent OS producer)")
+        return {}, _readiness_input(
+            schema=None,
+            available=False,
+            macro_root=macro_root,
+            macro_sha=macro_sha,
+            resolved_via=resolved_via,
+            degraded=warnings,
+        ), "macro_unavailable"
+
+    index, validation_error = _validate_readiness_envelope(payload)
+    if validation_error:
+        warnings.append(validation_error)
+        return {}, _readiness_input(
+            schema=None,
+            available=False,
+            macro_root=macro_root,
+            macro_sha=macro_sha,
+            resolved_via=resolved_via,
+            degraded=warnings,
+        ), "malformed_payload"
+
+    warnings.extend(payload.get("degraded") or [])
+    return index, _readiness_input(
+        schema=READINESS_SCHEMA,
+        available=True,
+        macro_root=macro_root,
+        macro_sha=macro_sha,
+        resolved_via=resolved_via,
+        degraded=warnings,
+    ), None
+
+
+def _annotate_readiness(
+    items: list[dict],
+    index: dict[tuple[str, str | None], dict],
+    failure_code: str | None,
+) -> list[dict]:
+    """Add readiness after ranking, using explicit identities only."""
+    for item in items:
+        raw_ref = item.get("agentos_ref")
+        try:
+            ref = _normalise_agentos_ref(raw_ref)
+        except ValueError as exc:
+            item["agentos_ref"] = None
+            item["readiness"] = _unknown_readiness(
+                "malformed_ref",
+                f"Agenda item has a malformed Agent OS reference: {exc}.",
+            )
+            continue
+        item["agentos_ref"] = ref
+        if ref is None:
+            # _item() may already have retained a malformed-ref failure while
+            # sanitizing its public identity to null. Do not relabel that as N/A.
+            existing = item.get("readiness")
+            if isinstance(existing, dict) and existing.get("reason_code") == "malformed_ref":
+                continue
+            item["readiness"] = _not_applicable_readiness()
+            continue
+        if failure_code == "malformed_payload":
+            item["readiness"] = _unknown_readiness(
+                "malformed_payload",
+                "Agent OS readiness payload is malformed; agenda priority is unchanged.",
+            )
+            continue
+        if failure_code == "macro_unavailable":
+            item["readiness"] = _unknown_readiness(
+                "macro_unavailable",
+                "Agent OS readiness is unavailable; agenda priority is unchanged.",
+            )
+            continue
+        identity = (ref["workstream"], ref["wave"])
+        match = index.get(identity)
+        if match is None:
+            wave = f"#{ref['wave']}" if ref["wave"] is not None else "#<workstream>"
+            item["readiness"] = _unknown_readiness(
+                "unmapped_ref",
+                f"No readiness record matched Agent OS reference {ref['workstream']}{wave}.",
+            )
+            continue
+        item["readiness"] = {
+            "state": match["state"],
+            "reason_code": match["reason_code"],
+            "reason": match["reason"],
+            "depends_on": list(match["depends_on"]),
+            "unmet_dependencies": list(match["unmet_dependencies"]),
+        }
+    return items
+
+
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 # build + write
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
-    """Fuse every accountability artifact into a RANKED agenda dict. Pure, deterministic, READ-ONLY,
+    """Fuse every accountability artifact into a RANKED agenda dict. Deterministic and READ-ONLY,
     never raises. Every source degrades to [] on missing data (charter P2). Items with empty evidence
     are dropped (charter P3 — no evidence, no item). `cio_rep` may be injected (tests / to avoid a
-    second cio.review); when None it is computed once here."""
+    second cio.review); when None it is computed once here. Agent OS readiness is read through the
+    existing CEO-brief bridge and attached only after rank, score, and age are final."""
     asof = asof or date.today()
 
     if cio_rep is None:
@@ -976,6 +1339,75 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
     for i, it in enumerate(items, 1):
         it["rank"] = i
 
+    # Readiness is annotation, never a ranking feature. Freeze the rank receipt
+    # before touching Agent OS and explicitly verify the optional join cannot mutate it.
+    rank_receipt = [
+        (it.get("id"), it.get("rank"), it.get("rank_score"),
+         it.get("first_seen"), it.get("age_weeks"))
+        for it in items
+    ]
+    try:
+        readiness_index, readiness_input, readiness_failure = _load_agentos_readiness()
+    except Exception as exc:  # noqa: BLE001 -- optional annotation can never sink the agenda
+        readiness_index = {}
+        readiness_failure = "macro_unavailable"
+        readiness_input = _readiness_input(
+            schema=None,
+            available=False,
+            macro_root=None,
+            macro_sha=None,
+            resolved_via=None,
+            degraded=[f"Agent OS readiness bridge failed ({type(exc).__name__})"],
+        )
+
+    # Annotate shallow copies so a buggy optional join cannot corrupt the ranked
+    # source list before the invariant is checked.  _annotate_readiness only owns
+    # top-level annotation fields; all ranking fields remain frozen above.
+    ranked_items = items
+    annotation_error: Exception | None = None
+    try:
+        annotated_items = _annotate_readiness(
+            [dict(item) for item in ranked_items], readiness_index, readiness_failure
+        )
+    except Exception as exc:  # noqa: BLE001 -- same fail-open boundary as malformed input
+        annotation_error = exc
+        annotated_items = []
+    try:
+        annotated_receipt = [
+            (it.get("id"), it.get("rank"), it.get("rank_score"),
+             it.get("first_seen"), it.get("age_weeks"))
+            for it in annotated_items
+        ]
+    except Exception as exc:  # noqa: BLE001 -- malformed annotator output also fails open
+        annotation_error = annotation_error or exc
+        annotated_receipt = []
+    if annotation_error is not None or rank_receipt != annotated_receipt:
+        warning = "Agent OS readiness annotation violated the frozen rank invariant"
+        if annotation_error is not None:
+            warning += f" ({type(annotation_error).__name__})"
+        readiness_input = dict(readiness_input)
+        readiness_input["available"] = False
+        readiness_input["degraded"] = [
+            *(readiness_input.get("degraded") or []),
+            warning,
+        ]
+        items = []
+        for ranked in ranked_items:
+            retained = dict(ranked)
+            try:
+                retained["agentos_ref"] = _normalise_agentos_ref(
+                    retained.get("agentos_ref")
+                )
+            except ValueError:
+                retained["agentos_ref"] = None
+            retained["readiness"] = _unknown_readiness(
+                "invariant_violation",
+                "Agent OS annotation was discarded because it changed the frozen rank receipt.",
+            )
+            items.append(retained)
+    else:
+        items = annotated_items
+
     counts: dict[str, int] = {}
     for it in items:
         counts[it["class"]] = counts.get(it["class"], 0) + 1
@@ -988,6 +1420,7 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
         "owners": {o: sum(1 for it in items if it["owner"] == o)
                    for o in (OWNER_SELF, OWNER_OPUS, OWNER_FABLE)},
         "items": items,
+        "readiness_input": readiness_input,
         "note": ("Advisory only. This agenda RANKS and WRITES — it never trades, flips a flag, or "
                  "mutates a seat. self-tunable items are actionable only by self_tune (L4) through the "
                  "Lab harness gates; opus-session/fable-review items need a session."),
@@ -1007,6 +1440,31 @@ def _md(agenda: dict) -> str:
              f"{oc.get(OWNER_SELF, 0)} self-tunable · {oc.get(OWNER_OPUS, 0)} opus-session · "
              f"{oc.get(OWNER_FABLE, 0)} fable-review.")
     L.append("")
+    raw_readiness_input = agenda.get("readiness_input")
+    if isinstance(raw_readiness_input, dict):
+        readiness_input = raw_readiness_input
+        degraded = list(readiness_input.get("degraded") or [])
+    else:
+        readiness_input = {}
+        degraded = ["Persisted agenda predates readiness_input; rebuild required."]
+    available = readiness_input.get("available") is True
+    health = "DEGRADED" if degraded else ("HEALTHY" if available else "UNAVAILABLE")
+    L += [
+        "## Agent OS readiness input (non-ranked)",
+        "",
+        "_Advisory annotation only. This input never sorts, filters, creates, or ranks agenda items._",
+        "",
+        f"**Health.** {health}",
+        f"**Available.** {'yes' if available else 'no'}",
+        f"**Schema.** `{readiness_input.get('schema') or 'unavailable'}`",
+        f"**Macro root.** `{readiness_input.get('macro_root') or 'unavailable'}`",
+        f"**Macro SHA.** `{readiness_input.get('macro_sha') or 'unavailable'}`",
+        f"**Resolved via.** `{readiness_input.get('resolved_via') or 'unavailable'}`",
+    ]
+    if degraded:
+        L += ["", "**Degraded warnings.**"]
+        L.extend(f"- {warning}" for warning in degraded)
+    L.append("")
     if not agenda.get("items"):
         L += ["_No items — every accountability source is clean or absent (P2 no-op)._"]
         return "\n".join(L)
@@ -1016,6 +1474,30 @@ def _md(agenda: dict) -> str:
         L.append(f"## {it['rank']}. {it['title']}")
         L.append(f"*{it['class']} · fix: **{it['fix_type']}** · owner: **{it['owner']}** · "
                  f"rank {it.get('rank_score')}{agetag}*")
+        L.append("")
+        ref = it.get("agentos_ref")
+        if isinstance(ref, Mapping) and ref.get("workstream"):
+            wave = f"#{ref.get('wave')}" if ref.get("wave") is not None else ""
+            L.append(f"**Agent OS reference.** `{ref.get('workstream')}{wave}`")
+        else:
+            L.append("**Agent OS reference.** N/A")
+        readiness = (
+            it.get("readiness")
+            if isinstance(it.get("readiness"), Mapping)
+            else _legacy_artifact_readiness()
+        )
+        state = readiness.get("state", "unknown")
+        state_label = "N/A" if state == "not_applicable" else str(state).replace("_", " ").upper()
+        L.append(
+            f"**Readiness.** {state_label} (`{readiness.get('reason_code', 'unknown')}`) — "
+            f"{readiness.get('reason', '')}"
+        )
+        dependencies = list(readiness.get("depends_on") or [])
+        if dependencies:
+            L.append(f"**Dependencies.** {', '.join(str(dep) for dep in dependencies)}")
+        unmet = list(readiness.get("unmet_dependencies") or [])
+        if unmet:
+            L.append(f"**Unmet dependencies.** {', '.join(str(dep) for dep in unmet)}")
         L.append("")
         L.append("**Evidence.**")
         for e in it["evidence"]:
@@ -1028,15 +1510,26 @@ def _md(agenda: dict) -> str:
     return "\n".join(L)
 
 
-def write(asof: date | None = None) -> dict:
-    """Build + persist data/agenda/<date>.json + data/agenda/AGENDA.md. Returns
-    {ok, as_of, json_path, md_path, n_items}. Never raises; honest result on failure."""
+def write(asof: date | None = None, *, prebuilt: dict | None = None) -> dict:
+    """Build + persist data/agenda/<date>.json + data/agenda/AGENDA.md.
+
+    ``prebuilt`` lets an orchestrator persist the exact agenda it just built without
+    repeating any accountability or Agent OS reads. Existing callers omit it and keep
+    the original build-and-write behavior. Returns {ok, as_of, json_path, md_path,
+    n_items}; never raises and reports an honest fallback artifact on failure.
+    """
     asof = asof or date.today()
     try:
-        agenda = build(asof)
+        if prebuilt is not None and not isinstance(prebuilt, dict):
+            raise TypeError("prebuilt agenda must be an object")
+        agenda = prebuilt if prebuilt is not None else build(asof)
     except Exception as e:  # noqa: BLE001
         agenda = {"as_of": asof.isoformat(), "schema_version": "improvement_agenda.v1",
                   "n_items": 0, "items": [], "class_counts": {}, "owners": {},
+                  "readiness_input": _readiness_input(
+                      schema=None, available=False, macro_root=None, macro_sha=None,
+                      resolved_via=None, degraded=[f"agenda build failed before readiness: {e}"],
+                  ),
                   "note": f"agenda build failed: {e}"}
     json_path = _OUT / f"{asof.isoformat()}.json"
     md_path = _OUT / "AGENDA.md"

@@ -93,7 +93,10 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 - **Sanctioned read bridge.** `scripts/ceo_boot_packet.py` (Phase 1D-A, #44) is the
   one-way read path — Executive OS reads the Agent OS brief via
   `agentos.py brief --json --no-remember`, and there is no write path back. Keep it
-  one-way.
+  one-way. Phase 2b reuses that resolver/collector in `brain/improvement_agenda.py`:
+  only an explicit `{workstream, wave}` reference may receive Agent OS readiness,
+  and the join happens after ranking. The Improvement Agenda remains the sole priority
+  queue; the boot packet does not render or recommend from legacy `brief.unblocked`.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole

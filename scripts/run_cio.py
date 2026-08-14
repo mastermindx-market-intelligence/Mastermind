@@ -34,7 +34,8 @@ def run(asof: date | None = None, *, with_agenda: bool = True,
     The weekly SCHEDULER runs the agenda as its own dedicated job (``_improvement_agenda_job``, L6)
     30 min after the CIO job, so ``with_agenda`` defaults on only for the ON-DEMAND / manual runner —
     the scheduler passes ``with_agenda=False`` to avoid a double-write. Either path calls the same
-    ``brain.improvement_agenda.write`` (one writer, charter P7)."""
+    ``brain.improvement_agenda.write`` (one writer, charter P7); the manual path supplies its
+    prebuilt artifact so persistence does not repeat the Agent OS read."""
     try:
         res = cio.write(asof, narrate=narrate)
     except Exception as e:  # noqa: BLE001 — the runner is best-effort; never crash the scheduler
@@ -45,10 +46,10 @@ def run(asof: date | None = None, *, with_agenda: bool = True,
     try:
         from brain import improvement_agenda
         cio_rep = res.get("review") if isinstance(res, dict) else None
-        # build with the injected review (avoids a second review() pass), then persist
+        # Build once with the injected review, then persist that exact artifact. This
+        # avoids a second CIO review and a second read-only Agent OS brief subprocess.
         agenda_dict = improvement_agenda.build(asof, cio_rep=cio_rep)
-        ag = improvement_agenda.write(asof)
-        ag["n_items"] = agenda_dict.get("n_items", ag.get("n_items"))
+        ag = improvement_agenda.write(asof, prebuilt=agenda_dict)
         res["agenda"] = ag
     except Exception as e:  # noqa: BLE001
         res["agenda"] = {"ok": False, "error": str(e)}

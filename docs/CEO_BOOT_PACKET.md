@@ -118,8 +118,10 @@ and Macro `7794929`, and the canon tree was byte-identical before and after.
 | `next_recommended_act` | `str` | The one thing to do next (ladder below). |
 
 `brief` embeds Macro's `ceo_brief.v1` **verbatim** — its keys (`counts`, `inputs`,
-`needs_ceo`, `blocked`, `finished`, `running`, `unblocked`, `unblocked_scope`,
-`warnings`) are never re-derived, re-sorted, or re-scored here. That contract is owned
+`needs_ceo`, `blocked`, `finished`, `running`, `readiness`, `warnings`) are never
+re-derived, re-sorted, or re-scored here. Old producers may still supply legacy
+`unblocked` / `unblocked_scope` keys; they remain embedded for compatibility but the
+boot packet never reads or renders them as priority. That contract is owned
 by Macro `scripts/agentos.py` at merge SHA
 `431fb2b846b693c13fb6654901f0747e79f82534` (Macro PR #5472). One generator, many
 renderers: if the projection is wrong, it is fixed in Agent OS, not patched here.
@@ -161,7 +163,8 @@ correct behavior, not a bug to fix.
 
 Deterministic and explainable on purpose: the same packet always yields the same act,
 and the rung that produced it is readable off the sentence. Repairs outrank rulings,
-rulings outrank unblocking, unblocking outranks starting new work.
+rulings outrank unblocking. Once those are clear, priority defers to the canonical
+Improvement Agenda; Agent OS readiness is an input there, never a second queue here.
 
 1. **Strategic state unreadable** → `Repair config/strategic_state.yml — <err>. The
    company is running without a declared objective set.` A company with no readable
@@ -173,10 +176,8 @@ rulings outrank unblocking, unblocking outranks starting new work.
    WS:<workstream> — <question>`
 4. **`blocked` non-empty** → `Clear <n> blocked workstream(s). First: WS:<workstream>
    (blocked by: <reasons>)`
-5. **`unblocked` non-empty** → `Start the top ready item: WS:<workstream> wave <wave> —
-   <next_action or title>`
-6. **Otherwise** → `No rulings pending, nothing blocked, nothing queued. Review
-   finished work and the improvement agenda for the next objective.`
+5. **Otherwise** → `Consult the canonical Improvement Agenda for the highest-priority
+   next work.` Legacy `brief.unblocked` is intentionally ignored.
 
 ## Boundary (invariant I1)
 
@@ -211,7 +212,8 @@ stores:
 - **What is blocked** — which workstreams, and by what.
 - **What needs Chris** — pending CEO decisions with the question, options,
   recommendation, and how many waves each one blocks.
-- **What to do next** — one sentence, derived by a fixed ladder rather than by
-  whatever the last conversation happened to be about.
+- **Where priority lives next** — after repair/ruling/blocker rungs, one sentence sends
+  the CEO to the canonical Improvement Agenda, whose items visibly carry Agent OS
+  readiness without letting readiness reorder them.
 - **What is unknown** — every gap named explicitly in `degraded`, so a partial read
   is never mistaken for a quiet org.

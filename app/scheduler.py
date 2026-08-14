@@ -13,7 +13,7 @@ Single in-process scheduler on a SQLite jobstore so the schedule survives restar
   * 'derisk_us'           — fast de-risk tripwire for US books (Mon–Fri; armed via MASTERMIND_FAST_DERISK).
   * 'snapshot'            — portfolio snapshot capture at configured hours (Mon–Fri).
   * 'cio_weekly'          — weekly CIO review (Mon only).
-  * 'improvement_agenda'  — weekly improvement-agenda refresh.
+  * 'improvement_agenda'  — weekly improvement-agenda refresh plus Agent OS readiness annotation.
   * 'loop_maintenance'    — periodic ledger + experiment maintenance.
   * 'experiment_maturity' — experiment maturity sweep.
 Flagship, Heavyweight, and ETF remain in scheduler health as archived historical jobs but are never
@@ -876,7 +876,8 @@ def _improvement_agenda_job():
 
     Fuses every accountability artifact (calibration, journal lesson clusters, shadow-vs-live gaps,
     benchmark-ledger gaps, validation verdicts, experiment-registry maturities, deploy-lag, student
-    drift) into a RANKED list of concrete improvement items and writes it to:
+    drift) into a RANKED list of concrete improvement items, then annotates the frozen order with
+    explicit-identity Agent OS readiness from the existing read-only CEO-brief bridge, and writes it to:
       • data/agenda/<date>.json  (the machine artifact)
       • data/agenda/AGENDA.md    (the human briefing — what any maintenance session opens cold)
 
