@@ -80,6 +80,7 @@ jobs:
           tests/test_executive_worker_broker.py
           tests/test_executive_launchd_config.py
           tests/test_executive_acceptance_retry.py
+          tests/test_executive_acceptance_observability.py
           tests/test_executive_python_runtime_provisioner.py
           tests/test_executive_worker_auth_provisioner.py
 

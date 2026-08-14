@@ -66,6 +66,35 @@ _REVIEWED_MACOS_ACCOUNT_GROUPS = {
     "_lpoperator": 100,
     "com.apple.access_disabled": 396,
 }
+# Bounded operator-visible refusal reasons for control commands.  The service
+# already bounds its own error messages; these caps bind the acceptance side so
+# an unexpected payload cannot turn one failure line into a log dump.
+_REFUSAL_DETAIL_LIMIT = 300
+_REFUSAL_TRUNCATION_MARKER = "...[truncated]"
+_REFUSAL_REDACTION = "<redacted>"
+_REFUSAL_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# Secret shapes this runtime actually mints are ``secrets.token_hex`` (hex) and
+# ``secrets.token_urlsafe`` (base64url).  ``/`` is deliberately excluded from the
+# token class so that filesystem paths (the most useful part of a workspace
+# refusal) survive redaction; no ``/``-bearing secret is minted anywhere in the
+# Executive OS.
+#
+# The token class is a strict superset of hex, so the token rule alone would
+# already redact every hex run.  The hex rule exists to REDUCE over-redaction:
+# it runs first with narrower boundaries, so ``sessionid_<32 hex>`` loses only
+# the digest (``sessionid_<redacted>``) instead of the whole run.
+_REFUSAL_HEX_SECRET_RE = re.compile(r"(?<![0-9A-Za-z])[0-9A-Fa-f]{32,}(?![0-9A-Za-z])")
+_REFUSAL_TOKEN_SECRET_RE = re.compile(
+    r"(?<![0-9A-Za-z+=_-])[0-9A-Za-z+=_-]{32,}(?![0-9A-Za-z+=_-])"
+)
+# Git object ids are not secrets, and they are load-bearing for THIS harness:
+# its whole proof premise is an exact-SHA comparison, so refusals like
+# "expected base sha <a> got <b>" and "fatal: reference is not a tree: <sha>"
+# must stay readable.  Exempting exactly-40 lowercase hex costs nothing: every
+# secret this runtime mints is a different length -- uuid4().hex is 32,
+# secrets.token_urlsafe(32) is 43, secrets.token_hex(32) is 64 -- so all of
+# them are still redacted.
+_GIT_OBJECT_ID_RE = re.compile(r"[0-9a-f]{40}")
 
 
 class AcceptanceError(RuntimeError):
@@ -109,6 +138,87 @@ def _run(
     if check and completed.returncode != 0:
         raise AcceptanceError(f"{label} failed with exit {completed.returncode}")
     return completed
+
+
+def _redact_secret_shaped(match: re.Match[str]) -> str:
+    """Redact one secret-shaped run, keeping Git object ids readable."""
+
+    value = match.group(0)
+    if _GIT_OBJECT_ID_RE.fullmatch(value):
+        return value
+    return _REFUSAL_REDACTION
+
+
+def _sanitize_refusal_fragment(
+    value: str,
+    *,
+    secrets_to_redact: Sequence[str] = (),
+) -> str:
+    """Render one refusal fragment as a bounded, single-line, redacted string.
+
+    Applied to every operator-visible fragment: exact secrets first, then
+    control characters, then secret-shaped runs, then whitespace collapse, then
+    a hard length bound with a visible truncation marker.
+
+    The order is load-bearing.  Redaction MUST complete before the length
+    bound: truncating first can cut a secret-shaped run below the 32-character
+    match threshold, so the surviving prefix would be printed verbatim.
+    """
+
+    text = value
+    for secret in sorted(
+        {item for item in secrets_to_redact if isinstance(item, str) and len(item) >= 8},
+        key=len,
+        reverse=True,
+    ):
+        text = text.replace(secret, _REFUSAL_REDACTION)
+    text = _REFUSAL_CONTROL_CHARS_RE.sub(" ", text)
+    text = _REFUSAL_HEX_SECRET_RE.sub(_redact_secret_shaped, text)
+    text = _REFUSAL_TOKEN_SECRET_RE.sub(_redact_secret_shaped, text)
+    text = " ".join(text.split())
+    if len(text) > _REFUSAL_DETAIL_LIMIT:
+        text = text[:_REFUSAL_DETAIL_LIMIT] + _REFUSAL_TRUNCATION_MARKER
+    return text
+
+
+def _refusal_detail(
+    completed: subprocess.CompletedProcess[bytes],
+    *,
+    secrets_to_redact: Sequence[str] = (),
+) -> str | None:
+    """Return why a control command refused, or ``None`` when nothing says why.
+
+    The operator CLI prints the service's structured envelope
+    (``{"ok": false, "error": {"code": ..., "message": ...}}``) to stdout and
+    exits 2; its client-side failure path prints ``error: <exc>`` to stderr
+    instead.  Prefer the structured envelope, fall back to a bounded stderr
+    excerpt, and never invent a reason when neither is present.
+    """
+
+    try:
+        payload = json.loads(completed.stdout.decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, ValueError):
+        payload = None
+    if isinstance(payload, dict) and payload.get("ok") is False:
+        error = payload.get("error")
+        if isinstance(error, dict):
+            code = error.get("code")
+            message = error.get("message")
+            parts: list[str] = []
+            if isinstance(code, str) and code.strip():
+                parts.append(f"[{code}]")
+            if isinstance(message, str) and message.strip():
+                parts.append(message)
+            if parts:
+                return _sanitize_refusal_fragment(
+                    " ".join(parts),
+                    secrets_to_redact=secrets_to_redact,
+                )
+    excerpt = _sanitize_refusal_fragment(
+        completed.stderr.decode("utf-8", errors="replace"),
+        secrets_to_redact=secrets_to_redact,
+    )
+    return excerpt or None
 
 
 def _json_output(completed: subprocess.CompletedProcess[bytes], *, label: str) -> dict[str, Any]:
@@ -770,6 +880,19 @@ class Acceptance:
         ).encode("utf-8")
         return self._write_bytes(name, payload)
 
+    def _refusal_redactions(self) -> tuple[str, ...]:
+        """Plaintext secrets this run holds that must never reach the operator.
+
+        The harness commits to the control environment canary by SHA-256 only
+        (``sentinel_value_sha256``) and never reads its plaintext, so this is
+        empty in the current flow; shape-based redaction covers the token
+        shapes the runtime mints.  The hook exists so that a step which does
+        hold a plaintext secret is redacted by exact match as well.
+        """
+
+        held = getattr(self, "canary_value", None)
+        return (held,) if isinstance(held, str) and held else ()
+
     def _control_request(self, command: str, *values: str, persist: str | None = None) -> dict[str, Any]:
         argv = [
             *self._service_environment(
@@ -796,7 +919,23 @@ class Acceptance:
             cwd=self.release,
             timeout=90.0,
             label=f"control command {command}",
+            check=False,
         )
+        if completed.returncode != 0:
+            # The CLI already exited non-zero; carry the service's own bounded
+            # refusal reason into the AcceptanceError instead of discarding it.
+            # Scoped to control requests: _run stays silent for every other
+            # acceptance command.
+            failure = (
+                f"control command {command} failed with exit {completed.returncode}"
+            )
+            detail = _refusal_detail(
+                completed,
+                secrets_to_redact=self._refusal_redactions(),
+            )
+            if detail is None:
+                raise AcceptanceError(f"{failure} (no structured refusal reason available)")
+            raise AcceptanceError(f"{failure}: {detail}")
         response = _json_output(completed, label=f"control command {command}")
         if response.get("ok") is not True or not isinstance(response.get("result"), (dict, list)):
             raise AcceptanceError(f"control command {command} was rejected")
