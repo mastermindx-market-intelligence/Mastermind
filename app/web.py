@@ -872,8 +872,10 @@ def market_view_page() -> FileResponse:
 def agenda_page() -> FileResponse:
     """The Improvement Agenda mirror (W-L / L3) — a read-only render of the weekly self-critique
     artifact (data/agenda/<date>.json): the ranked items, each with its evidence, suggested fix,
-    fix_type, and owner. Its own standalone static page (not the SPA) so a maintenance session can
-    bookmark it; fetches /api/agenda client-side. This view sizes/changes nothing — advisory only."""
+    fix_type, owner, explicit Agent OS reference, and Agent OS readiness annotation. Its own
+    standalone static page (not the SPA) so a maintenance session can bookmark it; fetches
+    /api/agenda client-side. Readiness is visible but never reorders the queue, and this view
+    sizes/changes nothing — advisory only."""
     return FileResponse(_STATIC / "agenda.html", media_type="text/html", headers=_PAGE_CACHE)
 
 
@@ -1780,7 +1782,10 @@ def api_market_view() -> JSONResponse:
 def api_agenda() -> JSONResponse:
     """The Improvement Agenda artifact (W-L / L3) — the weekly self-critique fusing every
     accountability artifact into a ranked list of {evidence, suggested_fix, fix_type, expected_impact,
-    owner}. Serves the latest data/agenda/<date>.json verbatim (schema improvement_agenda.v1).
+    owner, agentos_ref, readiness}. ``readiness_input`` carries a display-safe Macro root label plus
+    SHA/resolver provenance for the optional Agent OS readiness input. Serves the latest
+    data/agenda/<date>.json verbatim (schema improvement_agenda.v1); missing or malformed readiness
+    fails open and never changes rank.
 
     Read-only + advisory: this artifact ranks and reports — it never trades, flips a flag, or mutates
     a seat. Degrades to an honest ``available:false`` stub when no agenda has been built yet (the

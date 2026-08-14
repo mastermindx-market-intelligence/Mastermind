@@ -5,9 +5,9 @@ plus ``scripts/agentos.py`` in the **Macro** repository (merged as Macro PR #547
 merge SHA ``431fb2b846b693c13fb6654901f0747e79f82534``).  Executive OS — this
 repository — is the EXECUTION plane.  This module is the one-way bridge between them.
 It projects a single deterministic packet the AI CEO seat boots from: what the company
-is trying to do, what is running, what is blocked, what needs a ruling from Chris, and
-what to do next — so a cold session reconstructs organizational state from canonical
-stores instead of conversational memory.
+is trying to do, what is running, what is blocked, and what needs a ruling from Chris.
+Priority remains in the canonical Improvement Agenda; Agent OS readiness reaches it as
+an annotation rather than becoming a second queue in this packet.
 
 Design laws
 -----------
@@ -323,7 +323,8 @@ def next_recommended_act(
 
     Deterministic and explainable on purpose: the same packet always yields the same
     act, and the rung that produced it is readable off the sentence.  Repairs outrank
-    rulings, rulings outrank unblocking, unblocking outranks starting new work.
+    rulings, rulings outrank unblocking; after those, the canonical Improvement Agenda
+    owns priority.  Legacy ``brief.unblocked`` data is deliberately ignored here.
     """
     # 1. A company with no readable objective set cannot correctly prioritize anything
     #    else — every downstream judgment would be made against invented strategy.
@@ -359,18 +360,8 @@ def next_recommended_act(
             f"First: WS:{top.get('workstream', '?')} (blocked by: {by})"
         )
 
-    unblocked = brief.get("unblocked") or []
-    if unblocked:
-        top = unblocked[0] if isinstance(unblocked[0], dict) else {}
-        what = top.get("next_action") or top.get("title") or "no next action recorded"
-        return (
-            f"Start the top ready item: WS:{top.get('workstream', '?')} "
-            f"wave {top.get('wave', '?')} — {what}"
-        )
-
     return (
-        "No rulings pending, nothing blocked, nothing queued. "
-        "Review finished work and the improvement agenda for the next objective."
+        "Consult the canonical Improvement Agenda for the highest-priority next work."
     )
 
 
@@ -597,14 +588,6 @@ def render_packet(packet: dict[str, Any]) -> str:
             )),
         ))
 
-        ready = list(brief.get("unblocked") or [])
-        out.extend(_labeled(
-            f"READY NEXT ({len(ready)}):",
-            _top_n(ready, lambda _i, r: (
-                f"WS:{r.get('workstream', '?')} {r.get('wave', '?')} — "
-                f"{r.get('next_action') or r.get('title') or 'no next action recorded'}"
-            )),
-        ))
     out.append("")
 
     # --- HANDOFFS -----------------------------------------------------------

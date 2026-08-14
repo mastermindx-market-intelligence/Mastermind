@@ -64,6 +64,22 @@ body.page-ag a { text-decoration: none; color: var(--link); }
   background: color-mix(in srgb, var(--c) 12%, var(--panel));
   color: color-mix(in srgb, var(--c) 70%, var(--text)); }
 .pill.age { background: transparent; }
+.pill.readiness-ready { --c: var(--ok); }
+.pill.readiness-blocked { --c: var(--act); }
+.pill.readiness-in_progress { --c: var(--info); }
+.pill.readiness-done { --c: var(--muted); }
+.pill.readiness-unknown { --c: var(--warn); }
+.pill.readiness-not_applicable { --c: var(--muted); }
+.pill[class*="readiness-"] {
+  border-color: color-mix(in srgb, var(--c) 48%, var(--line));
+  background: color-mix(in srgb, var(--c) 12%, var(--panel));
+  color: color-mix(in srgb, var(--c) 74%, var(--text)); }
+
+.readiness-row { display: flex; align-items: flex-start; gap: 9px; margin: 0 0 14px;
+  padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel2); }
+.readiness-copy { min-width: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.readiness-copy b { color: var(--text); font-weight: 650; }
 
 .block-label { font-size: 11px; color: var(--muted); text-transform: uppercase;
   letter-spacing: .06em; font-weight: 700; margin: 12px 0 5px; }
@@ -180,6 +196,10 @@ body.page-ag .block-label {
   font-size: 9.5px;
   letter-spacing: .1em;
 }
+body.page-ag .readiness-row {
+  border-color: var(--ag-hair);
+  background: var(--ag-tile);
+}
 body.page-ag .evidence {
   display: grid;
   gap: 5px;
@@ -282,8 +302,18 @@ body.page-ag .msg {
   function renderSummary(a) {
     var oc = a.owners || {};
     var cc = a.class_counts || {};
+    var ri = a.readiness_input || {};
     var out = '<div class="summary">';
     out += '<span class="chip"><b>' + (a.n_items || 0) + '</b> open items</span>';
+    out += '<span class="chip"><b>' + (ri.available ? "CONNECTED" : "UNAVAILABLE") +
+      '</b> Agent OS readiness</span>';
+    if (ri.macro_sha) {
+      out += '<span class="chip"><b>' + esc(String(ri.macro_sha).slice(0, 12)) +
+        '</b> Macro source</span>';
+    }
+    if ((ri.degraded || []).length) {
+      out += '<span class="chip"><b>' + ri.degraded.length + '</b> readiness warnings</span>';
+    }
     out += '<span class="chip"><b>' + (oc["self-tunable"] || 0) + '</b> self-tunable</span>';
     out += '<span class="chip"><b>' + (oc["opus-session"] || 0) + '</b> opus-session</span>';
     out += '<span class="chip"><b>' + (oc["fable-review"] || 0) + '</b> fable-review</span>';
@@ -297,6 +327,18 @@ body.page-ag .msg {
   function renderItem(it) {
     var age = it.age_weeks || 0;
     var agetag = age ? ("open " + age + "w") : "NEW";
+    var hasReadiness = Object.prototype.hasOwnProperty.call(it, "readiness") &&
+      it.readiness && typeof it.readiness === "object";
+    var readiness = hasReadiness ? it.readiness : {
+      state: "unknown",
+      reason_code: "legacy_artifact",
+      reason: "Rebuild required: this persisted agenda predates readiness annotations.",
+      depends_on: [],
+      unmet_dependencies: []
+    };
+    var readinessState = readiness.state || "unknown";
+    var readinessLabel = readinessState === "not_applicable" ? "N/A" :
+      readinessState.replace(/_/g, " ").toUpperCase();
     var out = '<div class="item">';
     out += '<div class="top"><span class="rank">' + esc(it.rank) + ".</span>" +
       "<h2>" + esc(it.title) + "</h2></div>";
@@ -304,9 +346,24 @@ body.page-ag .msg {
       '<span class="pill">' + esc(it["class"]) + "</span>" +
       '<span class="pill">' + esc(it.fix_type) + "</span>" +
       '<span class="pill owner-' + esc(it.owner) + '">' + esc(it.owner) + "</span>" +
+      '<span class="pill readiness-' + esc(readinessState) + '">Readiness ' +
+        esc(readinessLabel) + "</span>" +
       '<span class="pill age">rank ' + esc(it.rank_score) + "</span>" +
       '<span class="pill age">' + esc(agetag) + "</span>" +
       "</div>";
+    var dependencies = readiness.depends_on || [];
+    var unmet = readiness.unmet_dependencies || [];
+    out += '<div class="readiness-row"><span class="pill readiness-' +
+      esc(readinessState) + '">' + esc(readinessLabel) + '</span>' +
+      '<div class="readiness-copy"><b>' + esc(readiness.reason_code || "unknown") +
+      '</b> · ' + esc(readiness.reason || "No readiness reason supplied.");
+    if (dependencies.length) {
+      out += '<br><b>Depends on:</b> ' + dependencies.map(esc).join(", ");
+    }
+    if (unmet.length) {
+      out += '<br><b>Unmet:</b> ' + unmet.map(esc).join(", ");
+    }
+    out += "</div></div>";
     out += '<div class="block-label">Evidence</div><ul class="evidence">';
     (it.evidence || []).forEach(function (e) { out += "<li>" + esc(e) + "</li>"; });
     out += "</ul>";
@@ -325,6 +382,11 @@ body.page-ag .msg {
       "Advisory only. This agenda ranks and reports — it never trades, flips a flag, or mutates a seat.") +
       "</div>";
     html += renderSummary(a);
+    var readinessWarnings = ((a.readiness_input || {}).degraded || []);
+    if (readinessWarnings.length) {
+      html += '<div class="note"><b>Agent OS readiness degraded.</b> ' +
+        readinessWarnings.map(esc).join(" · ") + "</div>";
+    }
     var items = a.items || [];
     if (!items.length) {
       html += '<div class="msg">No items — every accountability source is clean or absent.</div>';

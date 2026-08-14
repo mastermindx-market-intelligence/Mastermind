@@ -7,7 +7,7 @@ Covers:
   3. The bridge writes NOTHING into the Macro checkout — the whole fixture tree is
      hashed around a CLI run, and ``data/governance/.ceo_brief_last`` must not appear
      (which is the same thing as proving ``--no-remember`` was passed)
-  4. ``next_recommended_act`` walks its six rungs in the declared precedence, and a
+  4. ``next_recommended_act`` walks its fixed precedence, and a
      broken strategic state outranks a pending CEO ruling
   5. Two frozen-clock runs over the same store are byte-identical
   6. The text form always carries its headers, and never suppresses DEGRADED
@@ -330,17 +330,16 @@ _LADDER = [
                              "blocked": [{"workstream": "WS-B", "blocked_by": []}],
                              "unblocked": []},
      "Clear 1 blocked workstream(s). First: WS:WS-B (blocked by: unspecified)"),
-    ("unblocked", {"needs_ceo": [], "blocked": [],
-                   "unblocked": [{"workstream": "WS-C", "wave": "W2",
-                                  "title": "t", "next_action": "Draft the spec"}]},
-     "Start the top ready item: WS:WS-C wave W2 — Draft the spec"),
-    ("unblocked_title_fallback", {"needs_ceo": [], "blocked": [],
+    ("legacy_unblocked_ignored", {"needs_ceo": [], "blocked": [],
                                   "unblocked": [{"workstream": "WS-C", "wave": "W2",
-                                                 "title": "Cut the arc"}]},
-     "Start the top ready item: WS:WS-C wave W2 — Cut the arc"),
+                                                 "title": "t", "next_action": "Draft the spec"}]},
+     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+    ("legacy_unblocked_title_ignored", {"needs_ceo": [], "blocked": [],
+                                        "unblocked": [{"workstream": "WS-C", "wave": "W2",
+                                                       "title": "Cut the arc"}]},
+     "Consult the canonical Improvement Agenda for the highest-priority next work."),
     ("quiet", {"needs_ceo": [], "blocked": [], "unblocked": []},
-     "No rulings pending, nothing blocked, nothing queued. Review finished work "
-     "and the improvement agenda for the next objective."),
+     "Consult the canonical Improvement Agenda for the highest-priority next work."),
 ]
 
 
@@ -384,6 +383,29 @@ def test_next_act_rung_two_names_the_first_degraded_entry():
     )
 
 
+def test_legacy_unblocked_is_embedded_but_never_promoted_as_priority(
+    tmp_path, frozen_git
+):
+    """Phase 2b retires the rival list while preserving old brief compatibility."""
+    macro = make_macro_root(tmp_path)
+    packet = build_packet(
+        repo_root=tmp_path, macro_root_flag=os.fspath(macro), environ={},
+        now="2026-08-13T00:00:00Z",
+    )
+
+    assert packet["brief"]["unblocked"], "the legacy brief must remain embedded verbatim"
+    rendered = render_packet(packet)
+    assert "READY NEXT" not in rendered
+    assert "Draft the compile-context projection" not in rendered
+    final_act = next_recommended_act(
+        packet["strategic_state"], None,
+        {"needs_ceo": [], "blocked": [], "unblocked": packet["brief"]["unblocked"]},
+        [],
+    )
+    assert "Improvement Agenda" in final_act
+    assert "Start the top ready item" not in final_act
+
+
 # ---------------------------------------------------------------------------
 # 5. determinism
 # ---------------------------------------------------------------------------
@@ -423,7 +445,8 @@ def test_text_render_carries_every_section(tmp_path, frozen_git):
     assert "WS-CN-LIMIT-ALPHA" in text
     assert "NEEDS CEO (1)" in text
     assert "BLOCKED (1)" in text
-    assert "READY NEXT (1)" in text
+    assert "READY NEXT" not in text
+    assert "Draft the compile-context projection" not in text
     assert "HANDOFFS (latest 5)" in text
     assert "NEXT RECOMMENDED ACT" in text
     assert "DEGRADED" not in text
