@@ -38,6 +38,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from common.redaction import sanitize_external_text
 from control_plane.codex_worker import (
     ArtifactReceipt,
     BinaryAttestation,
@@ -57,6 +58,14 @@ from control_plane.codex_worker import (
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v1"
+
+# Error code carried by the envelope a connection handler frames when it is
+# unwound by a ``BaseException`` -- a launchd stop cancelling the in-flight
+# handler, ``SystemExit``, ``KeyboardInterrupt`` -- before the operation could
+# produce its own typed result.  It is deliberately distinct from
+# ``InternalBrokerError`` so the control side can tell "the broker went away
+# mid-request" from "the operation failed".
+BROKER_UNAVAILABLE_ERROR_CODE = "BrokerUnavailableError"
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -169,6 +178,49 @@ def _jsonable(value: Any) -> Any:
     raise BrokerProtocolError(f"broker value is not JSON serializable: {type(value).__name__}")
 
 
+_RESPONSE_EXCERPT_BYTES = 48
+_RESPONSE_SCAN_BYTES = 4096
+
+
+def _response_excerpt(raw: bytes) -> str:
+    """Bounded, redacted, printable-ASCII excerpt of a malformed response.
+
+    A broker response is externally-produced text, so it passes through the
+    shared sanitizer before it can reach a client-facing message.
+
+    Ordering is load-bearing: the excerpt is bounded LAST.  Slicing to
+    ``_RESPONSE_EXCERPT_BYTES`` first would cut a 64-character token down to
+    the ~28 characters that fit, dropping it below every shape threshold in
+    :func:`sanitize_external_text`, and the surviving fragment would then be
+    printed verbatim.  So a generous window is mapped to printable ASCII byte
+    for byte -- a credential's own characters are all printable, so a secret
+    run survives that mapping intact and is still matchable -- redacted whole,
+    and only then trimmed by the sanitizer's own limit.
+
+    Note this deliberately differs from ``acceptance.py``'s refusal sanitizer,
+    which exempts exactly-40 lowercase hex to keep Git object ids readable for
+    release-SHA comparison.  A broker wire excerpt is not that path, so the
+    shared helper's stricter 32+ hex rule applies here unmodified.
+    """
+
+    window = bytes(raw[:_RESPONSE_SCAN_BYTES])
+    printable = "".join(chr(byte) if 32 <= byte < 127 else "." for byte in window)
+    return sanitize_external_text(printable, limit=_RESPONSE_EXCERPT_BYTES)
+
+
+def _frame_response(response: Mapping[str, Any]) -> bytes:
+    """Serialize one broker response as a single newline-terminated JSON line.
+
+    ``json.dumps`` defaults to ``ensure_ascii=True``, so the encoded document is
+    pure ASCII and the following UTF-8 encode cannot fail; the newline is the
+    frame terminator the client reads with ``readline``.
+    """
+
+    return (
+        json.dumps(_jsonable(response), sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+
+
 def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
     """Atomically replace one owner-only, non-symlink JSON receipt."""
 
@@ -204,11 +256,41 @@ def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
         os.close(directory)
 
 
-def _ps_pids_for_uid(uid: int) -> tuple[int, ...]:
-    """Return a bounded process-table projection without shell evaluation."""
+_PS_UID_PROJECTION = "svuid=,ruid=,uid=,pid="
 
+
+def _ps_pids_for_uid(uid: int) -> tuple[int, ...]:
+    """Return a bounded process-table projection without shell evaluation.
+
+    The projection must be a SUPERSET of what the ``kill(-1, SIGKILL)``
+    broadcast can reach, or ``UIDSweepReceipt.passed`` can certify quiescence
+    with a reachable process still alive -- and that receipt is what
+    ``executive_supervisor`` treats as the terminal absence proof.
+
+    Darwin's ``man 2 kill`` says the receiver matches on "real or effective"
+    uid, but that wording is wrong: the kernel checks the receiver's real or
+    SAVED uid.  Measured on this host as uid 501, ``kill(pid, 0)`` against
+    ``loginwindow`` (``ruid=0 euid=501 svuid=0``) returns ``EPERM`` -- an
+    effective-uid match is not sufficient to signal.  So the killable set is
+    ``{ruid == W} | {svuid == W}`` while ``ps -o uid`` prints only the
+    effective uid.  Enumerating on ``uid`` alone both misses killable
+    processes (a setuid binary started by the worker uid prints ``uid=0`` with
+    ``ruid=<worker>``) and, on its own, is not a superset in the ``svuid``
+    direction either.
+
+    This therefore unions the saved, real, and effective columns.  The
+    effective column is kept deliberately: it can only ever ADD unreachable
+    processes (the ``loginwindow`` case), and over-reporting fails the sweep
+    closed rather than certifying a false absence.
+
+    Honest scope note: on this host no process currently carries an ``svuid``
+    distinct from its ``ruid``, so the saved-uid term closes an unestablished
+    invariant rather than a demonstrated escape.
+    """
+
+    argv = ["/bin/ps", "-axo", _PS_UID_PROJECTION]
     completed = subprocess.run(
-        ["/bin/ps", "-axo", "uid=,pid="],
+        argv,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -218,18 +300,32 @@ def _ps_pids_for_uid(uid: int) -> tuple[int, ...]:
         text=True,
     )
     if completed.returncode != 0:
+        # Defense in depth, not the load-bearing check: a ps lacking one of
+        # these keywords exits non-zero AND prints short rows, which the
+        # arity check below already refuses.  Either alone fails closed.
         raise DedicatedUIDError("cannot inspect the worker UID process table")
     values: list[int] = []
+    rows = 0
     for raw in completed.stdout.splitlines():
+        if not raw.strip():
+            continue
         fields = raw.split()
-        if len(fields) != 2:
-            continue
+        if len(fields) != 4:
+            raise DedicatedUIDError("worker UID process table projection is malformed")
         try:
-            observed_uid, pid = (int(item) for item in fields)
+            saved_uid, real_uid, effective_uid, pid = (int(item) for item in fields)
         except ValueError:
-            continue
-        if observed_uid == uid:
+            raise DedicatedUIDError(
+                "worker UID process table projection is malformed"
+            ) from None
+        rows += 1
+        if uid in (saved_uid, real_uid, effective_uid):
             values.append(pid)
+    if rows == 0:
+        # A live host always has a process table.  Without this, a ps that
+        # exits 0 with empty stdout yields no residuals at all -- a receipt
+        # with `passed=True` and `residual_pids_after=()` that proves nothing.
+        raise DedicatedUIDError("worker UID process table projection is empty")
     return tuple(sorted(set(values)))
 
 
@@ -1136,57 +1232,146 @@ class ExecutiveWorkerBroker:
                 pass
         self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "broker_shutdown")
 
+    async def _write_interrupted_envelope(
+        self,
+        writer: asyncio.StreamWriter,
+        request_id: str,
+        operation: str,
+        exc: BaseException,
+    ) -> None:
+        """Best-effort typed envelope for a handler that never reached delivery.
+
+        This is called while ``exc`` is propagating, so it must never raise:
+        the peer may already be gone, and the caller's exception -- including a
+        ``CancelledError`` that has to keep unwinding -- stays authoritative.
+        """
+
+        if isinstance(exc, Exception):
+            code = "InternalBrokerError"
+            message = f"broker response delivery failed: {type(exc).__name__}"
+        else:
+            code = BROKER_UNAVAILABLE_ERROR_CODE
+            message = (
+                "broker is unavailable: the connection handler was interrupted "
+                f"before the operation completed ({type(exc).__name__})"
+            )
+        try:
+            writer.write(
+                _frame_response(
+                    {
+                        "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                        "request_id": request_id,
+                        "operation": operation,
+                        "ok": False,
+                        "error": {"code": code, "message": message},
+                    }
+                )
+            )
+            await writer.drain()
+        except BaseException:
+            # The peer is gone, or the interrupt landed again inside this
+            # best-effort write.  Either way the caller re-raises the original.
+            return
+
     async def handle_connection(
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Serve one authenticated request and close the connection."""
+        """Serve one authenticated request and close the connection.
+
+        Every exit path that can still reach the peer frames exactly one
+        newline-terminated envelope.  ``asyncio.CancelledError``,
+        ``SystemExit`` and ``KeyboardInterrupt`` are direct ``BaseException``
+        subclasses, so before this guard they unwound the handler straight into
+        the teardown with zero bytes written -- the control side saw a bare EOF
+        and could only report an opaque framing error with no record of which
+        condition happened.  ``scripts/executive_os_phase1c_worker.py`` reaches
+        exactly that state on every launchd stop that lands mid-``start``.  The
+        interrupted path now frames a typed ``BrokerUnavailableError`` envelope
+        and re-raises, so cancellation still propagates and shutdown semantics
+        are unchanged.
+
+        That envelope is written ONLY once the request's identity is known.
+        The same shutdown cancels handlers still parked in ``readline`` whose
+        request never arrived; an envelope carrying the ``"invalid"`` sentinel
+        would fail the client's request-id/operation check and surface as
+        ``broker response identity does not match the request`` -- a worse,
+        actively misleading diagnosis than the clean-EOF message the client
+        derives when no envelope is sent at all.  Pre-parse interrupts
+        therefore fall through to that accurate message deliberately.
+        """
 
         request_id = "invalid"
         operation = "invalid"
+        identity_known = False
+        delivered = False
         try:
-            peer_socket = writer.get_extra_info("socket")
-            if peer_socket is None:
-                raise PeerAuthorizationError("connection has no Unix peer socket")
-            peer = self.peer_resolver(peer_socket)
-            self._authorize_peer(peer)
-            raw = await reader.readline()
-            if not raw or len(raw) > self.policy.max_request_bytes or not raw.endswith(b"\n"):
-                raise BrokerProtocolError("request framing is invalid")
             try:
-                request = json.loads(raw.decode("utf-8", errors="strict"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise BrokerProtocolError("request is not valid UTF-8 JSON") from exc
-            if isinstance(request, dict):
-                request_id = str(request.get("request_id") or "invalid")[:128]
-                operation = str(request.get("operation") or "invalid")[:32]
-            response = await self.execute(request, peer=peer)
-        except WorkerBrokerError as exc:
-            response = {
-                "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
-                "request_id": request_id,
-                "operation": operation,
-                "ok": False,
-                "error": {"code": type(exc).__name__, "message": str(exc)[:500]},
-            }
-        except Exception as exc:  # keep traces and values out of the socket
-            response = {
-                "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
-                "request_id": request_id,
-                "operation": operation,
-                "ok": False,
-                "error": {
-                    "code": "InternalBrokerError",
-                    "message": f"broker operation failed: {type(exc).__name__}",
-                },
-            }
-        try:
-            payload = (
-                json.dumps(_jsonable(response), sort_keys=True, separators=(",", ":")) + "\n"
-            ).encode("utf-8")
+                peer_socket = writer.get_extra_info("socket")
+                if peer_socket is None:
+                    raise PeerAuthorizationError("connection has no Unix peer socket")
+                peer = self.peer_resolver(peer_socket)
+                self._authorize_peer(peer)
+                raw = await reader.readline()
+                if (
+                    not raw
+                    or len(raw) > self.policy.max_request_bytes
+                    or not raw.endswith(b"\n")
+                ):
+                    raise BrokerProtocolError("request framing is invalid")
+                try:
+                    request = json.loads(raw.decode("utf-8", errors="strict"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise BrokerProtocolError("request is not valid UTF-8 JSON") from exc
+                if isinstance(request, dict):
+                    parsed_id = str(request.get("request_id") or "")[:128]
+                    parsed_operation = str(request.get("operation") or "")[:32]
+                    if parsed_id:
+                        request_id = parsed_id
+                    if parsed_operation:
+                        operation = parsed_operation
+                    # Defense in depth, not load-bearing today: `execute`
+                    # validates both identity fields synchronously, so a
+                    # request missing either one raises before the first
+                    # `await` and no interrupt can land while this is False.
+                    # It becomes load-bearing the moment anything awaits
+                    # earlier -- pin it with a test if that changes.
+                    identity_known = bool(parsed_id and parsed_operation)
+                response = await self.execute(request, peer=peer)
+            except WorkerBrokerError as exc:
+                response = {
+                    "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                    "request_id": request_id,
+                    "operation": operation,
+                    "ok": False,
+                    "error": {"code": type(exc).__name__, "message": str(exc)[:500]},
+                }
+            except Exception as exc:  # keep traces and values out of the socket
+                response = {
+                    "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                    "request_id": request_id,
+                    "operation": operation,
+                    "ok": False,
+                    "error": {
+                        "code": "InternalBrokerError",
+                        "message": f"broker operation failed: {type(exc).__name__}",
+                    },
+                }
+            payload = _frame_response(response)
+            delivered = True
             writer.write(payload)
             await writer.drain()
+        except BaseException as exc:
+            # `delivered` keeps a second envelope off a stream that already
+            # carries one (a drain() that fails after its write() succeeded
+            # would otherwise corrupt the frame); `identity_known` keeps an
+            # unaddressable envelope off the wire entirely.
+            if not delivered and identity_known:
+                await self._write_interrupted_envelope(
+                    writer, request_id, operation, exc
+                )
+            raise
         finally:
             writer.close()
             await writer.wait_closed()
@@ -1264,12 +1449,26 @@ class WorkerBrokerClient:
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readline()
-                if (
-                    not raw
-                    or len(raw) > self.max_response_bytes
-                    or not raw.endswith(b"\n")
-                ):
-                    raise BrokerProtocolError("broker response framing is invalid")
+                # One opaque "framing is invalid" used to cover three very
+                # different conditions.  Name each one and carry the bounded
+                # evidence that tells them apart after the fact.
+                if not raw:
+                    raise BrokerProtocolError(
+                        "broker closed the connection without sending a response "
+                        "(0 bytes read): the broker process died or its connection "
+                        "handler was cancelled mid-request"
+                    )
+                if len(raw) > self.max_response_bytes:
+                    raise BrokerProtocolError(
+                        f"broker response exceeds the client ceiling: {len(raw)} "
+                        f"bytes read, ceiling {self.max_response_bytes} bytes"
+                    )
+                if not raw.endswith(b"\n"):
+                    raise BrokerProtocolError(
+                        f"broker response is unterminated: {len(raw)} bytes read "
+                        "with no newline terminator (excerpt "
+                        f"{_response_excerpt(raw)!r})"
+                    )
                 return raw
             finally:
                 writer.close()
@@ -1725,6 +1924,7 @@ class _UnavailableRemoteInspector:
 __all__ = [
     "BROKER_REQUEST_SCHEMA_VERSION",
     "BROKER_RESPONSE_SCHEMA_VERSION",
+    "BROKER_UNAVAILABLE_ERROR_CODE",
     "UID_SWEEP_SCHEMA_VERSION",
     "BrokerPolicy",
     "BrokerProtocolError",

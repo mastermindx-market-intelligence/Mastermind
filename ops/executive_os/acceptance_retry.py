@@ -480,19 +480,50 @@ class AcceptanceRetry:
 
     @staticmethod
     def _uid_processes(uids: set[int]) -> dict[int, list[int]]:
+        """Census every process a dedicated UID can still own.
+
+        This is an independent quiescence proof from the broker's own sweep,
+        and it runs as root immediately before the release is archived, so a
+        false "quiescent" here archives state out from under a live worker.
+
+        It matches the broker's projection deliberately: ``ps -o uid`` prints
+        the EFFECTIVE uid, while the kernel's signal check uses the receiver's
+        real or SAVED uid, so an effective-only census both misses processes
+        the caller can signal and is not a superset of them.  The union of the
+        saved, real, and effective columns can only over-report, which fails
+        the retry closed instead of certifying a false absence.  Every parse
+        refusal below is fail-closed for the same reason.
+        """
+
         completed = _run(
-            ["/bin/ps", "-axo", "pid=,uid="],
+            ["/bin/ps", "-axo", "svuid=,ruid=,uid=,pid="],
             label="dedicated service UID process census",
         )
-        found = {uid: [] for uid in uids}
+        found: dict[int, list[int]] = {uid: [] for uid in uids}
+        rows = 0
         for raw_line in completed.stdout.decode("ascii", errors="strict").splitlines():
-            fields = raw_line.split()
-            if len(fields) != 2:
+            if not raw_line.strip():
                 continue
-            pid, uid = (int(value) for value in fields)
-            if uid in found and pid > 1:
-                found[uid].append(pid)
-        return {uid: sorted(pids) for uid, pids in found.items()}
+            fields = raw_line.split()
+            if len(fields) != 4:
+                raise RetryError("dedicated service UID process census is malformed")
+            try:
+                saved_uid, real_uid, effective_uid, pid = (
+                    int(value) for value in fields
+                )
+            except ValueError:
+                raise RetryError(
+                    "dedicated service UID process census is malformed"
+                ) from None
+            rows += 1
+            if pid <= 1:
+                continue
+            for uid in (saved_uid, real_uid, effective_uid):
+                if uid in found:
+                    found[uid].append(pid)
+        if rows == 0:
+            raise RetryError("dedicated service UID process census is empty")
+        return {uid: sorted(set(pids)) for uid, pids in found.items()}
 
     def _quiesce_dedicated_uids(self) -> dict[str, Any]:
         uids = {self.principals.control_uid, self.principals.worker_uid}
