@@ -11,6 +11,27 @@ Quotes are cached in-process for `_TTL` seconds so one page load (Positions +
 Trade History both want the held names) doesn't re-hit the API per panel.
 
 Delayed data is fine here: this is a paper book, marks are EOD-grade.
+
+SECRET-HANDLING CONSTRAINT — read before adding logging to this module.
+Every request below passes the key as an ``apiKey`` QUERY PARAMETER, and
+``requests`` embeds the full request URL in its exception messages.  A
+``requests`` exception raised anywhere in this file therefore carries
+POLYGON_API_KEY / MASSIVE_API_KEY in plaintext.  That is safe today only because
+every ``except Exception`` block here swallows the exception without logging it
+— the degradation contract ("never raises", returns None per symbol) is also
+what keeps the key out of the logs.
+
+If you add logging, the exception text is externally-produced text reaching a
+log and MUST go through it first::
+
+    from common.redaction import sanitize_external_text
+    log.warning("polygon %s failed: %s", ticker, sanitize_external_text(exc))
+
+Both key names are auto-collected by ``common.redaction.environment_secrets``,
+so the sanitizer removes them by identity, not merely by shape.  Pinned by
+``tests/test_secret_redaction.py::test_requests_style_url_exception_is_redacted``.
+The structural fix — moving the key to an ``Authorization: Bearer`` header so it
+never enters a URL — is a live-API change and is deliberately not made here.
 """
 from __future__ import annotations
 

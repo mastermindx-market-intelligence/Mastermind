@@ -51,7 +51,7 @@ jobs:
       - name: Compile source
         run: >-
           python -m compileall -q
-          app bot brain bridge control_plane data_layer loop portfolio scripts
+          app bot brain bridge common control_plane data_layer loop portfolio scripts
 
       - name: Validate shell scripts
         run: |
@@ -62,6 +62,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_auth.py
+          tests/test_secret_redaction.py
           tests/test_gate.py
           tests/test_book_state_isolation.py
           tests/test_vendored_read_ratchet.py
