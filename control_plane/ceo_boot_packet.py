@@ -277,6 +277,21 @@ def _git_branch(path: Path) -> str | None:
     return _git(path, "rev-parse", "--abbrev-ref", "HEAD")
 
 
+def git_sha(path: Path) -> str | None:
+    """Public name for :func:`_git_sha`, for sibling read-only projections.
+
+    A WRAPPER, not an alias.  An alias would bind the function object at import
+    time, so the house idiom of patching ``_git_sha`` in a test would silently
+    fail to move it; this delegates on every call, so patching either name works.
+    """
+    return _git_sha(path)
+
+
+def git_branch(path: Path) -> str | None:
+    """Public name for :func:`_git_branch`.  A wrapper, for the reason above."""
+    return _git_branch(path)
+
+
 def load_strategic_summary() -> tuple[dict[str, Any] | None, str | None]:
     """Project ``config/strategic_state.yml`` down to the boot-packet summary.
 
