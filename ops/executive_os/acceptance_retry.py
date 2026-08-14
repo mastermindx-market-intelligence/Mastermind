@@ -493,15 +493,45 @@ class AcceptanceRetry:
         saved, real, and effective columns can only over-report, which fails
         the retry closed instead of certifying a false absence.  Every parse
         refusal below is fail-closed for the same reason.
+
+        It also inherits the same self-reference hazard, so the census spawns
+        its ``ps`` through ``Popen`` and drops exactly that captured pid.
+        ``/bin/ps`` is setuid root, so a census run by uid W observes its own
+        child as ``ruid=W euid=0`` and the union matches it -- and because
+        ``_quiesce_dedicated_uids`` re-censuses in a loop until the set is
+        empty, a self-counting census can never converge and would wedge the
+        retry path.  This preparation is root-gated by ``validate_host``, where
+        the child is ``ruid=euid=svuid=0`` and matches no dedicated uid, so the
+        hazard is latent rather than live here; the exclusion removes the
+        census's dependence on WHICH uid happens to run it.
         """
 
-        completed = _run(
-            ["/bin/ps", "-axo", "svuid=,ruid=,uid=,pid="],
-            label="dedicated service UID process census",
-        )
+        argv = ["/bin/ps", "-axo", "svuid=,ruid=,uid=,pid="]
+        label = "dedicated service UID process census"
+        with subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as process:
+            census_pid = process.pid
+            try:
+                stdout, _stderr = process.communicate(timeout=60.0)
+            except subprocess.TimeoutExpired:
+                # Reap before propagating, exactly as `_run` does: a leaked ps
+                # would be a live process this census just created.
+                process.kill()
+                process.wait()
+                raise
+            except BaseException:
+                process.kill()
+                raise
+            returncode = process.returncode
+        if returncode != 0:
+            raise RetryError(f"{label} failed with exit {returncode}")
         found: dict[int, list[int]] = {uid: [] for uid in uids}
         rows = 0
-        for raw_line in completed.stdout.decode("ascii", errors="strict").splitlines():
+        for raw_line in stdout.decode("ascii", errors="strict").splitlines():
             if not raw_line.strip():
                 continue
             fields = raw_line.split()
@@ -516,7 +546,7 @@ class AcceptanceRetry:
                     "dedicated service UID process census is malformed"
                 ) from None
             rows += 1
-            if pid <= 1:
+            if pid <= 1 or pid == census_pid:
                 continue
             for uid in (saved_uid, real_uid, effective_uid):
                 if uid in found:

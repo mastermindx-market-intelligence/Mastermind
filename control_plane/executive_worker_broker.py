@@ -283,30 +283,64 @@ def _ps_pids_for_uid(uid: int) -> tuple[int, ...]:
     processes (the ``loginwindow`` case), and over-reporting fails the sweep
     closed rather than certifying a false absence.
 
+    The one process this MUST NOT count is the enumeration's own ``ps`` child.
+    ``/bin/ps`` is setuid root (``-rwsr-xr-x root wheel``), so the child this
+    function spawns is itself observed as ``ruid=<caller> euid=0 svuid=0`` and
+    the union above matches it on ``ruid`` -- the sweeper would then see a
+    residual on EVERY observation, a fresh transient pid each time, and could
+    never reach quiescence.  Enumerating on ``uid`` alone used to hide this by
+    accident (the setuid child prints ``uid=0``); adding the real-uid term made
+    the projection self-referential.  The child is therefore spawned through
+    ``Popen`` so its pid is CAPTURED rather than guessed, and exactly that pid
+    is dropped.  Identity is the only sound filter here: command name, ``euid``
+    and liveness are all properties a genuine residual can share, so filtering
+    on any of them would mask real processes.  Dropping the captured pid cannot
+    mask one, because a pid is unique among live processes and our child is
+    alive across the whole snapshot.
+
     Honest scope note: on this host no process currently carries an ``svuid``
     distinct from its ``ruid``, so the saved-uid term closes an unestablished
-    invariant rather than a demonstrated escape.
+    invariant rather than a demonstrated escape.  The effective-uid term, by
+    contrast, is demonstrably wide: measured as uid 501, ``loginwindow``
+    (``svuid=0 ruid=0 euid=501``) is enumerated and ``kill(pid, 0)`` against it
+    returns ``EPERM``.  That shape is retained in the QUIESCENCE gate on
+    purpose -- under a dedicated worker uid it requires either a setuid-to-W
+    binary or a root process that assumed W's effective identity, and either
+    one is an isolation breach that must fail the sweep closed rather than be
+    reported and tolerated.
     """
 
     argv = ["/bin/ps", "-axo", _PS_UID_PROJECTION]
-    completed = subprocess.run(
+    with subprocess.Popen(
         argv,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        check=False,
-        timeout=5,
         env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"},
         text=True,
-    )
-    if completed.returncode != 0:
+    ) as process:
+        enumeration_pid = process.pid
+        try:
+            stdout, _stderr = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            # Mirror subprocess.run(timeout=...): reap the child before the
+            # timeout propagates, so a wedged ps cannot be left running as the
+            # worker uid -- which would be a residual this sweep just created.
+            process.kill()
+            process.wait()
+            raise
+        except BaseException:
+            process.kill()
+            raise
+        returncode = process.returncode
+    if returncode != 0:
         # Defense in depth, not the load-bearing check: a ps lacking one of
         # these keywords exits non-zero AND prints short rows, which the
         # arity check below already refuses.  Either alone fails closed.
         raise DedicatedUIDError("cannot inspect the worker UID process table")
     values: list[int] = []
     rows = 0
-    for raw in completed.stdout.splitlines():
+    for raw in stdout.splitlines():
         if not raw.strip():
             continue
         fields = raw.split()
@@ -319,6 +353,11 @@ def _ps_pids_for_uid(uid: int) -> tuple[int, ...]:
                 "worker UID process table projection is malformed"
             ) from None
         rows += 1
+        if pid == enumeration_pid:
+            # This row IS the ps invocation above.  Counted after `rows` so it
+            # still witnesses a non-empty table, and dropped before the union
+            # so the reader cannot report itself as a residual.
+            continue
         if uid in (saved_uid, real_uid, effective_uid):
             values.append(pid)
     if rows == 0:
