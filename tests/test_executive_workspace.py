@@ -350,3 +350,219 @@ def test_packing_collapses_the_local_clone_to_a_single_object_file(tmp_path):
 
     # The packed clone copies an order of magnitude fewer files.
     assert copied_packed < copied_loose / 5
+
+
+# ---------------------------------------------------------------------------
+# The SAME incident, next chapter (2026-08-14). The #56 fix above packs the
+# administrative checkout with `git repack -ad`, but `repack -ad` packs only
+# REACHABLE objects. install.sh removes the checkout's "origin" remote
+# (`git remote remove origin`, inside the creation guard, right after the
+# initial clone) BEFORE repack ever runs. That deletes the remote-tracking
+# refs and orphans anything reachable only through them, so those orphans
+# stay loose after repack, install's own hard "count == 0" postcondition
+# correctly fires, and install exits 65 -- leaving the host half-installed
+# with a stale control config pinned to the previous release.
+#
+# Reproduced for real against the real repository: 141 refs survived the
+# initial `clone --no-hardlinks --no-checkout`, 7 after `remote remove
+# origin`; `count: 2533` (`in-pack: 4201`) after `repack -ad` ALONE; `count:
+# 0` only after `git prune --expire=now`, with HEAD still resolving to the
+# exact expected SHA afterward and the pruned checkout still usable as the
+# source for the existing `git clone --local --no-hardlinks` workspace
+# clone. The fix below adds exactly that `git prune --expire=now` call, run
+# as the same CONTROL_USER principal under the same scrubbed Git environment
+# as the repack it follows, between the repack and the existing (unchanged)
+# hard assertion.
+# ---------------------------------------------------------------------------
+
+
+def _repository_with_orphaned_history(tmp_path: Path) -> tuple[Path, str]:
+    """A source repo shaped like the real incident.
+
+    Reachable history the admin checkout must keep (`main`), PLUS history
+    that an ordinary `git clone` fetches -- it mirrors every branch, not
+    only the default one -- but that becomes unreachable the instant
+    install.sh deletes the "origin" remote: `feature/orphan` never gets a
+    local branch ref of its own anywhere in this repository, so once its
+    only ref (`refs/remotes/origin/feature/orphan`) is removed along with
+    the remote, nothing points at its five commits any more.
+    """
+    source = tmp_path / "source"
+    source.mkdir()
+    _git(source, "init", "-q", "-b", "main")
+    _git(source, "config", "user.name", "Executive Test")
+    _git(source, "config", "user.email", "executive@example.invalid")
+    (source / "a.txt").write_text("base\n", encoding="utf-8")
+    _git(source, "add", "a.txt")
+    _git(source, "commit", "-qm", "base")
+    base_sha = _git(source, "rev-parse", "HEAD")
+    (source / "b.txt").write_text("second\n", encoding="utf-8")
+    _git(source, "add", "b.txt")
+    _git(source, "commit", "-qm", "second")
+    expected_sha = _git(source, "rev-parse", "HEAD")
+
+    _git(source, "checkout", "-q", "-b", "feature/orphan", base_sha)
+    for index in range(5):
+        (source / f"orphan-{index}.txt").write_text(f"orphan {index}\n", encoding="utf-8")
+        _git(source, "add", f"orphan-{index}.txt")
+        _git(source, "commit", "-qm", f"orphan commit {index}")
+    _git(source, "checkout", "-q", "main")
+    return source, expected_sha
+
+
+def _count_objects(repo: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for line in _git(repo, "count-objects", "-v").splitlines():
+        key, _, value = line.partition(":")
+        counts[key.strip()] = int(value.strip())
+    return counts
+
+
+def test_install_sh_prunes_unreachable_objects_after_repack_and_before_final_chown():
+    """The fix: `git prune --expire=now`, run after repack (the companion
+    test below proves repack alone is not enough) and before the existing
+    hard "count == 0" postcondition, as the same CONTROL_USER principal
+    under the same scrubbed Git environment as the repack it follows --
+    never as root, for the same "dubious ownership" / root-owned-pack-files
+    reasons the repack call's own comment documents. The postcondition
+    itself, and its `exit 65` on failure, are UNCHANGED: this fix satisfies
+    the existing guard, it does not weaken it.
+    """
+    install_text = _INSTALL_SH.read_text(encoding="utf-8")
+
+    repack_marker = '/usr/bin/git -C "$ADMIN_CHECKOUT" repack -ad'
+    prune_marker = '/usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now'
+    assertion_marker = "administrative checkout still holds loose objects after repack"
+    assert install_text.count(repack_marker) == 1
+    assert install_text.count(prune_marker) == 1
+    assert install_text.count(assertion_marker) == 1
+
+    repack_index = install_text.index(repack_marker)
+    prune_index = install_text.index(prune_marker)
+    assertion_index = install_text.index(assertion_marker)
+
+    # Ownership/mode re-assertion must still run LAST, over whatever prune
+    # leaves behind -- not be skipped, and not reordered ahead of prune.
+    chown_marker = '/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"'
+    chmod_marker = '/bin/chmod -R go-rwx "$ADMIN_CHECKOUT"'
+    between_repack_and_assertion = install_text[repack_index:assertion_index]
+    assert between_repack_and_assertion.count(chown_marker) == 1
+    assert between_repack_and_assertion.count(chmod_marker) == 1
+    chown_index = install_text.index(chown_marker, repack_index)
+    chmod_index = install_text.index(chmod_marker, repack_index)
+
+    # Exact ordering: repack -> prune -> chown -> chmod -> hard assertion.
+    assert repack_index < prune_index < chown_index < chmod_index < assertion_index
+
+    # The prune call mirrors the repack call's invocation shape byte for
+    # byte: same control principal, same scrubbed environment, never root.
+    preceding_repack = install_text[:repack_index]
+    repack_invocation = preceding_repack[preceding_repack.rindex("/usr/bin/sudo -u"):]
+    preceding_prune = install_text[:prune_index]
+    prune_invocation = preceding_prune[preceding_prune.rindex("/usr/bin/sudo -u"):]
+    for line in (
+        '/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \\',
+        'PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \\',
+        "LANG=C.UTF-8 LC_ALL=C.UTF-8 \\",
+        "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \\",
+    ):
+        assert line in repack_invocation
+        assert line in prune_invocation
+
+    # The postcondition itself is untouched: still a hard `exit 65`, never
+    # downgraded to a warning.
+    assert "exit 65" in install_text[assertion_index:assertion_index + 200]
+
+    # Never widen to `git gc` -- forbidden by the CEO ruling absent evidence
+    # prune is insufficient, and the reproduction found it sufficient.
+    admin_checkout_block = install_text[
+        install_text.index('ADMIN_CHECKOUT="$RUNTIME_ROOT'):assertion_index
+    ]
+    assert "git gc" not in admin_checkout_block
+    assert " gc " not in admin_checkout_block
+
+    # The comment documents the intended sequence and why repack alone
+    # cannot satisfy the postcondition once a remote has been removed.
+    comment_block = install_text[repack_index:prune_index]
+    assert "remote removed" in comment_block
+    assert "repack reachable objects" in comment_block
+    assert "prune unreachable" in comment_block
+    assert "verify zero loose objects" in comment_block
+    assert "not company state" in comment_block
+
+
+def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_path: Path):
+    """The full fix, proved end to end without root.
+
+    Covers all eight points of the regression spec: a source repo with
+    reachable history PLUS orphanable history (1), cloned the way
+    install.sh clones the admin checkout (2), with its remote removed
+    exactly as install.sh removes it (3) -- proving `repack -ad` alone is
+    not enough (4) -- then `git prune --expire=now` (5) reaches zero loose
+    objects (6), HEAD still resolves to the exact expected SHA (7), and the
+    pruned checkout is still clean and usable as the source for the
+    existing `git clone --local --no-hardlinks` workspace clone that
+    `prepare_credentialless_clone` performs per job (8).
+    """
+    source, expected_sha = _repository_with_orphaned_history(tmp_path)
+    admin_checkout = tmp_path / "admin-checkout"
+
+    # 1 & 2: clone the admin checkout exactly the way install.sh's creation
+    # guard does.
+    subprocess.run(
+        ["git", "clone", "--no-hardlinks", "--no-checkout", str(source), str(admin_checkout)],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    _git(admin_checkout, "checkout", "--detach", expected_sha)
+
+    # 3: remove origin / remote-tracking refs exactly as install.sh does.
+    remote_refs_before = _git(admin_checkout, "for-each-ref", "refs/remotes")
+    assert "feature/orphan" in remote_refs_before, "fixture must fetch the orphan branch too"
+    _git(admin_checkout, "remote", "remove", "origin")
+    assert _git(admin_checkout, "remote") == ""
+    assert _git(admin_checkout, "for-each-ref", "refs/remotes") == ""
+    heads_after_removal = _git(admin_checkout, "for-each-ref", "refs/heads")
+    assert heads_after_removal.count("\n") == 0, "exactly one local ref (main) should survive"
+    assert expected_sha in heads_after_removal and "refs/heads/main" in heads_after_removal
+
+    # 4: repack ALONE must leave loose objects -- the exact defect real-host
+    # install.sh hit.
+    _git(admin_checkout, "repack", "-ad")
+    after_repack = _count_objects(admin_checkout)
+    assert after_repack["count"] > 0, (
+        "fixture produced no orphaned objects after repack -ad -- the "
+        "orphan branch history must be unreachable from refs/heads/main "
+        "and detached HEAD, or this test is vacuous"
+    )
+
+    # 5: the fix -- prune unreachable loose objects.
+    _git(admin_checkout, "prune", "--expire=now")
+
+    # 6: zero loose objects, matching install.sh's hard assertion exactly
+    # (the "count" field of `git count-objects -v`).
+    after_prune = _count_objects(admin_checkout)
+    assert after_prune["count"] == 0
+    # The reachable, packed history is untouched by prune.
+    assert after_prune["in-pack"] == after_repack["in-pack"]
+
+    # 7: HEAD still resolves to the exact expected SHA, and the checkout is
+    # still clean.
+    assert _git(admin_checkout, "rev-parse", "HEAD") == expected_sha
+    assert _git(admin_checkout, "status", "--porcelain=v1") == ""
+
+    # 8: the pruned checkout is still usable as the source for the SAME
+    # `git clone --local --no-hardlinks` workspace clone
+    # prepare_credentialless_clone performs per job -- proving prune did not
+    # remove or corrupt anything the workspace clone actually needs.
+    receipt = prepare_credentialless_clone(
+        admin_checkout,
+        tmp_path / "workspaces",
+        job_id="JOB-PRUNE-1",
+        base_sha=expected_sha,
+    )
+    assert receipt.base_sha == expected_sha
+    assert receipt.remote_count == 0
+    workspace = Path(receipt.workspace_path)
+    # Raises if the base commit object is missing from the clone result.
+    _git(workspace, "cat-file", "-e", f"{expected_sha}^{{commit}}")
+    assert _git(workspace, "rev-parse", "HEAD") == expected_sha
