@@ -745,6 +745,23 @@ fi
   LANG=C.UTF-8 LC_ALL=C.UTF-8 \
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
   /usr/bin/git -C "$ADMIN_CHECKOUT" repack -ad
+# Sequence: remote removed -> repack reachable objects -> prune unreachable
+# loose objects -> verify zero loose objects. The `git remote remove origin`
+# call above deletes the remote-tracking refs, which orphans every object
+# that was reachable only through them; `repack -ad` packs just the objects
+# still reachable from the retained refs/HEAD, so those newly-unreachable
+# objects are left behind as loose files instead of being dropped. The
+# administrative checkout is an install-owned, credentialless source whose
+# only required history is what remains reachable from its retained
+# refs/HEAD -- objects inherited from the development repository that are
+# no longer reachable are not company state, they are exactly the
+# clone-cost debris this normalization exists to remove, so prune them
+# before the postcondition below is asserted.
+/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  /usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now
 /usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
 /bin/chmod -R go-rwx "$ADMIN_CHECKOUT"
 [ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
