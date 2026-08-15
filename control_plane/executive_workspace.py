@@ -14,6 +14,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 from typing import Callable, Sequence
 
@@ -250,14 +251,18 @@ def _share_symlink_with_group(path: Path, *, shared_gid: int) -> None:
         ) from exc
     mode = stat.S_IMODE(after.st_mode)
     # Linux keeps symlink mode 0777 even when the API accepts
-    # follow_symlinks=False.  Treat only the observed restrictive result as
-    # enforcement; its parent directories still carry the traversal fence.
-    chmod_is_enforced = desired_mode is not None and mode == desired_mode
+    # follow_symlinks=False; those bits are not enforced there, and the parent
+    # directories carry the traversal fence.  Darwin does enforce link modes,
+    # so require the exact restrictive postcondition on the production host.
+    darwin_mode_invalid = sys.platform == "darwin" and (
+        desired_mode is None
+        or mode != desired_mode
+        or bool(mode & (stat.S_IWGRP | stat.S_IRWXO))
+    )
     if (
         after.st_gid != int(shared_gid)
         or not mode & stat.S_IRGRP
-        or mode & stat.S_IWGRP
-        or (chmod_is_enforced and mode & stat.S_IRWXO)
+        or darwin_mode_invalid
     ):
         raise WorkspaceError(
             "tracked symlink is not read-only for only the worker group"
