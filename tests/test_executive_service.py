@@ -536,6 +536,8 @@ def test_service_dispatch_and_requeue_refuse_nonproof_jobs(
             assert receipt["old_workspace"]["status_dirty"] is True
             assert receipt["new_workspace"]["head"] == service.config.proof_base_sha
             assert receipt["new_workspace"]["status_dirty"] is False
+            assert receipt["new_workspace"]["all_untracked_dirty"] is False
+            assert receipt["new_workspace"]["launch_clean"] is True
             events = runtime.events.list_events(job_id=proof_id)
             rotation_event = next(
                 item for item in events if item.event_type == "PROOF_WORKSPACE_ROTATED"

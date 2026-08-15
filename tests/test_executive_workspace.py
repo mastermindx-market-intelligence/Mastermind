@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -98,6 +99,126 @@ def test_exact_sha_workspace_can_be_shared_with_only_the_worker_group(tmp_path):
     assert stat.S_IMODE((workspace / "research" / "proof").stat().st_mode) == 0o770
     assert _git(workspace, "rev-parse", "HEAD") == base_sha
     assert _git(workspace, "remote") == ""
+
+
+def test_tracked_vendor_symlink_is_worker_readable_and_launch_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Regression for the real macOS Phase 1C-A `vendor/macro` failure."""
+
+    source, _ = _repository(tmp_path)
+    vendor = source / "vendor"
+    vendor.mkdir()
+    (vendor / "macro").symlink_to("../macro")
+    _git(source, "add", "vendor/macro")
+    _git(source, "commit", "-qm", "tracked vendor symlink")
+    base_sha = _git(source, "rev-parse", "HEAD")
+
+    shared_links: list[str] = []
+    real_share = executive_workspace._share_symlink_with_group
+
+    def observed_share(path: Path, *, shared_gid: int) -> None:
+        shared_links.append(path.relative_to(path.parents[1]).as_posix())
+        real_share(path, shared_gid=shared_gid)
+
+    monkeypatch.setattr(
+        executive_workspace, "_share_symlink_with_group", observed_share
+    )
+    previous_umask = os.umask(0o077)
+    try:
+        receipt = prepare_credentialless_clone(
+            source,
+            tmp_path / "workspaces",
+            job_id="JOB-SYMLINK",
+            base_sha=base_sha,
+            shared_gid=os.getegid(),
+            shared_write_paths=("research/proof/receipt.md",),
+        )
+    finally:
+        os.umask(previous_umask)
+
+    workspace = Path(receipt.workspace_path)
+    link = workspace / "vendor" / "macro"
+    link_info = link.lstat()
+    link_mode = stat.S_IMODE(link_info.st_mode)
+    assert shared_links == ["vendor/macro"]
+    assert stat.S_ISLNK(link_info.st_mode)
+    assert link_info.st_gid == os.getegid()
+    assert link_mode & stat.S_IRGRP
+    if sys.platform == "darwin":
+        assert not link_mode & stat.S_IWGRP
+        assert not link_mode & stat.S_IRWXO
+    observation = executive_workspace.observe_launch_cleanliness(
+        lambda arguments: subprocess.run(
+            ["git", *arguments],
+            cwd=workspace,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+    )
+    assert observation.dirty is False
+
+
+def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source, _ = _repository(tmp_path)
+    vendor = source / "vendor"
+    vendor.mkdir()
+    (vendor / "macro").symlink_to("../macro")
+    _git(source, "add", "vendor/macro")
+    _git(source, "commit", "-qm", "tracked vendor symlink")
+    base_sha = _git(source, "rev-parse", "HEAD")
+    real_chmod = os.chmod
+
+    def unchanged_symlink_mode(path, mode, *, follow_symlinks=True):
+        if follow_symlinks is False:
+            return None
+        return real_chmod(path, mode)
+
+    monkeypatch.setattr(executive_workspace.os, "chmod", unchanged_symlink_mode)
+    monkeypatch.setattr(
+        executive_workspace.os,
+        "supports_follow_symlinks",
+        {unchanged_symlink_mode},
+    )
+    monkeypatch.setattr(executive_workspace.sys, "platform", "darwin")
+    root = tmp_path / "workspaces"
+    previous_umask = os.umask(0o077)
+    try:
+        with pytest.raises(WorkspaceError, match="tracked symlink"):
+            prepare_credentialless_clone(
+                source,
+                root,
+                job_id="JOB-SYMLINK-MUTATION",
+                base_sha=base_sha,
+                shared_gid=os.getegid(),
+            )
+    finally:
+        os.umask(previous_umask)
+    assert not (root / "job-symlink-mutation").exists()
+
+
+def test_launch_cleanliness_definition_includes_ignored_untracked_material():
+    calls: list[tuple[str, ...]] = []
+
+    def observe(arguments):
+        value = tuple(arguments)
+        calls.append(value)
+        if value == executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS:
+            return b"ignored-runtime-file\0"
+        return b""
+
+    observation = executive_workspace.observe_launch_cleanliness(observe)
+
+    assert calls == [
+        executive_workspace.LAUNCH_CLEAN_STATUS_ARGS,
+        executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS,
+    ]
+    assert observation.status == b""
+    assert observation.all_untracked == b"ignored-runtime-file\0"
+    assert observation.dirty is True
 
 
 def test_shared_write_paths_reject_protected_or_escaping_targets(tmp_path):

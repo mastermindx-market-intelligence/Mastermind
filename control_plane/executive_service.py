@@ -42,7 +42,11 @@ from control_plane.executive_runtime import (
     SCHEMA_VERSION,
     StateConflict,
 )
-from control_plane.executive_workspace import WorkspaceError, prepare_credentialless_clone
+from control_plane.executive_workspace import (
+    WorkspaceError,
+    observe_launch_cleanliness,
+    prepare_credentialless_clone,
+)
 
 
 CONTROL_PROTOCOL_VERSION = "mastermind.executive_control/v1"
@@ -971,8 +975,8 @@ class ExecutiveControlService:
         branch = self._git_output(
             workspace, ["rev-parse", "--abbrev-ref", "HEAD"]
         ).decode("utf-8", errors="strict").strip()
-        status = self._git_output(
-            workspace, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+        cleanliness = observe_launch_cleanliness(
+            lambda arguments: self._git_output(workspace, list(arguments))
         )
         remotes = tuple(
             value
@@ -984,7 +988,7 @@ class ExecutiveControlService:
         if require_fresh and (
             head != self.config.proof_base_sha
             or branch != expected_branch
-            or status
+            or cleanliness.dirty
             or remotes
         ):
             raise ServiceError(
@@ -999,8 +1003,13 @@ class ExecutiveControlService:
             "mode": stat.S_IMODE(info.st_mode),
             "head": head,
             "branch": branch,
-            "status_sha256": hashlib.sha256(status).hexdigest(),
-            "status_dirty": bool(status),
+            "status_sha256": hashlib.sha256(cleanliness.status).hexdigest(),
+            "status_dirty": bool(cleanliness.status),
+            "all_untracked_sha256": hashlib.sha256(
+                cleanliness.all_untracked
+            ).hexdigest(),
+            "all_untracked_dirty": bool(cleanliness.all_untracked),
+            "launch_clean": not cleanliness.dirty,
             "remote_count": len(remotes),
         }
 
