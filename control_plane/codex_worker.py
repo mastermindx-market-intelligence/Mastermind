@@ -1387,13 +1387,43 @@ def _safe_git_operation_identity(args: Sequence[str]) -> str:
     return _SAFE_GIT_OPERATION_IDENTITIES.get(tuple(args), "unknown")
 
 
+def _command_scoped_git_trust_args(workspace: Path) -> tuple[str, str]:
+    """Trust one already-canonical workspace for one Git process only.
+
+    ``safe.directory`` is honored only from Git's protected configuration.
+    The command scope supplied by ``-c`` is protected but is not persisted.
+    Refusing aliases and glob syntax keeps this grant bound to the canonical
+    workspace accepted by launch validation rather than to request text, a
+    parent directory, or a family of repositories.
+    """
+
+    lexical = Path(workspace)
+    if not lexical.is_absolute():
+        raise LaunchValidationError("Git workspace trust path must be absolute")
+    try:
+        info = lexical.lstat()
+        canonical = lexical.resolve(strict=True)
+    except OSError as exc:
+        raise LaunchValidationError("Git workspace trust path is unavailable") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise LaunchValidationError("Git workspace trust path must be a real directory")
+    if lexical != canonical:
+        raise LaunchValidationError("Git workspace trust path must already be canonical")
+    rendered = os.fspath(canonical)
+    if any(character in rendered for character in ("\x00", "\n", "\r", "*", "?", "[")):
+        raise LaunchValidationError("Git workspace trust path contains unsafe syntax")
+    return ("-c", f"safe.directory={rendered}")
+
+
 def _git_command(workspace: Path, *args: str) -> bytes:
+    trust_args = _command_scoped_git_trust_args(workspace)
     argv = [
         "/usr/bin/git",
         "--no-pager",
         "-c", "credential.helper=",
         "-c", "core.hooksPath=/dev/null",
         "-c", "core.fsmonitor=false",
+        *trust_args,
         "-C", str(workspace),
         *args,
     ]
@@ -1439,6 +1469,7 @@ def _validate_git_config(git_dir: Path) -> None:
         r"^\s*\[\s*remote\b",
         r"^\s*\[\s*include(?:if)?\b",
         r"^\s*\[\s*credential\b",
+        r"^\s*\[\s*url\b",
         r"^\s*(?:url|pushurl|extraheader|sshcommand|helper)\s*=",
     )
     for pattern in forbidden:
