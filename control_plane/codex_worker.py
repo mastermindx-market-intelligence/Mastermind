@@ -24,6 +24,7 @@ profile.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ctypes
 import dataclasses
 import fnmatch
@@ -40,7 +41,7 @@ import subprocess
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 from uuid import uuid4
 
 
@@ -63,6 +64,36 @@ _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
 _MAX_PROJECT_CONFIG_BYTES = 64 * 1024
 _AUDITED_PROJECT_CONFIG_SHA256 = "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f"
 _ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
+_GIT_COMMAND_TIMEOUT_SECONDS = 15.0
+_SAFE_GIT_OPERATION_IDENTITIES = {
+    ("remote",): "remote",
+    ("rev-parse", "--verify", "HEAD"): "rev-parse --verify HEAD",
+    (
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+    ): "status --porcelain=v1 -z --untracked-files=all",
+    ("ls-files", "--others", "-z"): "ls-files --others -z",
+    ("diff", "--name-only", "-z", "HEAD", "--"): "diff --name-only -z HEAD --",
+}
+_SAFE_GIT_OPERATION_NAMES = frozenset(
+    {*_SAFE_GIT_OPERATION_IDENTITIES.values(), "unknown"}
+)
+_SAFE_LAUNCH_VALIDATION_STAGES = frozenset(
+    {
+        "spec_contract",
+        "workspace_identity",
+        "project_configuration",
+        "git_metadata",
+        "git_remote_policy",
+        "git_head_policy",
+        "git_cleanliness",
+        "expected_base",
+        "run_directory",
+        "isolation_manifest",
+    }
+)
 _SHELL_EXECUTABLE_NAMES = frozenset({"bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"})
 _DISABLED_FEATURES = (
     "hooks",
@@ -109,18 +140,73 @@ class LaunchValidationError(CodexWorkerError):
     """The launch specification or workspace is unsafe."""
 
 
+class LaunchValidationStageError(LaunchValidationError):
+    """A launch refusal attributed only to one audited validation boundary."""
+
+    code = "launch_validation_stage"
+
+    def __init__(self, *, stage: str) -> None:
+        if stage not in _SAFE_LAUNCH_VALIDATION_STAGES:
+            raise ValueError("launch validation stage is not allowlisted")
+        self.stage = stage
+        super().__init__(f"Launch validation failed at stage: {self.stage}")
+
+
+def _validate_safe_git_operation(operation: str) -> str:
+    value = str(operation)
+    if value not in _SAFE_GIT_OPERATION_NAMES:
+        raise ValueError("Git preflight operation is not allowlisted")
+    return value
+
+
 class GitPreflightTimeout(LaunchValidationError):
     """A bounded Git validation operation did not finish in time."""
 
     code = "git_preflight_timeout"
 
     def __init__(self, *, operation: str, timeout_seconds: float) -> None:
-        self.operation = str(operation)
+        self.operation = _validate_safe_git_operation(operation)
         self.timeout_seconds = float(timeout_seconds)
+        if self.timeout_seconds != _GIT_COMMAND_TIMEOUT_SECONDS:
+            raise ValueError("Git preflight timeout differs from the fixed contract")
         rendered_timeout = f"{self.timeout_seconds:g}"
         super().__init__(
             f"Git preflight timed out after {rendered_timeout}s: {self.operation}"
         )
+
+
+class GitPreflightFailed(LaunchValidationError):
+    """An allowlisted Git validation operation returned a bounded nonzero code."""
+
+    code = "git_preflight_failed"
+
+    def __init__(self, *, operation: str, exit_code: int) -> None:
+        self.operation = _validate_safe_git_operation(operation)
+        if (
+            isinstance(exit_code, bool)
+            or not isinstance(exit_code, int)
+            or not -255 <= exit_code <= 255
+            or exit_code == 0
+        ):
+            raise ValueError("Git preflight exit code is outside the safe contract")
+        self.exit_code = exit_code
+        super().__init__(
+            f"Git preflight failed: {self.operation} (exit {self.exit_code})"
+        )
+
+
+@contextlib.contextmanager
+def _launch_validation_stage(stage: str) -> Iterator[None]:
+    """Replace private validation prose with a stable allowlisted stage."""
+
+    if stage not in _SAFE_LAUNCH_VALIDATION_STAGES:
+        raise ValueError("launch validation stage is not allowlisted")
+    try:
+        yield
+    except (LaunchValidationStageError, GitPreflightTimeout, GitPreflightFailed):
+        raise
+    except LaunchValidationError as exc:
+        raise LaunchValidationStageError(stage=stage) from exc
 
 
 class BinaryAttestationError(CodexWorkerError):
@@ -1295,21 +1381,6 @@ def _validate_codex_home(path: Path) -> Path:
     return resolved
 
 
-_GIT_COMMAND_TIMEOUT_SECONDS = 15.0
-_SAFE_GIT_OPERATION_IDENTITIES = {
-    ("remote",): "remote",
-    ("rev-parse", "--verify", "HEAD"): "rev-parse --verify HEAD",
-    (
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-    ): "status --porcelain=v1 -z --untracked-files=all",
-    ("ls-files", "--others", "-z"): "ls-files --others -z",
-    ("diff", "--name-only", "-z", "HEAD", "--"): "diff --name-only -z HEAD --",
-}
-
-
 def _safe_git_operation_identity(args: Sequence[str]) -> str:
     """Name only audited Git argv, never workspace or future caller data."""
 
@@ -1354,8 +1425,10 @@ def _git_command(workspace: Path, *args: str) -> bytes:
     if len(result.stdout) > 4 * 1024 * 1024 or len(result.stderr) > 1024 * 1024:
         raise LaunchValidationError("Git preflight output exceeded its limit")
     if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", errors="replace")[-1000:]
-        raise LaunchValidationError(f"Git preflight failed: {detail}")
+        raise GitPreflightFailed(
+            operation=_safe_git_operation_identity(args),
+            exit_code=result.returncode,
+        )
     return result.stdout
 
 
@@ -1377,28 +1450,39 @@ def _validate_git_config(git_dir: Path) -> None:
 
 
 def _git_snapshot(workspace: Path, *, require_clean: bool) -> _GitSnapshot:
-    git_dir = workspace / ".git"
-    try:
-        git_info = git_dir.lstat()
-    except OSError as exc:
-        raise LaunchValidationError("workspace must contain its own .git directory") from exc
-    if stat.S_ISLNK(git_info.st_mode) or not stat.S_ISDIR(git_info.st_mode):
-        raise LaunchValidationError("linked worktrees and .git files are not accepted")
-    _validate_git_config(git_dir)
-    if _git_command(workspace, "remote").strip():
-        raise LaunchValidationError("workspace clone must have no Git remotes")
-    head = _git_command(workspace, "rev-parse", "--verify", "HEAD").decode().strip()
-    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head):
-        raise LaunchValidationError("workspace HEAD is not an immutable Git object id")
-    status_value = _git_command(
-        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
-    )
-    # `git status` intentionally respects ignore rules.  A per-job clone must
-    # also be free of pre-existing ignored/untracked material, since ignored
-    # runtime files are still a mutation and secret-smuggling surface.
-    all_untracked = _git_command(workspace, "ls-files", "--others", "-z")
-    if require_clean and (status_value or all_untracked):
-        raise LaunchValidationError("workspace clone must be clean before launch")
+    with _launch_validation_stage("git_metadata"):
+        git_dir = workspace / ".git"
+        try:
+            git_info = git_dir.lstat()
+        except OSError as exc:
+            raise LaunchValidationError("workspace must contain its own .git directory") from exc
+        if stat.S_ISLNK(git_info.st_mode) or not stat.S_ISDIR(git_info.st_mode):
+            raise LaunchValidationError("linked worktrees and .git files are not accepted")
+        _validate_git_config(git_dir)
+    with _launch_validation_stage("git_remote_policy"):
+        remote = _git_command(workspace, "remote")
+        if remote.strip():
+            raise LaunchValidationError("workspace clone must have no Git remotes")
+    with _launch_validation_stage("git_head_policy"):
+        try:
+            head = _git_command(
+                workspace, "rev-parse", "--verify", "HEAD"
+            ).decode("ascii", errors="strict").strip()
+        except UnicodeDecodeError as exc:
+            raise LaunchValidationError("workspace HEAD is not ASCII") from exc
+        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head):
+            raise LaunchValidationError("workspace HEAD is not an immutable Git object id")
+    with _launch_validation_stage("git_cleanliness"):
+        status_value = _git_command(
+            workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+        )
+        # `git status` intentionally respects ignore rules. A per-job clone
+        # must also be free of pre-existing ignored/untracked material, since
+        # ignored runtime files are still a mutation and secret-smuggling
+        # surface.
+        all_untracked = _git_command(workspace, "ls-files", "--others", "-z")
+        if require_clean and (status_value or all_untracked):
+            raise LaunchValidationError("workspace clone must be clean before launch")
     return _GitSnapshot(head=head.lower(), status=status_value)
 
 
@@ -1860,48 +1944,54 @@ class CodexWorkerAdapter:
         self._runs: dict[str, _RunState] = {}
 
     def _validate_spec(self, spec: LaunchSpec) -> tuple[Path, Path, Path, Path, _GitSnapshot, Any]:
-        for field_name in ("run_id", "job_id", "worker_id"):
-            value = getattr(spec, field_name)
-            if not isinstance(value, str) or _ID_RE.fullmatch(value) is None:
-                raise LaunchValidationError(f"invalid {field_name}")
-        if spec.run_id in self._runs:
-            raise LaunchValidationError(f"run {spec.run_id!r} is already known")
-        _authority_set(spec)
-        if not isinstance(spec.prompt, str) or not spec.prompt.strip():
-            raise LaunchValidationError("prompt is required")
-        if len(spec.prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
-            raise LaunchValidationError("prompt exceeds one MiB")
-        if not (0 < float(spec.timeout_seconds) <= 24 * 60 * 60):
-            raise LaunchValidationError("timeout_seconds is out of bounds")
-        if not (0.1 <= float(spec.cancel_grace_seconds) <= 60):
-            raise LaunchValidationError("cancel_grace_seconds is out of bounds")
+        with _launch_validation_stage("spec_contract"):
+            for field_name in ("run_id", "job_id", "worker_id"):
+                value = getattr(spec, field_name)
+                if not isinstance(value, str) or _ID_RE.fullmatch(value) is None:
+                    raise LaunchValidationError(f"invalid {field_name}")
+            if spec.run_id in self._runs:
+                raise LaunchValidationError(f"run {spec.run_id!r} is already known")
+            _authority_set(spec)
+            if not isinstance(spec.prompt, str) or not spec.prompt.strip():
+                raise LaunchValidationError("prompt is required")
+            if len(spec.prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
+                raise LaunchValidationError("prompt exceeds one MiB")
+            if not (0 < float(spec.timeout_seconds) <= 24 * 60 * 60):
+                raise LaunchValidationError("timeout_seconds is out of bounds")
+            if not (0.1 <= float(spec.cancel_grace_seconds) <= 60):
+                raise LaunchValidationError("cancel_grace_seconds is out of bounds")
 
-        workspace_lexical = Path(spec.workspace_path)
-        if not workspace_lexical.is_absolute():
-            raise LaunchValidationError("workspace path must be absolute")
-        workspace_info = workspace_lexical.lstat()
-        if stat.S_ISLNK(workspace_info.st_mode) or not stat.S_ISDIR(workspace_info.st_mode):
-            raise LaunchValidationError("workspace must be a real directory")
-        workspace = workspace_lexical.resolve(strict=True)
-        if workspace == _PROJECT_ROOT:
-            raise LaunchValidationError("production checkout cannot be used as a worker workspace")
-        _validate_project_configuration(workspace)
+        with _launch_validation_stage("workspace_identity"):
+            workspace_lexical = Path(spec.workspace_path)
+            if not workspace_lexical.is_absolute():
+                raise LaunchValidationError("workspace path must be absolute")
+            workspace_info = workspace_lexical.lstat()
+            if stat.S_ISLNK(workspace_info.st_mode) or not stat.S_ISDIR(workspace_info.st_mode):
+                raise LaunchValidationError("workspace must be a real directory")
+            workspace = workspace_lexical.resolve(strict=True)
+            if workspace == _PROJECT_ROOT:
+                raise LaunchValidationError("production checkout cannot be used as a worker workspace")
+        with _launch_validation_stage("project_configuration"):
+            _validate_project_configuration(workspace)
         baseline = _git_snapshot(workspace, require_clean=True)
-        if spec.expected_base_sha and baseline.head != spec.expected_base_sha.lower():
-            raise LaunchValidationError("workspace HEAD does not match expected base SHA")
+        with _launch_validation_stage("expected_base"):
+            if spec.expected_base_sha and baseline.head != spec.expected_base_sha.lower():
+                raise LaunchValidationError("workspace HEAD does not match expected base SHA")
 
-        run_lexical = Path(spec.run_dir)
-        if not run_lexical.is_absolute():
-            raise LaunchValidationError("run_dir must be absolute")
-        run_dir = _ensure_run_directory(
-            run_lexical,
-            shared_gid=(int(spec.shared_run_gid) if spec.shared_run_gid is not None else None),
-        )
-        if _is_relative_to(run_dir, workspace) or _is_relative_to(workspace, run_dir):
-            raise LaunchValidationError("run_dir and workspace must be disjoint")
-        self._validate_isolation_manifest(
-            spec, workspace, run_dir, verify_filesystem=True
-        )
+        with _launch_validation_stage("run_directory"):
+            run_lexical = Path(spec.run_dir)
+            if not run_lexical.is_absolute():
+                raise LaunchValidationError("run_dir must be absolute")
+            run_dir = _ensure_run_directory(
+                run_lexical,
+                shared_gid=(int(spec.shared_run_gid) if spec.shared_run_gid is not None else None),
+            )
+            if _is_relative_to(run_dir, workspace) or _is_relative_to(workspace, run_dir):
+                raise LaunchValidationError("run_dir and workspace must be disjoint")
+        with _launch_validation_stage("isolation_manifest"):
+            self._validate_isolation_manifest(
+                spec, workspace, run_dir, verify_filesystem=True
+            )
         home = _ensure_private_directory(run_dir / "home")
         tmp = _ensure_private_directory(run_dir / "tmp")
         _ensure_private_directory(run_dir / "logs")
@@ -3261,11 +3351,13 @@ __all__ = [
     "CodexWorkerAdapter",
     "CodexWorkerError",
     "CollectionReceipt",
+    "GitPreflightFailed",
     "GitPreflightTimeout",
     "LAUNCH_ATTESTATION_SCHEMA_VERSION",
     "LaunchAttestation",
     "LaunchSpec",
     "LaunchValidationError",
+    "LaunchValidationStageError",
     "ProcessIdentityError",
     "ProcessIdentity",
     "ProcessInspector",
