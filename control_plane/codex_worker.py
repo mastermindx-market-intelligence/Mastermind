@@ -740,11 +740,17 @@ def _assert_binary_unchanged(attestation: BinaryAttestation) -> None:
 # ``codesign --verify --strict`` on the ~220 MB Codex binary plus a
 # ``--version`` probe -- and records the verdict plus the binary's cheap
 # filesystem identity in a root-owned receipt.  ``CodexWorkerAdapter``, run
-# from the *worker* daemon under ``ProcessType=Background`` +
-# ``LowPriorityIO=true`` throttling (deliberately unchanged by this
-# mechanism), no longer has to repeat that cost -- and therefore no longer
-# has a codesign/--version call on its startup path that a cold trust-service
-# cache, host load, or I/O throttling can push past a timeout.
+# from the *worker* daemon under ``ProcessType=Background`` (CPU scheduling
+# politeness only).  launchd's ``LowPriorityIO=true`` disk I/O throttling
+# -- once also inherited here -- was removed from both Executive plists;
+# see tests/test_executive_launchd_config.py::
+# test_executive_daemons_do_not_throttle_disk_io.  The worker no longer
+# has to repeat the attestation cost, and therefore no longer has a
+# codesign/--version call on its startup path that a cold trust-service
+# cache or host load can push past a timeout -- true regardless of I/O
+# policy: install-time attestation was never only a throttling
+# workaround, since repeated subprocess calls on every worker start are
+# real, avoidable cost on their own terms.
 CODEX_ATTESTATION_RECEIPT_SCHEMA_VERSION = "mastermind.executive_codex_attestation/v1"
 
 # The fields pinned in the receipt and re-checked against a fresh
