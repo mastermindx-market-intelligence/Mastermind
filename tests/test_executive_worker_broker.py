@@ -22,6 +22,7 @@ from control_plane.codex_worker import (
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    GitPreflightTimeout,
     ProcessRef,
     ValidationReceipt,
     WorkerResult,
@@ -820,6 +821,13 @@ class _FailingStartAdapter(FakeAdapter):
         raise ValueError("fixture adapter refused the launch")
 
 
+class _GitTimeoutStartAdapter(FakeAdapter):
+    """The real adapter's first bounded Git preflight exceeded its contract."""
+
+    async def start(self, spec):
+        raise GitPreflightTimeout(operation="remote", timeout_seconds=15.0)
+
+
 def _socket_path() -> Path:
     # Unix socket paths are length-capped (104 bytes on Darwin); tmp_path is not
     # guaranteed to fit, so follow the house pattern used above.
@@ -957,6 +965,39 @@ def test_start_failure_cleanup_signals_only_observed_residual_pids(
             assert envelope["ok"] is False
             assert envelope["error"]["code"] == "InternalBrokerError"
             assert signals == [(999, signal.SIGKILL)]
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+
+    asyncio.run(scenario())
+
+
+def test_git_preflight_timeout_is_typed_and_broker_survives_cleanup(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, spec_value = _armed_broker(tmp_path, _GitTimeoutStartAdapter())
+        socket_path = _socket_path()
+        server = await asyncio.start_unix_server(
+            broker.handle_connection, path=str(socket_path), limit=1024 * 1024
+        )
+        try:
+            client = WorkerBrokerClient(socket_path, timeout_seconds=10.0)
+            with pytest.raises(RemoteBrokerError) as raised:
+                await client.request("start", _start_payload(spec_value))
+
+            assert raised.value.code == "git_preflight_timeout"
+            assert str(raised.value) == "Git preflight timed out after 15s: remote"
+            assert broker.sweeper.calls == ["broker_startup", "start_failed"]
+            assert broker.last_sweep is not None
+            assert broker.last_sweep.passed is True
+            assert broker.last_sweep.residual_pids_after == ()
+
+            # Cleanup returned and the same broker still answers a new request.
+            status = await client.request("status", {})
+            assert status["active_run_id"] is None
+            assert status["starting"] is False
         finally:
             server.close()
             await server.wait_closed()
