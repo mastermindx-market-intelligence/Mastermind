@@ -377,6 +377,17 @@ def test_broker_enforces_roots_principal_and_declared_argv(tmp_path: Path) -> No
                 _request("start", {"launch_spec": escaped, "validation_commands": []}),
                 peer=peer,
             )
+        sibling = broker.policy.workspace_root / "job-evil"
+        sibling.mkdir(mode=0o700)
+        substituted = dict(spec, workspace_path=str(sibling))
+        with pytest.raises(BrokerProtocolError, match="assignment identity drifted"):
+            await broker.execute(
+                _request(
+                    "start",
+                    {"launch_spec": substituted, "validation_commands": []},
+                ),
+                peer=peer,
+            )
         wrong_uid = dict(spec, expected_worker_uid=os.geteuid() + 42)
         with pytest.raises(BrokerProtocolError, match="principal"):
             await broker.execute(

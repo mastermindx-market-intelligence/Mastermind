@@ -290,9 +290,10 @@ def test_native_binary_attestation_timeout_is_typed_and_fail_closed(
 
 
 def test_git_preflight_timeout_names_only_the_safe_operation(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace = Path("/private/secret/workspace-that-must-not-cross-the-broker")
+    workspace = tmp_path.resolve() / "workspace-that-must-not-cross-the-broker"
+    workspace.mkdir()
     arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=all")
 
     def timed_out(argv, **kwargs):
@@ -322,9 +323,10 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
 
 
 def test_git_preflight_nonzero_names_only_operation_and_bounded_exit_code(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace = Path("/private/top-secret/workspace")
+    workspace = tmp_path.resolve() / "workspace"
+    workspace.mkdir()
     hostile_stderr = b"credential=/private/top-secret/token\n"
 
     def failed(argv, **_kwargs):
@@ -351,6 +353,139 @@ def test_git_preflight_nonzero_names_only_operation_and_bounded_exit_code(
     )
     assert str(workspace) not in str(error)
     assert hostile_stderr.decode().strip() not in str(error)
+
+
+def test_git_preflight_uses_exact_nonpersistent_command_scope_and_scrubbed_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = (tmp_path.resolve() / "workspace")
+    workspace.mkdir()
+    observed: dict[str, object] = {}
+
+    def run(argv, **kwargs):
+        observed["argv"] = tuple(argv)
+        observed["env"] = dict(kwargs["env"])
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(cw.subprocess, "run", run)
+
+    assert cw._git_command(workspace, "remote") == b""
+
+    assert observed["argv"] == (
+        "/usr/bin/git",
+        "--no-pager",
+        "-c", "credential.helper=",
+        "-c", "core.hooksPath=/dev/null",
+        "-c", "core.fsmonitor=false",
+        "-c", f"safe.directory={workspace}",
+        "-C", str(workspace),
+        "remote",
+    )
+    assert observed["env"] == {
+        "PATH": cw._SAFE_PATH,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "HOME": "/var/empty",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "never",
+    }
+
+
+def test_git_trust_is_exact_canonical_and_never_parent_or_wildcard(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve() / "workspaces"
+    root.mkdir()
+    intended = root / "job-001"
+    intended.mkdir()
+    sibling = root / "job-evil"
+    sibling.mkdir()
+
+    assert cw._command_scoped_git_trust_args(intended) == (
+        "-c",
+        f"safe.directory={intended}",
+    )
+    rendered = "\0".join(cw._command_scoped_git_trust_args(intended))
+    assert str(root) not in rendered.replace(str(intended), "")
+    assert str(sibling) not in rendered
+    assert not rendered.endswith("/*")
+
+    alias = root / "job-alias"
+    alias.symlink_to(intended, target_is_directory=True)
+    with pytest.raises(cw.LaunchValidationError, match="real directory"):
+        cw._command_scoped_git_trust_args(alias)
+
+    noncanonical = intended / ".." / intended.name
+    with pytest.raises(cw.LaunchValidationError, match="already be canonical"):
+        cw._command_scoped_git_trust_args(noncanonical)
+
+    wildcard = root / "*"
+    wildcard.mkdir()
+    with pytest.raises(cw.LaunchValidationError, match="unsafe syntax"):
+        cw._command_scoped_git_trust_args(wildcard)
+
+
+def test_installed_git_sees_exact_trust_only_in_command_scope_without_writes(
+    tmp_path: Path,
+) -> None:
+    workspace, head = _workspace(tmp_path)
+    config_path = workspace / ".git" / "config"
+    config_before = config_path.read_bytes()
+    config_info_before = config_path.stat()
+
+    trust_args = cw._command_scoped_git_trust_args(workspace)
+    scoped = subprocess.run(
+        [
+            "/usr/bin/git",
+            *trust_args,
+            "config",
+            "--show-scope",
+            "--get-all",
+            "safe.directory",
+        ],
+        cwd=workspace,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={
+            "PATH": cw._SAFE_PATH,
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "HOME": "/var/empty",
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GCM_INTERACTIVE": "never",
+        },
+        timeout=15.0,
+        check=False,
+    )
+    assert scoped.returncode == 0
+    scope = scoped.stdout.decode("utf-8", errors="strict").strip().split()
+
+    assert scope == ["command", str(workspace)]
+    assert cw._git_command(workspace, "remote") == b""
+    assert cw._git_command(workspace, "rev-parse", "--verify", "HEAD").decode().strip() == head
+    assert cw._git_command(
+        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+    ) == b""
+    assert cw._git_command(workspace, "ls-files", "--others", "-z") == b""
+    assert cw._git_command(workspace, "diff", "--name-only", "-z", "HEAD", "--") == b""
+    assert config_path.read_bytes() == config_before
+    config_info_after = config_path.stat()
+    assert (
+        config_info_after.st_uid,
+        config_info_after.st_gid,
+        stat.S_IMODE(config_info_after.st_mode),
+    ) == (
+        config_info_before.st_uid,
+        config_info_before.st_gid,
+        stat.S_IMODE(config_info_before.st_mode),
+    )
 
 
 def test_git_preflight_safe_types_reject_arbitrary_operation_and_exit_code() -> None:
@@ -455,6 +590,52 @@ def test_git_remote_policy_is_distinct_from_git_metadata(
         cw._git_snapshot(workspace, require_clean=True)
 
     assert raised.value.stage == "git_remote_policy"
+
+
+def test_command_scoped_trust_does_not_weaken_the_no_remote_assertion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    _run(
+        "/usr/bin/git",
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/repo.git",
+        cwd=workspace,
+    )
+    monkeypatch.setattr(cw, "_validate_git_config", lambda _git_dir: None)
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        cw._git_snapshot(workspace, require_clean=True)
+
+    assert raised.value.stage == "git_remote_policy"
+
+
+@pytest.mark.parametrize(
+    "dangerous_config",
+    (
+        '[remote "origin"]\n\turl = https://example.invalid/repo.git\n',
+        '[include]\n\tpath = /private/unsafe/config\n',
+        '[includeIf "gitdir:/private/unsafe/**"]\n\tpath = /private/unsafe/config\n',
+        '[credential]\n\thelper = osxkeychain\n',
+        '[url "ssh://example.invalid/"]\n\tinsteadOf = executive://\n',
+        '[remote "origin"]\n\tpushurl = ssh://example.invalid/repo.git\n',
+        '[http]\n\textraHeader = Authorization: secret\n',
+        '[core]\n\tsshCommand = /private/unsafe/helper\n',
+        '[credential "https://example.invalid"]\n\thelper = osxkeychain\n',
+    ),
+)
+def test_git_trust_does_not_bypass_dangerous_repository_config_refusals(
+    tmp_path: Path, dangerous_config: str
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    (workspace / ".git" / "config").write_text(dangerous_config, encoding="utf-8")
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        cw._git_snapshot(workspace, require_clean=True)
+
+    assert raised.value.stage == "git_metadata"
 
 
 def _fixture(
