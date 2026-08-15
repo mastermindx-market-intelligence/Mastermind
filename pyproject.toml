@@ -28,6 +28,14 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<10",
+    # The Executive MCP gateway's SDK (integrations/executive_mcp/server.py only).
+    # DELIBERATELY not a hard runtime dependency: `control_plane` must stay
+    # importable under the sealed, root-owned Executive Python runtime with no
+    # third-party package installed (EXEC-MCP-A commission R5), and it is
+    # declared explicitly here rather than inherited transitively from
+    # claude-agent-sdk so that an unrelated dependency bump cannot silently
+    # remove the gateway's SDK from CI.
+    "mcp>=1.2",
 ]
 
 [tool.setuptools.packages.find]
@@ -40,6 +48,7 @@ include = [
     "common",
     "control_plane",
     "data_layer",
+    "integrations*",
     "loop",
     "portfolio",
     "scripts",
