@@ -5,6 +5,7 @@ import plistlib
 import json
 import copy
 import os
+import pytest
 import stat
 import subprocess
 import sys
@@ -113,6 +114,151 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
     _assert_private_unix_socket(worker["Sockets"]["WorkerBroker"], mode=0o600)
     assert worker["Sockets"]["WorkerBroker"]["SockPathOwner"] == 450
     assert worker["Sockets"]["WorkerBroker"]["SockPathGroup"] == 450
+
+
+def test_executive_daemons_do_not_throttle_disk_io() -> None:
+    # Regression pin for the real-host Phase 1C acceptance timeout at
+    # create-proof-job: launchd's LowPriorityIO=true is inherited by every
+    # child process the daemon spawns (I/O policy is inherited across
+    # fork/exec), so the admin-checkout workspace `git clone --local
+    # --no-hardlinks --no-checkout` -- measured at ~1.9s at normal I/O
+    # priority on this host, with a 22 MB result against a 31 MB .git, so
+    # volume was never the issue -- measured >180s (the probe's own bound)
+    # under IOPOL_THROTTLE, which is exactly what LowPriorityIO=true sets,
+    # against a 60s service timeout. The same inherited throttle also
+    # explains the `codex --version` (0.12s normal vs. 10s budget) and
+    # `codesign --verify --strict` (2.3s normal vs. 60s budget) timeouts,
+    # and why a manual `_mastermind_exec` shell reproduction always
+    # succeeded: an interactive shell has normal I/O policy; only launchd's
+    # plist-driven daemon start applies the throttle. Both Executive
+    # launchd plists must never set the key again. ProcessType=Background
+    # (CPU scheduling politeness, not disk I/O) is retained and is not the
+    # defect -- it stays asserted on both templates below.
+    for value in (_plist(CONTROL), _plist(WORKER)):
+        assert "LowPriorityIO" not in value
+        assert value["ProcessType"] == "Background"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="plutil is a Darwin-only binary")
+def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
+    # The raw templates are not what ships: install.sh (1) installs the
+    # template file as-is, (2) replaces ProgramArguments wholesale via
+    # render_launchd_program_arguments.py, then (3) replaces the remaining
+    # placeholder-bearing keys with individual `plutil -replace` calls,
+    # before finally running `plutil -lint` on the result (see the block in
+    # ops/executive_os/install.sh starting at
+    # `CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"`). Mirror
+    # that exact sequence -- same commands, representative substitutions --
+    # so lint exercises what an install actually produces, not a
+    # __PLACEHOLDER__-riddled template plutil would never see in practice.
+    from ops.executive_os.render_launchd_program_arguments import (
+        render_program_arguments,
+    )
+
+    def plutil(*args: str) -> None:
+        completed = subprocess.run(
+            ["/usr/bin/plutil", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    control = tmp_path / "control.plist"
+    control.write_bytes(CONTROL.read_bytes())
+    control.chmod(0o644)
+    render_program_arguments(
+        control,
+        [
+            "/opt/mastermind-python/bin/python3.12",
+            "-I",
+            "-S",
+            "-B",
+            "/release/scripts/executive_os_phase1c_control_wrapper.py",
+            "--config",
+            "/config/control.json",
+            "--sentinel-file",
+            "/config/control-env-canary",
+            "--attestation",
+            "/state/control-environment-attestation.json",
+            "--release-root",
+            "/release",
+        ],
+    )
+    plutil("-replace", "WorkingDirectory", "-string", "/release", str(control))
+    plutil("-replace", "UserName", "-string", "_mastermind_exec", str(control))
+    plutil("-replace", "GroupName", "-string", "_mastermind_exec", str(control))
+    plutil(
+        "-replace", "EnvironmentVariables.HOME", "-string",
+        "/var/db/mastermind-executive/control/home", str(control),
+    )
+    plutil(
+        "-replace", "Sockets.Operator.SockPathName", "-string",
+        "/var/run/mastermind-executive/control.sock", str(control),
+    )
+    plutil("-replace", "Sockets.Operator.SockPathOwner", "-integer", "450", str(control))
+    plutil("-replace", "Sockets.Operator.SockPathGroup", "-integer", "453", str(control))
+    plutil(
+        "-replace", "StandardOutPath", "-string",
+        "/var/log/mastermind-executive/control/stdout.log", str(control),
+    )
+    plutil(
+        "-replace", "StandardErrorPath", "-string",
+        "/var/log/mastermind-executive/control/stderr.log", str(control),
+    )
+
+    worker = tmp_path / "worker.plist"
+    worker.write_bytes(WORKER.read_bytes())
+    worker.chmod(0o644)
+    render_program_arguments(
+        worker,
+        [
+            "/opt/mastermind-python/bin/python3.12",
+            "-I",
+            "-S",
+            "-B",
+            "/release/scripts/executive_os_phase1c_worker.py",
+            "serve",
+            "--config",
+            "/config/worker-codex.json",
+        ],
+    )
+    plutil("-replace", "WorkingDirectory", "-string", "/release", str(worker))
+    plutil("-replace", "UserName", "-string", "_mastermind_worker", str(worker))
+    plutil("-replace", "GroupName", "-string", "_mastermind_worker", str(worker))
+    plutil(
+        "-replace", "EnvironmentVariables.HOME", "-string",
+        "/var/db/mastermind-executive/workers/codex-01/provider-home", str(worker),
+    )
+    plutil(
+        "-replace", "Sockets.WorkerBroker.SockPathName", "-string",
+        "/var/run/mastermind-executive/worker.sock", str(worker),
+    )
+    plutil("-replace", "Sockets.WorkerBroker.SockPathOwner", "-integer", "450", str(worker))
+    plutil("-replace", "Sockets.WorkerBroker.SockPathGroup", "-integer", "450", str(worker))
+    plutil("-replace", "Sockets.WorkerBroker.SockPathMode", "-integer", "384", str(worker))
+    plutil(
+        "-replace", "StandardOutPath", "-string",
+        "/var/log/mastermind-executive/worker/stdout.log", str(worker),
+    )
+    plutil(
+        "-replace", "StandardErrorPath", "-string",
+        "/var/log/mastermind-executive/worker/stderr.log", str(worker),
+    )
+
+    completed = subprocess.run(
+        ["/usr/bin/plutil", "-lint", str(control), str(worker)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    for rendered_path in (control, worker):
+        with rendered_path.open("rb") as handle:
+            rendered = plistlib.load(handle)
+        assert "LowPriorityIO" not in rendered
+        assert rendered["ProcessType"] == "Background"
 
 
 def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> None:
@@ -700,9 +846,12 @@ def test_acceptance_allows_a_bounded_worker_broker_startup_window() -> None:
     # tests/test_executive_codex_attestation_receipt.py), so a bound this
     # generous is no longer justified by *that* cost specifically. It is
     # kept as a general allowance for the broker's other real startup work
-    # (the UID sweep, socket activation, interpreter start under
-    # LowPriorityIO=true throttling) -- this test only pins that the bound
-    # still exists and has not silently shrunk.
+    # (the UID sweep, socket activation, interpreter start) on a cold,
+    # possibly host-loaded start. LowPriorityIO=true disk I/O throttling --
+    # once inherited by this same startup path -- was removed from both
+    # Executive launchd plists (see
+    # test_executive_daemons_do_not_throttle_disk_io above); this test only
+    # pins that the bound still exists and has not silently shrunk.
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
     assert "WorkerBrokerClient(sys.argv[1],timeout_seconds=90.0)" in acceptance

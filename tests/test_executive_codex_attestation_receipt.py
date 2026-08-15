@@ -1,11 +1,19 @@
 """Hermetic tests for the install-time Codex attestation receipt.
 
 Phase 1C acceptance failed at worker-broker startup on the real host: the
-worker daemon (throttled ``ProcessType=Background`` + ``LowPriorityIO=true``,
-under host load) called ``attest_codex_binary`` -- which shells out to a
-version probe and (on Darwin) two ``codesign`` invocations -- on every single
-startup, and that cold path blew past a 60-second bound. These tests cover
-the fix: install time records a root-owned, immutable receipt
+worker daemon, at the time still running under launchd's
+``LowPriorityIO=true`` disk I/O throttling (removed in a later change --
+see
+tests/test_executive_launchd_config.py::test_executive_daemons_do_not_throttle_disk_io
+-- because that same inherited throttle also starved unrelated
+child-process I/O, most severely the Phase 1C workspace clone), called
+``attest_codex_binary`` under host load -- which shells out to a version
+probe and (on Darwin) two ``codesign`` invocations -- on every single
+startup, and that cold path blew past a 60-second bound. Install-time
+attestation is correct regardless of I/O policy -- repeated subprocess cost
+on every worker start is real and avoidable on its own terms -- so these
+tests cover the fix independent of the throttling history above: install
+time records a root-owned, immutable receipt
 (``control_plane.codex_worker.load_codex_attestation_receipt``), and worker
 startup (``scripts.executive_os_phase1c_worker._build_broker`` and
 ``check-config``) builds a ``BinaryAttestation`` from that receipt instead of
