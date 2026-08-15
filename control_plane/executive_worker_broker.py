@@ -10,10 +10,10 @@ operations around :class:`CodexWorkerAdapter`:
 There is no generic command or shell endpoint.  Validation argv must be frozen
 in the start request and is matched byte-for-byte before execution.  The
 production entrypoint also requires the worker UID to be dedicated to this one
-broker.  That permits a Darwin ``kill(-1, SIGKILL)`` residual sweep: for a
-non-root sender, Darwin delivers the signal to every other process with the
-same UID, including a descendant that deliberately escaped its original
-process group or session.
+broker.  That permits a residual sweep to enumerate and SIGKILL every other
+process carrying the worker UID, including a descendant that deliberately
+escaped its original process group or session, without broadcasting from the
+broker process itself.
 """
 from __future__ import annotations
 
@@ -262,9 +262,9 @@ _PS_UID_PROJECTION = "svuid=,ruid=,uid=,pid="
 def _ps_pids_for_uid(uid: int) -> tuple[int, ...]:
     """Return a bounded process-table projection without shell evaluation.
 
-    The projection must be a SUPERSET of what the ``kill(-1, SIGKILL)``
-    broadcast can reach, or ``UIDSweepReceipt.passed`` can certify quiescence
-    with a reachable process still alive -- and that receipt is what
+    The projection must be a SUPERSET of the processes the worker UID can
+    signal, or ``UIDSweepReceipt.passed`` can certify quiescence with a
+    reachable process still alive -- and that receipt is what
     ``executive_supervisor`` treats as the terminal absence proof.
 
     Darwin's ``man 2 kill`` says the receiver matches on "real or effective"
@@ -409,6 +409,33 @@ class DedicatedUIDSweeper:
             if pid > 1 and pid != broker_pid
         )
 
+    def _kill_residuals(self, residuals: Sequence[int]) -> bool:
+        """SIGKILL only the residual PIDs captured by the last observation.
+
+        A dedicated worker UID makes every observed residual unauthorized, no
+        matter which process group or session it escaped into.  Addressing the
+        captured PIDs directly preserves that closure while keeping the broker
+        outside the signal target set.  A process that exits between the
+        observation and signal is harmless; repeated observations catch any
+        replacement or newly detached process before quiescence can pass.
+        """
+
+        delivered = False
+        permission_error: PermissionError | None = None
+        for pid in residuals:
+            try:
+                self.kill_fn(int(pid), signal.SIGKILL)
+                delivered = True
+            except ProcessLookupError:
+                continue
+            except PermissionError as exc:
+                # Keep trying the other observed residuals before failing the
+                # sweep closed on an identity the dedicated UID cannot signal.
+                permission_error = permission_error or exc
+        if permission_error is not None:
+            raise DedicatedUIDError("worker UID could not signal an observed residual")
+        return delivered
+
     def sweep(self, reason: str) -> UIDSweepReceipt:
         if not isinstance(reason, str) or not reason or len(reason) > 160:
             raise DedicatedUIDError("UID sweep reason is invalid")
@@ -421,11 +448,7 @@ class DedicatedUIDSweeper:
         before = self._residuals(broker_pid)
         sent = False
         if before:
-            # Darwin kill(2): for a non-root sender, pid=-1 targets every other
-            # process with the same UID.  This is the deliberate setsid escape
-            # closure, not a generic process-killing facility.
-            self.kill_fn(-1, signal.SIGKILL)
-            sent = True
+            sent = self._kill_residuals(before)
 
         deadline = time.monotonic() + self.timeout_seconds
         quiescent = 0
@@ -434,8 +457,7 @@ class DedicatedUIDSweeper:
             after = self._residuals(broker_pid)
             if after:
                 quiescent = 0
-                self.kill_fn(-1, signal.SIGKILL)
-                sent = True
+                sent = self._kill_residuals(after) or sent
             else:
                 quiescent += 1
                 if quiescent >= self.required_quiescent_observations:

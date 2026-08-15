@@ -470,7 +470,7 @@ def test_validation_must_be_frozen_and_runs_only_after_collection(tmp_path: Path
     asyncio.run(scenario())
 
 
-def test_dedicated_uid_sweep_uses_minus_one_and_requires_quiescence() -> None:
+def test_dedicated_uid_sweep_targets_residual_and_requires_quiescence() -> None:
     snapshots = iter(((451, 999), (451,), (451,)))
     signals: list[tuple[int, int]] = []
     sweeper = DedicatedUIDSweeper(
@@ -484,7 +484,51 @@ def test_dedicated_uid_sweep_uses_minus_one_and_requires_quiescence() -> None:
     receipt = sweeper.sweep("test")
     assert receipt.passed is True
     assert receipt.residual_pids_before == (999,)
-    assert signals == [(-1, signal.SIGKILL)]
+    assert signals == [(999, signal.SIGKILL)]
+
+
+def test_dedicated_uid_sweep_tolerates_residual_exit_before_direct_signal() -> None:
+    snapshots = iter(((451, 999), (451,), (451,)))
+    signals: list[tuple[int, int]] = []
+
+    def vanished(target: int, value: int) -> None:
+        signals.append((target, value))
+        raise ProcessLookupError(target)
+
+    sweeper = DedicatedUIDSweeper(
+        451,
+        current_uid=lambda: 451,
+        current_pid=lambda: 451,
+        process_lister=lambda _uid: next(snapshots),
+        kill_fn=vanished,
+        sleep_fn=lambda _seconds: None,
+    )
+    receipt = sweeper.sweep("test")
+    assert receipt.passed is True
+    assert receipt.residual_pids_before == (999,)
+    assert receipt.signal_sent is False
+    assert signals == [(999, signal.SIGKILL)]
+
+
+def test_dedicated_uid_sweep_kills_signalable_residuals_then_fails_closed() -> None:
+    signals: list[tuple[int, int]] = []
+
+    def partly_denied(target: int, value: int) -> None:
+        signals.append((target, value))
+        if target == 888:
+            raise PermissionError(target)
+
+    sweeper = DedicatedUIDSweeper(
+        451,
+        current_uid=lambda: 451,
+        current_pid=lambda: 451,
+        process_lister=lambda _uid: (451, 888, 999),
+        kill_fn=partly_denied,
+        sleep_fn=lambda _seconds: None,
+    )
+    with pytest.raises(DedicatedUIDError, match="could not signal"):
+        sweeper.sweep("test")
+    assert signals == [(888, signal.SIGKILL), (999, signal.SIGKILL)]
 
 
 def test_dedicated_uid_sweep_rejects_wrong_effective_uid() -> None:
@@ -876,6 +920,51 @@ def test_ordinary_handler_failure_still_returns_one_framed_typed_envelope(
     asyncio.run(scenario())
 
 
+def test_start_failure_cleanup_signals_only_observed_residual_pids(
+    tmp_path: Path,
+) -> None:
+    """A failed launch must not broadcast SIGKILL from the broker process.
+
+    Real-host launchd evidence showed the worker broker exiting from a SIGKILL
+    attributed to itself while this exact ``start_failed`` sweep was active.
+    Pin the consequence at the operation boundary: cleanup may kill the
+    residual process it observed, but it must leave the broker able to return
+    the typed launch failure envelope.
+    """
+
+    async def scenario() -> None:
+        broker, spec_value = _armed_broker(tmp_path, _FailingStartAdapter())
+        snapshots = iter(((451, 999), (451,), (451,)))
+        signals: list[tuple[int, int]] = []
+        broker.sweeper = DedicatedUIDSweeper(
+            451,
+            current_uid=lambda: 451,
+            current_pid=lambda: 451,
+            process_lister=lambda _uid: next(snapshots),
+            kill_fn=lambda target, value: signals.append((target, value)),
+            sleep_fn=lambda _seconds: None,
+        )
+        socket_path = _socket_path()
+        server = await asyncio.start_unix_server(
+            broker.handle_connection, path=str(socket_path), limit=1024 * 1024
+        )
+        try:
+            raw = await _raw_exchange(
+                socket_path, _request("start", _start_payload(spec_value))
+            )
+            envelope = json.loads(raw.decode("utf-8"))
+            assert envelope["operation"] == "start"
+            assert envelope["ok"] is False
+            assert envelope["error"]["code"] == "InternalBrokerError"
+            assert signals == [(999, signal.SIGKILL)]
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+
+    asyncio.run(scenario())
+
+
 def test_cancelled_handler_frames_unavailable_envelope_and_still_propagates(
     tmp_path: Path,
 ) -> None:
@@ -1138,7 +1227,7 @@ def _fake_ps(rows_holder: list, *, pid: int = _FAKE_PS_PID):
     return popen
 
 
-def test_uid_enumeration_counts_the_real_uid_the_broadcast_can_kill(
+def test_uid_enumeration_counts_the_real_uid_the_sweeper_can_kill(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     holder = [_PS_ROWS_WITH_SETUID_RESIDUAL]
@@ -1146,11 +1235,11 @@ def test_uid_enumeration_counts_the_real_uid_the_broadcast_can_kill(
         "control_plane.executive_worker_broker.subprocess.Popen", _fake_ps(holder)
     )
     pids = _ps_pids_for_uid(451)
-    # ruid=451/uid=0: reachable by Darwin's kill(-1) broadcast and invisible to
+    # ruid=451/uid=0: signal-reachable by the worker and invisible to
     # the old effective-uid-only projection, so `passed` could certify
     # quiescence with this process still alive.
     assert 999 in pids
-    # ruid=0/svuid=0/uid=451 is NOT broadcast-reachable -- measured on the host,
+    # ruid=0/svuid=0/uid=451 is NOT signal-reachable -- measured on the host,
     # kill(pid, 0) against exactly this shape returns EPERM, because the kernel
     # checks the receiver's real or SAVED uid, not its effective one.  It is
     # counted because the union is deliberately wide: over-reporting fails the
@@ -1162,7 +1251,7 @@ def test_uid_enumeration_counts_the_real_uid_the_broadcast_can_kill(
 
     def kill_fn(target: int, value: int) -> None:
         # Deliberately stronger than the real kernel: this clears 888 too, which
-        # a real kill(-1) from uid 451 could not.  The sweep's timing/retry
+        # a real uid 451 process could not signal.  The sweep's timing/retry
         # behaviour, not the kernel's permission model, is what is under test.
         signals.append((target, value))
         holder[0] = _PS_ROWS_QUIESCENT
@@ -1179,7 +1268,7 @@ def test_uid_enumeration_counts_the_real_uid_the_broadcast_can_kill(
     assert receipt.residual_pids_before == (888, 999)
     assert receipt.residual_pids_after == ()
     assert receipt.passed is True
-    assert signals == [(-1, signal.SIGKILL)]
+    assert signals == [(888, signal.SIGKILL), (999, signal.SIGKILL)]
 
 
 def test_uid_enumeration_counts_a_saved_uid_only_process(
@@ -1442,7 +1531,7 @@ def test_a_self_counting_lister_can_never_satisfy_the_sweeper() -> None:
     with pytest.raises(DedicatedUIDError, match="did not become quiescent"):
         sweeper.sweep("test")
     # Every observation saw a DIFFERENT pid: the set never shrank, so no amount
-    # of retrying or SIGKILL broadcasting could ever have helped.
+    # of retrying or repeated SIGKILL attempts could ever have helped.
     assert len(set(observations)) == len(observations) > 1
 
 
@@ -1451,7 +1540,7 @@ def test_the_real_projection_satisfies_the_sweeper_contract() -> None:
     """The real projection, under the real sweeper, converges for an idle uid.
 
     Same sweeper and same quiescence rule as the test above; only the lister
-    differs.  Run against a uid that owns nothing, so the broadcast must never
+    differs.  Run against a uid that owns nothing, so no signal attempt may
     fire -- `kill_fn` failing the test is the assertion that it did not.
     """
 
