@@ -22,7 +22,10 @@ from control_plane.codex_worker import (
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    GitPreflightFailed,
     GitPreflightTimeout,
+    LaunchValidationError,
+    LaunchValidationStageError,
     ProcessRef,
     ValidationReceipt,
     WorkerResult,
@@ -828,6 +831,34 @@ class _GitTimeoutStartAdapter(FakeAdapter):
         raise GitPreflightTimeout(operation="remote", timeout_seconds=15.0)
 
 
+class _GitFailedStartAdapter(FakeAdapter):
+    """One allowlisted Git command returned nonzero with private local stderr."""
+
+    async def start(self, spec):
+        raise GitPreflightFailed(
+            operation="status --porcelain=v1 -z --untracked-files=all",
+            exit_code=128,
+        )
+
+
+class _LaunchStageStartAdapter(FakeAdapter):
+    def __init__(self, stage: str, private_detail: str) -> None:
+        super().__init__()
+        self.stage = stage
+        self.private_detail = private_detail
+
+    async def start(self, spec):
+        try:
+            raise LaunchValidationError(self.private_detail)
+        except LaunchValidationError as exc:
+            raise LaunchValidationStageError(stage=self.stage) from exc
+
+
+class _OpaqueLaunchValidationStartAdapter(FakeAdapter):
+    async def start(self, spec):
+        raise LaunchValidationError("/private/top-secret/unknown-validation-detail")
+
+
 def _socket_path() -> Path:
     # Unix socket paths are length-capped (104 bytes on Darwin); tmp_path is not
     # guaranteed to fit, so follow the house pattern used above.
@@ -989,12 +1020,187 @@ def test_git_preflight_timeout_is_typed_and_broker_survives_cleanup(
 
             assert raised.value.code == "git_preflight_timeout"
             assert str(raised.value) == "Git preflight timed out after 15s: remote"
+            assert raised.value.operation == "remote"
+            assert raised.value.timeout_seconds == 15.0
             assert broker.sweeper.calls == ["broker_startup", "start_failed"]
             assert broker.last_sweep is not None
             assert broker.last_sweep.passed is True
             assert broker.last_sweep.residual_pids_after == ()
 
             # Cleanup returned and the same broker still answers a new request.
+            status = await client.request("status", {})
+            assert status["active_run_id"] is None
+            assert status["starting"] is False
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("adapter", "expected_code", "expected_stage", "expected_operation", "expected_exit"),
+    (
+        (
+            _LaunchStageStartAdapter(
+                "project_configuration", "/private/top-secret/foo"
+            ),
+            "launch_validation_stage",
+            "project_configuration",
+            None,
+            None,
+        ),
+        (
+            _LaunchStageStartAdapter(
+                "isolation_manifest", "/private/top-secret/isolation"
+            ),
+            "launch_validation_stage",
+            "isolation_manifest",
+            None,
+            None,
+        ),
+        (
+            _GitFailedStartAdapter(),
+            "git_preflight_failed",
+            None,
+            "status --porcelain=v1 -z --untracked-files=all",
+            128,
+        ),
+    ),
+)
+def test_safe_launch_failures_are_typed_private_and_broker_survives(
+    tmp_path: Path,
+    adapter,
+    expected_code: str,
+    expected_stage: str | None,
+    expected_operation: str | None,
+    expected_exit: int | None,
+) -> None:
+    async def scenario() -> None:
+        broker, spec_value = _armed_broker(tmp_path, adapter)
+        socket_path = _socket_path()
+        server = await asyncio.start_unix_server(
+            broker.handle_connection, path=str(socket_path), limit=1024 * 1024
+        )
+        try:
+            client = WorkerBrokerClient(socket_path, timeout_seconds=10.0)
+            with pytest.raises(RemoteBrokerError) as raised:
+                await client.request("start", _start_payload(spec_value))
+
+            error = raised.value
+            assert error.code == expected_code
+            assert error.stage == expected_stage
+            assert error.operation == expected_operation
+            assert error.exit_code == expected_exit
+            assert "/private/top-secret" not in str(error)
+            assert broker.sweeper.calls == ["broker_startup", "start_failed"]
+            assert broker.last_sweep is not None
+            assert broker.last_sweep.passed is True
+            assert broker.last_sweep.residual_pids_after == ()
+
+            status = await client.request("status", {})
+            assert status["active_run_id"] is None
+            assert status["starting"] is False
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("adapter", "expected_error"),
+    (
+        (
+            _LaunchStageStartAdapter(
+                "project_configuration", "/private/top-secret/foo"
+            ),
+            {
+                "code": "launch_validation_stage",
+                "message": "Launch validation failed at stage: project_configuration",
+                "stage": "project_configuration",
+            },
+        ),
+        (
+            _LaunchStageStartAdapter(
+                "isolation_manifest", "/private/top-secret/isolation"
+            ),
+            {
+                "code": "launch_validation_stage",
+                "message": "Launch validation failed at stage: isolation_manifest",
+                "stage": "isolation_manifest",
+            },
+        ),
+        (
+            _GitFailedStartAdapter(),
+            {
+                "code": "git_preflight_failed",
+                "message": (
+                    "Git preflight failed: status --porcelain=v1 -z "
+                    "--untracked-files=all (exit 128)"
+                ),
+                "operation": "status --porcelain=v1 -z --untracked-files=all",
+                "exit_code": 128,
+            },
+        ),
+    ),
+)
+def test_typed_launch_error_envelopes_have_only_allowlisted_fields(
+    tmp_path: Path, adapter, expected_error: dict
+) -> None:
+    async def scenario() -> None:
+        broker, spec_value = _armed_broker(tmp_path, adapter)
+        socket_path = _socket_path()
+        server = await asyncio.start_unix_server(
+            broker.handle_connection, path=str(socket_path), limit=1024 * 1024
+        )
+        try:
+            raw = await _raw_exchange(
+                socket_path, _request("start", _start_payload(spec_value))
+            )
+            envelope = json.loads(raw.decode("utf-8"))
+            assert envelope["ok"] is False
+            assert envelope["error"] == expected_error
+            assert "/private/top-secret" not in raw.decode("utf-8")
+            assert "stderr" not in envelope["error"]
+
+            client = WorkerBrokerClient(socket_path, timeout_seconds=10.0)
+            status = await client.request("status", {})
+            assert status["active_run_id"] is None
+            assert status["starting"] is False
+        finally:
+            server.close()
+            await server.wait_closed()
+            socket_path.unlink(missing_ok=True)
+
+    asyncio.run(scenario())
+
+
+def test_unknown_launch_validation_error_remains_opaque_and_broker_survives(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, spec_value = _armed_broker(
+            tmp_path, _OpaqueLaunchValidationStartAdapter()
+        )
+        socket_path = _socket_path()
+        server = await asyncio.start_unix_server(
+            broker.handle_connection, path=str(socket_path), limit=1024 * 1024
+        )
+        try:
+            client = WorkerBrokerClient(socket_path, timeout_seconds=10.0)
+            with pytest.raises(RemoteBrokerError) as raised:
+                await client.request("start", _start_payload(spec_value))
+
+            assert raised.value.code == "InternalBrokerError"
+            assert str(raised.value) == (
+                "broker operation failed: LaunchValidationError"
+            )
+            assert "/private/top-secret" not in str(raised.value)
+            assert broker.sweeper.calls == ["broker_startup", "start_failed"]
+
             status = await client.request("status", {})
             assert status["active_run_id"] is None
             assert status["starting"] is False

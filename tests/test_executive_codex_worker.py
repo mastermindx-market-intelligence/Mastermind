@@ -321,6 +321,142 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
     assert "private workspace" not in str(error)
 
 
+def test_git_preflight_nonzero_names_only_operation_and_bounded_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = Path("/private/top-secret/workspace")
+    hostile_stderr = b"credential=/private/top-secret/token\n"
+
+    def failed(argv, **_kwargs):
+        return subprocess.CompletedProcess(argv, 128, b"", hostile_stderr)
+
+    monkeypatch.setattr(cw.subprocess, "run", failed)
+
+    with pytest.raises(cw.GitPreflightFailed) as raised:
+        cw._git_command(
+            workspace,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        )
+
+    error = raised.value
+    assert error.code == "git_preflight_failed"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.exit_code == 128
+    assert str(error) == (
+        "Git preflight failed: status --porcelain=v1 -z "
+        "--untracked-files=all (exit 128)"
+    )
+    assert str(workspace) not in str(error)
+    assert hostile_stderr.decode().strip() not in str(error)
+
+
+def test_git_preflight_safe_types_reject_arbitrary_operation_and_exit_code() -> None:
+    with pytest.raises(ValueError, match="not allowlisted"):
+        cw.GitPreflightFailed(
+            operation="status --private-path /private/top-secret/foo",
+            exit_code=128,
+        )
+    with pytest.raises(ValueError, match="exit code"):
+        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=all", exit_code=999)
+
+
+def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    hostile_stderr = b"fatal: leaked /private/top-secret/git-status\n"
+
+    def run(argv, **_kwargs):
+        operation = tuple(argv[argv.index("-C") + 2 :])
+        if operation == ("remote",):
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        if operation == ("rev-parse", "--verify", "HEAD"):
+            return subprocess.CompletedProcess(argv, 0, b"a" * 40 + b"\n", b"")
+        if operation == (
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ):
+            return subprocess.CompletedProcess(argv, 128, b"", hostile_stderr)
+        raise AssertionError(operation)
+
+    monkeypatch.setattr(cw.subprocess, "run", run)
+
+    with pytest.raises(cw.GitPreflightFailed) as raised:
+        cw._git_snapshot(workspace, require_clean=True)
+
+    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert raised.value.exit_code == 128
+    assert "top-secret" not in str(raised.value)
+
+
+def test_project_configuration_failure_is_attributed_without_private_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    private_detail = "/private/top-secret/foo"
+
+    def refuse(_workspace):
+        raise cw.LaunchValidationError(
+            f"unexpected ancestor Codex project config: {private_detail}"
+        )
+
+    monkeypatch.setattr(cw, "_validate_project_configuration", refuse)
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        adapter._validate_spec(spec)
+
+    assert raised.value.code == "launch_validation_stage"
+    assert raised.value.stage == "project_configuration"
+    assert str(raised.value) == (
+        "Launch validation failed at stage: project_configuration"
+    )
+    assert private_detail not in str(raised.value)
+    assert not (run_dir / "output").exists()
+
+
+def test_isolation_refusal_is_attributed_before_private_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    private_detail = "/private/top-secret/isolation-sibling"
+
+    def refuse(*_args, **_kwargs):
+        raise cw.LaunchValidationError(
+            f"isolation manifest identity drifted at {private_detail}"
+        )
+
+    monkeypatch.setattr(adapter, "_validate_isolation_manifest", refuse)
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        adapter._validate_spec(spec)
+
+    assert raised.value.stage == "isolation_manifest"
+    assert private_detail not in str(raised.value)
+    assert not (run_dir / "output").exists()
+
+
+def test_git_remote_policy_is_distinct_from_git_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    monkeypatch.setattr(cw, "_validate_git_config", lambda _git_dir: None)
+    monkeypatch.setattr(
+        cw,
+        "_git_command",
+        lambda _workspace, *args: b"origin\n" if args == ("remote",) else b"",
+    )
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        cw._git_snapshot(workspace, require_clean=True)
+
+    assert raised.value.stage == "git_remote_policy"
+
+
 def _fixture(
     tmp_path: Path,
     *,
@@ -962,16 +1098,18 @@ def test_project_config_preflight_rejects_hash_drift_and_ancestor_layer(tmp_path
         (workspace / ".codex" / "config.toml").write_text(
             "[agents]\nenabled = true\n", encoding="utf-8"
         )
-        with pytest.raises(cw.LaunchValidationError, match="audited worker-safe hash"):
+        with pytest.raises(cw.LaunchValidationStageError) as raised:
             await adapter.start(spec)
+        assert raised.value.stage == "project_configuration"
 
     async def ancestor_layer():
         adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path / "ancestor")
         parent_config = tmp_path / "ancestor" / ".codex" / "config.toml"
         parent_config.parent.mkdir(mode=0o700)
         parent_config.write_text("[agents]\nenabled = true\n", encoding="utf-8")
-        with pytest.raises(cw.LaunchValidationError, match="ancestor Codex project config"):
+        with pytest.raises(cw.LaunchValidationStageError) as raised:
             await adapter.start(spec)
+        assert raised.value.stage == "project_configuration"
 
     asyncio.run(hash_drift())
     asyncio.run(ancestor_layer())
@@ -983,8 +1121,9 @@ def test_project_config_preflight_rejects_symlink_even_to_audited_bytes(tmp_path
         config_path = workspace / ".codex" / "config.toml"
         config_path.unlink()
         config_path.symlink_to(cw._PROJECT_ROOT / ".codex" / "config.toml")
-        with pytest.raises(cw.LaunchValidationError, match="regular non-symlink"):
+        with pytest.raises(cw.LaunchValidationStageError) as raised:
             await adapter.start(spec)
+        assert raised.value.stage == "project_configuration"
 
     asyncio.run(exercise())
 
@@ -1017,8 +1156,9 @@ def test_unknown_effect_authority_fails_before_spawn(tmp_path: Path):
             authority=None,
             authorities=("READ", "DEPLOY"),
         )
-        with pytest.raises(cw.LaunchValidationError, match="DEPLOY"):
+        with pytest.raises(cw.LaunchValidationStageError) as raised:
             await adapter.start(spec)
+        assert raised.value.stage == "spec_contract"
 
     asyncio.run(exercise())
 
@@ -1109,8 +1249,9 @@ def test_remote_or_linked_worktree_is_rejected_before_spawn(tmp_path: Path):
     async def remote_case():
         adapter, spec, workspace, _run_dir = _fixture(tmp_path / "remote")
         _run("/usr/bin/git", "remote", "add", "origin", "https://example.invalid/repo.git", cwd=workspace)
-        with pytest.raises(cw.LaunchValidationError, match="remote"):
+        with pytest.raises(cw.LaunchValidationStageError) as raised:
             await adapter.start(spec)
+        assert raised.value.stage == "git_metadata"
 
     asyncio.run(remote_case())
 

@@ -45,9 +45,11 @@ from control_plane.codex_worker import (
     CancelReceipt,
     CodexWorkerAdapter,
     CollectionReceipt,
+    GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LaunchSpec,
+    LaunchValidationStageError,
     ProcessIdentityError,
     ProcessRef,
     ValidationReceipt,
@@ -1401,17 +1403,53 @@ class ExecutiveWorkerBroker:
                     # earlier -- pin it with a test if that changes.
                     identity_known = bool(parsed_id and parsed_operation)
                 response = await self.execute(request, peer=peer)
-            except GitPreflightTimeout as exc:
-                # This exception is deliberately safe to cross the UID boundary:
-                # it contains only one allowlisted Git operation and its fixed
-                # timeout, never argv from a request, output, environment, or a
-                # workspace path.  Other adapter failures remain opaque below.
+            except LaunchValidationStageError as exc:
                 response = {
                     "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
                     "request_id": request_id,
                     "operation": operation,
                     "ok": False,
-                    "error": {"code": exc.code, "message": str(exc)[:500]},
+                    "error": {
+                        "code": exc.code,
+                        "message": f"Launch validation failed at stage: {exc.stage}",
+                        "stage": exc.stage,
+                    },
+                }
+            except GitPreflightFailed as exc:
+                response = {
+                    "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                    "request_id": request_id,
+                    "operation": operation,
+                    "ok": False,
+                    "error": {
+                        "code": exc.code,
+                        "message": (
+                            f"Git preflight failed: {exc.operation} "
+                            f"(exit {exc.exit_code})"
+                        ),
+                        "operation": exc.operation,
+                        "exit_code": exc.exit_code,
+                    },
+                }
+            except GitPreflightTimeout as exc:
+                # These exceptions deliberately expose only audited fields:
+                # an allowlisted validation stage or Git operation, a bounded
+                # exit code, and the fixed timeout. Other adapter failures stay
+                # opaque below.
+                response = {
+                    "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                    "request_id": request_id,
+                    "operation": operation,
+                    "ok": False,
+                    "error": {
+                        "code": exc.code,
+                        "message": (
+                            f"Git preflight timed out after "
+                            f"{exc.timeout_seconds:g}s: {exc.operation}"
+                        ),
+                        "operation": exc.operation,
+                        "timeout_seconds": exc.timeout_seconds,
+                    },
                 }
             except WorkerBrokerError as exc:
                 response = {
@@ -1466,8 +1504,21 @@ class ExecutiveWorkerBroker:
 class RemoteBrokerError(WorkerBrokerError):
     """Typed error returned by the worker-side broker."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        stage: str | None = None,
+        operation: str | None = None,
+        exit_code: int | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
         self.code = str(code)
+        self.stage = stage
+        self.operation = operation
+        self.exit_code = exit_code
+        self.timeout_seconds = timeout_seconds
         super().__init__(str(message))
 
 
@@ -1568,8 +1619,56 @@ class WorkerBrokerClient:
             error = response.get("error")
             if not isinstance(error, dict):
                 raise BrokerProtocolError("broker error response is malformed")
+            code = str(error.get("code") or "RemoteBrokerError")
+            try:
+                if code == LaunchValidationStageError.code:
+                    stage = error.get("stage")
+                    if not isinstance(stage, str):
+                        raise ValueError("stage is not a string")
+                    classified = LaunchValidationStageError(stage=stage)
+                    raise RemoteBrokerError(
+                        code,
+                        str(classified),
+                        stage=classified.stage,
+                    )
+                if code == GitPreflightFailed.code:
+                    operation = error.get("operation")
+                    exit_code = error.get("exit_code")
+                    if not isinstance(operation, str):
+                        raise ValueError("operation is not a string")
+                    classified = GitPreflightFailed(
+                        operation=operation,
+                        exit_code=exit_code,
+                    )
+                    raise RemoteBrokerError(
+                        code,
+                        str(classified),
+                        operation=classified.operation,
+                        exit_code=classified.exit_code,
+                    )
+                if code == GitPreflightTimeout.code:
+                    operation = error.get("operation")
+                    timeout_seconds = error.get("timeout_seconds")
+                    if not isinstance(operation, str):
+                        raise ValueError("operation is not a string")
+                    classified = GitPreflightTimeout(
+                        operation=operation,
+                        timeout_seconds=timeout_seconds,
+                    )
+                    raise RemoteBrokerError(
+                        code,
+                        str(classified),
+                        operation=classified.operation,
+                        timeout_seconds=classified.timeout_seconds,
+                    )
+            except RemoteBrokerError:
+                raise
+            except (TypeError, ValueError) as exc:
+                raise BrokerProtocolError(
+                    "broker typed error response is malformed"
+                ) from exc
             raise RemoteBrokerError(
-                str(error.get("code") or "RemoteBrokerError"),
+                code,
                 str(error.get("message") or "worker broker rejected the request")[:500],
             )
         result = response.get("result")
