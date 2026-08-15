@@ -238,8 +238,9 @@ def _share_symlink_with_group(path: Path, *, shared_gid: int) -> None:
         # control-created 0700 link cannot be read by the worker, and Apple Git
         # then reports the tracked link as modified.  Linux symlinks normally
         # remain 0777, so the chmod is needed only where link modes are real.
-        chmod_is_enforced = os.chmod in os.supports_follow_symlinks
-        if chmod_is_enforced:
+        chmod_is_supported = os.chmod in os.supports_follow_symlinks
+        desired_mode: int | None = None
+        if chmod_is_supported:
             desired_mode = (stat.S_IMODE(before.st_mode) & 0o700) | stat.S_IRGRP
             os.chmod(path, desired_mode, follow_symlinks=False)
         after = path.lstat()
@@ -248,6 +249,10 @@ def _share_symlink_with_group(path: Path, *, shared_gid: int) -> None:
             "tracked symlink could not be made read-only for the worker group"
         ) from exc
     mode = stat.S_IMODE(after.st_mode)
+    # Linux keeps symlink mode 0777 even when the API accepts
+    # follow_symlinks=False.  Treat only the observed restrictive result as
+    # enforcement; its parent directories still carry the traversal fence.
+    chmod_is_enforced = desired_mode is not None and mode == desired_mode
     if (
         after.st_gid != int(shared_gid)
         or not mode & stat.S_IRGRP

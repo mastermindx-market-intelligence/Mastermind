@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -145,7 +146,7 @@ def test_tracked_vendor_symlink_is_worker_readable_and_launch_clean(
     assert link_info.st_gid == os.getegid()
     assert link_mode & stat.S_IRGRP
     assert not link_mode & stat.S_IWGRP
-    if os.chmod in os.supports_follow_symlinks:
+    if sys.platform == "darwin":
         assert not link_mode & stat.S_IRWXO
     observation = executive_workspace.observe_launch_cleanliness(
         lambda arguments: subprocess.run(
