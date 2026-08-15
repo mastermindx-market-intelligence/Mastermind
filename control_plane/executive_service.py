@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
+from common.redaction import sanitize_external_text
 from control_plane import ceo_intent
 from control_plane.executive_runtime import (
     Job,
@@ -41,7 +42,7 @@ from control_plane.executive_runtime import (
     SCHEMA_VERSION,
     StateConflict,
 )
-from control_plane.executive_workspace import prepare_credentialless_clone
+from control_plane.executive_workspace import WorkspaceError, prepare_credentialless_clone
 
 
 CONTROL_PROTOCOL_VERSION = "mastermind.executive_control/v1"
@@ -675,6 +676,27 @@ class ExecutiveControlService:
                 result = await self._dispatch_request(request)
             except (RuntimeProofError, ValueError) as exc:
                 await self._send_error(writer, "request_failed", str(exc)[:1000])
+                return
+            except WorkspaceError as exc:
+                # WorkspaceError is a bare RuntimeError (see
+                # control_plane/executive_workspace.py) so it is not a
+                # RuntimeProofError/ValueError and does not match the branch
+                # above; it is also not a subclass of RuntimeProofError or
+                # ValueError, so that branch is not a subclass of this one
+                # either. The two clauses are mutually exclusive by type, so
+                # their relative order cannot change which one a given
+                # exception hits -- only "before the generic `except
+                # Exception` below" is load-bearing. Reuse the existing
+                # `request_failed` code (no new wire contract) but sanitize
+                # the reason first: workspace text originates outside this
+                # process (paths, git/codex command output) and must not
+                # cross the socket unredacted or unbounded.
+                reason = sanitize_external_text(str(exc), limit=1000)
+                await self._send_error(
+                    writer,
+                    "request_failed",
+                    reason or "workspace preparation failed",
+                )
                 return
             except Exception as exc:  # fail closed without a traceback or local paths
                 await self._send_error(

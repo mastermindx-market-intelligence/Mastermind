@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from common.redaction import TRUNCATION_MARKER
 from control_plane.executive_runtime import JobPayload, JobStatus, Runtime
 from control_plane.executive_canary import (
     PrincipalIdentity,
@@ -29,6 +30,7 @@ from control_plane.executive_service import (
     ServiceConfig,
     send_control_request,
 )
+from control_plane.executive_workspace import WorkspaceError
 from scripts import executive_os_phase1c as service_cli
 
 
@@ -544,6 +546,200 @@ def test_service_dispatch_and_requeue_refuse_nonproof_jobs(
 
             denied_requeue = await _request(service, "requeue", {"job_id": foreign.job_id})
             assert denied_requeue["ok"] is False
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_workspace_error_reason_reaches_client_as_request_failed(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Real-host repro: ``create-proof-job`` fails inside
+    ``prepare_credentialless_clone`` with a ``WorkspaceError``.  That error is
+    a bare ``RuntimeError`` (see control_plane/executive_workspace.py), so
+    before this fix it fell through to the generic ``internal_error`` handler
+    and the operator got only ``WorkspaceError: Executive request failed`` --
+    the real reason existed in no channel.  It must now reach the client
+    under the EXISTING ``request_failed`` code, carrying the actual reason.
+    """
+
+    async def exercise():
+        service, _holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+
+            reason = (
+                "source repository is not a directory: "
+                "/var/db/nonexistent-mastermind-source"
+            )
+
+            def fail_workspace(*args, **kwargs):
+                raise WorkspaceError(reason)
+
+            monkeypatch.setattr(
+                "control_plane.executive_service.prepare_credentialless_clone",
+                fail_workspace,
+            )
+
+            failed = await _request(service, "create-proof-job")
+            assert failed["ok"] is False
+            assert failed["error"]["code"] == "request_failed"
+            assert failed["error"]["message"] == reason
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_workspace_error_redacts_secret_shaped_material(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Secret-shaped text embedded in a WorkspaceError is redacted before it
+    crosses the socket.  common/redaction.py has NO git-object-id exemption
+    -- unlike ops/executive_os/acceptance.py's refusal sanitizer, which
+    exempts exactly-40 lowercase hex to keep release SHAs comparable/readable
+    on that proof path.  This service is not that path, so a 40-hex git
+    object id is expected to redact here too; this test pins that divergence
+    rather than fighting it.
+    """
+
+    async def exercise():
+        service, _holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+
+            token_64_hex = "a" * 64
+            git_object_id_40_hex = "b" * 40
+            raw = (
+                f"workspace clone failed: token={token_64_hex} "
+                f"object={git_object_id_40_hex} done"
+            )
+
+            def fail_workspace(*args, **kwargs):
+                raise WorkspaceError(raw)
+
+            monkeypatch.setattr(
+                "control_plane.executive_service.prepare_credentialless_clone",
+                fail_workspace,
+            )
+
+            failed = await _request(service, "create-proof-job")
+            assert failed["ok"] is False
+            assert failed["error"]["code"] == "request_failed"
+            message = failed["error"]["message"]
+            assert token_64_hex not in message
+            assert git_object_id_40_hex not in message
+            assert message == (
+                "workspace clone failed: token=<redacted> object=<redacted> done"
+            )
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_workspace_error_text_is_bounded_at_service_boundary(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An oversized WorkspaceError message is bounded at the service
+    boundary rather than forwarded verbatim.  The explicit ceiling is the
+    sanitizer's ``limit=1000`` plus the length of its truncation marker.
+    """
+
+    async def exercise():
+        service, _holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+
+            oversized = "workspace clone failed while copying repository object " * 40
+            assert len(oversized) > 1000
+
+            def fail_workspace(*args, **kwargs):
+                raise WorkspaceError(oversized)
+
+            monkeypatch.setattr(
+                "control_plane.executive_service.prepare_credentialless_clone",
+                fail_workspace,
+            )
+
+            failed = await _request(service, "create-proof-job")
+            assert failed["ok"] is False
+            assert failed["error"]["code"] == "request_failed"
+            message = failed["error"]["message"]
+            ceiling = 1000 + len(TRUNCATION_MARKER)
+            assert len(message) == ceiling
+            assert len(message) <= ceiling
+            assert message.endswith(TRUNCATION_MARKER)
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_workspace_error_empty_after_sanitization_falls_back_to_fixed_message(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A WorkspaceError whose text sanitizes to nothing (an empty message)
+    falls back to the fixed string -- the client must never see an empty
+    ``request_failed`` reason.
+    """
+
+    async def exercise():
+        service, _holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+
+            def fail_workspace(*args, **kwargs):
+                raise WorkspaceError("")
+
+            monkeypatch.setattr(
+                "control_plane.executive_service.prepare_credentialless_clone",
+                fail_workspace,
+            )
+
+            failed = await _request(service, "create-proof-job")
+            assert failed["ok"] is False
+            assert failed["error"]["code"] == "request_failed"
+            assert failed["error"]["message"] == "workspace preparation failed"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_generic_runtime_error_still_opaque_and_unwidened(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A plain RuntimeError -- NOT a WorkspaceError, RuntimeProofError, or
+    ValueError -- must still land on the generic ``internal_error`` handler
+    with its reason withheld, exactly as before this change.  Pins that the
+    new WorkspaceError branch did not widen generic exception disclosure.
+    """
+
+    async def exercise():
+        service, _holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+
+            def fail_generic(*args, **kwargs):
+                raise RuntimeError("sensitive internal reason")
+
+            monkeypatch.setattr(
+                "control_plane.executive_service.prepare_credentialless_clone",
+                fail_generic,
+            )
+
+            failed = await _request(service, "create-proof-job")
+            assert failed["ok"] is False
+            assert failed["error"]["code"] == "internal_error"
+            assert failed["error"]["message"] == "RuntimeError: Executive request failed"
+            assert "sensitive internal reason" not in failed["error"]["message"]
         finally:
             await service.close()
 
