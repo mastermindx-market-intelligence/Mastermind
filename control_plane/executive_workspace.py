@@ -11,6 +11,7 @@ import dataclasses
 import datetime as dt
 import os
 import re
+import shutil
 import stat
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -171,6 +172,34 @@ def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
     return completed.stdout.strip()
 
 
+def _discard_partial_workspace(destination: Path) -> None:
+    """Remove a workspace this call created but could not finish.
+
+    ``prepare_credentialless_clone`` refuses a destination that already
+    exists, so anything present when preparation fails was created by this
+    call and is safe to discard.  Leaving it is not merely wasted space:
+    ``git clone`` writes ``HEAD -> refs/heads/.invalid`` and copies objects
+    incrementally, so an interrupted clone (the 60 s ``_run`` timeout firing
+    on a loaded host, say) leaves a destination that has no resolvable HEAD
+    and is missing the base commit.  That corpse then makes the *next*
+    preparation for the same job ID fail with "workspace already exists",
+    and it keeps the workspace root non-empty -- which the host acceptance
+    flow refuses outright, demanding the state be archived before it will
+    run at all.  One transient timeout otherwise wedges every later attempt.
+
+    Cleanup never masks the original failure: any error raised while
+    discarding is swallowed so the caller still sees the real cause.
+    """
+
+    try:
+        if destination.is_symlink() or destination.is_file():
+            destination.unlink()
+        elif destination.is_dir():
+            shutil.rmtree(destination, ignore_errors=True)
+    except OSError:
+        pass
+
+
 def prepare_credentialless_clone(
     source_repository: str | Path,
     workspace_root: str | Path,
@@ -235,74 +264,81 @@ def prepare_credentialless_clone(
         env=env,
     )
     _run(["git", "check-ref-format", "--branch", selected_branch], cwd=source, env=env)
-    _run(
-        ["git", "clone", "--local", "--no-hardlinks", "--no-checkout", str(source), str(destination)],
-        cwd=None,
-        env=env,
-    )
-    _run(["git", "checkout", "--detach", resolved_base], cwd=destination, env=env)
-    _run(["git", "switch", "-c", selected_branch], cwd=destination, env=env)
-    remotes = _run(["git", "remote"], cwd=destination, env=env).splitlines()
-    for remote in remotes:
-        if remote.strip():
-            _run(["git", "remote", "remove", remote.strip()], cwd=destination, env=env)
-    remaining = [line for line in _run(["git", "remote"], cwd=destination, env=env).splitlines() if line]
-    actual_base = _run(["git", "rev-parse", "HEAD"], cwd=destination, env=env)
-    status = _run(["git", "status", "--porcelain=v1"], cwd=destination, env=env)
-    git_dir = destination / ".git"
-    if actual_base != resolved_base or status or remaining or not git_dir.is_dir():
-        raise WorkspaceError("prepared workspace failed its clean, exact-SHA, no-remote self-check")
-    if shared_gid is not None:
-        for current_root, directory_names, file_names in os.walk(
-            destination, topdown=True, followlinks=False
-        ):
-            current = Path(current_root)
-            for candidate in [current, *(current / name for name in directory_names)]:
-                info = candidate.lstat()
-                if stat.S_ISLNK(info.st_mode):
-                    continue
-                os.chown(candidate, -1, int(shared_gid))
-                os.chmod(candidate, 0o750)
-            for name in file_names:
-                candidate = current / name
-                info = candidate.lstat()
-                if stat.S_ISLNK(info.st_mode):
-                    continue
-                os.chown(candidate, -1, int(shared_gid))
-                original = stat.S_IMODE(info.st_mode)
-                group_execute = 0o010 if original & 0o111 else 0
-                os.chmod(candidate, (original & 0o700) | 0o040 | group_execute)
-
-        for relative in normalized_write_paths:
-            current = destination
-            for part in relative.parts[:-1]:
-                candidate = current / part
-                if os.path.lexists(candidate):
+    try:
+        _run(
+            ["git", "clone", "--local", "--no-hardlinks", "--no-checkout", str(source), str(destination)],
+            cwd=None,
+            env=env,
+        )
+        _run(["git", "checkout", "--detach", resolved_base], cwd=destination, env=env)
+        _run(["git", "switch", "-c", selected_branch], cwd=destination, env=env)
+        remotes = _run(["git", "remote"], cwd=destination, env=env).splitlines()
+        for remote in remotes:
+            if remote.strip():
+                _run(["git", "remote", "remove", remote.strip()], cwd=destination, env=env)
+        remaining = [line for line in _run(["git", "remote"], cwd=destination, env=env).splitlines() if line]
+        actual_base = _run(["git", "rev-parse", "HEAD"], cwd=destination, env=env)
+        status = _run(["git", "status", "--porcelain=v1"], cwd=destination, env=env)
+        git_dir = destination / ".git"
+        if actual_base != resolved_base or status or remaining or not git_dir.is_dir():
+            raise WorkspaceError("prepared workspace failed its clean, exact-SHA, no-remote self-check")
+        if shared_gid is not None:
+            for current_root, directory_names, file_names in os.walk(
+                destination, topdown=True, followlinks=False
+            ):
+                current = Path(current_root)
+                for candidate in [current, *(current / name for name in directory_names)]:
                     info = candidate.lstat()
-                    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                    if stat.S_ISLNK(info.st_mode):
+                        continue
+                    os.chown(candidate, -1, int(shared_gid))
+                    os.chmod(candidate, 0o750)
+                for name in file_names:
+                    candidate = current / name
+                    info = candidate.lstat()
+                    if stat.S_ISLNK(info.st_mode):
+                        continue
+                    os.chown(candidate, -1, int(shared_gid))
+                    original = stat.S_IMODE(info.st_mode)
+                    group_execute = 0o010 if original & 0o111 else 0
+                    os.chmod(candidate, (original & 0o700) | 0o040 | group_execute)
+
+            for relative in normalized_write_paths:
+                current = destination
+                for part in relative.parts[:-1]:
+                    candidate = current / part
+                    if os.path.lexists(candidate):
+                        info = candidate.lstat()
+                        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                            raise WorkspaceError(
+                                "shared write path crosses a non-directory or symlink"
+                            )
+                    else:
+                        candidate.mkdir(mode=0o750)
+                    os.chown(candidate, -1, int(shared_gid))
+                    os.chmod(candidate, 0o750)
+                    current = candidate
+                parent = current
+                os.chown(parent, -1, int(shared_gid))
+                os.chmod(parent, 0o770)
+                target = parent / relative.name
+                if os.path.lexists(target):
+                    info = target.lstat()
+                    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
                         raise WorkspaceError(
-                            "shared write path crosses a non-directory or symlink"
+                            "shared write target must be a regular non-symlink file"
                         )
-                else:
-                    candidate.mkdir(mode=0o750)
-                os.chown(candidate, -1, int(shared_gid))
-                os.chmod(candidate, 0o750)
-                current = candidate
-            parent = current
-            os.chown(parent, -1, int(shared_gid))
-            os.chmod(parent, 0o770)
-            target = parent / relative.name
-            if os.path.lexists(target):
-                info = target.lstat()
-                if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-                    raise WorkspaceError(
-                        "shared write target must be a regular non-symlink file"
-                    )
-                original = stat.S_IMODE(info.st_mode)
-                group_execute = 0o010 if original & 0o111 else 0
-                os.chown(target, -1, int(shared_gid))
-                os.chmod(target, (original & 0o700) | 0o060 | group_execute)
-    workspace_info = destination.lstat()
+                    original = stat.S_IMODE(info.st_mode)
+                    group_execute = 0o010 if original & 0o111 else 0
+                    os.chown(target, -1, int(shared_gid))
+                    os.chmod(target, (original & 0o700) | 0o060 | group_execute)
+        workspace_info = destination.lstat()
+    except BaseException:
+        # Any failure past this point leaves a half-written clone that
+        # would block every later attempt for this job ID.  Discard it
+        # and re-raise the real cause unchanged.
+        _discard_partial_workspace(destination)
+        raise
     return WorkspaceReceipt(
         source_repository=str(source),
         workspace_path=str(destination),

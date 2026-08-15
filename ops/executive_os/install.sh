@@ -713,9 +713,47 @@ if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
   /usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
-  /usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
-  /bin/chmod -R go-rwx "$ADMIN_CHECKOUT"
 fi
+# Pack the administrative checkout, ALWAYS -- not only when it was just
+# created.  Every job clones this repository with `git clone --local
+# --no-hardlinks`, which copies each LOOSE object as its own small file.  A
+# checkout made from a long-lived development repository (or from a linked
+# worktree, which exposes the main repository's object store) inherits
+# thousands of them: measured 2,503 loose objects / 16.8 MB against a 5.9 MB
+# pack.  Copying those one by one as the throttled control principal on a
+# loaded host exceeded the 60 s bound in control_plane/executive_workspace.py
+# `_run`, roughly 21 % through, and the killed clone left a destination with
+# `HEAD -> refs/heads/.invalid` and no base commit -- surfacing only as an
+# opaque WorkspaceError. Packed, the same clone copies ONE ~8 MB file.
+#
+# This is the install-time-cost principle the Codex attestation receipt
+# already follows: pay it once here, as root, warm, at normal priority,
+# rather than on every job under throttling.  It runs outside the guard above
+# deliberately -- an existence guard that skips the repair is exactly how the
+# receipt writer could wedge an install (see the attestation receipt writer),
+# and an already-installed host must be healed by a reinstall rather than
+# left permanently slow.
+#
+# Run as the control principal, never as root: git refuses a repository whose
+# owner is neither the effective UID nor SUDO_UID ("dubious ownership"), and
+# packing as root would leave root-owned pack files inside a checkout the
+# control principal must own.  Ownership and modes are re-asserted afterwards
+# so a pre-existing checkout with drifted metadata is corrected too.
+/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
+/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  /usr/bin/git -C "$ADMIN_CHECKOUT" repack -ad
+/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
+/bin/chmod -R go-rwx "$ADMIN_CHECKOUT"
+[ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  /usr/bin/git -C "$ADMIN_CHECKOUT" count-objects -v | /usr/bin/awk '/^count:/{print $2}')" = "0" ] || {
+  /bin/echo "administrative checkout still holds loose objects after repack" >&2
+  exit 65
+}
 
 (
   cd "$RELEASE_ROOT"
