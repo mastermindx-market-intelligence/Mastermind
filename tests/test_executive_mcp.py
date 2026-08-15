@@ -535,6 +535,11 @@ def test_18_19b_loopback_bind_is_accepted(tmp_path: Path, host: str):
         ("workspace_root", schemas.PRODUCTION_SYSTEM_ROOT),
         ("workspace_root", "/Library/Application Support/MastermindExecutive/jobs"),
         ("workspace_root", "/Library/Frameworks/Python.framework/Versions/3.12"),
+        # Reviewer reproductions (§22 finding 1): realpath alias + APFS case.
+        ("socket_path", "/private/var/run/mastermind-executive/control.sock"),
+        ("runtime_root", "/private/var/db/mastermind-executive"),
+        ("socket_path", "/var/RUN/mastermind-executive/control.sock"),
+        ("workspace_root", "/Library/Application support/MastermindExecutive/jobs"),
     ],
 )
 def test_18_20_production_paths_are_refused_in_fixture_mode(field: str, value: str):
@@ -553,6 +558,45 @@ def test_18_20_production_paths_are_refused_in_fixture_mode(field: str, value: s
 def test_18_20b_production_control_config_is_refused_as_a_gateway_config(tmp_path: Path):
     with pytest.raises(GatewayError):
         load_gateway_config("fixture", schemas.PRODUCTION_CONTROL_CONFIG)
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        "/var/run/mastermind-executive/x.json",
+        "/private/var/db/mastermind-executive/config/control.json",
+        "/Library/Application support/MastermindExecutive/config/control.json",
+    ],
+)
+def test_18_20d_config_path_under_a_production_tree_is_refused(config_path: str):
+    """§22 finding 1: load_gateway_config resolves before checking, so a config
+    file under a production tree (realpath alias or case variant) must refuse.
+
+    The assertion pins the PRODUCTION refusal specifically, not a generic
+    invalid_input: pre-fix the missing file raised an 'unreadable' invalid_input,
+    which would have been a false green here."""
+
+    with pytest.raises(GatewayError) as excinfo:
+        load_gateway_config("fixture", config_path)
+    assert excinfo.value.code == "invalid_input"
+    assert "production" in excinfo.value.message, excinfo.value.message
+
+
+def test_18_20e_reverify_rechecks_the_strengthened_production_rule():
+    """§22 finding 6: reverify() must re-invoke the (now realpath-aware) check,
+    not be a no-op over a frozen accepted string."""
+
+    backend = FixtureBackend(
+        socket_path="/tmp/mcp-fixture/control.sock",
+        runtime_root="/tmp/mcp-fixture/runtime",
+        workspace_root="/tmp/mcp-fixture/workspaces",
+    )
+    backend.reverify()  # clean
+    # A production alias smuggled in after construction is caught on re-check.
+    object.__setattr__(backend, "runtime_root", "/private/var/db/mastermind-executive")
+    with pytest.raises(GatewayError) as excinfo:
+        backend.reverify()
+    assert excinfo.value.code == "invalid_input"
 
 
 def test_18_20c_fixture_mode_requires_an_explicit_backend(tmp_path: Path):
@@ -935,6 +979,88 @@ def test_unknown_tool_is_a_typed_not_found(tmp_path: Path):
     envelope = _call(_gateway(tmp_path), "executive_debug_exec", {})
     assert envelope["ok"] is False
     assert envelope["error"]["code"] == "not_found"
+
+
+def test_error_envelope_redacts_message_and_bounds_the_tool_name():
+    """§22 finding 2: error_envelope is the sole redaction+bound fence."""
+
+    secret = "sk-ant-" + "A" * 60
+    env = schemas.error_envelope(
+        "executive_state", mode=ServerMode.READONLY, generated_at=_FROZEN_NOW,
+        code="internal_error", message=f"boom {secret} boom",
+    )
+    assert secret not in env["error"]["message"]
+    assert "<redacted>" in env["error"]["message"]
+
+    # A 1 MB caller-supplied tool name must not become a 1 MB response.
+    big = "X" * 1_000_000
+    env2 = schemas.error_envelope(
+        big, mode=ServerMode.READONLY, generated_at=_FROZEN_NOW,
+        code="not_found", message=f"unknown tool {big!r}",
+    )
+    raw = schemas.canonical_json(env2)
+    assert len(raw) < schemas.MAX_RESPONSE_BYTES
+    assert len(env2["tool"]) <= 320
+    assert len(env2["error"]["message"]) <= 320
+
+
+def test_call_with_oversized_tool_name_stays_under_the_response_ceiling(tmp_path: Path):
+    """§22 finding 2 end-to-end: the whole call path bounds the echoed name."""
+
+    envelope = _call(_gateway(tmp_path), "X" * 1_000_000, {})
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "not_found"
+    assert len(canonical_json(envelope)) < schemas.MAX_RESPONSE_BYTES
+
+
+def test_bound_document_handles_keys_containing_dots_and_brackets():
+    """§22 finding 3: worker-authored dict keys (filenames, `[`) must bound, not raise."""
+
+    huge = "X" * 300_000
+    data = {"job": {"artifacts": {"report.md": huge, "weird[0].key": "small"}}}
+    bounded, receipts = schemas.bound_document(data, limit=256 * 1024)
+    assert receipts, "an oversized dotted-key field must bound honestly"
+    assert receipts[0]["field"] == "job.artifacts.report.md"
+    assert isinstance(bounded["job"]["artifacts"]["report.md"], dict)
+    assert bounded["job"]["artifacts"]["report.md"]["bounded"] is True
+    assert bounded["job"]["artifacts"]["weird[0].key"] == "small"
+    # Always valid JSON, never a mid-string cut.
+    assert json.loads(canonical_json(bounded)) == bounded
+
+
+def test_no_operator_home_path_in_read_grounding_or_mode_note(tmp_path: Path):
+    """§22 finding 5: reads must not emit the absolute host runtime path."""
+
+    home = tmp_path / "Users-operator-SENTINEL"
+    runtime_root = home / "runtime"
+    runtime_root.mkdir(parents=True)
+    job_id = _seed_runtime(runtime_root)
+    fixture = FixtureBackend(
+        socket_path=str(tmp_path / "sock" / "s.sock"),
+        runtime_root=str(runtime_root),
+        workspace_root=str(tmp_path / "ws"),
+    )
+    config = GatewayConfig(
+        mode=ServerMode.FIXTURE, repo_root=tmp_path, fixture=fixture, now=_FROZEN_NOW
+    )
+    packet = _packet(macro_root=str(tmp_path / "macro"))
+    gateway = ExecutiveMcpGateway(
+        config,
+        packet_builder=lambda **_kw: dict(packet),
+        clock=lambda: _FROZEN_NOW,
+        transport=_forbidden_transport,
+    )
+    for tool, args in (
+        ("executive_state", {}),
+        ("executive_inbox", {}),
+        ("executive_job", {"job_id": job_id}),
+    ):
+        envelope = _call(gateway, tool, args)
+        assert envelope["ok"] is True, (tool, envelope)
+        assert "Users-operator-SENTINEL" not in json.dumps(envelope), (tool, envelope)
+    # The label is still informative — mode + basename, never the host path.
+    state = _call(gateway, "executive_state", {})
+    assert state["grounding"]["runtime"] == "fixture:runtime"
 
 
 def test_docs_exist_and_record_the_future_gates():

@@ -331,6 +331,14 @@ In FIXTURE mode that read/write root split is stated in the envelope's
 }
 ```
 
+> **Coupling footgun (§23):** the fixture config's `workspace_root` **must equal
+> the temporary `ExecutiveControlService`'s `proof_workspace_root`.** The service
+> passes `proof_workspace_root` to `submit_intent(..., workspace_root=…)` and the
+> gateway derives each Job's worktree under the same directory; if the two
+> disagree, the worktree fence rejects the intent and the submission fails closed
+> as `backend_refused`. Point both at the same temporary directory when you stand
+> up the fixture service for the acceptance flow.
+
 Every path is refused — at startup **and again on every modifying call** — if it
 names or sits under:
 
@@ -340,8 +348,17 @@ names or sits under:
   and its `config/control.json`)
 - `/Library/Frameworks/Python.framework` (the sealed Python runtime)
 
-The comparison is a normalized-prefix rule, so naming a sibling inside one of
-those trees — or walking in through `..` — is refused too.
+The comparison runs twice per root, both sides casefolded: once over the
+lexically-normalized path, and once over `os.path.realpath` of the original
+input. `realpath` resolves symlinks in existing ancestors even when the leaf
+does not exist, so the Darwin `/var → /private/var` alias (the production socket
+is pinned as `/var/run/mastermind-executive/control.sock`, whose realpath is
+`/private/var/run/...`) is collapsed to one canonical name, and naming either the
+`/var/...` or the already-resolved `/private/var/...` form is refused. Casefolding
+defeats APFS case-insensitivity (`/var/RUN/...`, `/Library/Application support/...`).
+Naming a sibling inside one of those trees, or walking in through `..`, is refused
+too. `load_gateway_config` resolves a config path before this check, so a config
+file placed under a production tree is refused as well.
 
 ---
 

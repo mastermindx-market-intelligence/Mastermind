@@ -299,7 +299,8 @@ class ExecutiveMcpGateway:
         except GatewayError as exc:
             return error_envelope(
                 spec.name, mode=self.config.mode, generated_at=generated_at,
-                code=exc.code, message=sanitize_external_text(exc.message) or exc.code,
+                code=exc.code, message=exc.message,
+                intent_id=getattr(exc, "intent_id", None),
             )
         except asyncio.CancelledError:
             raise
@@ -378,22 +379,37 @@ class ExecutiveMcpGateway:
         )
         return packet, inbox
 
+    def _runtime_label(self) -> str:
+        """A stable, non-secret label for the runtime the reads resolve against.
+
+        Never an absolute host path: emitting ``self.config.runtime_root`` across
+        the MCP boundary would leak the operator home (``/Users/<operator>/...``)
+        for a read, which §15 forbids for paths outside the approved boot-packet
+        contract.  The mode plus the runtime directory's basename is enough for
+        the CEO seat to tell READONLY from FIXTURE without any host path.
+        """
+
+        return f"{self.config.mode.value}:{Path(self.config.runtime_root).name}"
+
     def _mode_note(self) -> list[str]:
-        """Name the read/write root split rather than letting it surprise anyone."""
+        """Name the read/write root split rather than letting it surprise anyone.
+
+        Deliberately path-free: it states WHICH lane reads what, not the absolute
+        host directories, so a degraded note cannot leak an operator home path.
+        """
 
         if self.config.fixture is None:
             return []
         return [
             "mode=fixture: executive_job and ceo_intent_status read the temporary "
-            f"fixture runtime at {self.config.runtime_root}, while executive_state "
-            "and executive_inbox project the reviewed repository checkout at "
-            f"{self.config.repo_root}"
+            "fixture runtime, while executive_state and executive_inbox project the "
+            "reviewed repository checkout"
         ]
 
     def _executive_state(self) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
         packet, inbox = self._collect()
         grounding = dict(inbox.get("grounding") or {})
-        grounding["runtime_root"] = os.fspath(self.config.runtime_root)
+        grounding["runtime"] = self._runtime_label()
         # The inbox already bubbles the packet's own degraded entries with a
         # ``boot_packet:`` prefix; passing its list through keeps every named
         # degradation without inventing or deduplicating any of them.
@@ -431,7 +447,7 @@ class ExecutiveMcpGateway:
     def _executive_inbox(self) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
         _packet, inbox = self._collect()
         grounding = dict(inbox.get("grounding") or {})
-        grounding["runtime_root"] = os.fspath(self.config.runtime_root)
+        grounding["runtime"] = self._runtime_label()
         degraded = [str(entry) for entry in (inbox.get("degraded") or [])]
         degraded.extend(self._mode_note())
         # Verbatim.  Not re-ranked, not filtered, not re-scored: an unknown
@@ -463,7 +479,7 @@ class ExecutiveMcpGateway:
             "latest_attempt": (latest.to_dict() if latest is not None else None),
         }
         grounding = {
-            "runtime_root": os.fspath(self.config.runtime_root),
+            "runtime": self._runtime_label(),
             "source": "control_plane.executive_runtime registries (no raw SQL)",
         }
         return data, grounding, self._mode_note()
@@ -477,7 +493,7 @@ class ExecutiveMcpGateway:
         except ceo_intent.CeoIntentError as exc:
             raise GatewayError("not_found", sanitize_external_text(exc)) from exc
         grounding = {
-            "runtime_root": os.fspath(self.config.runtime_root),
+            "runtime": self._runtime_label(),
             "source": "control_plane.ceo_intent.resolve_intent",
         }
         return receipt, grounding, self._mode_note()
@@ -659,7 +675,16 @@ class ExecutiveMcpGateway:
                     f"{sanitize_external_text(exc)}",
                 ) from exc
 
-        receipt = _unwrap_control_response(response)
+        try:
+            receipt = _unwrap_control_response(response)
+        except GatewayError as exc:
+            # A same-key conflict refusal (§10.7) is only useful if the CEO seat
+            # can still reach the durable Job.  The derived intent id is trusted,
+            # gateway-authored local text, but ``sanitize_external_text`` redacts
+            # its 32-hex fragment inside the message — so carry it structured.
+            if exc.intent_id is None:
+                exc.intent_id = str(envelope["intent_id"])
+            raise
         data, receipts = bound_document(receipt, limit=self.config.max_response_bytes)
         return result_envelope(
             MODIFYING_TOOL,

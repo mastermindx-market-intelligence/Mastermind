@@ -31,11 +31,13 @@ import dataclasses
 import enum
 import hashlib
 import json
+import os
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from common.redaction import sanitize_external_text
 from control_plane import ceo_intent as _ceo_intent
 
 __all__ = [
@@ -130,7 +132,7 @@ class GatewayError(Exception):
     defect this class exists to prevent.
     """
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, intent_id: str | None = None) -> None:
         if code not in ERROR_CODES:
             # An unknown code is itself a defect; degrade to the opaque one
             # rather than inventing a new public vocabulary entry at runtime.
@@ -138,6 +140,9 @@ class GatewayError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+        # A gateway-authored, trusted intent id may ride a refusal so a conflict
+        # stays recoverable via ``ceo_intent_status``; see ``error_envelope``.
+        self.intent_id = intent_id
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +155,16 @@ class GatewayError(Exception):
 #: control socket, the installed system root, the installed runtime root, and
 #: the sealed Python framework each own a whole tree, and an exact-path check
 #: would be defeated by naming a sibling inside the same tree.
+#: Both the ``/var`` names the installer writes and their Darwin realpath
+#: (``/private/var``) forms are listed explicitly, so the lexical check refuses a
+#: caller who names the already-resolved path on ANY platform — Linux CI has no
+#: ``/var → /private/var`` alias for ``os.path.realpath`` to collapse, so relying
+#: on realpath alone would leave the ``/private/var/...`` form accepted there.
 PRODUCTION_PATH_ROOTS = (
     "/var/run/mastermind-executive",
+    "/private/var/run/mastermind-executive",
     "/var/db/mastermind-executive",
+    "/private/var/db/mastermind-executive",
     "/Library/Application Support/MastermindExecutive",
     "/Library/Frameworks/Python.framework",
 )
@@ -195,13 +207,28 @@ def refuse_production_path(value: Any, field: str) -> str:
             continue
         parts.append(segment)
     normalized = "/" + "/".join(parts)
+    # Two comparisons per root, both casefolded so APFS case-insensitivity
+    # (``/var/RUN``, ``/Library/Application support``) cannot slip past:
+    #   1. the lexical normalized path (the fallback the realpath cannot reach);
+    #   2. ``os.path.realpath`` of the ORIGINAL text, which resolves symlinks in
+    #      existing ancestors even when the leaf does not exist — so ``/var`` ->
+    #      ``/private/var`` collapses to the canonical name the installer pins
+    #      (``ops/executive_os/install.sh`` writes ``/var/run/...``, whose
+    #      realpath is ``/private/var/run/...``), and a caller naming the already
+    #      resolved ``/private/var/...`` form is caught too.  The "roots may not
+    #      exist on a dev box" property holds: realpath never requires the leaf.
+    real = os.path.realpath(text)
     for root in PRODUCTION_PATH_ROOTS:
-        if normalized == root or normalized.startswith(root + "/"):
-            raise GatewayError(
-                "invalid_input",
-                f"{field} names the installed production Executive OS tree "
-                f"({root}); EXEC-MCP-A has no production write mode and refuses it",
-            )
+        real_root = os.path.realpath(root)
+        for candidate, base in ((normalized, root), (real, real_root)):
+            lowered = candidate.casefold()
+            lowered_base = base.casefold()
+            if lowered == lowered_base or lowered.startswith(lowered_base + "/"):
+                raise GatewayError(
+                    "invalid_input",
+                    f"{field} names the installed production Executive OS tree "
+                    f"({root}); EXEC-MCP-A has no production write mode and refuses it",
+                )
     return normalized
 
 
@@ -1028,15 +1055,39 @@ def canonical_json(value: Any) -> bytes:
     ).encode("utf-8")
 
 
-def _leaf_sizes(value: Any, path: str, out: list[tuple[int, str]]) -> None:
+def _leaf_sizes(
+    value: Any, parts: tuple[str | int, ...], out: list[tuple[int, tuple[str | int, ...]]]
+) -> None:
+    """Collect (utf-8 byte size, STRUCTURED path) for every string leaf.
+
+    The path is carried as a tuple of keys/indices, never a joined string.
+    Worker-authored dicts (``Job.result``/``checkpoint``, ``Attempt.result``/
+    ``launch_metadata``) are keyed by arbitrary strings — filenames like
+    ``report.md``, keys containing ``.`` or ``[`` — so a joined path that had to
+    be re-parsed would mis-split and raise, turning an honestly-boundable oversize
+    into an opaque ``internal_error``.  Structured parts are never re-parsed.
+    """
+
     if isinstance(value, Mapping):
         for key, item in value.items():
-            _leaf_sizes(item, f"{path}.{key}" if path else str(key), out)
+            _leaf_sizes(item, parts + (str(key),), out)
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
-            _leaf_sizes(item, f"{path}[{index}]", out)
+            _leaf_sizes(item, parts + (index,), out)
     elif isinstance(value, str):
-        out.append((len(value.encode("utf-8")), path))
+        out.append((len(value.encode("utf-8")), parts))
+
+
+def _display_path(parts: Sequence[str | int]) -> str:
+    """A human-readable field label; NEVER re-parsed back into parts."""
+
+    rendered = ""
+    for part in parts:
+        if isinstance(part, int):
+            rendered += f"[{part}]"
+        else:
+            rendered += f".{part}" if rendered else part
+    return rendered
 
 
 def _replace_at(value: Any, path: Sequence[str | int], replacement: Any) -> Any:
@@ -1054,20 +1105,6 @@ def _replace_at(value: Any, path: Sequence[str | int], replacement: Any) -> Any:
             for index, item in enumerate(value)
         ]
     return value
-
-
-def _parse_path(path: str) -> list[str | int]:
-    parts: list[str | int] = []
-    for chunk in path.split("."):
-        while "[" in chunk:
-            head, _, tail = chunk.partition("[")
-            index, _, chunk = tail.partition("]")
-            if head:
-                parts.append(head)
-            parts.append(int(index))
-        if chunk:
-            parts.append(chunk)
-    return parts
 
 
 #: How much of a bounded string is kept as a preview.  Enough to identify the
@@ -1097,27 +1134,32 @@ def bound_document(
     if len(canonical_json(current)) <= limit:
         return current, receipts
 
-    sizes: list[tuple[int, str]] = []
-    _leaf_sizes(current, "", sizes)
-    sizes.sort(key=lambda item: (-item[0], item[1]))
+    sizes: list[tuple[int, tuple[str | int, ...]]] = []
+    _leaf_sizes(current, (), sizes)
+    sizes.sort(key=lambda item: (-item[0], _display_path(item[1])))
 
-    for original_bytes, path in sizes:
+    for original_bytes, parts in sizes:
         if len(canonical_json(current)) <= limit:
             break
-        parts = _parse_path(path)
         node: Any = current
+        reachable = True
         for part in parts:
-            node = node[part] if isinstance(node, (Mapping, list)) else None
-            if node is None:
+            if isinstance(node, Mapping) and part in node:
+                node = node[part]
+            elif isinstance(node, list) and isinstance(part, int) and 0 <= part < len(node):
+                node = node[part]
+            else:
+                reachable = False
                 break
-        if not isinstance(node, str):
+        if not reachable or not isinstance(node, str):
             continue
+        display = _display_path(parts)
         preview = node[:BOUND_PREVIEW_CHARS]
         replacement = {
             "bounded": True,
             "original_bytes": original_bytes,
             "returned_bytes": len(preview.encode("utf-8")),
-            "field": path,
+            "field": display,
             "preview": preview,
         }
         current = _replace_at(current, parts, replacement)
@@ -1126,7 +1168,7 @@ def bound_document(
                 "bounded": True,
                 "original_bytes": original_bytes,
                 "returned_bytes": len(preview.encode("utf-8")),
-                "field": path,
+                "field": display,
             }
         )
 
@@ -1175,14 +1217,31 @@ def error_envelope(
     message: str,
     grounding: Mapping[str, Any] | None = None,
     degraded: Sequence[str] = (),
+    intent_id: str | None = None,
 ) -> dict[str, Any]:
-    """The shared failure envelope.  Typed code, bounded message, no traceback."""
+    """The shared failure envelope.  Typed code, bounded message, no traceback.
+
+    This is the SOLE redaction fence on the error path, not a courtesy second
+    one: every ``message`` and every ``tool`` label is passed through
+    ``sanitize_external_text`` here, so a caller-supplied 1 MB tool name, an
+    upstream exception repr, or a credential in an error body cannot cross the
+    boundary or blow the response ceiling regardless of what the call site did.
+    """
 
     if code not in ERROR_CODES:
         code = "internal_error"
+    error: dict[str, Any] = {
+        "code": code,
+        "message": sanitize_external_text(message) or code,
+    }
+    if intent_id is not None:
+        # Gateway-authored, trusted local text.  Carried as a STRUCTURED field so
+        # a same-key conflict stays recoverable via ``ceo_intent_status`` even
+        # though the 32-hex intent-id fragment is redacted inside ``message``.
+        error["intent_id"] = str(intent_id)
     return {
         "schema": RESULT_SCHEMA,
-        "tool": tool,
+        "tool": sanitize_external_text(str(tool)) or "unknown",
         "ok": False,
         "server_version": SERVER_VERSION,
         "mode": mode.value,
@@ -1191,7 +1250,7 @@ def error_envelope(
         "data": None,
         "degraded": [str(entry) for entry in degraded],
         "bounded": [],
-        "error": {"code": code, "message": message},
+        "error": error,
     }
 
 

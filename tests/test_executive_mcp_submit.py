@@ -15,6 +15,7 @@ absence afterwards.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -877,5 +878,49 @@ def test_fixture_mode_states_the_read_write_root_split(
         assert any("mode=fixture" in entry for entry in envelope["degraded"]), envelope[
             "degraded"
         ]
+
+    _run(tmp_path, short_socket_root, exercise)
+
+
+def test_conflict_refusal_carries_the_resolvable_intent_id(
+    tmp_path: Path, short_socket_root: Path
+):
+    """§22 finding 4: the 32-hex intent id is redacted in the message, so a
+    same-key conflict must carry the gateway-authored id as a structured field
+    the CEO seat can hand straight to ceo_intent_status."""
+
+    async def exercise(gateway, service):
+        first = await gateway.call(MODIFYING_TOOL, _args())
+        assert first["ok"] is True
+        conflict = await gateway.call(MODIFYING_TOOL, _args(objective="a changed objective"))
+        assert conflict["ok"] is False
+        assert conflict["error"]["code"] == "backend_refused"
+
+        recovered = conflict["error"].get("intent_id")
+        assert recovered == first["data"]["intent_id"], conflict
+        # The message alone would not have been enough — the id is redacted there.
+        assert "<redacted>" in conflict["error"]["message"], conflict["error"]["message"]
+
+        status = await gateway.call("ceo_intent_status", {"intent_id": recovered})
+        assert status["ok"] is True, status
+        assert status["data"]["job_id"] == first["data"]["job_id"]
+
+    _run(tmp_path, short_socket_root, exercise)
+
+
+def test_no_host_runtime_path_crosses_the_boundary_on_submit_or_read(
+    tmp_path: Path, short_socket_root: Path
+):
+    """§22 finding 5: neither a submit receipt nor a read leaks the absolute
+    host runtime directory across the MCP boundary."""
+
+    async def exercise(gateway, service):
+        runtime_path = str(service.config.runtime_root)
+        submit = await gateway.call(MODIFYING_TOOL, _args())
+        assert submit["ok"] is True
+        state = await gateway.call("executive_state", {})
+        job = await gateway.call("executive_job", {"job_id": submit["data"]["job_id"]})
+        for envelope in (submit, state, job):
+            assert runtime_path not in json.dumps(envelope), envelope
 
     _run(tmp_path, short_socket_root, exercise)

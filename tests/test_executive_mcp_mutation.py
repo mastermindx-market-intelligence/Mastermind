@@ -693,8 +693,13 @@ def test_mutant_disabled_redaction_is_observable(
 
     invariant()
 
-    # MUTANT: the sanitizer becomes the identity function.
-    monkeypatch.setattr(adapter_module, "sanitize_external_text", lambda value, **_kw: str(value))
+    # MUTANT: the sanitizer becomes the identity function.  Redaction is now a
+    # two-fence design — the adapter sanitizes upstream text, and error_envelope
+    # sanitizes again as the sole guaranteed fence — so DISABLING redaction means
+    # neutering both; patching only one proves nothing because the other saves it.
+    identity = lambda value, **_kw: str(value)  # noqa: E731
+    monkeypatch.setattr(adapter_module, "sanitize_external_text", identity)
+    monkeypatch.setattr(schemas, "sanitize_external_text", identity)
     with _mutation_visible():
         invariant()
 
