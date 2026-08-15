@@ -45,6 +45,7 @@ from control_plane.codex_worker import (
     CancelReceipt,
     CodexWorkerAdapter,
     CollectionReceipt,
+    GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LaunchSpec,
     ProcessIdentityError,
@@ -1400,6 +1401,18 @@ class ExecutiveWorkerBroker:
                     # earlier -- pin it with a test if that changes.
                     identity_known = bool(parsed_id and parsed_operation)
                 response = await self.execute(request, peer=peer)
+            except GitPreflightTimeout as exc:
+                # This exception is deliberately safe to cross the UID boundary:
+                # it contains only one allowlisted Git operation and its fixed
+                # timeout, never argv from a request, output, environment, or a
+                # workspace path.  Other adapter failures remain opaque below.
+                response = {
+                    "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
+                    "request_id": request_id,
+                    "operation": operation,
+                    "ok": False,
+                    "error": {"code": exc.code, "message": str(exc)[:500]},
+                }
             except WorkerBrokerError as exc:
                 response = {
                     "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,

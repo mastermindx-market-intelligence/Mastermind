@@ -109,6 +109,20 @@ class LaunchValidationError(CodexWorkerError):
     """The launch specification or workspace is unsafe."""
 
 
+class GitPreflightTimeout(LaunchValidationError):
+    """A bounded Git validation operation did not finish in time."""
+
+    code = "git_preflight_timeout"
+
+    def __init__(self, *, operation: str, timeout_seconds: float) -> None:
+        self.operation = str(operation)
+        self.timeout_seconds = float(timeout_seconds)
+        rendered_timeout = f"{self.timeout_seconds:g}"
+        super().__init__(
+            f"Git preflight timed out after {rendered_timeout}s: {self.operation}"
+        )
+
+
 class BinaryAttestationError(CodexWorkerError):
     """The configured Codex executable failed attestation."""
 
@@ -1281,6 +1295,27 @@ def _validate_codex_home(path: Path) -> Path:
     return resolved
 
 
+_GIT_COMMAND_TIMEOUT_SECONDS = 15.0
+_SAFE_GIT_OPERATION_IDENTITIES = {
+    ("remote",): "remote",
+    ("rev-parse", "--verify", "HEAD"): "rev-parse --verify HEAD",
+    (
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+    ): "status --porcelain=v1 -z --untracked-files=all",
+    ("ls-files", "--others", "-z"): "ls-files --others -z",
+    ("diff", "--name-only", "-z", "HEAD", "--"): "diff --name-only -z HEAD --",
+}
+
+
+def _safe_git_operation_identity(args: Sequence[str]) -> str:
+    """Name only audited Git argv, never workspace or future caller data."""
+
+    return _SAFE_GIT_OPERATION_IDENTITIES.get(tuple(args), "unknown")
+
+
 def _git_command(workspace: Path, *args: str) -> bytes:
     argv = [
         "/usr/bin/git",
@@ -1291,25 +1326,31 @@ def _git_command(workspace: Path, *args: str) -> bytes:
         "-C", str(workspace),
         *args,
     ]
-    result = subprocess.run(
-        argv,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env={
-            "PATH": _SAFE_PATH,
-            "LANG": "C.UTF-8",
-            "LC_ALL": "C.UTF-8",
-            "HOME": "/var/empty",
-            "GIT_CONFIG_GLOBAL": "/dev/null",
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_OPTIONAL_LOCKS": "0",
-            "GIT_TERMINAL_PROMPT": "0",
-            "GCM_INTERACTIVE": "never",
-        },
-        timeout=15,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={
+                "PATH": _SAFE_PATH,
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "HOME": "/var/empty",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_OPTIONAL_LOCKS": "0",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GCM_INTERACTIVE": "never",
+            },
+            timeout=_GIT_COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise GitPreflightTimeout(
+            operation=_safe_git_operation_identity(args),
+            timeout_seconds=_GIT_COMMAND_TIMEOUT_SECONDS,
+        ) from exc
     if len(result.stdout) > 4 * 1024 * 1024 or len(result.stderr) > 1024 * 1024:
         raise LaunchValidationError("Git preflight output exceeded its limit")
     if result.returncode != 0:
@@ -3220,6 +3261,7 @@ __all__ = [
     "CodexWorkerAdapter",
     "CodexWorkerError",
     "CollectionReceipt",
+    "GitPreflightTimeout",
     "LAUNCH_ATTESTATION_SCHEMA_VERSION",
     "LaunchAttestation",
     "LaunchSpec",

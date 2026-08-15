@@ -289,6 +289,38 @@ def test_native_binary_attestation_timeout_is_typed_and_fail_closed(
         cw.attest_codex_binary(binary)
 
 
+def test_git_preflight_timeout_names_only_the_safe_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = Path("/private/secret/workspace-that-must-not-cross-the-broker")
+    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=all")
+
+    def timed_out(argv, **kwargs):
+        raise subprocess.TimeoutExpired(
+            argv,
+            kwargs["timeout"],
+            output=b"private workspace output",
+            stderr=b"private workspace error",
+        )
+
+    monkeypatch.setattr(cw.subprocess, "run", timed_out)
+
+    with pytest.raises(cw.GitPreflightTimeout) as raised:
+        cw._git_command(workspace, *arguments)
+
+    error = raised.value
+    assert isinstance(error, cw.LaunchValidationError)
+    assert error.code == "git_preflight_timeout"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.timeout_seconds == cw._GIT_COMMAND_TIMEOUT_SECONDS == 15.0
+    assert str(error) == (
+        "Git preflight timed out after 15s: "
+        "status --porcelain=v1 -z --untracked-files=all"
+    )
+    assert str(workspace) not in str(error)
+    assert "private workspace" not in str(error)
+
+
 def _fixture(
     tmp_path: Path,
     *,
