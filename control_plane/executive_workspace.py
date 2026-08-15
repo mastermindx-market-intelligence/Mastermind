@@ -15,10 +15,17 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path, PurePosixPath
-from typing import Sequence
+from typing import Callable, Sequence
 
 
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+LAUNCH_CLEAN_STATUS_ARGS = (
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all",
+)
+LAUNCH_CLEAN_UNTRACKED_ARGS = ("ls-files", "--others", "-z")
 
 
 class WorkspaceError(RuntimeError):
@@ -27,6 +34,30 @@ class WorkspaceError(RuntimeError):
 
 class AssignmentSealError(WorkspaceError):
     """A terminal worker assignment could not be made control-private."""
+
+
+@dataclasses.dataclass(frozen=True)
+class LaunchCleanlinessObservation:
+    """The one launch-cleanliness definition shared by every boundary."""
+
+    status: bytes
+    all_untracked: bytes
+
+    @property
+    def dirty(self) -> bool:
+        return bool(self.status or self.all_untracked)
+
+
+def observe_launch_cleanliness(
+    run_git: Callable[[Sequence[str]], bytes],
+) -> LaunchCleanlinessObservation:
+    """Run the worker's exact tracked and all-untracked launch predicate."""
+
+    status = run_git(LAUNCH_CLEAN_STATUS_ARGS)
+    all_untracked = run_git(LAUNCH_CLEAN_UNTRACKED_ARGS)
+    if not isinstance(status, bytes) or not isinstance(all_untracked, bytes):
+        raise TypeError("launch cleanliness Git observations must be bytes")
+    return LaunchCleanlinessObservation(status=status, all_untracked=all_untracked)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -172,6 +203,62 @@ def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
     return completed.stdout.strip()
 
 
+def _run_bytes(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]
+) -> bytes:
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=str(cwd) if cwd is not None else None,
+            env=env,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).decode(
+            "utf-8", errors="replace"
+        ).strip()[-1000:]
+        raise WorkspaceError(f"workspace command failed ({completed.returncode}): {detail}")
+    return completed.stdout
+
+
+def _share_symlink_with_group(path: Path, *, shared_gid: int) -> None:
+    """Expose only a symlink's payload to the worker group, never its target."""
+
+    try:
+        before = path.lstat()
+        if not stat.S_ISLNK(before.st_mode):
+            raise WorkspaceError("shared symlink preparation received a non-symlink")
+        os.chown(path, -1, int(shared_gid), follow_symlinks=False)
+        # Darwin applies the creating process's umask to symlink modes.  A
+        # control-created 0700 link cannot be read by the worker, and Apple Git
+        # then reports the tracked link as modified.  Linux symlinks normally
+        # remain 0777, so the chmod is needed only where link modes are real.
+        chmod_is_enforced = os.chmod in os.supports_follow_symlinks
+        if chmod_is_enforced:
+            desired_mode = (stat.S_IMODE(before.st_mode) & 0o700) | stat.S_IRGRP
+            os.chmod(path, desired_mode, follow_symlinks=False)
+        after = path.lstat()
+    except (NotImplementedError, OSError) as exc:
+        raise WorkspaceError(
+            "tracked symlink could not be made read-only for the worker group"
+        ) from exc
+    mode = stat.S_IMODE(after.st_mode)
+    if (
+        after.st_gid != int(shared_gid)
+        or not mode & stat.S_IRGRP
+        or mode & stat.S_IWGRP
+        or (chmod_is_enforced and mode & stat.S_IRWXO)
+    ):
+        raise WorkspaceError(
+            "tracked symlink is not read-only for only the worker group"
+        )
+
+
 def _discard_partial_workspace(destination: Path) -> None:
     """Remove a workspace this call created but could not finish.
 
@@ -278,10 +365,9 @@ def prepare_credentialless_clone(
                 _run(["git", "remote", "remove", remote.strip()], cwd=destination, env=env)
         remaining = [line for line in _run(["git", "remote"], cwd=destination, env=env).splitlines() if line]
         actual_base = _run(["git", "rev-parse", "HEAD"], cwd=destination, env=env)
-        status = _run(["git", "status", "--porcelain=v1"], cwd=destination, env=env)
         git_dir = destination / ".git"
-        if actual_base != resolved_base or status or remaining or not git_dir.is_dir():
-            raise WorkspaceError("prepared workspace failed its clean, exact-SHA, no-remote self-check")
+        if actual_base != resolved_base or remaining or not git_dir.is_dir():
+            raise WorkspaceError("prepared workspace failed its exact-SHA, no-remote self-check")
         if shared_gid is not None:
             for current_root, directory_names, file_names in os.walk(
                 destination, topdown=True, followlinks=False
@@ -290,6 +376,7 @@ def prepare_credentialless_clone(
                 for candidate in [current, *(current / name for name in directory_names)]:
                     info = candidate.lstat()
                     if stat.S_ISLNK(info.st_mode):
+                        _share_symlink_with_group(candidate, shared_gid=int(shared_gid))
                         continue
                     os.chown(candidate, -1, int(shared_gid))
                     os.chmod(candidate, 0o750)
@@ -297,6 +384,7 @@ def prepare_credentialless_clone(
                     candidate = current / name
                     info = candidate.lstat()
                     if stat.S_ISLNK(info.st_mode):
+                        _share_symlink_with_group(candidate, shared_gid=int(shared_gid))
                         continue
                     os.chown(candidate, -1, int(shared_gid))
                     original = stat.S_IMODE(info.st_mode)
@@ -332,6 +420,15 @@ def prepare_credentialless_clone(
                     group_execute = 0o010 if original & 0o111 else 0
                     os.chown(target, -1, int(shared_gid))
                     os.chmod(target, (original & 0o700) | 0o060 | group_execute)
+        cleanliness = observe_launch_cleanliness(
+            lambda arguments: _run_bytes(
+                ["git", *arguments], cwd=destination, env=env
+            )
+        )
+        if cleanliness.dirty:
+            raise WorkspaceError(
+                "prepared workspace failed the canonical launch cleanliness predicate"
+            )
         workspace_info = destination.lstat()
     except BaseException:
         # Any failure past this point leaves a half-written clone that

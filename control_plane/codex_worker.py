@@ -44,6 +44,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Sequence
 from uuid import uuid4
 
+from control_plane.executive_workspace import (
+    LAUNCH_CLEAN_STATUS_ARGS,
+    LAUNCH_CLEAN_UNTRACKED_ARGS,
+    observe_launch_cleanliness,
+)
+
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
@@ -68,13 +74,8 @@ _GIT_COMMAND_TIMEOUT_SECONDS = 15.0
 _SAFE_GIT_OPERATION_IDENTITIES = {
     ("remote",): "remote",
     ("rev-parse", "--verify", "HEAD"): "rev-parse --verify HEAD",
-    (
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-    ): "status --porcelain=v1 -z --untracked-files=all",
-    ("ls-files", "--others", "-z"): "ls-files --others -z",
+    LAUNCH_CLEAN_STATUS_ARGS: "status --porcelain=v1 -z --untracked-files=all",
+    LAUNCH_CLEAN_UNTRACKED_ARGS: "ls-files --others -z",
     ("diff", "--name-only", "-z", "HEAD", "--"): "diff --name-only -z HEAD --",
 }
 _SAFE_GIT_OPERATION_NAMES = frozenset(
@@ -1504,17 +1505,16 @@ def _git_snapshot(workspace: Path, *, require_clean: bool) -> _GitSnapshot:
         if not re.fullmatch(r"[0-9a-fA-F]{40,64}", head):
             raise LaunchValidationError("workspace HEAD is not an immutable Git object id")
     with _launch_validation_stage("git_cleanliness"):
-        status_value = _git_command(
-            workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+        cleanliness = observe_launch_cleanliness(
+            lambda arguments: _git_command(workspace, *arguments)
         )
         # `git status` intentionally respects ignore rules. A per-job clone
         # must also be free of pre-existing ignored/untracked material, since
         # ignored runtime files are still a mutation and secret-smuggling
         # surface.
-        all_untracked = _git_command(workspace, "ls-files", "--others", "-z")
-        if require_clean and (status_value or all_untracked):
+        if require_clean and cleanliness.dirty:
             raise LaunchValidationError("workspace clone must be clean before launch")
-    return _GitSnapshot(head=head.lower(), status=status_value)
+    return _GitSnapshot(head=head.lower(), status=cleanliness.status)
 
 
 def _validate_project_configuration(workspace: Path) -> None:
