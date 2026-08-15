@@ -614,24 +614,32 @@ class RuntimeStore:
         clock: Callable[[], int | float | datetime] | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
+        create: bool = True,
     ) -> None:
         self.root = Path(root).resolve() if root is not None else _ROOT
         self.path = self.root / _DB_RELATIVE_PATH
         self.clock = clock
         self.lease_seconds = int(lease_seconds)
         self.busy_timeout_ms = int(busy_timeout_ms)
+        # `create=False` is the read-only accessor a PROJECTION opens the runtime
+        # with.  It never creates the directory or the file, never migrates, never
+        # chmods, and refuses `transaction()`, so a reader cannot manufacture an
+        # Executive OS schema on top of an empty, foreign, or truncated file and
+        # then report the result as a quiet company.
+        self.create = bool(create)
         if self.lease_seconds <= 0:
             raise StateConflict("lease_seconds must be positive")
         if self.busy_timeout_ms < 0:
             raise StateConflict("busy_timeout_ms cannot be negative")
         self._schema_ready = False
-        try:
-            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self.path.parent.chmod(0o700)
-        except OSError as exc:
-            raise PersistenceError(
-                f"cannot protect Executive runtime database directory: {exc}"
-            ) from exc
+        if self.create:
+            try:
+                self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                self.path.parent.chmod(0o700)
+            except OSError as exc:
+                raise PersistenceError(
+                    f"cannot protect Executive runtime database directory: {exc}"
+                ) from exc
         connection = self._open()
         connection.close()
 
@@ -644,7 +652,57 @@ class RuntimeStore:
             return int(value.timestamp() * 1000)
         return int(value)
 
+    def _open_readonly(self) -> sqlite3.Connection:
+        """Open an EXISTING database read-only: no create, no chmod, no migration.
+
+        SQLite's ``mode=ro`` makes the guarantee structural rather than
+        conventional: it refuses to create the file and rejects every write.
+        ``journal_mode`` and ``synchronous`` are deliberately NOT set here —
+        setting a journal mode is itself a write, and a reader must leave a
+        ``delete``-mode or ``wal``-mode database exactly as it found it.
+
+        The schema is then verified rather than assumed.  Without this check an
+        empty, truncated, or foreign file reads as a valid database with no rows,
+        which a caller would report as "nothing is running".
+        """
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                f"{self.path.as_uri()}?mode=ro",
+                uri=True,
+                timeout=self.busy_timeout_ms / 1000,
+                isolation_level=None,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+        except (OSError, sqlite3.Error) as exc:
+            if connection is not None:
+                connection.close()
+            raise PersistenceError(
+                f"executive runtime database at {self.path} is unavailable: {exc}"
+            ) from exc
+        if not self._schema_ready:
+            try:
+                connection.execute("SELECT version FROM schema_migrations LIMIT 1").fetchone()
+            except sqlite3.Error as exc:
+                connection.close()
+                message = str(exc)
+                if "no such table" in message:
+                    detail = "carries no Executive OS schema"
+                elif "not a database" in message:
+                    detail = "is not an Executive OS database"
+                else:
+                    detail = "could not be read"
+                raise PersistenceError(
+                    f"executive runtime database at {self.path} {detail}: {exc}"
+                ) from exc
+            self._schema_ready = True
+        return connection
+
     def _open(self) -> sqlite3.Connection:
+        if not self.create:
+            return self._open_readonly()
         connection: sqlite3.Connection | None = None
         try:
             connection = sqlite3.connect(
@@ -732,6 +790,13 @@ class RuntimeStore:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        if not self.create:
+            # Fail closed: a store opened for projection has no write path at all,
+            # so a lifecycle call cannot reach the database even by mistake.
+            raise StateConflict(
+                "read-only store: this RuntimeStore was opened with create=False "
+                "and refuses every lifecycle mutation"
+            )
         connection = self._open()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -3226,6 +3291,7 @@ class Runtime:
         clock: Callable[[], int | float | datetime] | None = None,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
+        create: bool = True,
     ) -> "Runtime":
         return cls.from_store(
             RuntimeStore(
@@ -3233,6 +3299,7 @@ class Runtime:
                 clock=clock,
                 lease_seconds=lease_seconds,
                 busy_timeout_ms=busy_timeout_ms,
+                create=create,
             )
         )
 
