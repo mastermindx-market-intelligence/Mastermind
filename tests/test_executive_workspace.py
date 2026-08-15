@@ -145,8 +145,8 @@ def test_tracked_vendor_symlink_is_worker_readable_and_launch_clean(
     assert stat.S_ISLNK(link_info.st_mode)
     assert link_info.st_gid == os.getegid()
     assert link_mode & stat.S_IRGRP
-    assert not link_mode & stat.S_IWGRP
     if sys.platform == "darwin":
+        assert not link_mode & stat.S_IWGRP
         assert not link_mode & stat.S_IRWXO
     observation = executive_workspace.observe_launch_cleanliness(
         lambda arguments: subprocess.run(
@@ -183,6 +183,7 @@ def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
         "supports_follow_symlinks",
         {unchanged_symlink_mode},
     )
+    monkeypatch.setattr(executive_workspace.sys, "platform", "darwin")
     root = tmp_path / "workspaces"
     previous_umask = os.umask(0o077)
     try:
