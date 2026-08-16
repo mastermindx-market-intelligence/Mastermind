@@ -51,7 +51,7 @@ include = [
     "integrations*",
     "loop",
     "portfolio",
-    "scripts",
+    "scripts*",
 ]
 namespaces = false
 

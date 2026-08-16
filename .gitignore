@@ -89,3 +89,8 @@ data/shadow/
 data/signal_history/
 data/universe_triage/
 data/*.log
+
+# OHF-P0 live probe artifacts (schema/fixtures are tracked; outputs are not)
+research/evidence/ohf_p0/**
+!research/evidence/ohf_p0/.gitkeep
+!research/evidence/.gitkeep
