@@ -26,11 +26,11 @@ session spawned with no context beyond this file.
   Macro repo. Authority is what those enforce, never what a session asserts.
 
 Canonical seat ids, occupant labels, and attention altitude live in
-`config/authority_map.yml` → `executive_seats`. Every seat carries `authority: none`:
-seat ownership is accountability/routing identity, not a capability grant.
-`config/agents.yml` is **model/provider routing only**. The model id `gpt-5.6-sol`
-does not define or authenticate the CEO seat, and changing the model route cannot
-change executive authority.
+`config/authority_map.yml` → `seats`, exactly the Phase 1F-prescribed canonical home.
+Every seat carries `authority: none`: seat ownership is accountability/routing identity,
+not a capability grant. `config/agents.yml` is **model/provider routing only**. The
+model id `gpt-5.6-sol` does not define or authenticate the CEO seat, and changing the
+model route cannot change executive authority.
 
 The legacy A7 name `FABLE_HUMAN` is a portfolio/governance **effect taxonomy** label,
 not executive hierarchy. It does not rank the COO above or in place of the Chairman.
@@ -38,6 +38,12 @@ For Executive OS operations, the server derives a decision category from the
 canonical requested operation/state and consults `authority_map.yml` →
 `executive_decision_policy`. Model-supplied `seat`, `actor`, `business_impact`,
 `decision_category`, or `escalation_target` never raises authority.
+
+Creating/updating a canonical Chairman request and committing the Chairman's decision
+are intentionally separate operations: `CHAIRMAN_REQUEST_CREATE_OR_UPDATE` is a
+CEO-delegated escalation operation; `CHAIRMAN_DECISION_COMMIT` is Chairman-reserved.
+A CEO may prepare the smallest decision request and recommendation, but may not
+approve/reject it on the Chairman's behalf.
 
 **Source-of-truth order.** When two sources disagree, the higher layer wins:
 
@@ -66,9 +72,10 @@ canonical requested operation/state and consults `authority_map.yml` →
 
 A new autonomous idea becomes executable only through a typed, authority-checked
 project/directive admission referencing an active P0 or recorded strategy decision
-and the applicable exact strategic-state revision. No runtime scheduler may key
-directly off `strategic_state.yml`, and no model may patch generated agenda output to
-persist its own priority decision.
+and the applicable exact strategic-state revision. That Phase 1G autonomous project-
+admission surface is **designed but not armed**. No runtime scheduler may key directly
+off `strategic_state.yml`, and no model may patch generated agenda output to persist
+its own priority decision.
 
 **A worker may not reinterpret a lower layer to override a higher layer.** Finding
 code that does X is not authority to do X. When layer 6 contradicts layers 1–3, that
