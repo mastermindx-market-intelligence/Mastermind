@@ -160,6 +160,78 @@ def test_tracked_vendor_symlink_is_worker_readable_and_launch_clean(
     assert observation.dirty is False
 
 
+def test_shared_index_stays_group_readable_after_control_cleanliness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Control cleanliness must not rewrite `.git/index` to mode 0600.
+
+    Real-host Phase 1C-A Gate B: after shared-group preparation, control
+    `git status` refreshed the index under umask 077 and left it 0600.
+    Worker `status --porcelain=v1 -z --untracked-files=all` then failed with
+    ``.git/index: index file open failed: Permission denied``.
+    """
+
+    source, base_sha = _repository(tmp_path)
+    recorded_envs: list[dict[str, str]] = []
+    recorded_argv: list[tuple[str, ...]] = []
+    index_mode_before_status: list[int] = []
+    real_run_bytes = executive_workspace._run_bytes
+
+    def observed_run_bytes(argv, *, cwd, env):
+        recorded_envs.append(dict(env))
+        recorded_argv.append(tuple(argv))
+        index = Path(cwd) / ".git" / "index"
+        if index.exists() and not index_mode_before_status:
+            index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
+        return real_run_bytes(argv, cwd=cwd, env=env)
+
+    monkeypatch.setattr(executive_workspace, "_run_bytes", observed_run_bytes)
+    previous_umask = os.umask(0o077)
+    try:
+        receipt = prepare_credentialless_clone(
+            source,
+            tmp_path / "workspaces",
+            job_id="JOB-INDEX",
+            base_sha=base_sha,
+            shared_gid=os.getegid(),
+        )
+    finally:
+        os.umask(previous_umask)
+
+    workspace = Path(receipt.workspace_path)
+    index = workspace / ".git" / "index"
+    final_info = index.stat()
+    final_mode = stat.S_IMODE(final_info.st_mode)
+
+    assert recorded_argv == [
+        ("git", *executive_workspace.LAUNCH_CLEAN_STATUS_ARGS),
+        ("git", *executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS),
+    ]
+    assert recorded_envs
+    assert all(env.get("GIT_OPTIONAL_LOCKS") == "0" for env in recorded_envs)
+    assert index_mode_before_status
+    before_mode = index_mode_before_status[0]
+    assert before_mode & stat.S_IRGRP
+    assert not before_mode & stat.S_IWGRP
+    assert not before_mode & stat.S_IRWXO
+    assert final_info.st_gid == os.getegid()
+    assert final_mode & stat.S_IRGRP
+    assert not final_mode & stat.S_IWGRP
+    assert not final_mode & stat.S_IRWXO
+    assert final_mode & stat.S_IRGRP == before_mode & stat.S_IRGRP
+
+    observation = executive_workspace.observe_launch_cleanliness(
+        lambda arguments: subprocess.run(
+            ["git", *arguments],
+            cwd=workspace,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout
+    )
+    assert observation.dirty is False
+
+
 def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
