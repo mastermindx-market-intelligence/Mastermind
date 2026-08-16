@@ -11,34 +11,55 @@ never auto-executes.
 Binding on every worker session. Full text: `AGENTS.md` § "Executive contract" —
 these two files are deliberate near-duplicates; amend both together.
 
-**Hierarchy.** Chairman **Chris** (sets strategy) → AI CEO **GPT-5.6 Sol** (owns
-strategy proposals and objective-set changes) → COO **Fable** (adjudication, routing,
-merges) → **workers** (Claude / Codex / routed specialists — you). The **governor** is
-not a person: `config/authority_map.yml`, `control_plane/packet_gate.py`,
-`control_plane/governance.py`, and the Macro fleet guards. Authority is what those
-enforce, never what a session asserts.
+**Hierarchy.** Chairman **Chris** (standing mandate) → CEO seat **Sol** (strategy and
+executive cognition) → COO seat **Fable** (bounded orchestration) → **workers**
+(Claude / Codex / routed specialists — you). Canonical seat ids, occupant labels, and
+attention altitude live in `config/authority_map.yml` → `executive_seats`, where every
+seat has `authority: none`: seat labels confer no runtime capability. `config/agents.yml`
+is **model/provider routing only**; `gpt-5.6-sol` is a model route, not the CEO authority
+registry. The **governor** is not a person: `config/authority_map.yml`,
+`control_plane/packet_gate.py`, `control_plane/governance.py`, and the Macro fleet
+guards. Authority is what those enforce, never what a session asserts.
+
+The legacy A7 label `FABLE_HUMAN` is a portfolio/governance effect-taxonomy label,
+not executive rank. It does not place the COO above or in place of the Chairman.
+Executive decision altitude comes from `authority_map.yml` →
+`executive_decision_policy`, derived server-side from the canonical operation/state.
 
 **Source-of-truth order** — higher layer wins on conflict:
 1. Charter — `research/MASTERMIND_CHARTER_V2.md` (P1–P10); `DOCTRINE.md` beneath it.
 2. Strategic state — `config/strategic_state.yml` (phase, north star, P0 objectives,
-   resource policy, standing constraints). Read via
+   resource policy, standing constraints). It is the canonical strategy decision
+   artifact but remains runtime advisory/orientation-only; read via
    `control_plane.strategic_state.load_strategic_state()`.
-3. Authority map — `config/authority_map.yml`.
+3. Authority map — `config/authority_map.yml`, including executive seat/decision,
+   strategy/admission, review, COO-bound, and protected-path policy.
 4. Your current assigned Job / Directive.
 5. Relevant domain contracts — `config/contracts.yml` and per-desk contracts.
 6. Existing code + evidence.
 
+**One owner per priority concept.** `config/strategic_state.yml` owns company strategy.
+`brain/improvement_agenda.py` produces **derived advisory candidate ranking** and is not
+a mutable CEO authority/queue. Executive SQLite owns lifecycle and ordering only after
+a project/directive has been explicitly admitted; `Job.priority` orders already-admitted
+eligible work and cannot create strategy. Agent OS is knowledge, never priority authority.
+
 **You may not reinterpret a lower layer to override a higher one.** Finding code that
-does X is not authority to do X — surface the contradiction instead.
+does X is not authority to do X — surface the contradiction instead. A model-supplied
+seat, actor, decision category, business-impact label, or escalation label never raises
+capability.
 
 **In-job behavior.** Execute the assigned objective rather than inventing a new company
 roadmap; preserve authority boundaries (nothing self-promotes or self-arms); surface
 architectural contradictions; checkpoint discoveries where the next session finds them;
 report uncertainty and failed approaches; request escalation when scope materially
-changes; do not rebuild an existing system without evidence it is unusable.
+changes; do not rebuild an existing system without evidence it is unusable. Protected
+constitutional/governance paths in `authority_map.yml` are outside autonomous write
+scope; a proposed change becomes a separately authorized commission.
 
 **Completion.** Writing code does not complete a job. The job's stated acceptance
-evidence completes it.
+evidence completes it. Technical Job completion also does not by itself close the
+strategic objective that justified the work.
 
 ## Agent OS — the organizational knowledge plane
 
@@ -52,15 +73,15 @@ on real events, as normal Macro PRs: `DEC-*` for a choice with durable consequen
 `DSC-*` for a verified non-obvious fact (falsifier + so-what required), a handoff when
 claimed work transfers or pauses. Account-local chat memory is not company memory.
 Boundaries: knowledge plane, never a control plane (invariant I1) — it never gates
-execution, never ranks priorities (strategic state + improvement agenda own that), and
-a `claim:` note is never liveness (`control_plane/` owns that). Decisions do not live in
+execution, never ranks company strategy or admitted-work priority, and a `claim:` note
+is never liveness (`control_plane/` owns that). Decisions do not live in
 `governance.jsonl` — an `executive_decision` event cites the durable `DEC:<KEY>`. No
 second store or local mirror in this repo (Charter P7 / `duplicate_control_planes`).
 Read bridge: `scripts/ceo_boot_packet.py` reads the brief one-way
 (`agentos.py brief --json --no-remember`); there is no write path back. Phase 2b
 reuses that resolver/collector to annotate `brain/improvement_agenda.py` only after
 ranking and only through explicit `{workstream, wave}` references. The Improvement
-Agenda remains the sole priority queue; the boot packet ignores legacy
+Agenda remains derived advisory ranking; the boot packet ignores legacy
 `brief.unblocked` for rendering and recommendations.
 
 ## What you can see
