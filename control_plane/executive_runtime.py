@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Sequence
 from uuid import uuid4
 
 from control_plane.executive_authority import (
@@ -35,13 +35,20 @@ from control_plane.executive_authority import (
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_LEASE_SECONDS = 60
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
 _ROOT = Path(__file__).resolve().parent.parent
 _DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
 _WORKER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _COMMAND_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_ROUTING_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_SEAT_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
+_JOB_SEATS = frozenset({"coo", "ceo", "chairman"})
+_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
+_ESCALATION_RANK = {"coo": 0, "ceo": 1, "chairman": 2}
+_COST_CLASS_RANK = {"small": 0, "default": 1, "frontier": 2}
+_MAX_JOB_DEPTH = 64
 
 
 class RuntimeProofError(RuntimeError):
@@ -106,6 +113,13 @@ _TERMINAL_ATTEMPT_STATUSES = {
     AttemptStatus.LOST,
     AttemptStatus.COMPLETED,
     AttemptStatus.CANCELLED,
+}
+_TERMINAL_JOB_STATUSES = {
+    JobStatus.RATE_LIMITED,
+    JobStatus.FAILED,
+    JobStatus.LOST,
+    JobStatus.COMPLETED,
+    JobStatus.CANCELLED,
 }
 _ACTIVE_JOB_STATUS_BY_ATTEMPT = {
     AttemptStatus.CLAIMED: JobStatus.RUNNING,
@@ -186,6 +200,63 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
     result: dict[str, Any] = {"eligible_quota_classes": eligible}
+
+    aliases_raw = raw.get("preferred_model_aliases") or []
+    if isinstance(aliases_raw, str):
+        aliases_raw = [aliases_raw]
+    if not isinstance(aliases_raw, (list, tuple)) or len(aliases_raw) > 16:
+        raise StateConflict("preferred_model_aliases must be a bounded list")
+    aliases: list[str] = []
+    for item in aliases_raw:
+        alias = str(item).strip().lower()
+        if _ROUTING_VALUE_RE.fullmatch(alias) is None:
+            raise StateConflict("preferred_model_aliases contains an invalid alias")
+        if alias not in aliases:
+            aliases.append(alias)
+    if aliases:
+        result["preferred_model_aliases"] = aliases
+
+    excluded_raw = raw.get("excluded_worker_ids") or []
+    if isinstance(excluded_raw, str):
+        excluded_raw = [excluded_raw]
+    if not isinstance(excluded_raw, (list, tuple)) or len(excluded_raw) > 16:
+        raise StateConflict("excluded_worker_ids must be a bounded list")
+    excluded: list[str] = []
+    for item in excluded_raw:
+        worker_id = str(item).strip()
+        if _WORKER_ID_RE.fullmatch(worker_id) is None:
+            raise StateConflict("excluded_worker_ids contains an invalid worker id")
+        if worker_id not in excluded:
+            excluded.append(worker_id)
+    if excluded:
+        result["excluded_worker_ids"] = excluded
+
+    for key in ("task_kind", "risk", "ambiguity", "routing_policy_version"):
+        normalized = str(raw.get(key) or "").strip().lower()
+        if normalized:
+            if _ROUTING_VALUE_RE.fullmatch(normalized) is None:
+                raise StateConflict(f"constraint {key} must be a bounded identifier")
+            result[key] = normalized
+
+    if aliases and "routing_policy_version" not in result:
+        raise StateConflict(
+            "preferred_model_aliases requires routing_policy_version"
+        )
+
+    reason_codes_raw = raw.get("routing_reason_codes") or []
+    if isinstance(reason_codes_raw, str):
+        reason_codes_raw = [reason_codes_raw]
+    if not isinstance(reason_codes_raw, (list, tuple)) or len(reason_codes_raw) > 16:
+        raise StateConflict("routing_reason_codes must be a bounded list")
+    reason_codes: list[str] = []
+    for item in reason_codes_raw:
+        reason = str(item).strip().lower()
+        if _ROUTING_VALUE_RE.fullmatch(reason) is None:
+            raise StateConflict("routing_reason_codes contains an invalid value")
+        if reason not in reason_codes:
+            reason_codes.append(reason)
+    if reason_codes:
+        result["routing_reason_codes"] = reason_codes
     if provider:
         result["provider"] = provider
     if capabilities:
@@ -202,6 +273,125 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
     return result
 
 
+def _normalise_seat(value: str, *, field: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if _SEAT_RE.fullmatch(normalized) is None or normalized not in _JOB_SEATS:
+        raise StateConflict(
+            f"{field} must be one of {', '.join(sorted(_JOB_SEATS))}"
+        )
+    return normalized
+
+
+def _normalise_business_impact(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized not in _BUSINESS_IMPACTS:
+        raise StateConflict(
+            "business_impact must be one of routine, material, critical"
+        )
+    return normalized
+
+
+def _assert_child_does_not_widen_parent(
+    parent_row: sqlite3.Row,
+    *,
+    requested: Sequence[str],
+    allowed_write_paths: Sequence[str],
+    constraints: dict[str, Any],
+) -> None:
+    """Refuse a child that would exceed its parent's grant.  Shrink-only (L6)."""
+
+    parent_authorities = {
+        str(item).strip().upper()
+        for item in _json_loads(parent_row["requested_authorities_json"], fallback=[])
+        if str(item).strip()
+    }
+    extra_authorities = sorted(set(requested) - parent_authorities)
+    if extra_authorities:
+        raise StateConflict(
+            "child requested_authorities may only shrink relative to the parent: "
+            + ", ".join(extra_authorities)
+        )
+    parent_paths = {
+        str(item)
+        for item in _json_loads(parent_row["allowed_write_paths_json"], fallback=[])
+    }
+    extra_paths = sorted(set(allowed_write_paths) - parent_paths)
+    if extra_paths:
+        raise StateConflict(
+            "child allowed_write_paths may only shrink relative to the parent: "
+            + ", ".join(extra_paths)
+        )
+    parent_cost = str(
+        _json_loads(parent_row["constraints_json"], fallback={}).get("cost_class") or ""
+    ).strip().lower()
+    child_cost = str(constraints.get("cost_class") or "").strip().lower()
+    if parent_cost and child_cost:
+        parent_rank = _COST_CLASS_RANK.get(parent_cost)
+        child_rank = _COST_CLASS_RANK.get(child_cost)
+        if (
+            parent_rank is None
+            or child_rank is None
+            or child_rank > parent_rank
+        ):
+            raise StateConflict(
+                "child cost_class may only shrink relative to the parent"
+            )
+
+
+def _has_executive_provenance(
+    provenance: dict[str, Any] | None, *, target: str
+) -> bool:
+    """Require a typed executive record before a job can name a higher seat."""
+
+    if not isinstance(provenance, dict):
+        return False
+    schema = str(provenance.get("schema") or "")
+    actor = str(provenance.get("actor") or "").strip().lower()
+    if target == "ceo":
+        return schema == "mastermind.ceo_intent.v1"
+    return (
+        schema in {"mastermind.executive_decision.v1", "mastermind.chairman_decision.v1"}
+        and actor in {"chairman", "chris", "chairman-chris"}
+    )
+
+
+def _capacity_route_metadata(row: sqlite3.Row) -> dict[str, Any]:
+    metadata = _json_loads(row["metadata_json"], fallback={})
+    if not isinstance(metadata, dict):
+        raise PersistenceError("worker quota-class metadata must be a mapping")
+    return metadata
+
+
+def _capacity_model_alias(row: sqlite3.Row) -> str:
+    metadata = _capacity_route_metadata(row)
+    return str(metadata.get("model_alias") or "").strip().lower()
+
+
+def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bool:
+    if str(row["worker_id"]) in set(constraints.get("excluded_worker_ids") or []):
+        return False
+    aliases = constraints.get("preferred_model_aliases") or []
+    if not aliases:
+        return True
+    metadata = _capacity_route_metadata(row)
+    worker_policy_version = str(
+        metadata.get("routing_policy_version") or ""
+    ).strip().lower()
+    return (
+        _capacity_model_alias(row) in aliases
+        and worker_policy_version == constraints.get("routing_policy_version")
+    )
+
+
+def _capacity_route_rank(
+    row: sqlite3.Row, constraints: dict[str, Any]
+) -> tuple[int, str, str]:
+    aliases = list(constraints.get("preferred_model_aliases") or [])
+    model_alias = _capacity_model_alias(row)
+    rank = aliases.index(model_alias) if model_alias in aliases else len(aliases)
+    return rank, str(row["worker_id"]), str(row["quota_class"])
+
+
 @dataclasses.dataclass(frozen=True)
 class JobPayload:
     summary: str = ""
@@ -210,6 +400,7 @@ class JobPayload:
     artifacts: list[str] = dataclasses.field(default_factory=list)
     next_actions: list[str] = dataclasses.field(default_factory=list)
     errors: list[str] = dataclasses.field(default_factory=list)
+    verdict: str = ""
 
     @classmethod
     def from_value(cls, value: "JobPayload | dict[str, Any]") -> "JobPayload":
@@ -226,6 +417,11 @@ class JobPayload:
                 raise StateConflict(f"payload field {key!r} must be a list")
             return [str(item) for item in raw]
 
+        verdict = str(value.get("verdict") or "").strip().lower()
+        if verdict not in {"", "approve", "reject"}:
+            raise StateConflict(
+                "payload field 'verdict' must be empty, 'approve', or 'reject'"
+            )
         return cls(
             summary=str(value.get("summary") or ""),
             completed_steps=_strings("completed_steps"),
@@ -233,10 +429,17 @@ class JobPayload:
             artifacts=_strings("artifacts"),
             next_actions=_strings("next_actions"),
             errors=_strings("errors"),
+            verdict=verdict,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        value = dataclasses.asdict(self)
+        # Verdict is an additive Phase 1F-B field.  Omitting the empty default
+        # keeps legacy checkpoint/result payloads byte-shape compatible while
+        # still persisting approve/reject on review jobs.
+        if not self.verdict:
+            value.pop("verdict", None)
+        return value
 
 
 @dataclasses.dataclass(frozen=True)
@@ -304,6 +507,14 @@ class Job:
     authority_policy_hash: str = ""
     allowed_write_paths: list[str] = dataclasses.field(default_factory=list)
     validation_commands: list[list[str]] = dataclasses.field(default_factory=list)
+    parent_job_id: str | None = None
+    root_job_id: str = ""
+    depth: int = 0
+    owner_seat: str = "coo"
+    escalation_target: str = "coo"
+    business_impact: str = "routine"
+    review_required: bool = False
+    reviews_job_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
@@ -599,8 +810,66 @@ _MIGRATION_1: tuple[str, ...] = (
     """,
 )
 
+_MIGRATION_2: tuple[str, ...] = (
+    "ALTER TABLE jobs ADD COLUMN parent_job_id TEXT REFERENCES jobs(job_id) ON DELETE RESTRICT",
+    "ALTER TABLE jobs ADD COLUMN root_job_id TEXT",
+    "ALTER TABLE jobs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0 CHECK(depth >= 0)",
+    "ALTER TABLE jobs ADD COLUMN owner_seat TEXT NOT NULL DEFAULT 'coo' CHECK(owner_seat IN ('coo','ceo','chairman'))",
+    "ALTER TABLE jobs ADD COLUMN escalation_target TEXT NOT NULL DEFAULT 'coo' CHECK(escalation_target IN ('coo','ceo','chairman'))",
+    "ALTER TABLE jobs ADD COLUMN business_impact TEXT NOT NULL DEFAULT 'routine' CHECK(business_impact IN ('routine','material','critical'))",
+    "ALTER TABLE jobs ADD COLUMN review_required INTEGER NOT NULL DEFAULT 0 CHECK(review_required IN (0,1))",
+    "ALTER TABLE jobs ADD COLUMN reviews_job_id TEXT REFERENCES jobs(job_id) ON DELETE RESTRICT",
+    "UPDATE jobs SET root_job_id=job_id WHERE root_job_id IS NULL",
+    "CREATE INDEX jobs_parent_dispatch ON jobs(parent_job_id,status,available_at_ms,priority DESC,created_at_ms,job_id)",
+    "CREATE INDEX jobs_root_order ON jobs(root_job_id,depth,created_at_ms,job_id)",
+    """
+    CREATE TRIGGER jobs_hierarchy_is_immutable
+    BEFORE UPDATE OF parent_job_id,root_job_id,depth,reviews_job_id ON jobs
+    WHEN OLD.parent_job_id IS NOT NEW.parent_job_id
+      OR OLD.root_job_id IS NOT NEW.root_job_id
+      OR OLD.depth IS NOT NEW.depth
+      OR OLD.reviews_job_id IS NOT NEW.reviews_job_id
+    BEGIN
+      SELECT RAISE(ABORT, 'job hierarchy and review pointer are immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER jobs_review_pointer_contract
+    BEFORE INSERT ON jobs
+    WHEN NEW.reviews_job_id IS NOT NULL AND NEW.review_required != 0
+    BEGIN
+      SELECT RAISE(ABORT, 'a review job cannot require review');
+    END
+    """,
+    """
+    CREATE TRIGGER jobs_review_pointer_contract_update
+    BEFORE UPDATE OF review_required,reviews_job_id ON jobs
+    WHEN NEW.reviews_job_id IS NOT NULL AND NEW.review_required != 0
+    BEGIN
+      SELECT RAISE(ABORT, 'a review job cannot require review');
+    END
+    """,
+    """
+    CREATE TRIGGER jobs_root_contract
+    BEFORE INSERT ON jobs
+    WHEN NEW.root_job_id IS NULL OR length(trim(NEW.root_job_id)) = 0
+    BEGIN
+      SELECT RAISE(ABORT, 'root_job_id is required');
+    END
+    """,
+    """
+    CREATE TRIGGER jobs_parent_is_not_self
+    BEFORE INSERT ON jobs
+    WHEN NEW.parent_job_id IS NOT NULL AND NEW.parent_job_id = NEW.job_id
+    BEGIN
+      SELECT RAISE(ABORT, 'a job cannot be its own parent');
+    END
+    """,
+)
+
 _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (1, "executive_runtime_core", _MIGRATION_1),
+    (2, "durable_parent_child_review_contract", _MIGRATION_2),
 )
 
 
@@ -1073,6 +1342,14 @@ def _job_from_row(row: sqlite3.Row) -> Job:
         validation_commands=list(
             _json_loads(row["validation_commands_json"], fallback=[])
         ),
+        parent_job_id=row["parent_job_id"],
+        root_job_id=str(row["root_job_id"] or row["job_id"]),
+        depth=int(row["depth"]),
+        owner_seat=str(row["owner_seat"]),
+        escalation_target=str(row["escalation_target"]),
+        business_impact=str(row["business_impact"]),
+        review_required=bool(int(row["review_required"])),
+        reviews_job_id=row["reviews_job_id"],
     )
 
 
@@ -1090,6 +1367,98 @@ def _authorize_job_row(row: sqlite3.Row):
         )
     except (AuthorityDenied, AuthorityPolicyError) as exc:
         raise StateConflict(f"job authority is denied at claim time: {exc}") from exc
+
+
+def _living_child_rows(
+    connection: sqlite3.Connection, parent_job_id: str
+) -> list[sqlite3.Row]:
+    placeholders = ",".join("?" for _ in _TERMINAL_JOB_STATUSES)
+    terminal = [status.value for status in _TERMINAL_JOB_STATUSES]
+    return connection.execute(
+        f"SELECT * FROM jobs WHERE parent_job_id=? AND status NOT IN ({placeholders}) "
+        "ORDER BY created_at_ms,job_id",
+        (parent_job_id, *terminal),
+    ).fetchall()
+
+
+def _review_void_evidence(
+    connection: sqlite3.Connection, *, job_id: str, worker_id: str
+) -> dict[str, Any] | None:
+    review = connection.execute(
+        "SELECT reviews_job_id FROM jobs WHERE job_id=?", (job_id,)
+    ).fetchone()
+    reviewed_id = review["reviews_job_id"] if review else None
+    if not reviewed_id:
+        return None
+    reviewed = connection.execute(
+        "SELECT assigned_worker_id,current_attempt_id FROM jobs WHERE job_id=?",
+        (reviewed_id,),
+    ).fetchone()
+    if reviewed is None or not reviewed["assigned_worker_id"]:
+        return None
+    if str(reviewed["assigned_worker_id"]) != str(worker_id):
+        return {"status": "INDEPENDENT", "reviews_job_id": str(reviewed_id)}
+    return {
+        "status": "VOID",
+        "reason": "review_not_independent",
+        "voids": reviewed["current_attempt_id"],
+        "reviews_job_id": str(reviewed_id),
+    }
+
+
+def _assert_parent_aggregation_allowed(
+    connection: sqlite3.Connection, *, parent_job_id: str
+) -> None:
+    """Fail closed until the explicit Phase 1F-C cycle is allowed to aggregate."""
+
+    children = connection.execute(
+        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY created_at_ms,job_id",
+        (parent_job_id,),
+    ).fetchall()
+    if not children:
+        return
+    living = [
+        row
+        for row in children
+        if JobStatus(row["status"]) not in _TERMINAL_JOB_STATUSES
+    ]
+    if living:
+        raise StateConflict(
+            "aggregation_blocked: parent has living child job(s) "
+            + ", ".join(str(row["job_id"]) for row in living)
+        )
+    for child in children:
+        if not bool(int(child["review_required"])):
+            continue
+        reviews = connection.execute(
+            """
+            SELECT r.*,a.worker_id AS review_worker_id
+            FROM jobs r
+            LEFT JOIN attempts a ON a.attempt_id=r.current_attempt_id
+            WHERE r.reviews_job_id=? AND r.status='COMPLETED'
+            ORDER BY r.updated_at_ms,r.job_id
+            """,
+            (child["job_id"],),
+        ).fetchall()
+        independent_approval = False
+        for review in reviews:
+            payload = JobPayload.from_value(
+                _json_loads(review["result_json"], fallback={})
+            )
+            if (
+                payload.verdict == "approve"
+                and review["review_worker_id"]
+                and child["assigned_worker_id"]
+                and str(review["review_worker_id"]) != str(child["assigned_worker_id"])
+            ):
+                independent_approval = True
+                break
+        if not independent_approval:
+            raise StateConflict(
+                "aggregation_blocked: child "
+                f"{child['job_id']} requires an independent completed review "
+                "with verdict=approve"
+            )
 
 
 def _event_from_row(row: sqlite3.Row) -> Event:
@@ -1547,6 +1916,12 @@ class JobRegistry:
         validation_commands: list[list[str]] | tuple[tuple[str, ...], ...] | None = None,
         command_id: str | None = None,
         provenance: dict[str, Any] | None = None,
+        parent_job_id: str | None = None,
+        owner_seat: str = "coo",
+        escalation_target: str = "coo",
+        business_impact: str = "routine",
+        review_required: bool = False,
+        reviews_job_id: str | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -1571,6 +1946,35 @@ class JobRegistry:
             raise StateConflict("command_id must be a bounded identifier")
         if int(attempt_limit) <= 0:
             raise StateConflict("attempt_limit must be positive")
+        owner_seat = _normalise_seat(owner_seat, field="owner_seat")
+        escalation_target = _normalise_seat(
+            escalation_target, field="escalation_target"
+        )
+        business_impact = _normalise_business_impact(business_impact)
+        if not isinstance(review_required, bool):
+            raise StateConflict("review_required must be a boolean")
+        if reviews_job_id is not None and review_required:
+            raise StateConflict(
+                "a review job cannot itself require review when reviews_job_id is set"
+            )
+        parent_job_id = str(parent_job_id).strip() if parent_job_id else None
+        reviews_job_id = str(reviews_job_id).strip() if reviews_job_id else None
+        if parent_job_id == "":
+            parent_job_id = None
+        if reviews_job_id == "":
+            reviews_job_id = None
+        if owner_seat != "coo" and not _has_executive_provenance(
+            provenance, target=owner_seat
+        ):
+            raise StateConflict(
+                f"owner_seat={owner_seat!r} requires its typed executive provenance"
+            )
+        if escalation_target != "coo" and not _has_executive_provenance(
+            provenance, target=escalation_target
+        ):
+            raise StateConflict(
+                f"escalation_target={escalation_target!r} requires its typed executive provenance"
+            )
         normalized_constraints = _normalise_constraints(constraints)
         try:
             authority = ExecutiveAuthorityPolicy.load().authorize(
@@ -1583,6 +1987,49 @@ class JobRegistry:
             raise StateConflict(f"job authority is denied: {exc}") from exc
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
+            parent_row = None
+            if parent_job_id is not None:
+                parent_row = connection.execute(
+                    """
+                    SELECT job_id,root_job_id,depth,escalation_target,
+                           requested_authorities_json,allowed_write_paths_json,
+                           constraints_json
+                    FROM jobs WHERE job_id=?
+                    """,
+                    (parent_job_id,),
+                ).fetchone()
+                if parent_row is None:
+                    raise StateConflict(f"parent job {parent_job_id!r} does not exist")
+                if int(parent_row["depth"]) + 1 > _MAX_JOB_DEPTH:
+                    raise StateConflict(
+                        f"parent job {parent_job_id} would exceed the {_MAX_JOB_DEPTH}-level hierarchy bound"
+                    )
+                if _ESCALATION_RANK[escalation_target] > _ESCALATION_RANK[
+                    str(parent_row["escalation_target"])
+                ]:
+                    raise StateConflict(
+                        "escalation_target may only shrink toward a less authoritative seat"
+                    )
+                _assert_child_does_not_widen_parent(
+                    parent_row,
+                    requested=list(authority.requested),
+                    allowed_write_paths=list(authority.allowed_write_paths),
+                    constraints=normalized_constraints,
+                )
+            if reviews_job_id is not None:
+                reviewed_row = connection.execute(
+                    "SELECT job_id,parent_job_id,root_job_id FROM jobs WHERE job_id=?",
+                    (reviews_job_id,),
+                ).fetchone()
+                if reviewed_row is None:
+                    raise StateConflict(f"reviewed job {reviews_job_id!r} does not exist")
+                if reviewed_row["job_id"] == parent_job_id:
+                    raise StateConflict("a job cannot review its own parent container")
+                if parent_job_id is None or reviewed_row["parent_job_id"] != parent_job_id:
+                    raise StateConflict(
+                        "a review job must be a sibling of the job it reviews"
+                    )
+            depth = 0 if parent_row is None else int(parent_row["depth"]) + 1
             numbers: list[int] = []
             for row in connection.execute("SELECT job_id FROM jobs"):
                 match = re.fullmatch(r"JOB-(\d+)", str(row[0]))
@@ -1590,14 +2037,20 @@ class JobRegistry:
                     numbers.append(int(match.group(1)))
             number = max(numbers, default=0) + 1
             job_id = f"JOB-{number:03d}"
+            root_job_id = (
+                job_id
+                if parent_row is None
+                else str(parent_row["root_job_id"] or parent_row["job_id"])
+            )
             connection.execute(
                 """
                 INSERT INTO jobs(
                   job_id,objective,department,priority,status,authority_level,branch,worktree,
                   constraints_json,requested_authorities_json,authority_policy_hash,
                   allowed_write_paths_json,validation_commands_json,attempt_limit,
-                  available_at_ms,created_at_ms,updated_at_ms
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  available_at_ms,created_at_ms,updated_at_ms,parent_job_id,root_job_id,depth,
+                  owner_seat,escalation_target,business_impact,review_required,reviews_job_id
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     job_id,
@@ -1619,9 +2072,27 @@ class JobRegistry:
                     timestamp if available_at_ms is None else int(available_at_ms),
                     timestamp,
                     timestamp,
+                    parent_job_id,
+                    root_job_id,
+                    depth,
+                    owner_seat,
+                    escalation_target,
+                    business_impact,
+                    int(review_required),
+                    reviews_job_id,
                 ),
             )
-            event_payload: dict[str, Any] = {"status": JobStatus.QUEUED.value}
+            event_payload: dict[str, Any] = {
+                "status": JobStatus.QUEUED.value,
+                "parent_job_id": parent_job_id,
+                "root_job_id": root_job_id,
+                "depth": depth,
+                "owner_seat": owner_seat,
+                "escalation_target": escalation_target,
+                "business_impact": business_impact,
+                "review_required": review_required,
+                "reviews_job_id": reviews_job_id,
+            }
             if provenance is not None:
                 event_payload["provenance"] = dict(provenance)
             self.store.append_event(
@@ -1963,6 +2434,12 @@ class AttemptRegistry:
                 raise StateConflict(
                     f"job {job_id} is {job_row['status']}, not QUEUED"
                 )
+            living_children = _living_child_rows(connection, job_id)
+            if living_children:
+                raise StateConflict(
+                    "container job cannot be claimed while child job(s) are living: "
+                    + ", ".join(str(row["job_id"]) for row in living_children)
+                )
             if timestamp < int(job_row["available_at_ms"]):
                 return None
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
@@ -1993,6 +2470,8 @@ class AttemptRegistry:
                     continue
                 if selected_quota and row["quota_class"] != selected_quota:
                     continue
+                if not _capacity_matches_route(row, constraints):
+                    continue
                 if row["quota_class"] not in eligible_classes:
                     continue
                 if required_provider and row["provider"] != required_provider:
@@ -2015,6 +2494,7 @@ class AttemptRegistry:
                 candidates.append(row)
             if not candidates:
                 return None
+            candidates.sort(key=lambda row: _capacity_route_rank(row, constraints))
             capacity = candidates[0]
             attempt_id = f"ATT-{uuid4().hex}"
             lease_token = secrets.token_urlsafe(32)
@@ -2101,6 +2581,16 @@ class AttemptRegistry:
                     "fence_generation": fence,
                     "authority_policy_hash": authority.policy_sha256,
                     "lease_expires_at_ms": timestamp + duration * 1000,
+                    "routing_policy_version": constraints.get(
+                        "routing_policy_version"
+                    ),
+                    "preferred_model_aliases": constraints.get(
+                        "preferred_model_aliases", []
+                    ),
+                    "selected_model_alias": _capacity_model_alias(capacity) or None,
+                    "routing_reason_codes": constraints.get(
+                        "routing_reason_codes", []
+                    ),
                 },
                 timestamp_ms=timestamp,
             )
@@ -2707,6 +3197,15 @@ class AttemptRegistry:
                 timestamp=timestamp,
                 statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
             )
+            if status is AttemptStatus.COMPLETED:
+                _assert_parent_aggregation_allowed(
+                    connection, parent_job_id=str(row["job_id"])
+                )
+            review_evidence = _review_void_evidence(
+                connection,
+                job_id=str(row["job_id"]),
+                worker_id=str(row["worker_id"]),
+            )
             result_json = _json_dumps(structured)
             error_json = result_json if status == AttemptStatus.FAILED else None
             connection.execute(
@@ -2742,6 +3241,9 @@ class AttemptRegistry:
                 """,
                 (timestamp, row["worker_id"], row["quota_class"], attempt_id),
             )
+            event_payload: dict[str, Any] = {"status": job_status.value}
+            if review_evidence is not None:
+                event_payload["review"] = review_evidence
             self.store.append_event(
                 connection,
                 aggregate_type="job",
@@ -2751,7 +3253,7 @@ class AttemptRegistry:
                 attempt_id=attempt_id,
                 worker_id=str(row["worker_id"]),
                 quota_class=str(row["quota_class"]),
-                payload={"status": job_status.value},
+                payload=event_payload,
                 timestamp_ms=timestamp,
             )
             job_id = str(row["job_id"])
@@ -3218,8 +3720,11 @@ class ResourceBroker:
                 ORDER BY q.worker_id,q.quota_class
                 """
             ).fetchall()
+        candidates: list[sqlite3.Row] = []
         for row in rows:
             if worker_id and row["worker_id"] != worker_id:
+                continue
+            if not _capacity_matches_route(row, job.constraints):
                 continue
             if row["quota_class"] not in eligible:
                 continue
@@ -3235,8 +3740,11 @@ class ResourceBroker:
                 continue
             quota = _quota_from_row(row)
             if required_capabilities.issubset(set(quota.capabilities)):
-                return quota
-        return None
+                candidates.append(row)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda row: _capacity_route_rank(row, job.constraints))
+        return _quota_from_row(candidates[0])
 
     def select_worker(self, job: Job | str) -> Worker | None:
         selected_job = (
@@ -3246,6 +3754,9 @@ class ResourceBroker:
             raise StateConflict(f"job {job!r} does not exist")
         if selected_job.status != JobStatus.QUEUED:
             return None
+        with self.store.read() as connection:
+            if _living_child_rows(connection, selected_job.job_id):
+                return None
         capacity = self._matching_capacity(selected_job)
         return (
             WorkerRegistry(self.store).get_worker(capacity.worker_id)

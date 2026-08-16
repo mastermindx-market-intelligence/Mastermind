@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from control_plane.executive_runtime import Runtime, RuntimeProofError
+from control_plane.model_router import (
+    ModelRouter,
+    RoutingPolicyError,
+    WorkRequest,
+)
 
 
 def _json_value(value: Any) -> Any:
@@ -70,9 +75,9 @@ def _parser() -> argparse.ArgumentParser:
         "register-worker", help="Register durable worker capacity without claiming work."
     )
     register.add_argument("worker_id")
-    register.add_argument("--provider", required=True)
+    register.add_argument("--provider")
     register.add_argument("--account-label", required=True)
-    register.add_argument("--worker-type", default="codex")
+    register.add_argument("--worker-type")
     register.add_argument("--capability", action="append", default=[])
     register.add_argument(
         "--quota-class",
@@ -81,8 +86,16 @@ def _parser() -> argparse.ArgumentParser:
         help="Independent capacity class; repeat as needed (default: default).",
     )
     register.add_argument("--model")
+    register.add_argument(
+        "--model-alias",
+        help=(
+            "Reviewed logical model alias from config/executive_worker_routes.json; "
+            "provider/model/effort/cost are then policy-derived."
+        ),
+    )
     register.add_argument("--reasoning-effort")
     register.add_argument("--cost-class")
+    register.add_argument("--routing-policy", type=Path)
 
     create = sub.add_parser(
         "create-job", help="Create an authority-checked queued job without claiming it."
@@ -129,6 +142,62 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     create.add_argument("--attempt-limit", type=int, default=10)
+    create.add_argument(
+        "--parent-job-id",
+        help="Existing durable parent/container job; the new job becomes a bounded child.",
+    )
+    create.add_argument(
+        "--owner-seat",
+        choices=("coo", "ceo", "chairman"),
+        default="coo",
+        help="Recorded owner seat; higher seats require typed executive provenance.",
+    )
+    create.add_argument(
+        "--escalation-target",
+        choices=("coo", "ceo", "chairman"),
+        default="coo",
+        help="Shrink-only escalation target for this durable job.",
+    )
+    create.add_argument(
+        "--business-impact",
+        choices=("routine", "material", "critical"),
+        default="routine",
+        help="Display/audit impact label; it never changes dispatch priority.",
+    )
+    create.add_argument(
+        "--review-required",
+        action="store_true",
+        help="Require a sibling review job with an independent approve verdict before aggregation.",
+    )
+    create.add_argument(
+        "--reviews-job-id",
+        help="Make this child a sibling review job for the named durable job.",
+    )
+    create.add_argument(
+        "--task-kind",
+        help=(
+            "Route a bounded worker task deterministically (implementation, mechanical, "
+            "tests, research, or review)."
+        ),
+    )
+    create.add_argument("--risk", default="routine")
+    create.add_argument("--ambiguity", default="low")
+    create.add_argument("--exclude-worker-id", action="append", default=[])
+    create.add_argument("--routing-policy", type=Path)
+
+    route = sub.add_parser(
+        "route",
+        help=(
+            "Preview a deterministic worker/lead route without opening or mutating "
+            "Executive OS state."
+        ),
+    )
+    route.add_argument("task_kind")
+    route.add_argument("--risk", default="routine")
+    route.add_argument("--ambiguity", default="low")
+    route.add_argument("--capability", action="append", default=[])
+    route.add_argument("--exclude-worker-id", action="append", default=[])
+    route.add_argument("--routing-policy", type=Path)
 
     sub.add_parser("workers", help="List durable worker identities and quota classes.")
     sub.add_parser("jobs", help="List durable jobs.")
@@ -178,39 +247,132 @@ def _supervisor(args: argparse.Namespace, runtime: Runtime):
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "route":
+            decision = ModelRouter.load(args.routing_policy).route(
+                WorkRequest(
+                    task_kind=args.task_kind,
+                    risk=args.risk,
+                    ambiguity=args.ambiguity,
+                    required_capabilities=tuple(args.capability),
+                    excluded_worker_ids=tuple(args.exclude_worker_id),
+                )
+            )
+            _print(decision.to_dict())
+            return 0
+
         runtime = Runtime.at(args.root)
         if args.command == "register-worker":
+            quota_metadata: dict[str, Any] = {}
+            worker_metadata: dict[str, Any] = {}
+            if args.model_alias:
+                if any(
+                    value
+                    for value in (
+                        args.provider,
+                        args.model,
+                        args.reasoning_effort,
+                        args.cost_class,
+                        args.worker_type,
+                    )
+                ):
+                    raise RoutingPolicyError(
+                        "--model-alias cannot be combined with raw "
+                        "provider/model/effort/cost/worker-type"
+                    )
+                router = ModelRouter.load(args.routing_policy)
+                profile = router.resolve_model_alias(args.model_alias)
+                unexpected = set(args.capability) - set(profile.capabilities)
+                if unexpected:
+                    raise RoutingPolicyError(
+                        "model alias does not declare requested capability: "
+                        + ", ".join(sorted(unexpected))
+                    )
+                provider = profile.provider_alias
+                model = profile.model
+                effort = profile.effort
+                cost_class = profile.cost_class
+                capabilities = list(profile.capabilities)
+                worker_type = profile.adapter_id
+                quota_metadata = {
+                    "adapter_id": profile.adapter_id,
+                    "model_alias": profile.model_alias,
+                    "provider_alias": profile.provider_alias,
+                    "routing_policy_version": router.policy_version,
+                }
+                worker_metadata = {
+                    "routing_policy_version": router.policy_version,
+                    "stage1_production_armed": False,
+                }
+            else:
+                if not args.provider:
+                    raise RoutingPolicyError(
+                        "--provider is required unless --model-alias is used"
+                    )
+                provider = args.provider
+                model = args.model
+                effort = args.reasoning_effort
+                cost_class = args.cost_class
+                capabilities = args.capability
+                worker_type = args.worker_type or "codex"
             quota_names = args.quota_class or ["default"]
             quota_classes = {
                 name: {
-                    "provider": args.provider,
-                    "model": args.model,
-                    "effort": args.reasoning_effort,
-                    "cost_class": args.cost_class,
-                    "capabilities": args.capability,
+                    "provider": provider,
+                    "model": model,
+                    "effort": effort,
+                    "cost_class": cost_class,
+                    "capabilities": capabilities,
+                    "metadata": quota_metadata,
                 }
                 for name in quota_names
             }
             _print(
                 runtime.workers.register_worker(
                     args.worker_id,
-                    provider=args.provider,
+                    provider=provider,
                     account_label=args.account_label,
-                    worker_type=args.worker_type,
-                    capabilities=args.capability,
+                    worker_type=worker_type,
+                    capabilities=capabilities,
                     quota_classes=quota_classes,
+                    metadata=worker_metadata,
                 )
             )
         elif args.command == "create-job":
-            constraints = {
-                "provider": args.provider,
-                "model": args.model,
-                "effort": args.reasoning_effort,
-                "cost_class": args.cost_class,
-                "base_sha": args.base_sha,
-                "required_capabilities": args.capability,
-                "eligible_quota_classes": args.quota_class,
-            }
+            if args.task_kind:
+                if any(
+                    value
+                    for value in (
+                        args.provider,
+                        args.model,
+                        args.reasoning_effort,
+                        args.cost_class,
+                    )
+                ):
+                    raise RoutingPolicyError(
+                        "routed jobs cannot select raw provider/model/effort/cost"
+                    )
+                decision = ModelRouter.load(args.routing_policy).route(
+                    WorkRequest(
+                        task_kind=args.task_kind,
+                        risk=args.risk,
+                        ambiguity=args.ambiguity,
+                        required_capabilities=tuple(args.capability),
+                        excluded_worker_ids=tuple(args.exclude_worker_id),
+                    )
+                )
+                constraints = decision.job_constraints()
+                constraints["base_sha"] = args.base_sha
+                constraints["eligible_quota_classes"] = args.quota_class
+            else:
+                constraints = {
+                    "provider": args.provider,
+                    "model": args.model,
+                    "effort": args.reasoning_effort,
+                    "cost_class": args.cost_class,
+                    "base_sha": args.base_sha,
+                    "required_capabilities": args.capability,
+                    "eligible_quota_classes": args.quota_class,
+                }
             _print(
                 runtime.jobs.create_job(
                     args.objective,
@@ -224,6 +386,12 @@ def main(argv: list[str] | None = None) -> int:
                     requested_authorities=args.authority or None,
                     allowed_write_paths=args.allowed_write_path,
                     validation_commands=args.validation_command,
+                    parent_job_id=args.parent_job_id,
+                    owner_seat=args.owner_seat,
+                    escalation_target=args.escalation_target,
+                    business_impact=args.business_impact,
+                    review_required=args.review_required,
+                    reviews_job_id=args.reviews_job_id,
                 )
             )
         elif args.command == "workers":
@@ -250,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         else:  # pragma: no cover - argparse guarantees a known command
             raise AssertionError(args.command)
         return 0
-    except RuntimeProofError as exc:
+    except (RuntimeProofError, RoutingPolicyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

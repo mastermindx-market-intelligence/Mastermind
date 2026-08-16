@@ -30,7 +30,6 @@ from typing import Any, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.codex_worker import (
-    CodexWorkerAdapter,
     CollectionReceipt,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
     LAUNCH_ATTESTATION_SCHEMA_VERSION,
@@ -41,6 +40,7 @@ from control_plane.codex_worker import (
     ValidationReceipt,
     WorkerRunStatus,
 )
+from control_plane.worker_adapter import WorkerExecutionAdapter
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -460,12 +460,12 @@ def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
 
 
 class ExecutiveSupervisor:
-    """Coordinate one durable job with one injected Codex process adapter."""
+    """Coordinate one durable job with one injected worker execution adapter."""
 
     def __init__(
         self,
         runtime: Runtime,
-        adapter: CodexWorkerAdapter,
+        adapter: WorkerExecutionAdapter,
         *,
         codex_home: str | Path,
         runs_root: str | Path | None = None,
@@ -704,6 +704,15 @@ class ExecutiveSupervisor:
             "model": job.constraints.get("model"),
             "effort": job.constraints.get("effort"),
             "cost_class": job.constraints.get("cost_class"),
+            "task_kind": job.constraints.get("task_kind"),
+            "risk": job.constraints.get("risk"),
+            "ambiguity": job.constraints.get("ambiguity"),
+            "preferred_model_aliases": job.constraints.get(
+                "preferred_model_aliases", []
+            ),
+            "routing_policy_version": job.constraints.get(
+                "routing_policy_version"
+            ),
             "assigned_quota_class": attempt.quota_class,
             "checkpoint": job.checkpoint,
         }
@@ -775,6 +784,10 @@ class ExecutiveSupervisor:
         spec: LaunchSpec,
         process_ref: ProcessRef,
     ) -> dict[str, Any]:
+        quota = self.runtime.workers.get_quota_class(
+            lease.attempt.worker_id, lease.attempt.quota_class
+        )
+        quota_metadata = quota.metadata if quota is not None else {}
         attestation_reader = getattr(self.adapter, "launch_attestation", None)
         if callable(attestation_reader):
             attestation_value = attestation_reader(process_ref)
@@ -819,6 +832,15 @@ class ExecutiveSupervisor:
             "authority_policy_hash": lease.attempt.authority_policy_hash,
             "authorities": job.requested_authorities,
             "quota_class": lease.attempt.quota_class,
+            "routing": {
+                "policy_version": job.constraints.get("routing_policy_version"),
+                "preferred_model_aliases": job.constraints.get(
+                    "preferred_model_aliases", []
+                ),
+                "selected_model_alias": quota_metadata.get("model_alias"),
+                "provider_alias": quota_metadata.get("provider_alias"),
+                "adapter_id": quota_metadata.get("adapter_id"),
+            },
         }
 
     def _fail_claim(self, lease: AttemptLease, message: str) -> Job:
