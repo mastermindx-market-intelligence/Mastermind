@@ -268,15 +268,6 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
         if not sandbox_mode:
             unobservable.append("sandbox")
 
-        plugin_rows = try_rpc("plugin/list", {}, timeout=5.0)
-        if plugin_rows and isinstance(plugin_rows.get("data"), list):
-            extra_plugins = [
-                str(item.get("name") or item.get("id") or "")
-                for item in plugin_rows["data"]
-                if isinstance(item, dict)
-            ]
-            observed_plugins = sorted(set(observed_plugins) | {name for name in extra_plugins if name})
-
         started = try_rpc(
             "thread/start",
             {
@@ -429,30 +420,44 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
         probe["skill_attestation"]["discovered"] = OHF_PROBE_SKILL_NAME in discovered_skills
         if OHF_PROBE_SKILL_NAME in discovered_skills:
             probe["skill_attestation"]["invokable"] = True
-            skill_turn = _bounded_turn(
-                client,
-                parent_id or fork_id,
-                f"$ohf-probe Reply with exactly {OHF_PROBE_SKILL_ACK}",
-            )
-            blob = " ".join(skill_turn.get("texts") or []) + str(skill_turn)
-            if OHF_PROBE_SKILL_ACK in blob:
-                probe["skill_attestation"]["invoked_successfully"] = True
-                set_cap("skills", "pass")
-                observe(
-                    "attest_skills",
-                    "VERIFIED",
-                    "Fixture skill was requested, reported, and invoked.",
-                    evidence=OHF_PROBE_SKILL_NAME,
-                )
-            else:
+            target = parent_id or fork_id
+            if not target:
                 probe["skill_attestation"]["invoked_successfully"] = False
                 set_cap("skills", "unknown")
                 observe(
                     "attest_skills",
                     "DEGRADED",
-                    "Fixture skill was listed but invocation did not return the deterministic ack.",
+                    "Fixture skill was listed but no native thread id was available to invoke it.",
                     evidence=",".join(discovered_skills),
                 )
+            else:
+                try:
+                    skill_turn = _bounded_turn(
+                        client,
+                        target,
+                        f"$ohf-probe Reply with exactly {OHF_PROBE_SKILL_ACK}",
+                    )
+                except JsonRpcError as exc:
+                    skill_turn = {"texts": [], "error": str(exc)}
+                blob = " ".join(skill_turn.get("texts") or []) + str(skill_turn)
+                if OHF_PROBE_SKILL_ACK in blob:
+                    probe["skill_attestation"]["invoked_successfully"] = True
+                    set_cap("skills", "pass")
+                    observe(
+                        "attest_skills",
+                        "VERIFIED",
+                        "Fixture skill was requested, reported, and invoked.",
+                        evidence=OHF_PROBE_SKILL_NAME,
+                    )
+                else:
+                    probe["skill_attestation"]["invoked_successfully"] = False
+                    set_cap("skills", "unknown")
+                    observe(
+                        "attest_skills",
+                        "DEGRADED",
+                        "Fixture skill was listed but invocation did not return the deterministic ack.",
+                        evidence=",".join(discovered_skills),
+                    )
         else:
             probe["skill_attestation"]["invokable"] = False
             set_cap("skills", "fail")
