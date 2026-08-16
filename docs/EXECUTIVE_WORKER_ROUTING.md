@@ -1,7 +1,9 @@
 # Executive worker routing — stage 1
 
-**Status:** implemented policy and adapter seam; fixture/local execution only by
-explicit operator action; **no new production arming**.
+**Status:** R1 shadow evidence accepted and Phase 1F-B durable parent/child
+runtime implemented on the current branch; fixture/local execution only by
+explicit operator action; **no new production arming** and Phase 1F-C remains
+unstarted.
 
 This stage makes economical-worker-first execution real without creating a
 second queue, teaching Chris tmux, or widening Executive OS or MCP authority.
@@ -37,7 +39,7 @@ process, poll, retry, or mark work complete.
 | worker launch | `CodexWorkerAdapter` already enforces exact-SHA workspaces, bounded authorities, no network, no MCP, structured output, artifact hashing, and supervisor-owned validation. | Keep it as the first adapter implementation. Generalize the supervisor type boundary, not its safety policy. |
 | Codex delegation | `.codex/config.toml` enables bounded native agents; read-only supporting profiles use Terra, while the deep reasoning profile keeps Sol. | Preserve those portfolio-analysis fences. Write-capable implementation remains an Executive Job in its own worktree. |
 | `config/agents.yml` | Portfolio reasoning roles still resolve to Sol/xhigh on the Codex production path. | Do not silently downgrade portfolio judgment. Point Executive worker labor to the separate routing policy. |
-| Phase 1F | The merged contract designs hierarchical children, independent review, and the run-once COO cycle, but 1F-B/1F-C are not implemented on `origin/master`. | Stage 1 routes existing bounded Jobs. It does not pretend the full parent/child cycle already exists. |
+| Phase 1F | Phase 1F-B now adds durable parent/root/depth metadata, bounded child creation, independent review verdicts, aggregation refusals, and inbox evidence on this branch. The explicit run-once COO cycle remains unimplemented. | Keep the runtime as the only lifecycle authority; accept Phase 1F-B independently before any Phase 1F-C work. |
 | EXEC-MCP-A | Exactly five tools exist. READONLY refuses the modifying tool; FIXTURE writes only to a temporary service and refuses production paths. No production-write server mode exists. | Make no MCP surface, mode, identity, socket, or peer-UID change. |
 
 ## 2. Policy and aliases
@@ -159,6 +161,13 @@ python -m scripts.executive_os_phase1b --root /absolute/fixture-root \
   --allowed-write-path control_plane/parser.py
 ```
 
+Frontier leads can create bounded children through the same router-backed command
+by adding `--parent-job-id`. Review-required children and sibling review jobs use
+`--review-required` and `--reviews-job-id`; the durable runtime refuses parent
+claims while children are living and refuses parent completion without an
+independent completed `approve` verdict. `business_impact` is display/audit
+metadata only and never becomes a priority key.
+
 The existing explicit `run-once` path launches it through the attested Codex
 adapter. It does not open or attach a tmux session. Production Phase 1C-A remains
 proof-job-only in this stage, so none of the commands above arms the installed
@@ -174,23 +183,23 @@ service.
   previous stable worker/quota ordering.
 - Keep EXEC-MCP-A READONLY/FIXTURE only.
 
-### Wave R1 — fixture and shadow evidence
+### Wave R1 — fixture and shadow evidence — accepted
 
-- Register separate fixture workers for Luna and Terra through reviewed Codex
-  homes.
-- Run representative implementation, research, tests, and review Jobs.
-- Compare completion quality, validation pass rate, repair rate, latency, and
-  usage against the former all-Sol baseline.
-- Shadow every proposed production placement before any live worker-slot
-  registration change.
+- The deterministic fixture harness registers dedicated Luna/Terra logical
+  capacity and runs representative implementation, research, tests, and review
+  Jobs.
+- Evidence and limitations are recorded in
+  `research/EXECUTIVE_OS_R1_SHADOW_EVIDENCE_2026-08-16.md`.
+- No provider, MCP, live worker slot, or write-capable adapter is invoked.
 
-### Wave R2 — hierarchical orchestration
+### Wave Phase 1F-B — durable hierarchy — accepted on this branch
 
-- Implement and independently review Phase 1F-B first: parent/child schema,
-  aggregation refusals, review verdicts, and inbox evidence.
-- Implement Phase 1F-C second: bounded, subtree-scoped, run-once COO cycle.
-- The cycle calls this router while creating child Jobs; it does not get another
-  queue or state store.
+- Durable parent/child schema, immutable hierarchy, bounded depth, seat/impact
+  fields, fail-closed verdicts, independent-review evidence, aggregation
+  refusals, and inbox v2 projection are implemented and tested.
+- Phase 1F-C is deliberately not implemented. It requires its own review and
+  acceptance after this phase; it must remain a separate run-once COO cycle and
+  cannot introduce another queue or state store.
 
 ### Wave R3 — reviewed Codex capacity composition
 
