@@ -93,7 +93,7 @@ from control_plane.executive_runtime import (
 )
 
 #: Schema version of the document this module emits.  A bump means a migration.
-SCHEMA = "mastermind.executive_inbox.v1"
+SCHEMA = "mastermind.executive_inbox.v2"
 
 #: The boot-packet contract this projection understands.  Owned by
 #: :mod:`control_plane.ceo_boot_packet`; a mismatch is reported, never mapped.
@@ -201,8 +201,9 @@ def _item(
     evidence: Sequence[Mapping[str, str]],
     existing_next_actions: Sequence[str],
     ordinal: int | None = None,
+    job_fields: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    item = {
         "attention_id": attention_id(
             target=target,
             kind=kind,
@@ -222,6 +223,9 @@ def _item(
         "evidence": [dict(entry) for entry in evidence],
         "existing_next_actions": [str(entry) for entry in existing_next_actions],
     }
+    if job_fields is not None:
+        item.update({str(key): value for key, value in job_fields.items()})
+    return item
 
 
 # ---------------------------------------------------------------------------
@@ -299,12 +303,35 @@ def _lost_cause(last_attempt: Attempt | None) -> tuple[str, str | None]:
     return "the runtime marked it LOST", reason
 
 
+def _is_independent_approval(
+    candidate: Job,
+    child: Job,
+    attempts_by_job: Mapping[str, Attempt],
+) -> bool:
+    if candidate.reviews_job_id != child.job_id or candidate.status is not JobStatus.COMPLETED:
+        return False
+    payload, error = _payload_or_error(candidate.result)
+    candidate_attempt = attempts_by_job.get(candidate.job_id)
+    child_attempt = attempts_by_job.get(child.job_id)
+    return (
+        error is None
+        and payload is not None
+        and payload.verdict == "approve"
+        and candidate_attempt is not None
+        and child_attempt is not None
+        and candidate_attempt.worker_id != child_attempt.worker_id
+    )
+
+
 def classify_job(
     job: Job,
     *,
     last_attempt: Attempt | None = None,
     provenance: Mapping[str, Any] | None = None,
     now: datetime | None = None,
+    children: Sequence[Job] = (),
+    reviewed_attempt: Attempt | None = None,
+    attempts_by_job: Mapping[str, Attempt] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Return ``(attention_item, None)`` or ``(None, suppression_bucket)``.
 
@@ -325,6 +352,18 @@ def classify_job(
 
     result, result_error = _payload_or_error(job.result)
     checkpoint, checkpoint_error = _payload_or_error(job.checkpoint)
+    attempts_by_job = attempts_by_job or {}
+
+    job_fields = {
+        "parent_job_id": job.parent_job_id,
+        "root_job_id": job.root_job_id,
+        "depth": job.depth,
+        "owner_seat": job.owner_seat,
+        "escalation_target": job.escalation_target,
+        "business_impact": job.business_impact,
+        "review_required": job.review_required,
+        "reviews_job_id": job.reviews_job_id,
+    }
 
     kind: str | None = None
     reason = ""
@@ -360,6 +399,47 @@ def classify_job(
             f"attempt has not acknowledged it"
         )
         attempt_evidence = True
+    elif (
+        status in (JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.CHECKPOINTED)
+        and children
+        and (
+            any(child.status not in {
+                JobStatus.RATE_LIMITED,
+                JobStatus.FAILED,
+                JobStatus.LOST,
+                JobStatus.COMPLETED,
+                JobStatus.CANCELLED,
+            } for child in children)
+            or any(
+                child.review_required
+                and not any(
+                    _is_independent_approval(candidate, child, attempts_by_job)
+                    for candidate in children
+                )
+                for child in children
+            )
+        )
+    ):
+        kind = "aggregation_blocked"
+        living = [
+            child.job_id
+            for child in children
+            if child.status not in {
+                JobStatus.RATE_LIMITED,
+                JobStatus.FAILED,
+                JobStatus.LOST,
+                JobStatus.COMPLETED,
+                JobStatus.CANCELLED,
+            }
+        ]
+        if living:
+            reason = f"{job.job_id} cannot aggregate while child job(s) are living: {', '.join(living)}"
+        else:
+            reason = (
+                f"{job.job_id} cannot aggregate: a review-required child lacks "
+                "an independent completed approval"
+            )
+        attempt_evidence = True
     elif status is JobStatus.QUEUED and exhausted:
         # A wedge, not a queue position: `claim_job` refuses at the attempt limit,
         # and `requeue_job` refuses too, so nothing in the runtime can move this
@@ -375,6 +455,32 @@ def classify_job(
         kind = "malformed_result_evidence"
         reason = f"{job.job_id} is COMPLETED but stores no result payload"
         extra.append(_evidence(job_ref, "result", "absent"))
+    elif (
+        status is JobStatus.COMPLETED
+        and job.reviews_job_id
+        and last_attempt is not None
+        and reviewed_attempt is not None
+        and last_attempt.worker_id == reviewed_attempt.worker_id
+    ):
+        kind = "review_not_independent"
+        reason = (
+            f"{job.job_id} is a completed review of {job.reviews_job_id}, but the "
+            f"review worker {last_attempt.worker_id} also completed the reviewed job"
+        )
+        extra.append(
+            _evidence(
+                f"attempt:{last_attempt.attempt_id}",
+                "review.status",
+                "VOID",
+            )
+        )
+        extra.append(
+            _evidence(
+                f"job:{job.reviews_job_id}",
+                "review_not_independent",
+                last_attempt.worker_id,
+            )
+        )
     elif result_error is not None:
         kind = "malformed_result_evidence"
         reason = (
@@ -488,6 +594,7 @@ def classify_job(
             reason=reason,
             evidence=evidence,
             existing_next_actions=next_actions,
+            job_fields=job_fields,
         ),
         None,
     )
@@ -639,12 +746,23 @@ def project_runtime(root: Path, now: datetime | None = None) -> _RuntimeProjecti
         return projection
 
     latest = _last_attempt_by_job(attempts or [])
+    children_by_parent: dict[str, list[Job]] = {}
+    for candidate in jobs:
+        if candidate.parent_job_id:
+            children_by_parent.setdefault(candidate.parent_job_id, []).append(candidate)
     suppressed = {key: 0 for key in _SUPPRESSION_KEYS}
     events_closed = False
 
     for job in jobs:
         last_attempt = latest.get(job.job_id)
-        item, bucket = classify_job(job, last_attempt=last_attempt, now=now)
+        item, bucket = classify_job(
+            job,
+            last_attempt=last_attempt,
+            now=now,
+            children=children_by_parent.get(job.job_id, ()),
+            reviewed_attempt=latest.get(job.reviews_job_id) if job.reviews_job_id else None,
+            attempts_by_job=latest,
+        )
         if item is None:
             if bucket is not None:
                 suppressed[bucket] = suppressed.get(bucket, 0) + 1
@@ -675,6 +793,9 @@ def project_runtime(root: Path, now: datetime | None = None) -> _RuntimeProjecti
                         last_attempt=last_attempt,
                         provenance=provenance,
                         now=now,
+                        children=children_by_parent.get(job.job_id, ()),
+                        reviewed_attempt=latest.get(job.reviews_job_id) if job.reviews_job_id else None,
+                        attempts_by_job=latest,
                     )[0]
         if item is not None:
             projection.attention.append(item)

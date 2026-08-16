@@ -1,4 +1,4 @@
-# Executive Inbox — Executive OS Phase 1F-A
+# Executive Inbox — Executive OS Phase 1F-A / Phase 1F-B projection
 
 A **read-only projection** of the durable Executive OS runtime into the small set of
 things an executive seat must actually look at, and whose each one is.
@@ -21,7 +21,7 @@ tests: `tests/test_executive_inbox.py` (wired into the hermetic governance gate 
 # Human-readable inbox (default)
 python3 scripts/executive_inbox.py
 
-# The mastermind.executive_inbox.v1 document
+# The mastermind.executive_inbox.v2 document
 python3 scripts/executive_inbox.py --json
 
 # Runtime only — skip boot-packet collection (no subprocess, no Agent OS read)
@@ -120,11 +120,11 @@ that registry's whole surface. That lands as a named `degraded` entry — a *vis
 degradation — rather than as a quietly shorter list. That trade was made on purpose;
 the alternative was rejected.
 
-## JSON schema — `mastermind.executive_inbox.v1`
+## JSON schema — `mastermind.executive_inbox.v2`
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema` | `str` | Always `mastermind.executive_inbox.v1`. A bump means a migration. |
+| `schema` | `str` | Always `mastermind.executive_inbox.v2`. A bump means a migration. |
 | `generated_at` | `str` | ISO-8601 Z. `--now` when given, else current UTC. The only clock read. |
 | `grounding` | `dict` | What this projection was computed against (below). |
 | `attention` | `list` | The items, sorted (below). May be empty; empty is a claim, not an absence of data. |
@@ -169,6 +169,14 @@ when that registry could not be read; the others keep answering.
 | `reason` | `str` | One sentence, assembled only from canonical fields. |
 | `evidence` | `list` | `{ref, field, value}` triples naming exactly where each claim came from — e.g. `{"ref":"job:JOB-009","field":"status","value":"FAILED"}`. |
 | `existing_next_actions` | `list[str]` | Copied **verbatim** from the job's stored `result.next_actions`, else its `checkpoint.next_actions`. `[]` when none. Never authored here. |
+| `parent_job_id` | `str \| null` | Durable parent/container job, when this is a child. |
+| `root_job_id` | `str` | Immutable root of the parent/child tree. |
+| `depth` | `int` | Durable bounded hierarchy depth; root is zero. |
+| `owner_seat` | `str` | Recorded seat (`coo`, `ceo`, or `chairman`); labels do not grant authority. |
+| `escalation_target` | `str` | Shrink-only escalation target. |
+| `business_impact` | `str` | `routine`, `material`, or `critical`; display/audit metadata, not a priority key. |
+| `review_required` | `bool` | Whether the job needs an independent sibling approval before its parent can aggregate. |
+| `reviews_job_id` | `str \| null` | Review job's sibling target, when this is a review job. |
 
 **Sort order:** `(target rank chairman=0/ceo=1/coo=2, source, job_id or workstream or
 "", kind)`. `--json` is emitted with `json.dumps(..., indent=2, sort_keys=True)`.
@@ -192,18 +200,21 @@ it projects. Every runtime item is `target: coo`.
 | 2 | status `LOST` | `job_lost` | The invocation was recorded as gone. |
 | 3 | status `RATE_LIMITED` | `job_rate_limited` | Capacity, not the job, stopped it. |
 | 4 | status `CANCEL_REQUESTED` | `cancel_requested` | A cancel was issued and the attempt has not acknowledged it. |
-| 5 | `QUEUED` and `attempt_count >= attempt_limit` | `attempts_exhausted` | A wedge, not a queue position — see below. |
-| 6 | `COMPLETED` with no `result`; **or** a stored `result` the runtime's validator rejects; **or** a stored `checkpoint` it rejects (any status) | `malformed_result_evidence` | The evidence contradicts itself; no downstream reading of this row is trustworthy. |
-| 7 | `COMPLETED` and `result.errors` non-empty | `completed_with_errors` | It finished, and it says something went wrong. |
-| 8 | `COMPLETED` and `result.next_actions` non-empty | `unresolved_next_actions` | It finished and handed work onward; nothing else picks that up. |
-| 9 | `RUNNING`/`CHECKPOINTED` whose **current** attempt's `lease_expires_at` < `now` | `stale_lease` | The supervisor-death signature — see below. |
-| 10 | anything else | *(suppressed)* | Routine — counted, not listed. |
+| 5 | queued/running/checkpointed parent with living children, or a review-required child without an independent completed approval | `aggregation_blocked` | Parent aggregation is a durable refusal, not an automatic cycle. |
+| 6 | completed review whose worker also completed the reviewed job | `review_not_independent` | Same-worker review is void evidence, never an approval. |
+| 7 | `QUEUED` and `attempt_count >= attempt_limit` | `attempts_exhausted` | A wedge, not a queue position — see below. |
+| 8 | `COMPLETED` with no `result`; **or** a stored `result` the runtime's validator rejects; **or** a stored `checkpoint` it rejects (any status) | `malformed_result_evidence` | The evidence contradicts itself; no downstream reading of this row is trustworthy. |
+| 9 | `COMPLETED` and `result.errors` non-empty | `completed_with_errors` | It finished, and it says something went wrong. |
+| 10 | `COMPLETED` and `result.next_actions` non-empty | `unresolved_next_actions` | It finished and handed work onward; nothing else picks that up. |
+| 11 | `RUNNING`/`CHECKPOINTED` whose **current** attempt's `lease_expires_at` < `now` | `stale_lease` | The supervisor-death signature — see below. |
+| 12 | anything else | *(suppressed)* | Routine — counted, not listed. |
 
 **`kind` is an open, documented vocabulary.** Later phases add kinds (see the
 orchestration contract's §5). A consumer that meets an unrecognised `kind` must treat
 it as **attention**, never as routine — the whole point of the surface is that
 something unfamiliar is exactly what a seat should look at. Additive kinds keep the
-schema at `v1`; adding or removing a *field* on an item bumps it to `v2`.
+schema at `v2`; adding or removing a *field* on an item requires another schema
+migration.
 
 For kinds 1–3 at the attempt limit the reason gains
 `; attempts exhausted (N/M) — requeue is refused`, because `requeue_job` refuses at
@@ -389,7 +400,7 @@ when there is no database.
 ```
 EXECUTIVE INBOX — 2026-08-14T00:00:00Z
 mastermind eeeeeeeeeeee (master) · macro 999999999999 · runtime db present
-schema mastermind.executive_inbox.v1
+schema mastermind.executive_inbox.v2
 0 chairman · 2 CEO · 13 COO
 runtime: 22 jobs · 18 attempts · 4 workers (2 AVAILABLE · 1 OFFLINE · 1 ERROR)
 suppressed: 4 clean completions · 2 queued · 2 running/checkpointed · 1 cancelled
@@ -422,18 +433,19 @@ None of these are in 1F-A, and none of them are oversights:
   live in the existing runtime's event log, not in a new store.
 - **No ranking.** Items are sorted for determinism, not scored for importance.
 
-## Phase 1F-B / 1F-C begin here
+## Phase 1F-C remains separate
 
 The orchestration contract that governs what may be built on top of this projection is
 `research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md`. Read it before extending
 anything below.
 
-Two gaps this phase leaves open on purpose, both named above:
+Phase 1F-B now provides the durable substrate and explicit refusals. The
+run-once COO cycle remains a separate reviewed phase and is intentionally not
+present here. The remaining gaps are:
 
-1. **Structured escalation (1F-B).** Runtime results carry no field that says "this
-   needs a seat above the COO", which is why no runtime state produces CEO attention
-   here. Adding that field is a runtime-schema change with its own review; until it
-   exists, escalation is a human act, not a derived one.
+1. **Explicit cycle (1F-C).** No daemon, polling loop, automatic parent completion,
+   or model call was added. A future run-once COO cycle must consume these durable
+   rows and remain subtree-scoped.
 2. **Chairman attention.** The vocabulary is reserved and unused. It must be fed by an
    explicit canonical source, never inferred.
 
