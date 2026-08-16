@@ -582,7 +582,7 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
         set_cap("human_attach", "unknown")
         set_cap("checkpoint", "unknown")
 
-        _run_recovery(lab, probe, holder, parent_id, observe, set_rec, try_rpc, reconnect, initial_mcp_pass)
+        _run_recovery(lab, probe, holder, parent_id, observe, set_rec, try_rpc, reconnect, initial_mcp_pass, note)
 
         leftover = holder.get("client")
         main_exited = leftover is None or leftover.proc is None or leftover.proc.poll() is not None
@@ -669,6 +669,7 @@ def _run_recovery(
     try_rpc: Callable[..., dict[str, Any] | None],
     reconnect: Callable[[], AppServerClient],
     initial_mcp_pass: bool,
+    note: Callable[[str], None],
 ) -> None:
     client = holder["client"]
     if client is None:
