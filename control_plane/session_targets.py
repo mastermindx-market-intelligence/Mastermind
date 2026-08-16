@@ -13,15 +13,19 @@ this file.  :class:`RuntimeBinding` is the seam; PR-1 does not persist it.
 
 Resolution precedence
 ---------------------
-1. exact ``root_job_id`` binding, when that higher-scope identity is present
-2. known workstream default for the declared seat
-3. seat default, only when workstream and root binding are both absent
+1. ``root_job_id`` absent → workstream / seat routing may run
+2. ``root_job_id`` present + valid + bound → exact root binding wins
+3. ``root_job_id`` present + malformed → REFUSE
+4. ``root_job_id`` present + valid but unbound → REFUSE
+5. root absent + known workstream → workstream default
+6. root absent + unknown/malformed workstream → REFUSE
+7. root absent + workstream absent → seat default
 
-An explicit unknown or malformed workstream/root id REFUSES.  It never
-silently falls through to the seat default.
+An explicitly supplied higher-scope identity never falls through silently.
 
-Two-key arming: ``target_enabled`` AND ``transport_implemented``.  PR-1 keeps
-every target disabled and every transport unimplemented.
+Two-key arming: ``target_enabled`` AND the canonical
+``wake_transport.transport_implemented`` bit.  PR-1 keeps every target
+disabled and every transport unimplemented.
 """
 from __future__ import annotations
 
@@ -33,6 +37,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from control_plane.wake_events import JOB_ID_RE, SEATS, canonical_json_bytes
+from control_plane.wake_transport import (
+    WAKE_TRANSPORTS,
+    transport_implemented as canonical_transport_implemented,
+)
 
 
 SCHEMA = "mastermind.wake_session_targets.v2"
@@ -45,25 +53,6 @@ _WORKSTREAM_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 REASONING_SURFACES = frozenset(
     {"chatgpt-sol", "codex", "workspace-agent", "human"}
 )
-WAKE_TRANSPORTS = frozenset(
-    {
-        "grok-computer",
-        "chatgpt-gui",
-        "codex-app-server",
-        "human",
-    }
-)
-
-#: PR-1: every transport is a descriptor only.  Flip per-transport in a
-#: separately reviewed adapter PR — never by renaming ``implemented``.
-TRANSPORT_IMPLEMENTED: dict[str, bool] = {name: False for name in sorted(WAKE_TRANSPORTS)}
-
-
-def transport_implemented(wake_transport: str) -> bool:
-    token = str(wake_transport or "").strip()
-    if token not in WAKE_TRANSPORTS:
-        raise SessionTargetError(f"unknown wake_transport {token!r}")
-    return bool(TRANSPORT_IMPLEMENTED[token])
 
 
 class SessionTargetError(ValueError):
@@ -96,6 +85,15 @@ class RuntimeBinding:
     account_label: str | None = None
     reasoning_surface: str | None = None
 
+    def __post_init__(self) -> None:
+        try:
+            generation = int(self.binding_generation)
+        except (TypeError, ValueError) as exc:
+            raise SessionTargetError("binding_generation must be a non-negative integer") from exc
+        if generation < 0:
+            raise SessionTargetError("binding_generation must be non-negative")
+        object.__setattr__(self, "binding_generation", generation)
+
 
 @dataclasses.dataclass(frozen=True)
 class WakeRoute:
@@ -108,6 +106,7 @@ class WakeRoute:
     wake_transport: str
     binding_generation: int
     route_digest: str
+    destination_digest: str
     root_job_id: str | None
     workstream: str | None
     target_enabled: bool
@@ -184,13 +183,14 @@ class SessionTargetRegistry:
             if JOB_ID_RE.fullmatch(root) is None:
                 raise SessionTargetError("root_job_id is malformed")
             bound_alias = self.root_job_bindings.get(root)
-            if bound_alias is not None:
-                target = self.get(bound_alias)
-                if target.target_seat != seat:
-                    raise SessionTargetError(
-                        f"root_job binding {root} is not bound to seat {seat!r}"
-                    )
-                return _binding_must_match(target, binding)
+            if bound_alias is None:
+                raise SessionTargetError(f"root_job_id {root} is unbound")
+            target = self.get(bound_alias)
+            if target.target_seat != seat:
+                raise SessionTargetError(
+                    f"root_job binding {root} is not bound to seat {seat!r}"
+                )
+            return _binding_must_match(target, binding)
 
         if stream_supplied:
             stream = str(workstream).strip().lower()
@@ -210,6 +210,28 @@ class SessionTargetRegistry:
         if alias is None:
             raise SessionTargetError(f"no session alias configured for seat {seat!r}")
         return _binding_must_match(self.get(alias), binding)
+
+
+def destination_digest(
+    *,
+    target: SessionTarget,
+    binding_generation: int,
+    policy_version: str,
+) -> str:
+    """Identity of the current delivery destination, excluding obligation id."""
+
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "session_alias": target.session_alias,
+                "target_seat": target.target_seat,
+                "reasoning_surface": target.reasoning_surface,
+                "wake_transport": target.wake_transport,
+                "binding_generation": int(binding_generation),
+                "policy_version": policy_version,
+            }
+        )
+    ).hexdigest()[:16]
 
 
 def route_digest(
@@ -239,12 +261,19 @@ def build_route(
     obligation_id: str,
     target: SessionTarget,
     registry: SessionTargetRegistry,
-    transport_implemented: bool,
     root_job_id: str | None = None,
     workstream: str | None = None,
     binding: RuntimeBinding | None = None,
+    transport_implemented: bool | None = None,
 ) -> WakeRoute:
     generation = 0 if binding is None else int(binding.binding_generation)
+    if generation < 0:
+        raise SessionTargetError("binding_generation must be non-negative")
+    implemented = (
+        canonical_transport_implemented(target.wake_transport)
+        if transport_implemented is None
+        else bool(transport_implemented)
+    )
     human_required = (
         target.target_seat == "chairman"
         or target.reasoning_surface == "human"
@@ -252,6 +281,11 @@ def build_route(
     )
     digest = route_digest(
         obligation_id=obligation_id,
+        target=target,
+        binding_generation=generation,
+        policy_version=registry.policy_version,
+    )
+    dest = destination_digest(
         target=target,
         binding_generation=generation,
         policy_version=registry.policy_version,
@@ -264,10 +298,11 @@ def build_route(
         wake_transport=target.wake_transport,
         binding_generation=generation,
         route_digest=digest,
+        destination_digest=dest,
         root_job_id=root_job_id,
         workstream=workstream,
         target_enabled=target.target_enabled,
-        transport_implemented=transport_implemented,
+        transport_implemented=implemented,
         human_required=human_required,
         policy_version=registry.policy_version,
     )
@@ -488,7 +523,6 @@ __all__ = [
     "DEFAULT_TARGETS_PATH",
     "REASONING_SURFACES",
     "SCHEMA",
-    "TRANSPORT_IMPLEMENTED",
     "WAKE_TRANSPORTS",
     "RuntimeBinding",
     "SessionTarget",
@@ -496,7 +530,7 @@ __all__ = [
     "SessionTargetRegistry",
     "WakeRoute",
     "build_route",
+    "destination_digest",
     "load_session_targets",
     "route_digest",
-    "transport_implemented",
 ]

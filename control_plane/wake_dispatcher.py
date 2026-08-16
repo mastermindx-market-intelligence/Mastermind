@@ -1,19 +1,16 @@
 """Wake delivery + acknowledgement contract — not a second queue.
 
-A persisted WAKE *request* is not a delivered wake.  PR-1 defines the states
-and how they later map onto existing Executive OS ``events.command_id``
-values.  It does not emit those events, add a table, or arm a transport.
+A persisted WAKE *request* is not a delivered wake.  Delivery attempts are
+route-specific.  Acknowledgement is obligation-global.
 
 Guarantee
 ---------
 at-least-once external nudge + idempotent wake consumption.
 
-Never exactly-once execution.  ``ALREADY_DELIVERED`` may be reconstructed only
-from a durable *delivery* receipt, never from ``WAKE_REQUESTED`` uniqueness.
-
-Crash after ``WAKE_REQUESTED`` and before dispatch leaves the obligation
-``PENDING_RETRYABLE``.  A delivered wake without ``TARGET_ACKNOWLEDGED`` stays
-distinguishable from an acknowledged wake.
+``ALREADY_DELIVERED`` may be reconstructed only from a durable *delivery*
+receipt for the *current* route snapshot.  ``ACCEPTED`` is not ``DELIVERED``.
+``DELIVERED`` is not ``TARGET_ACKNOWLEDGED``.  Delivery to an old route
+without ACK does not suppress delivery after the binding rotates.
 
 Coalescing (contract only)
 --------------------------
@@ -28,15 +25,16 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
-from control_plane.session_targets import (
-    WAKE_TRANSPORTS,
-    RuntimeBinding,
-    WakeRoute,
-)
+from control_plane.session_targets import RuntimeBinding, WakeRoute
 from control_plane.wake_events import WAKE_ID_RE, WakeObligation, utc_now_iso
-
-
-DISPATCHER_INTERFACE_VERSION = "mastermind.wake_dispatcher/v1"
+from control_plane.wake_transport import (
+    DISPATCHER_INTERFACE_VERSION,
+    WAKE_TRANSPORT_DESCRIPTORS,
+    WakeTransportDescriptor,
+    WakeTransportError,
+    transport_implemented,
+    wake_transport_descriptor as canonical_wake_transport_descriptor,
+)
 RECEIPT_SCHEMA = "mastermind.wake_receipt.v1"
 _DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 ALLOWED_DETAIL_KEYS = frozenset(
@@ -101,38 +99,80 @@ SUCCESS_OUTCOMES = frozenset(
 class LedgerPhase(str, Enum):
     WAKE_REQUESTED = "WAKE_REQUESTED"
     DELIVERY_ATTEMPT = "DELIVERY_ATTEMPT"
-    DELIVERED = "DELIVERED"
     ACCEPTED = "ACCEPTED"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
     TARGET_ACKNOWLEDGED = "TARGET_ACKNOWLEDGED"
 
 
 class ObligationStatus(str, Enum):
     NOT_SEEN = "NOT_SEEN"
     PENDING_RETRYABLE = "PENDING_RETRYABLE"
+    ATTEMPTED = "ATTEMPTED"
+    ACCEPTED = "ACCEPTED"
     DELIVERED_UNACKNOWLEDGED = "DELIVERED_UNACKNOWLEDGED"
     TARGET_ACKNOWLEDGED = "TARGET_ACKNOWLEDGED"
 
 
+DELIVERY_PAYLOAD_FIELDS = (
+    "obligation_id",
+    "attempt_n",
+    "phase",
+    "session_alias",
+    "reasoning_surface",
+    "wake_transport",
+    "route_digest",
+    "destination_digest",
+    "binding_generation",
+)
+
+
 @dataclasses.dataclass(frozen=True)
-class WakeTransportDescriptor:
-    """Non-secret facts about one reviewed wake transport."""
+class WakeLedgerRecord:
+    """Future Executive OS event representation.  PR-1 does not persist it."""
 
-    transport_id: str
-    interface_version: str = DISPATCHER_INTERFACE_VERSION
-    transport_implemented: bool = False
+    command_id: str
+    phase: LedgerPhase
+    attempt_n: int | None = None
+    route_digest: str | None = None
+    destination_digest: str | None = None
+    binding_generation: int | None = None
+    session_alias: str | None = None
+    reasoning_surface: str | None = None
+    wake_transport: str | None = None
+
+    def matches_route(self, route: WakeRoute) -> bool:
+        return (
+            self.route_digest == route.route_digest
+            and self.destination_digest == route.destination_digest
+            and self.binding_generation == route.binding_generation
+            and self.session_alias == route.session_alias
+            and self.reasoning_surface == route.reasoning_surface
+            and self.wake_transport == route.wake_transport
+        )
 
 
-WAKE_TRANSPORT_DESCRIPTORS: dict[str, WakeTransportDescriptor] = {
-    name: WakeTransportDescriptor(transport_id=name)
-    for name in sorted(WAKE_TRANSPORTS)
-}
-
-
-def wake_transport_descriptor(transport_id: str) -> WakeTransportDescriptor:
-    resolved = str(transport_id).strip()
-    if resolved not in WAKE_TRANSPORTS:
-        raise WakeDispatchError(f"unknown wake transport {transport_id!r}")
-    return WAKE_TRANSPORT_DESCRIPTORS[resolved]
+def delivery_record(
+    obligation_id: str,
+    phase: LedgerPhase,
+    *,
+    attempt_n: int | None = None,
+    route: WakeRoute | None = None,
+) -> WakeLedgerRecord:
+    command_id = ledger_command_id(obligation_id, phase, attempt_n=attempt_n)
+    if route is None:
+        return WakeLedgerRecord(command_id=command_id, phase=phase, attempt_n=attempt_n)
+    return WakeLedgerRecord(
+        command_id=command_id,
+        phase=phase,
+        attempt_n=attempt_n,
+        route_digest=route.route_digest,
+        destination_digest=route.destination_digest,
+        binding_generation=route.binding_generation,
+        session_alias=route.session_alias,
+        reasoning_surface=route.reasoning_surface,
+        wake_transport=route.wake_transport,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -186,6 +226,8 @@ class NudgePlan:
     session_alias: str
     reasoning_surface: str
     wake_transport: str
+    binding_generation: int
+    destination_digest: str
     obligation_ids: tuple[str, ...]
     route_digests: tuple[str, ...]
 
@@ -198,6 +240,8 @@ class NudgePlan:
             "session_alias": self.session_alias,
             "reasoning_surface": self.reasoning_surface,
             "wake_transport": self.wake_transport,
+            "binding_generation": self.binding_generation,
+            "destination_digest": self.destination_digest,
             "obligation_ids": list(self.obligation_ids),
             "route_digests": list(self.route_digests),
             "coalesced": self.coalesced,
@@ -213,40 +257,75 @@ def ledger_command_id(
 ) -> str:
     """Map a wake lifecycle phase onto existing ``events.command_id``.
 
-    ``WAKE-*`` fits the Executive OS command-id fence.  Delivery retries use a
-    generation suffix because ``command_id`` is UNIQUE.
+    Obligation-global: ``WAKE-<hex>`` (requested) and ``WAKE-<hex>:ACK``.
+    Delivery is attempt-specific: ``WAKE-<hex>:A<n>``, ``:A<n>:ACCEPTED``,
+    ``:A<n>:DELIVERED``, ``:A<n>:FAILED``.
     """
 
     oid = _obligation_id(obligation_id)
     resolved = phase if isinstance(phase, LedgerPhase) else LedgerPhase(str(phase))
     if resolved is LedgerPhase.WAKE_REQUESTED:
         return oid
+    if resolved is LedgerPhase.TARGET_ACKNOWLEDGED:
+        return f"{oid}:ACK"
+    n = int(attempt_n or 0)
+    if n < 1:
+        raise WakeDispatchError("delivery attempts are numbered from 1")
     if resolved is LedgerPhase.DELIVERY_ATTEMPT:
-        n = int(attempt_n or 0)
-        if n < 1:
-            raise WakeDispatchError("delivery attempts are numbered from 1")
         return f"{oid}:A{n}"
-    if resolved in {LedgerPhase.DELIVERED, LedgerPhase.ACCEPTED}:
-        return f"{oid}:DELIVERED"
-    return f"{oid}:ACK"
+    if resolved is LedgerPhase.ACCEPTED:
+        return f"{oid}:A{n}:ACCEPTED"
+    if resolved is LedgerPhase.DELIVERED:
+        return f"{oid}:A{n}:DELIVERED"
+    if resolved is LedgerPhase.FAILED:
+        return f"{oid}:A{n}:FAILED"
+    raise WakeDispatchError(f"unsupported ledger phase {resolved}")
 
 
-def reconstruct_status(obligation_id: str, command_ids: Sequence[str]) -> ObligationStatus:
-    """Derive obligation status from existing Executive OS command_id rows.
+def reconstruct_status(
+    obligation_id: str,
+    records: Sequence[WakeLedgerRecord],
+    *,
+    route: WakeRoute | None = None,
+) -> ObligationStatus:
+    """Derive obligation status from future Executive OS event records.
 
-    Presence of the request id alone is not delivery evidence.
+    Acknowledgement is obligation-global.  Delivery states are route-specific:
+    a DELIVERED record for route R1 does not close delivery for route R2.
+    ACCEPTED is never treated as DELIVERED.
     """
 
     oid = _obligation_id(obligation_id)
-    seen = {str(item) for item in command_ids}
-    if ledger_command_id(oid, LedgerPhase.TARGET_ACKNOWLEDGED) in seen:
+    scoped = [
+        record
+        for record in records
+        if str(record.command_id) == oid or str(record.command_id).startswith(oid + ":")
+    ]
+    if any(record.phase is LedgerPhase.TARGET_ACKNOWLEDGED for record in scoped):
         return ObligationStatus.TARGET_ACKNOWLEDGED
-    if ledger_command_id(oid, LedgerPhase.DELIVERED) in seen:
+    if route is None:
+        if any(record.phase is LedgerPhase.WAKE_REQUESTED for record in scoped):
+            return ObligationStatus.PENDING_RETRYABLE
+        return ObligationStatus.NOT_SEEN
+    matching = [
+        record
+        for record in scoped
+        if record.phase
+        in {
+            LedgerPhase.DELIVERY_ATTEMPT,
+            LedgerPhase.ACCEPTED,
+            LedgerPhase.DELIVERED,
+            LedgerPhase.FAILED,
+        }
+        and record.matches_route(route)
+    ]
+    if any(record.phase is LedgerPhase.DELIVERED for record in matching):
         return ObligationStatus.DELIVERED_UNACKNOWLEDGED
-    if oid in seen or any(
-        item.startswith(f"{oid}:A") and item[len(oid) + 2 :].isdigit()
-        for item in seen
-    ):
+    if any(record.phase is LedgerPhase.ACCEPTED for record in matching):
+        return ObligationStatus.ACCEPTED
+    if any(record.phase is LedgerPhase.DELIVERY_ATTEMPT for record in matching):
+        return ObligationStatus.ATTEMPTED
+    if any(record.phase is LedgerPhase.WAKE_REQUESTED for record in scoped):
         return ObligationStatus.PENDING_RETRYABLE
     return ObligationStatus.NOT_SEEN
 
@@ -308,6 +387,12 @@ def authenticate_receipt(
         raise WakeDispatchError("receipt binding_generation does not match the expected route")
     if receipt.wake_transport != descriptor.transport_id:
         raise WakeDispatchError("receipt wake_transport does not match the descriptor")
+    canonical_flag = transport_implemented(route.wake_transport)
+    injected = descriptor.transport_implemented != canonical_flag
+    if not injected and route.transport_implemented != descriptor.transport_implemented:
+        raise WakeDispatchError(
+            "route transport_implemented disagrees with the canonical descriptor"
+        )
     if receipt.transport_implemented != descriptor.transport_implemented:
         raise WakeDispatchError(
             "receipt transport_implemented flag does not match the descriptor"
@@ -326,32 +411,42 @@ def already_delivered_receipt(
     obligation: WakeObligation,
     route: WakeRoute,
     *,
-    found_command_id: str,
+    found: WakeLedgerRecord,
     created_at: str | None = None,
 ) -> WakeReceipt:
-    """Trusted replay coalescing.  Requires actual delivery evidence.
+    """Trusted replay coalescing.  Requires delivery evidence for *this* route.
 
-    ``command_id == obligation_id`` is only ``WAKE_REQUESTED`` and must not
-    produce ``ALREADY_DELIVERED``.
+    ``WAKE_REQUESTED`` and ``ACCEPTED`` must not produce ``ALREADY_DELIVERED``.
+    A DELIVERED record for a previous binding generation must not suppress
+    delivery after the route rotates.
     """
 
-    expected = ledger_command_id(obligation.obligation_id, LedgerPhase.DELIVERED)
-    if found_command_id != expected:
+    if found.phase is not LedgerPhase.DELIVERED:
+        raise WakeDispatchError("no delivery evidence for ALREADY_DELIVERED")
+    expected = ledger_command_id(
+        obligation.obligation_id, LedgerPhase.DELIVERED, attempt_n=found.attempt_n
+    )
+    if found.command_id != expected:
         raise WakeDispatchError("no delivery evidence for ALREADY_DELIVERED")
     if route.obligation_id != obligation.obligation_id:
         raise WakeDispatchError("route obligation_id does not match the wake")
+    if not found.matches_route(route):
+        raise WakeDispatchError("delivery evidence does not match the current route")
     return make_receipt(
         outcome=WakeOutcome.ALREADY_DELIVERED,
         obligation=obligation,
         route=route,
         reason_code="command_id_replay",
         created_at=created_at,
-        details={"ledger_command_id": found_command_id},
+        details={
+            "ledger_command_id": found.command_id,
+            "attempt_n": str(found.attempt_n or ""),
+        },
     )
 
 
 def coalesce_nudge(routes: Sequence[WakeRoute]) -> NudgePlan:
-    """One logical session → one external nudge covering every obligation."""
+    """One current destination → one external nudge covering every obligation."""
 
     if not routes:
         raise WakeDispatchError("coalesce_nudge requires at least one route")
@@ -359,12 +454,16 @@ def coalesce_nudge(routes: Sequence[WakeRoute]) -> NudgePlan:
     obligation_ids: list[str] = []
     digests: list[str] = []
     for route in routes:
+        if route.destination_digest != first.destination_digest:
+            raise WakeDispatchError("cannot coalesce mixed delivery destinations")
         if route.session_alias != first.session_alias:
             raise WakeDispatchError("cannot coalesce routes for different sessions")
         if route.reasoning_surface != first.reasoning_surface:
             raise WakeDispatchError("cannot coalesce mixed reasoning surfaces")
         if route.wake_transport != first.wake_transport:
             raise WakeDispatchError("cannot coalesce mixed wake transports")
+        if route.binding_generation != first.binding_generation:
+            raise WakeDispatchError("cannot coalesce mixed binding generations")
         if route.obligation_id not in obligation_ids:
             obligation_ids.append(route.obligation_id)
             digests.append(route.route_digest)
@@ -372,6 +471,8 @@ def coalesce_nudge(routes: Sequence[WakeRoute]) -> NudgePlan:
         session_alias=first.session_alias,
         reasoning_surface=first.reasoning_surface,
         wake_transport=first.wake_transport,
+        binding_generation=first.binding_generation,
+        destination_digest=first.destination_digest,
         obligation_ids=tuple(obligation_ids),
         route_digests=tuple(digests),
     )
@@ -388,7 +489,7 @@ class UnsupportedWakeDispatcher:
     """PR-1 default: known transports exist, none are armed."""
 
     def __init__(self, transport_id: str) -> None:
-        self.descriptor = wake_transport_descriptor(transport_id)
+        self.descriptor = _descriptor(transport_id)
 
     async def wake(
         self, obligation: WakeObligation, route: WakeRoute
@@ -432,7 +533,7 @@ class UnsupportedWakeDispatcher:
 
 
 def dispatcher_for(transport_id: str) -> WakeDispatcher:
-    descriptor = wake_transport_descriptor(transport_id)
+    descriptor = _descriptor(transport_id)
     if descriptor.transport_implemented:
         raise WakeDispatchError(
             f"wake transport {transport_id!r} is marked implemented but PR-1 "
@@ -467,8 +568,19 @@ async def dispatch_wake(
         receipt,
         obligation=obligation,
         route=route,
-        descriptor=wake_transport_descriptor(route.wake_transport),
+        descriptor=_descriptor(route.wake_transport),
     )
+
+
+def _descriptor(transport_id: str) -> WakeTransportDescriptor:
+    try:
+        return canonical_wake_transport_descriptor(transport_id)
+    except WakeTransportError as exc:
+        raise WakeDispatchError(str(exc)) from exc
+
+
+def wake_transport_descriptor(transport_id: str) -> WakeTransportDescriptor:
+    return _descriptor(transport_id)
 
 
 def _obligation_id(value: str) -> str:
@@ -496,6 +608,7 @@ def _bounded_details(
 __all__ = [
     "ALLOWED_DETAIL_KEYS",
     "DISPATCHER_INTERFACE_VERSION",
+    "DELIVERY_PAYLOAD_FIELDS",
     "LedgerPhase",
     "NudgePlan",
     "ObligationStatus",
@@ -506,12 +619,14 @@ __all__ = [
     "UnsupportedWakeDispatcher",
     "WakeDispatchError",
     "WakeDispatcher",
+    "WakeLedgerRecord",
     "WakeOutcome",
     "WakeReceipt",
     "WakeTransportDescriptor",
     "already_delivered_receipt",
     "authenticate_receipt",
     "coalesce_nudge",
+    "delivery_record",
     "dispatch_wake",
     "dispatcher_for",
     "ledger_command_id",

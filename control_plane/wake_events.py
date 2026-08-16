@@ -487,6 +487,7 @@ __all__ = [
     "SOURCE_KINDS",
     "WAKE_ID_RE",
     "WAKE_KINDS",
+    "WORKSTREAM_RE",
     "SourceKind",
     "WakeKind",
     "WakeObligation",

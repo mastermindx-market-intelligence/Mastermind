@@ -161,8 +161,8 @@ Callers do not get to assert that those semantic conditions occurred.
 
 | Adapter | Input | Wake? |
 |---|---|---|
-| Inbox | Canonical Inbox v2 item (`attention_id`, `kind`, `target`, …) | Yes, for known Inbox kinds. Uses the reviewed `target`. Does not re-infer the seat. Unknown kind → remain attention. |
-| Runtime | Canonical event + hierarchy flags | `review_required` only when `JOB_COMPLETED` and `review_required` and no `reviews_job_id`. Every other runtime event → `NO_WAKE`. |
+| Inbox | Projector output via `admit_inbox_projection` | Yes, for known Inbox kinds. `attention_id` is an opaque `source_ref` — it is not recomputed. Uses the reviewed `target`. Unknown kind → remain attention. A mapping that merely contains an `eia-*` string without the Inbox v2 item shape is refused. |
+| Runtime | Canonical event + `owner_seat` + `review_job_exists` | `review_required` only when `JOB_COMPLETED`, `review_required`, and no sibling review (`review.reviews_job_id == builder.job_id`). Ordinary continuation uses `owner_seat`, never `escalation_target`. |
 
 Generic worker-finished is **not** a COO wake.  Phase 1F-B may require a review
 job, aggregation, deterministic continuation, or no executive wake at all.
@@ -178,25 +178,43 @@ runtime terminals.  The runtime adapter must not mint those kinds again.
 
 Module: `control_plane/wake_dispatcher.py`
 
+Obligation-global:
+
 ```text
 WAKE_REQUESTED          command_id = WAKE-<hex>
-        ↓
-DELIVERY_ATTEMPT        command_id = WAKE-<hex>:A<n>
-        ↓
-ACCEPTED / DELIVERED / FAILED / UNSUPPORTED / HUMAN_REQUIRED
-                        success command_id = WAKE-<hex>:DELIVERED
-        ↓
 TARGET_ACKNOWLEDGED     command_id = WAKE-<hex>:ACK
 ```
 
-`ALREADY_DELIVERED` may only be reconstructed from the `:DELIVERED` row, never
-from the request id.  A process crash after `WAKE_REQUESTED` and before
-dispatch leaves `PENDING_RETRYABLE`.
-
-Coalescing (contract; no queue in PR-1):
+Delivery-attempt-specific (route snapshot lives in the future event payload):
 
 ```text
-5 pending WAKE obligations for PROPHET-COO-A
+DELIVERY_ATTEMPT        command_id = WAKE-<hex>:A<n>
+ACCEPTED                command_id = WAKE-<hex>:A<n>:ACCEPTED
+DELIVERED               command_id = WAKE-<hex>:A<n>:DELIVERED
+FAILED                  command_id = WAKE-<hex>:A<n>:FAILED
+```
+
+Payload contract fields: `obligation_id`, `attempt_n`, `phase`, `session_alias`,
+`reasoning_surface`, `wake_transport`, `route_digest`, `destination_digest`,
+`binding_generation`.
+
+`ACCEPTED != DELIVERED`.  `DELIVERED != ACKNOWLEDGED`.  `ACCEPTED` alone must
+not satisfy `ALREADY_DELIVERED`.  Acknowledgement closes obligation consumption.
+
+Delivered to an old route + no ACK + route/binding rotates = the obligation
+remains eligible for delivery to the current route.  `ALREADY_DELIVERED` may
+only be reconstructed from a `:A<n>:DELIVERED` record whose route snapshot
+matches the current route.
+
+A process crash after `WAKE_REQUESTED` and before dispatch leaves
+`PENDING_RETRYABLE`.
+
+Coalescing (contract; no queue in PR-1) groups by current destination
+(`session_alias` + reasoning surface + wake transport + `binding_generation` /
+`destination_digest`):
+
+```text
+5 pending WAKE obligations for the same current destination
         ↓
 one NudgePlan / one external wake
         ↓
@@ -207,12 +225,21 @@ retrieves/drains all five pending obligations
 acknowledges each obligation
 ```
 
+Mixed binding generations or transports cannot share one nudge.
+
 `authenticate_receipt` binds a success claim to the expected obligation id,
 logical session, reasoning surface, wake transport, route digest, and binding
 generation.  An implemented adapter that returns `DELIVERED` for a different
-wake/session is refused.  Receipt details are a closed key set; values pass
+wake/session/route is refused.  Receipt details are a closed key set; values pass
 `common.redaction.sanitize_external_text`.  No raw provider errors, URLs, or
 credentials.
+
+Transport implementation state has one authority:
+`control_plane/wake_transport.py`.  Route construction and dispatcher
+authentication both read it.
+
+Root resolution never silently falls through from an explicit unbound
+`root_job_id`.
 
 ## 7. Explicit non-goals (this PR)
 
@@ -229,18 +256,24 @@ credentials.
 
 ## 8. Recommended PR-2+
 
-1. After a trusted Inbox projection or the narrow runtime `review_required`
-   fact — **not** from `next_actions` prose — mint the obligation.
+1. After a trusted Inbox projection (`admit_inbox_projection` on
+   `build_inbox` / `project_needs_ceo` output) or the narrow runtime
+   `review_required` fact — **not** from `next_actions` prose and not from an
+   arbitrary `eia-*` mapping — mint the obligation.
 2. Persist `WAKE_REQUESTED` as an Executive OS event with
    `command_id = obligation_id`.  That row is not delivery.
-3. Resolve the route.  Coalesce pending obligations for the same
-   `session_alias` into one nudge.
-4. Persist `DELIVERY_ATTEMPT` (`:A<n>`), then dispatch.  On crash before
-   dispatch, status remains `PENDING_RETRYABLE`.
-5. Persist `:DELIVERED` only from authenticated delivery evidence.
-   `ALREADY_DELIVERED` reconstructs from that row only.
-6. Target acknowledgement (`:ACK`) is a later MCP / Control Panel act, still
-   one reviewed schema bump.
+3. Resolve the route.  An explicit unbound `root_job_id` must refuse, not fall
+   through.  Coalesce pending obligations that share the current destination
+   digest into one nudge.
+4. Persist `DELIVERY_ATTEMPT` (`:A<n>`) with the route snapshot in the event
+   payload, then dispatch.  On crash before dispatch, status remains
+   `PENDING_RETRYABLE`.
+5. Persist `:A<n>:ACCEPTED` and `:A<n>:DELIVERED` only from authenticated
+   evidence for that attempt/route.  `ALREADY_DELIVERED` reconstructs from a
+   matching route snapshot only.  A previous route's delivery does not suppress
+   a rotated binding.
+6. Target acknowledgement (`:ACK`) is obligation-global and closes consumption.
 7. Still no GUI automation and no Control Panel execution authority until a
    separately reviewed transport PR sets **both** `target_enabled` and
-   `transport_implemented`.
+   `transport_implemented`. Acknowledgement remains a later MCP / Control
+   Panel act and still one reviewed schema bump.
