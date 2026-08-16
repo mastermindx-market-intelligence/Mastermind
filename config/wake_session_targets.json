@@ -1,56 +1,86 @@
 {
-  "schema": "mastermind.wake_session_targets.v1",
+  "schema": "mastermind.wake_session_targets.v2",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
-  "notes": "Logical session aliases only. External handles are provider addresses, never Mastermind identity. This file is not a job queue, scheduler, lease table, or lifecycle ledger.",
+  "policy_version": "v2-2026-08-16",
+  "notes": "Logical session aliases only. Reasoning surface, wake transport, and runtime binding are distinct. Native/provider handles (including Codex App Server thread ids from OHF-P0) are runtime bindings and must not appear in this file. root_job_bindings stays empty in Git; tests overlay exact JOB-* bindings. This file is not a job queue, scheduler, lease table, or lifecycle ledger.",
   "default_alias_by_seat": {
-    "coo": "EXECUTIVE-COO-A",
-    "ceo": "EXECUTIVE-CEO-A"
+    "chairman": "EXECUTIVE-CHAIRMAN-A",
+    "ceo": "EXECUTIVE-CEO-A",
+    "coo": "EXECUTIVE-COO-A"
   },
   "workstream_alias_by_seat": {
     "prophet": {
+      "chairman": "EXECUTIVE-CHAIRMAN-A",
+      "ceo": "EXECUTIVE-CEO-A",
       "coo": "PROPHET-COO-A"
     },
     "terminal": {
+      "chairman": "EXECUTIVE-CHAIRMAN-A",
+      "ceo": "EXECUTIVE-CEO-A",
       "coo": "TERMINAL-COO-A"
     },
     "executive": {
+      "chairman": "EXECUTIVE-CHAIRMAN-A",
       "ceo": "EXECUTIVE-CEO-A",
       "coo": "EXECUTIVE-COO-A"
     }
   },
+  "root_job_bindings": {},
   "targets": {
     "PROPHET-COO-A": {
       "session_alias": "PROPHET-COO-A",
       "target_seat": "coo",
-      "adapter_type": "codex-app-server",
+      "reasoning_surface": "chatgpt-sol",
+      "wake_transport": "grok-computer",
+      "allowed_transports": ["grok-computer", "chatgpt-gui"],
       "workstream": "prophet",
-      "external_handle": null,
-      "implemented": false
+      "target_enabled": false
+    },
+    "PROPHET-COO-B": {
+      "session_alias": "PROPHET-COO-B",
+      "target_seat": "coo",
+      "reasoning_surface": "chatgpt-sol",
+      "wake_transport": "grok-computer",
+      "allowed_transports": ["grok-computer", "chatgpt-gui"],
+      "workstream": "prophet",
+      "target_enabled": false
     },
     "TERMINAL-COO-A": {
       "session_alias": "TERMINAL-COO-A",
       "target_seat": "coo",
-      "adapter_type": "codex-app-server",
+      "reasoning_surface": "chatgpt-sol",
+      "wake_transport": "grok-computer",
+      "allowed_transports": ["grok-computer", "chatgpt-gui"],
       "workstream": "terminal",
-      "external_handle": null,
-      "implemented": false
+      "target_enabled": false
     },
     "EXECUTIVE-COO-A": {
       "session_alias": "EXECUTIVE-COO-A",
       "target_seat": "coo",
-      "adapter_type": "codex-app-server",
+      "reasoning_surface": "chatgpt-sol",
+      "wake_transport": "grok-computer",
+      "allowed_transports": ["grok-computer", "chatgpt-gui"],
       "workstream": "executive",
-      "external_handle": null,
-      "implemented": false
+      "target_enabled": false
     },
     "EXECUTIVE-CEO-A": {
       "session_alias": "EXECUTIVE-CEO-A",
       "target_seat": "ceo",
-      "adapter_type": "chatgpt-gui",
+      "reasoning_surface": "chatgpt-sol",
+      "wake_transport": "chatgpt-gui",
+      "allowed_transports": ["chatgpt-gui", "grok-computer"],
       "workstream": "executive",
-      "external_handle": null,
-      "implemented": false
+      "target_enabled": false
+    },
+    "EXECUTIVE-CHAIRMAN-A": {
+      "session_alias": "EXECUTIVE-CHAIRMAN-A",
+      "target_seat": "chairman",
+      "reasoning_surface": "human",
+      "wake_transport": "human",
+      "allowed_transports": ["human"],
+      "workstream": "executive",
+      "target_enabled": false
     }
   }
 }
