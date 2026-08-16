@@ -42,6 +42,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
 _WORKER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _COMMAND_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_ROUTING_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 class RuntimeProofError(RuntimeError):
@@ -186,6 +187,63 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
     result: dict[str, Any] = {"eligible_quota_classes": eligible}
+
+    aliases_raw = raw.get("preferred_model_aliases") or []
+    if isinstance(aliases_raw, str):
+        aliases_raw = [aliases_raw]
+    if not isinstance(aliases_raw, (list, tuple)) or len(aliases_raw) > 16:
+        raise StateConflict("preferred_model_aliases must be a bounded list")
+    aliases: list[str] = []
+    for item in aliases_raw:
+        alias = str(item).strip().lower()
+        if _ROUTING_VALUE_RE.fullmatch(alias) is None:
+            raise StateConflict("preferred_model_aliases contains an invalid alias")
+        if alias not in aliases:
+            aliases.append(alias)
+    if aliases:
+        result["preferred_model_aliases"] = aliases
+
+    excluded_raw = raw.get("excluded_worker_ids") or []
+    if isinstance(excluded_raw, str):
+        excluded_raw = [excluded_raw]
+    if not isinstance(excluded_raw, (list, tuple)) or len(excluded_raw) > 16:
+        raise StateConflict("excluded_worker_ids must be a bounded list")
+    excluded: list[str] = []
+    for item in excluded_raw:
+        worker_id = str(item).strip()
+        if _WORKER_ID_RE.fullmatch(worker_id) is None:
+            raise StateConflict("excluded_worker_ids contains an invalid worker id")
+        if worker_id not in excluded:
+            excluded.append(worker_id)
+    if excluded:
+        result["excluded_worker_ids"] = excluded
+
+    for key in ("task_kind", "risk", "ambiguity", "routing_policy_version"):
+        normalized = str(raw.get(key) or "").strip().lower()
+        if normalized:
+            if _ROUTING_VALUE_RE.fullmatch(normalized) is None:
+                raise StateConflict(f"constraint {key} must be a bounded identifier")
+            result[key] = normalized
+
+    if aliases and "routing_policy_version" not in result:
+        raise StateConflict(
+            "preferred_model_aliases requires routing_policy_version"
+        )
+
+    reason_codes_raw = raw.get("routing_reason_codes") or []
+    if isinstance(reason_codes_raw, str):
+        reason_codes_raw = [reason_codes_raw]
+    if not isinstance(reason_codes_raw, (list, tuple)) or len(reason_codes_raw) > 16:
+        raise StateConflict("routing_reason_codes must be a bounded list")
+    reason_codes: list[str] = []
+    for item in reason_codes_raw:
+        reason = str(item).strip().lower()
+        if _ROUTING_VALUE_RE.fullmatch(reason) is None:
+            raise StateConflict("routing_reason_codes contains an invalid value")
+        if reason not in reason_codes:
+            reason_codes.append(reason)
+    if reason_codes:
+        result["routing_reason_codes"] = reason_codes
     if provider:
         result["provider"] = provider
     if capabilities:
@@ -200,6 +258,43 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
             raise StateConflict("constraint base_sha must be a full hexadecimal Git object id")
         result["base_sha"] = base_sha
     return result
+
+
+def _capacity_route_metadata(row: sqlite3.Row) -> dict[str, Any]:
+    metadata = _json_loads(row["metadata_json"], fallback={})
+    if not isinstance(metadata, dict):
+        raise PersistenceError("worker quota-class metadata must be a mapping")
+    return metadata
+
+
+def _capacity_model_alias(row: sqlite3.Row) -> str:
+    metadata = _capacity_route_metadata(row)
+    return str(metadata.get("model_alias") or "").strip().lower()
+
+
+def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bool:
+    if str(row["worker_id"]) in set(constraints.get("excluded_worker_ids") or []):
+        return False
+    aliases = constraints.get("preferred_model_aliases") or []
+    if not aliases:
+        return True
+    metadata = _capacity_route_metadata(row)
+    worker_policy_version = str(
+        metadata.get("routing_policy_version") or ""
+    ).strip().lower()
+    return (
+        _capacity_model_alias(row) in aliases
+        and worker_policy_version == constraints.get("routing_policy_version")
+    )
+
+
+def _capacity_route_rank(
+    row: sqlite3.Row, constraints: dict[str, Any]
+) -> tuple[int, str, str]:
+    aliases = list(constraints.get("preferred_model_aliases") or [])
+    model_alias = _capacity_model_alias(row)
+    rank = aliases.index(model_alias) if model_alias in aliases else len(aliases)
+    return rank, str(row["worker_id"]), str(row["quota_class"])
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1993,6 +2088,8 @@ class AttemptRegistry:
                     continue
                 if selected_quota and row["quota_class"] != selected_quota:
                     continue
+                if not _capacity_matches_route(row, constraints):
+                    continue
                 if row["quota_class"] not in eligible_classes:
                     continue
                 if required_provider and row["provider"] != required_provider:
@@ -2015,6 +2112,7 @@ class AttemptRegistry:
                 candidates.append(row)
             if not candidates:
                 return None
+            candidates.sort(key=lambda row: _capacity_route_rank(row, constraints))
             capacity = candidates[0]
             attempt_id = f"ATT-{uuid4().hex}"
             lease_token = secrets.token_urlsafe(32)
@@ -2101,6 +2199,16 @@ class AttemptRegistry:
                     "fence_generation": fence,
                     "authority_policy_hash": authority.policy_sha256,
                     "lease_expires_at_ms": timestamp + duration * 1000,
+                    "routing_policy_version": constraints.get(
+                        "routing_policy_version"
+                    ),
+                    "preferred_model_aliases": constraints.get(
+                        "preferred_model_aliases", []
+                    ),
+                    "selected_model_alias": _capacity_model_alias(capacity) or None,
+                    "routing_reason_codes": constraints.get(
+                        "routing_reason_codes", []
+                    ),
                 },
                 timestamp_ms=timestamp,
             )
@@ -3218,8 +3326,11 @@ class ResourceBroker:
                 ORDER BY q.worker_id,q.quota_class
                 """
             ).fetchall()
+        candidates: list[sqlite3.Row] = []
         for row in rows:
             if worker_id and row["worker_id"] != worker_id:
+                continue
+            if not _capacity_matches_route(row, job.constraints):
                 continue
             if row["quota_class"] not in eligible:
                 continue
@@ -3235,8 +3346,11 @@ class ResourceBroker:
                 continue
             quota = _quota_from_row(row)
             if required_capabilities.issubset(set(quota.capabilities)):
-                return quota
-        return None
+                candidates.append(row)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda row: _capacity_route_rank(row, job.constraints))
+        return _quota_from_row(candidates[0])
 
     def select_worker(self, job: Job | str) -> Worker | None:
         selected_job = (

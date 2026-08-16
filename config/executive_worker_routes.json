@@ -1,0 +1,105 @@
+{
+  "schema_version": "mastermind.executive_worker_routes/v1",
+  "policy_version": "2026-08-16.stage1",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "providers": {
+    "codex": {
+      "adapter_id": "codex-cli",
+      "enabled": true,
+      "autonomous_allowed": true
+    },
+    "qwen": {
+      "adapter_id": "openai-compatible",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
+    "glm": {
+      "adapter_id": "openai-compatible",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
+    "xai": {
+      "adapter_id": "openai-compatible",
+      "enabled": false,
+      "autonomous_allowed": false
+    }
+  },
+  "model_aliases": {
+    "frontier.orchestrator": {
+      "provider_alias": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "cost_class": "frontier",
+      "capabilities": ["planning", "judgment", "escalation"],
+      "worker_eligible": false
+    },
+    "fast.engineering": {
+      "provider_alias": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "cost_class": "small",
+      "capabilities": ["code", "tests"],
+      "worker_eligible": true
+    },
+    "standard.engineering": {
+      "provider_alias": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "cost_class": "default",
+      "capabilities": ["code", "tests"],
+      "worker_eligible": true
+    },
+    "fast.research": {
+      "provider_alias": "codex",
+      "model": "gpt-5.6-luna",
+      "effort": "medium",
+      "cost_class": "small",
+      "capabilities": ["research"],
+      "worker_eligible": true
+    },
+    "standard.research": {
+      "provider_alias": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "cost_class": "default",
+      "capabilities": ["research"],
+      "worker_eligible": true
+    },
+    "standard.review": {
+      "provider_alias": "codex",
+      "model": "gpt-5.6-terra",
+      "effort": "high",
+      "cost_class": "default",
+      "capabilities": ["code", "research", "review", "tests"],
+      "worker_eligible": true
+    }
+  },
+  "routes": {
+    "implementation": {
+      "required_capabilities": ["code"],
+      "routine": ["fast.engineering", "standard.engineering"],
+      "elevated": ["standard.engineering"]
+    },
+    "mechanical": {
+      "required_capabilities": ["code"],
+      "routine": ["fast.engineering", "standard.engineering"],
+      "elevated": ["standard.engineering"]
+    },
+    "tests": {
+      "required_capabilities": ["tests"],
+      "routine": ["fast.engineering", "standard.engineering"],
+      "elevated": ["standard.engineering"]
+    },
+    "research": {
+      "required_capabilities": ["research"],
+      "routine": ["fast.research", "standard.research"],
+      "elevated": ["standard.research"]
+    },
+    "review": {
+      "required_capabilities": ["review"],
+      "routine": ["standard.review"],
+      "elevated": ["standard.review"]
+    }
+  }
+}

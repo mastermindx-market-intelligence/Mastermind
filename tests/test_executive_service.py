@@ -28,9 +28,15 @@ from control_plane.executive_service import (
     CONTROL_PROTOCOL_VERSION,
     ExecutiveControlService,
     ServiceConfig,
+    ServiceError,
     send_control_request,
 )
-from control_plane.executive_workspace import WorkspaceError
+from control_plane.executive_workspace import (
+    LAUNCH_CLEAN_STATUS_ARGS,
+    LAUNCH_CLEAN_UNTRACKED_ARGS,
+    WorkspaceError,
+)
+from control_plane import executive_service as es_mod
 from scripts import executive_os_phase1c as service_cli
 
 
@@ -516,6 +522,13 @@ def test_service_dispatch_and_requeue_refuse_nonproof_jobs(
             assert proof_workspace.stat().st_ino != interrupted_inode
             assert stat.S_IMODE(proof_workspace.stat().st_mode) & 0o070 == 0o050
             assert stat.S_IMODE(archive.stat().st_mode) == 0o700
+            index = proof_workspace / ".git" / "index"
+            index_mode = stat.S_IMODE(index.stat().st_mode)
+            assert index.stat().st_gid == os.getegid()
+            assert index_mode & stat.S_IRGRP
+            assert not index_mode & stat.S_IWGRP
+            assert not index_mode & stat.S_IRWXO
+            assert not (proof_workspace / ".git" / "index.lock").exists()
             assert subprocess.run(
                 ["git", "-C", str(proof_workspace), "status", "--porcelain=v1"],
                 check=True,
@@ -538,6 +551,8 @@ def test_service_dispatch_and_requeue_refuse_nonproof_jobs(
             assert receipt["new_workspace"]["status_dirty"] is False
             assert receipt["new_workspace"]["all_untracked_dirty"] is False
             assert receipt["new_workspace"]["launch_clean"] is True
+            assert receipt["new_workspace"]["remote_count"] == 0
+            assert receipt["new_workspace"]["branch"] == proof["result"]["branch"]
             events = runtime.events.list_events(job_id=proof_id)
             rotation_event = next(
                 item for item in events if item.event_type == "PROOF_WORKSPACE_ROTATED"
@@ -1297,3 +1312,158 @@ def test_service_surface_has_no_financial_app_or_scheduler_integration():
                 source.relative_to(root).as_posix(),
                 service_names,
             )
+
+
+def _mark_proof_lost(runtime: Runtime, proof_id: str, proof_workspace: Path):
+    lease = runtime.broker.claim(proof_id, lease_owner="lost-fixture")
+    assert lease is not None
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        provider_session_id="missing-provider-session",
+    )
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    runtime.attempts.mark_lost(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        reason="verified fixture absence",
+        verified_process_absent=True,
+    )
+    proof_workspace.chmod(0o700)
+    return lease
+
+
+def test_service_git_observer_uses_optional_locks_and_refuses_mutation(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    async def exercise():
+        service, _holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+            created = await _request(service, "create-proof-job")
+            workspace = Path(created["result"]["worktree"])
+            recorded_env: list[dict[str, str]] = []
+            recorded_argv: list[tuple[str, ...]] = []
+            real_run = es_mod.subprocess.run
+
+            def observed_run(*args, **kwargs):
+                argv = args[0] if args else kwargs.get("args")
+                env = kwargs.get("env") or {}
+                recorded_argv.append(tuple(argv))
+                recorded_env.append(dict(env))
+                return real_run(*args, **kwargs)
+
+            monkeypatch.setattr(es_mod.subprocess, "run", observed_run)
+            service._observe_git(workspace, ["rev-parse", "--verify", "HEAD^{commit}"])
+            service._observe_git(workspace, list(LAUNCH_CLEAN_STATUS_ARGS))
+            service._observe_git(workspace, list(LAUNCH_CLEAN_UNTRACKED_ARGS))
+            assert recorded_argv == [
+                ("git", "-C", str(workspace), "rev-parse", "--verify", "HEAD^{commit}"),
+                ("git", "-C", str(workspace), *LAUNCH_CLEAN_STATUS_ARGS),
+                ("git", "-C", str(workspace), *LAUNCH_CLEAN_UNTRACKED_ARGS),
+            ]
+            assert recorded_env
+            assert all(item.get("GIT_OPTIONAL_LOCKS") == "0" for item in recorded_env)
+
+            spawned: list[object] = []
+
+            def refuse_spawn(*args, **kwargs):
+                spawned.append(args[0] if args else kwargs.get("args"))
+                raise AssertionError("mutating Git must not spawn")
+
+            monkeypatch.setattr(es_mod.subprocess, "run", refuse_spawn)
+            for forbidden in (
+                ["checkout", "HEAD"],
+                ["switch", "main"],
+                ["update-index", "--refresh"],
+                ["add", "."],
+                ["config", "safe.directory", "*"],
+                ["remote", "add", "origin", "https://example.invalid/repo.git"],
+                ["reset", "--hard"],
+            ):
+                with pytest.raises(ServiceError, match="refuses mutating"):
+                    service._observe_git(workspace, forbidden)
+            assert spawned == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_requeue_refuses_simulated_0600_index_after_service_observation(
+    tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            runtime = service.runtime
+            assert runtime is not None
+            await _request(service, "register-worker")
+            proof = await _request(service, "create-proof-job")
+            proof_id = proof["result"]["job_id"]
+            proof_workspace = Path(proof["result"]["worktree"])
+            _mark_proof_lost(runtime, proof_id, proof_workspace)
+            real_observe = service._observe_git
+
+            def corrupt_after_status(workspace: Path, arguments: list[str]) -> bytes:
+                result = real_observe(workspace, arguments)
+                if tuple(arguments) == LAUNCH_CLEAN_STATUS_ARGS:
+                    (workspace / ".git" / "index").chmod(0o600)
+                return result
+
+            monkeypatch.setattr(service, "_observe_git", corrupt_after_status)
+            failed = await _request(service, "requeue", {"job_id": proof_id})
+            assert failed["ok"] is False
+            assert failed["error"]["code"] == "request_failed"
+            assert ".git/index" in failed["error"]["message"]
+            job = runtime.jobs.get_job(proof_id)
+            assert job is not None
+            assert job.status is JobStatus.LOST
+            assert holder["supervisor"].started_jobs == []
+            rotation_root = service.config.proof_workspace_root / ".lost-attempts" / proof_id
+            assert not any(rotation_root.glob("*.rotation.json"))
+            assert runtime.attempts.list_attempts(job_id=proof_id)
+            current = runtime.jobs.get_job(proof_id)
+            assert current is not None and current.current_attempt_id is not None
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_dispatch_refuses_queued_workspace_with_0600_index(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            runtime = service.runtime
+            assert runtime is not None
+            await _request(service, "register-worker")
+            proof = await _request(service, "create-proof-job")
+            proof_id = proof["result"]["job_id"]
+            workspace = Path(proof["result"]["worktree"])
+            (workspace / ".git" / "index").chmod(0o600)
+            denied = await _request(service, "dispatch", {"job_id": proof_id})
+            assert denied["ok"] is False
+            assert denied["error"]["code"] == "request_failed"
+            assert ".git/index" in denied["error"]["message"]
+            job = runtime.jobs.get_job(proof_id)
+            assert job is not None
+            assert job.status is JobStatus.QUEUED
+            assert job.current_attempt_id is None
+            assert holder["supervisor"].started_jobs == []
+            assert stat.S_IMODE((workspace / ".git" / "index").stat().st_mode) == 0o600
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())

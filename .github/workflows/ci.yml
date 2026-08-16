@@ -64,10 +64,15 @@ jobs:
           python -m pytest -q
           tests/test_auth.py
           tests/test_secret_redaction.py
+          tests/test_ohf_probe_schema.py
+          tests/test_ohf_probe_redaction.py
+          tests/test_ohf_probe_inertness.py
+          tests/test_ohf_codex_app_server_probe.py
           tests/test_gate.py
           tests/test_book_state_isolation.py
           tests/test_vendored_read_ratchet.py
           tests/test_executive_os_runtime.py
+          tests/test_executive_model_router.py
           tests/test_strategic_state.py
           tests/test_executive_governance_source_law.py
           tests/test_ceo_boot_packet.py
