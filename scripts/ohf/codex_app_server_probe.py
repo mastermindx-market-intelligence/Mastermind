@@ -746,10 +746,7 @@ def _run_recovery(
     lab._write_isolated_config(include_mcp=True)
     lab.drop_mcp()
     try_rpc("config/mcpServer/reload")
-    mcp_after = try_rpc(
-        "mcpServerStatus/list",
-        {"detail": "toolsAndAuthOnly", "threadId": parent_id},
-    )
+    mcp_after = try_rpc("mcpServerStatus/list", {"detail": "toolsAndAuthOnly"})
     remaining = mcp_server_names(mcp_after)
     if mcp_after is None:
         set_rec("mcp_disappearance_detected", "UNKNOWN")
