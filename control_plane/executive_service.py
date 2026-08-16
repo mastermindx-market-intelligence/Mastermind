@@ -43,9 +43,14 @@ from control_plane.executive_runtime import (
     StateConflict,
 )
 from control_plane.executive_workspace import (
+    GitHandoffError,
+    LAUNCH_CLEAN_STATUS_ARGS,
+    LAUNCH_CLEAN_UNTRACKED_ARGS,
     WorkspaceError,
+    git_observation_env,
     observe_launch_cleanliness,
     prepare_credentialless_clone,
+    validate_shared_git_handoff,
 )
 
 
@@ -57,6 +62,15 @@ _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
 _PROOF_WORKSPACE_RE = re.compile(r"^proof-([0-9a-f]{32})$")
 _WORKSPACE_ROTATION_SCHEMA = "mastermind.executive_workspace_rotation/v1"
 _PROOF_ARTIFACT = "research/executive_os_phase1c_worker_proof/receipt.md"
+_SERVICE_GIT_OBSERVATION_ALLOWLIST = frozenset(
+    {
+        ("rev-parse", "--verify", "HEAD^{commit}"),
+        ("rev-parse", "--abbrev-ref", "HEAD"),
+        LAUNCH_CLEAN_STATUS_ARGS,
+        LAUNCH_CLEAN_UNTRACKED_ARGS,
+        ("remote",),
+    }
+)
 _PROOF_OBJECTIVE = (
     "Create the bounded Executive OS Phase 1C-A proof receipt at "
     f"{_PROOF_ARTIFACT}. Record only the assigned Job, Attempt, exact base SHA, "
@@ -928,19 +942,28 @@ class ExecutiveControlService:
                 "workspace rotation receipt directory must be control-owned and owner-only"
             )
 
-    def _git_output(self, workspace: Path, arguments: list[str]) -> bytes:
+    def _observe_git(self, workspace: Path, arguments: list[str]) -> bytes:
+        """Post-handoff observation-only Git. Mutation argv is refused here."""
+
+        requested = tuple(arguments)
+        if requested not in _SERVICE_GIT_OBSERVATION_ALLOWLIST:
+            raise ServiceError(
+                "proof workspace Git observer refuses mutating or unaudited operations"
+            )
         home = self.config.proof_workspace_root / ".supervisor-home"
-        environment = {
-            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
-            "HOME": str(home),
-            "LANG": "C.UTF-8",
-            "LC_ALL": "C.UTF-8",
-            "TZ": "UTC",
-            "GIT_CONFIG_GLOBAL": "/dev/null",
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_TERMINAL_PROMPT": "0",
-            "GCM_INTERACTIVE": "never",
-        }
+        environment = git_observation_env(
+            {
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+                "HOME": str(home),
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "TZ": "UTC",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GCM_INTERACTIVE": "never",
+            }
+        )
         try:
             completed = subprocess.run(
                 ["git", "-C", str(workspace), *arguments],
@@ -959,6 +982,18 @@ class ExecutiveControlService:
             )
         return completed.stdout
 
+    def _require_shared_git_handoff(self, workspace: Path) -> None:
+        if self.config.proof_shared_gid is None:
+            return
+        try:
+            validate_shared_git_handoff(
+                workspace,
+                control_uid=os.geteuid(),
+                shared_gid=int(self.config.proof_shared_gid),
+            )
+        except GitHandoffError as exc:
+            raise ServiceError(str(exc)) from exc
+
     def _workspace_observation(
         self,
         workspace: Path,
@@ -969,18 +1004,18 @@ class ExecutiveControlService:
         info = workspace.lstat()
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
             raise ServiceError("proof workspace must be a real directory")
-        head = self._git_output(
+        head = self._observe_git(
             workspace, ["rev-parse", "--verify", "HEAD^{commit}"]
         ).decode("ascii", errors="strict").strip()
-        branch = self._git_output(
+        branch = self._observe_git(
             workspace, ["rev-parse", "--abbrev-ref", "HEAD"]
         ).decode("utf-8", errors="strict").strip()
         cleanliness = observe_launch_cleanliness(
-            lambda arguments: self._git_output(workspace, list(arguments))
+            lambda arguments: self._observe_git(workspace, list(arguments))
         )
         remotes = tuple(
             value
-            for value in self._git_output(workspace, ["remote"])
+            for value in self._observe_git(workspace, ["remote"])
             .decode("utf-8", errors="strict")
             .splitlines()
             if value
@@ -994,6 +1029,8 @@ class ExecutiveControlService:
             raise ServiceError(
                 "replacement proof workspace is not clean, exact-SHA, branch-bound, and no-remote"
             )
+        if require_fresh:
+            self._require_shared_git_handoff(workspace)
         return {
             "path": str(workspace),
             "device": int(info.st_dev),
@@ -1289,6 +1326,7 @@ class ExecutiveControlService:
                     )
                 if job.status is not JobStatus.QUEUED:
                     raise StateConflict(f"job {job_id} cannot dispatch from {job.status.value}")
+                self._require_shared_git_handoff(Path(job.worktree))
                 try:
                     active = await supervisor.start_job(job_id)
                 except Exception as exc:

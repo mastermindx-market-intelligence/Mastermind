@@ -11,9 +11,12 @@ import pytest
 from control_plane import executive_workspace
 from control_plane.executive_workspace import (
     AssignmentSealError,
+    GitHandoffError,
     WorkspaceError,
+    git_observation_env,
     prepare_credentialless_clone,
     seal_control_owned_paths,
+    validate_shared_git_handoff,
 )
 
 
@@ -230,6 +233,240 @@ def test_shared_index_stays_group_readable_after_control_cleanliness(
         ).stdout
     )
     assert observation.dirty is False
+
+
+def test_git_observation_env_forces_optional_locks_off_without_mutating_input():
+    original = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": "/var/empty",
+        "GIT_OPTIONAL_LOCKS": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    snapshot = dict(original)
+
+    result = git_observation_env(original)
+
+    assert original == snapshot
+    assert result is not original
+    assert result["GIT_OPTIONAL_LOCKS"] == "0"
+    assert result["PATH"] == "/usr/bin:/bin"
+    assert result["HOME"] == "/var/empty"
+    assert result["GIT_TERMINAL_PROMPT"] == "0"
+    assert set(result) == set(original)
+
+
+def _assert_shared_readonly_git_handoff(workspace: Path, *, shared_gid: int) -> None:
+    root = workspace.lstat()
+    git_dir = (workspace / ".git").lstat()
+    index = workspace / ".git" / "index"
+    index_info = index.lstat()
+    config_info = (workspace / ".git" / "config").lstat()
+    head_info = (workspace / ".git" / "HEAD").lstat()
+    for info, directory in (
+        (root, True),
+        (git_dir, True),
+        (index_info, False),
+        (config_info, False),
+        (head_info, False),
+    ):
+        mode = stat.S_IMODE(info.st_mode)
+        assert not stat.S_ISLNK(info.st_mode)
+        assert info.st_uid == os.geteuid()
+        assert info.st_gid == shared_gid
+        assert mode & stat.S_IRGRP
+        if directory:
+            assert stat.S_ISDIR(info.st_mode)
+            assert mode & stat.S_IXGRP
+        else:
+            assert stat.S_ISREG(info.st_mode)
+            assert info.st_nlink == 1
+        assert not mode & stat.S_IWGRP
+        assert not mode & stat.S_IRWXO
+    assert not (workspace / ".git" / "index.lock").exists()
+
+
+def test_fresh_shared_handoff_is_exact_sha_clean_and_worker_readable(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    previous_umask = os.umask(0o077)
+    try:
+        receipt = prepare_credentialless_clone(
+            source,
+            tmp_path / "workspaces",
+            job_id="JOB-HANDOFF",
+            base_sha=base_sha,
+            shared_gid=os.getegid(),
+        )
+    finally:
+        os.umask(previous_umask)
+
+    workspace = Path(receipt.workspace_path)
+    assert receipt.base_sha == base_sha
+    assert _git(workspace, "remote") == ""
+    _assert_shared_readonly_git_handoff(workspace, shared_gid=os.getegid())
+    validate_shared_git_handoff(
+        workspace, control_uid=os.geteuid(), shared_gid=os.getegid()
+    )
+    observation = executive_workspace.observe_launch_cleanliness(
+        lambda arguments: subprocess.run(
+            ["git", *arguments],
+            cwd=workspace,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=git_observation_env(os.environ),
+        ).stdout
+    )
+    assert observation.dirty is False
+
+
+def test_handoff_validator_rejects_0600_index_and_does_not_repair(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    receipt = prepare_credentialless_clone(
+        source,
+        tmp_path / "workspaces",
+        job_id="JOB-0600",
+        base_sha=base_sha,
+        shared_gid=os.getegid(),
+    )
+    index = Path(receipt.workspace_path) / ".git" / "index"
+    index.chmod(0o600)
+
+    with pytest.raises(GitHandoffError, match=r"\.git/index"):
+        validate_shared_git_handoff(
+            receipt.workspace_path,
+            control_uid=os.geteuid(),
+            shared_gid=os.getegid(),
+        )
+
+    assert stat.S_IMODE(index.stat().st_mode) == 0o600
+
+
+def test_handoff_validator_rejects_group_write(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    receipt = prepare_credentialless_clone(
+        source,
+        tmp_path / "workspaces",
+        job_id="JOB-GW",
+        base_sha=base_sha,
+        shared_gid=os.getegid(),
+    )
+    index = Path(receipt.workspace_path) / ".git" / "index"
+    index.chmod(0o660)
+
+    with pytest.raises(GitHandoffError, match=r"\.git/index"):
+        validate_shared_git_handoff(
+            receipt.workspace_path,
+            control_uid=os.geteuid(),
+            shared_gid=os.getegid(),
+        )
+
+
+def test_handoff_validator_rejects_world_access(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    receipt = prepare_credentialless_clone(
+        source,
+        tmp_path / "workspaces",
+        job_id="JOB-WORLD",
+        base_sha=base_sha,
+        shared_gid=os.getegid(),
+    )
+    index = Path(receipt.workspace_path) / ".git" / "index"
+    index.chmod(0o644)
+
+    with pytest.raises(GitHandoffError, match=r"\.git/index"):
+        validate_shared_git_handoff(
+            receipt.workspace_path,
+            control_uid=os.geteuid(),
+            shared_gid=os.getegid(),
+        )
+
+
+def test_handoff_validator_rejects_wrong_gid_through_stat_seam(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source, base_sha = _repository(tmp_path)
+    receipt = prepare_credentialless_clone(
+        source,
+        tmp_path / "workspaces",
+        job_id="JOB-GID",
+        base_sha=base_sha,
+        shared_gid=os.getegid(),
+    )
+    real = executive_workspace._handoff_lstat
+    foreign_gid = os.getegid() + 1
+
+    def swapped(path: Path):
+        info = real(path)
+        if path.name == "index":
+            return os.stat_result(
+                (
+                    info.st_mode,
+                    info.st_ino,
+                    info.st_dev,
+                    info.st_nlink,
+                    info.st_uid,
+                    foreign_gid,
+                    info.st_size,
+                    info.st_atime,
+                    info.st_mtime,
+                    info.st_ctime,
+                )
+            )
+        return info
+
+    monkeypatch.setattr(executive_workspace, "_handoff_lstat", swapped)
+    with pytest.raises(GitHandoffError, match=r"\.git/index"):
+        validate_shared_git_handoff(
+            receipt.workspace_path,
+            control_uid=os.geteuid(),
+            shared_gid=os.getegid(),
+        )
+
+
+def test_handoff_validator_rejects_index_lock(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    receipt = prepare_credentialless_clone(
+        source,
+        tmp_path / "workspaces",
+        job_id="JOB-LOCK",
+        base_sha=base_sha,
+        shared_gid=os.getegid(),
+    )
+    lock = Path(receipt.workspace_path) / ".git" / "index.lock"
+    lock.write_bytes(b"lock")
+
+    with pytest.raises(GitHandoffError, match="index.lock"):
+        validate_shared_git_handoff(
+            receipt.workspace_path,
+            control_uid=os.geteuid(),
+            shared_gid=os.getegid(),
+        )
+
+
+def test_handoff_validator_rejects_symlink_substitution_without_following(
+    tmp_path: Path,
+):
+    source, base_sha = _repository(tmp_path)
+    receipt = prepare_credentialless_clone(
+        source,
+        tmp_path / "workspaces",
+        job_id="JOB-LINK",
+        base_sha=base_sha,
+        shared_gid=os.getegid(),
+    )
+    workspace = Path(receipt.workspace_path)
+    index = workspace / ".git" / "index"
+    payload = tmp_path / "payload-index"
+    payload.write_bytes(index.read_bytes())
+    payload.chmod(0o640)
+    index.unlink()
+    index.symlink_to(payload)
+
+    with pytest.raises(GitHandoffError, match="symlink"):
+        validate_shared_git_handoff(
+            workspace, control_uid=os.geteuid(), shared_gid=os.getegid()
+        )
+    assert index.is_symlink()
 
 
 def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(

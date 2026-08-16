@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
 import shutil
 import socket
 import struct
@@ -846,3 +847,158 @@ def test_service_still_serves_after_an_abrupt_client_disconnect(
         assert unhandled == []
 
     asyncio.run(exercise())
+
+
+PREFLIGHT_PATH = ROOT / "ops" / "executive_os" / "git_handoff_preflight.py"
+PREFLIGHT_SPEC = importlib.util.spec_from_file_location(
+    "executive_git_handoff_preflight", PREFLIGHT_PATH
+)
+assert PREFLIGHT_SPEC is not None and PREFLIGHT_SPEC.loader is not None
+preflight = importlib.util.module_from_spec(PREFLIGHT_SPEC)
+sys.modules[PREFLIGHT_SPEC.name] = preflight
+PREFLIGHT_SPEC.loader.exec_module(preflight)
+
+
+def test_gate_b_receipt_validation_and_failure_formatting():
+    sha = "a" * 40
+    receipt = {
+        "schema_version": preflight.SCHEMA_VERSION,
+        "passed": True,
+        "observed_at": "2026-08-16T00:00:00+00:00",
+        "release_sha": sha,
+        "control": {"uid": 450, "gid": 450},
+        "worker": {"uid": 451, "gid": 451},
+        "workspace": {"path": "gate-b-deadbeefcafe", "uid": 450, "gid": 451, "mode": 0o750},
+        "index_before_service_observation": {"inode": 1, "mode": 0o640},
+        "index_after_service_observation": {"inode": 1, "mode": 0o640},
+        "index_after_worker_preflight": {"inode": 1, "mode": 0o640},
+        "git": {
+            "head": sha,
+            "branch": "codex/gate-b-deadbeefcafe",
+            "remote_count": 0,
+            "status_dirty": False,
+            "all_untracked_dirty": False,
+            "launch_clean": True,
+        },
+        "persistent_config_unchanged": True,
+        "worker_preflight_passed": True,
+        "workspace_root_restored": True,
+        "stimulus_used": "natural-post-share-stat-cache",
+    }
+    preflight.validate_receipt(receipt)
+    failed = preflight.failure_receipt(release_sha=sha, reason="x" * 500)
+    assert failed["passed"] is False
+    assert failed["schema_version"] == preflight.SCHEMA_VERSION
+    assert len(failed["error"]) <= 300 + len("...[truncated]")
+    with pytest.raises(preflight.PreflightError, match="missing"):
+        preflight.validate_receipt({"schema_version": preflight.SCHEMA_VERSION, "passed": True})
+
+
+def test_gate_b_requires_darwin_root(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(preflight.sys, "platform", "linux")
+    monkeypatch.setattr(preflight.os, "geteuid", lambda: 0)
+    with pytest.raises(preflight.PreflightError, match="darwin"):
+        preflight.require_darwin_root()
+    monkeypatch.setattr(preflight.sys, "platform", "darwin")
+    monkeypatch.setattr(preflight.os, "geteuid", lambda: 501)
+    with pytest.raises(preflight.PreflightError, match="euid 0"):
+        preflight.require_darwin_root()
+
+
+def test_gate_b_refuses_identity_mismatch(monkeypatch: pytest.MonkeyPatch):
+    control = types.SimpleNamespace(pw_uid=450, pw_gid=450, pw_dir="/var/empty")
+    worker = types.SimpleNamespace(pw_uid=450, pw_gid=451, pw_dir="/var/empty")
+
+    def fake_pwnam(name: str):
+        return control if name.endswith("exec") else worker
+
+    monkeypatch.setattr(preflight.pwd, "getpwnam", fake_pwnam)
+    monkeypatch.setattr(preflight.grp, "getgrall", lambda: [])
+    with pytest.raises(preflight.PreflightError, match="must differ"):
+        preflight.require_distinct_identities(
+            control_user="_mastermind_exec", worker_user="_mastermind_worker"
+        )
+
+
+def test_gate_b_refuses_unsafe_workspace_root_and_probe_id(tmp_path: Path):
+    world = tmp_path / "world"
+    world.mkdir()
+    world.chmod(0o755)
+    with pytest.raises(preflight.PreflightError, match="unsafe workspace-root"):
+        preflight.require_workspace_root_metadata(world, control_uid=os.geteuid())
+    with pytest.raises(preflight.PreflightError, match="unsafe generated probe id"):
+        preflight.require_probe_id("../escape")
+    with pytest.raises(preflight.PreflightError, match="unsafe generated probe id"):
+        preflight.require_probe_id("gate-b-*")
+    assert preflight.require_probe_id("gate-b-deadbeefcafe") == "gate-b-deadbeefcafe"
+
+
+def test_gate_b_cleanup_plan_and_root_restore(tmp_path: Path):
+    root = tmp_path / "workspaces"
+    root.mkdir(mode=0o700)
+    home = root / ".supervisor-home"
+    home.mkdir(mode=0o700)
+    before = preflight.snapshot_workspace_root(root)
+    plan = preflight.cleanup_plan(
+        workspace=root / "gate-b-deadbeefcafe",
+        workspace_root=root,
+        supervisor_home_existed=True,
+        supervisor_home=home,
+    )
+    assert plan["remove_workspace"] is True
+    assert plan["touch_supervisor_home"] is False
+    (root / "probe-corpse").mkdir()
+    after = preflight.snapshot_workspace_root(root)
+    assert preflight.workspace_root_restored(before, after) is False
+    (root / "probe-corpse").rmdir()
+    assert preflight.workspace_root_restored(before, preflight.snapshot_workspace_root(root))
+
+
+def test_gate_b_index_and_persistent_config_comparison(tmp_path: Path):
+    index = tmp_path / "index"
+    index.write_bytes(b"idx")
+    index.chmod(0o640)
+    meta = preflight.index_metadata(index)
+    assert preflight.index_handoff_ok(
+        meta, control_uid=os.geteuid(), shared_gid=os.getegid()
+    )
+    assert preflight.index_observation_stable(meta, dict(meta))
+    changed = dict(meta)
+    changed["mode"] = 0o600
+    assert preflight.index_handoff_ok(
+        changed, control_uid=os.geteuid(), shared_gid=os.getegid()
+    ) is False
+    assert preflight.index_observation_stable(meta, changed) is False
+    config = tmp_path / "config"
+    config.write_text("[core]\n", encoding="utf-8")
+    config.chmod(0o640)
+    identity = preflight.config_identity(config)
+    assert preflight.persistent_config_unchanged(identity, dict(identity))
+    mutated = dict(identity)
+    mutated["sha256"] = "0" * 64
+    assert preflight.persistent_config_unchanged(identity, mutated) is False
+
+
+def test_gate_b_worker_receipt_validation():
+    sha = "b" * 40
+    preflight.validate_worker_preflight_receipt(
+        {
+            "passed": True,
+            "head": sha,
+            "remote_count": 0,
+            "launch_clean": True,
+            "persistent_trust_changed": False,
+        },
+        expected_sha=sha,
+    )
+    with pytest.raises(preflight.PreflightError, match="HEAD"):
+        preflight.validate_worker_preflight_receipt(
+            {
+                "passed": True,
+                "head": "c" * 40,
+                "remote_count": 0,
+                "launch_clean": True,
+                "persistent_trust_changed": False,
+            },
+            expected_sha=sha,
+        )
