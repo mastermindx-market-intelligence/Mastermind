@@ -1,0 +1,196 @@
+{
+  "apps_disable_setting": "features.apps=false",
+  "auth_isolation": {
+    "auth_json_copied": false,
+    "auth_json_symlinked": false,
+    "codex_home_used": "/Users/chriswong/.codex-ohf-p0",
+    "dedicated_auth_unchanged": true,
+    "dedicated_home_authenticated_independently": true,
+    "default_auth_unchanged": true,
+    "implicit_default_home_fallback": false
+  },
+  "backend": "live",
+  "bundled_skills_disable_setting": "skills.bundled.enabled=false",
+  "classification": {
+    "mcp": {
+      "ALLOWED_AMBIENT": [],
+      "FORBIDDEN": [],
+      "REQUIRED": [
+        "ohf_probe"
+      ],
+      "UNCLASSIFIED": [],
+      "missing_required": []
+    },
+    "skills": {
+      "ALLOWED_AMBIENT": [],
+      "FORBIDDEN": [],
+      "REQUIRED": [
+        "ohf-probe"
+      ],
+      "UNCLASSIFIED": [
+        "github:gh-address-comments",
+        "github:gh-fix-ci",
+        "github:github",
+        "github:yeet",
+        "openai-templates:artifact-template-analytics-dashboard",
+        "openai-templates:artifact-template-business-review",
+        "openai-templates:artifact-template-design-report",
+        "openai-templates:artifact-template-experiment-analysis",
+        "openai-templates:artifact-template-financial-budget",
+        "openai-templates:artifact-template-investment-committee-memo",
+        "openai-templates:artifact-template-legal-memorandum",
+        "openai-templates:artifact-template-market-trends-report",
+        "openai-templates:artifact-template-minimal-letterhead",
+        "openai-templates:artifact-template-operating-calendar",
+        "openai-templates:artifact-template-operating-review",
+        "openai-templates:artifact-template-project-kickoff",
+        "openai-templates:artifact-template-project-tracker",
+        "openai-templates:artifact-template-sales-pipeline",
+        "openai-templates:artifact-template-simple-dark-mode",
+        "openai-templates:artifact-template-simple-light-mode",
+        "openai-templates:artifact-template-strategy-memorandum",
+        "openai-templates:artifact-template-system-design",
+        "openai-templates:artifact-template-team-alignment",
+        "openai-templates:artifact-template-three-statement-forecast",
+        "plugin-management:plugin-management"
+      ],
+      "missing_required": []
+    }
+  },
+  "codex_version": "codex-cli 0.147.0",
+  "config_attestation": {
+    "approval_policy": "never",
+    "config_read_ok": true,
+    "features_apps": false,
+    "model": "gpt-5.6-sol",
+    "sandbox_mode": "read-only",
+    "skills_bundled_enabled": false
+  },
+  "config_backup": {
+    "original_sha256": "cdc4bbefcd048e0ab3ff5c696fa4e18de1c3dd65b253bc07a6d6b7f703650c9d",
+    "restore_matched": true,
+    "restored_sha256": "cdc4bbefcd048e0ab3ff5c696fa4e18de1c3dd65b253bc07a6d6b7f703650c9d"
+  },
+  "config_sha256": "d5a604698802f65577d9993ef56c1fcfdc1f56b305127f03b763779376168f65",
+  "initialize_ok": true,
+  "launch_decision_write_profile": "LAUNCH_REFUSED_UNCLASSIFIED",
+  "live_home": {
+    "auth_json_present": true,
+    "config_toml_present": true,
+    "exists": true,
+    "is_default_user_home": false,
+    "path_is_default": false
+  },
+  "mcp": {
+    "codex_apps_present": false,
+    "fixture_callable": true,
+    "fixture_server_visible": true,
+    "fixture_tool_visible": true,
+    "servers": [
+      "ohf_probe"
+    ],
+    "tools": [
+      "ohf_probe_echo"
+    ]
+  },
+  "notes": [],
+  "residual_surface": {
+    "unexpected_mcp": [],
+    "unexpected_skills": [
+      "github:gh-address-comments",
+      "github:gh-fix-ci",
+      "github:github",
+      "github:yeet",
+      "openai-templates:artifact-template-analytics-dashboard",
+      "openai-templates:artifact-template-business-review",
+      "openai-templates:artifact-template-design-report",
+      "openai-templates:artifact-template-experiment-analysis",
+      "openai-templates:artifact-template-financial-budget",
+      "openai-templates:artifact-template-investment-committee-memo",
+      "openai-templates:artifact-template-legal-memorandum",
+      "openai-templates:artifact-template-market-trends-report",
+      "openai-templates:artifact-template-minimal-letterhead",
+      "openai-templates:artifact-template-operating-calendar",
+      "openai-templates:artifact-template-operating-review",
+      "openai-templates:artifact-template-project-kickoff",
+      "openai-templates:artifact-template-project-tracker",
+      "openai-templates:artifact-template-sales-pipeline",
+      "openai-templates:artifact-template-simple-dark-mode",
+      "openai-templates:artifact-template-simple-light-mode",
+      "openai-templates:artifact-template-strategy-memorandum",
+      "openai-templates:artifact-template-system-design",
+      "openai-templates:artifact-template-team-alignment",
+      "openai-templates:artifact-template-three-statement-forecast",
+      "plugin-management:plugin-management"
+    ],
+    "unexpected_tools": []
+  },
+  "schema_version": "mastermind.ohf_p1a_minimal_surface/v1",
+  "skills": {
+    "bundled_disappeared": false,
+    "fixture_discovered": true,
+    "fixture_invoked": true,
+    "observed": [
+      "github:gh-address-comments",
+      "github:gh-fix-ci",
+      "github:github",
+      "github:yeet",
+      "ohf-probe",
+      "openai-templates:artifact-template-analytics-dashboard",
+      "openai-templates:artifact-template-business-review",
+      "openai-templates:artifact-template-design-report",
+      "openai-templates:artifact-template-experiment-analysis",
+      "openai-templates:artifact-template-financial-budget",
+      "openai-templates:artifact-template-investment-committee-memo",
+      "openai-templates:artifact-template-legal-memorandum",
+      "openai-templates:artifact-template-market-trends-report",
+      "openai-templates:artifact-template-minimal-letterhead",
+      "openai-templates:artifact-template-operating-calendar",
+      "openai-templates:artifact-template-operating-review",
+      "openai-templates:artifact-template-project-kickoff",
+      "openai-templates:artifact-template-project-tracker",
+      "openai-templates:artifact-template-sales-pipeline",
+      "openai-templates:artifact-template-simple-dark-mode",
+      "openai-templates:artifact-template-simple-light-mode",
+      "openai-templates:artifact-template-strategy-memorandum",
+      "openai-templates:artifact-template-system-design",
+      "openai-templates:artifact-template-team-alignment",
+      "openai-templates:artifact-template-three-statement-forecast",
+      "plugin-management:plugin-management"
+    ],
+    "p0_ambient_still_present": [
+      "github:gh-address-comments",
+      "github:gh-fix-ci",
+      "github:github",
+      "github:yeet",
+      "openai-templates:artifact-template-analytics-dashboard",
+      "openai-templates:artifact-template-business-review",
+      "openai-templates:artifact-template-design-report",
+      "openai-templates:artifact-template-experiment-analysis",
+      "openai-templates:artifact-template-financial-budget",
+      "openai-templates:artifact-template-investment-committee-memo",
+      "openai-templates:artifact-template-legal-memorandum",
+      "openai-templates:artifact-template-market-trends-report",
+      "openai-templates:artifact-template-minimal-letterhead",
+      "openai-templates:artifact-template-operating-calendar",
+      "openai-templates:artifact-template-operating-review",
+      "openai-templates:artifact-template-project-kickoff",
+      "openai-templates:artifact-template-project-tracker",
+      "openai-templates:artifact-template-sales-pipeline",
+      "openai-templates:artifact-template-simple-dark-mode",
+      "openai-templates:artifact-template-simple-light-mode",
+      "openai-templates:artifact-template-strategy-memorandum",
+      "openai-templates:artifact-template-system-design",
+      "openai-templates:artifact-template-team-alignment",
+      "openai-templates:artifact-template-three-statement-forecast",
+      "plugin-management:plugin-management"
+    ]
+  },
+  "thread": {
+    "resume_id": "01a00bc1-020b-7182-b44b-6693df054763",
+    "resume_ok": true,
+    "start_id": "01a00bc1-020b-7182-b44b-6693df054763",
+    "start_ok": true,
+    "turn_ok": true
+  }
+}
