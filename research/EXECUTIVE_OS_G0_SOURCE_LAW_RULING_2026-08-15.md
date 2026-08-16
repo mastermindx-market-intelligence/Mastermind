@@ -19,7 +19,7 @@ This change does not arm CEO wake or production writes. It establishes the gover
 
 ## 1. Executive seats
 
-Ruling:
+The canonical mapping is the `seats:` block in `config/authority_map.yml`, matching the representation Phase 1F §2 prescribed for the first CEO-wake consumer:
 
 ```text
 chairman -> occupant_label Chris -> escalation_rank 300 -> authority none
@@ -41,9 +41,18 @@ A deterministic server-side operation classifier maps canonical operations/state
 
 The model may recommend or describe a category, but that text has zero authority.
 
-Chairman-reserved v1 categories include constitutional/Charter change, hierarchy and authority-policy change, company phase/north-star/standing-constraint change, production autonomy expansion, production-write trust-model change, autonomous merge/deploy/service-control/live-capital authority, protected-path policy change, constitutional Reasoning Governor change, and Chairman decision approval/rejection.
+Chairman-reserved v1 categories include constitutional/Charter change, hierarchy and authority-policy change, company phase/north-star/standing-constraint change, production autonomy expansion, production-write trust-model change, autonomous merge/deploy/service-control/live-capital authority, protected-path policy change, constitutional Reasoning Governor change, and **committing** approval/rejection of a canonical Chairman request.
 
-CEO-delegated v1 categories cover P0 add/retire/rescope, resource-policy rebalance, project initiation/stop/reprioritization/reframe inside the standing mandate, reasoning escalation requests, and route republish inside already approved policy.
+CEO-delegated v1 categories cover P0 add/retire/rescope, resource-policy rebalance, project initiation/stop/reprioritization/reframe inside the standing mandate, reasoning escalation requests, route republish inside already approved policy, and **creating/updating** the canonical Chairman request used to ask for a reserved decision.
+
+The split is intentional:
+
+```text
+CHAIRMAN_REQUEST_CREATE_OR_UPDATE -> ceo
+CHAIRMAN_DECISION_COMMIT          -> chairman
+```
+
+Sol may synthesize the smallest question, options, recommendation, and evidence packet for the Chairman. Sol may not commit the Chairman's answer.
 
 COO v1 categories cover bounded decomposition, child-job creation, repair/review, deterministic placement, shrink-only pause/stop/drain, and upward exception escalation.
 
@@ -61,9 +70,9 @@ Canonical split:
 2. **Candidate ranking:** `brain/improvement_agenda.py` — derived advisory ranking; not a mutable executive authority or project queue.
 3. **Admitted-work lifecycle/order:** Executive SQLite — lifecycle authority and ordering of work only after explicit admission.
 
-A project underneath an already active P0 may be admitted by a typed, authority-checked directive referencing the exact strategic-state revision. Starting such a project does not require mutating the strategic-state file merely to create work.
+A project underneath an already active P0 may eventually be admitted by the Phase 1G typed, authority-checked project/directive surface referencing the exact strategic-state revision. **That autonomous project-admission surface is designed but not armed by this source-law PR.** Existing bounded CEO-intent behavior is not silently widened by this ruling.
 
-A proposed strategy change first follows the applicable CEO/Chairman decision category, then changes the Git-backed strategic-state artifact, and only afterward can an implementation directive reference the new revision.
+Starting such a future project does not require mutating the strategic-state file merely to create work. A proposed strategy change first follows the applicable CEO/Chairman decision category, then changes the Git-backed strategic-state artifact, and only afterward can an implementation directive reference the new revision.
 
 No runtime scheduler keys directly off `strategic_state.yml`. No model persists a priority decision by patching generated Improvement Agenda output.
 
@@ -92,7 +101,7 @@ Use `approve|reject` for v1. `request_changes` is represented as `reject` plus t
 
 ### Q3 — seat registry
 
-Order it now because Phase 1G CEO wake is the first consumer that requires machine-readable executive seat identity. Keep it in `config/authority_map.yml`, with `authority: none` for every seat. Do not create `seats.yml`.
+Order it now because Phase 1G CEO wake is the first consumer that requires machine-readable executive seat identity. Keep the canonical `seats:` block in `config/authority_map.yml`, with `authority: none` for every seat. Do not create `seats.yml` or a second seat registry.
 
 ### Q4 — implementation-result independence
 
@@ -128,9 +137,11 @@ The critic remains read-only challenge evidence and has no veto/write authority 
 
 ## 6. Protected paths
 
-`authority_map.yml` now declares a minimum constitutional/governance protected-path set including the Charter, authority map, strategic state, worker-facing executive contracts, Executive MCP implementation, Executive OS operations, and CI/workflow policy.
+`authority_map.yml` now declares a minimum constitutional/governance protected-path set including the Charter, Phase 1F source contract, this source-law ruling, authority map, strategic state, worker-facing executive contracts, Executive MCP implementation, Executive OS operations, and CI/workflow policy.
 
 Autonomous workers/models may not receive write authority to those paths merely through a Job payload or model request, and may not widen the protected set themselves.
+
+This PR establishes source law; current Phase 1B worker runtime is not represented as an X5 production modifying surface. Before X5 can arm, its modifying tools must actually consume/enforce the protected-path policy and prove that enforcement with refusal/mutation tests.
 
 A proposed change to constitutional/authority/trust/autonomy source law is a separate reviewed change at the required executive decision altitude.
 
@@ -147,6 +158,7 @@ This ruling does not:
 - authorize merge/deploy/service control/live capital;
 - authenticate a caller from a seat/model/actor label;
 - let an LLM choose its own decision altitude;
+- activate the designed Phase 1G autonomous project-admission surface;
 - waive Phase 1C-A or Phase 1F-B/C gates.
 
 Phase 1G production work still requires the later capability, identity, migration, and acceptance gates.
