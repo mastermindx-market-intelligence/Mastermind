@@ -2,6 +2,7 @@
 
 The JSON document is the canonical machine-readable artifact.  Markdown is a
 lossy human interpretation of the same observations.  Neither may guess.
+Essential acceptance evidence must live in structured JSON fields, not notes.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
-SCHEMA_VERSION = "mastermind.ohf_harness_probe/v1"
+SCHEMA_VERSION = "mastermind.ohf_harness_probe/v1.1"
 
 CAPABILITY_KEYS = (
     "persistent_session",
@@ -28,10 +29,15 @@ CAPABILITY_KEYS = (
 )
 
 RECOVERY_KEYS = (
-    "process_restart",
-    "session_resume",
-    "workspace_continuity",
-    "orphan_cleanup",
+    "process_sigkill_resume",
+    "process_sigterm_resume",
+    "malformed_rpc_recovery",
+    "missing_session_fail_closed",
+    "workspace_missing_fail_closed",
+    "config_drift_detected",
+    "mcp_disappearance_detected",
+    "main_process_cleanup",
+    "transitive_orphan_cleanup",
 )
 
 VERDICTS = frozenset({"pass", "fail", "unknown"})
@@ -39,6 +45,7 @@ OBSERVATION_STATUSES = frozenset(
     {"VERIFIED", "NOT_SUPPORTED", "NOT_TESTED", "DEGRADED", "UNKNOWN"}
 )
 USAGE_CLASSES = frozenset({"exact", "provider_reported", "estimated", "unknown"})
+TRI_BOOL = frozenset({True, False, "UNKNOWN"})
 
 P0_QUESTIONS = (
     ("launch", "Can we launch the native harness?"),
@@ -54,6 +61,8 @@ P0_QUESTIONS = (
     ("cleanup", "Can we clean up?"),
     ("inert", "Can we do all that without touching Executive lifecycle state?"),
 )
+
+LOAD_BEARING_DIMENSIONS = ("model", "skills", "mcp")
 
 
 def utc_now() -> str:
@@ -71,10 +80,130 @@ def empty_capabilities() -> dict[str, str]:
 
 
 def empty_recovery() -> dict[str, str]:
-    return {key: "unknown" for key in RECOVERY_KEYS}
+    return {key: "UNKNOWN" for key in RECOVERY_KEYS}
+
+
+def requested_capability_manifest(
+    *,
+    model: str,
+    skills: Iterable[str],
+    mcp_servers: Iterable[str],
+    mcp_tools: Iterable[str],
+    plugins: Iterable[str],
+    approval_policy: str,
+    sandbox_mode: str,
+    permissions: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "model": model,
+        "skills": sorted({str(item) for item in skills if str(item).strip()}),
+        "mcp_servers": sorted({str(item) for item in mcp_servers if str(item).strip()}),
+        "mcp_tools": sorted({str(item) for item in mcp_tools if str(item).strip()}),
+        "plugins": sorted({str(item) for item in plugins if str(item).strip()}),
+        "approval_policy": approval_policy,
+        "sandbox_mode": sandbox_mode,
+        "permissions": dict(permissions or {}),
+    }
+
+
+def observed_capability_manifest(
+    *,
+    model: str | None,
+    skills: Iterable[str],
+    mcp_servers: Iterable[str],
+    mcp_tools: Iterable[str],
+    plugins: Iterable[str],
+    approval_policy: str | None,
+    sandbox_mode: str | None,
+    harness_version: str,
+) -> dict[str, Any]:
+    return {
+        "model": model or "",
+        "skills": sorted({str(item) for item in skills if str(item).strip()}),
+        "mcp_servers": sorted({str(item) for item in mcp_servers if str(item).strip()}),
+        "mcp_tools": sorted({str(item) for item in mcp_tools if str(item).strip()}),
+        "plugins": sorted({str(item) for item in plugins if str(item).strip()}),
+        "approval_policy": approval_policy or "",
+        "sandbox_mode": sandbox_mode or "",
+        "harness_version": harness_version,
+    }
+
+
+def attest_manifests(
+    requested: Mapping[str, Any],
+    observed: Mapping[str, Any],
+    unobservable: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Compare requested vs observed.  Unobservable dimensions are UNKNOWN, not accepted."""
+    unobs = sorted({str(item) for item in unobservable if str(item).strip()})
+    req_skills = set(requested.get("skills") or [])
+    obs_skills = set(observed.get("skills") or [])
+    req_mcp = set(requested.get("mcp_servers") or [])
+    obs_mcp = set(observed.get("mcp_servers") or [])
+    req_plugins = set(requested.get("plugins") or [])
+    obs_plugins = set(observed.get("plugins") or [])
+    missing_required_skills = sorted(req_skills - obs_skills)
+    missing_required_mcp = sorted(req_mcp - obs_mcp)
+    missing_required_plugins = sorted(req_plugins - obs_plugins)
+    unexpected_skills = sorted(obs_skills - req_skills)
+    unexpected_mcp = sorted(obs_mcp - req_mcp)
+    unexpected_plugins = sorted(obs_plugins - req_plugins)
+    req_model = str(requested.get("model") or "")
+    obs_model = str(observed.get("model") or "")
+    if "model" in unobs or not obs_model:
+        model_match: bool | str = "UNKNOWN"
+        unexpected_model_override = False
+    else:
+        model_match = obs_model == req_model
+        unexpected_model_override = bool(obs_model and obs_model != req_model)
+
+    load_bearing_unobservable = [key for key in LOAD_BEARING_DIMENSIONS if key in unobs]
+    attested = (
+        model_match is True
+        and not missing_required_skills
+        and not missing_required_mcp
+        and not missing_required_plugins
+        and not unexpected_skills
+        and not unexpected_mcp
+        and not unexpected_plugins
+        and not unexpected_model_override
+        and not load_bearing_unobservable
+    )
+    return {
+        "model_match": model_match,
+        "missing_required_skills": missing_required_skills,
+        "missing_required_mcp": missing_required_mcp,
+        "missing_required_plugins": missing_required_plugins,
+        "unexpected_skills": unexpected_skills,
+        "unexpected_mcp": unexpected_mcp,
+        "unexpected_plugins": unexpected_plugins,
+        "unexpected_model_override": unexpected_model_override,
+        "unobservable_dimensions": unobs,
+        "config_attested": attested,
+    }
 
 
 def new_probe(*, probe_id: str, harness_kind: str) -> dict[str, Any]:
+    requested = requested_capability_manifest(
+        model="",
+        skills=[],
+        mcp_servers=[],
+        mcp_tools=[],
+        plugins=[],
+        approval_policy="never",
+        sandbox_mode="read-only",
+    )
+    observed = observed_capability_manifest(
+        model="",
+        skills=[],
+        mcp_servers=[],
+        mcp_tools=[],
+        plugins=[],
+        approval_policy="",
+        sandbox_mode="",
+        harness_version="",
+    )
+    attestation = attest_manifests(requested, observed, unobservable=LOAD_BEARING_DIMENSIONS)
     return {
         "schema_version": SCHEMA_VERSION,
         "probe_id": probe_id,
@@ -89,13 +218,67 @@ def new_probe(*, probe_id: str, harness_kind: str) -> dict[str, Any]:
             "version": "",
             "binary_digest": "",
             "protocol": "json-rpc-stdio",
-            "effective_config_digest": "",
+            "requested_manifest_digest": "",
+            "observed_manifest_digest": "",
         },
         "provider": {
             "provider": "openai",
-            "account_label": "unknown",
+            "auth_type": "UNKNOWN",
+            "plan_type": "UNKNOWN",
+            "requires_openai_auth": None,
             "requested_model": "",
             "served_model_observed": "",
+        },
+        "auth_isolation": {
+            "auth_json_copied": False,
+            "auth_json_symlinked": False,
+            "implicit_default_home_fallback": False,
+            "dedicated_home_authenticated_independently": False,
+            "codex_home_used": "",
+        },
+        "requested_manifest": requested,
+        "observed_manifest": observed,
+        "attestation": attestation,
+        "session_continuity": {
+            "initial_pid": None,
+            "replacement_pid": None,
+            "sigkill_replacement_pid": None,
+            "sigterm_replacement_pid": None,
+            "initial_thread_id": "",
+            "resumed_thread_id": "",
+            "sigkill_resume_thread_id": "",
+            "sigterm_resume_thread_id": "",
+            "process_identity_changed": "UNKNOWN",
+            "native_thread_survived": "UNKNOWN",
+            "workspace_survived": "UNKNOWN",
+            "process_generations": [],
+        },
+        "fork_proof": {
+            "parent_thread_id": "",
+            "fork_thread_id": "",
+            "fork_source_thread": "",
+            "parent_neq_fork": "UNKNOWN",
+            "inherited_earlier_state": "UNKNOWN",
+            "parent_continuation_isolated": "UNKNOWN",
+            "fork_continuation_isolated": "UNKNOWN",
+            "independent_continuation_proven": "UNKNOWN",
+        },
+        "skill_attestation": {
+            "requested_present": False,
+            "discovered": False,
+            "invokable": "UNKNOWN",
+            "invoked_successfully": False,
+            "removal": {
+                "reloadable_without_restart": "UNKNOWN",
+                "status": "NOT_TESTED",
+            },
+        },
+        "mcp_attestation": {
+            "configured": False,
+            "server_visible": False,
+            "tool_visible": False,
+            "tool_callable": False,
+            "structured_event_visible": False,
         },
         "capabilities": empty_capabilities(),
         "recovery": empty_recovery(),
@@ -108,6 +291,7 @@ def new_probe(*, probe_id: str, harness_kind: str) -> dict[str, Any]:
             "unexpected_skills": [],
             "unexpected_model_override": False,
             "unexpected_config_source": [],
+            "redaction_failures": [],
         },
         "usage": {
             "classification": "unknown",
@@ -115,6 +299,14 @@ def new_probe(*, probe_id: str, harness_kind: str) -> dict[str, Any]:
             "used_percent": None,
             "input_tokens": None,
             "output_tokens": None,
+        },
+        "quota": {
+            "classification": "unknown",
+            "source": "",
+        },
+        "cleanup_proof": {
+            "main_pid_exited": False,
+            "descendant_census": False,
         },
         "observations": [],
         "notes": [],
@@ -148,6 +340,20 @@ def observation_status(probe: Mapping[str, Any], question_id: str) -> str:
     return "UNKNOWN"
 
 
+def apply_attestation(probe: dict[str, Any], attestation: Mapping[str, Any]) -> None:
+    probe["attestation"] = dict(attestation)
+    security = probe.setdefault("security", {})
+    security["config_attested"] = bool(attestation.get("config_attested"))
+    security["unexpected_skills"] = list(attestation.get("unexpected_skills") or [])
+    security["unexpected_mcp"] = list(attestation.get("unexpected_mcp") or [])
+    security["unexpected_plugins"] = list(attestation.get("unexpected_plugins") or [])
+    security["unexpected_model_override"] = bool(attestation.get("unexpected_model_override"))
+    if not attestation.get("config_attested"):
+        sources = security.setdefault("unexpected_config_source", [])
+        if "manifest_mismatch" not in sources:
+            sources.append("manifest_mismatch")
+
+
 def validate_probe(probe: Mapping[str, Any]) -> list[str]:
     """Return schema defects.  Empty means the document is structurally valid."""
     errors: list[str] = []
@@ -157,15 +363,28 @@ def validate_probe(probe: Mapping[str, Any]) -> list[str]:
         errors.append("probe_id")
     if not str(probe.get("observed_at") or "").strip():
         errors.append("observed_at")
-    for section, keys in (("capabilities", CAPABILITY_KEYS), ("recovery", RECOVERY_KEYS)):
-        block = probe.get(section)
-        if not isinstance(block, dict):
-            errors.append(section)
-            continue
-        for key in keys:
-            verdict = block.get(key)
-            if verdict not in VERDICTS:
-                errors.append(f"{section}.{key}")
+    capabilities = probe.get("capabilities")
+    if not isinstance(capabilities, dict):
+        errors.append("capabilities")
+    else:
+        for key in CAPABILITY_KEYS:
+            if capabilities.get(key) not in VERDICTS:
+                errors.append(f"capabilities.{key}")
+    recovery = probe.get("recovery")
+    if not isinstance(recovery, dict):
+        errors.append("recovery")
+    else:
+        for key in RECOVERY_KEYS:
+            if recovery.get(key) not in OBSERVATION_STATUSES:
+                errors.append(f"recovery.{key}")
+        if recovery.get("transitive_orphan_cleanup") == "VERIFIED":
+            proof = probe.get("cleanup_proof") or {}
+            if not proof.get("descendant_census"):
+                errors.append("recovery.transitive_orphan_cleanup_unproven")
+        if recovery.get("main_process_cleanup") == "VERIFIED":
+            proof = probe.get("cleanup_proof") or {}
+            if not proof.get("main_pid_exited"):
+                errors.append("recovery.main_process_cleanup_unproven")
     usage = probe.get("usage") or {}
     if usage.get("classification") not in USAGE_CLASSES:
         errors.append("usage.classification")
@@ -174,6 +393,9 @@ def validate_probe(probe: Mapping[str, Any]) -> list[str]:
         "provider_reported",
     }:
         errors.append("usage.used_percent_without_provider_source")
+    quota = probe.get("quota") or {}
+    if quota.get("classification") not in USAGE_CLASSES:
+        errors.append("quota.classification")
     for row in probe.get("observations") or []:
         if not isinstance(row, dict) or row.get("status") not in OBSERVATION_STATUSES:
             errors.append("observations.status")
@@ -186,10 +408,17 @@ def validate_probe(probe: Mapping[str, Any]) -> list[str]:
         errors.append("security")
     elif security.get("credential_exposure") is True:
         errors.append("security.credential_exposure")
+    attestation = probe.get("attestation")
+    if not isinstance(attestation, dict):
+        errors.append("attestation")
+    elif "config_attested" not in attestation:
+        errors.append("attestation.config_attested")
     blob = json.dumps(probe, default=str).lower()
     for token in ("access_token", "refresh_token", "id_token", "auth.json"):
         if token in blob:
             errors.append(f"forbidden_token:{token}")
+    if "copy_auth" in blob or "shutil.copy2" in blob:
+        errors.append("forbidden_auth_copy_evidence")
     return errors
 
 
@@ -221,21 +450,104 @@ def render_markdown(probe: Mapping[str, Any]) -> str:
         if evidence:
             lines.append(f"- evidence: `{evidence}`")
         lines.append("")
-    lines.extend(["## Capabilities", ""])
+    harness = probe.get("harness") or {}
+    lines.extend(
+        [
+            "## Capability manifests",
+            "",
+            f"- requested_manifest_digest: `{harness.get('requested_manifest_digest') or ''}`",
+            f"- observed_manifest_digest: `{harness.get('observed_manifest_digest') or ''}`",
+            "",
+        ]
+    )
+    attestation = probe.get("attestation") or {}
+    lines.append(f"- model_match: `{attestation.get('model_match')}`")
+    lines.append(f"- config_attested: `{attestation.get('config_attested')}`")
+    for field in (
+        "missing_required_skills",
+        "missing_required_mcp",
+        "missing_required_plugins",
+        "unexpected_skills",
+        "unexpected_mcp",
+        "unexpected_plugins",
+        "unobservable_dimensions",
+    ):
+        values = attestation.get(field) or []
+        rendered = ", ".join(str(item) for item in values) or "(none)"
+        lines.append(f"- {field}: {rendered}")
+    lines.append("")
+    session = probe.get("session_continuity") or {}
+    lines.extend(
+        [
+            "## Session continuity",
+            "",
+            f"- initial_pid: `{session.get('initial_pid')}`",
+            f"- replacement_pid: `{session.get('replacement_pid')}`",
+            f"- sigkill_replacement_pid: `{session.get('sigkill_replacement_pid')}`",
+            f"- sigterm_replacement_pid: `{session.get('sigterm_replacement_pid')}`",
+            f"- initial_thread_id: `{session.get('initial_thread_id') or ''}`",
+            f"- resumed_thread_id: `{session.get('resumed_thread_id') or ''}`",
+            f"- sigkill_resume_thread_id: `{session.get('sigkill_resume_thread_id') or ''}`",
+            f"- sigterm_resume_thread_id: `{session.get('sigterm_resume_thread_id') or ''}`",
+            f"- process_identity_changed: `{session.get('process_identity_changed')}`",
+            f"- native_thread_survived: `{session.get('native_thread_survived')}`",
+            f"- workspace_survived: `{session.get('workspace_survived')}`",
+            "",
+            "## Fork proof",
+            "",
+        ]
+    )
+    fork = probe.get("fork_proof") or {}
+    for field in (
+        "parent_thread_id",
+        "fork_thread_id",
+        "fork_source_thread",
+        "parent_neq_fork",
+        "inherited_earlier_state",
+        "parent_continuation_isolated",
+        "fork_continuation_isolated",
+        "independent_continuation_proven",
+    ):
+        lines.append(f"- {field}: `{fork.get(field)}`")
+    lines.extend(["", "## Capabilities", ""])
     for key, verdict in (probe.get("capabilities") or {}).items():
         lines.append(f"- `{key}`: {verdict}")
     lines.extend(["", "## Recovery", ""])
     for key, verdict in (probe.get("recovery") or {}).items():
         lines.append(f"- `{key}`: {verdict}")
     usage = probe.get("usage") or {}
+    quota = probe.get("quota") or {}
     lines.extend(
         [
             "",
             "## Usage / quota",
             "",
-            f"- classification: `{usage.get('classification', 'unknown')}`",
-            f"- source: `{usage.get('source') or 'none'}`",
-            f"- used_percent: `{usage.get('used_percent')}`",
+            f"- usage.classification: `{usage.get('classification', 'unknown')}`",
+            f"- usage.source: `{usage.get('source') or 'none'}`",
+            f"- quota.classification: `{quota.get('classification', 'unknown')}`",
+            f"- quota.source: `{quota.get('source') or 'none'}`",
+        ]
+    )
+    for window in ("primary", "secondary"):
+        block = quota.get(window)
+        if isinstance(block, dict):
+            lines.append(
+                f"- quota.{window}: used_percent=`{block.get('used_percent')}` "
+                f"window_duration_minutes=`{block.get('window_duration_minutes')}` "
+                f"resets_at=`{block.get('resets_at')}`"
+            )
+    if quota.get("rate_limit_reached_type") is not None:
+        lines.append(f"- rate_limit_reached_type: `{quota.get('rate_limit_reached_type')}`")
+    auth = probe.get("auth_isolation") or {}
+    lines.extend(
+        [
+            "",
+            "## Auth isolation",
+            "",
+            f"- auth_json_copied: `{auth.get('auth_json_copied')}`",
+            f"- auth_json_symlinked: `{auth.get('auth_json_symlinked')}`",
+            f"- implicit_default_home_fallback: `{auth.get('implicit_default_home_fallback')}`",
+            f"- dedicated_home_authenticated_independently: `{auth.get('dedicated_home_authenticated_independently')}`",
             "",
             "## Security",
             "",
@@ -250,10 +562,21 @@ def render_markdown(probe: Mapping[str, Any]) -> str:
         "unexpected_plugins",
         "unexpected_skills",
         "unexpected_config_source",
+        "redaction_failures",
     ):
         values = security.get(field) or []
         rendered = ", ".join(str(item) for item in values) or "(none)"
         lines.append(f"- {field}: {rendered}")
+    cleanup = probe.get("cleanup_proof") or {}
+    lines.extend(
+        [
+            "",
+            "## Cleanup proof",
+            "",
+            f"- main_pid_exited: `{cleanup.get('main_pid_exited')}`",
+            f"- descendant_census: `{cleanup.get('descendant_census')}`",
+        ]
+    )
     notes = [str(note) for note in (probe.get("notes") or []) if str(note).strip()]
     if notes:
         lines.extend(["", "## Notes", ""])

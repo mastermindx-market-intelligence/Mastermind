@@ -2,7 +2,8 @@
 
 Default backend is the in-repo fake App Server so CI never launches Codex,
 never spends quota, and never touches Executive OS state.  Pass ``--live``
-only on an operator workstation that already has ``codex app-server``.
+only on an operator workstation that already has an independently
+authenticated dedicated Codex home.
 """
 from __future__ import annotations
 
@@ -22,6 +23,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backend", choices=("fake", "live"), default="fake")
     parser.add_argument("--live", action="store_true", help="alias for --backend live")
     parser.add_argument(
+        "--codex-home",
+        default="",
+        help="Already-authenticated dedicated Codex home. Required for --live. Never ~/.codex.",
+    )
+    parser.add_argument(
         "--out-dir",
         default="",
         help="Directory for probe.json and probe.md (default: research/evidence/ohf_p0/<id>)",
@@ -30,11 +36,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="gpt-5.6-sol")
     args = parser.parse_args(argv)
     backend = "live" if args.live else args.backend
+    dedicated = Path(args.codex_home).expanduser() if args.codex_home else None
+    if backend == "live" and dedicated is None:
+        print(
+            "OHF-P0 live mode requires --codex-home pointing at a dedicated, "
+            "already-authenticated Codex home.\n"
+            "Prepare it with:\n"
+            "  CODEX_HOME=/path/to/dedicated/home codex login\n"
+            "Then:\n"
+            "  python -m scripts.ohf.run_probe --live "
+            "--codex-home /path/to/dedicated/home --out-dir /tmp/ohf-p0-live",
+            file=sys.stderr,
+        )
+        return 2
 
     workdir = Path(args.workdir) if args.workdir else Path(tempfile.mkdtemp(prefix="ohf-p0-"))
-    lab = Laboratory(root=workdir, backend=backend, requested_model=args.model)
-    if backend == "live":
-        lab.copy_auth_if_present()
+    try:
+        lab = Laboratory(
+            root=workdir,
+            backend=backend,
+            requested_model=args.model,
+            dedicated_codex_home=dedicated,
+        )
+    except RuntimeError as exc:
+        print(f"OHF-P0: {exc}", file=sys.stderr)
+        return 2
     probe = run_codex_app_server_probe(lab)
     defects = validate_probe(probe)
     if evidence_contains_secret(probe):
