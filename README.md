@@ -36,4 +36,6 @@ overlays, not current `master` behavior.
 
 Start with `AGENTS.md` for authority and delivery rules,
 `research/MASTERMIND_CHARTER_V2.md` for the canonical charter, and
-`docs/DELIVERY_WORKFLOW.md` for operations. `README.md` is orientation only.
+`docs/DELIVERY_WORKFLOW.md` for operations. The first unarmed
+frontier-lead/economical-worker routing layer and rollout path are documented in
+`docs/EXECUTIVE_WORKER_ROUTING.md`. `README.md` is orientation only.
