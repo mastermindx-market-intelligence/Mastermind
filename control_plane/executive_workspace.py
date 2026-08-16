@@ -430,9 +430,15 @@ def prepare_credentialless_clone(
                     group_execute = 0o010 if original & 0o111 else 0
                     os.chown(target, -1, int(shared_gid))
                     os.chmod(target, (original & 0o700) | 0o060 | group_execute)
+        # Observational: do not let `git status` refresh `.git/index` under the
+        # control umask after shared-group preparation.  Worker launch then
+        # cannot open a 0600 index.  Clone/checkout commands keep the ordinary
+        # control Git environment; only this final cleanliness read is locked.
+        cleanliness_env = dict(env)
+        cleanliness_env["GIT_OPTIONAL_LOCKS"] = "0"
         cleanliness = observe_launch_cleanliness(
             lambda arguments: _run_bytes(
-                ["git", *arguments], cwd=destination, env=env
+                ["git", *arguments], cwd=destination, env=cleanliness_env
             )
         )
         if cleanliness.dirty:
