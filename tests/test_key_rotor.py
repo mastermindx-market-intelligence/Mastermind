@@ -467,6 +467,7 @@ class TestRotationLoop:
             monkeypatch.delenv(f"CLAUDE_CODE_OAUTH_TOKEN_{n}", raising=False)
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         monkeypatch.delenv("METAB_KEYS_ENABLED", raising=False)
+        monkeypatch.delenv("MASTERMIND_SHARED_LLM_POOL", raising=False)
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN_3", "tok_slot3_value")
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN_5", "tok_slot5_value")
 
@@ -487,6 +488,8 @@ class TestRotationLoop:
 
         import brain.cli_bridge as _cb
         _cb = importlib.reload(_cb)
+        # `import bot` during reload can re-read process env; pin slots again.
+        self._setup_slots(monkeypatch, tmp_path)
 
         call_count = {"n": 0}
 
@@ -515,7 +518,11 @@ class TestRotationLoop:
                 }
             raise AssertionError(f"Unexpected env_name: {env_name}")
 
+        async def _no_subprocess(*args, **kwargs):
+            raise AssertionError("rotation test must stay on the patched SDK path")
+
         monkeypatch.setattr(_cb, "_via_sdk", _fake_via_sdk)
+        monkeypatch.setattr(_cb, "_via_subprocess", _no_subprocess)
         monkeypatch.setattr(_cb, "_SDK", True)
         # Patch key_rotor import in cli_bridge to use our tmp_path-redirected version
         monkeypatch.setattr(_cb, "__builtins__", _cb.__builtins__)
@@ -523,10 +530,31 @@ class TestRotationLoop:
         # Reload key_rotor in cli_bridge's namespace
         import sys
         sys.modules["brain.key_rotor"] = _kr
+        # Pin the pool so hosted-CI vendor federation / extra env slots cannot
+        # change which candidates the rotation loop sees. Env discovery is
+        # covered by TestCandidates.
+        monkeypatch.setattr(
+            _kr,
+            "candidates",
+            lambda root=None: [
+                {
+                    "key_id": "claude_code_oauth_3",
+                    "env_name": "CLAUDE_CODE_OAUTH_TOKEN_3",
+                    "cooling": False,
+                    "load": 0,
+                },
+                {
+                    "key_id": "claude_code_oauth_5",
+                    "env_name": "CLAUDE_CODE_OAUTH_TOKEN_5",
+                    "cooling": False,
+                    "load": 0,
+                },
+            ],
+        )
 
         result = asyncio.run(_cb.reason("what is the market doing?", log_run=False))
 
-        assert result["ok"] is True
+        assert result["ok"] is True, result
         assert result["text"] == "The market is bullish."
         assert result.get("key_id") == "claude_code_oauth_5"
         assert call_count["n"] == 2  # slot 3 attempted first, then slot 5

@@ -673,6 +673,10 @@ def test_identity_group_writable_binary_is_refused(
         _load(binary, receipt)
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="Mach-O identity is asserted only on Darwin; Linux hits uid!=0 first",
+)
 def test_binary_is_not_mach_o_is_refused(tmp_path: Path) -> None:
     binary = tmp_path / "codex"
     binary.write_bytes(b"#!/bin/sh\necho not a real binary\n")
