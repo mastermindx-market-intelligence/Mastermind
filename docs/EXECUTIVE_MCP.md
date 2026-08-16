@@ -452,13 +452,18 @@ Blocked until **all** of:
 
 A later reviewed commission will add a narrow `acknowledge_ceo_wake` typed action
 and canonical `WAKE-*` identities. **None of it is implemented here** — there is
-no wake transport, no acknowledgement path, and no `WAKE-*` identity in this PR.
+no wake transport, no acknowledgement path, and no MCP `WAKE-*` identity in this
+gateway.
 
-The seam is the tool table: adding that action is **one `ToolSpec` entry in
-`schemas.TOOL_SPECS` plus one intentional update to
-`SCHEMA_SNAPSHOT_SHA256`**, in a reviewed PR. Nothing else in the gateway
-hardcodes the tool count — only the census tests do, deliberately, so that
-growing the surface must be a decision rather than a drift.
+The core Wake Fabric contracts now live below MCP in
+`control_plane/wake_events.py`, `session_targets.py`, `wake_router.py`, and
+`wake_dispatcher.py` (see `docs/EXECUTIVE_WAKE_FABRIC.md`). That PR-1 surface
+does **not** add a tool, bump `SCHEMA_SNAPSHOT_SHA256`, or arm a write. The MCP
+seam remains exactly this: adding `acknowledge_ceo_wake` is **one `ToolSpec`
+entry in `schemas.TOOL_SPECS` plus one intentional update to
+`SCHEMA_SNAPSHOT_SHA256`**, in a separately reviewed PR. Nothing else in the
+gateway hardcodes the tool count — only the census tests do, deliberately, so
+that growing the surface must be a decision rather than a drift.
 
 ### Executive OS multi-repo execution
 

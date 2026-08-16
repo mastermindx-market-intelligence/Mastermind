@@ -1,0 +1,56 @@
+{
+  "schema": "mastermind.wake_session_targets.v1",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "notes": "Logical session aliases only. External handles are provider addresses, never Mastermind identity. This file is not a job queue, scheduler, lease table, or lifecycle ledger.",
+  "default_alias_by_seat": {
+    "coo": "EXECUTIVE-COO-A",
+    "ceo": "EXECUTIVE-CEO-A"
+  },
+  "workstream_alias_by_seat": {
+    "prophet": {
+      "coo": "PROPHET-COO-A"
+    },
+    "terminal": {
+      "coo": "TERMINAL-COO-A"
+    },
+    "executive": {
+      "ceo": "EXECUTIVE-CEO-A",
+      "coo": "EXECUTIVE-COO-A"
+    }
+  },
+  "targets": {
+    "PROPHET-COO-A": {
+      "session_alias": "PROPHET-COO-A",
+      "target_seat": "coo",
+      "adapter_type": "codex-app-server",
+      "workstream": "prophet",
+      "external_handle": null,
+      "implemented": false
+    },
+    "TERMINAL-COO-A": {
+      "session_alias": "TERMINAL-COO-A",
+      "target_seat": "coo",
+      "adapter_type": "codex-app-server",
+      "workstream": "terminal",
+      "external_handle": null,
+      "implemented": false
+    },
+    "EXECUTIVE-COO-A": {
+      "session_alias": "EXECUTIVE-COO-A",
+      "target_seat": "coo",
+      "adapter_type": "codex-app-server",
+      "workstream": "executive",
+      "external_handle": null,
+      "implemented": false
+    },
+    "EXECUTIVE-CEO-A": {
+      "session_alias": "EXECUTIVE-CEO-A",
+      "target_seat": "ceo",
+      "adapter_type": "chatgpt-gui",
+      "workstream": "executive",
+      "external_handle": null,
+      "implemented": false
+    }
+  }
+}
