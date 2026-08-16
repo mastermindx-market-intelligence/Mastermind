@@ -21,7 +21,7 @@ attention item with no Job is a valid obligation.  There is no free-form
 ``project_id``.
 
 Later persistence (PR-2) reuses Executive OS ``events.command_id`` with
-phase suffixes defined in :mod:`control_plane.wake_dispatcher`.  This module
+phase suffixes defined in :mod:`control_plane.wake_ledger`.  This module
 does not write SQLite.
 """
 from __future__ import annotations
@@ -47,7 +47,9 @@ ATTENTION_ID_RE = re.compile(r"^eia-[0-9a-f]{12}$")
 RUNTIME_REF_RE = re.compile(
     r"^runtime:(job|attempt|worker):[A-Za-z0-9._:-]+:[1-9][0-9]*$"
 )
+RUNTIME_JOB_REF_RE = re.compile(r"^runtime:job:(JOB-\d{3,}):([1-9][0-9]*)$")
 WORKSTREAM_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+SOURCE_WORKSTREAM_RE = re.compile(r"^[^\x00-\x1f]{1,128}$")
 ISO_UTC_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]00:00)$"
 )
@@ -98,6 +100,7 @@ ENVELOPE_KEYS = frozenset(
         "attempt_id",
         "root_job_id",
         "workstream",
+        "source_workstream",
         "evidence_refs",
     }
 )
@@ -205,7 +208,14 @@ class WakeObligation:
     attempt_id: str | None
     root_job_id: str | None
     workstream: str | None
+    source_workstream: str | None
     evidence_refs: tuple[str, ...]
+
+    @property
+    def routing_workstream(self) -> str | None:
+        """Validated Wake routing namespace.  Distinct from source_workstream."""
+
+        return self.workstream
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -221,6 +231,7 @@ class WakeObligation:
             "attempt_id": self.attempt_id,
             "root_job_id": self.root_job_id,
             "workstream": self.workstream,
+            "source_workstream": self.source_workstream,
             "evidence_refs": list(self.evidence_refs),
         }
 
@@ -235,6 +246,7 @@ def mint_obligation(
     attempt_id: str | None = None,
     root_job_id: str | None = None,
     workstream: str | None = None,
+    source_workstream: str | None = None,
     source_created_at: str | None = None,
     emitted_at: str | None = None,
     evidence_refs: Sequence[str] | None = None,
@@ -246,7 +258,8 @@ def mint_obligation(
     job = _optional_job_id(job_id)
     attempt = _optional_attempt_id(attempt_id)
     root = _optional_job_id(root_job_id)
-    stream = _optional_workstream(workstream)
+    source_stream = _optional_source_workstream(source_workstream)
+    stream = _optional_routing_workstream(workstream)
     if resolved_source is SourceKind.EXECUTIVE_INBOX_ATTENTION:
         if resolved_kind.value not in INBOX_WAKE_KINDS:
             raise WakeObligationError(
@@ -256,6 +269,20 @@ def mint_obligation(
         raise WakeObligationError(
             f"runtime source cannot mint wake_kind {resolved_kind.value!r}"
         )
+    else:
+        matched = RUNTIME_JOB_REF_RE.fullmatch(resolved_ref)
+        if matched is None:
+            raise WakeObligationError(
+                "runtime review_required source_ref must be runtime:job:<JOB-*>:<sequence>"
+            )
+        if job != matched.group(1):
+            raise WakeObligationError(
+                "runtime review_required job_id must match source_ref job identity"
+            )
+        if root is None:
+            raise WakeObligationError(
+                "runtime review_required requires a canonical root_job_id"
+            )
     refs = _evidence_refs(
         evidence_refs,
         source_ref=resolved_ref,
@@ -281,6 +308,7 @@ def mint_obligation(
         attempt_id=attempt,
         root_job_id=root,
         workstream=stream,
+        source_workstream=source_stream,
         evidence_refs=refs,
     )
 
@@ -317,6 +345,7 @@ def parse_obligation(value: Mapping[str, Any]) -> WakeObligation:
         attempt_id=value.get("attempt_id"),
         root_job_id=value.get("root_job_id"),
         workstream=value.get("workstream"),
+        source_workstream=value.get("source_workstream"),
         source_created_at=value.get("source_created_at"),
         emitted_at=value.get("emitted_at"),
         evidence_refs=value.get("evidence_refs"),
@@ -398,12 +427,21 @@ def _optional_attempt_id(value: Any) -> str | None:
     return token
 
 
-def _optional_workstream(value: Any) -> str | None:
+def _optional_routing_workstream(value: Any) -> str | None:
     if value is None or value == "":
         return None
     token = str(value).strip().lower()
     if WORKSTREAM_RE.fullmatch(token) is None:
-        raise WakeObligationError("workstream must be a bounded identifier")
+        raise WakeObligationError("routing workstream must be a bounded identifier")
+    return token
+
+
+def _optional_source_workstream(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    token = str(value).strip()
+    if SOURCE_WORKSTREAM_RE.fullmatch(token) is None:
+        raise WakeObligationError("source_workstream is not a bounded source label")
     return token
 
 
@@ -488,6 +526,8 @@ __all__ = [
     "WAKE_ID_RE",
     "WAKE_KINDS",
     "WORKSTREAM_RE",
+    "ISO_UTC_RE",
+    "RUNTIME_JOB_REF_RE",
     "SourceKind",
     "WakeKind",
     "WakeObligation",

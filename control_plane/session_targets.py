@@ -36,10 +36,16 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
-from control_plane.wake_events import JOB_ID_RE, SEATS, canonical_json_bytes
+from control_plane.wake_events import (
+    JOB_ID_RE,
+    SEATS,
+    SourceKind,
+    WakeObligation,
+    canonical_json_bytes,
+)
 from control_plane.wake_transport import (
     WAKE_TRANSPORTS,
-    transport_implemented as canonical_transport_implemented,
+    wake_transport_descriptor,
 )
 
 
@@ -49,6 +55,7 @@ DEFAULT_TARGETS_PATH = (
 )
 SESSION_ALIAS_RE = re.compile(r"^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$")
 _WORKSTREAM_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+BINDING_ID_RE = re.compile(r"^bind-[a-z0-9][a-z0-9._-]{7,63}$")
 
 REASONING_SURFACES = frozenset(
     {"chatgpt-sol", "codex", "workspace-agent", "human"}
@@ -57,6 +64,20 @@ REASONING_SURFACES = frozenset(
 
 class SessionTargetError(ValueError):
     """The session-target registry is missing, malformed, or resolution refused."""
+
+
+class RouteRefusalError(SessionTargetError):
+    """Route resolution refused.  The obligation itself still exists."""
+
+    def __init__(self, refusal: "RouteRefusal") -> None:
+        super().__init__(refusal.reason)
+        self.refusal = refusal
+
+
+@dataclasses.dataclass(frozen=True)
+class RouteRefusal:
+    obligation_id: str
+    reason: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,22 +98,39 @@ class SessionTarget:
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeBinding:
-    """Rotating provider/runtime address.  Never checked in as Git identity."""
+    """Rotating provider/runtime address.  Never checked in as Git identity.
+
+    ``binding_id`` is durable and opaque so a post-restart generation 1 cannot
+    match a previous life's generation 1 (ABA).  Persistence is deferred.
+    """
 
     session_alias: str
+    binding_id: str
     binding_generation: int
     native_handle: str | None = None
     account_label: str | None = None
     reasoning_surface: str | None = None
 
     def __post_init__(self) -> None:
-        try:
-            generation = int(self.binding_generation)
-        except (TypeError, ValueError) as exc:
-            raise SessionTargetError("binding_generation must be a non-negative integer") from exc
-        if generation < 0:
-            raise SessionTargetError("binding_generation must be non-negative")
-        object.__setattr__(self, "binding_generation", generation)
+        alias = str(self.session_alias or "").strip()
+        if SESSION_ALIAS_RE.fullmatch(alias) is None:
+            raise SessionTargetError("runtime binding session_alias is malformed")
+        object.__setattr__(self, "session_alias", alias)
+        token = str(self.binding_id or "").strip()
+        if BINDING_ID_RE.fullmatch(token) is None:
+            raise SessionTargetError("binding_id must be a durable bind-* identity")
+        object.__setattr__(self, "binding_id", token)
+        if type(self.binding_generation) is not int or isinstance(
+            self.binding_generation, bool
+        ):
+            raise SessionTargetError("binding_generation must be an actual integer")
+        if self.binding_generation < 1:
+            raise SessionTargetError("concrete RuntimeBinding generation must be >= 1")
+        if self.reasoning_surface is not None:
+            surface = str(self.reasoning_surface).strip()
+            if surface not in REASONING_SURFACES:
+                raise SessionTargetError("runtime binding reasoning_surface is unknown")
+            object.__setattr__(self, "reasoning_surface", surface)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -104,28 +142,55 @@ class WakeRoute:
     target_seat: str
     reasoning_surface: str
     wake_transport: str
+    binding_id: str
     binding_generation: int
     route_digest: str
     destination_digest: str
+    policy_digest: str
     root_job_id: str | None
     workstream: str | None
+    production_armed: bool
     target_enabled: bool
     transport_implemented: bool
+    requires_runtime_binding: bool
+    binding_ready: bool
     human_required: bool
     policy_version: str
+    interface_version: str
 
     @property
     def delivery_allowed(self) -> bool:
-        return (
-            self.target_enabled
-            and self.transport_implemented
-            and not self.human_required
+        return evaluate_delivery_allowed(
+            production_armed=self.production_armed,
+            target_enabled=self.target_enabled,
+            transport_implemented=self.transport_implemented,
+            binding_ready=self.binding_ready,
+            human_required=self.human_required,
+            requires_runtime_binding=self.requires_runtime_binding,
         )
 
     def to_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
         value["delivery_allowed"] = self.delivery_allowed
         return value
+
+
+def evaluate_delivery_allowed(
+    *,
+    production_armed: bool,
+    target_enabled: bool,
+    transport_implemented: bool,
+    binding_ready: bool,
+    human_required: bool,
+    requires_runtime_binding: bool,
+) -> bool:
+    if human_required:
+        return False
+    if not production_armed or not target_enabled or not transport_implemented:
+        return False
+    if requires_runtime_binding and not binding_ready:
+        return False
+    return True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -136,7 +201,7 @@ class SessionTargetRegistry:
     policy_version: str
     default_alias_by_seat: dict[str, str]
     workstream_alias_by_seat: dict[str, dict[str, str]]
-    root_job_bindings: dict[str, str]
+    root_job_bindings: dict[str, dict[str, str]]
     targets: dict[str, SessionTarget]
 
     def get(self, session_alias: str) -> SessionTarget:
@@ -146,18 +211,56 @@ class SessionTargetRegistry:
         except KeyError as exc:
             raise SessionTargetError(f"unknown session_alias {alias!r}") from exc
 
+    def policy_digest(self) -> str:
+        return hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "schema": self.schema,
+                    "lifecycle_authority": self.lifecycle_authority,
+                    "production_armed": self.production_armed,
+                    "policy_version": self.policy_version,
+                    "default_alias_by_seat": self.default_alias_by_seat,
+                    "workstream_alias_by_seat": self.workstream_alias_by_seat,
+                    "targets": {
+                        alias: {
+                            "target_seat": target.target_seat,
+                            "reasoning_surface": target.reasoning_surface,
+                            "wake_transport": target.wake_transport,
+                            "workstream": target.workstream,
+                            "target_enabled": target.target_enabled,
+                        }
+                        for alias, target in sorted(self.targets.items())
+                    },
+                }
+            )
+        ).hexdigest()[:16]
+
     def with_root_job_bindings(
-        self, bindings: Mapping[str, str]
+        self, bindings: Mapping[str, Mapping[str, str]]
     ) -> "SessionTargetRegistry":
         """Runtime overlay.  Checked-in Git bindings stay empty in PR-1."""
 
-        resolved: dict[str, str] = {}
-        for job_id, alias in bindings.items():
+        resolved: dict[str, dict[str, str]] = {}
+        for job_id, seat_map in bindings.items():
             root = str(job_id).strip()
             if JOB_ID_RE.fullmatch(root) is None:
                 raise SessionTargetError(f"invalid root_job_id {job_id!r}")
-            target = self.get(alias)
-            resolved[root] = target.session_alias
+            if not isinstance(seat_map, Mapping) or not seat_map:
+                raise SessionTargetError(
+                    f"root_job_id {root} bindings must map seats to aliases"
+                )
+            bound: dict[str, str] = {}
+            for seat, alias in seat_map.items():
+                token = str(seat).strip().lower()
+                if token not in SEATS:
+                    raise SessionTargetError(f"unsupported target_seat {token!r}")
+                target = self.get(alias)
+                if target.target_seat != token:
+                    raise SessionTargetError(
+                        f"root binding {root}/{token} is not bound to that seat"
+                    )
+                bound[token] = target.session_alias
+            resolved[root] = bound
         return dataclasses.replace(self, root_job_bindings=resolved)
 
     def resolve(
@@ -168,6 +271,9 @@ class SessionTargetRegistry:
         root_job_id: str | None = None,
         claimed_session_alias: str | None = None,
         binding: RuntimeBinding | None = None,
+        source_kind: str | None = None,
+        source_workstream: str | None = None,
+        obligation_id: str | None = None,
     ) -> SessionTarget:
         """Resolve a logical target.  Claimed aliases from prose are ignored."""
 
@@ -181,30 +287,39 @@ class SessionTargetRegistry:
         if root_supplied:
             root = str(root_job_id).strip()
             if JOB_ID_RE.fullmatch(root) is None:
-                raise SessionTargetError("root_job_id is malformed")
-            bound_alias = self.root_job_bindings.get(root)
-            if bound_alias is None:
-                raise SessionTargetError(f"root_job_id {root} is unbound")
-            target = self.get(bound_alias)
-            if target.target_seat != seat:
-                raise SessionTargetError(
-                    f"root_job binding {root} is not bound to seat {seat!r}"
+                raise _refusal(obligation_id, "root_job_id is malformed")
+            seat_map = self.root_job_bindings.get(root)
+            if seat_map is None or seat not in seat_map:
+                raise _refusal(
+                    obligation_id,
+                    f"root_job_id {root} has no binding for seat {seat}",
                 )
-            return _binding_must_match(target, binding)
+            return _binding_must_match(self.get(seat_map[seat]), binding)
 
         if stream_supplied:
             stream = str(workstream).strip().lower()
             if _WORKSTREAM_ID_RE.fullmatch(stream) is None:
-                raise SessionTargetError("workstream is malformed")
+                raise _refusal(obligation_id, "workstream is malformed")
             seat_map = self.workstream_alias_by_seat.get(stream)
             if seat_map is None:
-                raise SessionTargetError(f"unknown workstream {stream!r}")
+                raise _refusal(obligation_id, f"unknown workstream {stream!r}")
             alias = seat_map.get(seat)
             if alias is None:
-                raise SessionTargetError(
-                    f"workstream {stream!r} has no alias for seat {seat!r}"
+                raise _refusal(
+                    obligation_id,
+                    f"workstream {stream!r} has no alias for seat {seat!r}",
                 )
             return _binding_must_match(self.get(alias), binding)
+
+        if (
+            source_workstream
+            and source_kind == SourceKind.EXECUTIVE_RUNTIME_EVENT.value
+        ):
+            raise _refusal(
+                obligation_id,
+                "runtime source_workstream is not a routing workstream; "
+                "refusing seat-default fallback",
+            )
 
         alias = self.default_alias_by_seat.get(seat)
         if alias is None:
@@ -212,23 +327,28 @@ class SessionTargetRegistry:
         return _binding_must_match(self.get(alias), binding)
 
 
+def _refusal(obligation_id: str | None, reason: str) -> RouteRefusalError:
+    return RouteRefusalError(
+        RouteRefusal(obligation_id=str(obligation_id or ""), reason=reason)
+    )
+
+
 def destination_digest(
     *,
     target: SessionTarget,
+    binding_id: str,
     binding_generation: int,
-    policy_version: str,
 ) -> str:
-    """Identity of the current delivery destination, excluding obligation id."""
+    """Identity of the current delivery destination, excluding obligation and policy."""
 
     return hashlib.sha256(
         canonical_json_bytes(
             {
                 "session_alias": target.session_alias,
-                "target_seat": target.target_seat,
                 "reasoning_surface": target.reasoning_surface,
                 "wake_transport": target.wake_transport,
+                "binding_id": binding_id,
                 "binding_generation": int(binding_generation),
-                "policy_version": policy_version,
             }
         )
     ).hexdigest()[:16]
@@ -237,58 +357,78 @@ def destination_digest(
 def route_digest(
     *,
     obligation_id: str,
-    target: SessionTarget,
-    binding_generation: int,
-    policy_version: str,
+    destination: str,
+    policy_digest: str,
 ) -> str:
     return hashlib.sha256(
         canonical_json_bytes(
             {
                 "obligation_id": obligation_id,
-                "session_alias": target.session_alias,
-                "target_seat": target.target_seat,
-                "reasoning_surface": target.reasoning_surface,
-                "wake_transport": target.wake_transport,
-                "binding_generation": int(binding_generation),
-                "policy_version": policy_version,
+                "destination_digest": destination,
+                "policy_digest": policy_digest,
             }
         )
     ).hexdigest()[:16]
 
 
-def build_route(
+def route_obligation(
+    obligation: WakeObligation,
+    registry: SessionTargetRegistry,
+    *,
+    binding: RuntimeBinding | None = None,
+) -> WakeRoute:
+    """Public routing API.  Seat / root / routing workstream come from the obligation."""
+
+    if not isinstance(obligation, WakeObligation):
+        raise SessionTargetError("route_obligation requires a WakeObligation")
+    target = registry.resolve(
+        obligation.declared_target_seat,
+        workstream=obligation.routing_workstream,
+        root_job_id=obligation.root_job_id,
+        binding=binding,
+        source_kind=obligation.source_kind.value,
+        source_workstream=obligation.source_workstream,
+        obligation_id=obligation.obligation_id,
+    )
+    return _build_route(
+        obligation_id=obligation.obligation_id,
+        target=target,
+        registry=registry,
+        root_job_id=obligation.root_job_id,
+        workstream=obligation.routing_workstream,
+        binding=binding,
+    )
+
+
+def _build_route(
     *,
     obligation_id: str,
     target: SessionTarget,
     registry: SessionTargetRegistry,
-    root_job_id: str | None = None,
-    workstream: str | None = None,
-    binding: RuntimeBinding | None = None,
-    transport_implemented: bool | None = None,
+    root_job_id: str | None,
+    workstream: str | None,
+    binding: RuntimeBinding | None,
 ) -> WakeRoute:
-    generation = 0 if binding is None else int(binding.binding_generation)
-    if generation < 0:
-        raise SessionTargetError("binding_generation must be non-negative")
-    implemented = (
-        canonical_transport_implemented(target.wake_transport)
-        if transport_implemented is None
-        else bool(transport_implemented)
-    )
+    descriptor = wake_transport_descriptor(target.wake_transport)
     human_required = (
         target.target_seat == "chairman"
         or target.reasoning_surface == "human"
         or target.wake_transport == "human"
     )
-    digest = route_digest(
-        obligation_id=obligation_id,
-        target=target,
-        binding_generation=generation,
-        policy_version=registry.policy_version,
-    )
+    if binding is None:
+        binding_id = ""
+        generation = 0
+        binding_ready = False
+    else:
+        binding_id = binding.binding_id
+        generation = binding.binding_generation
+        binding_ready = True
     dest = destination_digest(
-        target=target,
-        binding_generation=generation,
-        policy_version=registry.policy_version,
+        target=target, binding_id=binding_id, binding_generation=generation
+    )
+    policy = registry.policy_digest()
+    digest = route_digest(
+        obligation_id=obligation_id, destination=dest, policy_digest=policy
     )
     return WakeRoute(
         obligation_id=obligation_id,
@@ -296,15 +436,21 @@ def build_route(
         target_seat=target.target_seat,
         reasoning_surface=target.reasoning_surface,
         wake_transport=target.wake_transport,
+        binding_id=binding_id,
         binding_generation=generation,
         route_digest=digest,
         destination_digest=dest,
+        policy_digest=policy,
         root_job_id=root_job_id,
         workstream=workstream,
+        production_armed=registry.production_armed,
         target_enabled=target.target_enabled,
-        transport_implemented=implemented,
+        transport_implemented=descriptor.transport_implemented,
+        requires_runtime_binding=descriptor.requires_runtime_binding,
+        binding_ready=binding_ready,
         human_required=human_required,
         policy_version=registry.policy_version,
+        interface_version=descriptor.interface_version,
     )
 
 
@@ -418,13 +564,29 @@ def _validate(doc: Any, where: Path) -> SessionTargetRegistry:
             bound[token] = target.session_alias
         resolved_workstreams[stream_id] = bound
 
-    resolved_bindings: dict[str, str] = {}
-    for job_id, alias in bindings_raw.items():
+    resolved_bindings: dict[str, dict[str, str]] = {}
+    for job_id, seat_map in bindings_raw.items():
         root = str(job_id).strip()
         if JOB_ID_RE.fullmatch(root) is None:
             raise SessionTargetError(f"{where}: invalid root_job_id {job_id!r}")
-        target = _require_alias(targets, alias, where)
-        resolved_bindings[root] = target.session_alias
+        if not isinstance(seat_map, Mapping):
+            raise SessionTargetError(
+                f"{where}: root_job_bindings[{root}] must map seats to aliases"
+            )
+        bound: dict[str, str] = {}
+        for seat, alias in seat_map.items():
+            token = str(seat).strip().lower()
+            if token not in SEATS:
+                raise SessionTargetError(
+                    f"{where}: unknown seat {seat!r} under root {root}"
+                )
+            target = _require_alias(targets, alias, where)
+            if target.target_seat != token:
+                raise SessionTargetError(
+                    f"{where}: alias {alias!r} is not bound to {token}"
+                )
+            bound[token] = target.session_alias
+        resolved_bindings[root] = bound
 
     return SessionTargetRegistry(
         schema=SCHEMA,
@@ -520,17 +682,21 @@ def _parse_target(alias: Any, row: Any, where: Path) -> SessionTarget:
 
 
 __all__ = [
+    "BINDING_ID_RE",
     "DEFAULT_TARGETS_PATH",
     "REASONING_SURFACES",
     "SCHEMA",
     "WAKE_TRANSPORTS",
+    "RouteRefusal",
+    "RouteRefusalError",
     "RuntimeBinding",
     "SessionTarget",
     "SessionTargetError",
     "SessionTargetRegistry",
     "WakeRoute",
-    "build_route",
     "destination_digest",
+    "evaluate_delivery_allowed",
     "load_session_targets",
     "route_digest",
+    "route_obligation",
 ]

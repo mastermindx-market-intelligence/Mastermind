@@ -3,7 +3,7 @@
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "policy_version": "v2-2026-08-16",
-  "notes": "Logical session aliases only. Reasoning surface, wake transport, and runtime binding are distinct. Native/provider handles (including Codex App Server thread ids from OHF-P0) are runtime bindings and must not appear in this file. root_job_bindings stays empty in Git; tests overlay exact JOB-* bindings. This file is not a job queue, scheduler, lease table, or lifecycle ledger.",
+  "notes": "Logical session aliases only. Reasoning surface, wake transport, and runtime binding are distinct. Native/provider handles (including Codex App Server thread ids from OHF-P0) are runtime bindings and must not appear in this file. root_job_bindings is seat-aware: JOB-* maps to {seat: alias}. Git stays empty; tests overlay exact bindings. This file is not a job queue, scheduler, lease table, or lifecycle ledger.",
   "default_alias_by_seat": {
     "chairman": "EXECUTIVE-CHAIRMAN-A",
     "ceo": "EXECUTIVE-CEO-A",

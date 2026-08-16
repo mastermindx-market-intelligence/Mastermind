@@ -25,13 +25,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from control_plane.executive_runtime import Event, Job, JobStatus
 from control_plane.session_targets import (
+    RouteRefusalError,
     RuntimeBinding,
     SessionTargetError,
     SessionTargetRegistry,
     WakeRoute,
-    build_route,
     load_session_targets,
+    route_obligation,
 )
 from control_plane.wake_events import (
     ATTENTION_ID_RE,
@@ -56,8 +58,10 @@ class WakeAction(str, Enum):
     NO_WAKE = "NO_WAKE"
     WAKE = "WAKE"
     UNKNOWN_KIND = "UNKNOWN_KIND"
+    UNROUTABLE = "UNROUTABLE"
 
 
+_INBOX_CEO_KIND = "ceo_decision_pending"
 _INBOX_ITEM_REQUIRED_KEYS = frozenset(
     {
         "attention_id",
@@ -122,6 +126,7 @@ class CanonicalInboxAttention:
     job_id: str | None = None
     root_job_id: str | None = None
     workstream: str | None = None
+    source_workstream: str | None = None
     reason: str = ""
     existing_next_actions: tuple[str, ...] = ()
     claimed_session_alias: str = ""
@@ -153,6 +158,7 @@ class CanonicalRuntimeFact:
     attempt_id: str | None = None
     root_job_id: str | None = None
     workstream: str | None = None
+    source_workstream: str | None = None
     review_required: bool = False
     reviews_job_id: str | None = None
     escalation_target: str = "coo"
@@ -173,6 +179,7 @@ class WakeDecision:
     route: WakeRoute | None
     suppressed_inert_fields: tuple[str, ...]
     reason: str
+    refusal: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -181,6 +188,7 @@ class WakeDecision:
             "route": None if self.route is None else self.route.to_dict(),
             "suppressed_inert_fields": list(self.suppressed_inert_fields),
             "reason": self.reason,
+            "refusal": self.refusal,
         }
 
 
@@ -221,6 +229,18 @@ def admit_inbox_projection(item: Mapping[str, Any]) -> CanonicalInboxAttention:
     target = str(item.get("target") or "").strip().lower()
     if target not in SEATS:
         raise WakeRouterError(f"inbox target {target!r} is not a canonical seat")
+    kind = str(item.get("kind") or "").strip()
+    source = str(item.get("source") or "").strip()
+    if kind == _INBOX_CEO_KIND:
+        if source != "agent_os" or target != "ceo":
+            raise WakeRouterError(
+                "ceo_decision_pending must be Agent OS CEO attention"
+            )
+    elif kind in INBOX_WAKE_KINDS:
+        if source != "runtime":
+            raise WakeRouterError(
+                f"inbox kind {kind!r} must be runtime-projected attention"
+            )
     job_raw = item.get("job_id")
     job_id = None if job_raw in (None, "") else str(job_raw).strip()
     if job_id is not None and JOB_ID_RE.fullmatch(job_id) is None:
@@ -230,18 +250,19 @@ def admit_inbox_projection(item: Mapping[str, Any]) -> CanonicalInboxAttention:
     if root_job_id is not None and JOB_ID_RE.fullmatch(root_job_id) is None:
         raise WakeRouterError("inbox root_job_id is malformed")
     stream_raw = item.get("workstream")
-    stream = None if stream_raw in (None, "") else str(stream_raw).strip().lower()
-    if stream is not None and WORKSTREAM_RE.fullmatch(stream) is None:
-        # Agent OS labels such as WS:PROPHET-FUSION are not Wake Fabric aliases.
-        stream = None
+    source_stream = None if stream_raw in (None, "") else str(stream_raw).strip()
+    routing_stream = None
+    if source_stream is not None and WORKSTREAM_RE.fullmatch(source_stream.lower()):
+        routing_stream = source_stream.lower()
     return CanonicalInboxAttention(
         attention_id=attention_id,
-        kind=str(item.get("kind") or "").strip(),
+        kind=kind,
         target=target,
-        source=str(item.get("source") or "").strip(),
+        source=source,
         job_id=job_id,
         root_job_id=root_job_id,
-        workstream=stream,
+        workstream=routing_stream,
+        source_workstream=source_stream,
         reason=str(item.get("reason") or ""),
         existing_next_actions=tuple(str(entry) for entry in item.get("existing_next_actions") or ()),
         claimed_session_alias=str(item.get("claimed_session_alias") or ""),
@@ -250,6 +271,115 @@ def admit_inbox_projection(item: Mapping[str, Any]) -> CanonicalInboxAttention:
         claimed_wake_kind=str(item.get("claimed_wake_kind") or ""),
         source_created_at=item.get("source_created_at"),
         emitted_at=item.get("emitted_at"),
+    )
+
+
+def obligation_from_inbox(item: CanonicalInboxAttention | Mapping[str, Any]) -> WakeObligation:
+    attention = (
+        item if isinstance(item, CanonicalInboxAttention) else admit_inbox_projection(item)
+    )
+    if attention.kind not in INBOX_WAKE_KINDS:
+        raise WakeRouterError(f"unknown inbox kind {attention.kind!r} remains attention")
+    try:
+        return mint_obligation(
+            wake_kind=attention.kind,
+            source_kind=SourceKind.EXECUTIVE_INBOX_ATTENTION,
+            source_ref=attention.attention_id,
+            declared_target_seat=attention.target,
+            job_id=attention.job_id,
+            root_job_id=attention.root_job_id,
+            workstream=attention.workstream,
+            source_workstream=attention.source_workstream,
+            source_created_at=attention.source_created_at,
+            emitted_at=attention.emitted_at,
+        )
+    except WakeObligationError as exc:
+        raise WakeRouterError(str(exc)) from exc
+
+
+def obligation_from_runtime(fact: CanonicalRuntimeFact) -> WakeObligation | None:
+    event_type = str(fact.event_type or "").strip()
+    if event_type not in _RUNTIME_NO_WAKE_EVENTS:
+        raise WakeRouterError(f"unknown runtime event_type {event_type!r}")
+    owner = str(fact.owner_seat or "").strip().lower()
+    if owner not in SEATS:
+        raise WakeRouterError(f"unsupported owner_seat {owner!r}")
+    if not (
+        event_type == "JOB_COMPLETED"
+        and fact.review_required
+        and not fact.review_job_exists
+    ):
+        return None
+    try:
+        source_ref = runtime_source_ref(
+            aggregate_type=fact.aggregate_type,
+            aggregate_id=fact.aggregate_id,
+            sequence=fact.sequence,
+        )
+        return mint_obligation(
+            wake_kind=WakeKind.REVIEW_REQUIRED,
+            source_kind=SourceKind.EXECUTIVE_RUNTIME_EVENT,
+            source_ref=source_ref,
+            declared_target_seat=owner,
+            job_id=fact.job_id,
+            attempt_id=fact.attempt_id,
+            root_job_id=fact.root_job_id,
+            workstream=fact.workstream,
+            source_workstream=fact.source_workstream,
+            source_created_at=fact.source_created_at,
+            emitted_at=fact.emitted_at,
+        )
+    except WakeObligationError as exc:
+        raise WakeRouterError(str(exc)) from exc
+
+
+def admit_runtime_review_source(
+    *,
+    event: Event,
+    job: Job,
+    sibling_jobs: Sequence[Job] = (),
+) -> CanonicalRuntimeFact:
+    """Admit typed Phase 1F Job+Event state.  Callers cannot claim owner/review independently."""
+
+    if event.aggregate_type != "job":
+        raise WakeRouterError("runtime review source aggregate_type must be job")
+    if event.aggregate_id != job.job_id:
+        raise WakeRouterError("runtime event aggregate_id must equal job.job_id")
+    if int(event.sequence) < 1:
+        raise WakeRouterError("runtime event sequence must be >= 1")
+    if event.event_type != "JOB_COMPLETED":
+        raise WakeRouterError("runtime review source must be JOB_COMPLETED")
+    if job.status is not JobStatus.COMPLETED:
+        raise WakeRouterError("runtime review source job.status must be COMPLETED")
+    if job.review_required is not True:
+        raise WakeRouterError("runtime review source requires review_required=True")
+    root = str(job.root_job_id or "").strip()
+    if JOB_ID_RE.fullmatch(root) is None:
+        raise WakeRouterError("runtime review source requires canonical root_job_id")
+    owner = str(job.owner_seat or "").strip().lower()
+    if owner not in SEATS:
+        raise WakeRouterError("runtime review source owner_seat is not a canonical seat")
+    exists = sibling_review_exists(
+        builder_job_id=job.job_id,
+        review_jobs=[{"reviews_job_id": sibling.reviews_job_id} for sibling in sibling_jobs],
+    )
+    routing = None
+    source_stream = None
+    return CanonicalRuntimeFact(
+        aggregate_type="job",
+        aggregate_id=job.job_id,
+        sequence=int(event.sequence),
+        event_type=event.event_type,
+        owner_seat=owner,
+        review_job_exists=exists,
+        job_id=job.job_id,
+        root_job_id=root,
+        workstream=routing,
+        source_workstream=source_stream,
+        review_required=True,
+        reviews_job_id=job.reviews_job_id,
+        escalation_target=str(job.escalation_target or "coo"),
+        source_created_at=event.created_at,
     )
 
 
@@ -281,20 +411,7 @@ class WakeRouter:
                 suppressed_inert_fields=suppressed,
                 reason=f"unknown inbox kind {attention.kind!r} remains attention",
             )
-        try:
-            obligation = mint_obligation(
-                wake_kind=attention.kind,
-                source_kind=SourceKind.EXECUTIVE_INBOX_ATTENTION,
-                source_ref=attention.attention_id,
-                declared_target_seat=attention.target,
-                job_id=attention.job_id,
-                root_job_id=attention.root_job_id,
-                workstream=attention.workstream,
-                source_created_at=attention.source_created_at,
-                emitted_at=attention.emitted_at,
-            )
-        except WakeObligationError as exc:
-            raise WakeRouterError(str(exc)) from exc
+        obligation = obligation_from_inbox(attention)
         return self._routed(obligation, suppressed, binding=binding)
 
     def from_runtime(
@@ -304,17 +421,8 @@ class WakeRouter:
         binding: RuntimeBinding | None = None,
     ) -> WakeDecision:
         suppressed = _present(fact, _INERT_RUNTIME_FIELDS)
-        event_type = str(fact.event_type or "").strip()
-        if event_type not in _RUNTIME_NO_WAKE_EVENTS:
-            raise WakeRouterError(f"unknown runtime event_type {event_type!r}")
-        owner = str(fact.owner_seat or "").strip().lower()
-        if owner not in SEATS:
-            raise WakeRouterError(f"unsupported owner_seat {owner!r}")
-        if not (
-            event_type == "JOB_COMPLETED"
-            and fact.review_required
-            and not fact.review_job_exists
-        ):
+        obligation = obligation_from_runtime(fact)
+        if obligation is None:
             return WakeDecision(
                 action=WakeAction.NO_WAKE,
                 obligation=None,
@@ -322,26 +430,6 @@ class WakeRouter:
                 suppressed_inert_fields=suppressed,
                 reason="canonical runtime fact does not require an executive wake",
             )
-        try:
-            source_ref = runtime_source_ref(
-                aggregate_type=fact.aggregate_type,
-                aggregate_id=fact.aggregate_id,
-                sequence=fact.sequence,
-            )
-            obligation = mint_obligation(
-                wake_kind=WakeKind.REVIEW_REQUIRED,
-                source_kind=SourceKind.EXECUTIVE_RUNTIME_EVENT,
-                source_ref=source_ref,
-                declared_target_seat=owner,
-                job_id=fact.job_id,
-                attempt_id=fact.attempt_id,
-                root_job_id=fact.root_job_id,
-                workstream=fact.workstream,
-                source_created_at=fact.source_created_at,
-                emitted_at=fact.emitted_at,
-            )
-        except WakeObligationError as exc:
-            raise WakeRouterError(str(exc)) from exc
         return self._routed(obligation, suppressed, binding=binding)
 
     def _routed(
@@ -352,22 +440,25 @@ class WakeRouter:
         binding: RuntimeBinding | None,
     ) -> WakeDecision:
         try:
-            target = self.registry.resolve(
-                obligation.declared_target_seat,
-                workstream=obligation.workstream,
-                root_job_id=obligation.root_job_id,
-                binding=binding,
+            route = route_obligation(obligation, self.registry, binding=binding)
+        except RouteRefusalError as exc:
+            return WakeDecision(
+                action=WakeAction.UNROUTABLE,
+                obligation=obligation,
+                route=None,
+                suppressed_inert_fields=suppressed,
+                reason="canonical source requires a wake obligation",
+                refusal=str(exc),
             )
         except SessionTargetError as exc:
-            raise WakeRouterError(str(exc)) from exc
-        route = build_route(
-            obligation_id=obligation.obligation_id,
-            target=target,
-            registry=self.registry,
-            root_job_id=obligation.root_job_id,
-            workstream=obligation.workstream,
-            binding=binding,
-        )
+            return WakeDecision(
+                action=WakeAction.UNROUTABLE,
+                obligation=obligation,
+                route=None,
+                suppressed_inert_fields=suppressed,
+                reason="canonical source requires a wake obligation",
+                refusal=str(exc),
+            )
         return WakeDecision(
             action=WakeAction.WAKE,
             obligation=obligation,
@@ -394,5 +485,8 @@ __all__ = [
     "WakeRouter",
     "WakeRouterError",
     "admit_inbox_projection",
+    "admit_runtime_review_source",
+    "obligation_from_inbox",
+    "obligation_from_runtime",
     "sibling_review_exists",
 ]
