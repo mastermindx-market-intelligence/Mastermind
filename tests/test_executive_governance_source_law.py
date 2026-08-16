@@ -26,8 +26,11 @@ def _doc() -> dict:
     return value
 
 
-def test_executive_seats_are_identity_only_and_strictly_ranked():
-    seats = _doc()["executive_seats"]
+def test_seats_are_identity_only_strictly_ranked_and_use_phase1f_canonical_key():
+    doc = _doc()
+    assert "seats" in doc
+    assert "executive_seats" not in doc
+    seats = doc["seats"]
     assert seats["schema_version"] == 1
     assert set(seats) == {"schema_version", "chairman", "ceo", "coo"}
 
@@ -65,10 +68,16 @@ def test_chairman_reserved_categories_are_pinned():
         "AUTONOMOUS_MERGE_DEPLOY_SERVICE_CONTROL_OR_CAPITAL_EXECUTION",
         "CONSTITUTIONAL_PROTECTED_PATH_POLICY_CHANGE",
         "REASONING_GOVERNOR_CONSTITUTIONAL_CHANGE",
-        "CHAIRMAN_DECISION_REQUEST",
+        "CHAIRMAN_DECISION_COMMIT",
     }
     assert required <= set(categories)
     assert all(categories[name]["minimum_decision_seat"] == "chairman" for name in required)
+
+
+def test_chairman_request_creation_is_ceo_while_decision_commit_is_chairman():
+    categories = _doc()["executive_decision_policy"]["categories"]
+    assert categories["CHAIRMAN_REQUEST_CREATE_OR_UPDATE"]["minimum_decision_seat"] == "ceo"
+    assert categories["CHAIRMAN_DECISION_COMMIT"]["minimum_decision_seat"] == "chairman"
 
 
 def test_ceo_delegated_categories_are_pinned():
@@ -81,6 +90,7 @@ def test_ceo_delegated_categories_are_pinned():
         "PROJECT_SCOPE_REFRAME_WITHIN_DELEGATED_AUTHORITY",
         "EXECUTIVE_REASONING_ESCALATION_REQUEST",
         "CEO_ROUTE_REPUBLISH_WITHIN_APPROVED_POLICY",
+        "CHAIRMAN_REQUEST_CREATE_OR_UPDATE",
     }
     assert required <= set(categories)
     assert all(categories[name]["minimum_decision_seat"] == "ceo" for name in required)
@@ -110,6 +120,7 @@ def test_decision_category_is_server_derived_not_model_authority():
 def test_strategy_ranking_and_runtime_order_have_one_owner_each():
     policy = _doc()["executive_strategy_policy"]
     assert policy["schema_version"] == 1
+    assert policy["project_admission_status"] == "designed_not_armed"
 
     assert policy["company_strategy"]["canonical_artifact"] == "config/strategic_state.yml"
     assert policy["company_strategy"]["runtime_role"] == "advisory_and_orientation_only"
@@ -166,6 +177,8 @@ def test_protected_paths_cover_constitution_governance_and_control_surfaces():
     paths = set(p["paths"])
     required = {
         "research/MASTERMIND_CHARTER_V2.md",
+        "research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md",
+        "research/EXECUTIVE_OS_G0_SOURCE_LAW_RULING_2026-08-15.md",
         "config/authority_map.yml",
         "config/strategic_state.yml",
         "AGENTS.md",
