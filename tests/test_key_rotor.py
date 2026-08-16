@@ -524,35 +524,37 @@ class TestRotationLoop:
         monkeypatch.setattr(_cb, "_via_sdk", _fake_via_sdk)
         monkeypatch.setattr(_cb, "_via_subprocess", _no_subprocess)
         monkeypatch.setattr(_cb, "_SDK", True)
-        # Patch key_rotor import in cli_bridge to use our tmp_path-redirected version
-        monkeypatch.setattr(_cb, "__builtins__", _cb.__builtins__)
-
-        # Reload key_rotor in cli_bridge's namespace
+        # Public reason() follows config/agents.yml backend: waterfall unless
+        # BOT_LLM_BACKEND is set. Hosted CI is a clean env, so the SDK rotation
+        # loop never runs unless we force the CLI backend.
+        monkeypatch.setenv("BOT_LLM_BACKEND", "cli")
+        import brain
         import sys
+        monkeypatch.setattr(brain, "key_rotor", _kr)
         sys.modules["brain.key_rotor"] = _kr
-        # Pin the pool so hosted-CI vendor federation / extra env slots cannot
-        # change which candidates the rotation loop sees. Env discovery is
-        # covered by TestCandidates.
-        monkeypatch.setattr(
-            _kr,
-            "candidates",
-            lambda root=None: [
-                {
-                    "key_id": "claude_code_oauth_3",
-                    "env_name": "CLAUDE_CODE_OAUTH_TOKEN_3",
-                    "cooling": False,
-                    "load": 0,
-                },
-                {
-                    "key_id": "claude_code_oauth_5",
-                    "env_name": "CLAUDE_CODE_OAUTH_TOKEN_5",
-                    "cooling": False,
-                    "load": 0,
-                },
-            ],
-        )
+        pinned = [
+            {
+                "key_id": "claude_code_oauth_3",
+                "env_name": "CLAUDE_CODE_OAUTH_TOKEN_3",
+                "cooling": False,
+                "load": 0,
+            },
+            {
+                "key_id": "claude_code_oauth_5",
+                "env_name": "CLAUDE_CODE_OAUTH_TOKEN_5",
+                "cooling": False,
+                "load": 0,
+            },
+        ]
 
-        result = asyncio.run(_cb.reason("what is the market doing?", log_run=False))
+        result = asyncio.run(
+            _cb._reason(
+                "what is the market doing?",
+                log_run=False,
+                _backend_override="cli",
+                _oauth_candidates=pinned,
+            )
+        )
 
         assert result["ok"] is True, result
         assert result["text"] == "The market is bullish."
