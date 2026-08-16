@@ -1,10 +1,13 @@
 # Executive OS Phase 1F — hierarchical orchestration contract
 
-**Status:** Phase 1F-A deliverable (reviewed design; 1F-B and 1F-C are DESIGNED HERE,
-NOT BUILT). Written by the COO seat (Fable) against Mastermind `origin/master`
+**Status:** Phase 1F-A deliverable plus the Phase 1F-B implementation contract.
+The durable 1F-B runtime and inbox-v2 projection are implemented on the current
+branch; the bounded COO cycle in 1F-C remains DESIGNED HERE, NOT BUILT. Written by
+the COO seat (Fable) against Mastermind `origin/master`
 `9603b408d0b8d3c806a76764f6a5e12454d140a1`.
 **Shipped alongside:** `control_plane/executive_inbox.py` + `scripts/executive_inbox.py`
-+ `docs/EXECUTIVE_INBOX.md` (the `mastermind.executive_inbox.v1` read-only projection).
++ `docs/EXECUTIVE_INBOX.md` (the `mastermind.executive_inbox.v2` read-only projection)
++ `control_plane/executive_runtime.py` schema migration 2.
 **Review:** an independent fresh-context adversarial review (2026-08-14) attacked
 this memo alongside the 1F-A code; its six memo findings (creator-set escalation
 routing, impact-as-ordering, the escalation path's dependence on §5 kinds,
@@ -26,7 +29,7 @@ The Executive OS runtime (Phase 1A–1E) can durably hold jobs, lease them to is
 workers, and accept bounded CEO intents. What it cannot yet do is *organize* work:
 hundreds of worker/job events have no compression into executive attention (fixed by
 1F-A's inbox), jobs have no parent/child structure and no independent-review shape
-(designed in §3, built in 1F-B), and there is no bounded COO cycle that turns an
+(implemented in §3, with runtime acceptance evidence), and there is no bounded COO cycle that turns an
 accepted parent objective into dispatched children, collected results, independent
 reviews, and an aggregated outcome (designed in §4, built in 1F-C). The CEO must
 eventually operate by exception. Everything below serves that, under one constraint

@@ -143,6 +143,37 @@ def _parser() -> argparse.ArgumentParser:
     )
     create.add_argument("--attempt-limit", type=int, default=10)
     create.add_argument(
+        "--parent-job-id",
+        help="Existing durable parent/container job; the new job becomes a bounded child.",
+    )
+    create.add_argument(
+        "--owner-seat",
+        choices=("coo", "ceo", "chairman"),
+        default="coo",
+        help="Recorded owner seat; higher seats require typed executive provenance.",
+    )
+    create.add_argument(
+        "--escalation-target",
+        choices=("coo", "ceo", "chairman"),
+        default="coo",
+        help="Shrink-only escalation target for this durable job.",
+    )
+    create.add_argument(
+        "--business-impact",
+        choices=("routine", "material", "critical"),
+        default="routine",
+        help="Display/audit impact label; it never changes dispatch priority.",
+    )
+    create.add_argument(
+        "--review-required",
+        action="store_true",
+        help="Require a sibling review job with an independent approve verdict before aggregation.",
+    )
+    create.add_argument(
+        "--reviews-job-id",
+        help="Make this child a sibling review job for the named durable job.",
+    )
+    create.add_argument(
         "--task-kind",
         help=(
             "Route a bounded worker task deterministically (implementation, mechanical, "
@@ -355,6 +386,12 @@ def main(argv: list[str] | None = None) -> int:
                     requested_authorities=args.authority or None,
                     allowed_write_paths=args.allowed_write_path,
                     validation_commands=args.validation_command,
+                    parent_job_id=args.parent_job_id,
+                    owner_seat=args.owner_seat,
+                    escalation_target=args.escalation_target,
+                    business_impact=args.business_impact,
+                    review_required=args.review_required,
+                    reviews_job_id=args.reviews_job_id,
                 )
             )
         elif args.command == "workers":

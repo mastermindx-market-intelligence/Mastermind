@@ -158,7 +158,7 @@ def test_restore_drill_uses_an_isolated_copy_and_leaves_live_state_unchanged(tmp
     assert drill.database_sha256 == receipt.database_sha256
     assert drill.integrity_check == "ok"
     assert drill.foreign_key_check == "ok"
-    assert drill.migration_versions == (1,)
+    assert drill.migration_versions == (1, 2)
     assert _logical_state(runtime) == before
 
 
