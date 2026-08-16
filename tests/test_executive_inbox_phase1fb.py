@@ -91,3 +91,50 @@ def test_inbox_v2_suppresses_parent_after_independent_approval(tmp_path):
     assert not [item for item in inbox["attention"] if item["job_id"] in {parent.job_id, child.job_id, review.job_id}]
     assert inbox["suppressed"]["queued"] == 1
     assert inbox["suppressed"]["clean_completed"] == 2
+
+
+def test_inbox_v2_escalated_exception_is_a_declaration_not_a_label(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    job = runtime.jobs.create_job(
+        "CEO-declared exception",
+        escalation_target="ceo",
+        provenance={"schema": "mastermind.ceo_intent.v1", "actor": "sol"},
+    )
+    lease = runtime.attempts.claim_job(job.job_id, worker_id="worker-a")
+    assert lease is not None
+    runtime.jobs.fail_job(job.job_id, JobPayload(summary="failed", errors=["boom"]))
+
+    unlabeled = runtime.jobs.create_job(
+        "Failed without escalation",
+        department="executive",
+        priority=100,
+        provenance={"schema": "mastermind.ceo_intent.v1", "actor": "sol"},
+    )
+    unlabeled_lease = runtime.attempts.claim_job(unlabeled.job_id, worker_id="worker-a")
+    assert unlabeled_lease is not None
+    runtime.jobs.fail_job(unlabeled.job_id, JobPayload(summary="failed", errors=["boom"]))
+
+    items = {
+        item["job_id"]: item
+        for item in _inbox(tmp_path)["attention"]
+        if item["source"] == "runtime"
+    }
+    declared = items[job.job_id]
+    assert declared["kind"] == "escalated_exception"
+    assert declared["target"] == "ceo"
+    assert declared["reason"] == "the job DECLARES escalation_target: ceo"
+    assert {
+        "ref": f"job:{job.job_id}",
+        "field": "escalation_target",
+        "value": "ceo",
+    } in declared["evidence"]
+    assert {
+        "ref": f"event:{job.job_id}:JOB_CREATED",
+        "field": "provenance.schema",
+        "value": "mastermind.ceo_intent.v1",
+    } in declared["evidence"]
+
+    ordinary = items[unlabeled.job_id]
+    assert ordinary["kind"] == "job_failed"
+    assert ordinary["target"] == "coo"

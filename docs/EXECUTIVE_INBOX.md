@@ -192,13 +192,15 @@ remain exactly the documented six-part join.
 
 One pass over the jobs. **First match wins, and a job yields at most one item** — an
 inbox that listed the same job three times would be a worse instrument than the ledger
-it projects. Every runtime item is `target: coo`.
+it projects. Runtime items stay `target: coo` unless a terminal exception's durable
+`escalation_target` already declares `ceo` or `chairman`. Department, priority,
+impact, and provenance labels still confer no seat.
 
 | # | Condition | `kind` | Why it is attention |
 |---|---|---|---|
-| 1 | status `FAILED` | `job_failed` | The work did not happen and nothing will retry it on its own. |
-| 2 | status `LOST` | `job_lost` | The invocation was recorded as gone. |
-| 3 | status `RATE_LIMITED` | `job_rate_limited` | Capacity, not the job, stopped it. |
+| 1 | status `FAILED` | `job_failed`, or `escalated_exception` when `escalation_target` is `ceo`/`chairman` | The work did not happen and nothing will retry it on its own. The escalated form is a declaration of the durable column, never a projector verdict. |
+| 2 | status `LOST` | `job_lost`, or `escalated_exception` as above | The invocation was recorded as gone. |
+| 3 | status `RATE_LIMITED` | `job_rate_limited`, or `escalated_exception` as above | Capacity, not the job, stopped it. |
 | 4 | status `CANCEL_REQUESTED` | `cancel_requested` | A cancel was issued and the attempt has not acknowledged it. |
 | 5 | queued/running/checkpointed parent with living children, or a review-required child without an independent completed approval | `aggregation_blocked` | Parent aggregation is a durable refusal, not an automatic cycle. |
 | 6 | completed review whose worker also completed the reviewed job | `review_not_independent` | Same-worker review is void evidence, never an approval. |

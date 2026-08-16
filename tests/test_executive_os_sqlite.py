@@ -74,14 +74,16 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        migration = connection.execute(
-            "SELECT version,name,checksum FROM schema_migrations"
-        ).fetchone()
+        migrations = connection.execute(
+            "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+        ).fetchall()
 
     assert {"workers", "worker_quota_classes", "jobs", "attempts", "events"} <= tables
-    assert migration is not None
-    assert migration[0:2] == (1, "executive_runtime_core")
-    assert len(migration[2]) == 64
+    assert [row[0:2] for row in migrations] == [
+        (1, "executive_runtime_core"),
+        (2, "durable_parent_child_review_contract"),
+    ]
+    assert all(len(row[2]) == 64 for row in migrations)
 
 
 def test_policy_receipt_is_persisted_at_create_and_snapshotted_at_claim(

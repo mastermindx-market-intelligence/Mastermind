@@ -74,6 +74,9 @@ jobs:
           tests/test_agentos_readiness_agenda.py
           tests/test_ceo_intent.py
           tests/test_executive_inbox.py
+          tests/test_executive_inbox_phase1fb.py
+          tests/test_executive_os_phase1fb.py
+          tests/test_executive_os_r1_shadow.py
           tests/test_executive_authority.py
           tests/test_executive_codex_worker.py
           tests/test_executive_os_sqlite.py

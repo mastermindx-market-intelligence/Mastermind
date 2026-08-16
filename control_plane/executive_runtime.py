@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Sequence
 from uuid import uuid4
 
 from control_plane.executive_authority import (
@@ -47,6 +47,7 @@ _SEAT_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
 _JOB_SEATS = frozenset({"coo", "ceo", "chairman"})
 _BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 _ESCALATION_RANK = {"coo": 0, "ceo": 1, "chairman": 2}
+_COST_CLASS_RANK = {"small": 0, "default": 1, "frontier": 2}
 _MAX_JOB_DEPTH = 64
 
 
@@ -288,6 +289,53 @@ def _normalise_business_impact(value: str) -> str:
             "business_impact must be one of routine, material, critical"
         )
     return normalized
+
+
+def _assert_child_does_not_widen_parent(
+    parent_row: sqlite3.Row,
+    *,
+    requested: Sequence[str],
+    allowed_write_paths: Sequence[str],
+    constraints: dict[str, Any],
+) -> None:
+    """Refuse a child that would exceed its parent's grant.  Shrink-only (L6)."""
+
+    parent_authorities = {
+        str(item).strip().upper()
+        for item in _json_loads(parent_row["requested_authorities_json"], fallback=[])
+        if str(item).strip()
+    }
+    extra_authorities = sorted(set(requested) - parent_authorities)
+    if extra_authorities:
+        raise StateConflict(
+            "child requested_authorities may only shrink relative to the parent: "
+            + ", ".join(extra_authorities)
+        )
+    parent_paths = {
+        str(item)
+        for item in _json_loads(parent_row["allowed_write_paths_json"], fallback=[])
+    }
+    extra_paths = sorted(set(allowed_write_paths) - parent_paths)
+    if extra_paths:
+        raise StateConflict(
+            "child allowed_write_paths may only shrink relative to the parent: "
+            + ", ".join(extra_paths)
+        )
+    parent_cost = str(
+        _json_loads(parent_row["constraints_json"], fallback={}).get("cost_class") or ""
+    ).strip().lower()
+    child_cost = str(constraints.get("cost_class") or "").strip().lower()
+    if parent_cost and child_cost:
+        parent_rank = _COST_CLASS_RANK.get(parent_cost)
+        child_rank = _COST_CLASS_RANK.get(child_cost)
+        if (
+            parent_rank is None
+            or child_rank is None
+            or child_rank > parent_rank
+        ):
+            raise StateConflict(
+                "child cost_class may only shrink relative to the parent"
+            )
 
 
 def _has_executive_provenance(
@@ -807,6 +855,14 @@ _MIGRATION_2: tuple[str, ...] = (
     WHEN NEW.root_job_id IS NULL OR length(trim(NEW.root_job_id)) = 0
     BEGIN
       SELECT RAISE(ABORT, 'root_job_id is required');
+    END
+    """,
+    """
+    CREATE TRIGGER jobs_parent_is_not_self
+    BEFORE INSERT ON jobs
+    WHEN NEW.parent_job_id IS NOT NULL AND NEW.parent_job_id = NEW.job_id
+    BEGIN
+      SELECT RAISE(ABORT, 'a job cannot be its own parent');
     END
     """,
 )
@@ -1934,7 +1990,12 @@ class JobRegistry:
             parent_row = None
             if parent_job_id is not None:
                 parent_row = connection.execute(
-                    "SELECT job_id,root_job_id,depth,escalation_target FROM jobs WHERE job_id=?",
+                    """
+                    SELECT job_id,root_job_id,depth,escalation_target,
+                           requested_authorities_json,allowed_write_paths_json,
+                           constraints_json
+                    FROM jobs WHERE job_id=?
+                    """,
                     (parent_job_id,),
                 ).fetchone()
                 if parent_row is None:
@@ -1949,6 +2010,12 @@ class JobRegistry:
                     raise StateConflict(
                         "escalation_target may only shrink toward a less authoritative seat"
                     )
+                _assert_child_does_not_widen_parent(
+                    parent_row,
+                    requested=list(authority.requested),
+                    allowed_write_paths=list(authority.allowed_write_paths),
+                    constraints=normalized_constraints,
+                )
             if reviews_job_id is not None:
                 reviewed_row = connection.execute(
                     "SELECT job_id,parent_job_id,root_job_id FROM jobs WHERE job_id=?",

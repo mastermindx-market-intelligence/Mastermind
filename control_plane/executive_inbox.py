@@ -143,7 +143,9 @@ _SUPPRESSION_BY_STATUS = {
 _SUPPRESSION_KEYS = ("clean_completed", "queued", "running", "checkpointed", "cancelled")
 
 #: Kinds whose reason gains the "requeue is refused" clause at the attempt limit.
-_REQUEUE_REFUSED_KINDS = frozenset({"job_failed", "job_lost", "job_rate_limited"})
+_REQUEUE_REFUSED_KINDS = frozenset(
+    {"job_failed", "job_lost", "job_rate_limited", "escalated_exception"}
+)
 
 #: This Mastermind checkout — same idiom as :mod:`control_plane.ceo_boot_packet`.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -337,9 +339,9 @@ def classify_job(
 
     First match wins and a job yields AT MOST ONE item: an inbox that listed the
     same job three times would be a worse instrument than the ledger it projects.
-    Every item is ``target="coo"`` — an operational exception belongs to
-    orchestration regardless of who submitted it (see the labels-confer-no-
-    privilege design law).
+    Runtime items stay ``target="coo"`` unless the durable ``escalation_target``
+    column already declares ``ceo`` or ``chairman`` on a terminal exception —
+    never because of department, priority, impact, or provenance labels.
 
     ``now`` enables the one clock-dependent rule, ``stale_lease``.  Passing None
     disables it rather than inventing an instant: a lease comparison against an
@@ -369,6 +371,7 @@ def classify_job(
     reason = ""
     attempt_evidence = False
     extra: list[dict[str, str]] = []
+    target = "coo"
 
     if status is JobStatus.FAILED:
         kind = "job_failed"
@@ -541,6 +544,27 @@ def classify_job(
         # reconciliation check proves suppression + attention == every job.
         return None, _SUPPRESSION_BY_STATUS.get(status)
 
+    if (
+        kind in {"job_failed", "job_lost", "job_rate_limited"}
+        and job.escalation_target in {"ceo", "chairman"}
+    ):
+        # Contract §5: the durable column is a declaration, never a projector
+        # verdict.  Department/priority/impact still cannot retarget a seat.
+        kind = "escalated_exception"
+        target = job.escalation_target
+        reason = f"the job DECLARES escalation_target: {job.escalation_target}"
+        extra.append(_evidence(job_ref, "escalation_target", job.escalation_target))
+        if provenance is not None:
+            schema = provenance.get("schema")
+            if isinstance(schema, str) and schema:
+                extra.append(
+                    _evidence(
+                        f"event:{job.job_id}:JOB_CREATED",
+                        "provenance.schema",
+                        schema,
+                    )
+                )
+
     if kind in _REQUEUE_REFUSED_KINDS and exhausted:
         reason += f"; attempts exhausted ({used}/{limit}) — requeue is refused"
 
@@ -585,7 +609,7 @@ def classify_job(
 
     return (
         _item(
-            target="coo",
+            target=target,
             kind=kind,
             source="runtime",
             job_id=job.job_id,
