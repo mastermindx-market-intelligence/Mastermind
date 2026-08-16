@@ -883,7 +883,14 @@ def test_gate_b_receipt_validation_and_failure_formatting():
         "persistent_config_unchanged": True,
         "worker_preflight_passed": True,
         "workspace_root_restored": True,
-        "stimulus_used": "natural-post-share-stat-cache",
+        "stimulus_used": preflight.STIMULUS_METHOD,
+        "stimulus": {
+            "path": "README.md",
+            "selection_method": preflight.STIMULUS_METHOD,
+            "bytes_unchanged": True,
+            "size_unchanged": True,
+            "ownership_mode_unchanged": True,
+        },
     }
     preflight.validate_receipt(receipt)
     failed = preflight.failure_receipt(release_sha=sha, reason="x" * 500)
