@@ -14,17 +14,21 @@ these two files are deliberate near-duplicates; amend both together.
 **Hierarchy.** Chairman **Chris** (standing mandate) → CEO seat **Sol** (strategy and
 executive cognition) → COO seat **Fable** (bounded orchestration) → **workers**
 (Claude / Codex / routed specialists — you). Canonical seat ids, occupant labels, and
-attention altitude live in `config/authority_map.yml` → `executive_seats`, where every
-seat has `authority: none`: seat labels confer no runtime capability. `config/agents.yml`
-is **model/provider routing only**; `gpt-5.6-sol` is a model route, not the CEO authority
-registry. The **governor** is not a person: `config/authority_map.yml`,
-`control_plane/packet_gate.py`, `control_plane/governance.py`, and the Macro fleet
-guards. Authority is what those enforce, never what a session asserts.
+attention altitude live in `config/authority_map.yml` → `seats`, exactly the Phase
+1F-prescribed canonical home, where every seat has `authority: none`: seat labels confer
+no runtime capability. `config/agents.yml` is **model/provider routing only**;
+`gpt-5.6-sol` is a model route, not the CEO authority registry. The **governor** is not
+a person: `config/authority_map.yml`, `control_plane/packet_gate.py`,
+`control_plane/governance.py`, and the Macro fleet guards. Authority is what those
+enforce, never what a session asserts.
 
 The legacy A7 label `FABLE_HUMAN` is a portfolio/governance effect-taxonomy label,
 not executive rank. It does not place the COO above or in place of the Chairman.
 Executive decision altitude comes from `authority_map.yml` →
 `executive_decision_policy`, derived server-side from the canonical operation/state.
+Creating/updating a Chairman request is `CHAIRMAN_REQUEST_CREATE_OR_UPDATE` (CEO);
+committing approve/reject is `CHAIRMAN_DECISION_COMMIT` (Chairman). A model cannot
+collapse those operations by saying the Chairman already approved.
 
 **Source-of-truth order** — higher layer wins on conflict:
 1. Charter — `research/MASTERMIND_CHARTER_V2.md` (P1–P10); `DOCTRINE.md` beneath it.
@@ -43,6 +47,7 @@ Executive decision altitude comes from `authority_map.yml` →
 a mutable CEO authority/queue. Executive SQLite owns lifecycle and ordering only after
 a project/directive has been explicitly admitted; `Job.priority` orders already-admitted
 eligible work and cannot create strategy. Agent OS is knowledge, never priority authority.
+The Phase 1G autonomous project-admission surface is designed but not armed.
 
 **You may not reinterpret a lower layer to override a higher one.** Finding code that
 does X is not authority to do X — surface the contradiction instead. A model-supplied
