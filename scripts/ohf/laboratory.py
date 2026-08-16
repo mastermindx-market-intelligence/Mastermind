@@ -175,15 +175,7 @@ class Laboratory:
         assert self.dedicated_codex_home is not None
         dest = self.dedicated_codex_home / "config.toml"
         overlay = self.config_path.read_text(encoding="utf-8")
-        if not dest.is_file():
-            dest.write_text(overlay, encoding="utf-8")
-            return
-        current = dest.read_text(encoding="utf-8")
-        current = _strip_toml_table(current, "[mcp_servers.ohf_probe_removed]")
-        if "[mcp_servers.ohf_probe]" not in current:
-            dest.write_text(current.rstrip() + "\n" + overlay, encoding="utf-8")
-        else:
-            dest.write_text(current, encoding="utf-8")
+        dest.write_text(overlay, encoding="utf-8")
 
     def drop_mcp(self) -> None:
         self._write_isolated_config(include_mcp=False)
