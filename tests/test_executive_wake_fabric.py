@@ -568,7 +568,14 @@ def test_existing_runtime_schema_gains_no_wake_table(tmp_path: Path):
 
 def test_ci_wires_this_file_into_the_hermetic_gate():
     workflow = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "tests/test_executive_wake_fabric.py" in workflow
+    assert "Run repository test gate" in workflow
+    assert "scripts/ci_pytest.py" in workflow
+    discovered = {
+        path.relative_to(_ROOT).as_posix()
+        for path in (_ROOT / "tests").rglob("test_*.py")
+        if path.is_file()
+    }
+    assert "tests/test_executive_wake_fabric.py" in discovered
 
 
 def test_docs_state_the_persistence_home():

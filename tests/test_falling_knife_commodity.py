@@ -152,12 +152,12 @@ def test_commodity_miner_uses_commodity_thresholds_from_regime_table():
 # ---------------------------------------------------------------------------
 
 def _fake_full_hold(ticker: str, kind: str = "name"):
-    """A name parked in the churn zone: would-be 'hold' (confluence 0.20, just above the exit
+    """A name parked in the churn zone: would-be 'hold' (confluence 0.26, just above the exit
     floor) — a NEW name is rejected, a HELD name is retained."""
     return {
         "subject": ticker, "kind": "name",
         "rows": [{"lens": "valuation", "value": {}, "status": "context", "direction": "neutral", "note": ""}],
-        "synthesis": {"bull": 1, "bear": 1, "n_scored": 2, "confluence": 0.20,
+        "synthesis": {"bull": 1, "bear": 1, "n_scored": 2, "confluence": 0.26,
                       "vetoes": [], "divergences": [], "size_authority": "hold",
                       "price_downtrend": False, "leadership_ok": True,
                       "price_falling_fast": False, "weak_asymmetry": False, "asym_ratio": None},

@@ -1,0 +1,5 @@
+version = 1
+
+# Hosted CI runs every tests/**/test_*.py module unless it is named here.
+# Zero exclusions is the preferred state. A new test is included automatically.
+# Exact files only: no globs, directories, or wildcards.

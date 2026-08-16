@@ -37,6 +37,23 @@ def _clean():
             p.unlink()
 
 
+def test_daily_loop_archived_is_noop():
+    """Production Flagship is archived: run_daily must no-op before book work."""
+    _clean()
+    from bot import daily
+    from portfolio import registry
+    assert registry.is_archived("flagship")
+    out = daily.run_daily(armed=False)
+    assert out["archived"] is True
+    assert out["book"]["ran"] is False
+    assert out["skipped"] == "portfolio_archived"
+    _clean()
+
+
+@_pytest_w8.mark.skipif(
+    not (Path(__file__).resolve().parent.parent / "vendor" / "macro" / "data" / "regime" / "latest.json").exists(),
+    reason="vendored regime latest.json absent — hosted CI sparse checkout",
+)
 def test_daily_loop_deterministic(monkeypatch):
     _clean()
     from portfolio import registry

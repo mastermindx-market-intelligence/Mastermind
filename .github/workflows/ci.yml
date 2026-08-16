@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -59,81 +60,5 @@ jobs:
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
-      - name: Run hermetic governance gate
-        run: >-
-          python -m pytest -q
-          tests/test_auth.py
-          tests/test_secret_redaction.py
-          tests/test_ohf_probe_schema.py
-          tests/test_ohf_probe_redaction.py
-          tests/test_ohf_probe_inertness.py
-          tests/test_ohf_codex_app_server_probe.py
-          tests/test_gate.py
-          tests/test_book_state_isolation.py
-          tests/test_vendored_read_ratchet.py
-          tests/test_executive_os_runtime.py
-          tests/test_executive_model_router.py
-          tests/test_strategic_state.py
-          tests/test_ceo_boot_packet.py
-          tests/test_agentos_readiness_agenda.py
-          tests/test_ceo_intent.py
-          tests/test_executive_inbox.py
-          tests/test_executive_inbox_phase1fb.py
-          tests/test_executive_os_phase1fb.py
-          tests/test_executive_os_r1_shadow.py
-          tests/test_executive_authority.py
-          tests/test_executive_codex_worker.py
-          tests/test_executive_os_sqlite.py
-          tests/test_executive_supervisor.py
-          tests/test_executive_workspace.py
-          tests/test_executive_backup.py
-          tests/test_executive_canary.py
-          tests/test_executive_service.py
-          tests/test_executive_worker_broker.py
-          tests/test_executive_launchd_config.py
-          tests/test_executive_acceptance_retry.py
-          tests/test_executive_acceptance_observability.py
-          tests/test_executive_python_runtime_provisioner.py
-          tests/test_executive_worker_auth_provisioner.py
-          tests/test_executive_mcp.py
-          tests/test_executive_mcp_submit.py
-          tests/test_executive_mcp_mutation.py
-          tests/test_executive_wake_fabric.py
-
-      - name: Run Portfolio v2 safety gate
-        run: >-
-          python -m pytest -q
-          tests/test_portfolio_archival.py
-          tests/test_etf_book.py
-          tests/test_portfolio_registry_security.py
-          tests/test_decision_submission_v2.py
-          tests/test_autonomous_stock_only_boundary.py
-          tests/test_autonomous_etf_migration.py
-          tests/test_regional_stock_only_boundary.py
-          tests/test_china_book.py
-          tests/test_regional_omission_carry.py
-          tests/test_mandate_packet.py
-          tests/test_portfolio_dashboard_ui.py
-          tests/test_decision_log_execution_truth_ui.py
-          tests/test_brain_pending_truth.py
-          tests/test_portfolio_eod_marks.py
-          tests/test_pending_target_cutover.py
-          tests/test_derisk.py
-          tests/test_paper_transaction_boundary.py
-          tests/test_execution_quote_gap.py
-          tests/test_settle_open_price.py
-          tests/test_pending_decision_provenance.py
-          tests/test_decision_settlement_reconciliation.py
-          tests/test_receipt_projection_durability.py
-          tests/test_outstanding_receipt_fence.py
-          tests/test_portfolio_intelligence.py
-          tests/test_portfolio_intelligence_mcp.py
-          tests/test_portfolio_learning.py
-          tests/test_lesson_application_trace.py
-          tests/test_forward_evaluation.py
-          tests/test_advisor_proposal_lifecycle.py
-          tests/test_scheduler_governance.py
-          tests/test_deploy_provenance.py
-          tests/test_web_exception_sanitization.py
-          tests/test_cli_bridge.py
-          tests/test_codex_bridge.py
+      - name: Run repository test gate
+        run: python scripts/ci_pytest.py
