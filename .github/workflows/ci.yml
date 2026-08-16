@@ -51,7 +51,8 @@ jobs:
       - name: Compile source
         run: >-
           python -m compileall -q
-          app bot brain bridge common control_plane data_layer loop portfolio scripts
+          app bot brain bridge common control_plane data_layer integrations loop
+          portfolio scripts
 
       - name: Validate shell scripts
         run: |
@@ -86,6 +87,9 @@ jobs:
           tests/test_executive_acceptance_observability.py
           tests/test_executive_python_runtime_provisioner.py
           tests/test_executive_worker_auth_provisioner.py
+          tests/test_executive_mcp.py
+          tests/test_executive_mcp_submit.py
+          tests/test_executive_mcp_mutation.py
 
       - name: Run Portfolio v2 safety gate
         run: >-
