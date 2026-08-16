@@ -202,12 +202,12 @@ def test_append_outcomes_matured_appends_rows(tmp_path):
     alert_date = date(2026, 7, 7) - timedelta(days=50)
     _write_alerts(alerts_path, [_alert("AAPL", "alert-old-1", str(alert_date))])
 
-    def mock_price(ticker, as_of, vendor_root=None):
-        return 100.0
+    idx = [(alert_date + timedelta(days=i)).isoformat() for i in range(80)]
+    values = [100.0] * 80
 
     with patch.object(hro, "_ALERTS_PATH", alerts_path), \
          patch.object(hro, "_OUTCOMES_PATH", outcomes_path), \
-         patch.object(hro, "_get_price_at", mock_price):
+         patch.object(hro, "_get_ohlcv_series", return_value=(idx, values)):
         n = hro.append_outcomes(today=date(2026, 7, 7))
 
     assert n >= 1, f"expected at least 1 outcome row, got {n}"

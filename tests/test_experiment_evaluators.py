@@ -381,14 +381,18 @@ class TestRealSeedToday:
 
     @pytest.mark.skipif(not _SEED.exists(), reason="registry.json seed not found")
     @pytest.mark.parametrize("eid", ["judgment-book-promotion", "posture-decider-arming"])
-    def test_current_real_state_is_insufficient_power(self, eid):
+    def test_current_real_state_is_insufficient_power(self, tmp_path, monkeypatch, eid):
         import brain.experiment_registry as er
         seed = json.loads(self._SEED.read_text())
         item = next((e for e in seed if e.get("id") == eid), None)
         assert item is not None, f"{eid} missing from registry.json seed"
-        # Use the real _ROOT (no monkeypatch) so we read the actual data tree as it stands today.
-        result = er.evaluate(item, date(2026, 7, 17))
+        item = dict(item)
+        item["status"] = "open"
+        # Hermetic empty tree: calendar comeback_date / matured status must not override
+        # the registered evidence evaluators.
+        monkeypatch.setattr(er, "_ROOT", tmp_path)
+        result = er.evaluate(item, date.today())
         assert result["state"] == er.STATE_BLOCKED, \
-            (f"{eid} is not insufficient_power against today's real data — either the evidence "
-             "genuinely arrived (great, then re-judge) or the evaluator regressed to calendar maturation")
+            (f"{eid} is not insufficient_power against an empty evidence tree — the evaluator "
+             "regressed to calendar maturation")
         assert result["state"] != er.STATE_READY

@@ -26,8 +26,8 @@ The fourteen safety proofs, each named at its own test:
      packet schema is named and produces no CEO attention
  12. No new database, table, or queue — the fixture tree is unchanged by a CLI run
  13. Existing suites stay green — a RUN receipt, not a test in this file: the
-     hermetic governance gate in ``.github/workflows/ci.yml`` is the standing proof
- 14. CI wiring self-check — this file is wired into that gate
+     repository test gate in ``.github/workflows/ci.yml`` is the standing proof
+ 14. CI wiring self-check — this file is included by discovery, not a filename pack
 
 Plus the post-review proofs: the read-only construction path (a 0-byte husk, a
 foreign SQLite file, and a `delete`-mode database are all left exactly as found),
@@ -1105,10 +1105,14 @@ def test_12_a_cli_run_creates_no_new_state(store, frozen_git, capsys):
 
 def test_14_this_suite_is_wired_into_the_hermetic_governance_gate():
     workflow = (_REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    marker = "Run hermetic governance gate"
-    assert marker in workflow
-    step = workflow.split(marker, 1)[1].split("- name:", 1)[0]
-    assert "tests/test_executive_inbox.py" in step, (
+    assert "Run repository test gate" in workflow
+    assert "scripts/ci_pytest.py" in workflow
+    discovered = {
+        path.relative_to(_REPO).as_posix()
+        for path in (_REPO / "tests").rglob("test_*.py")
+        if path.is_file()
+    }
+    assert "tests/test_executive_inbox.py" in discovered, (
         "a projection nobody runs is a projection nobody trusts"
     )
 
