@@ -1,9 +1,9 @@
 # Executive OS OHF-P0 — harness capability and recovery probe
 
-**Status:** laboratory specification and first implementation (Codex App Server only)
+**Status:** P0B protocol-fidelity laboratory (Codex App Server only)
 **Date:** 2026-08-16
-**Branch:** `codex/ohf-p0-harness-probes-20260816` off current `origin/master`
-**Does not depend on:** Phase 1F-B, PR #74, or any change to `WorkerExecutionAdapter`
+**Does not depend on changing Phase 1F-B semantics.**  Evidence remains ordinary
+files.  This is still not the Operator Fabric.
 
 ## 0. What P0 is
 
@@ -24,18 +24,7 @@ extend Executive Jobs, Attempts, workers, capacity tables, or resource leases.
 ## 1. Architectural constraint
 
 `control_plane.worker_adapter.WorkerExecutionAdapter` stays the sealed-worker
-floor:
-
-```text
-start
-collect_result
-cancel
-run_validation_argv
-```
-
-OHF-P0 must not modify that protocol. A richer future interface is allowed to
-exist only after this probe has evidence for what the native harness actually
-exposes.
+floor. OHF-P0 must not modify that protocol.
 
 ## 2. Runtime migration prohibition
 
@@ -54,88 +43,95 @@ CI pins this with `tests/test_ohf_probe_inertness.py`.
 
 Canonical machine-readable evidence:
 
-`mastermind.ohf_harness_probe/v1`
+`mastermind.ohf_harness_probe/v1.1`
 
-Written as `probe.json` plus a human `probe.md`. Markdown statuses are only:
+Written as `probe.json` plus a human `probe.md`. Markdown statuses are only
+derived from JSON. Essential acceptance evidence must not live only in notes.
 
-- **VERIFIED**
-- **NOT SUPPORTED**
-- **NOT TESTED**
-- **DEGRADED**
-- **UNKNOWN**
+Capability verdicts remain `pass | fail | unknown` and are an **initial**
+snapshot. Recovery uses `VERIFIED | NOT_SUPPORTED | NOT_TESTED | DEGRADED |
+UNKNOWN` and is a separate matrix. Losing MCP later must not rewrite the
+initial `capabilities.mcp` snapshot.
 
-No guessing. Usage/quota classification is `exact | provider_reported |
-estimated | unknown`. A percentage is recorded only when the harness reported
-it. The probe never infers one.
+Attestation is two manifests, not one mixed digest:
 
-Untrusted streams reuse ``common.redaction.sanitize_external_text`` (the
-sanitizer pinned by ``tests/test_secret_redaction.py``) plus
-``control_plane.flags._SECRET_MARKERS`` for secret-named keys.  The finished
-document uses a tighter credential-prefix scan so SHA-256 attestation digests
-are not mistaken for API keys.  ``bridge.nw_feedback._redact_secrets`` is not
-called: it publishes a governance event and would violate inertness.
+- `RequestedCapabilityManifest` → `requested_manifest_digest`
+- `ObservedCapabilityManifest` → `observed_manifest_digest`
 
-## 4. Codex App Server commission
+`config_attested=true` only when every load-bearing requirement matches.
+Unobservable dimensions are `UNKNOWN`, never implicitly accepted.
 
-The first implementation talks JSON-RPC stdio to either:
+Usage/quota classification is `exact | provider_reported | estimated |
+unknown`. Provider windows are stored as reported (`used_percent`,
+`window_duration_minutes`, `resets_at`, `rate_limit_reached_type`). The probe
+never estimates remaining capacity.
+
+## 4. Auth isolation
+
+Live mode must not copy, symlink, or read `auth.json` bytes, and must not fall
+back to `~/.codex`.
+
+Prepare a dedicated home:
+
+```bash
+CODEX_HOME=/path/to/dedicated/home codex login
+python -m scripts.ohf.run_probe \
+  --live \
+  --codex-home /path/to/dedicated/home \
+  --out-dir /tmp/ohf-p0-live
+```
+
+`--live` without `--codex-home` is refused.
+
+## 5. Codex App Server commission
+
+The implementation talks JSON-RPC stdio to either:
 
 - `--backend fake` — in-repo double (`scripts.ohf.fake_app_server`), default, CI
-- `--backend live` / `--live` — real `codex app-server`
+- `--backend live` / `--live --codex-home PATH` — real `codex app-server`
+
+The fake must reproduce current App Server shapes, including grouped
+`skills/list` and `skills/extraRoots/set` with `{extraRoots:[...]}`.  The client
+parses `account/read` as `{account, requiresOpenaiAuth}` and records only
+`auth_type`, `plan_type`, and `requires_openai_auth`.
 
 The commission, in order:
 
 1. start App Server, `initialize`, `initialized`
-2. create thread, bounded turn, record native thread identity
+2. create thread, bounded turn, record native thread identity and PID
 3. stop App Server, restart, resume same thread, bounded turn
-4. fork; two divergent bounded continuations; parent ≠ fork
-5. discover and invoke the inert `ohf-probe` skill
+4. fork; two divergent bounded continuations; prove isolation from `thread/read`
+5. discover and invoke the inert `ohf-probe` skill; then a removal/drift case
 6. discover and invoke inert MCP `ohf_probe` / `ohf_probe_echo`
-7. capture effective configuration digest vs expected bundle
-8. capture provider-reported usage/quota when present
-9. recovery battery:
-   - kill App Server, resume (process died ≠ native session died)
-   - SIGTERM, resume
-   - malformed request, recover
-   - missing native session reference, fail closed
-   - workspace disappears, fail closed
-   - effective configuration changes, detect drift
-   - MCP disappears, report degraded capability
-10. cleanup
+7. compare requested vs observed capability manifests
+8. capture provider-reported usage/quota windows when present
+9. recovery battery with canonical fields:
+   - `process_sigkill_resume`
+   - `process_sigterm_resume`
+   - `malformed_rpc_recovery`
+   - `missing_session_fail_closed`
+   - `config_drift_detected`
+   - `mcp_disappearance_detected`
+   - `workspace_missing_fail_closed`
+   - `main_process_cleanup`
+   - `transitive_orphan_cleanup`
+10. cleanup: main-process exit is not proof that every descendant exited
 
-The inert skill and MCP fixture are laboratory-owned. They are not operational
-Mastermind skills or production MCP servers.
-
-## 5. How to run
+## 6. How to run
 
 ```bash
 python -m scripts.ohf.run_probe --backend fake --out-dir /tmp/ohf-p0
-python -m scripts.ohf.run_probe --live --out-dir research/evidence/ohf_p0/live
+python -m scripts.ohf.run_probe \
+  --live \
+  --codex-home /path/to/dedicated/home \
+  --out-dir /tmp/ohf-p0-live
 ```
 
-Live mode copies `auth.json` into an isolated `CODEX_HOME` without loading it
-into evidence. It still must not write Executive SQLite, claim workers, change
-routing config, register provider capacity, or arm live execution.
+## 7. P0B acceptance
 
-## 6. P0 acceptance
+CI proves the fake commission, protocol fidelity, auth isolation, and
+attestation mutations. A live Codex canary is required before
+`PASS_FOR_OPERATOR_ADAPTER_DESIGN`, but the laboratory remains
+production-inert.
 
-P0 passes when the laboratory can answer, with evidence:
-
-| Question | Observation id |
-|---|---|
-| Can we launch the native harness? | `launch` |
-| Can we create a durable session? | `durable_session` |
-| Can we identify it? | `identify` |
-| Can we restart the local process? | `process_restart` |
-| Can we resume the session? | `resume` |
-| Can we fork it? | `fork` |
-| Can we attest skills? | `attest_skills` |
-| Can we attest MCP? | `attest_mcp` |
-| Can we observe usage/quota? | `usage_quota` |
-| Can we detect configuration drift? | `config_drift` |
-| Can we clean up? | `cleanup` |
-| Can we do all that without touching Executive lifecycle state? | `inert` |
-
-CI proves the fake commission. A live Codex run is an operator command, not a
-merge gate, because it requires local auth and may spend quota.
-
-Claude, Grok, Qwen, and Cursor are out of scope for this PR.
+Claude, Grok, Qwen, and Cursor are out of scope.

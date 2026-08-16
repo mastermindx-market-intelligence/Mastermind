@@ -68,6 +68,9 @@ jobs:
           tests/test_ohf_probe_redaction.py
           tests/test_ohf_probe_inertness.py
           tests/test_ohf_codex_app_server_probe.py
+          tests/test_ohf_auth_isolation.py
+          tests/test_ohf_protocol_fidelity.py
+          tests/test_ohf_attestation.py
           tests/test_gate.py
           tests/test_book_state_isolation.py
           tests/test_vendored_read_ratchet.py

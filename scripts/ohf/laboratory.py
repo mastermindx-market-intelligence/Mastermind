@@ -43,11 +43,45 @@ FORBIDDEN_WRITE_NAMES = (
 )
 
 
+def default_user_codex_home() -> Path:
+    return (Path.home() / ".codex").resolve()
+
+
+def inspect_codex_home(path: Path) -> dict[str, Any]:
+    """Safe directory metadata.  Never reads credential bytes."""
+    resolved = Path(path).expanduser().resolve()
+    return {
+        "path": str(resolved),
+        "exists": resolved.is_dir(),
+        "auth_json_present": (resolved / "auth.json").is_file(),
+        "config_toml_present": (resolved / "config.toml").is_file(),
+        "is_default_user_home": resolved == default_user_codex_home(),
+    }
+
+
+def validate_live_codex_home(path: Path) -> dict[str, Any]:
+    meta = inspect_codex_home(path)
+    if meta["is_default_user_home"]:
+        raise RuntimeError(
+            "live mode refuses the implicit ~/.codex home; pass a dedicated --codex-home"
+        )
+    if not meta["exists"]:
+        raise RuntimeError(f"--codex-home is not a directory: {meta['path']}")
+    if not meta["auth_json_present"]:
+        raise RuntimeError(
+            "dedicated CODEX_HOME is not authenticated independently "
+            "(auth.json missing). Prepare it with: "
+            f"CODEX_HOME={meta['path']} codex login"
+        )
+    return meta
+
+
 @dataclass
 class Laboratory:
     root: Path
     backend: str
     requested_model: str = "gpt-5.6-sol"
+    dedicated_codex_home: Path | None = None
     probe_id: str = field(default_factory=lambda: f"ohf-p0-{uuid.uuid4().hex[:12]}")
 
     def __post_init__(self) -> None:
@@ -57,10 +91,18 @@ class Laboratory:
         self.evidence = self.root / "evidence"
         self.state_path = self.codex_home / "ohf_fake_state.json"
         self.config_path = self.codex_home / "config.toml"
+        if self.dedicated_codex_home is not None:
+            self.dedicated_codex_home = Path(self.dedicated_codex_home).expanduser().resolve()
         for path in (self.workspace, self.codex_home, self.evidence):
             path.mkdir(parents=True, exist_ok=True)
         self._write_isolated_config()
         self._install_skill()
+        self.live_home_meta: dict[str, Any] = {}
+        if self.backend == "live":
+            if self.dedicated_codex_home is None:
+                raise RuntimeError("live mode requires an explicit --codex-home")
+            self.live_home_meta = validate_live_codex_home(self.dedicated_codex_home)
+            self._merge_live_probe_config()
 
     def _write_isolated_config(self, *, include_mcp: bool = True) -> None:
         python = shutil.which("python3") or shutil.which("python") or "python3"
@@ -113,32 +155,70 @@ class Laboratory:
             "principal": f"uid-{os.geteuid()}",
         }
 
-    def copy_auth_if_present(self) -> bool:
-        """Copy ChatGPT auth into the isolated home without loading it into evidence."""
-        src = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json"
-        if not src.is_file():
-            return False
-        dest = self.codex_home / "auth.json"
-        shutil.copy2(src, dest)
-        os.chmod(dest, 0o600)
-        return True
+    def _merge_live_probe_config(self) -> None:
+        """Write non-secret probe MCP/model overlay into the dedicated home.
+
+        Never copies, reads, or symlinks auth.json.
+        """
+        assert self.dedicated_codex_home is not None
+        dest = self.dedicated_codex_home / "config.toml"
+        overlay = self.config_path.read_text(encoding="utf-8")
+        if not dest.is_file():
+            dest.write_text(overlay, encoding="utf-8")
+            return
+        current = dest.read_text(encoding="utf-8")
+        if "[mcp_servers.ohf_probe]" not in current:
+            dest.write_text(current.rstrip() + "\n" + overlay, encoding="utf-8")
 
     def drop_mcp(self) -> None:
         self._write_isolated_config(include_mcp=False)
+        if self.backend == "live" and self.dedicated_codex_home is not None:
+            dest = self.dedicated_codex_home / "config.toml"
+            if dest.is_file():
+                text = dest.read_text(encoding="utf-8")
+                dest.write_text(
+                    text.replace("[mcp_servers.ohf_probe]", "[mcp_servers.ohf_probe_removed]"),
+                    encoding="utf-8",
+                )
+
+    def drop_skill(self) -> None:
+        dest = self.workspace / ".agents" / "skills" / "ohf-probe"
+        if dest.exists():
+            shutil.rmtree(dest)
 
     def mutate_config_for_drift(self) -> None:
         current = self.config_path.read_text(encoding="utf-8")
         self.config_path.write_text(current + '\n# ohf-drift-marker = "1"\n', encoding="utf-8")
+        if self.backend == "live" and self.dedicated_codex_home is not None:
+            dest = self.dedicated_codex_home / "config.toml"
+            if dest.is_file():
+                dest.write_text(
+                    dest.read_text(encoding="utf-8") + '\n# ohf-drift-marker = "1"\n',
+                    encoding="utf-8",
+                )
 
     def destroy_workspace(self) -> None:
         if self.workspace.exists():
             shutil.rmtree(self.workspace)
 
+    def live_codex_home(self) -> Path:
+        if self.backend != "live" or self.dedicated_codex_home is None:
+            raise RuntimeError("live Codex home is only available in live mode")
+        return self.dedicated_codex_home
+
     def env(self) -> dict[str, str]:
+        if self.backend == "live":
+            if self.dedicated_codex_home is None:
+                raise RuntimeError("live mode requires an explicit --codex-home")
+            if self.dedicated_codex_home == default_user_codex_home():
+                raise RuntimeError("live mode refuses implicit ~/.codex fallback")
+            codex_home = str(self.dedicated_codex_home)
+        else:
+            codex_home = str(self.codex_home)
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(self.root / "home"),
-            "CODEX_HOME": str(self.codex_home),
+            "CODEX_HOME": codex_home,
             "OHF_FAKE_STATE": str(self.state_path),
             "OHF_FAKE_WORKSPACE": str(self.workspace),
             "OHF_FAKE_SKILL_ROOT": str(self.workspace / ".agents" / "skills"),
