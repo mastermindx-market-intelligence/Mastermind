@@ -53,3 +53,12 @@ codex:
     analyst: gpt-5.6-sol
     scout: gpt-5.6-sol
     fable: gpt-5.6-sol
+
+# Executive worker execution is a separate, bounded concern from the portfolio
+# reasoning roles above.  Logical worker aliases and economical-worker-first
+# placement live in one dependency-free policy file; Executive OS SQLite still
+# owns every Job/Attempt/Worker transition.  Stage 1 is deliberately unarmed.
+executive_worker_routing:
+  policy_file: config/executive_worker_routes.json
+  lifecycle_authority: executive_os
+  production_armed: false

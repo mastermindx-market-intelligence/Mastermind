@@ -68,6 +68,7 @@ jobs:
           tests/test_book_state_isolation.py
           tests/test_vendored_read_ratchet.py
           tests/test_executive_os_runtime.py
+          tests/test_executive_model_router.py
           tests/test_strategic_state.py
           tests/test_ceo_boot_packet.py
           tests/test_agentos_readiness_agenda.py
