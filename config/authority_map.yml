@@ -21,6 +21,11 @@
 # A6  BOOK_LIFECYCLE Probation/retire RECOMMENDATION (human executes; no auto-kill).
 # A7  FABLE_HUMAN    Irreversible or cross-book change; requires Fable/human approval.
 #
+# NOTE: A0-A7 is the legacy portfolio/governance EFFECT taxonomy.  A7's historical
+# FABLE_HUMAN label is not an organizational rank and does not make the COO seat the
+# Chairman.  Executive seat identity/altitude is declared separately below and never
+# grants capability by label.
+#
 # ENFORCEMENT: the conformance test (test_governance_ledger.py) validates:
 #   (1) every decision-affecting flag in KNOWN_FLAGS has an entry in 'flags';
 #   (2) every governance event_type in 'events' is listed here.
@@ -59,6 +64,166 @@ executive_worker_policy:
   scope_requirements:
     WRITE_BRANCH: assigned_workspace_and_declared_paths
     RUN_TESTS: declared_argv_commands
+
+# EXECUTIVE SEAT IDENTITY
+# -----------------------
+# This key is deliberately named `seats` exactly as Phase 1F §2 prescribed for the
+# first CEO-wake consumer. Seats are organizational/routing identity only.
+# `authority: "none"` is load-bearing: no model name, occupant label, owner_seat,
+# escalation_target, actor, or other descriptive seat field grants runtime capability.
+# Capability remains downstream of the existing authority/policy gates.
+seats:
+  schema_version: 1
+  chairman:
+    occupant_label: Chris
+    description: human Chairman and standing-mandate authority
+    escalation_rank: 300
+    authority: "none"
+  ceo:
+    occupant_label: Sol
+    description: protected AI CEO cognition seat
+    escalation_rank: 200
+    authority: "none"
+  coo:
+    occupant_label: Fable
+    description: bounded COO and project-orchestration seat
+    escalation_rank: 100
+    authority: "none"
+
+# EXECUTIVE DECISION ALTITUDE
+# ---------------------------
+# The server derives a category from the requested operation + canonical state.
+# A model-supplied category is untrusted prose and has zero authority.  Adding,
+# removing, or reclassifying a category is itself Chairman-reserved.
+executive_decision_policy:
+  schema_version: 1
+  derivation: server_from_canonical_operation_and_state
+  model_supplied_category_authority: "none"
+  semantic_demotion: prohibited
+  categories:
+    CONSTITUTION_OR_CHARTER_CHANGE:
+      minimum_decision_seat: chairman
+    EXECUTIVE_HIERARCHY_CHANGE:
+      minimum_decision_seat: chairman
+    EXECUTIVE_AUTHORITY_POLICY_CHANGE:
+      minimum_decision_seat: chairman
+    COMPANY_PHASE_NORTH_STAR_OR_STANDING_CONSTRAINT_CHANGE:
+      minimum_decision_seat: chairman
+    PRODUCTION_AUTONOMY_ARM_OR_EXPANSION:
+      minimum_decision_seat: chairman
+    PRODUCTION_WRITE_TRUST_MODEL_CHANGE:
+      minimum_decision_seat: chairman
+    AUTONOMOUS_MERGE_DEPLOY_SERVICE_CONTROL_OR_CAPITAL_EXECUTION:
+      minimum_decision_seat: chairman
+    CONSTITUTIONAL_PROTECTED_PATH_POLICY_CHANGE:
+      minimum_decision_seat: chairman
+    REASONING_GOVERNOR_CONSTITUTIONAL_CHANGE:
+      minimum_decision_seat: chairman
+    CHAIRMAN_DECISION_COMMIT:
+      minimum_decision_seat: chairman
+    P0_OBJECTIVE_ADD_RETIRE_OR_RESCOPE:
+      minimum_decision_seat: ceo
+    RESOURCE_POLICY_REBALANCE:
+      minimum_decision_seat: ceo
+    PROJECT_INITIATE_WITHIN_ACTIVE_P0:
+      minimum_decision_seat: ceo
+    PROJECT_STOP_OR_REPRIORITIZE_WITHIN_ACTIVE_P0:
+      minimum_decision_seat: ceo
+    PROJECT_SCOPE_REFRAME_WITHIN_DELEGATED_AUTHORITY:
+      minimum_decision_seat: ceo
+    EXECUTIVE_REASONING_ESCALATION_REQUEST:
+      minimum_decision_seat: ceo
+    CEO_ROUTE_REPUBLISH_WITHIN_APPROVED_POLICY:
+      minimum_decision_seat: ceo
+    CHAIRMAN_REQUEST_CREATE_OR_UPDATE:
+      minimum_decision_seat: ceo
+    PROJECT_DECOMPOSE_ACCEPTED_OBJECTIVE:
+      minimum_decision_seat: coo
+    BOUNDED_CHILD_JOB_CREATE:
+      minimum_decision_seat: coo
+    BOUNDED_REPAIR_OR_REVIEW:
+      minimum_decision_seat: coo
+    DETERMINISTIC_PROVIDER_PLACEMENT:
+      minimum_decision_seat: coo
+    SHRINK_ONLY_PAUSE_STOP_OR_DRAIN:
+      minimum_decision_seat: coo
+    EXECUTIVE_EXCEPTION_ESCALATE:
+      minimum_decision_seat: coo
+
+# ONE SOURCE OF TRUTH PER EXECUTIVE PRIORITY CONCEPT
+# --------------------------------------------------
+# Company strategy, candidate ranking, and admitted-work lifecycle/order are
+# deliberately distinct concepts. None may silently become another control plane.
+# This policy is the source-law contract for the Phase 1G autonomous project-
+# admission surface; that modifying surface is designed here but remains unarmed.
+executive_strategy_policy:
+  schema_version: 1
+  project_admission_status: designed_not_armed
+  company_strategy:
+    canonical_artifact: config/strategic_state.yml
+    runtime_role: advisory_and_orientation_only
+    editor_authority: recorded_executive_decision
+  candidate_ranking:
+    canonical_generator: brain/improvement_agenda.py
+    authority: derived_advisory_only
+    direct_executive_mutation: prohibited
+  admitted_work:
+    lifecycle_authority: executive_sqlite
+    job_priority_role: already_admitted_work_order_only
+    strategy_authority: "none"
+  project_admission_requires:
+    - active_p0_or_recorded_strategy_decision
+    - exact_strategic_state_revision
+    - typed_directive_or_intent
+    - authority_policy_pass
+
+# PHASE 1F COO BOUNDS — CEO RULING
+# --------------------------------
+coo_cycle_policy:
+  schema_version: 1
+  max_fan_out_per_parent: 8
+  max_depth: 2
+  max_repair_rounds: 2
+  max_review_attempts_per_job: 2
+  max_children_total: 16
+  allowed_child_cost_classes: [default, small]
+  review_verdicts: [approve, reject]
+
+# REVIEW INDEPENDENCE — CEO RULING
+# --------------------------------
+executive_review_policy:
+  schema_version: 1
+  implementation_result:
+    minimum_independence: worker_only
+    stronger_independence: [account_separated, provider_separated]
+    starvation_disposition: escalate
+    waiver_allowed: false
+  executive_dissent:
+    required_independence: policy_selected
+    independence_classes: [D1_DIFFERENT_WORKER, D2_DIFFERENT_ACCOUNT, D3_DIFFERENT_PROVIDER]
+    unavailable_disposition: DISSENT_UNAVAILABLE
+    clear_on_degraded_independence: false
+
+# CONSTITUTIONAL / GOVERNANCE WRITE FENCE
+# ---------------------------------------
+# This is a minimum protected set. Later CEO-wake/reasoning/auth/write-arm source
+# files join it before those paths can be production-armed. Autonomous jobs/models
+# cannot widen this set through payload, prompt, or tool arguments.
+executive_protected_paths:
+  schema_version: 1
+  autonomous_write: prohibited
+  self_widening: prohibited
+  paths:
+    - research/MASTERMIND_CHARTER_V2.md
+    - research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md
+    - research/EXECUTIVE_OS_G0_SOURCE_LAW_RULING_2026-08-15.md
+    - config/authority_map.yml
+    - config/strategic_state.yml
+    - AGENTS.md
+    - CLAUDE.md
+    - "integrations/executive_mcp/**"
+    - "ops/executive_os/**"
+    - ".github/workflows/**"
 
 # ───────────────────────────────────────────────────────────────────────────────
 # FLAGS
@@ -459,7 +624,7 @@ flags:
     note: >
       Arms the posture governor to MOVE a live budget multiplier (default OFF —
       disarmed is observe-only).  A5: when armed, may apply a bounded ±step
-      (0.05) within the doctrine [0.40, 1.00] band; never widens the band.
+      (0.05) within the doctrine [floor, ceil] band; never widens the band.
       Governed by emitter (d) which fires on TRANSITION only.
 
   MASTERMIND_RISKOFF_GROSS:

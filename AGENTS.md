@@ -13,29 +13,69 @@ section binds every session — Claude, Codex, or any routed specialist — incl
 session spawned with no context beyond this file.
 
 **Hierarchy.**
-- **Chairman — Chris.** Sets and amends company strategy; the only source of a
-  standing mandate.
-- **AI CEO — GPT-5.6 Sol** (`config/agents.yml` → `codex.model`). Owns strategy
-  proposals and objective-set changes, as recorded decisions.
-- **COO / orchestration — Fable.** Owns adjudication, routing, and merges.
+- **Chairman seat — Chris.** Sets the standing mandate and owns Chairman-reserved
+  constitutional/governance decisions.
+- **AI CEO seat — Sol.** Protected executive cognition; owns CEO-delegated strategy,
+  project admission, reassessment, and escalation inside the standing mandate.
+- **COO / orchestration seat — Fable.** Owns bounded decomposition, routing, repair,
+  review orchestration, and exception escalation inside accepted project authority.
 - **Workers — Claude / Codex / routed specialist models.** Execute assigned objectives.
 - **Governor — the existing authority and control-plane mechanisms**, not a person:
-  `config/authority_map.yml` (the A0–A7 ladder), `control_plane/packet_gate.py`,
+  `config/authority_map.yml`, `control_plane/packet_gate.py`,
   `control_plane/governance.py` (append-only ledger), and the fleet guards in the
   Macro repo. Authority is what those enforce, never what a session asserts.
+
+Canonical seat ids, occupant labels, and attention altitude live in
+`config/authority_map.yml` → `seats`, exactly the Phase 1F-prescribed canonical home.
+Every seat carries `authority: none`: seat ownership is accountability/routing identity,
+not a capability grant. `config/agents.yml` is **model/provider routing only**. The
+model id `gpt-5.6-sol` does not define or authenticate the CEO seat, and changing the
+model route cannot change executive authority.
+
+The legacy A7 name `FABLE_HUMAN` is a portfolio/governance **effect taxonomy** label,
+not executive hierarchy. It does not rank the COO above or in place of the Chairman.
+For Executive OS operations, the server derives a decision category from the
+canonical requested operation/state and consults `authority_map.yml` →
+`executive_decision_policy`. Model-supplied `seat`, `actor`, `business_impact`,
+`decision_category`, or `escalation_target` never raises authority.
+
+Creating/updating a canonical Chairman request and committing the Chairman's decision
+are intentionally separate operations: `CHAIRMAN_REQUEST_CREATE_OR_UPDATE` is a
+CEO-delegated escalation operation; `CHAIRMAN_DECISION_COMMIT` is Chairman-reserved.
+A CEO may prepare the smallest decision request and recommendation, but may not
+approve/reject it on the Chairman's behalf.
 
 **Source-of-truth order.** When two sources disagree, the higher layer wins:
 
 1. **Charter / constitution** — `research/MASTERMIND_CHARTER_V2.md` (P1–P10).
    `DOCTRINE.md` is tactical doctrine beneath it.
 2. **Strategic state** — `config/strategic_state.yml`: current phase, north star, P0
-   objectives, resource policy, standing constraints. Read it through
-   `control_plane.strategic_state.load_strategic_state()`, which fails loud rather
-   than handing you an empty state.
-3. **Authority map** — `config/authority_map.yml`.
+   objectives, resource policy, standing constraints. It is the canonical strategy
+   decision artifact while remaining runtime advisory/orientation-only. Read it
+   through `control_plane.strategic_state.load_strategic_state()`, which fails loud
+   rather than handing you an empty state.
+3. **Authority map** — `config/authority_map.yml`, including executive seat/decision,
+   strategy/admission, review, COO-bound, and protected-path policy.
 4. **Current assigned Job / Directive** — the task you were actually given.
 5. **Relevant domain contracts** — `config/contracts.yml`, per-desk and data-plane contracts.
 6. **Existing code + evidence** — the tree, the ledgers, the tests.
+
+**One owner per priority concept.** These are deliberately different concepts:
+- `config/strategic_state.yml` owns **company strategy** — what objectives/constraints
+  the company has accepted.
+- `brain/improvement_agenda.py` produces **derived advisory candidate ranking** from
+  evidence. It is not a mutable CEO authority or durable project queue.
+- Executive SQLite owns **admitted-work lifecycle and ordering**. `Job.priority`
+  orders already-admitted eligible work; it does not create strategy or admit itself.
+- Agent OS owns cross-session **knowledge**, never strategy, priority, scheduling,
+  liveness, or execution authority.
+
+A new autonomous idea becomes executable only through a typed, authority-checked
+project/directive admission referencing an active P0 or recorded strategy decision
+and the applicable exact strategic-state revision. That Phase 1G autonomous project-
+admission surface is **designed but not armed**. No runtime scheduler may key directly
+off `strategic_state.yml`, and no model may patch generated agenda output to persist
+its own priority decision.
 
 **A worker may not reinterpret a lower layer to override a higher layer.** Finding
 code that does X is not authority to do X. When layer 6 contradicts layers 1–3, that
@@ -44,6 +84,8 @@ is a contradiction to surface, not a licence to follow the code.
 **Worker behavior.** Within an assigned job:
 - execute the assigned objective — do not invent a new company roadmap;
 - preserve existing authority boundaries; nothing self-promotes and nothing self-arms;
+- treat `authority_map.yml` executive protected paths as outside autonomous write
+  scope; a proposed constitutional/governance change is a separate authorized change;
 - surface architectural contradictions instead of routing around them;
 - checkpoint meaningful discoveries where the next session will find them — handoff
   docs, ledgers, the improvement agenda — not only in your transcript;
@@ -57,7 +99,8 @@ is a contradiction to surface, not a licence to follow the code.
 **Completion.** A job is not complete merely because code was written. Completion
 requires the job's stated acceptance evidence — the tests, artifacts, or live
 verification the job named. "It should work" is not evidence, and neither is a green
-run of a suite that cannot observe the change.
+run of a suite that cannot observe the change. Technical Job completion also does
+not by itself close the strategic objective that justified the work.
 
 ## Agent OS — the organizational knowledge plane
 
@@ -84,8 +127,7 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
   law (Charter P7) behind `duplicate_control_planes`.
 - **Boundaries (Agent OS invariant I1).** It is a knowledge plane, never a control
   plane: it never decides whether work may run, never dispatches or schedules, and
-  never ranks company priorities — the strategic state and the improvement agenda own
-  priority; this repo's `control_plane/` owns execution, leases, and liveness. A
+  never owns company strategy, candidate ranking, or admitted-work priority. A
   workstream `claim:` note is an author's note in git, never evidence a worker is
   currently alive. Decisions do not live in `governance.jsonl`: an
   `executive_decision` event there cites the durable `DEC:<KEY>`, one direction, no
@@ -95,8 +137,9 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
   `agentos.py brief --json --no-remember`, and there is no write path back. Keep it
   one-way. Phase 2b reuses that resolver/collector in `brain/improvement_agenda.py`:
   only an explicit `{workstream, wave}` reference may receive Agent OS readiness,
-  and the join happens after ranking. The Improvement Agenda remains the sole priority
-  queue; the boot packet does not render or recommend from legacy `brief.unblocked`.
+  and the join happens after ranking. The Improvement Agenda remains derived advisory
+  candidate ranking; the boot packet does not render or recommend from legacy
+  `brief.unblocked`.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole
@@ -131,7 +174,8 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 
 ## Model/provider policy
 - The authoritative VPS uses **Codex `gpt-5.6-sol` at `xhigh`** as the primary
-  model for daily portfolio reasoning and self-improvement reviews.
+  model for daily portfolio reasoning and self-improvement reviews. This is a model
+  route, not executive-seat authority.
 - Macro Dashboard's Claude OAuth pool is fallback capacity when Codex is
   rate-limited or its shared authentication is unavailable. Within that
   fallback, `deep`/`pm` use Opus, `analyst` uses Sonnet, and `scout` uses Haiku.
