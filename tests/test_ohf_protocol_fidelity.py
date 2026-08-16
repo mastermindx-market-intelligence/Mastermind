@@ -7,10 +7,12 @@ from contextlib import redirect_stdout
 from scripts.ohf.fake_app_server import FakeAppServer
 from scripts.ohf.protocol import (
     extra_roots_set_params,
+    mcp_tool_names,
     parse_account_read,
     parse_skills_list,
     skill_names,
     skills_list_params,
+    turn_texts,
 )
 
 
@@ -82,6 +84,33 @@ def test_account_read_parser_ignores_top_level_auth_mode():
     assert real["plan_type"] == "plus"
     assert real["requires_openai_auth"] is True
     assert "email" not in real
+
+
+def test_mcp_tools_are_name_keyed_objects():
+    listed = {
+        "data": [
+            {
+                "name": "ohf_probe",
+                "tools": {"ohf_probe_echo": {"name": "ohf_probe_echo"}},
+            }
+        ]
+    }
+    assert mcp_tool_names(listed) == ["ohf_probe_echo"]
+    flat = {"data": [{"name": "ohf_probe", "tools": [{"name": "ohf_probe_echo"}]}]}
+    # A list is the old fake shape; the live parser must still not require it.
+    assert mcp_tool_names(flat) == ["ohf_probe_echo"]
+
+
+def test_turn_texts_read_item_content():
+    turns = [
+        {
+            "id": "turn_1",
+            "items": [
+                {"type": "agentMessage", "content": [{"type": "output_text", "text": "OHF_P0_ACK-P"}]}
+            ],
+        }
+    ]
+    assert "OHF_P0_ACK-P" in " ".join(turn_texts(turns))
 
 
 def test_skills_list_params_are_array_of_cwd_objects():

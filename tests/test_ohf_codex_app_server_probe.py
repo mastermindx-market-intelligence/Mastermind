@@ -49,7 +49,9 @@ def test_fake_commission_answers_p0_questions(tmp_path):
     assert observation_status(probe, "cleanup") == "VERIFIED"
     assert observation_status(probe, "inert") == "VERIFIED"
     assert probe["session_continuity"]["initial_pid"] != probe["session_continuity"]["replacement_pid"]
+    assert probe["session_continuity"]["sigkill_replacement_pid"] not in {None, probe["session_continuity"]["initial_pid"]}
     assert probe["session_continuity"]["native_thread_survived"] is True
+    assert any(row.get("reason") == "sigkill" for row in probe["session_continuity"]["process_generations"])
     assert probe["fork_proof"]["independent_continuation_proven"] is True
     assert probe["skill_attestation"]["invoked_successfully"] is True
     assert probe["mcp_attestation"]["tool_callable"] is True

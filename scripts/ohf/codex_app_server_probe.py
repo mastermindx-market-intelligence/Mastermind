@@ -84,6 +84,15 @@ def _forked_from(result: dict[str, Any] | None) -> str:
     return str(thread.get("forkedFromId") or thread.get("forked_from") or "")
 
 
+def _turns_from(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not result:
+        return []
+    data = result.get("data")
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return thread_turns(result)
+
+
 def _connect(lab: Laboratory) -> AppServerClient:
     client = AppServerClient(_argv_for(lab), env=lab.env(), cwd=lab.workspace)
     client.start()
@@ -214,6 +223,9 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
             return _finalize(probe, lab)
 
         probe["session_continuity"]["initial_pid"] = client.pid
+        probe["session_continuity"]["process_generations"].append(
+            {"reason": "launch", "pid": client.pid, "resumed_thread_id": ""}
+        )
         observe(
             "launch",
             "VERIFIED",
@@ -256,7 +268,7 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
         if not sandbox_mode:
             unobservable.append("sandbox")
 
-        plugin_rows = try_rpc("plugin/list")
+        plugin_rows = try_rpc("plugin/list", {}, timeout=5.0)
         if plugin_rows and isinstance(plugin_rows.get("data"), list):
             extra_plugins = [
                 str(item.get("name") or item.get("id") or "")
@@ -317,6 +329,9 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
         client.terminate()
         client = reconnect()
         probe["session_continuity"]["replacement_pid"] = client.pid
+        probe["session_continuity"]["process_generations"].append(
+            {"reason": "graceful_restart", "pid": client.pid, "resumed_thread_id": ""}
+        )
         if client.pid == first_pid:
             observe("process_restart", "UNKNOWN", "restarted process reused the same pid")
             probe["session_continuity"]["process_identity_changed"] = "UNKNOWN"
@@ -334,8 +349,10 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
         probe["session_continuity"]["resumed_thread_id"] = resumed_id
         if resumed and resumed_id == parent_id:
             set_cap("resume", "pass")
+            set_rec("process_sigterm_resume", "VERIFIED")
             probe["session_continuity"]["native_thread_survived"] = True
             probe["session_continuity"]["workspace_survived"] = True
+            probe["session_continuity"]["process_generations"][-1]["resumed_thread_id"] = resumed_id
             observe("resume", "VERIFIED", "Resumed the same native thread after process restart.", evidence=parent_id)
             _bounded_turn(client, parent_id, f"Reply with exactly {OHF_PROBE_TURN_ACK}-2 and nothing else.")
         elif parent_id:
@@ -358,8 +375,19 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
             _bounded_turn(client, fork_id, f"Fork continuation. Reply {FORK_MARK}")
             parent_read = try_rpc("thread/read", {"threadId": parent_id, "includeTurns": True})
             fork_read = try_rpc("thread/read", {"threadId": fork_id, "includeTurns": True})
-            parent_texts = turn_texts(thread_turns(parent_read))
-            fork_texts = turn_texts(thread_turns(fork_read))
+            parent_texts = turn_texts(_turns_from(parent_read))
+            fork_texts = turn_texts(_turns_from(fork_read))
+            if not parent_texts or not fork_texts:
+                parent_listed = try_rpc(
+                    "thread/turns/list",
+                    {"threadId": parent_id, "limit": 20, "sortDirection": "asc", "itemsView": "full"},
+                )
+                fork_listed = try_rpc(
+                    "thread/turns/list",
+                    {"threadId": fork_id, "limit": 20, "sortDirection": "asc", "itemsView": "full"},
+                )
+                parent_texts = parent_texts or turn_texts(_turns_from(parent_listed))
+                fork_texts = fork_texts or turn_texts(_turns_from(fork_listed))
             inherited = OHF_PROBE_TURN_ACK in " ".join(fork_texts) if fork_texts else None
             parent_isolated = FORK_MARK not in " ".join(parent_texts) if parent_texts else None
             fork_isolated = PARENT_MARK not in " ".join(fork_texts) if fork_texts else None
@@ -451,7 +479,10 @@ def run_codex_app_server_probe(lab: Laboratory) -> dict[str, Any]:
             }
             note("skill removal was not visible without a process restart")
 
-        mcp_status = try_rpc("mcpServerStatus/list", {"detail": "toolsAndAuthOnly"})
+        mcp_status = try_rpc(
+            "mcpServerStatus/list",
+            {"detail": "toolsAndAuthOnly", "threadId": parent_id},
+        )
         mcp_names = mcp_server_names(mcp_status)
         tool_names = mcp_tool_names(mcp_status)
         if mcp_status is None:
@@ -641,9 +672,15 @@ def _run_recovery(
     killed_pid = client.pid
     client.kill()
     client = reconnect()
+    probe["session_continuity"]["sigkill_replacement_pid"] = client.pid
     process_died = client.pid != killed_pid
     resumed = try_rpc("thread/resume", {"threadId": parent_id})
-    session_alive = bool(resumed and _thread_id(resumed) == parent_id)
+    resumed_id = _thread_id(resumed or {})
+    probe["session_continuity"]["sigkill_resume_thread_id"] = resumed_id
+    probe["session_continuity"]["process_generations"].append(
+        {"reason": "sigkill", "pid": client.pid, "resumed_thread_id": resumed_id}
+    )
+    session_alive = bool(resumed and resumed_id == parent_id)
     if process_died and session_alive:
         set_rec("process_sigkill_resume", "VERIFIED")
     elif process_died and not session_alive:
@@ -651,11 +688,20 @@ def _run_recovery(
     else:
         set_rec("process_sigkill_resume", "UNKNOWN")
 
+    prior_sigterm = probe["recovery"].get("process_sigterm_resume")
     client.terminate()
     client = reconnect()
+    probe["session_continuity"]["sigterm_replacement_pid"] = client.pid
     resumed = try_rpc("thread/resume", {"threadId": parent_id})
-    if resumed and _thread_id(resumed) == parent_id:
+    resumed_id = _thread_id(resumed or {})
+    probe["session_continuity"]["sigterm_resume_thread_id"] = resumed_id
+    probe["session_continuity"]["process_generations"].append(
+        {"reason": "sigterm", "pid": client.pid, "resumed_thread_id": resumed_id}
+    )
+    if resumed and resumed_id == parent_id:
         set_rec("process_sigterm_resume", "VERIFIED")
+    elif prior_sigterm == "VERIFIED":
+        note("post-SIGKILL SIGTERM resume did not take the writer; keeping earlier graceful SIGTERM VERIFIED")
     elif parent_id:
         set_rec("process_sigterm_resume", "NOT_SUPPORTED")
     else:
@@ -694,7 +740,10 @@ def _run_recovery(
     lab._write_isolated_config(include_mcp=True)
     lab.drop_mcp()
     try_rpc("config/mcpServer/reload")
-    mcp_after = try_rpc("mcpServerStatus/list", {"detail": "toolsAndAuthOnly"})
+    mcp_after = try_rpc(
+        "mcpServerStatus/list",
+        {"detail": "toolsAndAuthOnly", "threadId": parent_id},
+    )
     remaining = mcp_server_names(mcp_after)
     if mcp_after is None:
         set_rec("mcp_disappearance_detected", "UNKNOWN")

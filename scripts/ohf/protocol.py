@@ -106,15 +106,27 @@ def mcp_server_names(result: Mapping[str, Any] | None) -> list[str]:
 def mcp_tool_names(result: Mapping[str, Any] | None) -> list[str]:
     names: list[str] = []
     for row in parse_mcp_status(result):
-        tools = row.get("tools") or []
-        if not isinstance(tools, list):
-            continue
+        names.extend(_tool_names(row.get("tools")))
+    return sorted(set(names))
+
+
+def _tool_names(tools: Any) -> list[str]:
+    """Real App Server returns tools as a name-keyed object, not a flat list."""
+    names: list[str] = []
+    if isinstance(tools, dict):
+        for key, tool in tools.items():
+            if isinstance(tool, dict) and tool.get("name"):
+                names.append(str(tool["name"]))
+            elif str(key).strip():
+                names.append(str(key))
+        return names
+    if isinstance(tools, list):
         for tool in tools:
             if isinstance(tool, dict) and tool.get("name"):
                 names.append(str(tool["name"]))
             elif isinstance(tool, str) and tool.strip():
                 names.append(tool)
-    return sorted(set(names))
+    return names
 
 
 def parse_config_read(result: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -237,7 +249,23 @@ def turn_texts(turns: list[Mapping[str, Any]]) -> list[str]:
         text = turn.get("text")
         if text:
             texts.append(str(text))
+        for item in turn.get("items") or []:
+            if isinstance(item, dict):
+                texts.extend(_strings_from(item))
     return texts
+
+
+def _strings_from(value: Any) -> list[str]:
+    found: list[str] = []
+    if isinstance(value, str) and value.strip():
+        found.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            found.extend(_strings_from(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.extend(_strings_from(item))
+    return found
 
 
 DEFAULT_REQUESTED_SKILLS = (OHF_PROBE_SKILL_NAME,)

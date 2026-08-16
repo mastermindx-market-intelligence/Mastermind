@@ -43,6 +43,18 @@ FORBIDDEN_WRITE_NAMES = (
 )
 
 
+def _strip_toml_table(text: str, header: str) -> str:
+    lines: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            skipping = stripped == header
+        if not skipping:
+            lines.append(line)
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def default_user_codex_home() -> Path:
     return (Path.home() / ".codex").resolve()
 
@@ -167,8 +179,11 @@ class Laboratory:
             dest.write_text(overlay, encoding="utf-8")
             return
         current = dest.read_text(encoding="utf-8")
+        current = _strip_toml_table(current, "[mcp_servers.ohf_probe_removed]")
         if "[mcp_servers.ohf_probe]" not in current:
             dest.write_text(current.rstrip() + "\n" + overlay, encoding="utf-8")
+        else:
+            dest.write_text(current, encoding="utf-8")
 
     def drop_mcp(self) -> None:
         self._write_isolated_config(include_mcp=False)
@@ -176,10 +191,9 @@ class Laboratory:
             dest = self.dedicated_codex_home / "config.toml"
             if dest.is_file():
                 text = dest.read_text(encoding="utf-8")
-                dest.write_text(
-                    text.replace("[mcp_servers.ohf_probe]", "[mcp_servers.ohf_probe_removed]"),
-                    encoding="utf-8",
-                )
+                for header in ("[mcp_servers.ohf_probe]", "[mcp_servers.ohf_probe_removed]"):
+                    text = _strip_toml_table(text, header)
+                dest.write_text(text, encoding="utf-8")
 
     def drop_skill(self) -> None:
         dest = self.workspace / ".agents" / "skills" / "ohf-probe"

@@ -190,6 +190,20 @@ class FakeAppServer:
                 return
             self._ok(request_id, {"thread": self._thread_view(thread)})
             return
+        if method == "thread/turns/list":
+            thread = self._require_thread(str(params.get("threadId") or ""))
+            if thread is None:
+                self._error(request_id, "native session reference missing", code=-32004)
+                return
+            self._ok(
+                request_id,
+                {
+                    "data": list(thread.get("turns") or []),
+                    "nextCursor": None,
+                    "backwardsCursor": None,
+                },
+            )
+            return
         if method == "thread/settings/update":
             self._ok(request_id, {})
             return
@@ -221,7 +235,15 @@ class FakeAppServer:
             else:
                 reply = OHF_PROBE_TURN_ACK
                 item_type = "agent_message"
-            thread.setdefault("turns", []).append({"id": turn_id, "text": reply})
+            thread.setdefault("turns", []).append(
+                {
+                    "id": turn_id,
+                    "text": reply,
+                    "items": [
+                        {"type": "agentMessage", "text": reply, "content": [{"type": "text", "text": reply}]}
+                    ],
+                }
+            )
             self._save()
             turn = {"id": turn_id, "status": "completed", "threadId": thread_id}
             self._ok(request_id, {"turn": turn})
@@ -312,7 +334,12 @@ class FakeAppServer:
                         {
                             "name": OHF_PROBE_MCP_SERVER,
                             "status": self.mcp_status,
-                            "tools": [{"name": OHF_PROBE_MCP_TOOL}],
+                            "tools": {
+                                OHF_PROBE_MCP_TOOL: {
+                                    "name": OHF_PROBE_MCP_TOOL,
+                                    "description": "Echo a bounded laboratory payload.",
+                                }
+                            },
                             "authStatus": "unsupported",
                             "pluginId": None,
                         }
