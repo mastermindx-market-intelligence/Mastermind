@@ -67,11 +67,12 @@ executive_worker_policy:
 
 # EXECUTIVE SEAT IDENTITY
 # -----------------------
-# Seats are organizational/routing identity only.  `authority: "none"` is
-# load-bearing: no model name, occupant label, owner_seat, escalation_target, actor,
-# or other descriptive seat field grants runtime capability.  Capability remains
-# downstream of the existing authority/policy gates.
-executive_seats:
+# This key is deliberately named `seats` exactly as Phase 1F §2 prescribed for the
+# first CEO-wake consumer. Seats are organizational/routing identity only.
+# `authority: "none"` is load-bearing: no model name, occupant label, owner_seat,
+# escalation_target, actor, or other descriptive seat field grants runtime capability.
+# Capability remains downstream of the existing authority/policy gates.
+seats:
   schema_version: 1
   chairman:
     occupant_label: Chris
@@ -118,7 +119,7 @@ executive_decision_policy:
       minimum_decision_seat: chairman
     REASONING_GOVERNOR_CONSTITUTIONAL_CHANGE:
       minimum_decision_seat: chairman
-    CHAIRMAN_DECISION_REQUEST:
+    CHAIRMAN_DECISION_COMMIT:
       minimum_decision_seat: chairman
     P0_OBJECTIVE_ADD_RETIRE_OR_RESCOPE:
       minimum_decision_seat: ceo
@@ -133,6 +134,8 @@ executive_decision_policy:
     EXECUTIVE_REASONING_ESCALATION_REQUEST:
       minimum_decision_seat: ceo
     CEO_ROUTE_REPUBLISH_WITHIN_APPROVED_POLICY:
+      minimum_decision_seat: ceo
+    CHAIRMAN_REQUEST_CREATE_OR_UPDATE:
       minimum_decision_seat: ceo
     PROJECT_DECOMPOSE_ACCEPTED_OBJECTIVE:
       minimum_decision_seat: coo
@@ -150,9 +153,12 @@ executive_decision_policy:
 # ONE SOURCE OF TRUTH PER EXECUTIVE PRIORITY CONCEPT
 # --------------------------------------------------
 # Company strategy, candidate ranking, and admitted-work lifecycle/order are
-# deliberately distinct concepts.  None may silently become another control plane.
+# deliberately distinct concepts. None may silently become another control plane.
+# This policy is the source-law contract for the Phase 1G autonomous project-
+# admission surface; that modifying surface is designed here but remains unarmed.
 executive_strategy_policy:
   schema_version: 1
+  project_admission_status: designed_not_armed
   company_strategy:
     canonical_artifact: config/strategic_state.yml
     runtime_role: advisory_and_orientation_only
@@ -200,8 +206,8 @@ executive_review_policy:
 
 # CONSTITUTIONAL / GOVERNANCE WRITE FENCE
 # ---------------------------------------
-# This is a minimum protected set.  Later CEO-wake/reasoning/auth/write-arm source
-# files join it before those paths can be production-armed.  Autonomous jobs/models
+# This is a minimum protected set. Later CEO-wake/reasoning/auth/write-arm source
+# files join it before those paths can be production-armed. Autonomous jobs/models
 # cannot widen this set through payload, prompt, or tool arguments.
 executive_protected_paths:
   schema_version: 1
@@ -209,6 +215,8 @@ executive_protected_paths:
   self_widening: prohibited
   paths:
     - research/MASTERMIND_CHARTER_V2.md
+    - research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md
+    - research/EXECUTIVE_OS_G0_SOURCE_LAW_RULING_2026-08-15.md
     - config/authority_map.yml
     - config/strategic_state.yml
     - AGENTS.md
@@ -290,7 +298,7 @@ flags:
     authority_level: A4
     allowed_effect: [arm_flagship_judgment_layer, disarm_flagship_judgment_layer]
     note: >
-      Enables the flagship judgment overlay layer.
+      Enables the judgment-book overlay for the flagship build.
 
   MASTERMIND_MACRO_RISK:
     authority_level: A4
@@ -321,7 +329,7 @@ flags:
     authority_level: A4
     allowed_effect: [arm_dwell_filter, disarm_dwell_filter]
     note: >
-      Enables minimum-dwell-time filtering in Brain book decisions.
+      Enables minimum-dwell-time filtering on Brain book decisions.
 
   MASTERMIND_GATE_OFFICER:
     authority_level: A4
@@ -346,13 +354,13 @@ flags:
     authority_level: A4
     allowed_effect: [arm_reputation_weighting, disarm_reputation_weighting]
     note: >
-      Enables reputation-weighted scoring in Brain's decision layer.
+      Enables reputation-weighted scoring in the Brain's decision layer.
 
   MASTERMIND_RESEARCH_LLM:
     authority_level: A4
     allowed_effect: [arm_research_llm, disarm_research_llm]
     note: >
-      Enables LLM-based research desk calls from Brain.
+      Enables LLM-based research desk calls from the Brain.
 
   MASTERMIND_RISK_GOVERNOR:
     authority_level: A4
@@ -404,7 +412,7 @@ flags:
       (additionally APPLY the verdict SUBTRACT-ONLY: "wait" → park the name via the existing
       timing-withhold path, "staged_starter" → cap scale at 0.7; never forces a buy, never
       escalates). DARK: default "off" = byte-identical to base. Fail-soft — a seat/LLM failure
-      degrades to existing behaviour (a failed seat never parks; only a real "wait" parks).
+      degrades to the existing behaviour (a failed seat never parks; only a real "wait" parks).
       A4 gate: off→shadow→enforce is a staged arm/disarm toggle; arming to enforce is a Fable
       decision recorded in the governance ledger BEFORE the flag changes. Come-back TBD.
 
@@ -444,7 +452,7 @@ flags:
     note: >
       Single-stock divergence-clue candidacy. bool: "0" (default — inert) | "1" (a per-name
       divergence clue may nominate an additive buy candidate). DARK: default "0" = no behavior change.
-      Additive buy-source (Lane-A); arm only on the E8 bar, ledgered first. Come-back TBD.
+      Additive buy-source (Lane-A); arm only on the E8 statistical bar, ledgered first. Come-back TBD.
 
   # ── Buy-board LEARNING loop (DARK — candidacy gate_go fix + proven-edge trust multiplier) ──
   # Two flags that close the buy-board learning loop: (1) STANDOUT_UNGATED makes the board's own
@@ -616,7 +624,7 @@ flags:
     note: >
       Arms the posture governor to MOVE a live budget multiplier (default OFF —
       disarmed is observe-only).  A5: when armed, may apply a bounded ±step
-      (0.05) within the doctrine [0.40, 1.00] band; never widens the band.
+      (0.05) within the doctrine [floor, ceil] band; never widens the band.
       Governed by emitter (d) which fires on TRANSITION only.
 
   MASTERMIND_RISKOFF_GROSS:
