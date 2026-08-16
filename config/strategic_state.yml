@@ -10,17 +10,27 @@
 # amended — never the reverse. Charter P7 (one source of truth per concept) is why
 # this is the only file that answers "what is the company working on right now."
 #
-# WHAT THIS FILE IS NOT. It is not a control plane, a scheduler, or a job queue, and
-# no runtime behavior keys off it. control_plane/ owns job governance,
-# config/authority_map.yml owns the A0-A7 authority ladder, config/agents.yml owns
-# seats and model routing, brain/improvement_agenda.py owns the ranked work queue.
-# Wiring an execution path that reads this file to decide what to RUN would create a
-# second control plane — prohibited by `constraints` below and by Phase 0 census §6.1.
+# STRATEGY AUTHORITY, NOT AN EXECUTION QUEUE. This file is the canonical company-
+# strategy decision artifact for company phase, north star, P0 objectives, resource
+# policy, standing constraints, and review triggers. It remains advisory/orientation-
+# only to runtime code: no scheduler, broker, claim path, or worker dispatcher may
+# read it to decide what to RUN. A recorded strategy decision becomes executable only
+# through a separately admitted typed Executive OS project/directive that references
+# the applicable strategic-state revision and passes config/authority_map.yml.
 #
-# WHO EDITS IT. The Chairman or the AI CEO seat, as a recorded decision. A worker
-# session may NOT rewrite the objective set to match whatever it happens to be
-# building; that is the reinterpretation failure the executive contract forbids
-# (see AGENTS.md § "Executive contract").
+# ONE OWNER PER PRIORITY CONCEPT. control_plane/ owns admitted Job lifecycle and
+# ordering; brain/improvement_agenda.py produces derived advisory candidate ranking;
+# this file owns company strategy. The agenda is not a mutable executive authority,
+# and Job.priority is not company strategy. See authority_map.yml
+# executive_strategy_policy. Wiring any of these three concepts to silently replace
+# another would create the duplicate control plane prohibited below.
+#
+# WHO EDITS IT. The Chairman or the AI CEO seat, as a recorded decision whose
+# decision category is authorized by config/authority_map.yml. A worker session may
+# NOT rewrite the objective set to match whatever it happens to be building; that is
+# the reinterpretation failure the executive contract forbids (see AGENTS.md §
+# "Executive contract"). Chairman-reserved fields such as company phase, north star,
+# and standing constraints are not delegated merely because this file is editable.
 
 schema: mastermind.strategic_state.v1
 
@@ -101,7 +111,8 @@ resource_policy:
 
 # Standing limits on what may be started or armed at this company phase. `prohibited`
 # means a worker may not do it under any local justification — only a recorded
-# Chairman/CEO decision that amends this file can change the level.
+# decision at the minimum executive seat required by authority_map.yml may change the
+# level. These fields are Chairman-reserved under executive_decision_policy v1.
 constraints:
   new_feature_expansion: constrained
   autonomous_production_deploy: prohibited
