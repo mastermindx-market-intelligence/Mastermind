@@ -458,12 +458,18 @@ def test_owner_and_escalation_require_typed_provenance_and_shrink_only(tmp_path)
 
 
 def test_phase1fb_suites_are_wired_into_the_hermetic_governance_gate():
-    workflow = (
-        Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
-    ).read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "Run repository test gate" in workflow
+    assert "scripts/ci_pytest.py" in workflow
+    discovered = {
+        path.relative_to(root).as_posix()
+        for path in (root / "tests").rglob("test_*.py")
+        if path.is_file()
+    }
     for name in (
         "tests/test_executive_os_phase1fb.py",
         "tests/test_executive_inbox_phase1fb.py",
         "tests/test_executive_os_r1_shadow.py",
     ):
-        assert name in workflow, f"{name} must run in the hermetic governance gate"
+        assert name in discovered, f"{name} must be discovered by the repository test gate"

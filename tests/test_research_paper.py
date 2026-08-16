@@ -6,6 +6,8 @@ and the phase2 integration. No Claude auth / network needed.
 """
 import json
 
+from pathlib import Path
+
 import bot  # noqa: F401
 
 from brain import research_paper as rp
@@ -14,6 +16,17 @@ from portfolio import lenses
 # ── W8 legacy-contract pin (2026-07-19): this file exercises pre-W8 build/book mechanics; the v2
 # gates are covered by tests/test_flagship_v2_replay.py + tests/test_entry_context_engines.py.
 import pytest as _pytest_w8
+
+_STOCKDATA = Path(__file__).resolve().parent.parent / "vendor" / "macro" / "site" / "stockdata"
+_REGIME = Path(__file__).resolve().parent.parent / "vendor" / "macro" / "data" / "regime" / "latest.json"
+_needs_stockdata = _pytest_w8.mark.skipif(
+    not (_STOCKDATA / "AVGO.json").exists(),
+    reason="vendored site/stockdata absent — hosted CI sparse checkout",
+)
+_needs_regime = _pytest_w8.mark.skipif(
+    not _REGIME.exists(),
+    reason="vendored data/regime/latest.json absent — hosted CI sparse checkout",
+)
 
 
 @_pytest_w8.fixture(autouse=True)
@@ -40,6 +53,7 @@ def _w8_legacy_env(monkeypatch):
 # deterministic report
 # ---------------------------------------------------------------------------
 
+@_needs_stockdata
 def test_deterministic_paper_has_all_sections():
     full = lenses.full("AVGO", "name")
     syn = full["synthesis"]
@@ -239,6 +253,7 @@ def test_size_mult_bounds_and_monotonic():
 # persistence (isolated to tmp dir by conftest)
 # ---------------------------------------------------------------------------
 
+@_needs_stockdata
 def test_save_load_latest_roundtrip():
     paper = rp.generate("MSFT", asof="2026-06-20", confluence=0.4,
                         rows=lenses.full("MSFT", "name")["rows"], vetoes=[], price=500.0, armed=False)
@@ -249,6 +264,7 @@ def test_save_load_latest_roundtrip():
     assert latest and latest["ticker"] == "MSFT"
 
 
+@_needs_stockdata
 def test_write_feed_note_is_parseable():
     from app.web import _parse_note
     paper = rp.generate("AAPL", asof="2026-06-20", confluence=0.4,
@@ -268,6 +284,7 @@ def test_llm_disabled_under_pytest():
 # phase2 integration — the gate stands between a name and the book
 # ---------------------------------------------------------------------------
 
+@_needs_regime
 def test_phase2_attaches_research_to_conviction_and_holds(monkeypatch):
     from pathlib import Path
     from bot import phase2

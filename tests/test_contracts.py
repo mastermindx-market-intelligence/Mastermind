@@ -33,8 +33,12 @@ from __future__ import annotations
 import json
 import os
 import textwrap
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+_FRESH = date.today().isoformat()
+_STALE = (date.today() - timedelta(days=15)).isoformat()
 
 import pytest
 
@@ -281,10 +285,10 @@ class TestFreezeSemantics:
     def test_fresh_anchors_freeze_false(self, monkeypatch, tmp_path):
         """All anchors fresh → freeze=False."""
         src = self._make_checkout(tmp_path, {
-            "site/factordata/us_standouts.json": {"as_of": "2026-07-05"},
-            "data/regime/latest.json":           {"date": "2026-07-05"},
-            "site/sectordata/sector_cycles.json": {"meta": {"asOf": "2026-07-05"}},
-            "site/stockdata/SPY.json":            {"asof": "2026-07-05"},
+            "site/factordata/us_standouts.json": {"as_of": _FRESH},
+            "data/regime/latest.json":           {"date": _FRESH},
+            "site/sectordata/sector_cycles.json": {"meta": {"asOf": _FRESH}},
+            "site/stockdata/SPY.json":            {"asof": _FRESH},
         })
         self._patch_src(monkeypatch, src)
         from data_layer import macro_refresh as mr
@@ -296,10 +300,10 @@ class TestFreezeSemantics:
     def test_stale_freeze_anchor_sets_freeze_true(self, monkeypatch, tmp_path):
         """Stale regime anchor → freeze=True, reasons non-empty."""
         src = self._make_checkout(tmp_path, {
-            "site/factordata/us_standouts.json": {"as_of": "2026-07-05"},
-            "data/regime/latest.json":           {"date": "2026-06-20"},   # 15d old >> budget
-            "site/sectordata/sector_cycles.json": {"meta": {"asOf": "2026-07-05"}},
-            "site/stockdata/SPY.json":            {"asof": "2026-07-05"},
+            "site/factordata/us_standouts.json": {"as_of": _FRESH},
+            "data/regime/latest.json":           {"date": _STALE},
+            "site/sectordata/sector_cycles.json": {"meta": {"asOf": _FRESH}},
+            "site/stockdata/SPY.json":            {"asof": _FRESH},
         })
         self._patch_src(monkeypatch, src)
         from data_layer import macro_refresh as mr
@@ -326,10 +330,10 @@ class TestFreezeSemantics:
     def test_advisory_anchor_stale_does_not_freeze(self, monkeypatch, tmp_path):
         """ADVISORY-class artifact stale does not set freeze=True."""
         src = self._make_checkout(tmp_path, {
-            "site/factordata/us_standouts.json": {"as_of": "2026-07-05"},
-            "data/regime/latest.json":           {"date": "2026-07-05"},
-            "site/sectordata/sector_cycles.json": {"meta": {"asOf": "2026-07-05"}},
-            "site/stockdata/SPY.json":            {"asof": "2026-07-05"},
+            "site/factordata/us_standouts.json": {"as_of": _FRESH},
+            "data/regime/latest.json":           {"date": _FRESH},
+            "site/sectordata/sector_cycles.json": {"meta": {"asOf": _FRESH}},
+            "site/stockdata/SPY.json":            {"asof": _FRESH},
         })
         self._patch_src(monkeypatch, src)
         from data_layer import macro_refresh as mr
@@ -357,9 +361,9 @@ class TestFreezeSemantics:
     def test_check_and_warn_returns_freeze_keys(self, monkeypatch, tmp_path):
         """check_and_warn() always returns 'freeze' and 'freeze_reasons' keys (backwards-compat)."""
         src = self._make_checkout(tmp_path, {
-            "site/factordata/us_standouts.json": {"as_of": "2026-07-05"},
-            "data/regime/latest.json":           {"date": "2026-07-05"},
-            "site/sectordata/sector_cycles.json": {"meta": {"asOf": "2026-07-05"}},
+            "site/factordata/us_standouts.json": {"as_of": _FRESH},
+            "data/regime/latest.json":           {"date": _FRESH},
+            "site/sectordata/sector_cycles.json": {"meta": {"asOf": _FRESH}},
         })
         self._patch_src(monkeypatch, src)
         from data_layer import macro_refresh as mr
@@ -645,7 +649,7 @@ class TestR2Probe:
         sd = src / "site" / "stockdata"
         sd.mkdir(parents=True)
         # Only write SPY — QQQ, NVDA, AAPL, MSFT absent
-        (sd / "SPY.json").write_text(json.dumps({"asof": "2026-07-05"}))
+        (sd / "SPY.json").write_text(json.dumps({"asof": _FRESH}))
         self._patch_src(monkeypatch, src)
         from data_layer import macro_refresh as mr
         mr._FREEZE_CONTRACTS_LOADED = False
@@ -662,7 +666,7 @@ class TestR2Probe:
         sd.mkdir(parents=True)
         from data_layer import macro_refresh as mr
         for ticker in mr._R2_PROBE_TICKERS:
-            (sd / f"{ticker}.json").write_text(json.dumps({"asof": "2026-07-05"}))
+            (sd / f"{ticker}.json").write_text(json.dumps({"asof": _FRESH}))
         self._patch_src(monkeypatch, src)
         mr._FREEZE_CONTRACTS_LOADED = False
         with patch("control_plane.contracts.all_contracts", return_value={}):
@@ -677,13 +681,13 @@ class TestR2Probe:
         (src / "site" / "stockdata").mkdir(parents=True)  # exists but probe tickers absent
         (src / "site" / "factordata").mkdir(parents=True)
         (src / "site" / "factordata" / "us_standouts.json").write_text(
-            json.dumps({"as_of": "2026-07-05"}))
+            json.dumps({"as_of": _FRESH}))
         (src / "data" / "regime").mkdir(parents=True)
         (src / "data" / "regime" / "latest.json").write_text(
-            json.dumps({"date": "2026-07-05"}))
+            json.dumps({"date": _FRESH}))
         (src / "site" / "sectordata").mkdir(parents=True)
         (src / "site" / "sectordata" / "sector_cycles.json").write_text(
-            json.dumps({"meta": {"asOf": "2026-07-05"}}))
+            json.dumps({"meta": {"asOf": _FRESH}}))
         self._patch_src(monkeypatch, src)
         from data_layer import macro_refresh as mr
         mr._FREEZE_CONTRACTS_LOADED = False

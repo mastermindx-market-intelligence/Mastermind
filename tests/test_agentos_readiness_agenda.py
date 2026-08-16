@@ -644,4 +644,11 @@ def test_agenda_ui_api_scheduler_docs_and_ci_expose_native_readiness() -> None:
     assert ".sort(" not in render_path
     assert "Agent OS readiness" in WEB_SOURCE
     assert "Agent OS readiness" in SCHEDULER_SOURCE
-    assert "tests/test_agentos_readiness_agenda.py" in CI_SOURCE
+    assert "scripts/ci_pytest.py" in CI_SOURCE
+    assert "Run repository test gate" in CI_SOURCE
+    discovered = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "tests").rglob("test_*.py")
+        if path.is_file()
+    }
+    assert "tests/test_agentos_readiness_agenda.py" in discovered

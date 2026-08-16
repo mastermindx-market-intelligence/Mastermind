@@ -567,14 +567,14 @@ class TestDateDrivenRoundTrip:
     def test_future_comeback_unchanged(self, registry):
         future = (self.TODAY + timedelta(days=7)).isoformat()
         registry.add(_make_exp("dd-1", comeback_date=future))
-        result = registry.matured()
+        result = registry.matured(as_of=self.TODAY)
         ids = [e["id"] for e in result]
         assert "dd-1" not in ids, "future item must not be in matured()"
 
     def test_past_comeback_promoted_by_matured(self, registry):
         past = (self.TODAY - timedelta(days=2)).isoformat()
         registry.add(_make_exp("dd-2", comeback_date=past))
-        result = registry.matured()
+        result = registry.matured(as_of=self.TODAY)
         ids = [e["id"] for e in result]
         assert "dd-2" in ids
         # status must be promoted to matured (the existing date-driven path, unchanged)
