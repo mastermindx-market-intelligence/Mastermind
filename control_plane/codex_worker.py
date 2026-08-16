@@ -47,6 +47,7 @@ from uuid import uuid4
 from control_plane.executive_workspace import (
     LAUNCH_CLEAN_STATUS_ARGS,
     LAUNCH_CLEAN_UNTRACKED_ARGS,
+    git_observation_env,
     observe_launch_cleanliness,
 )
 
@@ -1434,17 +1435,18 @@ def _git_command(workspace: Path, *args: str) -> bytes:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={
-                "PATH": _SAFE_PATH,
-                "LANG": "C.UTF-8",
-                "LC_ALL": "C.UTF-8",
-                "HOME": "/var/empty",
-                "GIT_CONFIG_GLOBAL": "/dev/null",
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_OPTIONAL_LOCKS": "0",
-                "GIT_TERMINAL_PROMPT": "0",
-                "GCM_INTERACTIVE": "never",
-            },
+            env=git_observation_env(
+                {
+                    "PATH": _SAFE_PATH,
+                    "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8",
+                    "HOME": "/var/empty",
+                    "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "GCM_INTERACTIVE": "never",
+                }
+            ),
             timeout=_GIT_COMMAND_TIMEOUT_SECONDS,
             check=False,
         )

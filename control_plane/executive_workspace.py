@@ -16,7 +16,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -33,8 +33,34 @@ class WorkspaceError(RuntimeError):
     """A job workspace could not be prepared without sharing authority."""
 
 
+class GitHandoffError(WorkspaceError):
+    """Shared Git metadata is not a valid control-to-worker handoff."""
+
+
 class AssignmentSealError(WorkspaceError):
     """A terminal worker assignment could not be made control-private."""
+
+
+# Filesystem/Git execution states inside the existing workspace lifecycle.
+# This is not a database or scheduler state machine.
+#
+# STATE A — CONTROL_CONSTRUCTION
+#   workspace owned and manipulated only by control
+#   Git mutation is allowed (clone / checkout / switch / remote-remove)
+#
+# STATE B — SHARED_HANDOFF
+#   control remains owner; worker group receives only reviewed access
+#   Git mutation by control is no longer allowed
+#   control may observe only; worker may perform its audited preflight
+#   worker may write only declared workspace artifact paths and may not write .git
+#   Invariant: no control-side Git observation may modify worker-required Git metadata
+#
+# STATE C — TERMINAL_SEALED
+#   workspace root becomes control-private 0700
+#   worker traversal revoked; forensic/control observation only
+CONTROL_CONSTRUCTION = "CONTROL_CONSTRUCTION"
+SHARED_HANDOFF = "SHARED_HANDOFF"
+TERMINAL_SEALED = "TERMINAL_SEALED"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -59,6 +85,123 @@ def observe_launch_cleanliness(
     if not isinstance(status, bytes) or not isinstance(all_untracked, bytes):
         raise TypeError("launch cleanliness Git observations must be bytes")
     return LaunchCleanlinessObservation(status=status, all_untracked=all_untracked)
+
+
+def git_observation_env(base: Mapping[str, str]) -> dict[str, str]:
+    """Return a new mapping that forces post-handoff Git observation read-only.
+
+    Optional Git locks are how Apple Git rewrites ``.git/index`` during an
+    otherwise observational ``status``.  After STATE B (SHARED_HANDOFF) that
+    rewrite is forbidden: it can recreate the index as mode 0600 under the
+    control umask and make the worker unable to open it.  Construction Git
+    (clone/checkout/switch) must keep the ordinary control environment.
+    """
+
+    result = dict(base)
+    result["GIT_OPTIONAL_LOCKS"] = "0"
+    return result
+
+
+def _handoff_lstat(path: Path) -> os.stat_result:
+    """Observe one path without following it. Tests may wrap this seam."""
+
+    return path.lstat()
+
+
+def _require_shared_readonly_node(
+    path: Path,
+    *,
+    label: str,
+    control_uid: int,
+    shared_gid: int,
+    directory: bool,
+) -> os.stat_result:
+    try:
+        info = _handoff_lstat(path)
+    except OSError as exc:
+        raise GitHandoffError(f"{label} is unavailable for shared Git handoff") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise GitHandoffError(f"{label} must not be a symlink")
+    if directory:
+        if not stat.S_ISDIR(info.st_mode):
+            raise GitHandoffError(f"{label} must be a real directory")
+        group_ok = bool(info.st_mode & stat.S_IRGRP) and bool(info.st_mode & stat.S_IXGRP)
+    else:
+        if not stat.S_ISREG(info.st_mode):
+            raise GitHandoffError(f"{label} must be a regular file")
+        if info.st_nlink != 1:
+            raise GitHandoffError(f"{label} must have exactly one link")
+        group_ok = bool(info.st_mode & stat.S_IRGRP)
+    mode = stat.S_IMODE(info.st_mode)
+    if (
+        info.st_uid != int(control_uid)
+        or info.st_gid != int(shared_gid)
+        or not group_ok
+        or mode & stat.S_IWGRP
+        or mode & stat.S_IRWXO
+    ):
+        raise GitHandoffError(
+            f"{label} is not control-owned, worker-group readable, and unwritable"
+        )
+    return info
+
+
+def validate_shared_git_handoff(
+    workspace: str | Path,
+    *,
+    control_uid: int,
+    shared_gid: int,
+) -> None:
+    """Fail closed if STATE B Git metadata is not worker-readable and immutable.
+
+    Observes only. Never chmod/chown. A malformed handoff must not be healed.
+    """
+
+    root = Path(workspace)
+    _require_shared_readonly_node(
+        root,
+        label="workspace root",
+        control_uid=control_uid,
+        shared_gid=shared_gid,
+        directory=True,
+    )
+    git_dir = root / ".git"
+    _require_shared_readonly_node(
+        git_dir,
+        label=".git",
+        control_uid=control_uid,
+        shared_gid=shared_gid,
+        directory=True,
+    )
+    _require_shared_readonly_node(
+        git_dir / "index",
+        label=".git/index",
+        control_uid=control_uid,
+        shared_gid=shared_gid,
+        directory=False,
+    )
+    _require_shared_readonly_node(
+        git_dir / "config",
+        label=".git/config",
+        control_uid=control_uid,
+        shared_gid=shared_gid,
+        directory=False,
+    )
+    _require_shared_readonly_node(
+        git_dir / "HEAD",
+        label=".git/HEAD",
+        control_uid=control_uid,
+        shared_gid=shared_gid,
+        directory=False,
+    )
+    lock = git_dir / "index.lock"
+    try:
+        _handoff_lstat(lock)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise GitHandoffError(".git/index.lock could not be observed") from exc
+    raise GitHandoffError(".git/index.lock must not exist after shared handoff")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -353,6 +496,8 @@ def prepare_credentialless_clone(
         raise WorkspaceError(f"workspace already exists: {destination}")
 
     selected_branch = branch or f"codex/job-{safe_job_id.lower()}"
+    # STATE A — CONTROL_CONSTRUCTION: mutating Git is allowed. Do not wrap
+    # clone/checkout/switch/remote-remove in the read-only observation env.
     env = _git_env(root / ".supervisor-home")
     _run(["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"], cwd=None, env=env)
     resolved_base = _run(
@@ -430,12 +575,10 @@ def prepare_credentialless_clone(
                     group_execute = 0o010 if original & 0o111 else 0
                     os.chown(target, -1, int(shared_gid))
                     os.chmod(target, (original & 0o700) | 0o060 | group_execute)
-        # Observational: do not let `git status` refresh `.git/index` under the
-        # control umask after shared-group preparation.  Worker launch then
-        # cannot open a 0600 index.  Clone/checkout commands keep the ordinary
-        # control Git environment; only this final cleanliness read is locked.
-        cleanliness_env = dict(env)
-        cleanliness_env["GIT_OPTIONAL_LOCKS"] = "0"
+        # STATE B — SHARED_HANDOFF: DAC sharing is complete. Control Git may
+        # observe only. Canonical cleanliness must be measured AFTER sharing
+        # (#63) and must not refresh `.git/index` under the control umask (#75).
+        cleanliness_env = git_observation_env(env)
         cleanliness = observe_launch_cleanliness(
             lambda arguments: _run_bytes(
                 ["git", *arguments], cwd=destination, env=cleanliness_env
@@ -444,6 +587,12 @@ def prepare_credentialless_clone(
         if cleanliness.dirty:
             raise WorkspaceError(
                 "prepared workspace failed the canonical launch cleanliness predicate"
+            )
+        if shared_gid is not None:
+            validate_shared_git_handoff(
+                destination,
+                control_uid=os.geteuid(),
+                shared_gid=int(shared_gid),
             )
         workspace_info = destination.lstat()
     except BaseException:
