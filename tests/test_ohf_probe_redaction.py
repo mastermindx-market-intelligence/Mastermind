@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 
-from scripts.ohf.fake_app_server import SECRET_FIXTURE
 from scripts.ohf.redaction import (
     REDACTED,
     evidence_contains_secret,
@@ -11,7 +10,7 @@ from scripts.ohf.redaction import (
     redact_value,
 )
 
-STDERR_SECRET = SECRET_FIXTURE
+STDERR_SECRET = "sk-ohf-probe-fixture-" + ("A" * 24)
 HARNESS_ERROR = "ghp_" + ("b" * 36)
 MCP_ERROR = "github_pat_" + ("c" * 40)
 ENV_VALUE = "sk-proj-OHFPROBEFIXTURESECRETVALUE123456"
