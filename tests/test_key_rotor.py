@@ -524,10 +524,11 @@ class TestRotationLoop:
         monkeypatch.setattr(_cb, "_via_sdk", _fake_via_sdk)
         monkeypatch.setattr(_cb, "_via_subprocess", _no_subprocess)
         monkeypatch.setattr(_cb, "_SDK", True)
-        # Public reason() follows config/agents.yml backend: waterfall unless
-        # BOT_LLM_BACKEND is set. Hosted CI is a clean env, so the SDK rotation
-        # loop never runs unless we force the CLI backend.
+        # Hosted CI has no Claude Code CLI and a clean env, so `_reason` would
+        # otherwise return early (`cli_path()` empty) or take the waterfall
+        # backend from agents.yml. This test is the SDK rotation loop.
         monkeypatch.setenv("BOT_LLM_BACKEND", "cli")
+        monkeypatch.setattr(_cb, "cli_path", lambda: "/usr/bin/claude")
         import brain
         import sys
         monkeypatch.setattr(brain, "key_rotor", _kr)
@@ -556,7 +557,14 @@ class TestRotationLoop:
             )
         )
 
-        assert result["ok"] is True, result
+        assert result.get("ok") is True, {
+            "ok": result.get("ok"),
+            "backend": result.get("backend"),
+            "error": result.get("error"),
+            "text": result.get("text"),
+            "key_id": result.get("key_id"),
+            "calls": call_count["n"],
+        }
         assert result["text"] == "The market is bullish."
         assert result.get("key_id") == "claude_code_oauth_5"
         assert call_count["n"] == 2  # slot 3 attempted first, then slot 5
