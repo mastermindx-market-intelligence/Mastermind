@@ -126,7 +126,8 @@ def tmp_books(tmp_path: Path, monkeypatch) -> Generator[Path, None, None]:
 def _seed_held_book(pid: str, prices: dict, asof: str) -> None:
     """Build a held book for `pid` at `prices` and mark it once at `asof` (the 'built once' state)."""
     from portfolio import paper_account
-    paper_account.rebalance({"AAPL": 0.5}, prices, asof, portfolio_id=pid)
+    held = next(ticker for ticker in prices if ticker != "SPY")
+    paper_account.rebalance({held: 0.5}, prices, asof, portfolio_id=pid)
     paper_account.mark(prices, asof, portfolio_id=pid)
 
 
@@ -176,21 +177,32 @@ def test_daily_mark_job_is_idempotent_per_date(tmp_books: Path, monkeypatch) -> 
 def test_daily_mark_job_one_failure_does_not_abort_others(tmp_books: Path, monkeypatch) -> None:
     """A book whose mark raises must not prevent the other books from being marked."""
     from app import scheduler
-    from portfolio import paper_account
+    from control_plane import locks
+    from portfolio import fx, paper_account
+
+    class _Lock:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
 
     _seed_held_book("autonomous", {"AAPL": 200.0, "SPY": 500.0}, "2026-01-02")
-    _seed_held_book("china", {"AAPL": 200.0, "000300.SS": 4_000.0}, "2026-01-02")
+    _seed_held_book("china", {"600519.SS": 100.0}, "2026-01-02")
 
     real_mark = paper_account.mark
 
-    def _flaky_mark(prices, asof, portfolio_id=None, benchmark=None):
+    def _flaky_mark(prices, asof, portfolio_id=None, benchmark=None, **kwargs):
         if portfolio_id == "autonomous":
             raise RuntimeError("boom")
-        return real_mark(prices, asof, portfolio_id=portfolio_id, benchmark=benchmark)
+        return real_mark(prices, asof, portfolio_id=portfolio_id, benchmark=benchmark, **kwargs)
 
     monkeypatch.setattr(paper_account, "_current_price",
                         lambda t: {"AAPL": 250.0, "SPY": 520.0,
-                                   "000300.SS": 4_100.0}.get(t))
+                                   "600519.SS": 110.0, "000300.SS": 4_100.0}.get(t))
+    monkeypatch.setattr(fx, "usd_to", lambda px, ccy: (px or 0) * 7.0 if ccy == "CNY" else px)
+    monkeypatch.setattr(paper_account, "pending_settlement_receipts", lambda pid=None: [])
+    monkeypatch.setattr(locks, "acquire_or_log", lambda *args, **kwargs: _Lock())
     monkeypatch.setattr(paper_account, "mark", _flaky_mark)
     monkeypatch.setattr(scheduler, "_today_iso", lambda: "2026-01-03")
 

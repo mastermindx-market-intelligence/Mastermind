@@ -52,8 +52,13 @@ def _legacy_flagship_runner_enabled(monkeypatch):
 # the fail-open bug this repo just fixed. Skip the live-data assertions instead.
 _STOCKDATA = Path(__file__).resolve().parent.parent / "vendor" / "macro" / "site" / "stockdata"
 _HAS_STOCKDATA = (_STOCKDATA / "NVDA.json").exists()
+_REGIME = Path(__file__).resolve().parent.parent / "vendor" / "macro" / "data" / "regime" / "latest.json"
 _needs_stockdata = pytest.mark.skipif(
     not _HAS_STOCKDATA, reason="vendored site/stockdata absent — fail-closed gate blocks all entries by design"
+)
+_needs_regime = pytest.mark.skipif(
+    not _REGIME.exists(),
+    reason="vendored data/regime/latest.json absent — hosted CI sparse checkout",
 )
 
 
@@ -111,6 +116,7 @@ def test_phase2_multiname_book_and_gate():
     _fresh()
 
 
+@_needs_regime
 def test_store_roundtrip():
     _fresh()
     phase2.run()
@@ -128,6 +134,7 @@ def test_store_roundtrip():
     _fresh()
 
 
+@_needs_regime
 def test_runs_table_written_and_dedup():
     """record_run must write to the runs table so same-day re-runs carry forward.
 

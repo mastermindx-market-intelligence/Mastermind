@@ -8,6 +8,7 @@ row (mirroring the NW audit precedent), which is exercised directly here.
 """
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,8 @@ import brain.treasury_context as TC  # noqa: E402
 # --------------------------------------------------------------------------- #
 # fixtures
 # --------------------------------------------------------------------------- #
-def _fresh_artifact(tmp_path: Path, as_of: str = "2026-07-09") -> Path:
+def _fresh_artifact(tmp_path: Path, as_of: str | None = None) -> Path:
+    as_of = as_of or date.today().isoformat()
     art = {
         "schema": "treasury_watch.v1",
         "as_of": as_of,
@@ -147,11 +149,14 @@ def test_strategist_flag_on_stale_artifact_key_absent(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 def test_market_plane_liquidity_shape_with_block(monkeypatch):
     import brain.neural_web_context as NWC
+    today = __import__("datetime").date.today().isoformat()
     NWC._reset_context_cache()
     monkeypatch.setattr(NWC, "_CACHE", {
         "schema": NWC._EXPECTED_SCHEMA, "is_context_only": True,
-        "as_of": __import__("datetime").date.today().isoformat(),
+        "as_of": today,
+        "freshness": {"market": {"as_of": today, "stale": False}},
         "lobes": {"market": {
+            "as_of": today,
             "liquidity_plumbing": {
                 "headline": {"state": "stress_liquidity_expansion"},
                 "quantity": {"netliq_bn": 5990.4},
@@ -174,11 +179,13 @@ def test_market_plane_liquidity_shape_with_block(monkeypatch):
 
 def test_market_plane_liquidity_shape_without_block(monkeypatch):
     import brain.neural_web_context as NWC
+    today = __import__("datetime").date.today().isoformat()
     NWC._reset_context_cache()
     monkeypatch.setattr(NWC, "_CACHE", {
         "schema": NWC._EXPECTED_SCHEMA, "is_context_only": True,
-        "as_of": __import__("datetime").date.today().isoformat(),
-        "lobes": {"market": {}},   # no liquidity_plumbing block
+        "as_of": today,
+        "freshness": {"market": {"as_of": today, "stale": False}},
+        "lobes": {"market": {"as_of": today}},   # no liquidity_plumbing block
     })
     monkeypatch.setattr(NWC, "_CACHE_LOADED", True)
     liq = NWC.market_plane().get("liquidity")

@@ -393,53 +393,35 @@ class TestS3CorruptedMarkHardStop:
 # ---------------------------------------------------------------------------
 
 class TestS4DisabledProductionAuth:
-    """S4: MASTERMIND_REQUIRE_AUTH=1 without MASTERMIND_PASSWORD → auth.install raises.
+    """S4 originally refused boot when MASTERMIND_REQUIRE_AUTH=1 and no password.
 
-    Docket M7 — S4.  Defending wave: MW0 (auth.install startup refusal).
-
-    (i)  severity: HARD_STOP (RuntimeError at startup prevents unauthenticated boot).
-    (ii) ledger record: the raised RuntimeError IS the enforcement — no silent pass-through.
-    (iii) no risk increase: boot is aborted, no requests can reach the app.
+    The browser password-cookie login flow was removed. MASTERMIND_REQUIRE_AUTH and
+    MASTERMIND_PASSWORD are now no-ops. auth.install() always registers middleware;
+    the only remaining credential is the optional MASTERMIND_AUTH_TOKEN bearer.
+    Docket class name is retained so the M7 drill manifest stays complete.
     """
 
-    def test_require_auth_without_password_raises(self, monkeypatch):
-        """auth.install() raises RuntimeError when REQUIRE_AUTH=1 but no password is set."""
+    def test_require_auth_without_password_does_not_refuse_boot(self, monkeypatch):
+        """Current auth model: REQUIRE_AUTH=1 without a password must not abort install()."""
         monkeypatch.setenv("MASTERMIND_REQUIRE_AUTH", "1")
         monkeypatch.delenv("MASTERMIND_PASSWORD", raising=False)
+        monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
 
         from app import auth
-        # Re-read env at call time (not cached) — the module reads os.environ in enabled()
-        # Force _password() to return None by clearing the env above.
-        # We need to patch _password since some envs may have it set from .env files.
-        with patch.object(auth, "_password", return_value=None):
-            with patch.object(auth, "_require_auth", return_value=True):
-                app_stub = MagicMock()
-                # Capture the raised exception
-                with pytest.raises(RuntimeError) as exc_info:
-                    auth.install(app_stub)
-                # (i) severity: RuntimeError is the HARD_STOP enforcement
-                assert "MASTERMIND_REQUIRE_AUTH" in str(exc_info.value) or \
-                       "password" in str(exc_info.value).lower(), (
-                    f"S4: RuntimeError message must reference REQUIRE_AUTH or password: "
-                    f"{exc_info.value}"
-                )
-                # (ii) no silent pass-through: the exception was raised (assert above)
-                # (iii) install() was aborted before any middleware was added
-                app_stub.middleware.assert_not_called()
+        app_stub = MagicMock()
+        auth.install(app_stub)
+        app_stub.middleware.assert_called()
 
-    def test_no_password_no_require_auth_warns_not_raises(self, monkeypatch):
-        """Without REQUIRE_AUTH=1, missing password logs a warning but does NOT raise."""
+    def test_no_password_no_require_auth_still_registers_middleware(self, monkeypatch):
+        """Missing credentials still install the operator/serve-only middleware."""
         monkeypatch.delenv("MASTERMIND_REQUIRE_AUTH", raising=False)
         monkeypatch.delenv("MASTERMIND_PASSWORD", raising=False)
+        monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
 
         from app import auth
-        with patch.object(auth, "_password", return_value=None):
-            with patch.object(auth, "_require_auth", return_value=False):
-                app_stub = MagicMock()
-                # Must not raise
-                auth.install(app_stub)
-                # middleware was registered (pass-through mode)
-                app_stub.middleware.assert_called()
+        app_stub = MagicMock()
+        auth.install(app_stub)
+        app_stub.middleware.assert_called()
 
 
 # ---------------------------------------------------------------------------
