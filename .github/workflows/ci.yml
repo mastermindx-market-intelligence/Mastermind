@@ -98,6 +98,7 @@ jobs:
           tests/test_executive_mcp.py
           tests/test_executive_mcp_submit.py
           tests/test_executive_mcp_mutation.py
+          tests/test_executive_wake_fabric.py
 
       - name: Run Portfolio v2 safety gate
         run: >-
