@@ -884,6 +884,7 @@ class RuntimeStore:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
         create: bool = True,
+        existing_writable: bool = False,
     ) -> None:
         self.root = Path(root).resolve() if root is not None else _ROOT
         self.path = self.root / _DB_RELATIVE_PATH
@@ -895,7 +896,14 @@ class RuntimeStore:
         # chmods, and refuses `transaction()`, so a reader cannot manufacture an
         # Executive OS schema on top of an empty, foreign, or truncated file and
         # then report the result as a quiet company.
+        #
+        # `existing_writable=True` is the reviewed seam for tools that must write
+        # into a positively verified current runtime without creating or migrating
+        # one.  It still refuses a missing, empty, foreign, or stale schema.
         self.create = bool(create)
+        self.existing_writable = bool(existing_writable)
+        if self.create and self.existing_writable:
+            raise StateConflict("existing_writable cannot also create a runtime")
         if self.lease_seconds <= 0:
             raise StateConflict("lease_seconds must be positive")
         if self.busy_timeout_ms < 0:
@@ -909,6 +917,10 @@ class RuntimeStore:
                 raise PersistenceError(
                     f"cannot protect Executive runtime database directory: {exc}"
                 ) from exc
+        elif self.existing_writable and not self.path.is_file():
+            raise PersistenceError(
+                f"executive runtime database at {self.path} is missing"
+            )
         connection = self._open()
         connection.close()
 
@@ -969,7 +981,71 @@ class RuntimeStore:
             self._schema_ready = True
         return connection
 
+    def _verify_current_schema(self, connection: sqlite3.Connection) -> None:
+        """Refuse anything except the already-applied current Executive schema."""
+
+        try:
+            rows = connection.execute(
+                "SELECT version, name, checksum FROM schema_migrations"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            message = str(exc)
+            if "no such table" in message:
+                detail = "carries no Executive OS schema"
+            elif "not a database" in message:
+                detail = "is not an Executive OS database"
+            else:
+                detail = "could not be read"
+            raise PersistenceError(
+                f"executive runtime database at {self.path} {detail}: {exc}"
+            ) from exc
+        existing = {int(row["version"]): row for row in rows}
+        known = {version: (name, statements) for version, name, statements in _MIGRATIONS}
+        if set(existing) != set(known):
+            raise PersistenceError(
+                "executive runtime schema is not current: "
+                f"have {sorted(existing)}, need {sorted(known)}"
+            )
+        for version, (name, statements) in known.items():
+            checksum = hashlib.sha256(
+                "\n".join(statement.strip() for statement in statements).encode("utf-8")
+            ).hexdigest()
+            row = existing[version]
+            if row["name"] != name or row["checksum"] != checksum:
+                raise PersistenceError(
+                    f"migration {version} checksum/name does not match code"
+                )
+
+    def _open_existing_writable(self) -> sqlite3.Connection:
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                self.path,
+                timeout=self.busy_timeout_ms / 1000,
+                isolation_level=None,
+            )
+            self.path.chmod(0o600)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
+            if not self._schema_ready:
+                self._verify_current_schema(connection)
+                self._schema_ready = True
+            return connection
+        except PersistenceError:
+            if connection is not None:
+                connection.close()
+            raise
+        except (OSError, sqlite3.Error) as exc:
+            if connection is not None:
+                connection.close()
+            raise PersistenceError(
+                f"executive runtime database at {self.path} is unavailable: {exc}"
+            ) from exc
+
     def _open(self) -> sqlite3.Connection:
+        if self.existing_writable:
+            return self._open_existing_writable()
         if not self.create:
             return self._open_readonly()
         connection: sqlite3.Connection | None = None
@@ -1059,7 +1135,7 @@ class RuntimeStore:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        if not self.create:
+        if not self.create and not self.existing_writable:
             # Fail closed: a store opened for projection has no write path at all,
             # so a lifecycle call cannot reach the database even by mistake.
             raise StateConflict(
@@ -3714,6 +3790,7 @@ class EventRegistry:
         attempt_id: str | None = None,
         aggregate_type: str | None = None,
         aggregate_id: str | None = None,
+        command_id_prefix: str | None = None,
     ) -> list[Event]:
         clauses: list[str] = []
         params: list[str] = []
@@ -3729,6 +3806,12 @@ class EventRegistry:
         if aggregate_id:
             clauses.append("aggregate_id=?")
             params.append(str(aggregate_id).strip())
+        if command_id_prefix:
+            token = str(command_id_prefix).strip()
+            if not token or any(ch in token for ch in "%_"):
+                raise StateConflict("command_id_prefix must be a literal namespace")
+            clauses.append("command_id LIKE ?")
+            params.append(token + "%")
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with self.store.read() as connection:
             rows = connection.execute(
@@ -3846,6 +3929,7 @@ class Runtime:
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
         create: bool = True,
+        existing_writable: bool = False,
     ) -> "Runtime":
         return cls.from_store(
             RuntimeStore(
@@ -3854,6 +3938,7 @@ class Runtime:
                 lease_seconds=lease_seconds,
                 busy_timeout_ms=busy_timeout_ms,
                 create=create,
+                existing_writable=existing_writable,
             )
         )
 

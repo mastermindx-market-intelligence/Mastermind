@@ -19,7 +19,7 @@ if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
 from control_plane.executive_inbox import load_boot_packet_file  # noqa: E402
-from control_plane.executive_runtime import Runtime  # noqa: E402
+from control_plane.executive_runtime import PersistenceError, Runtime  # noqa: E402
 from control_plane.wake_reconcile import reconcile_wakes  # noqa: E402
 
 
@@ -76,7 +76,11 @@ def main(argv: list[str] | None = None) -> int:
         if error is not None:
             print(error, file=sys.stderr)
             return 2
-    runtime = Runtime.at(root, create=True)
+    try:
+        runtime = Runtime.at(root, create=False, existing_writable=True)
+    except PersistenceError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     result = reconcile_wakes(
         runtime,
         boot_packet=packet,
@@ -98,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
             print("contradictions:")
             for entry in result.plan.contradictions:
                 print(f"  - {entry}")
+    if result.plan.contradictions:
+        return 3
     return 0
 
 

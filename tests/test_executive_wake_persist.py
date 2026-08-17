@@ -16,6 +16,7 @@ from control_plane.executive_inbox import BOOT_PACKET_SCHEMA, SCHEMA as INBOX_SC
 from control_plane.executive_runtime import (
     Event,
     JobPayload,
+    PersistenceError,
     Runtime,
     SCHEMA_VERSION,
     StateConflict,
@@ -25,9 +26,13 @@ from control_plane.wake_dispatcher import dispatch_wake
 from control_plane.wake_ledger import (
     FORBIDDEN_EVENT_PAYLOAD_KEYS,
     LedgerPhase,
+    SourceReadHealth,
     WAKE_AGGREGATE_TYPE,
     WakeLedgerError,
+    expected_resolution_code,
     requested_record,
+    resolve_source,
+    resolved_record,
     wake_record_from_event,
 )
 from control_plane.wake_persist import WakeLedgerRepository
@@ -273,11 +278,8 @@ def test_agentos_no_job_ceo_two_rows_and_healthy_removal(tmp_path, frozen_git):
     assert len({item.aggregate_id for item in events}) == 2
 
     removed = _reconcile(runtime, boot_packet=_packet(needs_ceo=[]), include_boot_packet=False)
-    assert set(removed.resolved) == set(first.requested)
-    assert {item.event_type for item in _wake_events(runtime)} == {
-        "WAKE_REQUESTED",
-        "SOURCE_RESOLVED",
-    }
+    assert removed.resolved == ()
+    assert {item.event_type for item in _wake_events(runtime)} == {"WAKE_REQUESTED"}
 
     runtime2 = Runtime.at(tmp_path / "degraded-ceo")
     _reconcile(runtime2, boot_packet=_packet(), include_boot_packet=False)
@@ -498,3 +500,129 @@ def test_one_shot_script_exits_after_one_pass(tmp_path, frozen_git):
     code = main(["--root", str(tmp_path), "--no-boot-packet", "--json"])
     assert code == 0
     assert len(_requested_kind(Runtime.at(tmp_path), "review_required")) == 1
+
+
+def test_causal_write_refuses_resolved_before_requested(tmp_path, frozen_git):
+    from control_plane.wake_reconcile import collect_source_snapshot
+
+    runtime = Runtime.at(tmp_path)
+    _completed_review_child(runtime)
+    obligation = collect_source_snapshot(runtime, include_boot_packet=False).observed[0]
+    resolution = resolve_source(
+        obligation,
+        code=expected_resolution_code(obligation),
+        health=SourceReadHealth.HEALTHY,
+        source_present=False,
+        snapshot_digest="a" * 16,
+    )
+    repo = WakeLedgerRepository(runtime)
+    with pytest.raises(WakeLedgerError, match="REQUESTED must precede"):
+        repo.append_record(resolved_record(obligation, resolution), obligation=obligation)
+    assert _wake_events(runtime) == []
+
+
+def test_event_job_id_mismatch_is_corrupt(tmp_path, frozen_git):
+    runtime = Runtime.at(tmp_path)
+    _completed_review_child(runtime)
+    _reconcile(runtime)
+    event = _requested_kind(runtime, "review_required")[0]
+    with pytest.raises(WakeLedgerError, match="job_id disagrees"):
+        wake_record_from_event(
+            Event(
+                event_id=event.event_id,
+                aggregate_type=event.aggregate_type,
+                aggregate_id=event.aggregate_id,
+                sequence=event.sequence,
+                event_type=event.event_type,
+                command_id=event.command_id,
+                actor=event.actor,
+                job_id="JOB-999",
+                attempt_id=event.attempt_id,
+                worker_id=event.worker_id,
+                quota_class=event.quota_class,
+                payload=event.payload,
+                created_at=event.created_at,
+            )
+        )
+
+
+def test_disagreeing_observed_envelope_is_contradiction(tmp_path, frozen_git, monkeypatch):
+    import dataclasses
+
+    from control_plane.wake_reconcile import collect_source_snapshot
+
+    runtime = Runtime.at(tmp_path)
+    _completed_review_child(runtime)
+    obligation = collect_source_snapshot(runtime, include_boot_packet=False).observed[0]
+    other = dataclasses.replace(obligation, declared_target_seat="chairman")
+    monkeypatch.setattr(
+        "control_plane.wake_reconcile._runtime_review_obligations",
+        lambda runtime, jobs: [obligation, other],
+    )
+    collided = collect_source_snapshot(runtime, include_boot_packet=False)
+    assert obligation.obligation_id not in {item.obligation_id for item in collided.observed}
+    assert any("disagreeing observed envelope" in entry for entry in collided.contradictions)
+    result = _reconcile(runtime)
+    assert obligation.obligation_id not in result.requested
+    assert _wake_events(runtime) == []
+
+
+def test_unadmitted_current_attention_does_not_resolve(tmp_path, frozen_git, monkeypatch):
+    runtime = Runtime.at(tmp_path)
+    first = _reconcile(runtime, boot_packet=_packet(), include_boot_packet=False)
+    assert first.requested
+    source_ref = _wake_events(runtime)[0].payload["source_ref"]
+    monkeypatch.setattr(
+        "control_plane.wake_reconcile.build_inbox",
+        lambda **kwargs: {
+            "schema": INBOX_SCHEMA,
+            "attention": [{"attention_id": source_ref, "kind": "not-a-real-kind"}],
+            "degraded": [],
+            "grounding": {"boot_packet_schema": BOOT_PACKET_SCHEMA},
+        },
+    )
+    blocked = _reconcile(runtime, include_boot_packet=False)
+    assert blocked.resolved == ()
+    assert source_ref in blocked.plan.unsupported_attention
+    assert blocked.snapshot.inbox_runtime_health.value == "degraded"
+
+
+def test_command_id_prefix_rejects_wildcards(tmp_path, frozen_git):
+    runtime = Runtime.at(tmp_path)
+    with pytest.raises(StateConflict, match="literal namespace"):
+        runtime.events.list_events(command_id_prefix="WAKE-%")
+
+
+def test_existing_writable_refuses_missing_and_does_not_create(tmp_path):
+    with pytest.raises(PersistenceError, match="missing"):
+        Runtime.at(tmp_path, create=False, existing_writable=True)
+    assert not (tmp_path / "data" / "control_plane" / "executive.sqlite3").exists()
+
+
+def test_one_shot_script_refuses_missing_runtime(tmp_path):
+    from scripts.executive_wake_reconcile import main
+
+    code = main(["--root", str(tmp_path), "--no-boot-packet"])
+    assert code == 2
+    assert not (tmp_path / "data" / "control_plane" / "executive.sqlite3").exists()
+
+
+def test_one_shot_script_exits_nonzero_on_contradictions(tmp_path, frozen_git):
+    from control_plane.wake_reconcile import collect_source_snapshot
+    from scripts.executive_wake_reconcile import main
+
+    runtime = Runtime.at(tmp_path)
+    _completed_review_child(runtime)
+    oid = collect_source_snapshot(runtime, include_boot_packet=False).observed[0].obligation_id
+    with runtime.store.transaction() as connection:
+        runtime.store.append_event(
+            connection,
+            aggregate_type="job",
+            aggregate_id="JOB-001",
+            event_type="JOB_CREATED",
+            actor="test",
+            payload={"stolen": True},
+            command_id=oid,
+        )
+    code = main(["--root", str(tmp_path), "--no-boot-packet", "--json"])
+    assert code == 3

@@ -1050,12 +1050,14 @@ def _assert_outer_correlation(event: object, obligation: WakeObligation | None) 
         if job_id is not None or attempt_id is not None:
             raise WakeLedgerError("no-job wake requires events.job_id and events.attempt_id null")
         return
-    if job_id not in (None, obligation.job_id):
+    if job_id != obligation.job_id:
         raise WakeLedgerError("Event.job_id disagrees with the wake obligation envelope")
-    if obligation.attempt_id is None:
-        if attempt_id is not None:
-            raise WakeLedgerError("wake without ATT-* attempt_id cannot set events.attempt_id")
-    elif attempt_id not in (None, obligation.attempt_id):
+    expected_attempt = (
+        obligation.attempt_id
+        if obligation.attempt_id and obligation.attempt_id.startswith("ATT-")
+        else None
+    )
+    if attempt_id != expected_attempt:
         raise WakeLedgerError("Event.attempt_id disagrees with the wake obligation envelope")
 
 

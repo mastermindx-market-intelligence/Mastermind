@@ -16,7 +16,6 @@ from control_plane.executive_inbox import (
     build_inbox,
 )
 from control_plane.executive_runtime import (
-    Event,
     Job,
     JobStatus,
     Runtime,
@@ -30,6 +29,8 @@ from control_plane.wake_ledger import (
     WAKE_AGGREGATE_TYPE,
     WakeLedgerError,
     WakeLedgerRecord,
+    expected_resolution_code,
+    identity_payload,
     reconstruct_status,
     requested_record,
     resolve_source,
@@ -55,6 +56,7 @@ class WakeSourceSnapshot:
     grounding: dict[str, object]
     digest: str
     unsupported_attention: tuple[str, ...] = ()
+    contradictions: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,7 +70,7 @@ class WakeLedgerSnapshot:
 class WakeReconcilePlan:
     to_request: tuple[WakeObligation, ...]
     already_requested: tuple[str, ...]
-    to_resolve: tuple[tuple[WakeObligation, str], ...]
+    to_resolve: tuple[WakeObligation, ...]
     already_closed: tuple[str, ...]
     unsupported_attention: tuple[str, ...]
     degraded: tuple[str, ...]
@@ -97,15 +99,13 @@ def collect_source_snapshot(
     observed: list[WakeObligation] = []
     unsupported: list[str] = []
     runtime_health = SourceReadHealth.HEALTHY
+    jobs: list[Job] = []
     try:
-        jobs = runtime.jobs.list_jobs()
-        events = runtime.events.list_events(aggregate_type="job")
-        observed.extend(_runtime_review_obligations(jobs, events))
+        jobs = list(runtime.jobs.list_jobs())
+        observed.extend(_runtime_review_obligations(runtime, jobs))
     except Exception as exc:
         runtime_health = SourceReadHealth.DEGRADED
-        degraded.append(f"runtime source unreadable: {exc}")
-        jobs = []
-        events = []
+        degraded.append(f"runtime source unreadable: {type(exc).__name__}")
 
     inbox = build_inbox(
         repo_root=runtime.store.root,
@@ -115,48 +115,73 @@ def collect_source_snapshot(
     )
     inbox_degraded = tuple(str(item) for item in (inbox.get("degraded") or ()))
     degraded.extend(inbox_degraded)
-    inbox_runtime_health = (
-        SourceReadHealth.DEGRADED
-        if _inbox_runtime_degraded(inbox_degraded)
-        else SourceReadHealth.HEALTHY
-    )
-    agentos_health = (
-        SourceReadHealth.HEALTHY
-        if _agentos_healthy(inbox, inbox_degraded)
-        else SourceReadHealth.DEGRADED
-    )
+    admission_uncertain = inbox.get("schema") != INBOX_SCHEMA
     if inbox.get("schema") != INBOX_SCHEMA:
         degraded.append(
             f"inbox schema is {inbox.get('schema')!r}, expected {INBOX_SCHEMA!r}"
         )
-        inbox_runtime_health = SourceReadHealth.DEGRADED
-        agentos_health = SourceReadHealth.DEGRADED
+        admission_uncertain = True
     else:
         for item in inbox.get("attention") or ():
             if not isinstance(item, Mapping):
                 unsupported.append("inbox attention row is not a mapping")
+                admission_uncertain = True
                 continue
             try:
                 attention = admit_inbox_projection(item)
             except WakeRouterError as exc:
-                unsupported.append(f"{item.get('kind') or 'unknown'}:{exc.__class__.__name__}")
+                aid = str(item.get("attention_id") or "").strip()
+                unsupported.append(aid or f"{item.get('kind') or 'unknown'}:{exc.__class__.__name__}")
+                admission_uncertain = True
                 continue
             if attention.kind == "review_required":
                 unsupported.append("inbox review_required is not a runtime-direct source")
                 continue
             if attention.kind not in INBOX_WAKE_KINDS:
                 unsupported.append(attention.kind or "unknown")
+                admission_uncertain = True
                 continue
             try:
                 observed.append(obligation_from_inbox(attention))
             except WakeRouterError as exc:
                 unsupported.append(f"{attention.kind}:{exc.__class__.__name__}")
+                admission_uncertain = True
+    grounding_raw = inbox.get("grounding") if isinstance(inbox.get("grounding"), Mapping) else {}
+    runtime_db = grounding_raw.get("runtime_db") if isinstance(grounding_raw.get("runtime_db"), Mapping) else {}
+    runtime_counts = (
+        inbox.get("runtime_counts") if isinstance(inbox.get("runtime_counts"), Mapping) else {}
+    )
+    jobs_projected = runtime_counts.get("jobs") is not None
+    inbox_runtime_health = (
+        SourceReadHealth.DEGRADED
+        if admission_uncertain or not jobs_projected or not runtime_db.get("present")
+        else SourceReadHealth.HEALTHY
+    )
+    agentos_health = (
+        SourceReadHealth.HEALTHY
+        if grounding_raw.get("boot_packet_schema") == BOOT_PACKET_SCHEMA
+        and inbox.get("schema") == INBOX_SCHEMA
+        and not admission_uncertain
+        else SourceReadHealth.DEGRADED
+    )
 
     unique: dict[str, WakeObligation] = {}
+    dropped: set[str] = set()
+    contradictions: list[str] = []
     for obligation in observed:
-        unique[obligation.obligation_id] = obligation
+        oid = obligation.obligation_id
+        if oid in dropped:
+            continue
+        previous = unique.get(oid)
+        if previous is None:
+            unique[oid] = obligation
+            continue
+        if identity_payload(previous) == identity_payload(obligation):
+            continue
+        unique.pop(oid, None)
+        dropped.add(oid)
+        contradictions.append(f"{oid}:disagreeing observed envelope")
     ordered = tuple(sorted(unique.values(), key=lambda item: item.obligation_id))
-    grounding_raw = inbox.get("grounding") if isinstance(inbox.get("grounding"), Mapping) else {}
     grounding = {
         "runtime_root": str(runtime.store.root),
         "inbox_schema": inbox.get("schema"),
@@ -183,23 +208,23 @@ def collect_source_snapshot(
         grounding=grounding,
         digest=digest,
         unsupported_attention=tuple(unsupported),
+        contradictions=tuple(contradictions),
     )
 
 
 def collect_ledger_snapshot(runtime: Runtime) -> WakeLedgerSnapshot:
     repo = WakeLedgerRepository(runtime)
-    events = runtime.events.list_events()
+    wake_events = runtime.events.list_events(aggregate_type=WAKE_AGGREGATE_TYPE)
+    stolen = runtime.events.list_events(command_id_prefix="WAKE-")
     hydrated: list[PersistedWakeEvent] = []
     contradictions: list[str] = []
     grouped: dict[str, list[PersistedWakeEvent]] = {}
-    for event in events:
-        if str(event.command_id).startswith("WAKE-") and event.aggregate_type != WAKE_AGGREGATE_TYPE:
+    for event in stolen:
+        if event.aggregate_type != WAKE_AGGREGATE_TYPE:
             contradictions.append(
                 f"{event.command_id}:foreign Executive event stole a Wake command id"
             )
-            continue
-        if event.aggregate_type != WAKE_AGGREGATE_TYPE:
-            continue
+    for event in wake_events:
         try:
             item = repo._hydrate(event)
         except (WakeLedgerError, StateConflict) as exc:
@@ -222,9 +247,11 @@ def plan_wake_reconciliation(
     observed_ids = {item.obligation_id: item for item in source_snapshot.observed}
     to_request: list[WakeObligation] = []
     already_requested: list[str] = []
-    to_resolve: list[tuple[WakeObligation, str]] = []
+    to_resolve: list[WakeObligation] = []
     already_closed: list[str] = []
-    contradictions = list(ledger_snapshot.contradictions)
+    contradictions = list(ledger_snapshot.contradictions) + list(
+        source_snapshot.contradictions
+    )
 
     known_ids = set(observed_ids) | set(ledger_snapshot.by_obligation)
     for oid in sorted(known_ids):
@@ -255,7 +282,7 @@ def plan_wake_reconciliation(
             continue
         if not _may_resolve(stored, source_snapshot):
             continue
-        to_resolve.append((stored, _resolution_reason(stored)))
+        to_resolve.append(stored)
     return WakeReconcilePlan(
         to_request=tuple(to_request),
         already_requested=tuple(already_requested),
@@ -272,20 +299,34 @@ def apply_wake_reconciliation(
     plan: WakeReconcilePlan,
     *,
     source_snapshot: WakeSourceSnapshot,
+    boot_packet: Mapping[str, object] | None = None,
+    include_boot_packet: bool = True,
 ) -> WakeReconcileResult:
+    live = collect_source_snapshot(
+        runtime, boot_packet=boot_packet, include_boot_packet=include_boot_packet
+    )
+    live_ids = {item.obligation_id for item in live.observed}
     repo = WakeLedgerRepository(runtime)
     writes: list[tuple[WakeLedgerRecord, WakeObligation | None]] = []
     requested_ids: list[str] = []
     resolved_ids: list[str] = []
     for obligation in plan.to_request:
+        if obligation.obligation_id not in live_ids:
+            continue
         writes.append((requested_record(obligation), obligation))
         requested_ids.append(obligation.obligation_id)
-    for obligation, reason in plan.to_resolve:
+    for obligation in plan.to_resolve:
+        if obligation.obligation_id in live_ids:
+            continue
+        if not _may_resolve(obligation, live):
+            continue
         resolution = resolve_source(
             obligation,
-            health=_health_for(obligation, source_snapshot),
+            code=expected_resolution_code(obligation),
+            health=SourceReadHealth.HEALTHY,
             source_present=False,
-            reason=reason,
+            snapshot_digest=live.digest,
+            annotation=_resolution_annotation(obligation),
         )
         writes.append((resolved_record(obligation, resolution), obligation))
         resolved_ids.append(obligation.obligation_id)
@@ -312,18 +353,34 @@ def reconcile_wakes(
     )
     ledger = collect_ledger_snapshot(runtime)
     plan = plan_wake_reconciliation(snapshot, ledger)
-    return apply_wake_reconciliation(runtime, plan, source_snapshot=snapshot)
+    return apply_wake_reconciliation(
+        runtime,
+        plan,
+        source_snapshot=snapshot,
+        boot_packet=boot_packet,
+        include_boot_packet=include_boot_packet,
+    )
 
 
-def _runtime_review_obligations(jobs: Sequence[Job], events: Sequence[Event]) -> list[WakeObligation]:
-    by_id = {job.job_id: job for job in jobs}
+def _runtime_review_obligations(runtime: Runtime, jobs: Sequence[Job]) -> list[WakeObligation]:
+    candidates = [
+        job
+        for job in jobs
+        if job.review_required is True and job.status is JobStatus.COMPLETED
+    ]
     found: list[WakeObligation] = []
-    for event in events:
-        if event.event_type != "JOB_COMPLETED" or event.aggregate_type != "job":
+    for job in candidates:
+        events = runtime.events.list_events(
+            aggregate_type="job", aggregate_id=job.job_id
+        )
+        completed = [
+            event
+            for event in events
+            if event.event_type == "JOB_COMPLETED"
+        ]
+        if not completed:
             continue
-        job = by_id.get(event.aggregate_id)
-        if job is None or job.status is not JobStatus.COMPLETED or job.review_required is not True:
-            continue
+        event = completed[-1]
         try:
             fact = admit_runtime_review_source(event=event, job=job, sibling_jobs=tuple(jobs))
             obligation = obligation_from_runtime(fact)
@@ -334,49 +391,19 @@ def _runtime_review_obligations(jobs: Sequence[Job], events: Sequence[Event]) ->
     return found
 
 
-def _inbox_runtime_degraded(degraded: Sequence[str]) -> bool:
-    needles = (
-        "runtime not projected",
-        "runtime jobs unreadable",
-        "runtime attempts unreadable",
-        "executive runtime database missing",
-        "runtime source unreadable",
-    )
-    return any(any(needle in entry for needle in needles) for entry in degraded)
-
-
-def _agentos_healthy(inbox: Mapping[str, object], degraded: Sequence[str]) -> bool:
-    grounding = inbox.get("grounding") if isinstance(inbox.get("grounding"), Mapping) else {}
-    if grounding.get("boot_packet_schema") != BOOT_PACKET_SCHEMA:
-        return False
-    blocked = (
-        "CEO attention not projected",
-        "boot packet carries no Agent OS brief",
-        "boot packet collection failed",
-        "boot packet not collected",
-    )
-    return not any(any(token in entry for token in blocked) for entry in degraded)
-
-
 def _may_resolve(obligation: WakeObligation, snapshot: WakeSourceSnapshot) -> bool:
+    if obligation.source_ref in snapshot.unsupported_attention:
+        return False
+    if obligation.wake_kind.value == "ceo_decision_pending":
+        return False
     if obligation.source_kind.value == "executive_runtime_event":
         return snapshot.runtime_health is SourceReadHealth.HEALTHY
-    if obligation.wake_kind.value == "ceo_decision_pending":
-        return snapshot.agentos_health is SourceReadHealth.HEALTHY
     return snapshot.inbox_runtime_health is SourceReadHealth.HEALTHY
 
 
-def _health_for(obligation: WakeObligation, snapshot: WakeSourceSnapshot) -> SourceReadHealth:
-    if not _may_resolve(obligation, snapshot):
-        return SourceReadHealth.DEGRADED
-    return SourceReadHealth.HEALTHY
-
-
-def _resolution_reason(obligation: WakeObligation) -> str:
+def _resolution_annotation(obligation: WakeObligation) -> str:
     if obligation.wake_kind.value == "review_required":
         return "healthy runtime read: sibling review exists or review_required source is absent"
-    if obligation.wake_kind.value == "ceo_decision_pending":
-        return "healthy Agent OS/Inbox projection no longer contains this needs_ceo item"
     return "healthy Inbox rebuild no longer contains this attention item"
 
 

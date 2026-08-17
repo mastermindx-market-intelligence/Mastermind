@@ -19,6 +19,7 @@ from control_plane.wake_ledger import (
     WakeLedgerRecord,
     assert_causal,
     event_payload_for,
+    parse_ledger_record,
     payloads_equivalent,
     wake_record_from_event,
 )
@@ -84,6 +85,18 @@ class WakeLedgerRepository:
             raise WakeLedgerError("append_records_atomic requires at least one record")
         out: list[PersistedWakeEvent] = []
         with self.store.transaction() as connection:
+            proposed_by_oid: dict[str, list[WakeLedgerRecord]] = {}
+            for record, obligation in items:
+                parse_ledger_record(record)
+                oid = record.command_id.split(":", 1)[0]
+                proposed_by_oid.setdefault(oid, []).append(record)
+            for oid, proposed in proposed_by_oid.items():
+                existing = self._records_on_connection(connection, oid)
+                existing_commands = {item.command_id for item in existing}
+                combined = list(existing) + [
+                    record for record in proposed if record.command_id not in existing_commands
+                ]
+                assert_causal(combined)
             for record, obligation in items:
                 out.append(
                     self._append_one(
@@ -170,6 +183,20 @@ class WakeLedgerRepository:
         if record.phase is LedgerPhase.WAKE_REQUESTED:
             obligation = parse_obligation(event.payload)
         return PersistedWakeEvent(event=event, record=record, obligation=obligation)
+
+    def _records_on_connection(self, connection, obligation_id: str) -> list[WakeLedgerRecord]:
+        rows = connection.execute(
+            "SELECT command_id FROM events "
+            "WHERE aggregate_type=? AND aggregate_id=? ORDER BY event_id",
+            (WAKE_AGGREGATE_TYPE, obligation_id),
+        ).fetchall()
+        records: list[WakeLedgerRecord] = []
+        for (command_id,) in rows:
+            event = self.store.get_event_by_command_id(command_id, connection=connection)
+            if event is None:
+                continue
+            records.append(self._hydrate(event).record)
+        return records
 
 
 def _correlation(
