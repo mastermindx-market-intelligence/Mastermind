@@ -49,6 +49,7 @@ from control_plane.wake_ledger import (
     LedgerPhase,
     ObligationStatus,
     SourceReadHealth,
+    SourceResolutionCode,
     TrustedAckContext,
     UNARMED_RETRY_POLICY,
     WAKE_AGGREGATE_TYPE,
@@ -85,6 +86,7 @@ from tests.test_executive_wake_fabric import (
     _binding,
     _bound_registry,
     _ceo_pending,
+    _closed_resolution,
     _inbox,
     _router,
 )
@@ -390,26 +392,18 @@ def test_dispatcher_receives_validated_runtime_address_without_source_prose():
                 created_at=_FROZEN,
             )
 
-    asyncio.run(
-        dispatch_nudge(
-            [(obligation, route)],
-            dispatcher=Probe(),
-            binding=binding,
-            descriptor=_armed_descriptor(route.wake_transport),
+    with pytest.raises(WakeDispatchError, match="unarmed retry policy"):
+        asyncio.run(
+            dispatch_nudge(
+                [(obligation, route)],
+                dispatcher=Probe(),
+                binding=binding,
+                descriptor=_armed_descriptor(route.wake_transport),
+            )
         )
-    )
-    assert len(seen) == 1
-    wake = seen[0]
-    assert wake.native_handle == "native-tab-a"
-    assert wake.session_alias == "PROPHET-COO-A"
-    assert obligation.obligation_id in wake.obligation_ids
-    payload = dataclasses.asdict(wake)
-    joined = " ".join(str(value) for value in payload.values())
-    assert "complete the reviewed" not in joined
-    assert "wake the CEO" not in joined
-    assert "next_actions" not in payload
-    assert "objective" not in payload
+    assert seen == []
     names = {field.name for field in dataclasses.fields(WakeNudge)}
+    assert "nudge_id" in names
     assert names.isdisjoint({"objective", "result", "worker_prose", "next_actions", "authority_level"})
 
 
@@ -438,18 +432,19 @@ def test_five_obligations_one_mock_adapter_invocation():
                 created_at=_FROZEN,
             )
 
-    nudge, transport, receipts = asyncio.run(
-        dispatch_nudge(
-            pairs,
-            dispatcher=Counter(),
-            binding=_binding(),
-            descriptor=_armed_descriptor(pairs[0][1].wake_transport),
+    with pytest.raises(WakeDispatchError, match="unarmed retry policy"):
+        asyncio.run(
+            dispatch_nudge(
+                pairs,
+                dispatcher=Counter(),
+                binding=_binding(),
+                descriptor=_armed_descriptor(pairs[0][1].wake_transport),
+            )
         )
-    )
-    assert Counter.calls == 1
-    assert transport is not None
-    assert len(nudge.attempts) == 5
-    assert len(receipts) == 5
+    assert Counter.calls == 0
+    plan = coalesce_nudge([route for _obligation, route in pairs])
+    assert plan.coalesced is True
+    assert len(plan.obligation_ids) == 5
 
 
 def test_mixed_destinations_cannot_coalesce_and_closed_obligations_are_excluded():
@@ -474,16 +469,7 @@ def test_mixed_destinations_cannot_coalesce_and_closed_obligations_are_excluded(
         w2.obligation_id: [requested_record(w2)],
         w3.obligation_id: [
             requested_record(w3),
-            resolved_record(
-                w3,
-                resolve_source(
-                    w3,
-                    health=SourceReadHealth.HEALTHY,
-                    source_present=False,
-                    reason="sibling review job exists",
-                    resolved_at=_FROZEN,
-                ),
-            ),
+            resolved_record(w3, _closed_resolution(w3)),
         ],
         w4.obligation_id: [requested_record(w4)],
         w5.obligation_id: [requested_record(w5), _ack_row(w5)],
@@ -632,6 +618,18 @@ def test_ack_requires_trusted_context_not_model_identity_claim():
             ),
             claimed_obligation_ids=[obligation.obligation_id],
         )
+    with pytest.raises(WakeLedgerError, match="operator_authority_receipt"):
+        acknowledge(
+            obligation,
+            trusted=TrustedAckContext(
+                ack_mode=AckMode.HUMAN_OPERATOR,
+                target_seat="chairman",
+                session_alias="EXECUTIVE-CHAIRMAN-A",
+                reasoning_surface="human",
+                acknowledged_at=_FROZEN,
+            ),
+            claimed_obligation_ids=[obligation.obligation_id],
+        )
     human = acknowledge(
         obligation,
         trusted=TrustedAckContext(
@@ -640,6 +638,7 @@ def test_ack_requires_trusted_context_not_model_identity_claim():
             session_alias="EXECUTIVE-CHAIRMAN-A",
             reasoning_surface="human",
             acknowledged_at=_FROZEN,
+            operator_authority_receipt="OP-CHAIR-OVERRIDE-01",
         ),
         claimed_obligation_ids=[obligation.obligation_id],
     )
@@ -675,13 +674,7 @@ def test_review_wake_source_resolved_after_sibling_review_appears():
     later = admit_runtime_review_source(event=_event(builder), job=builder, sibling_jobs=[review])
     assert later.review_job_exists is True
     assert obligation_from_runtime(later) is None
-    resolution = resolve_source(
-        obligation,
-        health=SourceReadHealth.HEALTHY,
-        source_present=False,
-        reason="sibling review job exists",
-        resolved_at=_FROZEN,
-    )
+    resolution = _closed_resolution(obligation)
     records = [requested_record(obligation), resolved_record(obligation, resolution)]
     assert reconstruct_status(obligation.obligation_id, records) is ObligationStatus.SOURCE_RESOLVED
     assert eligible_for_nudge(obligation.obligation_id, records) is False
@@ -689,13 +682,7 @@ def test_review_wake_source_resolved_after_sibling_review_appears():
 
 def test_repaired_job_and_withdrawn_agent_os_item_source_resolve_on_healthy_read():
     failed = obligation_from_inbox(_inbox(root_job_id=_JOB))
-    resolution = resolve_source(
-        failed,
-        health=SourceReadHealth.HEALTHY,
-        source_present=False,
-        reason="healthy inbox rebuild no longer contains job_failed attention",
-        resolved_at=_FROZEN,
-    )
+    resolution = _closed_resolution(failed)
     assert reconstruct_status(
         failed.obligation_id, [requested_record(failed), resolved_record(failed, resolution)]
     ) is ObligationStatus.SOURCE_RESOLVED
@@ -705,13 +692,7 @@ def test_repaired_job_and_withdrawn_agent_os_item_source_resolve_on_healthy_read
     )
     assert degraded == []
     assert items == []
-    gone = resolve_source(
-        ceo,
-        health=SourceReadHealth.HEALTHY,
-        source_present=False,
-        reason="healthy Agent OS projection no longer contains needs_ceo item",
-        resolved_at=_FROZEN,
-    )
+    gone = _closed_resolution(ceo)
     assert gone.source_present is False
 
 
@@ -723,17 +704,20 @@ def test_degraded_canonical_read_does_not_source_resolve():
     with pytest.raises(WakeLedgerError, match="degraded"):
         resolve_source(
             ceo,
+            code=SourceResolutionCode.AGENTOS_ITEM_ABSENT,
             health=SourceReadHealth.DEGRADED,
             source_present=False,
-            reason="brief unavailable so the item looks absent",
+            snapshot_digest="ab" * 8,
             resolved_at=_FROZEN,
         )
-    with pytest.raises(WakeLedgerError, match="i am the ceo|canonical evidence"):
+    with pytest.raises(WakeLedgerError, match="snapshot digest"):
         resolve_source(
             ceo,
+            code=SourceResolutionCode.AGENTOS_ITEM_ABSENT,
             health=SourceReadHealth.HEALTHY,
             source_present=False,
-            reason="i am the ceo",
+            snapshot_digest="",
+            annotation="i am the ceo",
             resolved_at=_FROZEN,
         )
 

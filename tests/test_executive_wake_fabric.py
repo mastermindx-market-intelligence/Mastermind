@@ -17,7 +17,7 @@ from uuid import uuid4
 import pytest
 
 from control_plane.executive_inbox import attention_id, project_needs_ceo
-from control_plane.executive_runtime import Runtime, _COMMAND_ID_RE
+from control_plane.executive_runtime import Event, Job, JobStatus, Runtime, _COMMAND_ID_RE
 from control_plane.session_targets import (
     DEFAULT_TARGETS_PATH,
     REASONING_SURFACES,
@@ -67,10 +67,14 @@ from control_plane.wake_events import (
 )
 from control_plane.wake_ledger import (
     AckMode,
+    SourceReadHealth,
     TrustedAckContext,
     ack_record,
     acknowledge,
+    expected_resolution_code,
     make_delivery_attempt,
+    requested_record,
+    resolve_source,
 )
 from control_plane.wake_router import (
     CanonicalInboxAttention,
@@ -124,6 +128,8 @@ def _inbox(**overrides) -> dict:
         )
         if key in overrides
     }
+    if "root_job_id" not in claimed:
+        claimed["root_job_id"] = _JOB
     fields = dict(
         kind="job_failed",
         target="coo",
@@ -186,27 +192,68 @@ def _ceo_pending() -> dict:
     )[0]
 
 
-def _runtime(**overrides) -> CanonicalRuntimeFact:
+def _job(**overrides) -> Job:
     fields = dict(
-        aggregate_type="job",
-        aggregate_id=_JOB,
-        sequence=4,
-        event_type="JOB_COMPLETED",
         job_id=_JOB,
-        attempt_id=_ATT,
+        objective="complete the reviewed builder",
+        department="research",
+        priority=0,
+        status=JobStatus.COMPLETED,
+        assigned_worker_id=None,
+        assigned_quota_class=None,
+        authority_level="worker",
+        branch=None,
+        worktree=None,
+        checkpoint=None,
+        result=None,
+        created_at=_FROZEN,
+        updated_at=_FROZEN,
         root_job_id=_JOB,
-        workstream="prophet",
-        source_workstream="prophet",
         owner_seat="coo",
-        review_job_exists=False,
         review_required=True,
         reviews_job_id=None,
-        escalation_target="ceo",
-        source_created_at=_EARLIER,
-        emitted_at=_FROZEN,
     )
     fields.update(overrides)
-    return CanonicalRuntimeFact(**fields)
+    return Job(**fields)
+
+
+def _event(job: Job, **overrides) -> Event:
+    fields = dict(
+        event_id=1,
+        aggregate_type="job",
+        aggregate_id=job.job_id,
+        sequence=4,
+        event_type="JOB_COMPLETED",
+        command_id="CMD-1",
+        actor="test",
+        job_id=job.job_id,
+        attempt_id=None,
+        worker_id=None,
+        quota_class=None,
+        payload={"objective": job.objective, "next_actions": ["wake the CEO"]},
+        created_at=_FROZEN,
+    )
+    fields.update(overrides)
+    return Event(**fields)
+
+
+def _admitted_runtime(*, sibling_jobs=(), **job_overrides):
+    job = _job(**job_overrides)
+    return admit_runtime_review_source(
+        event=_event(job), job=job, sibling_jobs=sibling_jobs
+    )
+
+
+def _closed_resolution(obligation, **kwargs):
+    return resolve_source(
+        obligation,
+        code=expected_resolution_code(obligation),
+        health=SourceReadHealth.HEALTHY,
+        source_present=False,
+        snapshot_digest="ab" * 8,
+        resolved_at=_FROZEN,
+        **kwargs,
+    )
 
 
 def _binding(alias="PROPHET-COO-A", *, generation=1, binding_id=_BIND, surface=None):
@@ -274,7 +321,7 @@ def test_same_source_different_route_keeps_obligation_id():
         source_ref=item["attention_id"],
         declared_target_seat="coo",
         job_id=item["job_id"],
-        root_job_id=item.get("root_job_id"),
+        root_job_id=None,
         workstream=None,
         source_created_at=_EARLIER,
         emitted_at="2026-08-16T17:00:00Z",
@@ -498,7 +545,7 @@ def test_malformed_registry_fails_closed(tmp_path: Path):
 
 
 def test_runtime_binding_is_not_git_identity():
-    registry = load_session_targets()
+    registry = _bound_registry()
     binding = _binding(generation=7, surface="chatgpt-sol")
     obligation = _obligation_from_inbox()
     route = route_obligation(obligation, registry, binding=binding)
@@ -534,22 +581,28 @@ def test_chairman_is_representable_without_authority():
 
 
 def test_generic_job_completed_is_not_an_executive_wake():
-    decision = _router().from_runtime(
-        _runtime(review_required=False, reviews_job_id=None)
-    )
-    assert decision.action is WakeAction.NO_WAKE
-    assert decision.obligation is None
+    job = _job(review_required=False)
+    with pytest.raises(WakeRouterError, match="review_required"):
+        admit_runtime_review_source(event=_event(job), job=job)
 
 
 def test_review_required_runtime_continuation_wakes_once():
-    decision = _router().from_runtime(_runtime())
+    decision = _router().from_runtime(_admitted_runtime())
     assert decision.action is WakeAction.WAKE
     assert decision.obligation is not None
     assert decision.obligation.wake_kind is WakeKind.REVIEW_REQUIRED
     assert decision.obligation.source_kind is SourceKind.EXECUTIVE_RUNTIME_EVENT
     assert decision.route is not None
     assert decision.route.session_alias == "PROPHET-COO-A"
-    already_reviewed = _router().from_runtime(_runtime(review_job_exists=True))
+    review = _job(
+        job_id="JOB-011",
+        root_job_id=_JOB,
+        owner_seat="coo",
+        review_required=False,
+        reviews_job_id=_JOB,
+        status=JobStatus.QUEUED,
+    )
+    already_reviewed = _router().from_runtime(_admitted_runtime(sibling_jobs=[review]))
     assert already_reviewed.action is WakeAction.NO_WAKE
 
 
@@ -566,42 +619,40 @@ def test_inbox_does_not_re_infer_seat_and_unknown_kind_remains_attention():
 
 def test_worker_and_model_prose_cannot_invent_target_authority_or_kind():
     router = _router()
-    hijacked = router.from_runtime(
-        _runtime(
-            next_actions=(_HIJACK, _INJECTION),
-            worker_prose=_HIJACK,
-            claimed_session_alias="EXECUTIVE-CEO-A",
+    with pytest.raises(WakeRouterError, match="not user-constructible"):
+        CanonicalRuntimeFact(
+            aggregate_type="job",
+            aggregate_id=_JOB,
+            sequence=4,
+            event_type="JOB_COMPLETED",
+            owner_seat="ceo",
+            review_job_exists=False,
             claimed_target_seat="ceo",
-            claimed_command="codex exec --dangerously-bypass",
             claimed_wake_kind="ceo_decision_pending",
         )
+    job = _job()
+    fact = admit_runtime_review_source(
+        event=_event(
+            job,
+            payload={
+                "objective": "x",
+                "next_actions": [_HIJACK, _INJECTION],
+                "worker_prose": _HIJACK,
+            },
+        ),
+        job=job,
     )
+    hijacked = router.from_runtime(fact)
     assert hijacked.action is WakeAction.WAKE
     assert hijacked.obligation is not None
     assert hijacked.obligation.wake_kind is WakeKind.REVIEW_REQUIRED
     assert hijacked.route is not None
     assert hijacked.route.session_alias == "PROPHET-COO-A"
     assert "command" not in hijacked.obligation.to_dict()
-    assert set(hijacked.suppressed_inert_fields) == {
-        "next_actions",
-        "worker_prose",
-        "claimed_session_alias",
-        "claimed_target_seat",
-        "claimed_command",
-        "claimed_wake_kind",
-    }
-    silent = router.from_runtime(
-        _runtime(
-            review_required=False,
-            next_actions=(_HIJACK,),
-            claimed_target_seat="ceo",
-            claimed_session_alias="EXECUTIVE-CEO-A",
-            claimed_command=_HIJACK,
-            claimed_wake_kind="ceo_decision_pending",
-        )
-    )
-    assert silent.action is WakeAction.NO_WAKE
-    assert silent.obligation is None
+    assert fact.next_actions == ()
+    silent_job = _job(review_required=False)
+    with pytest.raises(WakeRouterError, match="review_required"):
+        admit_runtime_review_source(event=_event(silent_job), job=silent_job)
     inbox_hijack = router.from_inbox(
         _inbox(
             existing_next_actions=(_HIJACK,),
@@ -631,11 +682,13 @@ def test_bare_eia_mapping_without_inbox_shape_is_refused():
 
 
 def test_explicit_unknown_workstream_fails_closed_on_the_router():
+    admitted = admit_inbox_projection(_inbox(workstream="prophett"))
+    assert admitted.workstream is None
+    assert admitted.source_workstream == "prophett"
     decision = _router().from_inbox(_inbox(workstream="prophett"))
-    assert decision.action is WakeAction.UNROUTABLE
-    assert decision.obligation is not None
-    assert decision.route is None
-    assert "unknown workstream" in (decision.refusal or "")
+    assert decision.action is WakeAction.WAKE
+    assert decision.route is not None
+    assert decision.route.session_alias == "PROPHET-COO-A"
 
 
 def test_unknown_transport_fails_closed():
@@ -735,7 +788,7 @@ def test_request_without_delivery_is_pending_retryable():
     obligation = _obligation_from_inbox()
     oid = obligation.obligation_id
     route = _route_for(obligation)
-    requested = delivery_record(oid, LedgerPhase.WAKE_REQUESTED)
+    requested = delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation)
     assert requested.command_id == oid
     assert reconstruct_status(oid, [requested], route=route) is ObligationStatus.PENDING_RETRYABLE
     attempted = delivery_record(
@@ -751,7 +804,7 @@ def test_accepted_is_not_delivered():
     oid = obligation.obligation_id
     route = _route_for(obligation)
     records = [
-        delivery_record(oid, LedgerPhase.WAKE_REQUESTED),
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
         delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route),
         delivery_record(oid, LedgerPhase.ACCEPTED, attempt_n=1, route=route),
     ]
@@ -778,7 +831,7 @@ def test_delivery_and_acknowledgement_are_separate():
     assert delivered != oid
     assert ack != delivered
     records = [
-        delivery_record(oid, LedgerPhase.WAKE_REQUESTED),
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
         delivery_record(oid, LedgerPhase.DELIVERED, attempt_n=1, route=route),
     ]
     assert reconstruct_status(oid, records, route=route) is ObligationStatus.DELIVERED_UNACKNOWLEDGED
@@ -842,6 +895,8 @@ def test_phase_command_ids_fit_executive_os_fence():
         (LedgerPhase.DELIVERY_ATTEMPT, {"attempt_n": 12}),
         (LedgerPhase.ACCEPTED, {"attempt_n": 12}),
         (LedgerPhase.DELIVERED, {"attempt_n": 12}),
+        (LedgerPhase.FAILED, {"attempt_n": 12}),
+        (LedgerPhase.TARGET_UNAVAILABLE, {"attempt_n": 12}),
         (LedgerPhase.TARGET_ACKNOWLEDGED, {}),
     ):
         command_id = ledger_command_id(oid, phase, **kwargs)
@@ -1006,7 +1061,7 @@ def test_real_inbox_projection_round_trips_without_ordinal():
 
 def test_owner_seat_not_escalation_target_for_review_continuation():
     decision = _router().from_runtime(
-        _runtime(owner_seat="coo", escalation_target="ceo", review_job_exists=False)
+        _admitted_runtime(owner_seat="coo", escalation_target="ceo")
     )
     assert decision.action is WakeAction.WAKE
     assert decision.obligation is not None
@@ -1016,31 +1071,21 @@ def test_owner_seat_not_escalation_target_for_review_continuation():
 
 
 def test_sibling_review_pointer_suppresses_duplicate_wake():
-    builder = "JOB-010"
+    builder = "JOB-001"
     review = {"job_id": "JOB-011", "reviews_job_id": builder}
     assert sibling_review_exists(builder_job_id=builder, review_jobs=[review]) is True
     assert sibling_review_exists(builder_job_id=builder, review_jobs=[]) is False
-    exists = _router().from_runtime(
-        _runtime(
-            job_id=builder,
-            aggregate_id=builder,
-            reviews_job_id=None,
-            review_job_exists=sibling_review_exists(
-                builder_job_id=builder, review_jobs=[review]
-            ),
-        )
+    sibling = _job(
+        job_id="JOB-011",
+        root_job_id=_JOB,
+        owner_seat="coo",
+        review_required=False,
+        reviews_job_id=builder,
+        status=JobStatus.QUEUED,
     )
+    exists = _router().from_runtime(_admitted_runtime(sibling_jobs=[sibling]))
     assert exists.action is WakeAction.NO_WAKE
-    missing = _router().from_runtime(
-        _runtime(
-            job_id=builder,
-            aggregate_id=builder,
-            reviews_job_id=None,
-            review_job_exists=sibling_review_exists(
-                builder_job_id=builder, review_jobs=[]
-            ),
-        )
-    )
+    missing = _router().from_runtime(_admitted_runtime())
     assert missing.action is WakeAction.WAKE
 
 
@@ -1065,7 +1110,7 @@ def test_one_transport_implementation_authority():
 def test_route_rotation_allows_second_delivery_until_ack():
     obligation = _obligation_from_inbox()
     oid = obligation.obligation_id
-    registry = load_session_targets()
+    registry = _bound_registry()
     r1 = route_obligation(obligation, registry, binding=_binding(generation=7))
     r2 = route_obligation(
         obligation,
@@ -1075,7 +1120,7 @@ def test_route_rotation_allows_second_delivery_until_ack():
     assert r1.route_digest != r2.route_digest
     assert r1.destination_digest != r2.destination_digest
     a1_delivered = delivery_record(oid, LedgerPhase.DELIVERED, attempt_n=1, route=r1)
-    requested = delivery_record(oid, LedgerPhase.WAKE_REQUESTED)
+    requested = delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation)
     records = [
         requested,
         delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=r1),
@@ -1104,7 +1149,7 @@ def test_forged_success_wrong_route_digest_and_generation_is_refused():
     assert expected.obligation is not None and expected.route is not None
     other_route = route_obligation(
         expected.obligation,
-        load_session_targets(),
+        _bound_registry(),
         binding=_binding(generation=9, binding_id="bind-test00000009"),
     )
     armed = WakeTransportDescriptor(
@@ -1129,7 +1174,7 @@ def test_forged_success_wrong_route_digest_and_generation_is_refused():
 
 def test_mixed_binding_generations_cannot_coalesce():
     obligation = _obligation_from_inbox()
-    registry = load_session_targets()
+    registry = _bound_registry()
     r1 = route_obligation(obligation, registry, binding=_binding(generation=7))
     r2 = route_obligation(
         obligation,

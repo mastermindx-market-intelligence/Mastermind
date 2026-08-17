@@ -139,8 +139,13 @@ human path.
 
 Public APIs:
 
+- `admit_inbox_projection(...)` / `admit_runtime_review_source(...)` are the
+  only trusted constructors for `CanonicalInboxAttention` /
+  `CanonicalRuntimeFact`. Direct dataclass construction is refused.
+- Inbox source `workstream` is inert correlation (`source_workstream`). It is
+  not auto-promoted into the routing `workstream`.
 - `obligation_from_inbox(...)` / `obligation_from_runtime(...)` mint a
-  `WakeObligation` from a trusted canonical source.
+  `WakeObligation` from an admitted canonical source.
 - `route_obligation(obligation, registry, binding=...)` returns a `WakeRoute`
   or a structured `RouteRefusal`.
 
@@ -381,13 +386,14 @@ aggregate_id   = obligation_id
 
 | Phase | command_id | payload |
 |---|---|---|
-| `WAKE_REQUESTED` | `W` (the obligation id) | no attempt-only route fields, no binding/native address |
+| `WAKE_REQUESTED` | `W` (the obligation id) | frozen bounded `WakeObligation` envelope; no attempt-only route fields, no binding/native address |
 | `DELIVERY_ATTEMPT` | `W:A<n>` | complete attempt + route snapshot |
 | `ACCEPTED` | `W:A<n>:ACCEPTED` | complete attempt + route snapshot |
 | `DELIVERED` | `W:A<n>:DELIVERED` | complete attempt + route snapshot |
 | `FAILED` | `W:A<n>:FAILED` | complete attempt + route snapshot |
+| `TARGET_UNAVAILABLE` | `W:A<n>:UNAVAILABLE` | complete attempt + route snapshot; retry/backoff distinct from generic `FAILED` |
 | `TARGET_ACKNOWLEDGED` | `W:ACK` | trusted acknowledgement evidence |
-| `SOURCE_RESOLVED` | `W:RESOLVED` | source reconciliation evidence |
+| `SOURCE_RESOLVED` | `W:RESOLVED` | closed `SourceResolutionCode` + snapshot digest + source_ref; prose is annotation only |
 
 `command_id` ↔ phase ↔ `attempt_n` ↔ payload shape is enforced by constructors
 and `parse_ledger_record`.  Impossible rows are refused (`W:ACK` with
@@ -398,8 +404,10 @@ Causal rules (state is reconstructed from immutable events; no mutable state
 row):
 
 - `REQUESTED` precedes delivery attempts
-- `DELIVERY_ATTEMPT` exists before `ACCEPTED` / `DELIVERED` / `FAILED`
-- attempt terminal evidence is tied to that exact attempt
+- `DELIVERY_ATTEMPT` exists before `ACCEPTED` / `DELIVERED` / `FAILED` / `TARGET_UNAVAILABLE`
+- attempt terminal evidence is tied to that exact attempt; at most one of `DELIVERED` / `FAILED` / `TARGET_UNAVAILABLE` per attempt
+- later attempts cannot start while the previous attempt is unfinished
+- a causal stream is one obligation; mixed `W1`/`W2` rows refuse
 - `ACCEPTED` does not imply `DELIVERED`
 - `DELIVERED` does not imply `ACK`
 - `ACK` closes target-consumption eligibility
