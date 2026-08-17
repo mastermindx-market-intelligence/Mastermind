@@ -1157,6 +1157,36 @@ class RuntimeStore:
             ),
         )
 
+    def get_event_by_command_id(
+        self,
+        command_id: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> Event | None:
+        """Return the full Event that owns ``command_id``, or None.
+
+        When ``connection`` is supplied, the lookup uses that open transaction
+        so a writer can reconcile UNIQUE ``command_id`` replay inside
+        ``BEGIN IMMEDIATE``.  The public EventRegistry wrapper uses a read
+        snapshot.  This does not expose arbitrary SQL.
+        """
+
+        token = str(command_id or "").strip()
+        if not token:
+            raise StateConflict("command_id is required")
+
+        def _load(conn: sqlite3.Connection) -> Event | None:
+            row = conn.execute(
+                "SELECT * FROM events WHERE command_id=?",
+                (token,),
+            ).fetchone()
+            return None if row is None else _event_from_row(row)
+
+        if connection is not None:
+            return _load(connection)
+        with self.read() as conn:
+            return _load(conn)
+
     def find_event_by_command_id(self, command_id: str) -> dict[str, Any] | None:
         """Return the essentials of the event that owns ``command_id``, or None.
 
@@ -3672,11 +3702,18 @@ class EventRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
 
+    def get_event_by_command_id(self, command_id: str) -> Event | None:
+        """Full Event lookup by durable command id."""
+
+        return self.store.get_event_by_command_id(command_id)
+
     def list_events(
         self,
         *,
         job_id: str | None = None,
         attempt_id: str | None = None,
+        aggregate_type: str | None = None,
+        aggregate_id: str | None = None,
     ) -> list[Event]:
         clauses: list[str] = []
         params: list[str] = []
@@ -3686,6 +3723,12 @@ class EventRegistry:
         if attempt_id:
             clauses.append("attempt_id=?")
             params.append(attempt_id)
+        if aggregate_type:
+            clauses.append("aggregate_type=?")
+            params.append(str(aggregate_type).strip())
+        if aggregate_id:
+            clauses.append("aggregate_id=?")
+            params.append(str(aggregate_id).strip())
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with self.store.read() as connection:
             rows = connection.execute(

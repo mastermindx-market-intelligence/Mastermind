@@ -1,0 +1,191 @@
+"""Wake ledger persistence over the existing Executive OS events table.
+
+This is not a store.  Writes use ``RuntimeStore.transaction()`` /
+``append_event()``.  There is no Wake table, queue, or mutable state row.
+"""
+from __future__ import annotations
+
+import dataclasses
+from typing import Sequence
+
+from control_plane.executive_runtime import Event, Runtime, RuntimeStore, StateConflict
+from control_plane.wake_events import WakeObligation, parse_obligation
+from control_plane.wake_ledger import (
+    ATTEMPT_PHASES,
+    LedgerPhase,
+    WAKE_AGGREGATE_TYPE,
+    WAKE_EVENT_ACTOR,
+    WakeLedgerError,
+    WakeLedgerRecord,
+    assert_causal,
+    event_payload_for,
+    payloads_equivalent,
+    wake_record_from_event,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class PersistedWakeEvent:
+    event: Event
+    record: WakeLedgerRecord
+    obligation: WakeObligation | None = None
+
+
+class WakeLedgerRepository:
+    """Narrow adapter.  One Executive OS events stream per obligation."""
+
+    def __init__(self, runtime: Runtime) -> None:
+        self.runtime = runtime
+        self.store: RuntimeStore = runtime.store
+
+    def get_by_command_id(self, command_id: str) -> PersistedWakeEvent | None:
+        event = self.runtime.events.get_event_by_command_id(command_id)
+        if event is None:
+            return None
+        return self._hydrate(event)
+
+    def list_records(self, obligation_id: str) -> tuple[PersistedWakeEvent, ...]:
+        return self.list_wake_events(aggregate_id=obligation_id)
+
+    def list_wake_events(
+        self, *, aggregate_id: str | None = None
+    ) -> tuple[PersistedWakeEvent, ...]:
+        events = self.runtime.events.list_events(
+            aggregate_type=WAKE_AGGREGATE_TYPE,
+            aggregate_id=aggregate_id,
+        )
+        hydrated: list[PersistedWakeEvent] = []
+        for event in events:
+            hydrated.append(self._hydrate(event))
+        if aggregate_id is not None:
+            assert_causal(tuple(item.record for item in hydrated))
+        return tuple(hydrated)
+
+    def append_record(
+        self,
+        record: WakeLedgerRecord,
+        *,
+        obligation: WakeObligation | None = None,
+        actor: str = WAKE_EVENT_ACTOR,
+    ) -> PersistedWakeEvent:
+        rows = self.append_records_atomic(
+            ((record, obligation),),
+            actor=actor,
+        )
+        return rows[0]
+
+    def append_records_atomic(
+        self,
+        items: Sequence[tuple[WakeLedgerRecord, WakeObligation | None]],
+        *,
+        actor: str = WAKE_EVENT_ACTOR,
+    ) -> tuple[PersistedWakeEvent, ...]:
+        if not items:
+            raise WakeLedgerError("append_records_atomic requires at least one record")
+        out: list[PersistedWakeEvent] = []
+        with self.store.transaction() as connection:
+            for record, obligation in items:
+                out.append(
+                    self._append_one(
+                        connection,
+                        record,
+                        obligation=obligation,
+                        actor=actor,
+                    )
+                )
+        return tuple(out)
+
+    def _append_one(
+        self,
+        connection,
+        record: WakeLedgerRecord,
+        *,
+        obligation: WakeObligation | None,
+        actor: str,
+    ) -> PersistedWakeEvent:
+        payload = event_payload_for(record, obligation=obligation)
+        oid = record.command_id.split(":", 1)[0]
+        job_id, attempt_id = _correlation(obligation, record)
+        existing = self.store.get_event_by_command_id(
+            record.command_id, connection=connection
+        )
+        if existing is not None:
+            self._assert_replay(existing, record, payload, job_id, attempt_id)
+            return self._hydrate(existing)
+        self.store.append_event(
+            connection,
+            aggregate_type=WAKE_AGGREGATE_TYPE,
+            aggregate_id=oid,
+            event_type=record.phase.value,
+            actor=actor,
+            job_id=job_id,
+            attempt_id=attempt_id,
+            payload=payload,
+            command_id=record.command_id,
+        )
+        written = self.store.get_event_by_command_id(
+            record.command_id, connection=connection
+        )
+        if written is None:
+            raise StateConflict("wake event did not persist")
+        return self._hydrate(written)
+
+    def _assert_replay(
+        self,
+        existing: Event,
+        record: WakeLedgerRecord,
+        payload: dict[str, object],
+        job_id: str | None,
+        attempt_id: str | None,
+    ) -> None:
+        oid = record.command_id.split(":", 1)[0]
+        if existing.aggregate_type != WAKE_AGGREGATE_TYPE:
+            raise StateConflict(
+                "command_id collision: existing event is not a wake aggregate"
+            )
+        if existing.aggregate_id != oid:
+            raise StateConflict(
+                "command_id collision: existing event aggregate_id disagrees"
+            )
+        if existing.event_type != record.phase.value:
+            raise StateConflict(
+                "command_id collision: existing event_type disagrees"
+            )
+        if existing.job_id != job_id or existing.attempt_id != attempt_id:
+            raise StateConflict(
+                "command_id collision: existing correlation disagrees"
+            )
+        if not payloads_equivalent(existing.payload, payload, phase=record.phase):
+            raise StateConflict(
+                "command_id collision: existing payload disagrees"
+            )
+
+    def _hydrate(self, event: Event) -> PersistedWakeEvent:
+        if event.command_id.startswith("WAKE-") and event.aggregate_type != WAKE_AGGREGATE_TYPE:
+            raise StateConflict(
+                "foreign Executive event stole a Wake command id"
+            )
+        record = wake_record_from_event(event)
+        obligation = None
+        if record.phase is LedgerPhase.WAKE_REQUESTED:
+            obligation = parse_obligation(event.payload)
+        return PersistedWakeEvent(event=event, record=record, obligation=obligation)
+
+
+def _correlation(
+    obligation: WakeObligation | None, record: WakeLedgerRecord
+) -> tuple[str | None, str | None]:
+    if obligation is not None:
+        attempt = obligation.attempt_id
+        if attempt and attempt.startswith("ATT-"):
+            return obligation.job_id, attempt
+        return obligation.job_id, None
+    if record.phase in ATTEMPT_PHASES:
+        return None, None
+    return None, None
+
+
+__all__ = [
+    "PersistedWakeEvent",
+    "WakeLedgerRepository",
+]

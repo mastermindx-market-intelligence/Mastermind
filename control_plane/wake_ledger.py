@@ -1,11 +1,13 @@
 """Wake event-ledger contract — existing Executive OS events, no new table.
 
-Future persistence (PR-2) writes these rows into ``events`` with::
+Durable rows live in Executive OS ``events`` with::
 
     aggregate_type = "wake"
     aggregate_id   = obligation_id
 
-PR-1 constructs and parses the records.  It does not write SQLite.
+PR-1 froze the record/codec.  PR-2 persists ``WAKE_REQUESTED`` and
+``SOURCE_RESOLVED`` through :mod:`control_plane.wake_persist` using that
+codec.  There is still no Wake table.
 """
 from __future__ import annotations
 
@@ -786,6 +788,283 @@ def _strict_positive_int(value: object, name: str = "attempt_n") -> int:
     return value
 
 
+WAKE_EVENT_ACTOR = "wake_reconcile"
+FORBIDDEN_EVENT_PAYLOAD_KEYS = frozenset(
+    {
+        "native_handle",
+        "native",
+        "thread_id",
+        "account_label",
+        "next_actions",
+        "worker_prose",
+        "objective",
+        "result",
+        "authority_level",
+    }
+)
+IDENTITY_PAYLOAD_KEYS = (
+    "schema",
+    "obligation_id",
+    "wake_kind",
+    "source_kind",
+    "source_ref",
+    "declared_target_seat",
+    "job_id",
+    "attempt_id",
+    "root_job_id",
+    "workstream",
+    "source_workstream",
+    "evidence_refs",
+)
+
+
+def identity_payload(obligation: WakeObligation) -> dict[str, object]:
+    """#82 identity envelope without timestamps.  Replay compares this, not emitted_at."""
+
+    full = obligation.to_dict()
+    return {key: full[key] for key in IDENTITY_PAYLOAD_KEYS}
+
+
+def requested_event_payload(obligation: WakeObligation) -> dict[str, object]:
+    payload = identity_payload(obligation)
+    payload["source_created_at"] = obligation.source_created_at
+    payload["emitted_at"] = obligation.emitted_at
+    return payload
+
+
+def resolution_event_payload(resolution: SourceResolution) -> dict[str, object]:
+    return {
+        "obligation_id": resolution.obligation_id,
+        "code": resolution.code.value,
+        "health": resolution.health.value,
+        "source_present": resolution.source_present,
+        "source_kind": resolution.source_kind,
+        "source_ref": resolution.source_ref,
+        "snapshot_digest": resolution.snapshot_digest,
+        "resolved_at": resolution.resolved_at,
+        "evidence_refs": list(resolution.evidence_refs),
+        "annotation": resolution.annotation,
+    }
+
+
+def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
+    return {
+        "obligation_id": ack.obligation_id,
+        "ack_mode": ack.ack_mode.value,
+        "target_seat": ack.target_seat,
+        "session_alias": ack.session_alias,
+        "reasoning_surface": ack.reasoning_surface,
+        "binding_id": ack.binding_id,
+        "acknowledged_at": ack.acknowledged_at,
+        "claimed_obligation_ids": list(ack.claimed_obligation_ids),
+        "operator_authority_receipt": ack.operator_authority_receipt,
+    }
+
+
+def attempt_event_payload(attempt: DeliveryAttempt) -> dict[str, object]:
+    return {
+        "obligation_id": attempt.obligation_id,
+        "attempt_n": attempt.attempt_n,
+        "attempt_command_id": attempt.attempt_command_id,
+        "destination_digest": attempt.destination_digest,
+        "route_digest": attempt.route_digest,
+        "binding_id": attempt.binding_id,
+        "binding_generation": attempt.binding_generation,
+        "session_alias": attempt.session_alias,
+        "reasoning_surface": attempt.reasoning_surface,
+        "wake_transport": attempt.wake_transport,
+    }
+
+
+def event_payload_for(
+    record: WakeLedgerRecord,
+    *,
+    obligation: WakeObligation | None = None,
+) -> dict[str, object]:
+    parse_ledger_record(record)
+    if record.phase is LedgerPhase.WAKE_REQUESTED:
+        envelope = obligation or record.obligation
+        if envelope is None:
+            raise WakeLedgerError("WAKE_REQUESTED payload requires the obligation envelope")
+        if envelope.obligation_id != _obligation_id_from_command(record.command_id):
+            raise WakeLedgerError("obligation_id does not match WAKE_REQUESTED command")
+        return requested_event_payload(envelope)
+    if record.phase is LedgerPhase.SOURCE_RESOLVED:
+        if record.source_resolution is None:
+            raise WakeLedgerError("SOURCE_RESOLVED payload requires resolution evidence")
+        return resolution_event_payload(record.source_resolution)
+    if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED:
+        if record.ack is None:
+            raise WakeLedgerError("TARGET_ACKNOWLEDGED payload requires acknowledgement evidence")
+        return ack_event_payload(record.ack)
+    if record.phase in ATTEMPT_PHASES:
+        return {
+            "obligation_id": _obligation_id_from_command(record.command_id),
+            "attempt_n": record.attempt_n,
+            "attempt_command_id": ledger_command_id(
+                _obligation_id_from_command(record.command_id),
+                LedgerPhase.DELIVERY_ATTEMPT,
+                attempt_n=record.attempt_n,
+            ),
+            "destination_digest": record.destination_digest,
+            "route_digest": record.route_digest,
+            "binding_id": record.binding_id,
+            "binding_generation": record.binding_generation,
+            "session_alias": record.session_alias,
+            "reasoning_surface": record.reasoning_surface,
+            "wake_transport": record.wake_transport,
+        }
+    raise WakeLedgerError(f"unsupported ledger phase {record.phase}")
+
+
+def payloads_equivalent(left: Mapping[str, object], right: Mapping[str, object], *, phase: LedgerPhase) -> bool:
+    if phase is LedgerPhase.WAKE_REQUESTED:
+        def _ident(payload: Mapping[str, object]) -> dict[str, object]:
+            return {key: payload.get(key) for key in IDENTITY_PAYLOAD_KEYS}
+
+        return _ident(left) == _ident(right)
+    return dict(left) == dict(right)
+
+
+def wake_record_from_event(event: object) -> WakeLedgerRecord:
+    """Validate a durable Executive Event as a Wake ledger row.
+
+    ``event`` is ``executive_runtime.Event``.  Typed as object so this module
+    does not import the runtime.
+    """
+
+    aggregate_type = str(getattr(event, "aggregate_type", "") or "")
+    aggregate_id = str(getattr(event, "aggregate_id", "") or "")
+    event_type = str(getattr(event, "event_type", "") or "")
+    command_id = str(getattr(event, "command_id", "") or "")
+    raw_seq = getattr(event, "sequence", None)
+    payload = getattr(event, "payload", {}) or {}
+    if aggregate_type != WAKE_AGGREGATE_TYPE:
+        raise WakeLedgerError("wake event aggregate_type must be wake")
+    if type(raw_seq) is not int or isinstance(raw_seq, bool) or raw_seq < 1:
+        raise WakeLedgerError("wake event sequence must be >= 1")
+    if not isinstance(payload, Mapping):
+        raise WakeLedgerError("wake event payload must be a mapping")
+    stolen = sorted(set(payload) & FORBIDDEN_EVENT_PAYLOAD_KEYS)
+    if stolen:
+        raise WakeLedgerError(
+            f"wake event payload contains forbidden field(s): {', '.join(stolen)}"
+        )
+    try:
+        phase = LedgerPhase(event_type)
+    except ValueError as exc:
+        raise WakeLedgerError(f"wake event_type {event_type!r} is not a ledger phase") from exc
+    oid = _obligation_id(aggregate_id)
+    if command_id.split(":", 1)[0] != oid:
+        raise WakeLedgerError("wake command_id does not belong to aggregate_id")
+    if ledger_command_id(oid, phase, attempt_n=_payload_attempt_n(payload, phase)) != command_id:
+        raise WakeLedgerError("wake command_id does not match phase")
+    if phase is LedgerPhase.WAKE_REQUESTED:
+        obligation = parse_obligation(payload)
+        if obligation.obligation_id != oid:
+            raise WakeLedgerError("WAKE_REQUESTED payload obligation_id disagrees with aggregate")
+        _assert_outer_correlation(event, obligation)
+        return requested_record(obligation)
+    if phase is LedgerPhase.SOURCE_RESOLVED:
+        try:
+            code = SourceResolutionCode(str(payload.get("code") or ""))
+            health = SourceReadHealth(str(payload.get("health") or ""))
+        except ValueError as exc:
+            raise WakeLedgerError("SOURCE_RESOLVED code/health is not a canonical value") from exc
+        resolution = parse_source_resolution(
+            SourceResolution(
+                obligation_id=str(payload.get("obligation_id") or ""),
+                code=code,
+                health=health,
+                source_present=bool(payload.get("source_present")),
+                source_kind=str(payload.get("source_kind") or ""),
+                source_ref=str(payload.get("source_ref") or ""),
+                snapshot_digest=str(payload.get("snapshot_digest") or ""),
+                resolved_at=str(payload.get("resolved_at") or ""),
+                evidence_refs=tuple(str(item) for item in (payload.get("evidence_refs") or ())),
+                annotation=str(payload.get("annotation") or ""),
+            ),
+            obligation_id=oid,
+        )
+        _assert_outer_correlation(event, None)
+        return parse_ledger_record(
+            WakeLedgerRecord(
+                command_id=command_id,
+                phase=phase,
+                source_resolution=resolution,
+            )
+        )
+    if phase is LedgerPhase.TARGET_ACKNOWLEDGED:
+        try:
+            ack_mode = AckMode(str(payload.get("ack_mode") or ""))
+        except ValueError as exc:
+            raise WakeLedgerError("ack_mode must be AckMode") from exc
+        ack = parse_acknowledgement(
+            WakeAcknowledgement(
+                obligation_id=str(payload.get("obligation_id") or ""),
+                ack_mode=ack_mode,
+                target_seat=str(payload.get("target_seat") or ""),
+                session_alias=str(payload.get("session_alias") or ""),
+                reasoning_surface=str(payload.get("reasoning_surface") or ""),
+                binding_id=payload.get("binding_id"),
+                acknowledged_at=str(payload.get("acknowledged_at") or ""),
+                claimed_obligation_ids=tuple(
+                    str(item) for item in (payload.get("claimed_obligation_ids") or ())
+                ),
+                operator_authority_receipt=payload.get("operator_authority_receipt"),
+            ),
+            obligation_id=oid,
+        )
+        _assert_outer_correlation(event, None)
+        return parse_ledger_record(
+            WakeLedgerRecord(command_id=command_id, phase=phase, ack=ack)
+        )
+    attempt_n = _strict_positive_int(payload.get("attempt_n"))
+    _assert_outer_correlation(event, None)
+    return parse_ledger_record(
+        WakeLedgerRecord(
+            command_id=command_id,
+            phase=phase,
+            attempt_n=attempt_n,
+            route_digest=str(payload.get("route_digest") or "") or None,
+            destination_digest=str(payload.get("destination_digest") or "") or None,
+            binding_id=str(payload.get("binding_id") or "") or None,
+            binding_generation=payload.get("binding_generation"),
+            session_alias=str(payload.get("session_alias") or "") or None,
+            reasoning_surface=str(payload.get("reasoning_surface") or "") or None,
+            wake_transport=str(payload.get("wake_transport") or "") or None,
+        )
+    )
+
+
+def _assert_outer_correlation(event: object, obligation: WakeObligation | None) -> None:
+    job_raw = getattr(event, "job_id", None)
+    attempt_raw = getattr(event, "attempt_id", None)
+    job_id = None if job_raw in (None, "") else str(job_raw)
+    attempt_id = None if attempt_raw in (None, "") else str(attempt_raw)
+    if attempt_id and not str(attempt_id).startswith("ATT-"):
+        raise WakeLedgerError("events.attempt_id cannot carry a Wake attempt identity")
+    if obligation is None:
+        return
+    if obligation.job_id is None:
+        if job_id is not None or attempt_id is not None:
+            raise WakeLedgerError("no-job wake requires events.job_id and events.attempt_id null")
+        return
+    if job_id not in (None, obligation.job_id):
+        raise WakeLedgerError("Event.job_id disagrees with the wake obligation envelope")
+    if obligation.attempt_id is None:
+        if attempt_id is not None:
+            raise WakeLedgerError("wake without ATT-* attempt_id cannot set events.attempt_id")
+    elif attempt_id not in (None, obligation.attempt_id):
+        raise WakeLedgerError("Event.attempt_id disagrees with the wake obligation envelope")
+
+
+def _payload_attempt_n(payload: Mapping[str, object], phase: LedgerPhase) -> int | None:
+    if phase in GLOBAL_PHASES:
+        return None
+    return _strict_positive_int(payload.get("attempt_n"))
+
+
 __all__ = [
     "AckMode",
     "DeliveryAttempt",
@@ -805,18 +1084,26 @@ __all__ = [
     "acknowledge",
     "already_delivered_to_destination",
     "assert_causal",
+    "ack_event_payload",
+    "attempt_event_payload",
     "attempt_record",
     "eligible_for_nudge",
+    "event_payload_for",
     "expected_resolution_code",
+    "identity_payload",
     "ledger_command_id",
     "make_delivery_attempt",
     "next_attempt_n",
     "parse_acknowledgement",
     "parse_ledger_record",
     "parse_source_resolution",
+    "payloads_equivalent",
     "reconstruct_status",
+    "requested_event_payload",
     "requested_record",
+    "resolution_event_payload",
     "resolve_source",
     "resolved_record",
     "unfinished_attempt_n",
+    "wake_record_from_event",
 ]

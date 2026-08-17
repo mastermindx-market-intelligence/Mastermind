@@ -99,6 +99,8 @@ _WAKE_MODULES = (
     _ROOT / "control_plane" / "wake_dispatcher.py",
     _ROOT / "control_plane" / "wake_transport.py",
     _ROOT / "control_plane" / "wake_ledger.py",
+    _ROOT / "control_plane" / "wake_persist.py",
+    _ROOT / "control_plane" / "wake_reconcile.py",
 )
 _FROZEN = "2026-08-16T16:00:00Z"
 _EARLIER = "2026-08-16T15:00:00Z"
