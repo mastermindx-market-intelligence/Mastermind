@@ -1,80 +1,103 @@
-# OHF-P1A — Adversarial review packet
+# OHF-P1A-R2 — Adversarial review packet
 
 **Date:** 2026-08-16
-**Status:** attack surface for a fresh-context reviewer. Not self-acceptance.
+**Status:** attack surface after R1 remediation. Not self-acceptance.
+**Typed freeze:** `control_plane/operator_harness_contract.py`
 
-Threats from the P1A commission §44. Each row is prevent / detect / recover
-or explicitly UNKNOWN.
+Legend: **P** prevent, **D** detect, **R** recover, **U** unknown, **X** unsafe
+if the old P1A-R1 rule were kept (now closed in contract).
 
-Legend: **P** prevent, **D** detect, **R** recover, **U** unknown.
-
-| # | Threat | P | D | R | Notes |
+| # | Threat | P | D | R | Layer |
 |---|---|---|---|---|---|
-| 1 | Same native thread attached by two Executive processes | P | D | R | Writer fence on `(provider, account, native_session_id)`; provider also refuses second writer (P0) |
-| 2 | Same native thread reused by two Attempts | P | D | | Unique active Attempt per native id; new Attempt requires fresh session |
-| 3 | SIGKILL leaves writer active | | D | R | P0 verified. RECOVERY_BLOCKED_ACTIVE_WRITER; no steal |
-| 4 | Stale generation resumes after newer owns session | P | D | | generation_number unique; open-writer partial unique; fence CAS |
-| 5 | Resume silently changes model | P | D | | ExecutionProfile digest compare before resume; mismatch → refuse / new Attempt |
-| 6 | Resume silently changes sandbox | P | D | | same |
-| 7 | Resume silently changes approval policy | P | D | | same |
-| 8 | Resume uses wrong cwd/worktree | P | D | | Attempt workspace vs `thread` cwd; mismatch refuse |
-| 9 | `CODEX_HOME` points to another account | P | D | | Attempt binds account_label + home identity hash (non-secret); live mode already refuses `~/.codex` |
-| 10 | Ambient app appears after Codex update | | D | P | observed digest vs REQUIRED/FORBIDDEN/allowlist; unclassified fails write profile |
-| 11 | Bundled skill appears after update | | D | P | same |
-| 12 | Project-local skill/plugin injection | | D | P | extraRoots and workspace skills are observed; unclassified/forbidden refuse |
-| 13 | Malicious MCP tool injection | | D | P | required MCP allowlist; extra servers unclassified/forbidden |
-| 14 | Provider event leaks credentials | P | D | | redaction before persist; refuse to write secret-shaped evidence (P0/P1A probes) |
-| 15 | Native fork writes into same worktree concurrently | P | | | V1 helpers read-only; parallel writes are child Jobs + worktrees (1G L13 preserved) |
-| 16 | Native helper counted as independent review | P | D | | review must be a different `worker_id` Job; native fork cannot satisfy |
-| 17 | Broader-authority session reused under narrower job | P | | | HarnessSession cannot cross Attempts |
-| 18 | Narrower session reused after authority widening | P | | | same; widening is a new Attempt + fresh session |
-| 19 | Provider says completed but validation has not run | P | D | | adapter returns candidate only; runtime completes after validation |
-| 20 | Controller crash during graceful generation handoff | | D | R | QUIESCING generation + adopt_attempt; do not start second writer |
-| 21 | Host reboot while generation says ACTIVE | | D | R | boot_id mismatch ⇒ dead generation; resume only if writer-safe (**untested**) |
-| 22 | Backup/restore with stale active writer record | P | D | R | restore is whole DB; fence still unique; reconcile expired/lost path; operator may need interrupt (**partially unknown** on live App Server after restore) |
+| 1 | Two Executive writers on one `(worker_id, provider_session_id)` | P | D | R | unique held-writer index + provider writer |
+| 2 | Opaque session id collision across workers | P | | | realm includes `worker_id` |
+| 3 | Session reused across Attempts | P | D | | epoch bound to one Attempt; realm unique per worker |
+| 4 | SIGKILL then `ended_at` frees writer | P | D | R | `executive_writer_held` survives process death |
+| 5 | Stale generation resumes after newer owns session | P | D | | generation_number + held-writer uniqueness |
+| 6 | Resume changes model/sandbox/approval | P | D | | requested profile digest; mismatch REFUSE / NEW_ATTEMPT |
+| 7 | Wrong cwd/worktree / recreated path | P | D | | workspace inode+device+uid+gid+base SHA (`executive_workspace` + Gate B path law) |
+| 8 | `CODEX_HOME` other account | | D | U | ACCOUNT_REALM_ATTESTATION_UNPROVEN; path/inode are not identity |
+| 9 | Ambient app/skill after update | D | P | | observed attestation vs REQUIRED/FORBIDDEN/allowlist |
+| 10 | Malicious repository `AGENTS.md` | P | D | | requested profile + sandbox + unclassified fail-closed; model is not the boundary |
+| 11 | Malicious project-local `SKILL.md` | P | D | | capability attestation; unclassified write REFUSE |
+| 12 | Malicious plugin config | P | D | | same; residual plugins remain UNCLASSIFIED |
+| 13 | Malicious MCP server/tool description | P | D | | MCP allowlist; extra servers unclassified/forbidden |
+| 14 | Malicious MCP result | P | | | treat output untrusted; no universal MCP item events |
+| 15 | Future browser/web prompt injection | P | U | | out of P1A; later Resource Fabric + sandbox |
+| 16 | Native helper inherits parent write tools | P | D | | helpers disabled on write-capable V1 unless ceiling proven |
+| 17 | Helper counted as independent review | P | D | | Phase 1F different `worker_id` |
+| 18 | Ambient provider skill conflicts with Mastermind skill | D | P | | attestation; unclassified fail-closed |
+| 19 | Global user config silently overrides Attempt profile | D | P | | observed config digest vs requested |
+| 20 | Provider completed without validation | P | D | | CandidateResult; runtime completes after validation/review |
+| 21 | Controller crash; PID adoption of live App Server | P | D | R | LIVE APP SERVER ADOPTION = NOT_SUPPORTED; terminate; new generation |
+| 22 | Host reboot while generation says ACTIVE | | D | R | boot_id mismatch; writer not RELEASED (**untested live**) |
+| 23 | Backup/restore resurrects writer | P | D | R | restore invalidates held; epochs abandoned; Attempt LOST |
+| 24 | Stale S1 writer locks whole account | P | | | fence is session-realm, not account-wide; S2 allowed |
+| 25 | Terminal Attempt erases provider writer uncertainty | P | | | provider state may remain HELD/UNKNOWN |
+| 26 | Credential in events | P | D | | redaction; AuthRealmFact forbids tokens |
+| 27 | Kitchen-sink prepare() starts process / reads creds | P | | | prepare rejected; validate/stage typed |
+| 28 | reconcile() becomes hidden lifecycle authority | P | | | ReconcileReport forbids kill/resume/LOST |
+| 29 | Parked native leader after Phase 1F parent-container | P | | | V1_QUALITY_TRADEOFF_ACCEPTED; fresh aggregation Attempt |
+| 30 | Context rotation burns `attempt_limit` | P | | | CARDINALITY_B; rotation = new epoch |
 
-## Failure taxonomy (not conflated with semantic work failure)
+## Failure taxonomy
+
+Adapter reports a typed `AdapterFailureClass`. It does not own routing.
 
 | Class | Cool pool? | Attempt effect |
 |---|---|---|
-| Provider quota exhausted | yes | RATE_LIMITED / later retry |
-| Provider concurrency limited | maybe | recovery, not code failure |
-| Auth expired/failed | no | interrupt; never copy auth.json |
-| Harness process crash | no | recovery machine |
-| Native session unavailable | no | recovery / new Attempt |
-| Active writer conflict | no | RECOVERY_BLOCKED_ACTIVE_WRITER |
-| Tool transport / MCP failure | no | Attempt error |
-| Config attestation failure | no | refuse launch |
-| Capability missing / forbidden | no | refuse launch |
-| Workspace mismatch | no | refuse |
-| Validation failure | no | Job/Attempt failed |
-| Model/semantic failure | no | work failure |
-| Human intervention required | no | APPROVAL_REQUIRED |
+| QUOTA_OR_RATE_LIMIT | yes | RATE_LIMITED / later retry |
+| PROVIDER_CONCURRENCY | maybe | recovery, not code failure |
+| AUTH_FAILURE | no | interrupt; never copy auth.json |
+| PROCESS_CRASH | no | recovery machine |
+| SESSION_MISSING | no | new epoch or LOST depending on placement |
+| ACTIVE_WRITER_CONFLICT | no | do not start second writer |
+| CAPABILITY_ATTESTATION_FAILURE | no | REFUSE launch |
+| WORKSPACE_MISMATCH | no | REFUSE |
+| CONFIG_DRIFT | no | re-attest or NEW_ATTEMPT |
+| MCP_OR_TOOL_TRANSPORT_FAILURE | no | Attempt error |
+| VALIDATION_FAILURE | no | Job/Attempt failed |
+| MODEL_OR_WORK_RESULT_FAILURE | no | work failure |
+| HUMAN_APPROVAL_REQUIRED | no | wait; not a crash |
 
-## Remaining UNKNOWNs
+## Mandatory scenario results (A–J)
 
-- Transitive orphan / descendant process cleanup (P0 UNKNOWN; not upgraded).
+| ID | Result |
+|---|---|
+| A graceful restart | SAME_ATTEMPT, same epoch, generation 2 resumes S1 after RELEASED |
+| B context rotation | SAME_ATTEMPT, epoch 2 / S2, attempt_count unchanged |
+| C SIGKILL writer retained | process PROVEN_DEAD, Executive held, provider UNKNOWN then HELD; fence not freed |
+| D abandon poisoned S1 | epoch 1 ABANDONED, provider may stay HELD, epoch 2 / S2 CURRENT, same Attempt |
+| E opaque id collision | W1/`abc` and W2/`abc` legal |
+| F duplicate writer | generation B attach to W1/S1 refused |
+| G controller restart | lease adoptable; stdio not; terminate old process; new generation |
+| H restored database | generation historical; writer invalidated; session not resumed; Attempt LOST |
+| I profile mismatch | LaunchDecision REFUSE; no work turn |
+| J unclassified capability | write REFUSE; read-only lab only with explicit lab policy |
+
+## Remaining UNKNOWNs / gates
+
+- Transitive orphan / descendant process cleanup (P0 UNKNOWN).
 - Official writer-release/steal API (must not be reverse-engineered).
-- Host reboot, controller restart, App Server still-alive-while-controller-restarts (designed, not VERIFIED).
-- Whether disabling `features.plugins` removes residual `github:*` /
-  `openai-templates:*` without harming fixture MCP.
-- Structured MCP item events as an adapter-required capability (P0 false).
-- Multi-host `host_id` adoption.
-- Whether a future harness without native resume can still meet
-  COMMON_REQUIRED (yes by design: resume is OPTIONAL).
-- Backup/restore while a real App Server writer is still alive on the host.
+- Host reboot live behavior.
+- ACCOUNT_REALM_ATTESTATION_UNPROVEN.
+- Residual `github:*` / `openai-templates:*` / `plugin-management` write-canary.
+- Whether `features.plugins=false` exists and removes that residue (optional; not run in R2).
+- Native-helper capability ceiling on write-capable Codex.
+- Structured MCP item events (not universal).
+- Multi-host machine identity (postponed).
 
-## Reviewer brief
+## Reviewer brief for R2
 
-Attack especially:
+Attack the remediation, not the original 1:1 design. Especially:
 
-1. Identity boundaries (Attempt vs HarnessSession vs ProcessGeneration vs fork).
-2. Schema minimality (no `harness_sessions` table in V1).
-3. Single-writer fence vs provider active-writer.
-4. Recovery without lock deletion.
-5. Capability attestation after partial reduction.
-6. Phase 1F-B parent-container vs long-lived native leaders.
-7. Source-law: no dependency on unmerged #72.
-8. Credential isolation.
-9. Native-helper vs independent review.
-10. Migration/rollback of NULL historical columns.
+1. CARDINALITY_B vs merged `attempt_count`.
+2. `(worker_id, provider_session_id)` fence vs `ended_at`.
+3. Live App Server adoption deleted.
+4. Requested vs observed seal points.
+5. Typed adapter: could P1B still invent a method semantic?
+6. Restore → LOST and abandoned epochs.
+7. Helper enforcement vs prompt policy.
+8. No hidden #66/#72 dependency.
+9. No `native_session_id` synonym.
+10. Consistency table vs schema SQL.

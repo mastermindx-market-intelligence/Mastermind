@@ -1,437 +1,415 @@
-# OHF-P1A — Operator Harness Constitution
+# OHF-P1A-R2 — Operator Harness Constitution
 
 **Date:** 2026-08-16
-**Status:** architecture contract for independent review. Not accepted law. Not armed.
+**Status:** architecture contract after independent review R1. Not accepted law. Not armed.
+**Remediation of:** architecture SHA `f3c1cdb7d3b40103450cf3f845ac0648479585e7`
+**Governing review:** `research/EXECUTIVE_OS_OHF_P1A_INDEPENDENT_ARCH_SECURITY_REVIEW_2026-08-16.md` (`3f1ee290ba147313d3bee3a1192e18b21313f88d`)
+**Typed freeze:** `control_plane/operator_harness_contract.py` (`mastermind.operator_harness/v1`)
 **Depends on:** merged OHF-P0 (`da6bd78e078b96db8c121b16f1b10e3fd70e6fef`, PR #81)
-**Does not depend on:** unmerged PR #66 or PR #72 becoming law
-**Production arming / Phase 1F-C / CodexOperatorAdapter: prohibited by this commission**
+**Does not depend on:** unmerged PR #66 or PR #72
+**Production arming / Phase 1F-C / CodexOperatorAdapter / SCHEMA_VERSION 3: prohibited**
 
-Authoring verdict is not architecture acceptance. Final state of this PR:
-`READY_FOR_INDEPENDENT_REVIEW`.
+Authoring verdict of this remediation: `READY_FOR_R2_REREVIEW`.
+That is not architecture acceptance and not permission to start P1B.
 
 ## 0. One-sentence law
 
-Executive OS owns organizational work. A native harness owns the local
-reasoning loop inside one Attempt. Provider-completed is evidence, never
-Executive completion.
+Executive OS owns organizational work. A native harness owns a local reasoning
+loop inside one Attempt. Provider-completed is evidence, never Executive
+completion.
 
-## 1. Source hierarchy used
+Accepted direction from independent review, preserved:
 
-Binding / merged:
+- Executive SQLite is the sole organizational lifecycle authority.
+- Native harness state is subordinate execution state.
+- OS process identity ≠ native harness session identity.
+- Process death ≠ provider writer release.
+- Native session state never becomes Executive authority.
+- Cross-Attempt native-session reuse is prohibited.
+- `WorkerExecutionAdapter` remains the sealed-worker floor.
+- Native helper/fork ≠ Executive child Job and ≠ independent review.
 
-- `research/MASTERMIND_CHARTER_V2.md` (P7 one source of truth; P8 shadow before authority)
-- `config/strategic_state.yml` (`duplicate_control_planes: prohibited`)
-- `config/authority_map.yml` (current merged map; no `seats:` block on master)
-- `AGENTS.md` executive contract
-- `research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md`
-- `docs/EXECUTIVE_WORKER_ROUTING.md`
-- `control_plane/executive_runtime.py` (`SCHEMA_VERSION = 2`)
-- `control_plane/worker_adapter.py` (`WorkerExecutionAdapter` sealed floor)
-- `research/EXECUTIVE_OS_OHF_P0_LIVE_ACCEPTANCE_2026-08-16.md`
+## 1. Source hierarchy
 
-Draft / not law:
+Binding / merged: Charter P7/P8, `strategic_state.yml` (`duplicate_control_planes`),
+merged `authority_map.yml`, `AGENTS.md`, Phase 1F contract, worker routing,
+`executive_runtime.py` (`SCHEMA_VERSION = 2`), `worker_adapter.py`,
+`executive_supervisor.py`, `codex_worker.py`, `executive_workspace.py`,
+`executive_backup.py`, P0 live acceptance.
 
-- PR #66 Phase 1G Agent Fabric (`session_handles`, `mastermind.agent_handoff.v1`, L13–L16)
-- PR #72 G0 source-law ruling (seats, decision altitude, priority split)
+Draft / not law: PR #66, PR #72. P1A does not encode G0 seats or 1G runtime.
 
-Superseded by P0 evidence:
+Superseded by P0 + this remediation: Phase 1G `session_handles` mixing pid with
+session id; P1A-R1 `Attempt 1:1 HarnessSession`; live App Server stdio adoption.
 
-- Phase 1G `session_handles` as a single row mixing `provider_session_id` with
-  `pid/pgid/boot_id`. Live App Server proved those are different identities.
-  Replace with `HarnessSession` + `ProcessGeneration`. Do not keep both names
-  for the same concept.
+Canonical typed freeze for adapter/identity helpers is
+`control_plane/operator_harness_contract.py`. Prose here must not contradict it.
 
-Unresolved source-law dependency:
+## 2. Definition of Attempt
 
-- P1A does **not** require PR #72 to merge. Seat labels and Chairman-reserved
-  categories are organizational, not harness identity. If G0 later lands, OHF
-  reads it; OHF must not encode G0 tables as if they already exist.
+An Executive Attempt is **one leased execution placement of a Job**:
 
-## 2. Ownership matrix
+one claim against one `(worker_id, quota_class)`, one authority-policy hash,
+one workspace binding, one lease/fence generation, and one Executive retry slot
+(`attempt_number` toward `attempt_limit`).
 
-| Concept | Canonical owner | Durable source | Who may mutate | Native harness influence | Survives process restart |
-|---|---|---|---|---|---|
-| Company objective | Chairman / strategy Git | `strategic_state.yml` (advisory) | Chairman path only | no | yes (Git) |
-| Job | Executive runtime | `jobs` | runtime txn | no | yes |
-| Parent/child | Executive runtime | `jobs.parent_job_id` | runtime txn | no | yes |
-| Authority envelope | Executive runtime + authority map | job authority columns | runtime txn | no | yes |
-| Priority | Executive runtime | `jobs.priority` | runtime txn | no | yes |
-| Attempt | Executive runtime | `attempts` | runtime txn | no | yes |
-| Workspace | Executive runtime | `jobs.branch/worktree` | runtime txn | cwd must match; cannot choose | yes |
-| Provider | placement | `workers.provider` + attempt | new Attempt if changed | no | yes |
-| Provider account | placement | `workers.account_label` | new Attempt if changed | no | yes |
-| Capacity pool | quota class | `worker_quota_classes` | supervisor | no; quota events are observations | yes |
-| Exact model | ExecutionProfile | Attempt snapshot | new Attempt if changed | served≠requested → refuse or new Attempt | snapshot yes |
-| Harness kind | ExecutionProfile | Attempt snapshot | new Attempt if AppServer→PTY | no | snapshot yes |
-| Native session/thread | HarnessSession | Attempt native id + generations | resume inside Attempt only | yes, locally | yes if graceful |
-| OS process | ProcessGeneration | `process_generations` (proposed) + current attempt process fields | supervisor | no | no |
-| Native fork/helper | parent HarnessSession | subordinate handle JSON/events | adapter observation | yes, private | maybe; not a Job |
-| Tool capability | ExecutionProfile policy | Attempt snapshot | new Attempt if load-bearing | discover ≠ permit | snapshot yes |
-| Skill | ExecutionProfile | Attempt snapshot | see drift matrix | discover ≠ grant | snapshot yes |
-| MCP | ExecutionProfile | Attempt snapshot | see drift matrix | discover ≠ grant | snapshot yes |
-| Sandbox | ExecutionProfile | Attempt snapshot | new Attempt | no | snapshot yes |
-| Approval policy | ExecutionProfile | Attempt snapshot | new Attempt | no | snapshot yes |
-| Browser / devserver | Resource Fabric later | not in P1A | n/a | n/a | n/a |
-| Result | Executive runtime | `attempts.result_json` after validation | runtime txn | candidate only | yes |
-| Validation | Executive runtime | validation receipts | supervisor | no | yes |
-| Independent review | Executive child Job | `jobs.reviews_job_id` | runtime txn | native review-subagent does **not** count | yes |
-| Provider quota | provider | observation events | none in Executive | telemetry only | observation yes |
+Native conversational hygiene does not redefine this.
 
-Non-negotiable: native provider state never owns Job lifecycle, authority,
-Executive priority, review acceptance, Executive completion, or placement.
+**Immutable after claim:** `attempt_id`, `job_id`, `attempt_number`, `worker_id`,
+`quota_class`, `authority_policy_hash`, `started_at_ms`.
 
-## 3. Identity model
+**Attempt-immutable placement/security envelope once RequestedExecutionProfile
+is sealed:** provider, requested model, harness kind, exact harness binary
+digest, workspace identity (path + inode/device/uid/gid + base SHA), sandbox,
+approval, network, REQUIRED/FORBIDDEN sets, allowed write paths, native-helper
+policy, write-capable flag.
+
+**Must not increment `attempt_count` / `attempt_number`:** context rotation,
+compaction, graceful process replacement, SIGKILL recovery, abandoning poisoned
+S1 and starting S2, native fork/helper.
+
+**Does consume a retry slot:** a new Attempt created because placement or the
+security envelope changed, including Phase 1F aggregation after leader release.
+
+## 3. Identity hierarchy (CARDINALITY_B)
 
 ```text
 Job
- └── Attempt                         1:N
-      └── primary HarnessSession     1:1
-           ├── ProcessGeneration 1
-           ├── ProcessGeneration 2
-           └── ProcessGeneration N
-           └── subordinate NativeSessionHandles (forks/helpers)
+ └── Attempt                                    1:N
+      ├── primary HarnessSessionEpoch 1         sequential
+      │     ├── ProcessGeneration 1
+      │     └── ProcessGeneration 2
+      ├── primary HarnessSessionEpoch 2
+      │     └── ProcessGeneration 3
+      └── subordinate native forks/helpers      not epochs, not Jobs
 ```
 
-Cardinalities:
+- One Attempt has N **sequential** primary session epochs.
+- At most one epoch per Attempt is `CURRENT`.
+- A native fork/helper is not a primary epoch and does not consume the epoch
+  counter.
+- A ProcessGeneration is one OS incarnation of a harness process for one epoch.
+- An epoch may have many generations (graceful replace / resume).
+- Cross-Attempt session reuse is `REFUSE`.
 
-- One Job has many Attempts.
-- One Attempt has exactly one **primary** HarnessSession.
-- One HarnessSession has many ProcessGenerations; **at most one** Executive-owned
-  active writer generation.
-- Native forks/helpers are subordinate handles of the primary session, not
-  additional HarnessSessions and not Executive Jobs.
+### 3.1 HarnessSessionEpoch
 
-This is design **A**, not B. B (N HarnessSessions per Attempt with roles) would
-invite treating a helper as a second governed principal. P0 fork proof showed
-branchable conversational state, not a second budget/authority principal.
+One primary provider-native conversational identity used sequentially inside
+exactly one Attempt.
 
-`session_handles` from PR #66 is refined, not duplicated: the 1G row mixed
-session id and process identity. Those become two objects.
+Properties:
 
-Wake Fabric `SessionTarget` remains an alias/routing map, not lifecycle.
+- belongs to exactly one Attempt
+- monotonically increasing `epoch_number`
+- `provider_session_id` may be NULL until creation completes, then immutable
+- may own multiple ProcessGenerations sequentially
+- can become `TERMINAL` or `ABANDONED` / nonresumable
+- cannot become `CURRENT` again after abandonment
+- never crosses Attempt boundary
+- at most one `CURRENT` primary epoch per Attempt
 
-### 3.1 Attempt immutables
+Creates an epoch: first start_session on an Attempt; intentional context
+rotation; session corrupt/lost with placement still valid; abandoning S1 and
+starting S2.
 
-One Attempt is one immutable combination of:
+Terminates an epoch: graceful session end with confirmed stop; intentional
+rotation of the old epoch; Attempt terminalization.
 
-Job, authority envelope, allowed-write paths, workspace identity, provider,
-provider account, capacity slot, exact model, harness kind, harness version,
-ExecutionProfile.
+Abandons an epoch: recovery deadline after unsafe writer state; restore
+invalidation; supervisor decision that S1 must never be resumed.
 
-Change any of those → new Attempt or refuse. See §4.
+Abandoned epoch resume: **forbidden**.
 
-### 3.2 HarnessSession must not cross Attempts
+Rotation increments epoch count, **not** Attempt count.
 
-A native conversation can carry previous authority, workspace, tools, account,
-and untrusted tool output. Reusing it under another Attempt is a governance
-hole.
+### 3.2 Canonical session identity
 
-Law:
+One name: `provider_session_id`.
 
-```text
-process restart inside same Attempt → resume same HarnessSession
-new Attempt → provider-neutral Handoff → fresh HarnessSession
-```
+It already exists on `attempts` for sealed workers (write-once / COALESCE).
+For rich OHF it lives on `harness_session_epochs.provider_session_id`.
+`attempts.provider_session_id` is then a same-transaction projection of the
+current epoch, or the legacy sealed-worker field when no epoch rows exist.
 
-P1A does **not** propose reusing one native session across Attempts. No proof
-exists that authority cannot widen, workspace cannot drift, or tool output
-cannot contaminate the next envelope.
+**`native_session_id` is a forbidden synonym.** Do not add that column.
+
+### 3.3 ProcessGeneration
+
+One concrete OS incarnation of a harness process associated with one primary
+session epoch. Not an Attempt, not a native conversation, not a retry slot, not
+organizational authority.
+
+Canonical process identity: `pid`, `pgid`, `process_start_identity`, `boot_id`
+on the generation row. Attempt pid fields are a same-transaction projection of
+the current generation for rich OHF, or remain the sealed-worker canonical
+fields when no generation rows exist.
+
+`ended_at` means: the OS process was observed terminated. It does **not** mean
+Executive writer released, provider writer released, or session resumable.
 
 ## 4. Attempt-boundary matrix
 
-| Case | Decision | Rationale |
-|---|---|---|
-| Graceful App Server restart | **same Attempt** | P0: PID 30646→30816, same thread |
-| Crashed App Server with successful safe resume | **same Attempt** | same native session after bounded reconciliation |
-| SIGKILL with active-writer refusal | **same Attempt while RECOVERY_PENDING**; after deadline **new Attempt** | P0: writer lease survives kill; V1 does not steal |
-| Codex native context compaction | **same Attempt** | harness-private; not a governance boundary |
-| Native thread fork for private analysis | **same Attempt** | subordinate handle; not a child Job |
-| Fresh native thread because context became poor | **new Attempt** | new primary session; handoff required |
-| Model changes | **new Attempt** | profile immutable |
-| Served model differs from requested | **refuse** launch; if already running **new Attempt** after interrupt | cannot silently change the profile |
-| Provider changes | **new Attempt** | realm change |
-| Provider account changes | **new Attempt** | realm change; auth domain is not copyable |
-| `CODEX_HOME` changes | **new Attempt** | different auth domain |
-| Harness AppServer → PTY | **new Attempt** | different harness kind |
-| Harness version changes | **new Attempt** if binary/protocol digest changes in a load-bearing way | treat as profile identity |
-| Skill bundle changes | **new Attempt** if REQUIRED/FORBIDDEN set changes; **same Attempt** only for documented ALLOWED_AMBIENT baseline refresh that does not add unclassified/forbidden | see drift law |
-| MCP bundle changes | **new Attempt** if required/forbidden servers change | |
-| Ambient capability baseline changes | **new Attempt** for write profiles unless the new names are in the version allowlist | fail-closed unclassified |
-| Sandbox changes | **new Attempt** | |
-| Approval policy changes | **new Attempt** | |
-| Network permission changes | **new Attempt** | |
-| Authority changes | **new Attempt** | |
-| Allowed-write paths change | **new Attempt** | |
-| Workspace changes | **new Attempt** | |
-| Base SHA changes | **new Attempt** | work identity changed |
+Canonical copy: `ATTEMPT_BOUNDARY_MATRIX` in
+`control_plane/operator_harness_contract.py`.
 
-## 5. Native helper / fork law
-
-- Native helper/fork ≠ Executive child Job.
-- No independent Executive budget, authority, review, provider/account, or
-  durable company deliverable.
-- V1 helpers may analyze / research / read-only explore inside the parent
-  Attempt ceiling.
-- They may **not** fan out write-capable parallel work.
-- Parallel durable writes remain: Executive child Job → separate worktree →
-  separate Attempt → validation/review.
-- Do not promote a private helper retroactively into a Job.
-- A native review subagent / forked thread / second agent in the same Attempt
-  does **not** satisfy Phase 1F independent review. Minimum remains a different
-  `worker_id`.
-
-If helper work needs a different provider, account, worktree, deliverable,
-review, or authority envelope: create the child Job **prospectively**.
-
-## 6. Phase 1F-B compatibility
-
-A parent with living children is a container and cannot be claimed as ordinary
-worker work. Therefore OHF does **not** design:
-
-- Fable leader claims parent, delegates, stays alive for hours, polls, aggregates.
-
-Expected pattern:
-
-```text
-bounded planning turn (rich HarnessSession on a planning Attempt)
-  → durable children created
-  → leader process/session released (graceful stop; Attempt checkpoints)
-
-children run independently (own Attempts, own sessions)
-
-later explicit orchestration Attempt
-  → receive durable results + provider-neutral handoff
-  → bounded aggregation/repair turn on a fresh HarnessSession
-```
-
-Rich native continuity lives **inside one Attempt**, not across the parent
-container's lifetime. Planning and later aggregation are different Attempts
-joined by handoff, not one 3-hour native thread. This preserves L7 (no
-persistent leader process) and avoids a second scheduler.
-
-## 7. Single-writer law
-
-At most one Executive-owned active ProcessGeneration may control one native
-primary HarnessSession.
-
-Fence key:
-
-```text
-(provider, account_label, native_session_id)
-```
-
-A native thread id is meaningless outside its provider/account realm.
-Additionally: unique active Attempt per native session.
-
-Durable owner: Executive SQLite, `BEGIN IMMEDIATE`, same pattern as
-`worker_quota_classes.fence_counter` / `attempts.fence_generation`.
-No sidecar lock DB. No filesystem lock as organizational truth.
-Provider "active writer" is additional defense, not lifecycle authority.
-
-Acquire:
-
-1. Check no ACTIVE/QUIESCING/RESUMING generation for that fence key.
-2. Old generation proven quiesced (process dead **and** resume-safe, or
-   graceful stop completed).
-3. Insert new generation; bump fence; record pid/pgid/start/boot.
-4. Else enter RECOVERY_PENDING; do not start a second writer.
-
-Release: graceful stop → process exit observed → generation ended → fence free.
-Stale writer: SIGKILL path stays RECOVERY_BLOCKED_ACTIVE_WRITER until deadline,
-then Attempt INTERRUPTED/LOST, checkpoint if trustworthy, handoff, new Attempt,
-fresh session. V1 does not steal writers or delete Codex lock files.
-
-Controller restart: `adopt_attempt` already CAS-bumps the Attempt lease. The
-harness writer fence is separate: re-prove the process generation (pid +
-start identity + boot id) before resume. Do not adopt a live App Server from
-PID alone.
-
-Host reboot: boot_id mismatch ⇒ generation dead. Native session may still
-exist in provider storage. Resume only after writer-safe reconciliation;
-otherwise new Attempt. **Untested in P0. Not VERIFIED.**
-
-## 8. Recovery state machine
-
-Do not add a new AttemptStatus for every harness fact. Map onto existing
-Attempt statuses plus generation-scoped recovery class.
-
-| Concept | Where | Notes |
-|---|---|---|
-| CLAIMED / RUNNING / CHECKPOINTED / COMPLETED / FAILED / LOST / CANCELLED | AttemptStatus (existing, durable) | |
-| QUIESCING | ProcessGeneration.termination_class | graceful stop in flight |
-| RECOVERY_PENDING | ProcessGeneration.recovery_class | durable; gates second writer |
-| RECOVERY_BLOCKED_ACTIVE_WRITER | ProcessGeneration.recovery_class | P0 observed |
-| RESUMING | ProcessGeneration.resume_intent/result | durable until success/fail |
-| ACTIVE writer | derived: one generation with ended_at NULL and resume_result in {active, resumed} | |
-| Adapter RPC errors | receipts only | |
-
-Graceful (P0 verified):
-
-```text
-RUNNING → request stop → process exits → fence releases
-→ new ProcessGeneration → thread/resume → same thread → RUNNING
-```
-
-Hard-crash (P0 observed):
-
-```text
-RUNNING → SIGKILL → process gone → RECOVERY_PENDING
-→ bounded reconcile
-  safe resume → new generation ACTIVE
-  writer blocked → RECOVERY_BLOCKED_ACTIVE_WRITER
-→ deadline exceeded → Attempt LOST/CHECKPOINTED + handoff + new Attempt
-```
-
-Deadline fail-closed attacks:
-
-- Data loss: mitigate with last trusted checkpoint_json before interrupt.
-- Duplicate work: new Attempt starts from handoff, not from silent resume.
-- Double-writer: fence refuses a second generation while blocked.
-
-## 9. ExecutionProfile
-
-Immutable JSON snapshot + content digest **on the Attempt**. Not a mutable
-profile row. A later content-addressed table is optional sharing; V1 does not
-need it.
-
-Required snapshot contents:
-
-- harness kind, binary version, binary digest, protocol version
-- requested model, served model
-- auth class, provider, account/slot (labels only)
-- requested capability digest, observed capability digest
-- skill / MCP / plugin manifest digests
-- sandbox, approval policy, network policy
-- effective config digest (non-secret)
-- capability policy: REQUIRED / ALLOWED_AMBIENT / FORBIDDEN
-- unclassified handling: fail-closed on write profiles
-
-Capability presence is not authority:
-
-`DISCOVERED → AVAILABLE → PERMITTED → INVOKABLE → INVOKED`
-
-Native tool list ≠ Executive permit. Skill installation ≠ capability grant.
-
-P1A 0.147.0 ChatGPT Pro App Server, after `features.apps=false` and
-`skills.bundled.enabled=false`:
-
-- REQUIRED: `ohf-probe`, `ohf_probe` / `ohf_probe_echo` (laboratory)
-- FORBIDDEN for write profiles until explicitly allowed: `codex_apps` (gone
-  when apps disabled), GitHub connector tools, browser, network
-- ALLOWED_AMBIENT is **not** "everything leftover". Residual
-  `github:*`, `openai-templates:*`, `plugin-management` remain unclassified
-  until a versioned allowlist is reviewed.
-- Write-profile launch with those residuals: `LAUNCH_REFUSED_UNCLASSIFIED`
-
-## 10. Configuration drift between generations
-
-| Change | Action |
+| Case | Decision |
 |---|---|
-| model / provider / account / harness kind / sandbox / approval / network / filesystem roots / authority / workspace | new Attempt |
-| harness patch version with same protocol+digest policy | new ProcessGeneration, re-attest; new Attempt if digest/policy changes |
-| REQUIRED skill/MCP missing | refuse / interrupt |
-| FORBIDDEN present | refuse / interrupt |
-| ALLOWED_AMBIENT baseline add that is pre-approved for this binary | new ProcessGeneration, re-attest |
-| unclassified appears | refuse write profile |
-| native subagent policy | new Attempt if write fan-out would widen |
+| Graceful harness process replacement | SAME_ATTEMPT (same epoch if resume succeeds) |
+| Safe crash recovery | SAME_ATTEMPT |
+| SIGKILL blocked writer | SAME_ATTEMPT while recovering |
+| SIGKILL, abandon S1, start S2 | SAME_ATTEMPT, new epoch |
+| Context compaction | SAME_ATTEMPT, same epoch |
+| Intentional context rotation | SAME_ATTEMPT, new epoch |
+| Fresh primary session, same placement | SAME_ATTEMPT, new epoch |
+| Native fork/helper | SAME_ATTEMPT, subordinate |
+| Worker / provider / account / auth-home | NEW_ATTEMPT |
+| Requested model | NEW_ATTEMPT |
+| Harness kind | NEW_ATTEMPT |
+| Exact harness binary digest | NEW_ATTEMPT |
+| Workspace / base SHA / inode identity | NEW_ATTEMPT |
+| Authority / write paths | NEW_ATTEMPT |
+| Sandbox / approval / network | NEW_ATTEMPT |
+| REQUIRED/FORBIDDEN set change | NEW_ATTEMPT |
+| Phase 1F aggregation after leader release | NEW_ATTEMPT |
+| Served model ≠ requested | REFUSE |
+| UNCLASSIFIED on write profile | REFUSE |
+| FORBIDDEN present / REQUIRED missing | REFUSE |
+| Cross-Attempt session reuse | REFUSE |
 
-## 11. Adapter contract `mastermind.operator_harness/v1`
+V1 has **no** patch-compatible harness-version exception inside one Attempt.
 
-Do **not** extend `WorkerExecutionAdapter`. Sealed workers keep
-`start / collect_result / cancel / run_validation_argv`.
+## 5. Writer fence
 
-Rich path is a sibling: `OperatorHarnessAdapter`. Shared utilities allowed.
-Adapter returns typed observations. Supervisor/control service decides.
-Runtime transaction mutates Executive state. Adapter must not mark Jobs complete.
+V1 realm: `(worker_id, provider_session_id)`.
 
-| Method | Class |
+Not `account_label`. Not `UNIQUE(provider_session_id)` globally. Not
+`WHERE ended_at IS NULL`.
+
+Four distinct facts:
+
+| Fact | Values | Owner |
+|---|---|---|
+| Process liveness | ALIVE / PROVEN_DEAD / UNKNOWN | ProcessGeneration |
+| Executive writer ownership | held or not, for that realm | ProcessGeneration `executive_writer_held` |
+| Provider writer knowledge | HELD / RELEASED / UNKNOWN | ProcessGeneration |
+| Resume safety | derived | never independent durable truth |
+
+Process death leaves Executive writer held and provider writer UNKNOWN or HELD
+until reconcile or abandonment. Never invent RELEASED.
+
+Abandonment of epoch/S1: Executive promises never to attach another generation
+to S1. Provider writer may remain HELD or UNKNOWN forever. Fresh S2 on the same
+Attempt and same worker is lawful. S1 remains nonresumable, including on later
+Attempts of the same worker.
+
+Opaque id collision across workers is legal: W1/`abc` and W2/`abc` are different
+realms.
+
+## 6. Controller / process topology
+
+Current topology (merged): adapter / `CodexWorker` /
+laboratory App Server client spawn via `Popen` or `create_subprocess_exec`.
+Pipes live in the spawning process. A restarted controller cannot inherit them.
+
+Three different operations:
+
+| Concept | V1 |
 |---|---|
-| `probe` | COMMON_OPTIONAL |
-| `describe_capabilities` | COMMON_REQUIRED |
-| `prepare` | COMMON_REQUIRED |
-| `start_session` | COMMON_REQUIRED |
-| `resume_session` | COMMON_OPTIONAL (capability: persistent_session) |
-| `begin_turn` | COMMON_REQUIRED |
-| `read_events` | COMMON_REQUIRED |
-| `send_input` / `steer` | COMMON_OPTIONAL |
-| `respond_to_approval` | COMMON_OPTIONAL |
-| `interrupt_turn` | COMMON_REQUIRED |
-| `fork_session` | COMMON_OPTIONAL (Codex has it; others may not) |
-| `checkpoint` | COMMON_OPTIONAL |
-| `collect_candidate_result` | COMMON_REQUIRED |
-| `graceful_stop` | COMMON_REQUIRED |
-| `cancel` | COMMON_REQUIRED |
-| `reconcile` | COMMON_REQUIRED |
-| writer-steal / lock-file delete | REJECTED_FROM_INTERFACE |
-| `complete_job` | REJECTED_FROM_INTERFACE |
-| browser/devserver lease APIs | REJECTED_FROM_INTERFACE (later Resource Fabric) |
-| Codex `plugin/list` | CODEX_SPECIFIC and not required (P0 race) |
+| Executive Attempt lease adoption (`adopt_attempt`) | supported; lease/fence only |
+| Native process / stdio / JSON-RPC adoption | **NOT_SUPPORTED** |
+| Provider session resume | optional; requires a **new** ProcessGeneration after writer-safe reconcile |
 
-## 12. Events
+Controller restart law:
 
-Two layers: provider-native raw (untrusted, redacted, size-bounded) and
-normalized Executive events. Adapters need not emit every type.
+```text
+reacquire/reconcile Executive Attempt lease
+→ identify old process if any
+→ do not inherit old stdio
+→ terminate/reconcile old process if required
+→ determine provider writer state
+→ if same epoch resume_safe: new ProcessGeneration, resume provider session
+→ else abandon old epoch; start fresh epoch if placement still lawful
+```
 
-Normalized vocabulary: `HARNESS_SESSION_STARTED`, `TURN_STARTED`,
-`ASSISTANT_OUTPUT`, `TOOL_REQUESTED`, `TOOL_COMPLETED`, `APPROVAL_REQUIRED`,
-`USAGE_OBSERVED`, `RATE_LIMIT_OBSERVED`, `CHECKPOINT_AVAILABLE`,
-`CANDIDATE_RESULT`, `TURN_INTERRUPTED`, `HARNESS_SESSION_ENDED`.
+No hidden durable broker. No writer stealing. No lock-file deletion.
 
-Raw handling: redact credentials; bound size; cursor/replay; ignore duplicates
-by provider event id when present; tolerate out-of-order; reconnect does not
-imply new Attempt; malformed provider events are receipts, not state.
+Host reboot: DESIGNED / UNKNOWN as live evidence. `boot_id` mismatch ⇒ generation
+cannot be considered live. That does **not** imply provider RELEASED.
 
-MCP: P0 did not observe structured MCP item events. Do not require the
-provider event stream as sole audit. Future Executive-owned MCP should add
-server-side receipts (Attempt + tool + input/result digests). Not implemented
-in P1A.
+## 7. RequestedExecutionProfile and ObservedHarnessAttestation
 
-Quota: store provider-defined horizons as instances (`used_percent`,
-`window_duration_minutes`, `resets_at`, `rate_limit_reached_type`). Never
-hard-code 5h/weekly/monthly columns. Classification remains
-`provider_reported | failure_inferred | unknown`. Do not compute remaining.
+Two concepts. Not one mutable blob.
 
-## 13. Failures vs semantic work failure
+**RequestedExecutionProfile** is sealed after Attempt claim and **before**
+process start. It is Attempt-immutable. Fields: worker_id, provider, requested
+model, harness kind, exact binary digest/version, workspace identity, sandbox,
+approval, network, REQUIRED/FORBIDDEN/ALLOWED_AMBIENT policy, native-helper
+policy, authority hash, allowed write paths, write-capable flag.
 
-Quota exhausted / concurrency limited → cool pool, do not fail the Job as code.
-Auth expired/failed → interrupt Attempt, do not retry with copied `auth.json`.
-Process crash / session unavailable / active writer → recovery machine.
-Tool/MCP/transport → Attempt failure class, not pool cool unless provider 429.
-Config attestation / capability missing or forbidden → refuse launch.
-Workspace mismatch → refuse.
-Validation failure → Job/Attempt failed, not quota.
-Model/semantic failure → work failure.
-Human intervention → approval_required, not crash.
+**ObservedHarnessAttestation** is collected after process launch + initialize +
+effective discovery, and sealed **before** the first meaningful work turn.
+Unknown stays UNKNOWN. Fields: served model, harness version/digest confirmation,
+effective skills/MCP/plugins, sandbox/approval, config digest, AuthRealmFact,
+workspace observation.
 
-Cross-provider failover is a new Attempt after handoff. ATT-1 must not silently
-become another provider.
+First-turn gate:
 
-Handoff (`mastermind.agent_handoff.v1` from 1G, still a draft name we preserve
-rather than duplicate): execution facts, decisions, artifacts, failures,
-remaining work. No hidden chain-of-thought. Minimum for account failover,
-cross-provider, machine loss, context rotation, operator takeover, and fresh
-thread after session failure.
+```text
+claimed Attempt
+→ RequestedExecutionProfile sealed
+→ ProcessGeneration launched
+→ harness initialized
+→ ObservedHarnessAttestation collected
+→ deterministic LaunchDecision
+→ ALLOW: first work turn
+→ REFUSE: no work turn; supervisor reconciles/terminates
+```
 
-## 14. Host/controller cases (untested — design only)
+Served ≠ requested → `REFUSE_SERVED_MODEL_MISMATCH`. Do not rewrite the requested
+profile. If a provider only reveals the served model on first inference, it is
+incapable of pre-work model attestation unless a bounded non-work identification
+probe exists. V1 does not hide that limitation.
 
-| Case | Consult | Re-prove | Adopt process? | Resume session? |
+Re-attestation: every new ProcessGeneration; after harness config reload; after
+authoritative workspace identity change. Harness binary digest change is
+NEW_ATTEMPT, not an in-Attempt re-attest. Not per-turn.
+
+## 8. Capability policy
+
+REQUIRED missing → REFUSE.
+FORBIDDEN present → REFUSE.
+UNCLASSIFIED on write-capable profile → REFUSE.
+UNCLASSIFIED in explicitly read-only laboratory mode → only under a named lab
+policy; never silently promoted to ALLOWED_AMBIENT.
+
+ALLOWED_AMBIENT binds at minimum to harness exact binary digest + capability
+name, and where available skill content digest, tool schema digest, and MCP
+server identity/version.
+
+Residual Codex 0.147.0 `github:*` / `openai-templates:*` /
+`plugin-management` remain UNCLASSIFIED. Architecture: nonblocking.
+Write-capable Codex canary: **blocked**. Production arming: **blocked**.
+
+## 9. Auth realm
+
+`account_label` is display/config metadata: not unique, not authenticated,
+default `"dedicated-codex-home"`. It is not a security identity.
+
+V1 fence uses `worker_id` (unique slot PK).
+**ACCOUNT_REALM_ATTESTATION_UNPROVEN.**
+
+Not identities: `CODEX_HOME` path, `auth.json` inode/mtime, plan type.
+Credential refresh in the same account must not create a new Attempt.
+A different provider account inside the same home must. Detection of silent
+account switch is unproven → production-arming gate. Fail closed if a provider
+reports a changed non-secret account id.
+
+`AuthRealmFact` must support identity = UNKNOWN and must not persist tokens.
+
+## 10. Native helpers
+
+Read-only Attempt: helpers allowed if the parent ceiling is itself enforceably
+read-only.
+
+Write-capable Attempt: helpers **disabled** unless the harness proves
+`supports_subagent_capability_ceiling` and that ceiling can prevent writes
+beyond the subordinate policy. Prompt "read-only" is not a boundary.
+
+Native helper / fork / native review subagent cannot satisfy Phase 1F
+independent review. Minimum remains a different `worker_id`.
+
+## 11. Phase 1F
+
+```text
+bounded planning Attempt
+→ durable children
+→ leader released (no persistent leader)
+→ children execute independently
+→ later aggregation Attempt
+→ fresh session + provider-neutral handoff
+```
+
+**V1_QUALITY_TRADEOFF_ACCEPTED.** Native planner context is lost. Do not park a
+thread without a worker lease. Later parity testing must measure the cost.
+
+Aggregation consumes an Attempt. Context rotation does not.
+
+## 12. Adapter contract
+
+Sibling of `WorkerExecutionAdapter`. Adapter returns typed observations.
+Supervisor decides. Runtime mutates Executive state.
+
+Kitchen-sink `prepare()` is **rejected**. Use `validate_requested_profile`
+(required, pure) and optional `stage_operator_config` (Attempt-owned staging
+dir only; no credentials; no authoritative workspace mutation; no process start).
+
+`reconcile()` is observational. It must not kill, resume, mark LOST, start
+Attempts, select providers, release quota, or complete jobs.
+
+`signal_process` is supervisor/runtime machinery, not a provider-neutral method.
+
+`collect_candidate_result()` never calls `complete_job()`.
+
+Required methods, optional methods, timeouts, idempotency, side effects, and
+failure classes are frozen in `METHOD_CONTRACTS`. State-creating operations
+require an Executive `OperationId`.
+
+EventCursor is the reconnect/duplicate/out-of-order contract. Normalized events
+carry Attempt, epoch, generation, turn, optional provider event id, optional
+subordinate id. No second event store. MCP item events are not universally
+required.
+
+## 13. Backup / restore
+
+Option A: backup may capture active OHF history. Restore always invalidates
+external-live authority.
+
+A restored provider session id is historical evidence, not authority to resume.
+Restored `executive_writer_held` is cleared. Process liveness becomes UNKNOWN.
+Provider writer is not rewritten to RELEASED (HELD stays HELD; prior RELEASED
+becomes UNKNOWN because restore does not prove current provider state).
+Current epochs become ABANDONED. Active Attempts transition to existing
+**LOST**. Continuation is a new lawful Attempt from last trusted checkpoint,
+subject to `attempt_limit`.
+
+Terminal Attempt with provider writer HELD/UNKNOWN is allowed. Terminalization
+ends Executive authority; it does not falsify provider state.
+
+## 14. Rollback wording
+
+Feature disable: stop using OHF. That is not old-binary rollback.
+Old binary vs future schema 3: fail closed.
+DB restore: offline; invalidate writers as §13.
+Forward-fix: the safe escape.
+Migration rollback: not promised.
+
+## 15. Architecture consistency table
+
+| Fact | Canonical owner | Durable location (proposed v3) | Immutable? | Change inside Attempt? |
 |---|---|---|---|---|
-| Executive control process restart | Attempt + lease + generation | fence + lease via `adopt_attempt` | only if pid+start+boot match | if writer-safe |
-| Worker supervisor restart | same | same | same | same |
-| Host reboot | boot_id | generation dead | never by old pid | only if provider session still writer-safe; else new Attempt |
-| App Server alive, controller dead | generation row | process still matches | yes if identities match | no second writer |
-| Controller alive, App Server dead | generation row | process gone | no | recovery machine |
+| worker placement | Attempt | `attempts.worker_id` | after claim | no → NEW_ATTEMPT |
+| authority | Attempt | `authority_policy_hash` | after claim | no → NEW_ATTEMPT |
+| workspace | existing workspace receipt | inode+device+uid+gid+base SHA | after seal | no → NEW_ATTEMPT |
+| requested model | RequestedExecutionProfile | Attempt requested JSON | after seal | no → NEW_ATTEMPT |
+| harness binary | RequestedExecutionProfile | digest in requested JSON | after seal | no → NEW_ATTEMPT |
+| session epoch | HarnessSessionEpoch | `harness_session_epochs` | epoch_number | new epoch, same Attempt |
+| provider_session_id | epoch | epoch column; Attempt projection | once non-null | no on that epoch |
+| ProcessGeneration | generation row | `process_generations` | identity fields | new generation |
+| process liveness | generation | pid/start/boot + ended_at | n/a | yes (observation) |
+| Executive writer | generation | `executive_writer_held` | n/a | held until release/abandon |
+| provider writer | generation | `provider_writer_state` | n/a | HELD/RELEASED/UNKNOWN |
+| requested profile | Attempt | requested JSON + digest | after seal | no |
+| observed attestation | generation | observed JSON + digest | after seal | re-attest per generation |
+| capability policy | requested profile | manifest | after seal | set change → NEW_ATTEMPT |
 
-None of these are VERIFIED by P0.
+## 16. Preserved gates
 
-## 15. Codex-specific vs common
-
-Common: session start, turn, events, interrupt, graceful stop, cancel,
-capability describe, candidate result, reconcile.
-
-Codex-specific: App Server JSON-RPC, `thread/fork`, `skills/extraRoots/set`,
-`account/rateLimits/read`, `features.apps`, `skills.bundled.enabled`,
-active-writer error string, ChatGPT auth domain.
-
-A harness without fork is still a valid operator. Quota telemetry may be
-unknown. Claude/Grok/Qwen adapters must not fake Codex thread ids.
+- ACCOUNT_REALM_ATTESTATION_UNPROVEN
+- residual Codex plugin/template skills → write-canary / production-arming
+- native-helper capability ceiling → write-capable-helper gate
+- transitive orphan cleanup → UNKNOWN
+- host reboot live behavior → UNKNOWN / design only
+- multi-host machine identity → postponed; no hostname-hash identity
+- provider writer-steal API → not used
+- structured MCP item events → not universal
+- live App Server adoption → NOT_SUPPORTED

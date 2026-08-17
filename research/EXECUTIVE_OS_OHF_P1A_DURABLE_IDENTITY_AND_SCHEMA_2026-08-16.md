@@ -1,124 +1,133 @@
-# OHF-P1A — Durable identity and schema proposal
+# OHF-P1A-R2 — Durable identity and schema proposal
 
 **Date:** 2026-08-16
 **Status:** proposal only. Do not apply a migration in this PR.
-**Runtime census from:** `control_plane/executive_runtime.py` on master
-`da6bd78e078b96db8c121b16f1b10e3fd70e6fef` (`SCHEMA_VERSION = 2`).
+**Runtime census from:** `control_plane/executive_runtime.py` (`SCHEMA_VERSION = 2`)
+**Typed freeze:** `control_plane/operator_harness_contract.py`
 
 This file does not create `harness.sqlite`, a second queue, or a second lease
 DB. All durable OHF state must fit Executive runtime.
 
+P1A-R1 proposed Attempt 1:1 HarnessSession and therefore omitted a session
+table. Independent review adopted CARDINALITY_B. A minimal
+`harness_session_epochs` table is now justified because restart correctness
+requires 1:N sequential primary sessions, one current epoch, historical
+`provider_session_id`, abandoned/nonresumable epochs, and ProcessGeneration
+ownership without incrementing `attempt_count`.
+
 ## 1. Current runtime census
 
-### 1.1 Schema
-
-`SCHEMA_VERSION = 2` at `control_plane/executive_runtime.py:38`.
+Unchanged from schema v2:
 
 Tables: `workers`, `worker_quota_classes`, `jobs`, `attempts`, `events`,
 `schema_migrations`.
 
-No `harness_sessions`, `process_generations`, or `execution_profile` tables.
+Attempt already has `pid`, `pgid`, `process_start_identity`, `boot_id`,
+`provider_session_id`. AttemptStatus set is unchanged: CLAIMED, RUNNING,
+CHECKPOINTED, CANCEL_REQUESTED, RATE_LIMITED, FAILED, LOST, COMPLETED,
+CANCELLED. P1A adds **no** new AttemptStatus.
 
-### 1.2 Attempt fields relevant to OHF
+`workers.account_label` is not unique and is not an auth realm.
 
-From current DDL: `attempt_id`, `job_id`, `attempt_number`, `worker_id`,
-`quota_class`, `status`, `fence_generation`, `authority_policy_hash`,
-`lease_token`, `lease_owner`, `lease_expires_at_ms`, `heartbeat_at_ms`,
-`checkpoint_sequence`, `checkpoint_json`, `result_json`, `error_json`,
-**`pid`, `pgid`, `process_start_identity`, `boot_id`, `provider_session_id`**,
-stdout/stderr/result paths, `exit_code`, `launch_metadata_json`.
+`adopt_attempt` rotates lease/fence only. It does not reclaim stdio.
 
-**No `host_id`.** Current process identity is all-or-nothing local
-`(pid, pgid, process_start_identity, boot_id)` or else `provider_session_id`.
+Backup/restore copies the whole SQLite offline. Restore does not match live
+OS processes or provider sessions.
 
-AttemptStatus: CLAIMED, RUNNING, CHECKPOINTED, CANCEL_REQUESTED, RATE_LIMITED,
-FAILED, LOST, COMPLETED, CANCELLED.
+## 2. Canonical owners
 
-### 1.3 Lease / fence
-
-Not a separate table. Claim does `BEGIN IMMEDIATE`, increments
-`worker_quota_classes.fence_counter`, stores it as `attempts.fence_generation`,
-issues `lease_token`. Mutations require fence match + token compare.
-`adopt_attempt` CAS-bumps fence and token (supervisor restart).
-Fence counter does not decrement on release.
-
-This is the pattern OHF writer fencing must reuse, not replace.
-
-### 1.4 Events
-
-Append-only, immutable triggers, unique `command_id`, per-aggregate sequence.
-Tokens never in payloads.
-
-### 1.5 Worker / account / quota
-
-`workers.account_label` is the account identity. Quota class holds provider,
-model, effort, cost_class, capabilities_json, held_attempt_id, fence_counter.
-No generic provider-horizon table — and P1A does not add 5h/weekly/monthly
-columns.
-
-### 1.6 Backup / restore
-
-`control_plane/executive_backup.py` copies the whole SQLite via
-`Connection.backup()`. Verification is migration-exact (`schema_migrations`
-checksums + `runtime_schema_version`). Adding a migration changes the contract:
-old backups fail against new code until regenerated. No business-table
-allowlist — unknown tables after a migrated backup are included automatically.
-
-### 1.7 Census: reuse / extend / new
-
-| Need | Existing | Decision |
+| Fact | Canonical | Duplicate rule |
 |---|---|---|
-| Job / Attempt / authority / workspace | `jobs`, `attempts` | reuse |
-| Current process cache | `attempts.pid/pgid/boot_id/start_identity` | extend meaning: **current generation only** |
-| Native thread id | `attempts.provider_session_id` | extend: store primary native session id here; realm is worker provider+account |
-| Lease of Executive Attempt | existing fence/token | reuse; do not conflate with harness writer fence |
-| Harness writer history | none | **new table** `process_generations` |
-| ExecutionProfile | none | **extend Attempt** with immutable JSON + digest columns |
-| Primary HarnessSession row | none | **no extra table in V1** (1:1 with Attempt) |
-| Native forks | none | **JSON + events** on Attempt, not Jobs |
-| Ambient allowlist | none | Git-backed policy, not SQLite rows per skill |
-| Quota horizons | none | event payload, not schema columns |
+| provider session identity | `harness_session_epochs.provider_session_id` for rich OHF | `attempts.provider_session_id` is same-txn projection of current epoch, or legacy sealed-worker field when no epoch rows exist |
+| session epoch state | `harness_session_epochs.state` | none |
+| current ProcessGeneration | generation with `executive_writer_held=1` for the current epoch | `attempts.pid/pgid/start/boot` projection for rich OHF |
+| process liveness | generation pid/start/boot + `ended_at_ms` | Attempt pid cache must not be independently authoritative |
+| Executive writer ownership | `process_generations.executive_writer_held` | do not derive from `ended_at_ms IS NULL` |
+| provider writer observation | `process_generations.provider_writer_state` | never invent RELEASED |
+| requested profile | `attempts.requested_execution_profile_json` + digest | no mixed blob |
+| observed attestation | `process_generations.observed_attestation_json` + digest | per generation |
+| workspace identity | existing workspace receipt (inode/device/uid/gid + base SHA) | cwd string is not identity |
+| recovery state | generation-scoped writer/liveness/provider fields | no Attempt `harness_recovery_class` |
 
-Why no `harness_sessions` table: P1A freezes 1 Attempt : 1 primary
-HarnessSession. A second table would duplicate Attempt identity until design B
-is proven. If a later commission reverses cardinality, that is the moment to
-add the table — not now.
+Forbidden synonym: `native_session_id`.
 
-## 2. Proposed additive migration (NOT APPLIED)
+Postponed (not in v3): `native_subordinates_json`, `host_id` /
+hostname-hash, `runtime_metadata_json`. Future host realm may be added without
+redefining Attempt/epoch/generation. Native forks live in typed events.
+
+## 3. Proposed additive migration (NOT APPLIED)
 
 Next version would be `SCHEMA_VERSION = 3` named
-`ohf_process_generations_and_profile_snapshot`.
+`ohf_session_epochs_and_process_generations`.
 
-### 2.1 Attempt extensions
+### 3.1 Attempt extensions
 
 ```sql
-ALTER TABLE attempts ADD COLUMN native_session_id TEXT;
-ALTER TABLE attempts ADD COLUMN harness_kind TEXT;
-ALTER TABLE attempts ADD COLUMN harness_version TEXT;
-ALTER TABLE attempts ADD COLUMN execution_profile_digest TEXT;
-ALTER TABLE attempts ADD COLUMN execution_profile_json TEXT;
-ALTER TABLE attempts ADD COLUMN writer_generation_id TEXT;
-ALTER TABLE attempts ADD COLUMN harness_recovery_class TEXT;
-ALTER TABLE attempts ADD COLUMN native_subordinates_json TEXT;
+ALTER TABLE attempts ADD COLUMN requested_execution_profile_json TEXT;
+ALTER TABLE attempts ADD COLUMN requested_execution_profile_digest TEXT;
+ALTER TABLE attempts ADD COLUMN current_session_epoch_id TEXT;
+ALTER TABLE attempts ADD COLUMN current_process_generation_id TEXT;
 ```
 
-Immutability: `execution_profile_json` / digest may be written once while
-CLAIMED/RUNNING start, then CHECK-constrained against updates (trigger
-mirroring `events` immutability, or service gate). Native session id is
-immutable once recorded.
+No `native_session_id`. No `execution_profile_json` mixed blob. No
+`harness_recovery_class`. No `native_subordinates_json`.
+`harness_kind` / `harness_version` are inside requested JSON, not extra
+canonical columns.
 
-`provider_session_id` may remain as a synonym during transition; do not store
-two different native ids.
+`provider_session_id` stays. Sealed workers continue to use it as today.
+Rich OHF maintains it as a projection of the current epoch in the same
+transaction. Mismatch is corruption and must fail closed.
 
-### 2.2 `process_generations`
+Requested profile JSON/digest are write-once after seal (trigger or service
+gate). NULL on historical/sealed rows is valid, not corruption.
+
+### 3.2 `harness_session_epochs`
+
+```sql
+CREATE TABLE harness_session_epochs (
+  session_epoch_id TEXT PRIMARY KEY,
+  attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id),
+  worker_id TEXT NOT NULL,
+  epoch_number INTEGER NOT NULL CHECK (epoch_number >= 1),
+  provider_session_id TEXT,
+  state TEXT NOT NULL CHECK (state IN ('CURRENT','TERMINAL','ABANDONED')),
+  created_at_ms INTEGER NOT NULL,
+  ended_at_ms INTEGER,
+  abandonment_class TEXT,
+  UNIQUE (attempt_id, epoch_number)
+);
+
+CREATE UNIQUE INDEX harness_session_epochs_one_current
+  ON harness_session_epochs(attempt_id)
+  WHERE state = 'CURRENT';
+
+CREATE UNIQUE INDEX harness_session_epochs_session_realm
+  ON harness_session_epochs(worker_id, provider_session_id)
+  WHERE provider_session_id IS NOT NULL;
+```
+
+`worker_id` on the epoch row is a same-transaction copy of `attempts.worker_id`
+so the unique index can include the realm. Attempt remains canonical placement.
+
+Rules:
+
+- `provider_session_id` NULL until creation completes; UPDATE trigger refuses
+  change once non-null.
+- `ABANDONED` / `TERMINAL` cannot return to `CURRENT`.
+- Cross-Attempt reuse of a `(worker_id, provider_session_id)` is refused by
+  `harness_session_epochs_session_realm` for the lifetime of that worker slot.
+- Different workers may share an opaque provider session id.
+
+### 3.3 `process_generations`
 
 ```sql
 CREATE TABLE process_generations (
   process_generation_id TEXT PRIMARY KEY,
-  attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id),
-  native_session_id TEXT NOT NULL,
+  session_epoch_id TEXT NOT NULL
+    REFERENCES harness_session_epochs(session_epoch_id),
+  worker_id TEXT NOT NULL,
+  provider_session_id TEXT,
   generation_number INTEGER NOT NULL CHECK (generation_number >= 1),
-  host_id TEXT,
   pid INTEGER,
   pgid INTEGER,
   process_start_identity TEXT,
@@ -128,62 +137,92 @@ CREATE TABLE process_generations (
   ended_at_ms INTEGER,
   termination_class TEXT,
   exit_code INTEGER,
-  resume_intent TEXT,
+  executive_writer_held INTEGER NOT NULL CHECK (executive_writer_held IN (0,1)),
+  provider_writer_state TEXT NOT NULL
+    CHECK (provider_writer_state IN ('HELD','RELEASED','UNKNOWN')),
   resume_result TEXT,
-  recovery_class TEXT,
-  runtime_metadata_json TEXT,
+  reconciliation_result TEXT,
+  observed_attestation_json TEXT,
+  observed_attestation_digest TEXT,
   created_at_ms INTEGER NOT NULL,
-  UNIQUE (attempt_id, generation_number)
+  UNIQUE (session_epoch_id, generation_number)
 );
+
+CREATE UNIQUE INDEX process_generations_one_executive_writer
+  ON process_generations(worker_id, provider_session_id)
+  WHERE executive_writer_held = 1 AND provider_session_id IS NOT NULL;
 ```
 
-Indexes:
+`ended_at_ms` is process-death observation only. The writer fence is
+`executive_writer_held`, not `ended_at_ms IS NULL`.
 
-- `(native_session_id)`
-- partial unique: one open writer
-  `UNIQUE(native_session_id) WHERE ended_at_ms IS NULL`
-  (SQLite partial unique index)
+`worker_id` and `provider_session_id` on the generation are same-transaction
+copies used by the unique index. Canonical session id remains the epoch row.
 
-Generation numbers cannot regress because of the unique `(attempt_id,
-generation_number)` plus service gate `MAX+1`.
+No `host_id`. `boot_id` is host-local process identity, sufficient for
+single-host V1.
 
-### 2.3 What stays off the schema
+## 4. Adversarial schema walks
 
-- Recovery conceptual states NEW/PREPARING/STARTING/ACTIVE as extra Attempt enums
+| Attack | Answer |
+|---|---|
+| Two CURRENT epochs on one Attempt | unique index `harness_session_epochs_one_current` |
+| Reopen ABANDONED epoch | state trigger/service gate; resume_safety false |
+| Mutate provider_session_id after first assignment | UPDATE trigger |
+| Two Executive writers on W1/S1 | unique index `process_generations_one_executive_writer` |
+| W1/`abc` and W2/`abc` | legal; realm includes worker_id |
+| Process dies, writer remains | `ended_at_ms` set; `executive_writer_held=1`; provider UNKNOWN/HELD |
+| Terminal Attempt, provider UNKNOWN | allowed; held cleared; provider stays UNKNOWN |
+| Restore of active snapshot | invalidate held; abandon current epochs; Attempt LOST; do not resume ids |
+| Legacy Attempt with no epoch rows | valid sealed-worker Attempt; missing OHF state is not corruption |
+| Sealed adapter beside OHF data | sealed path ignores epoch tables; must not write them |
+
+## 5. Writer constraint cases
+
+1. Same opaque id, different workers: both may exist.
+2. Fresh S2 while abandoned S1 is unresolved: S1 epoch ABANDONED, held=0,
+   provider maybe HELD; S2 different `provider_session_id`; unique writer index
+   allows S2.
+3. Duplicate writer same realm: second generation with `executive_writer_held=1`
+   for W1/S1 is refused even if the first process is dead.
+
+## 6. Restore law (source law)
+
+Option A: backups may capture active OHF history. Restore never restores live
+execution authority over external processes or provider sessions.
+
+After restore of an active snapshot:
+
+- old ProcessGeneration is not live (`process liveness = UNKNOWN`)
+- `executive_writer_held` forced to 0
+- provider_writer_state is not set to RELEASED
+- current epochs become ABANDONED / nonresumable
+- Attempt status becomes existing **LOST** (not a new enum)
+- continuation only via a new lawful Attempt from last trusted checkpoint
+
+## 7. Legacy compatibility
+
+Historical/sealed Attempts remain valid with NULL OHF columns and zero epoch
+rows. The future runtime must distinguish legacy/sealed Attempts from rich OHF
+Attempts. Missing OHF state is not corruption.
+
+Sealed `WorkerExecutionAdapter` ignores new tables.
+
+## 8. Rollback wording
+
+Feature disable: stop writing OHF tables. Not old-binary rollback.
+Old binary that requires schema 2 must refuse schema 3.
+DB restore: §6.
+Forward-fix: the supported escape.
+Migration rollback: not promised.
+
+## 9. What stays off the schema
+
 - Browser/devserver leases
 - Capacity/account pool tables
-- Raw credential-bearing provider payloads
+- Raw credential payloads
 - Per-horizon quota columns
-
-## 3. Invariants
-
-| Invariant | SQLite | Service gate |
-|---|---|---|
-| One primary native session cannot belong to two active Attempts | partial unique on `attempts.native_session_id` where status in active set | also check at `start_session` |
-| One HarnessSession has at most one current Executive writer generation | partial unique on open `process_generations.native_session_id` | acquire path |
-| Generation numbers cannot regress | UNIQUE(attempt_id, generation_number) | insert uses MAX+1 |
-| Native session identity immutable | UPDATE trigger | start_session only |
-| Provider/account/harness realm cannot silently change | profile digest stored; worker_id FK | drift matrix refuses in-Attempt change |
-| ExecutionProfile historically immutable | UPDATE trigger on digest/json | |
-| Process generation cannot outlive terminal HarnessSession incorrectly | FK attempt_id; terminal Attempt must end open generations in the same txn | `_terminal` |
-| FKs survive backup/restore | ordinary SQLite FKs; whole-DB backup | restore verify migrations |
-| Legacy Jobs/Attempts remain valid | new columns NULL-ok | sealed workers ignore them |
-
-Where SQLite is not enough: writer-safe resume after SIGKILL is a **service**
-decision (RECOVERY_BLOCKED_ACTIVE_WRITER). Do not encode "steal" in SQL.
-
-## 4. Migration / rollback
-
-- Additive only. Default NULL for historical rows.
-- Sealed `WorkerExecutionAdapter` path ignores new columns.
-- Deactivation: stop writing generations; old columns remain; no drop in the
-  same release.
-- Backup: after apply, regenerate executive backup manifests so
-  `runtime_schema_version=3` checksums match.
-- Do not apply in P1A.
-
-## 5. Host identity
-
-P0/P1A did not persist `host_id`. The generation table includes a nullable
-`host_id` so multi-host later does not require another cardinality fight.
-V1 single-host may store hostname hash, not credentials.
+- Native subordinate JSON
+- Hostname-hash host identity
+- Kitchen-sink runtime_metadata_json
+- New AttemptStatus values for harness facts

@@ -79,3 +79,16 @@ Unknown: whether `--disable plugins` would remove `github:*` /
 Requested-set == observed-set remains false even after reduction.
 Attestation must stay three-layer: REQUIRED / ALLOWED_AMBIENT / FORBIDDEN,
 with UNCLASSIFIED fail-closed on write profiles.
+
+## 6. R2 gate classification (unchanged residue)
+
+Independent review classified this residue:
+
+- architecture: **NONBLOCKING**
+- write-capable Codex OHF canary: **BLOCKED**
+- production arming: **BLOCKED**
+
+R2 does **not** add `github:*`, `openai-templates:*`, or `plugin-management` to
+ALLOWED_AMBIENT. The optional `features.plugins=false` spike was not run in this
+remediation. Residual names stay UNCLASSIFIED until a later explicit experiment
+or versioned allowlist.
