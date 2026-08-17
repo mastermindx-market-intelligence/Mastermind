@@ -11,24 +11,35 @@ result.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
 from control_plane.session_targets import RuntimeBinding, WakeRoute
-from control_plane.wake_events import ISO_UTC_RE, WAKE_ID_RE, WakeObligation, utc_now_iso
+from control_plane.wake_events import (
+    ISO_UTC_RE,
+    WAKE_ID_RE,
+    WakeObligation,
+    canonical_json_bytes,
+    utc_now_iso,
+)
 from control_plane.wake_ledger import (
     DeliveryAttempt,
     LedgerPhase,
     ObligationStatus,
+    UNARMED_RETRY_POLICY,
     WakeLedgerRecord,
-    already_delivered_to_destination,
+    WakeRetryPolicy,
     attempt_record,
     eligible_for_nudge,
     ledger_command_id,
     make_delivery_attempt,
+    next_attempt_n,
+    parse_ledger_record,
     reconstruct_status,
+    requested_record,
 )
 from control_plane.wake_transport import (
     DISPATCHER_INTERFACE_VERSION,
@@ -180,6 +191,7 @@ class WakeNudge:
     destination_digest: str
     obligation_ids: tuple[str, ...]
     attempt_command_ids: tuple[str, ...]
+    nudge_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -191,6 +203,13 @@ class NudgeAttempt:
     binding_id: str
     binding_generation: int
     attempts: tuple[DeliveryAttempt, ...]
+
+    @property
+    def nudge_id(self) -> str:
+        return mint_nudge_id(
+            self.destination_digest,
+            tuple(item.attempt_command_id for item in self.attempts),
+        )
 
     @property
     def obligation_ids(self) -> tuple[str, ...]:
@@ -281,9 +300,25 @@ def plan_eligible_nudge(
     eligible = [
         route
         for route in routes
-        if eligible_for_nudge(route.obligation_id, records_by_obligation.get(route.obligation_id, ()))
+        if eligible_for_nudge(
+            route.obligation_id,
+            records_by_obligation.get(route.obligation_id, ()),
+            destination_digest=route.destination_digest,
+        )
     ]
     return coalesce_nudge(eligible)
+
+
+def mint_nudge_id(
+    destination_digest: str, attempt_command_ids: Sequence[str]
+) -> str:
+    payload = canonical_json_bytes(
+        {
+            "destination_digest": str(destination_digest),
+            "attempt_command_ids": sorted(str(item) for item in attempt_command_ids),
+        }
+    )
+    return "NUDGE-" + hashlib.sha256(payload).hexdigest()[:32]
 
 
 def make_receipt(
@@ -308,19 +343,20 @@ def make_receipt(
         if attempt is None
         else attempt.attempt_command_id
     )
+    snapshot = attempt
     return WakeReceipt(
         schema=RECEIPT_SCHEMA,
         outcome=resolved_outcome,
         obligation_id=_obligation_id(obligation.obligation_id),
         attempt_n=n,
         attempt_command_id=command,
-        session_alias=route.session_alias,
-        reasoning_surface=route.reasoning_surface,
-        wake_transport=route.wake_transport,
-        route_digest=route.route_digest,
-        destination_digest=route.destination_digest,
-        binding_id=route.binding_id,
-        binding_generation=route.binding_generation,
+        session_alias=snapshot.session_alias if snapshot else route.session_alias,
+        reasoning_surface=snapshot.reasoning_surface if snapshot else route.reasoning_surface,
+        wake_transport=snapshot.wake_transport if snapshot else route.wake_transport,
+        route_digest=snapshot.route_digest if snapshot else route.route_digest,
+        destination_digest=snapshot.destination_digest if snapshot else route.destination_digest,
+        binding_id=snapshot.binding_id if snapshot else route.binding_id,
+        binding_generation=snapshot.binding_generation if snapshot else route.binding_generation,
         transport_implemented=route.transport_implemented,
         target_enabled=route.target_enabled,
         production_armed=route.production_armed,
@@ -339,6 +375,7 @@ def authenticate_receipt(
     descriptor: WakeTransportDescriptor,
     attempt: DeliveryAttempt | None = None,
     allow_fabric_outcome: bool = False,
+    historical_delivery: bool = False,
 ) -> WakeReceipt:
     """Treat the receipt as untrusted adapter (or fabric) output."""
 
@@ -352,21 +389,22 @@ def authenticate_receipt(
         raise WakeDispatchError("receipt interface version does not match the descriptor")
     if receipt.obligation_id != obligation.obligation_id:
         raise WakeDispatchError("receipt obligation_id does not match the expected wake")
-    if receipt.session_alias != route.session_alias:
-        raise WakeDispatchError("receipt session_alias does not match the expected route")
-    if receipt.reasoning_surface != route.reasoning_surface:
-        raise WakeDispatchError("receipt reasoning_surface does not match the expected route")
-    if receipt.wake_transport != route.wake_transport:
-        raise WakeDispatchError("receipt wake_transport does not match the expected route")
-    if receipt.route_digest != route.route_digest:
-        raise WakeDispatchError("receipt route_digest does not match the expected route")
     if receipt.destination_digest != route.destination_digest:
         raise WakeDispatchError("receipt destination_digest does not match the expected route")
-    if receipt.binding_generation != route.binding_generation:
-        raise WakeDispatchError("receipt binding_generation does not match the expected route")
-    if receipt.binding_id != route.binding_id:
-        raise WakeDispatchError("receipt binding_id does not match the expected route")
-    if receipt.wake_transport != descriptor.transport_id:
+    if not historical_delivery:
+        if receipt.session_alias != route.session_alias:
+            raise WakeDispatchError("receipt session_alias does not match the expected route")
+        if receipt.reasoning_surface != route.reasoning_surface:
+            raise WakeDispatchError("receipt reasoning_surface does not match the expected route")
+        if receipt.wake_transport != route.wake_transport:
+            raise WakeDispatchError("receipt wake_transport does not match the expected route")
+        if receipt.route_digest != route.route_digest:
+            raise WakeDispatchError("receipt route_digest does not match the expected route")
+        if receipt.binding_generation != route.binding_generation:
+            raise WakeDispatchError("receipt binding_generation does not match the expected route")
+        if receipt.binding_id != route.binding_id:
+            raise WakeDispatchError("receipt binding_id does not match the expected route")
+    if receipt.wake_transport != descriptor.transport_id and not historical_delivery:
         raise WakeDispatchError("receipt wake_transport does not match the descriptor")
     if receipt.target_enabled != route.target_enabled:
         raise WakeDispatchError("receipt target_enabled snapshot does not match the route")
@@ -396,7 +434,11 @@ def authenticate_receipt(
             raise WakeDispatchError("receipt attempt_n does not match the delivery attempt")
         if receipt.attempt_command_id != attempt.attempt_command_id:
             raise WakeDispatchError("receipt attempt_command_id does not match")
-        if not attempt.matches_route(route):
+        if receipt.route_digest != attempt.route_digest:
+            raise WakeDispatchError("receipt route_digest does not match the delivery attempt")
+        if receipt.destination_digest != attempt.destination_digest:
+            raise WakeDispatchError("receipt destination_digest does not match the delivery attempt")
+        if not historical_delivery and not attempt.matches_route(route):
             raise WakeDispatchError("delivery attempt does not match the current route")
     if receipt.claims_success() and not descriptor.transport_implemented:
         if not (allow_fabric_outcome and receipt.outcome is WakeOutcome.ALREADY_DELIVERED):
@@ -407,8 +449,7 @@ def authenticate_receipt(
     if receipt.claims_success() and not route.delivery_allowed:
         if not (allow_fabric_outcome and receipt.outcome is WakeOutcome.ALREADY_DELIVERED):
             raise WakeDispatchError("delivery is not allowed for this route")
-    _bounded_details(dict(receipt.details))
-    return receipt
+    return dataclasses.replace(receipt, details=_bounded_details(dict(receipt.details)))
 
 
 def already_delivered_receipt(
@@ -418,11 +459,33 @@ def already_delivered_receipt(
     found: WakeLedgerRecord,
     created_at: str | None = None,
 ) -> WakeReceipt:
-    if found.phase is not LedgerPhase.DELIVERED:
+    try:
+        parsed = parse_ledger_record(found)
+    except WakeLedgerError as exc:
+        raise WakeDispatchError(str(exc)) from exc
+    if parsed.phase is not LedgerPhase.DELIVERED:
         raise WakeDispatchError("no delivery evidence for ALREADY_DELIVERED")
-    if found.destination_digest != route.destination_digest:
+    found_oid = str(parsed.command_id).split(":", 1)[0]
+    if found_oid != obligation.obligation_id:
+        raise WakeDispatchError("delivery evidence belongs to a different obligation")
+    if parsed.destination_digest != route.destination_digest:
         raise WakeDispatchError("delivery evidence does not match the current destination")
-    attempt_n = int(found.attempt_n or 0)
+    historical = DeliveryAttempt(
+        obligation_id=obligation.obligation_id,
+        attempt_n=parsed.attempt_n or 0,
+        attempt_command_id=ledger_command_id(
+            obligation.obligation_id,
+            LedgerPhase.DELIVERY_ATTEMPT,
+            attempt_n=parsed.attempt_n,
+        ),
+        destination_digest=str(parsed.destination_digest),
+        route_digest=str(parsed.route_digest),
+        binding_id=str(parsed.binding_id),
+        binding_generation=int(parsed.binding_generation or 0),
+        session_alias=str(parsed.session_alias),
+        reasoning_surface=str(parsed.reasoning_surface),
+        wake_transport=str(parsed.wake_transport),
+    )
     return authenticate_receipt(
         make_receipt(
             outcome=WakeOutcome.ALREADY_DELIVERED,
@@ -431,30 +494,17 @@ def already_delivered_receipt(
             reason_code="command_id_replay",
             created_at=created_at,
             details={
-                "ledger_command_id": found.command_id,
-                "attempt_n": str(attempt_n),
+                "ledger_command_id": parsed.command_id,
+                "attempt_n": str(historical.attempt_n),
             },
-            attempt=DeliveryAttempt(
-                obligation_id=obligation.obligation_id,
-                attempt_n=attempt_n,
-                attempt_command_id=ledger_command_id(
-                    obligation.obligation_id,
-                    LedgerPhase.DELIVERY_ATTEMPT,
-                    attempt_n=attempt_n,
-                ),
-                destination_digest=route.destination_digest,
-                route_digest=route.route_digest,
-                binding_id=route.binding_id,
-                binding_generation=route.binding_generation,
-                session_alias=route.session_alias,
-                reasoning_surface=route.reasoning_surface,
-                wake_transport=route.wake_transport,
-            ),
+            attempt=historical,
         ),
         obligation=obligation,
         route=route,
         descriptor=_descriptor(route.wake_transport),
+        attempt=historical,
         allow_fabric_outcome=True,
+        historical_delivery=True,
     )
 
 
@@ -550,6 +600,10 @@ def _nudge_from(
         destination_digest=first.destination_digest,
         obligation_ids=tuple(item.obligation_id for item in attempts),
         attempt_command_ids=tuple(item.attempt_command_id for item in attempts),
+        nudge_id=mint_nudge_id(
+            first.destination_digest,
+            tuple(item.attempt_command_id for item in attempts),
+        ),
     )
 
 
@@ -558,25 +612,54 @@ async def dispatch_nudge(
     *,
     dispatcher: WakeDispatcher | None = None,
     binding: RuntimeBinding | None = None,
-    attempt_n: int = 1,
     records_by_obligation: Mapping[str, Sequence[WakeLedgerRecord]] | None = None,
     descriptor: WakeTransportDescriptor | None = None,
-) -> tuple[NudgeAttempt, TransportReceipt | None, tuple[WakeReceipt, ...]]:
+    retry_policy: WakeRetryPolicy | None = None,
+) -> tuple[NudgeAttempt | None, TransportReceipt | None, tuple[WakeReceipt, ...]]:
     if not pairs:
         raise WakeDispatchError("dispatch_nudge requires at least one obligation/route")
     eligible_pairs = []
     for obligation, route in pairs:
+        records = () if records_by_obligation is None else records_by_obligation.get(
+            obligation.obligation_id, ()
+        )
         if records_by_obligation is not None and not eligible_for_nudge(
             obligation.obligation_id,
-            records_by_obligation.get(obligation.obligation_id, ()),
+            records,
+            destination_digest=route.destination_digest,
         ):
             continue
         eligible_pairs.append((obligation, route))
     if not eligible_pairs:
         raise WakeDispatchError("no eligible obligations remain for this nudge")
+    first_obligation, first_route = eligible_pairs[0]
+    resolved_descriptor = descriptor or _descriptor(first_route.wake_transport)
+    preflight = dispatcher_for(first_route.wake_transport)
+    if first_route.human_required or not first_route.delivery_allowed:
+        fabric = await preflight.wake(first_obligation, first_route)
+        authenticated = authenticate_receipt(
+            fabric,
+            obligation=first_obligation,
+            route=first_route,
+            descriptor=resolved_descriptor,
+            allow_fabric_outcome=True,
+        )
+        return None, None, (authenticated,)
+    policy = retry_policy if retry_policy is not None else UNARMED_RETRY_POLICY
+    if not policy.armed:
+        raise WakeDispatchError("automated dispatch refuses an unarmed retry policy")
+    _assert_binding_ready(binding, first_route, resolved_descriptor)
     plan = coalesce_nudge([route for _obligation, route in eligible_pairs])
     attempts = tuple(
-        make_delivery_attempt(obligation, route, attempt_n=attempt_n)
+        make_delivery_attempt(
+            obligation,
+            route,
+            attempt_n=next_attempt_n(
+                ()
+                if records_by_obligation is None
+                else records_by_obligation.get(obligation.obligation_id, ())
+            ),
+        )
         for obligation, route in eligible_pairs
     )
     nudge_attempt = NudgeAttempt(
@@ -588,27 +671,12 @@ async def dispatch_nudge(
         binding_generation=plan.binding_generation,
         attempts=attempts,
     )
-    first_obligation, first_route = eligible_pairs[0]
-    resolved_descriptor = descriptor or _descriptor(first_route.wake_transport)
-    preflight = dispatcher_for(first_route.wake_transport)
-    if first_route.human_required or not first_route.delivery_allowed:
-        fabric = await preflight.wake(first_obligation, first_route)
-        authenticated = authenticate_receipt(
-            fabric,
-            obligation=first_obligation,
-            route=first_route,
-            descriptor=resolved_descriptor,
-            attempt=attempts[0],
-            allow_fabric_outcome=True,
-        )
-        return nudge_attempt, None, (authenticated,)
     resolved = dispatcher if dispatcher is not None else preflight
     wake = _nudge_from(attempts, binding=binding, first_route=first_route)
     transport = await resolved.nudge(wake)
-    if not isinstance(transport, TransportReceipt):
-        raise WakeDispatchError("adapter must return a TransportReceipt")
-    if transport.outcome.value not in TRANSPORT_OUTCOMES:
-        raise WakeDispatchError("adapter returned a fabric-only outcome")
+    authenticated_transport = authenticate_transport_receipt(
+        transport, expected_nudge_id=wake.nudge_id
+    )
     receipts = []
     for obligation, route, attempt in zip(
         (item[0] for item in eligible_pairs),
@@ -616,17 +684,13 @@ async def dispatch_nudge(
         attempts,
         strict=True,
     ):
-        reasons = OUTCOME_REASONS[transport.outcome.value]
-        reason_code = transport.reason_code
-        if reason_code not in reasons:
-            reason_code = sorted(reasons)[0]
         receipt = make_receipt(
-            outcome=WakeOutcome(transport.outcome.value),
+            outcome=WakeOutcome(authenticated_transport.outcome.value),
             obligation=obligation,
             route=route,
-            reason_code=reason_code,
-            created_at=transport.created_at,
-            details=dict(transport.details),
+            reason_code=authenticated_transport.reason_code,
+            created_at=authenticated_transport.created_at,
+            details=dict(authenticated_transport.details),
             attempt=attempt,
         )
         receipts.append(
@@ -638,7 +702,7 @@ async def dispatch_nudge(
                 attempt=attempt,
             )
         )
-    return nudge_attempt, transport, tuple(receipts)
+    return nudge_attempt, authenticated_transport, tuple(receipts)
 
 
 async def dispatch_wake(
@@ -668,9 +732,14 @@ def delivery_record(
     *,
     attempt_n: int | None = None,
     route: WakeRoute | None = None,
+    obligation: WakeObligation | None = None,
 ) -> WakeLedgerRecord:
     if phase is LedgerPhase.WAKE_REQUESTED:
-        return WakeLedgerRecord(command_id=obligation_id, phase=phase)
+        if obligation is None:
+            raise WakeDispatchError("WAKE_REQUESTED requires the frozen obligation envelope")
+        if obligation.obligation_id != obligation_id:
+            raise WakeDispatchError("obligation_id does not match the envelope")
+        return requested_record(obligation)
     if route is None:
         raise WakeDispatchError("attempt/delivery records require a route snapshot")
     attempt = DeliveryAttempt(
@@ -688,6 +757,48 @@ def delivery_record(
         wake_transport=route.wake_transport,
     )
     return attempt_record(attempt, phase)
+
+
+def authenticate_transport_receipt(
+    receipt: object,
+    *,
+    expected_nudge_id: str | None = None,
+) -> TransportReceipt:
+    if not isinstance(receipt, TransportReceipt):
+        raise WakeDispatchError("adapter must return a TransportReceipt")
+    if ISO_UTC_RE.fullmatch(str(receipt.created_at or "")) is None:
+        raise WakeDispatchError("transport created_at must be UTC ISO-8601")
+    if receipt.outcome.value not in TRANSPORT_OUTCOMES:
+        raise WakeDispatchError("adapter returned a fabric-only outcome")
+    expected = OUTCOME_REASONS[receipt.outcome.value]
+    if receipt.reason_code not in expected:
+        raise WakeDispatchError("invalid transport reason_code")
+    details = _bounded_details(dict(receipt.details))
+    found = dict(details).get("nudge_id")
+    if expected_nudge_id is not None and found not in (None, expected_nudge_id):
+        raise WakeDispatchError("transport receipt nudge_id does not match")
+    return dataclasses.replace(receipt, details=details)
+
+
+def _assert_binding_ready(
+    binding: RuntimeBinding | None,
+    route: WakeRoute,
+    descriptor: WakeTransportDescriptor,
+) -> None:
+    if not descriptor.requires_runtime_binding:
+        return
+    if binding is None:
+        raise WakeDispatchError("binding is not ready")
+    if binding.session_alias != route.session_alias:
+        raise WakeDispatchError("runtime binding session_alias does not match the route")
+    if binding.binding_id != route.binding_id:
+        raise WakeDispatchError("runtime binding id does not match the route")
+    if binding.binding_generation != route.binding_generation:
+        raise WakeDispatchError("runtime binding generation does not match the route")
+    if binding.reasoning_surface not in (None, route.reasoning_surface):
+        raise WakeDispatchError("runtime binding reasoning_surface does not match the route")
+    if not str(binding.native_handle or "").strip():
+        raise WakeDispatchError("binding is not addressable for this transport")
 
 
 def _descriptor(transport_id: str) -> WakeTransportDescriptor:
@@ -745,6 +856,7 @@ __all__ = [
     "WakeTransportDescriptor",
     "already_delivered_receipt",
     "authenticate_receipt",
+    "authenticate_transport_receipt",
     "coalesce_nudge",
     "delivery_record",
     "dispatch_nudge",
@@ -752,6 +864,7 @@ __all__ = [
     "dispatcher_for",
     "ledger_command_id",
     "make_receipt",
+    "mint_nudge_id",
     "plan_eligible_nudge",
     "reconstruct_status",
     "wake_transport_descriptor",

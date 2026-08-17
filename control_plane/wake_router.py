@@ -40,7 +40,6 @@ from control_plane.wake_events import (
     INBOX_WAKE_KINDS,
     JOB_ID_RE,
     SEATS,
-    WORKSTREAM_RE,
     SourceKind,
     WakeKind,
     WakeObligation,
@@ -61,6 +60,7 @@ class WakeAction(str, Enum):
     UNROUTABLE = "UNROUTABLE"
 
 
+_ADMISSION = object()
 _INBOX_CEO_KIND = "ceo_decision_pending"
 _INBOX_ITEM_REQUIRED_KEYS = frozenset(
     {
@@ -135,6 +135,13 @@ class CanonicalInboxAttention:
     claimed_wake_kind: str = ""
     source_created_at: str | None = None
     emitted_at: str | None = None
+    _admission: object = dataclasses.field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._admission is not _ADMISSION:
+            raise WakeRouterError(
+                "CanonicalInboxAttention is not user-constructible; use admit_inbox_projection"
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -170,6 +177,13 @@ class CanonicalRuntimeFact:
     claimed_command: str = ""
     claimed_target_seat: str = ""
     claimed_wake_kind: str = ""
+    _admission: object = dataclasses.field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._admission is not _ADMISSION:
+            raise WakeRouterError(
+                "CanonicalRuntimeFact is not user-constructible; use admit_runtime_review_source"
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -251,9 +265,6 @@ def admit_inbox_projection(item: Mapping[str, Any]) -> CanonicalInboxAttention:
         raise WakeRouterError("inbox root_job_id is malformed")
     stream_raw = item.get("workstream")
     source_stream = None if stream_raw in (None, "") else str(stream_raw).strip()
-    routing_stream = None
-    if source_stream is not None and WORKSTREAM_RE.fullmatch(source_stream.lower()):
-        routing_stream = source_stream.lower()
     return CanonicalInboxAttention(
         attention_id=attention_id,
         kind=kind,
@@ -261,7 +272,7 @@ def admit_inbox_projection(item: Mapping[str, Any]) -> CanonicalInboxAttention:
         source=source,
         job_id=job_id,
         root_job_id=root_job_id,
-        workstream=routing_stream,
+        workstream=None,
         source_workstream=source_stream,
         reason=str(item.get("reason") or ""),
         existing_next_actions=tuple(str(entry) for entry in item.get("existing_next_actions") or ()),
@@ -271,6 +282,7 @@ def admit_inbox_projection(item: Mapping[str, Any]) -> CanonicalInboxAttention:
         claimed_wake_kind=str(item.get("claimed_wake_kind") or ""),
         source_created_at=item.get("source_created_at"),
         emitted_at=item.get("emitted_at"),
+        _admission=_ADMISSION,
     )
 
 
@@ -278,6 +290,10 @@ def obligation_from_inbox(item: CanonicalInboxAttention | Mapping[str, Any]) -> 
     attention = (
         item if isinstance(item, CanonicalInboxAttention) else admit_inbox_projection(item)
     )
+    if getattr(attention, "_admission", None) is not _ADMISSION:
+        raise WakeRouterError(
+            "CanonicalInboxAttention is not user-constructible; use admit_inbox_projection"
+        )
     if attention.kind not in INBOX_WAKE_KINDS:
         raise WakeRouterError(f"unknown inbox kind {attention.kind!r} remains attention")
     try:
@@ -298,6 +314,10 @@ def obligation_from_inbox(item: CanonicalInboxAttention | Mapping[str, Any]) -> 
 
 
 def obligation_from_runtime(fact: CanonicalRuntimeFact) -> WakeObligation | None:
+    if getattr(fact, "_admission", None) is not _ADMISSION:
+        raise WakeRouterError(
+            "CanonicalRuntimeFact is not user-constructible; use admit_runtime_review_source"
+        )
     event_type = str(fact.event_type or "").strip()
     if event_type not in _RUNTIME_NO_WAKE_EVENTS:
         raise WakeRouterError(f"unknown runtime event_type {event_type!r}")
@@ -345,7 +365,9 @@ def admit_runtime_review_source(
         raise WakeRouterError("runtime review source aggregate_type must be job")
     if event.aggregate_id != job.job_id:
         raise WakeRouterError("runtime event aggregate_id must equal job.job_id")
-    if int(event.sequence) < 1:
+    if event.job_id not in (None, job.job_id):
+        raise WakeRouterError("runtime event job_id must equal job.job_id")
+    if type(event.sequence) is not int or isinstance(event.sequence, bool) or event.sequence < 1:
         raise WakeRouterError("runtime event sequence must be >= 1")
     if event.event_type != "JOB_COMPLETED":
         raise WakeRouterError("runtime review source must be JOB_COMPLETED")
@@ -380,6 +402,7 @@ def admit_runtime_review_source(
         reviews_job_id=job.reviews_job_id,
         escalation_target=str(job.escalation_target or "coo"),
         source_created_at=event.created_at,
+        _admission=_ADMISSION,
     )
 
 
@@ -402,6 +425,10 @@ class WakeRouter:
             if isinstance(item, CanonicalInboxAttention)
             else admit_inbox_projection(item)
         )
+        if getattr(attention, "_admission", None) is not _ADMISSION:
+            raise WakeRouterError(
+                "CanonicalInboxAttention is not user-constructible; use admit_inbox_projection"
+            )
         suppressed = _present(attention, _INERT_ATTENTION_FIELDS)
         if attention.kind not in INBOX_WAKE_KINDS:
             return WakeDecision(
@@ -420,6 +447,10 @@ class WakeRouter:
         *,
         binding: RuntimeBinding | None = None,
     ) -> WakeDecision:
+        if getattr(fact, "_admission", None) is not _ADMISSION:
+            raise WakeRouterError(
+                "CanonicalRuntimeFact is not user-constructible; use admit_runtime_review_source"
+            )
         suppressed = _present(fact, _INERT_RUNTIME_FIELDS)
         obligation = obligation_from_runtime(fact)
         if obligation is None:
