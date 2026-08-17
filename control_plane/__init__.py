@@ -11,7 +11,7 @@ worker_runtime  Compatibility facade for the durable Executive worker runtime.
 executive_runtime  SQLite Worker/QuotaClass/Job/Attempt/Event source of truth.
 executive_authority  Fail-closed executable worker capability reader.
 codex_worker  Isolated one-shot Codex process adapter (Executive OS Phase 1B).
-wake_events / session_targets / wake_router / wake_dispatcher
+wake_events / session_targets / wake_transport / wake_router / wake_dispatcher / wake_ledger
               Executive Wake Fabric PR-1 contracts.  No scheduler, no SQLite
               table, no MCP tool, no provider transport armed.
 
