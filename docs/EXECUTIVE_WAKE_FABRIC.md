@@ -1,9 +1,10 @@
 # Executive Wake Fabric — PR-1 contracts (v1 rework, final hardening)
 
-**Status:** contracts only. Globally unarmed. No Control Panel UI, no GUI
-automation, no Grok computer-control, no ChatGPT GUI adapter, no Codex App
-Server transport, no production MCP write, no public HTTP endpoint, no runtime
-emitter, no reconciler daemon. PR-2 has not started.
+**Status:** PR-1 contracts + PR-2 durable ledger/reconciliation. Globally
+unarmed. No Control Panel UI, no GUI automation, no Grok computer-control, no
+ChatGPT GUI adapter, no Codex App Server transport, no production MCP write, no
+public HTTP endpoint, no daemon, no launchd schedule. PR-3 (delivery/transport)
+has not started.
 
 The Wake Fabric is the missing notification layer between a **canonical source
 fact** and the human-or-AI seat that must continue the work.  It does **not**
@@ -71,7 +72,7 @@ invoke Codex, ChatGPT, or Grok directly.
 | Job / Attempt / Worker / Event / lease | `control_plane/executive_runtime.py` SQLite | Sole lifecycle authority. Unchanged by this PR. |
 | Inbox attention | `control_plane/executive_inbox.py` v2 | Reviewed `attention_id` / `kind` / `target`. |
 | Wake *obligation* identity | Deterministic `WAKE-*` from `{schema, source_kind, source_ref, wake_kind}` | Reconstructable on replay. Fits `events.command_id`. |
-| Wake request / delivery / ack / resolve (later) | Existing `events` table: `aggregate_type="wake"`, `aggregate_id=obligation_id` | **No SQLite table**, queue, or scheduler. |
+| Wake request / delivery / ack / resolve | Existing `events` table: `aggregate_type="wake"`, `aggregate_id=obligation_id` | **No SQLite table**, queue, or scheduler. PR-2 writes `WAKE_REQUESTED` and `SOURCE_RESOLVED` only. |
 | Logical session alias | `config/wake_session_targets.json` | Documentation-as-config. Not a lifecycle registry. |
 | Runtime / native handle | `RuntimeBinding` only — never this Git file | OHF-P0: Codex App Server thread ids rotate (resume/fork). |
 | Inbox `next_actions` / worker prose | Existing Job / Inbox payload | Inert. Router must not execute or route from it. |
@@ -576,30 +577,75 @@ rotation must.
 - Codex App Server client
 - MCP `acknowledge_ceo_wake` or any schema-snapshot bump
 - Public HTTP endpoint
-- Runtime transition → wake emission (that is PR-2)
+- Runtime transition → wake emission as a live daemon (PR-2 is a one-shot reconciler only)
 - Live reconciliation daemon
 - Changing Executive supervisor, broker, service, MCP, or worker-adapter behavior
 - A new scheduler, sidecar queue, or session database
 - Production arming (`production_armed` / `target_enabled` /
   `transport_implemented` remain false)
+- Delivery attempts, ACK, or any transport from the reconciler
+- RuntimeBinding / root-session binding persistence
 
-## 19. Recommended PR-2+
+## 19. PR-2 durable ledger and reconciliation
 
-1. Reconcile canonical sources to expected wake obligations.  Mint missing
-   `WAKE_REQUESTED` rows (`command_id = obligation_id`,
-   `aggregate_type="wake"`).  Route refusal still leaves the obligation.
-2. Resolve obsolete obligations to `SOURCE_RESOLVED` only from healthy
-   canonical reads.
-3. Coalesce eligible pending obligations that share the current
+PR-2 persists source-driven obligations onto the existing Executive OS `events`
+table.  It does not add a Wake database, table, queue, scheduler, or mutable
+state row.
+
+```text
+canonical source state
+      ↓  (no write transaction held)
+trusted source snapshot
+      ↓
+expected WakeObligations
+      ↓
+compare durable wake events
+      ↓
+persist missing WAKE_REQUESTED
+      ↓
+persist SOURCE_RESOLVED only from healthy canonical absence proof
+```
+
+Reconciliation is deterministic, idempotent, crash-recoverable, source-driven,
+and route/transport-independent.  Automatic apply creates only `WAKE_REQUESTED`
+and `SOURCE_RESOLVED`.  It does not create `DELIVERY_ATTEMPT`, `ACCEPTED`,
+`DELIVERED`, `FAILED`, `TARGET_ACKNOWLEDGED`, or any transport invocation.
+
+Source reads (`WakeSourceSnapshot`) happen before `BEGIN IMMEDIATE`.  Runtime
+directly emits `review_required` only, via typed `Event` + `Job` + sibling Jobs
+through `admit_runtime_review_source`.  Inbox kinds go through
+`admit_inbox_projection` / `obligation_from_inbox` on a validated
+`mastermind.executive_inbox.v2` document.  Agent OS no-job CEO attention is a
+valid obligation (`job_id` / `attempt_id` null).  Two identical Agent OS rows
+remain two obligations because Inbox `attention_id` already disambiguates them.
+
+Degradation is asymmetric: an observed valid source may create a missing
+`WAKE_REQUESTED`.  Absence may `SOURCE_RESOLVE` only when that lane's canonical
+snapshot positively proves a healthy read.  Unreadable runtime, missing boot
+packet, foreign Inbox schema, or a partial projection is not "source
+disappeared".
+
+ACK and `SOURCE_RESOLVED` are terminal for automatic delivery eligibility.
+Reconciliation does not reopen a terminal Wake merely because the same
+deterministic source id reappears.  A new source fact (new Inbox `attention_id`,
+or a new `runtime:job:<JOB-*>:<sequence>`) is a new obligation.
+
+The optional one-shot `scripts/executive_wake_reconcile.py` performs one
+snapshot, one plan, one apply, one report, and exits.  It is not wired into
+`ExecutiveControlService` startup.
+
+## 20. Recommended PR-3+
+
+1. Coalesce eligible pending obligations that share the current
    `destination_digest` into one `NudgeAttempt`.
-4. Persist `DELIVERY_ATTEMPT` (`:A<n>`) with the route snapshot, then dispatch
+2. Persist `DELIVERY_ATTEMPT` (`:A<n>`) with the route snapshot, then dispatch
    **one** adapter call.  On crash, reuse unfinished A1.
-5. Persist `:A<n>:ACCEPTED` / `:A<n>:DELIVERED` only from authenticated
+3. Persist `:A<n>:ACCEPTED` / `:A<n>:DELIVERED` only from authenticated
    transport evidence for that attempt.  `ALREADY_DELIVERED` reconstructs from
    trusted durable destination-level delivery evidence.
-6. Target acknowledgement (`:ACK`) is obligation-global, from trusted session
+4. Target acknowledgement (`:ACK`) is obligation-global, from trusted session
    or human-operator context.  MCP ACK remains a later schema bump.
-7. Still no GUI automation and no Control Panel execution authority until a
+5. Still no GUI automation and no Control Panel execution authority until a
    separately reviewed transport PR sets **both** `target_enabled` and
    `transport_implemented` **and** `production_armed`, with a reviewed bounded
    retry policy.
