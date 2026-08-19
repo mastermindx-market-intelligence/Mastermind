@@ -35,7 +35,11 @@ dev = [
     # declared explicitly here rather than inherited transitively from
     # claude-agent-sdk so that an unrelated dependency bump cannot silently
     # remove the gateway's SDK from CI.
-    "mcp>=1.2",
+    # Exact SDK version resolved by EXEC-MCP-A (PR #64) on 2026-08-15.
+    # The floating `mcp>=1.2` constraint allowed a later SDK to rename
+    # `Server.list_tools` / `ToolAnnotations.readOnlyHint` and red hosted CI
+    # without any MCP product change. Do not float this pin.
+    "mcp==1.28.0",
 ]
 
 [tool.setuptools.packages.find]
