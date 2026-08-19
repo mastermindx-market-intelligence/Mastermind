@@ -1,7 +1,7 @@
-# OHF-P1A-R2 — Adversarial review packet
+# OHF-P1A-R3 — Adversarial review packet
 
-**Date:** 2026-08-16
-**Status:** attack surface after R1 remediation. Not self-acceptance.
+**Date:** 2026-08-18
+**Status:** attack surface after R2 remediation. Not self-acceptance.
 **Typed freeze:** `control_plane/operator_harness_contract.py`
 
 Legend: **P** prevent, **D** detect, **R** recover, **U** unknown, **X** unsafe
@@ -36,9 +36,16 @@ if the old P1A-R1 rule were kept (now closed in contract).
 | 25 | Terminal Attempt erases provider writer uncertainty | P | | | provider state may remain HELD/UNKNOWN |
 | 26 | Credential in events | P | D | | redaction; AuthRealmFact forbids tokens |
 | 27 | Kitchen-sink prepare() starts process / reads creds | P | | | prepare rejected; validate/stage typed |
-| 28 | reconcile() becomes hidden lifecycle authority | P | | | ReconcileReport forbids kill/resume/LOST |
+| 28 | reconcile() becomes hidden lifecycle authority | P | | | ReconcileObservation forbids Executive judgments |
 | 29 | Parked native leader after Phase 1F parent-container | P | | | V1_QUALITY_TRADEOFF_ACCEPTED; fresh aggregation Attempt |
 | 30 | Context rotation burns `attempt_limit` | P | | | CARDINALITY_B; rotation = new epoch |
+| 31 | Two writers while provider_session_id is NULL | P | D | | pre-bind UNIQUE(session_epoch_id) WHERE held=1 |
+| 32 | Adapter mints epoch/generation/turn IDs | P | | | Executive allocates in TX-2/TX-5; start/begin return observations |
+| 33 | Timeout retries create a second S1 | P | D | R | OperationId INTENT; EFFECT_UNKNOWN is non-replayable |
+| 34 | UNKNOWN process + UNKNOWN effect, launch E2 | P | | R | no new writer; Attempt LOST if recovery expires |
+| 35 | Caller tells comparator workspace/auth match | P | | | compare_launch(requested, observed) only |
+| 36 | Restore rewrites RELEASED into UNKNOWN | P | | | TX-9 clears authority; historical provider state untouched |
+| 37 | Rich OHF overwrites sealed Attempt pid/session | P | | | LEGACY_ONLY fields; execution_mode discriminator |
 
 ## Failure taxonomy
 
@@ -87,17 +94,17 @@ Adapter reports a typed `AdapterFailureClass`. It does not own routing.
 - Structured MCP item events (not universal).
 - Multi-host machine identity (postponed).
 
-## Reviewer brief for R2
+## Reviewer brief for R3
 
-Attack the remediation, not the original 1:1 design. Especially:
+Attack the R3 closure, not CARDINALITY_B. Especially:
 
-1. CARDINALITY_B vs merged `attempt_count`.
-2. `(worker_id, provider_session_id)` fence vs `ended_at`.
-3. Live App Server adoption deleted.
-4. Requested vs observed seal points.
-5. Typed adapter: could P1B still invent a method semantic?
-6. Restore → LOST and abandoned epochs.
-7. Helper enforcement vs prompt policy.
-8. No hidden #66/#72 dependency.
-9. No `native_session_id` synonym.
-10. Consistency table vs schema SQL.
+1. Legacy Attempt pid/session fields are LEGACY_ONLY, not projections.
+2. Pre-bind epoch writer fence plus post-bind realm fence.
+3. Executive allocates epoch/generation/turn IDs before adapter side effects.
+4. OperationId INTENT lives on `events.command_id`; EFFECT_UNKNOWN is fail-closed.
+5. `compare_launch` has no caller-supplied security verdicts; served_model None refuses.
+6. ReconcileObservation cannot assert resume_safe / executive writer held.
+7. Restore preserves historical RELEASED; invalidates authority separately.
+8. Optional methods have typed Protocols and OperationIds.
+9. EventCursor is ProcessGeneration-scoped.
+10. TX-1…TX-9 and the crash-window matrix leave no P1B identity invention.

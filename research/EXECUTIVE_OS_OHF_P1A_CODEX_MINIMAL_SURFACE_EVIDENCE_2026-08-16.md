@@ -80,7 +80,7 @@ Requested-set == observed-set remains false even after reduction.
 Attestation must stay three-layer: REQUIRED / ALLOWED_AMBIENT / FORBIDDEN,
 with UNCLASSIFIED fail-closed on write profiles.
 
-## 6. R2 gate classification (unchanged residue)
+## 6. R3 gate classification (unchanged residue)
 
 Independent review classified this residue:
 
@@ -88,7 +88,8 @@ Independent review classified this residue:
 - write-capable Codex OHF canary: **BLOCKED**
 - production arming: **BLOCKED**
 
-R2 does **not** add `github:*`, `openai-templates:*`, or `plugin-management` to
-ALLOWED_AMBIENT. The optional `features.plugins=false` spike was not run in this
-remediation. Residual names stay UNCLASSIFIED until a later explicit experiment
-or versioned allowlist.
+R3 does **not** add `github:*`, `openai-templates:*`, or `plugin-management` to
+ALLOWED_AMBIENT. The optional `features.plugins=false` spike was not run.
+Residual names stay UNCLASSIFIED until a later explicit experiment or
+versioned allowlist. Observed capability identities can carry digests when a
+future probe exposes them; they still classify as UNCLASSIFIED today.
