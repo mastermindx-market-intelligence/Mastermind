@@ -107,4 +107,20 @@ Attack the R3 closure, not CARDINALITY_B. Especially:
 7. Restore preserves historical RELEASED; invalidates authority separately.
 8. Optional methods have typed Protocols and OperationIds.
 9. EventCursor is ProcessGeneration-scoped.
-10. TX-1…TX-9 and the crash-window matrix leave no P1B identity invention.
+10. TX-1…TX-10 and the crash-window matrix leave no P1B identity invention.
+    TX-10 is the only same-epoch G2 recovery transaction.
+
+## Reviewer brief for R3.1
+
+Attack TX-10 and OperationId receipt closure. Do not reopen CARDINALITY_B or
+rewrite the R1/R2 review artifacts. Especially:
+
+1. Hard-dead G1 + RELEASED + resume_safe → S1/G2 on the same epoch, same Attempt.
+2. Hard-dead G1 + HELD/UNKNOWN provider writer → no G2.
+3. UNKNOWN process → no G2.
+4. Duplicate TX-10 → unique writer and unique OperationId refusal; no provider call.
+5. Crash after TX-10 INTENT before resume_session → deterministic
+   RETRY_SAME_OPERATION_ON_ALLOCATED_GENERATION vs EFFECT_UNKNOWN_HOLD_GENERATION.
+   Never allocate G3 as a replay.
+6. Every accepted OperationId permits applied/refused/effect-unknown/reconciled
+   receipts under `_COMMAND_ID_RE`. Max accepted length and one-beyond are tests.

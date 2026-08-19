@@ -200,6 +200,11 @@ Canonical copy: `TRANSACTION_GROUPS` in the typed contract.
 | TX-7 | process death observation; held remains; provider not RELEASED | n/a |
 | TX-8 | epoch ABANDONED, clear held, preserve provider writer | only if process PROVEN_DEAD |
 | TX-9 | OHF Attempts LOST, CURRENT epochs ABANDONED, held cleared, history untouched | before service re-enable |
+| TX-10 | same-epoch G2 recovery: release G1 writer, allocate G2, acquire writer, resume INTENT | yes — before resume_session |
+
+TX-10 does not create a SessionEpoch and does not consume an Attempt. It is
+refused when the old process is UNKNOWN or the provider writer is not
+RELEASED. Duplicate recovery is unique-writer / unique-OperationId refusal.
 
 Context rotation: TX marks old CURRENT TERMINAL, optionally inserts the next
 CURRENT epoch without a writer if launch is deferred. Crash between TX-8 and
@@ -214,6 +219,8 @@ E2 creation leaves Attempt active, no CURRENT epoch, no writer — recoverable.
 | Mutate provider_session_id after first assignment | UPDATE trigger | SQL trigger |
 | Two Executive writers before S1 exists | unique index `process_generations_one_epoch_writer` | SQL index |
 | Two Executive writers on W1/S1 | unique index `process_generations_one_executive_writer` | SQL index |
+| Duplicate TX-10 / same-epoch G2 while G2 holds | unique writer indexes + unique command_id; no provider call | SQL index + BEGIN IMMEDIATE |
+| Hard-dead G1 + RELEASED + resume_safe | TX-10 same epoch, same Attempt, G2 resumes S1 | BEGIN IMMEDIATE |
 | W1/`abc` and W2/`abc` | legal; realm includes worker_id | SQL index |
 | Process dies, writer remains | `ended_at_ms` set; `executive_writer_held=1`; provider UNKNOWN/HELD | TX-7 |
 | UNKNOWN process + UNKNOWN effect, start E2 | refused until process absence proven; else Attempt LOST | supervisor |

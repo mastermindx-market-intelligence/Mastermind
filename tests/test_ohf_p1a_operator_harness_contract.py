@@ -1,4 +1,4 @@
-"""OHF-P1A-R3 typed OperatorHarnessAdapter contract freeze."""
+"""OHF-P1A-R3.1 typed OperatorHarnessAdapter contract freeze."""
 from __future__ import annotations
 
 import dataclasses
@@ -20,6 +20,7 @@ from control_plane.operator_harness_contract import (
     AuthRealmRequirement,
     CANONICAL_SESSION_FIELD,
     CARDINALITY,
+    COMMAND_ID_MAX_LEN,
     COMMAND_ID_RE,
     CRASH_WINDOW_MATRIX,
     CandidateResult,
@@ -36,6 +37,7 @@ from control_plane.operator_harness_contract import (
     LEGACY_SEALED_WORKER_ATTEMPT_FIELDS,
     LaunchDecision,
     LIVE_APP_SERVER_ADOPTION,
+    MAX_OPERATION_ID_LEN,
     METHOD_CONTRACTS,
     MethodClass,
     NativeHelperPolicy,
@@ -44,6 +46,7 @@ from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
     OPERATION_AGGREGATE_TYPE,
     OPERATION_COMMAND_ID_PREFIX,
+    OPERATION_RECEIPT_COMMAND_SUFFIXES,
     OPTIONAL_ADAPTER_PROTOCOLS,
     ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
@@ -56,6 +59,7 @@ from control_plane.operator_harness_contract import (
     POST_RESTORE_ATTEMPT_STATUS,
     PREBIND_WRITER_FENCE_KEY,
     PROPOSED_SQL_INVARIANTS,
+    ProcessGenerationRecord,
     ProcessGenerationRef,
     ProcessIdentityObservation,
     ProcessLiveness,
@@ -63,6 +67,9 @@ from control_plane.operator_harness_contract import (
     REATTEST_TRIGGERS,
     ReconcileObservation,
     RequestedExecutionProfile,
+    SameEpochRecoveryRefusal,
+    SameEpochRecoveryReplay,
+    SameEpochRecoverySnapshot,
     SessionEpochRef,
     SessionEpochState,
     SessionStartObservation,
@@ -85,24 +92,31 @@ from control_plane.operator_harness_contract import (
     WriterFacts,
     abandon_epoch,
     adapter_method_returns_executive_id,
+    apply_same_epoch_generation_recovery,
     classify_capability,
     compare_launch,
     compare_launch_parameter_names,
+    diagnose_same_epoch_generation_recovery,
     derive_resume_safety,
     event_cursor_scoped_to,
     first_work_turn_allowed,
+    may_allocate_another_generation_after_tx10,
     may_abandon_epoch,
     may_bind_epoch_provider_session,
     may_bind_provider_session,
     may_hold_executive_writer,
     may_hold_prebind_epoch_writer,
+    may_hold_postbind_realm_writer,
+    may_recover_same_epoch_generation,
     may_start_successor_rich_writer,
     native_helpers_allowed,
+    operation_id_permits_all_derived_receipts,
     operation_receipt_command_id,
     process_end_does_not_release_writer,
     restore_invalidation,
     rich_ohf_may_rewrite_legacy_attempt_field,
     resolve_operation_after_crash,
+    same_epoch_recovery_replay_disposition,
     writer_realm_key,
 )
 
@@ -169,6 +183,47 @@ def _observed(**overrides: object) -> ObservedHarnessAttestation:
     )
     payload.update(overrides)
     return ObservedHarnessAttestation(**payload)  # type: ignore[arg-type]
+
+
+def _epoch() -> SessionEpochRef:
+    return SessionEpochRef(
+        session_epoch_id="epoch-1",
+        attempt_id="att-1",
+        worker_id="W1",
+        epoch_number=1,
+    )
+
+
+def _generation(generation_id: str, number: int) -> ProcessGenerationRef:
+    return ProcessGenerationRef(
+        process_generation_id=generation_id,
+        session_epoch_id="epoch-1",
+        generation_number=number,
+        worker_id="W1",
+    )
+
+
+def _recovery_snapshot(
+    *,
+    liveness: ProcessLiveness = ProcessLiveness.PROVEN_DEAD,
+    provider_writer: ProviderWriterState = ProviderWriterState.RELEASED,
+    writer_held: bool = True,
+    epoch_state: SessionEpochState = SessionEpochState.CURRENT,
+) -> SameEpochRecoverySnapshot:
+    return SameEpochRecoverySnapshot(
+        epoch=_epoch(),
+        epoch_state=epoch_state,
+        provider_session_id="S1",
+        generations=(
+            ProcessGenerationRecord(
+                ref=_generation("gen-1", 1),
+                executive_writer_held=writer_held,
+                process_liveness=liveness,
+                provider_writer_state=provider_writer,
+                provider_session_id="S1",
+            ),
+        ),
+    )
 
 
 def test_cardinality_and_identity_constants():
@@ -769,6 +824,12 @@ def test_transaction_groups_and_crash_windows_are_frozen():
         "tx8_committed_e2_not_created",
         "restore_completed_before_tx9",
         "controller_dies_during_tx9",
+        "after_tx10_before_resume_call",
+        "during_resume_session",
+        "resume_returned_before_applied",
+        "duplicate_tx10_while_successor_holds",
+        "hard_dead_g1_provider_held_or_unknown",
+        "unknown_process_blocks_tx10",
     }
     assert required_windows <= set(CRASH_WINDOW_MATRIX)
     for row in CRASH_WINDOW_MATRIX.values():
@@ -778,6 +839,12 @@ def test_transaction_groups_and_crash_windows_are_frozen():
     assert "WHERE executive_writer_held = 1" in PROPOSED_SQL_INVARIANTS["prebind_epoch_writer"]
     assert "provider_session_id IS NOT NULL" in PROPOSED_SQL_INVARIANTS["postbind_realm_writer"]
     assert set(INVARIANT_ENFORCEMENT)
+    assert TransactionGroup.TX10_SAME_EPOCH_GENERATION_RECOVERY in TRANSACTION_GROUPS
+    tx10 = TRANSACTION_GROUPS[TransactionGroup.TX10_SAME_EPOCH_GENERATION_RECOVERY]
+    assert "No new SessionEpoch" in tx10
+    assert "No new Attempt" in tx10
+    assert "resume_session" in tx10
+    assert INVARIANT_ENFORCEMENT["same_epoch_generation_recovery"].value == "BEGIN_IMMEDIATE"
 
 
 def test_scenario_a_graceful_restart_same_epoch():
@@ -859,3 +926,229 @@ def test_command_id_regex_is_the_runtime_law():
     assert OPERATION_COMMAND_ID_PREFIX.startswith("ohf-op")
     # Keep the unused import of `re` honest against a local copy of the law.
     assert re.compile(COMMAND_ID_RE.pattern).pattern == COMMAND_ID_RE.pattern
+    assert COMMAND_ID_MAX_LEN == 128
+    assert MAX_OPERATION_ID_LEN == COMMAND_ID_MAX_LEN - len(":effect-unknown")
+    assert "effect-unknown" in OPERATION_RECEIPT_COMMAND_SUFFIXES
+
+
+def test_operation_id_receipt_closure_at_max_and_one_beyond():
+    prefix = OPERATION_COMMAND_ID_PREFIX
+    max_id = prefix + "a" * (MAX_OPERATION_ID_LEN - len(prefix))
+    assert len(max_id) == MAX_OPERATION_ID_LEN
+    assert operation_id_permits_all_derived_receipts(max_id)
+    op = OperationId(command_id=max_id)
+    for kind in (
+        OperationReceiptKind.INTENT,
+        OperationReceiptKind.APPLIED,
+        OperationReceiptKind.REFUSED,
+        OperationReceiptKind.EFFECT_UNKNOWN,
+        OperationReceiptKind.RECONCILED,
+    ):
+        derived = operation_receipt_command_id(op, kind)
+        assert COMMAND_ID_RE.fullmatch(derived)
+        assert len(derived) <= COMMAND_ID_MAX_LEN
+    beyond = max_id + "a"
+    assert len(beyond) == MAX_OPERATION_ID_LEN + 1
+    assert COMMAND_ID_RE.fullmatch(beyond)
+    assert not operation_id_permits_all_derived_receipts(beyond)
+    with pytest.raises(ValueError, match="derived receipt"):
+        OperationId(command_id=beyond)
+    too_long_for_regex = "o" + "a" * COMMAND_ID_MAX_LEN
+    assert len(too_long_for_regex) == COMMAND_ID_MAX_LEN + 1
+    assert COMMAND_ID_RE.fullmatch(too_long_for_regex) is None
+
+
+def test_hard_dead_released_same_epoch_g2_is_lawful():
+    snapshot = _recovery_snapshot()
+    g2 = _generation("gen-2", 2)
+    op = OperationId(command_id="ohf-op:resume-s1-g2")
+    assert may_recover_same_epoch_generation(
+        snapshot,
+        old_generation_id="gen-1",
+        new_generation=g2,
+        operation_id=op,
+        resume_safe=True,
+    )
+    recovered = apply_same_epoch_generation_recovery(
+        snapshot,
+        old_generation_id="gen-1",
+        new_generation=g2,
+        operation_id=op,
+        resume_safe=True,
+    )
+    assert recovered.epoch.session_epoch_id == snapshot.epoch.session_epoch_id
+    assert recovered.epoch.attempt_id == snapshot.epoch.attempt_id
+    assert recovered.epoch.epoch_number == snapshot.epoch.epoch_number
+    assert recovered.creates_new_epoch is False
+    assert recovered.consumes_attempt is False
+    assert recovered.provider_session_id == "S1"
+    by_id = {row.ref.process_generation_id: row for row in recovered.generations}
+    assert by_id["gen-1"].executive_writer_held is False
+    assert by_id["gen-1"].provider_writer_state is ProviderWriterState.RELEASED
+    assert by_id["gen-2"].executive_writer_held is True
+    assert by_id["gen-2"].ref.generation_number == 2
+    assert by_id["gen-2"].provider_session_id == "S1"
+    assert op.command_id in recovered.reserved_operation_ids
+    assert ATTEMPT_BOUNDARY_MATRIX["safe_crash_recovery"] is AttemptBoundary.SAME_ATTEMPT
+
+
+def test_hard_dead_held_or_unknown_provider_writer_refuses_g2():
+    g2 = _generation("gen-2", 2)
+    op = OperationId(command_id="ohf-op:resume-blocked")
+    for writer in (ProviderWriterState.HELD, ProviderWriterState.UNKNOWN):
+        snapshot = _recovery_snapshot(provider_writer=writer)
+        assert (
+            diagnose_same_epoch_generation_recovery(
+                snapshot,
+                old_generation_id="gen-1",
+                new_generation=g2,
+                operation_id=op,
+                resume_safe=True,
+            )
+            is SameEpochRecoveryRefusal.PROVIDER_WRITER_NOT_RELEASED
+        )
+        with pytest.raises(ValueError, match="PROVIDER_WRITER_NOT_RELEASED"):
+            apply_same_epoch_generation_recovery(
+                snapshot,
+                old_generation_id="gen-1",
+                new_generation=g2,
+                operation_id=op,
+                resume_safe=True,
+            )
+
+
+def test_unknown_process_refuses_same_epoch_g2():
+    snapshot = _recovery_snapshot(liveness=ProcessLiveness.UNKNOWN)
+    g2 = _generation("gen-2", 2)
+    op = OperationId(command_id="ohf-op:resume-unknown-process")
+    assert (
+        diagnose_same_epoch_generation_recovery(
+            snapshot,
+            old_generation_id="gen-1",
+            new_generation=g2,
+            operation_id=op,
+            resume_safe=True,
+        )
+        is SameEpochRecoveryRefusal.PROCESS_LIVENESS_UNKNOWN
+    )
+
+
+def test_duplicate_same_epoch_recovery_hits_writer_and_operation_id():
+    snapshot = _recovery_snapshot()
+    g2 = _generation("gen-2", 2)
+    op = OperationId(command_id="ohf-op:resume-once")
+    recovered = apply_same_epoch_generation_recovery(
+        snapshot,
+        old_generation_id="gen-1",
+        new_generation=g2,
+        operation_id=op,
+        resume_safe=True,
+    )
+    held_epoch = {
+        row.ref.session_epoch_id: row.ref.process_generation_id
+        for row in recovered.generations
+        if row.executive_writer_held
+    }
+    assert not may_hold_prebind_epoch_writer(
+        session_epoch_id="epoch-1",
+        generation_id="gen-3",
+        held_by_epoch=held_epoch,
+    )
+    held_realm = {
+        writer_realm_key("W1", "S1"): row.ref.process_generation_id
+        for row in recovered.generations
+        if row.executive_writer_held
+    }
+    assert not may_hold_postbind_realm_writer(
+        worker_id="W1",
+        provider_session_id="S1",
+        generation_id="gen-3",
+        held_by=held_realm,
+    )
+    assert (
+        diagnose_same_epoch_generation_recovery(
+            recovered,
+            old_generation_id="gen-1",
+            new_generation=_generation("gen-3", 3),
+            operation_id=op,
+            resume_safe=True,
+        )
+        is SameEpochRecoveryRefusal.OLD_WRITER_NOT_HELD
+    )
+    assert (
+        diagnose_same_epoch_generation_recovery(
+            recovered,
+            old_generation_id="gen-1",
+            new_generation=_generation("gen-3", 3),
+            operation_id=OperationId(command_id="ohf-op:resume-twice"),
+            resume_safe=True,
+        )
+        is SameEpochRecoveryRefusal.OLD_WRITER_NOT_HELD
+    )
+    # Same OperationId is reserved even if a caller names a different old generation.
+    g2_as_old = SameEpochRecoverySnapshot(
+        epoch=recovered.epoch,
+        epoch_state=recovered.epoch_state,
+        provider_session_id=recovered.provider_session_id,
+        generations=tuple(
+            ProcessGenerationRecord(
+                ref=row.ref,
+                executive_writer_held=row.executive_writer_held,
+                process_liveness=(
+                    ProcessLiveness.PROVEN_DEAD
+                    if row.ref.process_generation_id == "gen-2"
+                    else row.process_liveness
+                ),
+                provider_writer_state=(
+                    ProviderWriterState.RELEASED
+                    if row.ref.process_generation_id == "gen-2"
+                    else row.provider_writer_state
+                ),
+                provider_session_id=row.provider_session_id,
+            )
+            for row in recovered.generations
+        ),
+        reserved_operation_ids=recovered.reserved_operation_ids,
+    )
+    assert (
+        diagnose_same_epoch_generation_recovery(
+            g2_as_old,
+            old_generation_id="gen-2",
+            new_generation=_generation("gen-3", 3),
+            operation_id=op,
+            resume_safe=True,
+        )
+        is SameEpochRecoveryRefusal.OPERATION_ID_DUPLICATE
+    )
+
+
+def test_tx10_intent_crash_has_deterministic_replay_disposition():
+    safe = same_epoch_recovery_replay_disposition(
+        intent_committed=True,
+        terminal_receipt=None,
+        external_call_proven_not_started=True,
+    )
+    unknown = same_epoch_recovery_replay_disposition(
+        intent_committed=True,
+        terminal_receipt=None,
+        external_call_proven_not_started=False,
+    )
+    assert safe is SameEpochRecoveryReplay.RETRY_SAME_OPERATION_ON_ALLOCATED_GENERATION
+    assert unknown is SameEpochRecoveryReplay.EFFECT_UNKNOWN_HOLD_GENERATION
+    assert may_allocate_another_generation_after_tx10(intent_committed=True) is False
+    assert may_allocate_another_generation_after_tx10(intent_committed=False) is False
+    recovered = apply_same_epoch_generation_recovery(
+        _recovery_snapshot(),
+        old_generation_id="gen-1",
+        new_generation=_generation("gen-2", 2),
+        operation_id=OperationId(command_id="ohf-op:resume-crash"),
+        resume_safe=True,
+    )
+    g2 = next(row for row in recovered.generations if row.ref.process_generation_id == "gen-2")
+    assert g2.executive_writer_held is True
+    assert g2.process_liveness is ProcessLiveness.UNKNOWN
+    assert not may_start_successor_rich_writer(
+        process_liveness=g2.process_liveness,
+        process_proven_absent=False,
+        external_effect_unknown=True,
+    )

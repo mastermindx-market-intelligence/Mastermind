@@ -152,3 +152,20 @@ activation invariant, not a P1A architecture blocker.
 - host reboot live proof UNKNOWN
 - multi-host identity postponed
 - worker-slot auth-binding production invariant
+
+## R3.1 (2026-08-19)
+
+Does not reopen R2-1…R2-5 or CARDINALITY_B.
+
+- **Same-epoch generation recovery:** TX-10 atomically releases the dead
+  generation's Executive writer, allocates G2 on the existing CURRENT epoch,
+  acquires the writer, and commits the resume OperationId INTENT before
+  `resume_session`. Tests:
+  `test_hard_dead_released_same_epoch_g2_is_lawful`,
+  `test_hard_dead_held_or_unknown_provider_writer_refuses_g2`,
+  `test_unknown_process_refuses_same_epoch_g2`,
+  `test_duplicate_same_epoch_recovery_hits_writer_and_operation_id`,
+  `test_tx10_intent_crash_has_deterministic_replay_disposition`.
+- **OperationId receipt closure:** `OperationId` rejects any base id whose
+  derived `:{applied,refused,effect-unknown,reconciled}` receipts would miss
+  `_COMMAND_ID_RE`. Test: `test_operation_id_receipt_closure_at_max_and_one_beyond`.

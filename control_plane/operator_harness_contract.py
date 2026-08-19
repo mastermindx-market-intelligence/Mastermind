@@ -1,4 +1,4 @@
-"""OHF-P1A-R3 provider-neutral Operator Harness contract.
+"""OHF-P1A-R3.1 provider-neutral Operator Harness contract.
 
 Pure architecture freeze.  This module must not:
 
@@ -46,6 +46,33 @@ WORKER_SLOT_AUTH_BINDING_PRODUCTION_INVARIANT = (
 # Mirrors control_plane.executive_runtime._COMMAND_ID_RE.  Duplicated here so
 # this pure module does not import the runtime.  Tests pin the two patterns equal.
 COMMAND_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+COMMAND_ID_MAX_LEN = 128  # 1 first char + {0,127}
+OPERATION_RECEIPT_COMMAND_SUFFIXES: tuple[str, ...] = (
+    "applied",
+    "refused",
+    "effect-unknown",
+    "reconciled",
+)
+LONGEST_OPERATION_RECEIPT_SUFFIX_LEN = max(
+    len(f":{item}") for item in OPERATION_RECEIPT_COMMAND_SUFFIXES
+)
+# Longest derived receipt is `:effect-unknown` (15).  Every accepted OperationId
+# must leave room for that suffix under COMMAND_ID_MAX_LEN.
+MAX_OPERATION_ID_LEN = COMMAND_ID_MAX_LEN - LONGEST_OPERATION_RECEIPT_SUFFIX_LEN
+
+
+def operation_id_permits_all_derived_receipts(command_id: str) -> bool:
+    """True iff command_id and every derived receipt match COMMAND_ID_RE."""
+
+    value = str(command_id or "")
+    if COMMAND_ID_RE.fullmatch(value) is None:
+        return False
+    if len(value) > MAX_OPERATION_ID_LEN:
+        return False
+    for suffix in OPERATION_RECEIPT_COMMAND_SUFFIXES:
+        if COMMAND_ID_RE.fullmatch(f"{value}:{suffix}") is None:
+            return False
+    return True
 
 LEGACY_SEALED_WORKER_ATTEMPT_FIELDS: frozenset[str] = frozenset(
     {
@@ -272,6 +299,31 @@ class TransactionGroup(str, Enum):
     TX7_HARD_PROCESS_DEATH = "TX-7"
     TX8_ABANDON_POISONED_EPOCH = "TX-8"
     TX9_RESTORE_INVALIDATION = "TX-9"
+    TX10_SAME_EPOCH_GENERATION_RECOVERY = "TX-10"
+
+
+class SameEpochRecoveryRefusal(str, Enum):
+    EPOCH_NOT_CURRENT = "EPOCH_NOT_CURRENT"
+    PROCESS_NOT_PROVEN_DEAD = "PROCESS_NOT_PROVEN_DEAD"
+    PROCESS_LIVENESS_UNKNOWN = "PROCESS_LIVENESS_UNKNOWN"
+    PROVIDER_WRITER_NOT_RELEASED = "PROVIDER_WRITER_NOT_RELEASED"
+    RESUME_NOT_SAFE = "RESUME_NOT_SAFE"
+    OLD_WRITER_NOT_HELD = "OLD_WRITER_NOT_HELD"
+    SUCCESSOR_WRITER_CONFLICT = "SUCCESSOR_WRITER_CONFLICT"
+    OPERATION_ID_DUPLICATE = "OPERATION_ID_DUPLICATE"
+    GENERATION_NOT_SEQUENTIAL = "GENERATION_NOT_SEQUENTIAL"
+    EPOCH_MISMATCH = "EPOCH_MISMATCH"
+
+
+class SameEpochRecoveryReplay(str, Enum):
+    RETRY_SAME_OPERATION_ON_ALLOCATED_GENERATION = (
+        "RETRY_SAME_OPERATION_ON_ALLOCATED_GENERATION"
+    )
+    EFFECT_UNKNOWN_HOLD_GENERATION = "EFFECT_UNKNOWN_HOLD_GENERATION"
+    NOT_STARTED = "NOT_STARTED"
+    APPLIED = "APPLIED"
+    REFUSED = "REFUSED"
+    RECONCILED = "RECONCILED"
 
 
 class EnforcementSite(str, Enum):
@@ -371,6 +423,17 @@ TRANSACTION_GROUPS: dict[TransactionGroup, str] = {
         "BEGIN IMMEDIATE before service re-enable: OPERATOR_HARNESS active Attempts "
         "→ LOST; CURRENT epochs → ABANDONED; executive_writer_held → 0; historical "
         "provider observations unchanged; append OHF_RESTORE_INVALIDATED."
+    ),
+    TransactionGroup.TX10_SAME_EPOCH_GENERATION_RECOVERY: (
+        "BEGIN IMMEDIATE: verify epoch CURRENT; verify old generation is the held "
+        "writer; verify old process PROVEN_DEAD; verify provider_writer_state "
+        "RELEASED; verify Executive-derived resume_safe; clear old "
+        "executive_writer_held; allocate next process_generation_id + "
+        "generation_number on the SAME epoch; insert successor with "
+        "executive_writer_held=1 and provider_session_id index projection already "
+        "bound to S1; append OPERATOR_OPERATION_INTENT command_id=OperationId "
+        "for resume_session. No new SessionEpoch. No new Attempt. Commit before "
+        "resume_session()."
     ),
 }
 
@@ -484,6 +547,70 @@ CRASH_WINDOW_MATRIX: dict[str, dict[str, str]] = {
         "epoch_may_be_abandoned": "yes, remaining CURRENT epochs",
         "new_epoch_may_start": "no",
     },
+    "after_tx10_before_resume_call": {
+        "durable_state": (
+            "resume INTENT committed; G1 writer released; G2 writer held on the "
+            "same CURRENT epoch; provider_session_id already S1; G2 process not launched"
+        ),
+        "external_side_effect": "none if Executive can prove resume_session was never entered",
+        "safe_automatic_retry": (
+            "only the same OperationId against already-allocated G2, and only if "
+            "local execution state proves the adapter call did not begin; never allocate G3"
+        ),
+        "required_reconciliation": (
+            "inspect local call-start flag; proven-not-started → "
+            "RETRY_SAME_OPERATION_ON_ALLOCATED_GENERATION; otherwise "
+            "EFFECT_UNKNOWN_HOLD_GENERATION"
+        ),
+        "writer_held": "yes, G2 post-bind epoch+realm writer",
+        "epoch_may_be_abandoned": "no while G2 process liveness is UNKNOWN",
+        "new_epoch_may_start": "no",
+    },
+    "during_resume_session": {
+        "durable_state": "TX-10 committed; G2 writer held; S1 bound; APPLIED absent",
+        "external_side_effect": "possible new OS process attached to existing S1",
+        "safe_automatic_retry": "no",
+        "required_reconciliation": "EFFECT_UNKNOWN; do not allocate G3; do not create a new epoch",
+        "writer_held": "yes, G2",
+        "epoch_may_be_abandoned": "not while G2 process liveness is UNKNOWN",
+        "new_epoch_may_start": "no",
+    },
+    "resume_returned_before_applied": {
+        "durable_state": "TX-10 committed; resume observation only in adapter memory",
+        "external_side_effect": "G2 process and S1 resume likely exist",
+        "safe_automatic_retry": "no",
+        "required_reconciliation": "persist process identity + APPLIED if still obtainable; else EFFECT_UNKNOWN",
+        "writer_held": "yes, G2",
+        "epoch_may_be_abandoned": "not while G2 process may still be alive",
+        "new_epoch_may_start": "no",
+    },
+    "duplicate_tx10_while_successor_holds": {
+        "durable_state": "G2 already holds the epoch and realm writer; OperationId may already be reserved",
+        "external_side_effect": "none from the duplicate",
+        "safe_automatic_retry": "no — unique writer index and unique command_id refuse before any provider call",
+        "required_reconciliation": "SUCCESSOR_WRITER_CONFLICT and/or OPERATION_ID_DUPLICATE; no adapter call",
+        "writer_held": "yes, the already-allocated successor",
+        "epoch_may_be_abandoned": "no",
+        "new_epoch_may_start": "no",
+    },
+    "hard_dead_g1_provider_held_or_unknown": {
+        "durable_state": "TX-7 death recorded; Executive writer still held on G1; provider not RELEASED",
+        "external_side_effect": "none from a refused TX-10",
+        "safe_automatic_retry": "no — TX-10 is refused; do not invent RELEASED",
+        "required_reconciliation": "no G2; TX-8 abandon+new epoch remains the S2 path if process is PROVEN_DEAD",
+        "writer_held": "yes, G1",
+        "epoch_may_be_abandoned": "yes via TX-8 only, not via TX-10",
+        "new_epoch_may_start": "only after TX-8, never as G2 on S1",
+    },
+    "unknown_process_blocks_tx10": {
+        "durable_state": "CURRENT epoch; G1 writer held; process liveness UNKNOWN",
+        "external_side_effect": "possible live G1 process",
+        "safe_automatic_retry": "no",
+        "required_reconciliation": "TX-10 refused; no G2; no new epoch; Attempt LOST if recovery cannot prove absence",
+        "writer_held": "yes, G1",
+        "epoch_may_be_abandoned": "no while process liveness is UNKNOWN",
+        "new_epoch_may_start": "no",
+    },
 }
 
 
@@ -504,6 +631,7 @@ INVARIANT_ENFORCEMENT: dict[str, EnforcementSite] = {
     "resume_safety": EnforcementSite.PURE_COMPARATOR,
     "unknown_process_blocks_new_writer": EnforcementSite.SUPERVISOR,
     "restore_invalidation_before_reenable": EnforcementSite.BEGIN_IMMEDIATE,
+    "same_epoch_generation_recovery": EnforcementSite.BEGIN_IMMEDIATE,
 }
 
 
@@ -519,6 +647,11 @@ class OperationId:
             raise ValueError("OperationId must use the ohf-op: command_id prefix")
         if COMMAND_ID_RE.fullmatch(value) is None:
             raise ValueError("OperationId.command_id must match events.command_id law")
+        if not operation_id_permits_all_derived_receipts(value):
+            raise ValueError(
+                "OperationId.command_id must leave room for every derived receipt "
+                "command_id under events.command_id law"
+            )
 
 
 @dataclass(frozen=True)
@@ -808,6 +941,30 @@ class RestoreInvalidationResult:
     clear_executive_writer: bool = True
     abandon_epoch: bool = True
     attempt_status: str = POST_RESTORE_ATTEMPT_STATUS
+
+
+@dataclass(frozen=True)
+class ProcessGenerationRecord:
+    """Pure in-memory generation row for TX-10 architecture proofs.  Not SQLite."""
+
+    ref: ProcessGenerationRef
+    executive_writer_held: bool
+    process_liveness: ProcessLiveness
+    provider_writer_state: ProviderWriterState
+    provider_session_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SameEpochRecoverySnapshot:
+    """Pre/post TX-10 durable facts.  Attempt identity is unchanged by construction."""
+
+    epoch: SessionEpochRef
+    epoch_state: SessionEpochState
+    provider_session_id: str
+    generations: tuple[ProcessGenerationRecord, ...]
+    reserved_operation_ids: frozenset[str] = frozenset()
+    creates_new_epoch: bool = False
+    consumes_attempt: bool = False
 
 
 @dataclass(frozen=True)
@@ -1422,12 +1579,15 @@ def operation_receipt_command_id(
 ) -> str:
     if kind is OperationReceiptKind.INTENT:
         return operation_id.command_id
-    suffix = {
+    suffix_map = {
         OperationReceiptKind.APPLIED: "applied",
         OperationReceiptKind.REFUSED: "refused",
         OperationReceiptKind.EFFECT_UNKNOWN: "effect-unknown",
         OperationReceiptKind.RECONCILED: "reconciled",
-    }[kind]
+    }
+    suffix = suffix_map[kind]
+    if suffix not in OPERATION_RECEIPT_COMMAND_SUFFIXES:
+        raise ValueError("receipt suffix is not in the frozen suffix set")
     derived = f"{operation_id.command_id}:{suffix}"
     if COMMAND_ID_RE.fullmatch(derived) is None:
         raise ValueError("derived command_id exceeds Executive command_id law")
@@ -1455,6 +1615,194 @@ def resolve_operation_after_crash(
     if external_call_proven_not_started:
         return OperationResolution.MAY_RETRY_SAME_OPERATION_ID
     return OperationResolution.EFFECT_UNKNOWN
+
+
+def same_epoch_recovery_replay_disposition(
+    *,
+    intent_committed: bool,
+    terminal_receipt: OperationReceiptKind | None,
+    external_call_proven_not_started: bool,
+) -> SameEpochRecoveryReplay:
+    """Crash after TX-10 INTENT: retry the allocated G2 or fail closed.
+
+    Allocating another generation is never a legal replay after TX-10 commits.
+    """
+
+    resolution = resolve_operation_after_crash(
+        intent_committed=intent_committed,
+        terminal_receipt=terminal_receipt,
+        external_call_proven_not_started=external_call_proven_not_started,
+    )
+    if resolution is OperationResolution.NOT_STARTED:
+        return SameEpochRecoveryReplay.NOT_STARTED
+    if resolution is OperationResolution.MAY_RETRY_SAME_OPERATION_ID:
+        return SameEpochRecoveryReplay.RETRY_SAME_OPERATION_ON_ALLOCATED_GENERATION
+    if resolution is OperationResolution.EFFECT_UNKNOWN:
+        return SameEpochRecoveryReplay.EFFECT_UNKNOWN_HOLD_GENERATION
+    if resolution is OperationResolution.APPLIED:
+        return SameEpochRecoveryReplay.APPLIED
+    if resolution is OperationResolution.REFUSED:
+        return SameEpochRecoveryReplay.REFUSED
+    return SameEpochRecoveryReplay.RECONCILED
+
+
+def may_allocate_another_generation_after_tx10(*, intent_committed: bool) -> bool:
+    """TX-10 already placed G2 on the writer fence.  G3 is never a replay."""
+
+    del intent_committed
+    return False
+
+
+def diagnose_same_epoch_generation_recovery(
+    snapshot: SameEpochRecoverySnapshot,
+    *,
+    old_generation_id: str,
+    new_generation: ProcessGenerationRef,
+    operation_id: OperationId,
+    resume_safe: bool,
+) -> SameEpochRecoveryRefusal | None:
+    if snapshot.epoch_state is not SessionEpochState.CURRENT:
+        return SameEpochRecoveryRefusal.EPOCH_NOT_CURRENT
+    if new_generation.session_epoch_id != snapshot.epoch.session_epoch_id:
+        return SameEpochRecoveryRefusal.EPOCH_MISMATCH
+    if snapshot.creates_new_epoch or snapshot.consumes_attempt:
+        return SameEpochRecoveryRefusal.EPOCH_MISMATCH
+    old = next(
+        (
+            row
+            for row in snapshot.generations
+            if row.ref.process_generation_id == old_generation_id
+        ),
+        None,
+    )
+    if old is None:
+        return SameEpochRecoveryRefusal.EPOCH_MISMATCH
+    if old.ref.session_epoch_id != snapshot.epoch.session_epoch_id:
+        return SameEpochRecoveryRefusal.EPOCH_MISMATCH
+    if new_generation.worker_id != snapshot.epoch.worker_id:
+        return SameEpochRecoveryRefusal.EPOCH_MISMATCH
+    if old.process_liveness is ProcessLiveness.UNKNOWN:
+        return SameEpochRecoveryRefusal.PROCESS_LIVENESS_UNKNOWN
+    if old.process_liveness is not ProcessLiveness.PROVEN_DEAD:
+        return SameEpochRecoveryRefusal.PROCESS_NOT_PROVEN_DEAD
+    if old.provider_writer_state is not ProviderWriterState.RELEASED:
+        return SameEpochRecoveryRefusal.PROVIDER_WRITER_NOT_RELEASED
+    if not resume_safe:
+        return SameEpochRecoveryRefusal.RESUME_NOT_SAFE
+    if not old.executive_writer_held:
+        return SameEpochRecoveryRefusal.OLD_WRITER_NOT_HELD
+    expected_number = max(row.ref.generation_number for row in snapshot.generations) + 1
+    if new_generation.generation_number != expected_number:
+        return SameEpochRecoveryRefusal.GENERATION_NOT_SEQUENTIAL
+    held_by_epoch = {
+        row.ref.session_epoch_id: row.ref.process_generation_id
+        for row in snapshot.generations
+        if row.executive_writer_held
+    }
+    released_epoch = {
+        key: value for key, value in held_by_epoch.items() if value != old_generation_id
+    }
+    if not may_hold_prebind_epoch_writer(
+        session_epoch_id=snapshot.epoch.session_epoch_id,
+        generation_id=new_generation.process_generation_id,
+        held_by_epoch=released_epoch,
+    ):
+        return SameEpochRecoveryRefusal.SUCCESSOR_WRITER_CONFLICT
+    held_by_realm = {
+        writer_realm_key(snapshot.epoch.worker_id, snapshot.provider_session_id): (
+            row.ref.process_generation_id
+        )
+        for row in snapshot.generations
+        if row.executive_writer_held and row.provider_session_id
+    }
+    released_realm = {
+        key: value for key, value in held_by_realm.items() if value != old_generation_id
+    }
+    if not may_hold_postbind_realm_writer(
+        worker_id=snapshot.epoch.worker_id,
+        provider_session_id=snapshot.provider_session_id,
+        generation_id=new_generation.process_generation_id,
+        held_by=released_realm,
+    ):
+        return SameEpochRecoveryRefusal.SUCCESSOR_WRITER_CONFLICT
+    if operation_id.command_id in snapshot.reserved_operation_ids:
+        return SameEpochRecoveryRefusal.OPERATION_ID_DUPLICATE
+    return None
+
+
+def may_recover_same_epoch_generation(
+    snapshot: SameEpochRecoverySnapshot,
+    *,
+    old_generation_id: str,
+    new_generation: ProcessGenerationRef,
+    operation_id: OperationId,
+    resume_safe: bool,
+) -> bool:
+    return (
+        diagnose_same_epoch_generation_recovery(
+            snapshot,
+            old_generation_id=old_generation_id,
+            new_generation=new_generation,
+            operation_id=operation_id,
+            resume_safe=resume_safe,
+        )
+        is None
+    )
+
+
+def apply_same_epoch_generation_recovery(
+    snapshot: SameEpochRecoverySnapshot,
+    *,
+    old_generation_id: str,
+    new_generation: ProcessGenerationRef,
+    operation_id: OperationId,
+    resume_safe: bool,
+) -> SameEpochRecoverySnapshot:
+    """Pure TX-10.  Releases G1 writer, inserts G2 writer, reserves OperationId."""
+
+    refusal = diagnose_same_epoch_generation_recovery(
+        snapshot,
+        old_generation_id=old_generation_id,
+        new_generation=new_generation,
+        operation_id=operation_id,
+        resume_safe=resume_safe,
+    )
+    if refusal is not None:
+        raise ValueError(refusal.value)
+    updated: list[ProcessGenerationRecord] = []
+    for row in snapshot.generations:
+        if row.ref.process_generation_id == old_generation_id:
+            updated.append(
+                ProcessGenerationRecord(
+                    ref=row.ref,
+                    executive_writer_held=False,
+                    process_liveness=row.process_liveness,
+                    provider_writer_state=row.provider_writer_state,
+                    provider_session_id=row.provider_session_id,
+                )
+            )
+        else:
+            updated.append(row)
+    updated.append(
+        ProcessGenerationRecord(
+            ref=new_generation,
+            executive_writer_held=True,
+            process_liveness=ProcessLiveness.UNKNOWN,
+            provider_writer_state=ProviderWriterState.UNKNOWN,
+            provider_session_id=snapshot.provider_session_id,
+        )
+    )
+    return SameEpochRecoverySnapshot(
+        epoch=snapshot.epoch,
+        epoch_state=SessionEpochState.CURRENT,
+        provider_session_id=snapshot.provider_session_id,
+        generations=tuple(updated),
+        reserved_operation_ids=frozenset(
+            {*snapshot.reserved_operation_ids, operation_id.command_id}
+        ),
+        creates_new_epoch=False,
+        consumes_attempt=False,
+    )
 
 
 def may_start_successor_rich_writer(
@@ -1882,6 +2230,7 @@ __all__ = [
     "AttemptExecutionMode",
     "CANONICAL_SESSION_FIELD",
     "CARDINALITY",
+    "COMMAND_ID_MAX_LEN",
     "COMMAND_ID_RE",
     "CRASH_WINDOW_MATRIX",
     "CandidateResult",
@@ -1901,6 +2250,8 @@ __all__ = [
     "LaunchComparison",
     "LaunchDecision",
     "LIVE_APP_SERVER_ADOPTION",
+    "LONGEST_OPERATION_RECEIPT_SUFFIX_LEN",
+    "MAX_OPERATION_ID_LEN",
     "METHOD_CONTRACTS",
     "MethodClass",
     "MethodContract",
@@ -1912,6 +2263,7 @@ __all__ = [
     "OPERATOR_HARNESS_INTERFACE_VERSION",
     "OPERATION_AGGREGATE_TYPE",
     "OPERATION_COMMAND_ID_PREFIX",
+    "OPERATION_RECEIPT_COMMAND_SUFFIXES",
     "OPTIONAL_ADAPTER_PROTOCOLS",
     "ObservedCapabilityIdentity",
     "ObservedHarnessAttestation",
@@ -1924,6 +2276,7 @@ __all__ = [
     "POST_RESTORE_ATTEMPT_STATUS",
     "PREBIND_WRITER_FENCE_KEY",
     "PROPOSED_SQL_INVARIANTS",
+    "ProcessGenerationRecord",
     "ProcessGenerationRef",
     "ProcessIdentityObservation",
     "ProcessLiveness",
@@ -1934,6 +2287,9 @@ __all__ = [
     "ReconcileObservation",
     "RequestedExecutionProfile",
     "RestoreInvalidationResult",
+    "SameEpochRecoveryRefusal",
+    "SameEpochRecoveryReplay",
+    "SameEpochRecoverySnapshot",
     "SessionEpochRef",
     "SessionEpochState",
     "SessionStartObservation",
@@ -1957,21 +2313,26 @@ __all__ = [
     "WriterFacts",
     "abandon_epoch",
     "adapter_method_returns_executive_id",
+    "apply_same_epoch_generation_recovery",
     "classify_capability",
     "classify_observed_capabilities",
     "compare_launch",
     "compare_launch_parameter_names",
+    "diagnose_same_epoch_generation_recovery",
     "derive_resume_safety",
     "event_cursor_scoped_to",
     "first_work_turn_allowed",
+    "may_allocate_another_generation_after_tx10",
     "may_abandon_epoch",
     "may_bind_epoch_provider_session",
     "may_bind_provider_session",
     "may_hold_executive_writer",
     "may_hold_postbind_realm_writer",
     "may_hold_prebind_epoch_writer",
+    "may_recover_same_epoch_generation",
     "may_start_successor_rich_writer",
     "native_helpers_allowed",
+    "operation_id_permits_all_derived_receipts",
     "operation_receipt_command_id",
     "process_end_does_not_release_writer",
     "process_identities_match",
@@ -1979,6 +2340,7 @@ __all__ = [
     "resolve_operation_after_crash",
     "restore_invalidation",
     "rich_ohf_may_rewrite_legacy_attempt_field",
+    "same_epoch_recovery_replay_disposition",
     "workspace_identities_equal",
     "writer_realm_key",
 ]

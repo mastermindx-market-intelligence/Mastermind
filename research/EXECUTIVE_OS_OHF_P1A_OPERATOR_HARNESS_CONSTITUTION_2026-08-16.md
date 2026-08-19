@@ -292,10 +292,33 @@ reacquire/reconcile Executive Attempt lease
 → terminate/reconcile old process if required
 → determine provider writer state
 → inspect OperationId INTENT vs APPLIED (EFFECT_UNKNOWN is fail-closed)
-→ if same epoch resume_safe: new ProcessGeneration, resume provider session
+→ if CURRENT epoch + old generation PROVEN_DEAD + provider RELEASED + resume_safe:
+     TX-10 same-epoch ProcessGeneration recovery (below), then resume_session
 → else if process PROVEN_DEAD: abandon old epoch; start fresh epoch if placement still lawful
 → else if process UNKNOWN: no new writer; Attempt LOST if recovery expires
 ```
+
+**TX-10 — same-epoch ProcessGeneration recovery.** Distinct from TX-6 (graceful
+stop after confirmed provider RELEASED) and TX-8 (abandon epoch / fresh S2).
+Entry: epoch `CURRENT`, old generation is the Executive-held writer, process
+`PROVEN_DEAD`, provider writer `RELEASED`, Executive-derived `resume_safe`.
+One `BEGIN IMMEDIATE` transaction:
+
+1. clear the old generation's `executive_writer_held`
+2. allocate the next Executive `process_generation_id` / `generation_number`
+   on the **existing** epoch
+3. insert the successor with `executive_writer_held=1` and
+   `provider_session_id` index projection already bound to S1
+4. append `OPERATOR_OPERATION_INTENT` with `command_id=OperationId`
+
+Then, and only then, call `resume_session`. TX-10 does **not** create a
+SessionEpoch and does **not** consume an Attempt. Hard-dead G1 + `HELD` /
+`UNKNOWN` provider writer refuses G2 (TX-8 remains the S2 path). UNKNOWN
+process refuses G2. Duplicate TX-10 is refused by the unique writer indexes
+and unique `command_id`. Crash after INTENT but before the provider call:
+retry the **same** OperationId against already-allocated G2 only if local
+state proves the adapter was never entered; otherwise `EFFECT_UNKNOWN` and
+hold G2. Never allocate G3 as a replay.
 
 No hidden durable broker. No writer stealing. No lock-file deletion.
 
@@ -455,7 +478,11 @@ then adapter side effect
 
 Later receipts for the same operation use deterministic derived command IDs
 (`:applied`, `:refused`, `:effect-unknown`, `:reconciled`) and the same
-aggregate id. No sidecar operation store.
+aggregate id. No sidecar operation store. Every accepted base OperationId must
+leave room for **all** of those derived receipts under Executive
+`_COMMAND_ID_RE` (max 128). Construction that matches the base regex but would
+overflow `:effect-unknown` is refused. Canonical cap:
+`MAX_OPERATION_ID_LEN = 128 - len(":effect-unknown")`.
 
 A committed INTENT is Executive at-most-once **issuance**, not proof that an
 external effect did or did not occur. Missing APPLIED after a possible provider
