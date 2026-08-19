@@ -376,9 +376,162 @@ def test_v1_receipt_is_not_silently_accepted() -> None:
         "residual_pids_before": [],
         "residual_pids_after": [],
         "broker_pid": 42419,
+        "worker_uid": 451,
         "ambient_pids": [],
         "ambient_identities": [],
         "ambient_attribution": "absent",
         "found_residuals": False,
     }
     assert uid_sweep_receipt_is_passing(v1) is False
+
+
+def _passing_v2_receipt(**overrides: object) -> dict:
+    identity = _identity()
+    receipt: dict = {
+        "schema_version": UID_SWEEP_SCHEMA_VERSION,
+        "observed_at": "2026-08-11T00:00:01+00:00",
+        "reason": "run_terminal",
+        "worker_uid": 451,
+        "broker_pid": 42419,
+        "residual_pids_before": [],
+        "residual_pids_after": [],
+        "signal_name": "SIGKILL",
+        "signal_sent": False,
+        "quiescent_observations": 2,
+        "ambient_pids": [identity.pid],
+        "ambient_identities": [identity.to_dict()],
+        "ambient_attribution": "attested",
+        "passed": True,
+        "found_residuals": False,
+    }
+    receipt.update(overrides)
+    return receipt
+
+
+def _malformed_ambient_cases() -> list[tuple[str, dict]]:
+    identity = _identity().to_dict()
+    attested = _passing_v2_receipt()
+    absent = _passing_v2_receipt(
+        ambient_pids=[],
+        ambient_identities=[],
+        ambient_attribution="absent",
+    )
+    incomplete = dict(identity)
+    incomplete.pop("codesign_verified")
+    mismatched_pid = dict(identity)
+    mismatched_pid["launchd_reported_pid"] = identity["pid"] + 1
+    mismatched_uid = dict(identity)
+    mismatched_uid["uid"] = 450
+    return [
+        (
+            "attested_empty_pids_with_identities",
+            {**attested, "ambient_pids": []},
+        ),
+        (
+            "attested_empty_identities_with_pids",
+            {**attested, "ambient_identities": []},
+        ),
+        (
+            "absent_with_ambient_pids",
+            {**absent, "ambient_pids": [88688]},
+        ),
+        (
+            "failed_closed_with_identities",
+            {
+                **absent,
+                "ambient_attribution": "failed_closed",
+                "ambient_identities": [identity],
+                "ambient_pids": [88688],
+            },
+        ),
+        (
+            "pid_set_does_not_match_identities",
+            {**attested, "ambient_pids": [99999]},
+        ),
+        (
+            "identity_is_not_a_mapping",
+            {**attested, "ambient_identities": [identity["pid"]]},
+        ),
+        (
+            "identity_missing_reviewed_fields",
+            {**attested, "ambient_identities": [incomplete]},
+        ),
+        (
+            "identity_pid_not_launchd_reported_pid",
+            {**attested, "ambient_identities": [mismatched_pid]},
+        ),
+        (
+            "identity_uid_not_worker_uid",
+            {**attested, "ambient_identities": [mismatched_uid]},
+        ),
+        (
+            "duplicate_ambient_pids",
+            {**attested, "ambient_pids": [88688, 88688]},
+        ),
+        (
+            "duplicate_identity_pids",
+            {
+                **attested,
+                "ambient_identities": [identity, dict(identity)],
+            },
+        ),
+        (
+            "ambient_overlaps_broker",
+            {
+                **attested,
+                "ambient_pids": [42419],
+                "ambient_identities": [
+                    {**identity, "pid": 42419, "launchd_reported_pid": 42419}
+                ],
+            },
+        ),
+        (
+            "ambient_overlaps_residual_before",
+            {
+                **attested,
+                "residual_pids_before": [88688],
+                "found_residuals": True,
+            },
+        ),
+        (
+            "extra_identity_pid_not_in_ambient",
+            {
+                **attested,
+                "ambient_identities": [
+                    identity,
+                    {
+                        **identity,
+                        "pid": 99999,
+                        "launchd_reported_pid": 99999,
+                    },
+                ],
+            },
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "label,payload",
+    _malformed_ambient_cases(),
+    ids=[label for label, _payload in _malformed_ambient_cases()],
+)
+def test_malformed_v2_ambient_projection_fails_closed(label: str, payload: dict) -> None:
+    from ops.executive_os.acceptance import _uid_sweep_is_passing
+
+    assert uid_sweep_receipt_is_passing(payload) is False, label
+    assert _uid_sweep_is_passing(payload) is False, label
+
+
+def test_coherent_attested_and_absent_v2_receipts_pass_both_validators() -> None:
+    from ops.executive_os.acceptance import _uid_sweep_is_passing
+
+    attested = _passing_v2_receipt()
+    absent = _passing_v2_receipt(
+        ambient_pids=[],
+        ambient_identities=[],
+        ambient_attribution="absent",
+    )
+    assert uid_sweep_receipt_is_passing(attested) is True
+    assert _uid_sweep_is_passing(attested) is True
+    assert uid_sweep_receipt_is_passing(absent) is True
+    assert _uid_sweep_is_passing(absent) is True

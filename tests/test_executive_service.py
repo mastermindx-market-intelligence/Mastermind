@@ -24,6 +24,13 @@ from control_plane.executive_canary import (
     SecretCanaryConfig,
     run_secret_canary,
 )
+from control_plane.executive_ambient_process import (
+    AMBIENT_CODESIGN_IDENTIFIER,
+    AMBIENT_LAUNCHD_LABEL,
+    AMBIENT_PLIST_PATH,
+    AMBIENT_PROGRAM_PATH,
+    AmbientProcessIdentity,
+)
 from control_plane.executive_service import (
     CONTROL_PROTOCOL_VERSION,
     ExecutiveControlService,
@@ -1505,7 +1512,22 @@ def test_ambient_process_and_invalid_provider_result_fail_job_keep_service_ready
                 "signal_sent": False,
                 "quiescent_observations": 2,
                 "ambient_pids": [88688],
-                "ambient_identities": [{"pid": 88688, "launchd_label": "com.apple.distnoted.xpc.agent"}],
+                "ambient_identities": [
+                    AmbientProcessIdentity(
+                        pid=88688,
+                        uid=451,
+                        launchd_domain="user/451",
+                        launchd_label=AMBIENT_LAUNCHD_LABEL,
+                        launchd_reported_pid=88688,
+                        plist_path=AMBIENT_PLIST_PATH,
+                        program_path=AMBIENT_PROGRAM_PATH,
+                        executable_path=AMBIENT_PROGRAM_PATH,
+                        executable_device=1,
+                        executable_inode=1,
+                        codesign_identifier=AMBIENT_CODESIGN_IDENTIFIER,
+                        codesign_verified=True,
+                    ).to_dict()
+                ],
                 "ambient_attribution": "attested",
                 "passed": True,
                 "found_residuals": False,

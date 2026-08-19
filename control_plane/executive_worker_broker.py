@@ -69,6 +69,22 @@ BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
 UID_SWEEP_TERMINAL_REASONS = frozenset({"run_terminal"})
 _AMBIENT_ATTRIBUTIONS = frozenset({"attested", "absent", "failed_closed"})
+_AMBIENT_IDENTITY_FIELDS = frozenset(
+    {
+        "pid",
+        "uid",
+        "launchd_domain",
+        "launchd_label",
+        "launchd_reported_pid",
+        "plist_path",
+        "program_path",
+        "executable_path",
+        "executable_device",
+        "executable_inode",
+        "codesign_identifier",
+        "codesign_verified",
+    }
+)
 
 # Error code carried by the envelope a connection handler frames when it is
 # unwound by a ``BaseException`` -- a launchd stop cancelling the in-flight
@@ -178,36 +194,109 @@ class UIDSweepReceipt:
         return value
 
 
+def _positive_pid(value: Any) -> bool:
+    return type(value) is int and value > 1
+
+
+def _ambient_identity_mapping_is_valid(value: Any, *, worker_uid: int) -> bool:
+    """True when ``value`` is one reviewed ambient identity mapping."""
+
+    if not isinstance(value, Mapping) or set(value) != _AMBIENT_IDENTITY_FIELDS:
+        return False
+    pid = value.get("pid")
+    reported = value.get("launchd_reported_pid")
+    uid = value.get("uid")
+    if not _positive_pid(pid) or type(reported) is not int or reported != pid:
+        return False
+    if type(uid) is not int or uid != worker_uid:
+        return False
+    if type(value.get("executable_device")) is not int:
+        return False
+    if type(value.get("executable_inode")) is not int:
+        return False
+    if value.get("codesign_verified") is not True:
+        return False
+    for key in (
+        "launchd_domain",
+        "launchd_label",
+        "plist_path",
+        "program_path",
+        "executable_path",
+        "codesign_identifier",
+    ):
+        field = value.get(key)
+        if type(field) is not str or not field:
+            return False
+    return True
+
+
+def _v2_ambient_projection_is_coherent(value: Mapping[str, Any]) -> bool:
+    """Keep in sync with ``ops.executive_os.acceptance._uid_sweep_is_passing``."""
+
+    attribution = value.get("ambient_attribution")
+    ambient = value.get("ambient_pids")
+    identities = value.get("ambient_identities")
+    before = value.get("residual_pids_before")
+    after = value.get("residual_pids_after")
+    broker_pid = value.get("broker_pid")
+    worker_uid = value.get("worker_uid")
+    if attribution not in _AMBIENT_ATTRIBUTIONS:
+        return False
+    if not isinstance(ambient, list) or not isinstance(identities, list):
+        return False
+    if not isinstance(before, list) or not isinstance(after, list):
+        return False
+    if not all(_positive_pid(item) for item in ambient):
+        return False
+    if len(ambient) != len(set(ambient)):
+        return False
+    if type(worker_uid) is not int or worker_uid <= 0:
+        return False
+    if not _positive_pid(broker_pid):
+        return False
+    identity_pids: list[int] = []
+    for identity in identities:
+        if not _ambient_identity_mapping_is_valid(identity, worker_uid=worker_uid):
+            return False
+        identity_pids.append(identity["pid"])
+    if len(identity_pids) != len(set(identity_pids)):
+        return False
+    if set(identity_pids) != set(ambient):
+        return False
+    if attribution == "attested":
+        if not ambient or not identities:
+            return False
+    elif ambient or identities:
+        return False
+    pid_sets = (set(ambient), set(before), set(after), {broker_pid})
+    for index, left in enumerate(pid_sets):
+        for right in pid_sets[index + 1 :]:
+            if not left.isdisjoint(right):
+                return False
+    return True
+
+
 def uid_sweep_receipt_is_passing(value: Any) -> bool:
-    """True when ``value`` is a passing v2 dedicated-UID sweep receipt."""
+    """True when ``value`` is a passing v2 dedicated-UID sweep receipt.
+
+    The ambient projection must be internally coherent: attested receipts carry
+    matching PID/identity sets of the reviewed shape; non-attested receipts
+    carry neither. A malformed attested/empty-PID receipt does not pass.
+    """
 
     if not isinstance(value, Mapping):
         return False
     before = value.get("residual_pids_before")
     after = value.get("residual_pids_after")
-    ambient = value.get("ambient_pids")
-    identities = value.get("ambient_identities")
-    attribution = value.get("ambient_attribution")
-    broker_pid = value.get("broker_pid")
     return (
         value.get("schema_version") == UID_SWEEP_SCHEMA_VERSION
         and value.get("passed") is True
         and isinstance(before, list)
         and isinstance(after, list)
         and after == []
-        and all(isinstance(item, int) and item > 1 for item in before)
-        and isinstance(ambient, list)
-        and all(isinstance(item, int) and item > 1 for item in ambient)
-        and isinstance(identities, list)
-        and attribution in _AMBIENT_ATTRIBUTIONS
-        and isinstance(broker_pid, int)
-        and broker_pid > 1
-        and broker_pid not in before
-        and broker_pid not in after
-        and set(ambient).isdisjoint(before)
-        and set(ambient).isdisjoint(after)
+        and all(_positive_pid(item) for item in before)
         and value.get("found_residuals") is bool(before)
-        and (attribution == "attested") == bool(identities)
+        and _v2_ambient_projection_is_coherent(value)
     )
 
 
