@@ -293,7 +293,9 @@ reacquire/reconcile Executive Attempt lease
 → determine provider writer state
 → inspect OperationId INTENT vs APPLIED (EFFECT_UNKNOWN is fail-closed)
 → if CURRENT epoch + old generation PROVEN_DEAD + provider RELEASED + resume_safe:
-     TX-10 same-epoch ProcessGeneration recovery (below), then resume_session
+     TX-10 same-epoch ProcessGeneration recovery, then resume_session
+     with ProviderSessionHandoff(already-bound S1), then TX-11 process
+     identity + APPLIED
 → else if process PROVEN_DEAD: abandon old epoch; start fresh epoch if placement still lawful
 → else if process UNKNOWN: no new writer; Attempt LOST if recovery expires
 ```
@@ -311,14 +313,34 @@ One `BEGIN IMMEDIATE` transaction:
    `provider_session_id` index projection already bound to S1
 4. append `OPERATOR_OPERATION_INTENT` with `command_id=OperationId`
 
-Then, and only then, call `resume_session`. TX-10 does **not** create a
-SessionEpoch and does **not** consume an Attempt. Hard-dead G1 + `HELD` /
-`UNKNOWN` provider writer refuses G2 (TX-8 remains the S2 path). UNKNOWN
-process refuses G2. Duplicate TX-10 is refused by the unique writer indexes
-and unique `command_id`. Crash after INTENT but before the provider call:
-retry the **same** OperationId against already-allocated G2 only if local
-state proves the adapter was never entered; otherwise `EFFECT_UNKNOWN` and
-hold G2. Never allocate G3 as a replay.
+Then, and only then, call `resume_session` with a `ProviderSessionHandoff`
+of the already-bound S1. The adapter must not mint a provider session.
+TX-10 does **not** create a SessionEpoch and does **not** consume an Attempt.
+Hard-dead G1 + `HELD` / `UNKNOWN` provider writer refuses G2 (TX-8 remains
+the S2 path). UNKNOWN process refuses G2. Duplicate TX-10 is refused by the
+unique writer indexes and unique `command_id`. Crash after INTENT but before
+the provider call: retry the **same** OperationId against already-allocated
+G2 only if local state proves the adapter was never entered; otherwise
+`EFFECT_UNKNOWN` and hold G2. Never allocate G3 as a replay.
+
+**TX-11 — bind resume result.** Distinct from TX-3 (first bind of a NULL
+epoch session). After `resume_session` returns an observation, one
+`BEGIN IMMEDIATE` transaction:
+
+1. verify TX-10 INTENT for this OperationId
+2. verify epoch `CURRENT` and G2 still holds the writer
+3. verify observed `provider_session_id` equals already-bound S1
+4. record G2 process identity (`pid`/`pgid`/`process_start_identity`/`boot_id`)
+5. append `OPERATOR_OPERATION_APPLIED`
+
+TX-11 must **not** mutate `epoch.provider_session_id`, must **not** create a
+SessionEpoch, and must **not** consume an Attempt. Observed S2 / NULL /
+empty session is `PROVIDER_SESSION_MISMATCH`. Incomplete process identity
+is refused. Missing APPLIED after a possible resume call is
+`EFFECT_UNKNOWN`; do not allocate G3. Matching TX-11 replay after APPLIED
+is a no-op; a different process identity is `ALREADY_APPLIED_CONFLICT`.
+G2 still requires TX-4 re-attestation before a work turn
+(`new_process_generation`).
 
 No hidden durable broker. No writer stealing. No lock-file deletion.
 
@@ -501,7 +523,16 @@ Idempotency class replaces a boolean: `PURE_IDEMPOTENT`,
 generation. Adapter may launch the process, initialize, and create the native
 session. It returns observations. Executive binds `provider_session_id` in TX-3.
 
-### 12.3 EventCursor
+### 12.3 Combined resume_session
+
+`resume_session` is optional. Executive already bound S1 in TX-3 and already
+allocated G2 in TX-10. Executive passes that bound S1 **into** the adapter as
+`ProviderSessionHandoff`. The adapter must not allocate `provider_session_id`
+and must not create a new provider session. Observed session must equal the
+handoff. Executive records G2 process identity and APPLIED in TX-11. TX-11 is
+not TX-3: a NULL epoch session cannot be bound on the resume path.
+
+### 12.4 EventCursor
 
 Scoped to one ProcessGeneration: `attempt_id`, `session_epoch_id`,
 `process_generation_id`, optional `turn_id`, optional provider replay cursor,

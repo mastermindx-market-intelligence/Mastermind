@@ -1,4 +1,4 @@
-"""OHF-P1A-R3.1 typed OperatorHarnessAdapter contract freeze."""
+"""OHF-P1A-R3.2 typed OperatorHarnessAdapter contract freeze."""
 from __future__ import annotations
 
 import dataclasses
@@ -63,10 +63,13 @@ from control_plane.operator_harness_contract import (
     ProcessGenerationRef,
     ProcessIdentityObservation,
     ProcessLiveness,
+    ProviderSessionHandoff,
     ProviderWriterState,
     REATTEST_TRIGGERS,
     ReconcileObservation,
     RequestedExecutionProfile,
+    ResumeBindRefusal,
+    ResumeBindSnapshot,
     SameEpochRecoveryRefusal,
     SameEpochRecoveryReplay,
     SameEpochRecoverySnapshot,
@@ -92,10 +95,12 @@ from control_plane.operator_harness_contract import (
     WriterFacts,
     abandon_epoch,
     adapter_method_returns_executive_id,
+    apply_resume_bind,
     apply_same_epoch_generation_recovery,
     classify_capability,
     compare_launch,
     compare_launch_parameter_names,
+    diagnose_resume_bind,
     diagnose_same_epoch_generation_recovery,
     derive_resume_safety,
     event_cursor_scoped_to,
@@ -104,6 +109,7 @@ from control_plane.operator_harness_contract import (
     may_abandon_epoch,
     may_bind_epoch_provider_session,
     may_bind_provider_session,
+    may_bind_resume_result,
     may_hold_executive_writer,
     may_hold_prebind_epoch_writer,
     may_hold_postbind_realm_writer,
@@ -113,7 +119,10 @@ from control_plane.operator_harness_contract import (
     operation_id_permits_all_derived_receipts,
     operation_receipt_command_id,
     process_end_does_not_release_writer,
+    process_identity_is_complete,
+    provider_session_handoff_for_resume,
     restore_invalidation,
+    resume_session_handoff_is_lawful,
     rich_ohf_may_rewrite_legacy_attempt_field,
     resolve_operation_after_crash,
     same_epoch_recovery_replay_disposition,
@@ -223,6 +232,90 @@ def _recovery_snapshot(
                 provider_session_id="S1",
             ),
         ),
+    )
+
+
+def _process(
+    *,
+    pid: int | None = 4242,
+    pgid: int | None = 4242,
+    start: str | None = "start-g2",
+    boot: str | None = "boot-1",
+) -> ProcessIdentityObservation:
+    return ProcessIdentityObservation(
+        pid=pid,
+        pgid=pgid,
+        process_start_identity=start,
+        boot_id=boot,
+    )
+
+
+def _handoff(session: str = "S1", worker: str = "W1") -> ProviderSessionHandoff:
+    return ProviderSessionHandoff(provider_session_id=session, worker_id=worker)
+
+
+def _observation(
+    *,
+    session: str | None = "S1",
+    process: ProcessIdentityObservation | None = None,
+) -> SessionStartObservation:
+    return SessionStartObservation(
+        provider_session_id=session,
+        process=process if process is not None else _process(),
+    )
+
+
+def _recovered_tx10(
+    command_id: str = "ohf-op:resume-s1-g2",
+) -> tuple[SameEpochRecoverySnapshot, OperationId]:
+    op = OperationId(command_id=command_id)
+    recovered = apply_same_epoch_generation_recovery(
+        _recovery_snapshot(),
+        old_generation_id="gen-1",
+        new_generation=_generation("gen-2", 2),
+        operation_id=op,
+        resume_safe=True,
+    )
+    return recovered, op
+
+
+def _resume_bind_snapshot(
+    recovered: SameEpochRecoverySnapshot,
+    operation_id: OperationId,
+    *,
+    applied: bool = False,
+    process: ProcessIdentityObservation | None = None,
+    intent_committed: bool = True,
+    bound_provider_session_id: str | None = None,
+    writer_held: bool = True,
+) -> ResumeBindSnapshot:
+    g2 = next(
+        row
+        for row in recovered.generations
+        if row.ref.process_generation_id == "gen-2"
+    )
+    if not writer_held:
+        g2 = ProcessGenerationRecord(
+            ref=g2.ref,
+            executive_writer_held=False,
+            process_liveness=g2.process_liveness,
+            provider_writer_state=g2.provider_writer_state,
+            provider_session_id=g2.provider_session_id,
+        )
+    bound = (
+        recovered.provider_session_id
+        if bound_provider_session_id is None
+        else bound_provider_session_id
+    )
+    return ResumeBindSnapshot(
+        epoch=recovered.epoch,
+        epoch_state=recovered.epoch_state,
+        bound_provider_session_id=bound,
+        generation=g2,
+        operation_id=operation_id,
+        intent_committed=intent_committed,
+        applied=applied,
+        process=process,
     )
 
 
@@ -789,7 +882,13 @@ def test_optional_protocols_require_operation_id():
             assert "operation_id" in params or "request" in params
     resume = get_type_hints(SupportsSessionResume.resume_session)
     assert resume["operation_id"] is OperationId
+    assert resume["provider_session"] is ProviderSessionHandoff
+    assert resume["epoch"] is SessionEpochRef
+    assert resume["generation"] is ProcessGenerationRef
     assert resume["return"] is SessionStartObservation
+    start_params = inspect.signature(OperatorHarnessAdapter.start_session).parameters
+    assert "provider_session" not in start_params
+    assert "provider_session_id" not in start_params
     describe = get_type_hints(OperatorHarnessAdapter.describe_capabilities)
     assert describe["return"] is HarnessAdapterCapabilities
 
@@ -827,6 +926,10 @@ def test_transaction_groups_and_crash_windows_are_frozen():
         "after_tx10_before_resume_call",
         "during_resume_session",
         "resume_returned_before_applied",
+        "after_tx11_applied",
+        "observed_session_mismatch_refuses_tx11",
+        "incomplete_process_identity_refuses_tx11",
+        "duplicate_tx11_matching_observation",
         "duplicate_tx10_while_successor_holds",
         "hard_dead_g1_provider_held_or_unknown",
         "unknown_process_blocks_tx10",
@@ -844,7 +947,16 @@ def test_transaction_groups_and_crash_windows_are_frozen():
     assert "No new SessionEpoch" in tx10
     assert "No new Attempt" in tx10
     assert "resume_session" in tx10
+    assert "ProviderSessionHandoff" in tx10
+    assert "TX-11" in tx10
+    assert TransactionGroup.TX11_BIND_RESUME_RESULT in TRANSACTION_GROUPS
+    tx11 = TRANSACTION_GROUPS[TransactionGroup.TX11_BIND_RESUME_RESULT]
+    assert "already-bound S1" in tx11
+    assert "Must not mutate" in tx11
+    assert "TX-3 only" in tx11
     assert INVARIANT_ENFORCEMENT["same_epoch_generation_recovery"].value == "BEGIN_IMMEDIATE"
+    assert INVARIANT_ENFORCEMENT["resume_provider_session_handoff"].value == "PURE_COMPARATOR"
+    assert INVARIANT_ENFORCEMENT["resume_bind_process_identity"].value == "BEGIN_IMMEDIATE"
 
 
 def test_scenario_a_graceful_restart_same_epoch():
@@ -1152,3 +1264,203 @@ def test_tx10_intent_crash_has_deterministic_replay_disposition():
         process_proven_absent=False,
         external_effect_unknown=True,
     )
+
+
+def test_resume_session_requires_bound_provider_session_handoff():
+    recovered, _op = _recovered_tx10()
+    handoff = provider_session_handoff_for_resume(
+        epoch=recovered.epoch,
+        bound_provider_session_id=recovered.provider_session_id,
+    )
+    assert handoff.provider_session_id == "S1"
+    assert handoff.worker_id == "W1"
+    assert resume_session_handoff_is_lawful(
+        handoff,
+        epoch=recovered.epoch,
+        bound_provider_session_id="S1",
+    )
+    assert not resume_session_handoff_is_lawful(
+        _handoff("S2"),
+        epoch=recovered.epoch,
+        bound_provider_session_id="S1",
+    )
+    assert not resume_session_handoff_is_lawful(
+        _handoff("S1", worker="W2"),
+        epoch=recovered.epoch,
+        bound_provider_session_id="S1",
+    )
+    with pytest.raises(ValueError, match="already-bound"):
+        provider_session_handoff_for_resume(
+            epoch=recovered.epoch,
+            bound_provider_session_id="",
+        )
+    with pytest.raises(ValueError, match="provider_session_id is required"):
+        ProviderSessionHandoff(provider_session_id="", worker_id="W1")
+    resume_contract = METHOD_CONTRACTS["resume_session"]
+    assert "allocate provider_session_id" in resume_contract.forbidden_side_effects
+    assert "create a new provider session" in resume_contract.forbidden_side_effects
+    assert "rebind epoch.provider_session_id" in resume_contract.forbidden_side_effects
+    assert "ProviderSessionHandoff" in resume_contract.notes
+    assert "TX-11" in resume_contract.notes
+
+
+def test_tx11_records_process_identity_and_applied_without_rebinding_s1():
+    recovered, op = _recovered_tx10()
+    snapshot = _resume_bind_snapshot(recovered, op)
+    observation = _observation()
+    handoff = _handoff()
+    assert may_bind_resume_result(
+        snapshot, observation=observation, handoff=handoff
+    )
+    bound = apply_resume_bind(
+        snapshot, observation=observation, handoff=handoff
+    )
+    assert bound.applied is True
+    assert bound.intent_committed is True
+    assert bound.bound_provider_session_id == "S1"
+    assert bound.epoch.session_epoch_id == recovered.epoch.session_epoch_id
+    assert bound.epoch.attempt_id == recovered.epoch.attempt_id
+    assert bound.creates_new_epoch is False
+    assert bound.consumes_attempt is False
+    assert bound.epoch_provider_session_mutated is False
+    assert bound.generation.provider_session_id == "S1"
+    assert bound.generation.executive_writer_held is True
+    assert bound.generation.process_liveness is ProcessLiveness.ALIVE
+    assert bound.generation.provider_writer_state is ProviderWriterState.HELD
+    assert bound.process == _process()
+    assert process_identity_is_complete(bound.process)
+    applied = operation_receipt_command_id(op, OperationReceiptKind.APPLIED)
+    assert applied == "ohf-op:resume-s1-g2:applied"
+    assert same_epoch_recovery_replay_disposition(
+        intent_committed=True,
+        terminal_receipt=OperationReceiptKind.APPLIED,
+        external_call_proven_not_started=False,
+    ) is SameEpochRecoveryReplay.APPLIED
+    assert "new_process_generation" in REATTEST_TRIGGERS
+
+
+def test_tx11_refuses_observed_session_mismatch_and_does_not_rebind():
+    recovered, op = _recovered_tx10("ohf-op:resume-mismatch")
+    snapshot = _resume_bind_snapshot(recovered, op)
+    handoff = _handoff()
+    for observed in ("S2", None, ""):
+        observation = _observation(session=observed)
+        assert (
+            diagnose_resume_bind(
+                snapshot, observation=observation, handoff=handoff
+            )
+            is ResumeBindRefusal.PROVIDER_SESSION_MISMATCH
+        )
+        with pytest.raises(ValueError, match="PROVIDER_SESSION_MISMATCH"):
+            apply_resume_bind(snapshot, observation=observation, handoff=handoff)
+    assert snapshot.bound_provider_session_id == "S1"
+    assert snapshot.applied is False
+    assert snapshot.epoch_provider_session_mutated is False
+    assert not may_bind_epoch_provider_session(
+        epoch_provider_session_id="S1",
+        observed_provider_session_id="S2",
+    )
+
+
+def test_tx11_refuses_unbound_epoch_that_belongs_to_tx3():
+    recovered, op = _recovered_tx10("ohf-op:resume-unbound")
+    snapshot = _resume_bind_snapshot(
+        recovered, op, bound_provider_session_id=""
+    )
+    assert (
+        diagnose_resume_bind(
+            snapshot, observation=_observation(), handoff=_handoff()
+        )
+        is ResumeBindRefusal.EPOCH_SESSION_UNBOUND
+    )
+    assert may_bind_epoch_provider_session(
+        epoch_provider_session_id=None,
+        observed_provider_session_id="S1",
+    )
+
+
+def test_tx11_refuses_incomplete_process_identity():
+    recovered, op = _recovered_tx10("ohf-op:resume-incomplete")
+    snapshot = _resume_bind_snapshot(recovered, op)
+    incomplete = _observation(process=_process(pid=None))
+    assert not process_identity_is_complete(incomplete.process)
+    assert (
+        diagnose_resume_bind(
+            snapshot, observation=incomplete, handoff=_handoff()
+        )
+        is ResumeBindRefusal.PROCESS_IDENTITY_INCOMPLETE
+    )
+
+
+def test_tx11_refuses_wrong_handoff_and_missing_intent():
+    recovered, op = _recovered_tx10("ohf-op:resume-handoff")
+    snapshot = _resume_bind_snapshot(recovered, op)
+    assert (
+        diagnose_resume_bind(
+            snapshot, observation=_observation(), handoff=_handoff("S2")
+        )
+        is ResumeBindRefusal.HANDOFF_MISMATCH
+    )
+    no_intent = _resume_bind_snapshot(recovered, op, intent_committed=False)
+    assert (
+        diagnose_resume_bind(
+            no_intent, observation=_observation(), handoff=_handoff()
+        )
+        is ResumeBindRefusal.INTENT_MISSING
+    )
+    no_writer = _resume_bind_snapshot(recovered, op, writer_held=False)
+    assert (
+        diagnose_resume_bind(
+            no_writer, observation=_observation(), handoff=_handoff()
+        )
+        is ResumeBindRefusal.GENERATION_NOT_WRITER
+    )
+
+
+def test_resume_returned_before_tx11_is_effect_unknown_and_holds_g2():
+    recovered, op = _recovered_tx10("ohf-op:resume-before-tx11")
+    snapshot = _resume_bind_snapshot(recovered, op)
+    assert snapshot.applied is False
+    assert snapshot.generation.process_liveness is ProcessLiveness.UNKNOWN
+    unknown = same_epoch_recovery_replay_disposition(
+        intent_committed=True,
+        terminal_receipt=None,
+        external_call_proven_not_started=False,
+    )
+    assert unknown is SameEpochRecoveryReplay.EFFECT_UNKNOWN_HOLD_GENERATION
+    assert may_allocate_another_generation_after_tx10(intent_committed=True) is False
+    window = CRASH_WINDOW_MATRIX["resume_returned_before_applied"]
+    assert "TX-11" in window["required_reconciliation"]
+    assert window["safe_automatic_retry"] == "no"
+    assert not may_start_successor_rich_writer(
+        process_liveness=snapshot.generation.process_liveness,
+        process_proven_absent=False,
+        external_effect_unknown=True,
+    )
+    assert op.command_id in recovered.reserved_operation_ids
+
+
+def test_duplicate_tx11_matching_observation_is_noop():
+    recovered, op = _recovered_tx10("ohf-op:resume-applied-once")
+    first = apply_resume_bind(
+        _resume_bind_snapshot(recovered, op),
+        observation=_observation(),
+        handoff=_handoff(),
+    )
+    replay = apply_resume_bind(
+        first, observation=_observation(), handoff=_handoff()
+    )
+    assert replay is first or (
+        replay.applied is True
+        and replay.process == first.process
+        and replay.bound_provider_session_id == "S1"
+        and replay.epoch_provider_session_mutated is False
+    )
+    conflict = _observation(process=_process(pid=9999))
+    assert (
+        diagnose_resume_bind(first, observation=conflict, handoff=_handoff())
+        is ResumeBindRefusal.ALREADY_APPLIED_CONFLICT
+    )
+    with pytest.raises(ValueError, match="ALREADY_APPLIED_CONFLICT"):
+        apply_resume_bind(first, observation=conflict, handoff=_handoff())
+

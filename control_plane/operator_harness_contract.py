@@ -1,4 +1,4 @@
-"""OHF-P1A-R3.1 provider-neutral Operator Harness contract.
+"""OHF-P1A-R3.2 provider-neutral Operator Harness contract.
 
 Pure architecture freeze.  This module must not:
 
@@ -300,6 +300,7 @@ class TransactionGroup(str, Enum):
     TX8_ABANDON_POISONED_EPOCH = "TX-8"
     TX9_RESTORE_INVALIDATION = "TX-9"
     TX10_SAME_EPOCH_GENERATION_RECOVERY = "TX-10"
+    TX11_BIND_RESUME_RESULT = "TX-11"
 
 
 class SameEpochRecoveryRefusal(str, Enum):
@@ -324,6 +325,19 @@ class SameEpochRecoveryReplay(str, Enum):
     APPLIED = "APPLIED"
     REFUSED = "REFUSED"
     RECONCILED = "RECONCILED"
+
+
+class ResumeBindRefusal(str, Enum):
+    INTENT_MISSING = "INTENT_MISSING"
+    EPOCH_NOT_CURRENT = "EPOCH_NOT_CURRENT"
+    GENERATION_NOT_WRITER = "GENERATION_NOT_WRITER"
+    EPOCH_SESSION_UNBOUND = "EPOCH_SESSION_UNBOUND"
+    HANDOFF_MISMATCH = "HANDOFF_MISMATCH"
+    PROVIDER_SESSION_MISMATCH = "PROVIDER_SESSION_MISMATCH"
+    PROCESS_IDENTITY_INCOMPLETE = "PROCESS_IDENTITY_INCOMPLETE"
+    INDEX_PROJECTION_MISMATCH = "INDEX_PROJECTION_MISMATCH"
+    ALREADY_APPLIED_CONFLICT = "ALREADY_APPLIED_CONFLICT"
+    EPOCH_MISMATCH = "EPOCH_MISMATCH"
 
 
 class EnforcementSite(str, Enum):
@@ -433,7 +447,18 @@ TRANSACTION_GROUPS: dict[TransactionGroup, str] = {
         "executive_writer_held=1 and provider_session_id index projection already "
         "bound to S1; append OPERATOR_OPERATION_INTENT command_id=OperationId "
         "for resume_session. No new SessionEpoch. No new Attempt. Commit before "
-        "resume_session()."
+        "resume_session(). Executive then passes ProviderSessionHandoff of the "
+        "already-bound S1 into resume_session. Process identity and APPLIED are "
+        "TX-11, not TX-10."
+    ),
+    TransactionGroup.TX11_BIND_RESUME_RESULT: (
+        "BEGIN IMMEDIATE after resume_session observation: verify TX-10 INTENT; "
+        "verify epoch CURRENT; verify G2 still owns the writer; verify observed "
+        "provider_session_id equals already-bound S1 (refuse rebind / new "
+        "session / NULL); record G2 process identity (pid/pgid/start/boot); "
+        "append OPERATOR_OPERATION_APPLIED. Must not mutate "
+        "epoch.provider_session_id. Must not create a SessionEpoch. Must not "
+        "consume an Attempt. First bind of a NULL epoch session is TX-3 only."
     ),
 }
 
@@ -576,12 +601,54 @@ CRASH_WINDOW_MATRIX: dict[str, dict[str, str]] = {
         "new_epoch_may_start": "no",
     },
     "resume_returned_before_applied": {
-        "durable_state": "TX-10 committed; resume observation only in adapter memory",
+        "durable_state": "TX-10 committed; resume observation only in adapter memory; TX-11 not committed",
         "external_side_effect": "G2 process and S1 resume likely exist",
         "safe_automatic_retry": "no",
-        "required_reconciliation": "persist process identity + APPLIED if still obtainable; else EFFECT_UNKNOWN",
+        "required_reconciliation": (
+            "TX-11 persist G2 process identity + APPLIED if the observation is "
+            "still obtainable and observed session equals bound S1; else EFFECT_UNKNOWN"
+        ),
         "writer_held": "yes, G2",
         "epoch_may_be_abandoned": "not while G2 process may still be alive",
+        "new_epoch_may_start": "no",
+    },
+    "after_tx11_applied": {
+        "durable_state": (
+            "resume APPLIED; G2 process identity recorded; epoch.provider_session_id "
+            "still S1; G2 writer held"
+        ),
+        "external_side_effect": "yes, already bound to S1 on G2",
+        "safe_automatic_retry": "n/a — resume already applied; matching TX-11 replay is a no-op",
+        "required_reconciliation": "collect attestation (new_process_generation); LaunchDecision still pending",
+        "writer_held": "yes, G2",
+        "epoch_may_be_abandoned": "only after later hard-fail law",
+        "new_epoch_may_start": "no",
+    },
+    "observed_session_mismatch_refuses_tx11": {
+        "durable_state": "TX-10 committed; bound S1 unchanged; APPLIED absent",
+        "external_side_effect": "possible foreign session or missing session",
+        "safe_automatic_retry": "no — do not rebind epoch.provider_session_id; do not allocate G3",
+        "required_reconciliation": "PROVIDER_SESSION_MISMATCH; EFFECT_UNKNOWN on the resume OperationId; hold G2",
+        "writer_held": "yes, G2",
+        "epoch_may_be_abandoned": "not while G2 process liveness is UNKNOWN",
+        "new_epoch_may_start": "no",
+    },
+    "incomplete_process_identity_refuses_tx11": {
+        "durable_state": "TX-10 committed; S1 bound; APPLIED absent; G2 process identity unset",
+        "external_side_effect": "possible G2 process",
+        "safe_automatic_retry": "no",
+        "required_reconciliation": "PROCESS_IDENTITY_INCOMPLETE; EFFECT_UNKNOWN; hold G2; do not invent pid/boot",
+        "writer_held": "yes, G2",
+        "epoch_may_be_abandoned": "not while G2 process may still be alive",
+        "new_epoch_may_start": "no",
+    },
+    "duplicate_tx11_matching_observation": {
+        "durable_state": "TX-11 already APPLIED; G2 process identity already recorded",
+        "external_side_effect": "none from the duplicate persist",
+        "safe_automatic_retry": "yes as a no-op if observed session and process identity match the sealed row",
+        "required_reconciliation": "matching observation is identity; mismatch is ALREADY_APPLIED_CONFLICT",
+        "writer_held": "yes, G2",
+        "epoch_may_be_abandoned": "no",
         "new_epoch_may_start": "no",
     },
     "duplicate_tx10_while_successor_holds": {
@@ -632,6 +699,8 @@ INVARIANT_ENFORCEMENT: dict[str, EnforcementSite] = {
     "unknown_process_blocks_new_writer": EnforcementSite.SUPERVISOR,
     "restore_invalidation_before_reenable": EnforcementSite.BEGIN_IMMEDIATE,
     "same_epoch_generation_recovery": EnforcementSite.BEGIN_IMMEDIATE,
+    "resume_provider_session_handoff": EnforcementSite.PURE_COMPARATOR,
+    "resume_bind_process_identity": EnforcementSite.BEGIN_IMMEDIATE,
 }
 
 
@@ -897,6 +966,25 @@ class SessionStartObservation:
 
 
 @dataclass(frozen=True)
+class ProviderSessionHandoff:
+    """Already-bound epoch session identity.  Executive passes this INTO resume_session.
+
+    Not an Executive-allocated ID.  Not adapter-minted on the resume call.
+    Must equal ``harness_session_epochs.provider_session_id`` and the
+    generation index projection.  Empty values are refused.
+    """
+
+    provider_session_id: str
+    worker_id: str
+
+    def __post_init__(self) -> None:
+        if not str(self.provider_session_id or "").strip():
+            raise ValueError("ProviderSessionHandoff.provider_session_id is required")
+        if not str(self.worker_id or "").strip():
+            raise ValueError("ProviderSessionHandoff.worker_id is required")
+
+
+@dataclass(frozen=True)
 class TurnStartObservation:
     provider_native_turn_id: str | None = None
     acknowledged: bool = False
@@ -965,6 +1053,23 @@ class SameEpochRecoverySnapshot:
     reserved_operation_ids: frozenset[str] = frozenset()
     creates_new_epoch: bool = False
     consumes_attempt: bool = False
+
+
+@dataclass(frozen=True)
+class ResumeBindSnapshot:
+    """Pre/post TX-11 durable facts.  Epoch session identity is already bound."""
+
+    epoch: SessionEpochRef
+    epoch_state: SessionEpochState
+    bound_provider_session_id: str
+    generation: ProcessGenerationRecord
+    operation_id: OperationId
+    intent_committed: bool
+    applied: bool = False
+    process: ProcessIdentityObservation | None = None
+    creates_new_epoch: bool = False
+    consumes_attempt: bool = False
+    epoch_provider_session_mutated: bool = False
 
 
 @dataclass(frozen=True)
@@ -1276,6 +1381,10 @@ METHOD_CONTRACTS: dict[str, MethodContract] = {
             "cross Attempt resume",
             "free writer because process is dead",
             "allocate process_generation_id",
+            "allocate session_epoch_id",
+            "allocate provider_session_id",
+            "create a new provider session",
+            "rebind epoch.provider_session_id",
         ),
         failure_classes=(
             AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
@@ -1283,7 +1392,13 @@ METHOD_CONTRACTS: dict[str, MethodContract] = {
             AdapterFailureClass.PROCESS_CRASH,
             AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
         ),
-        notes="Requires Executive-derived resume_safe. Adapters without native resume remain valid.",
+        notes=(
+            "Executive passes already-bound S1 as ProviderSessionHandoff. "
+            "Adapter must not mint a session. Observed provider_session_id must "
+            "equal the handoff. G2 process identity and APPLIED are TX-11. "
+            "Requires Executive-derived resume_safe at TX-10. Adapters without "
+            "native resume remain valid."
+        ),
     ),
     "send_input": _contract(
         name="send_input",
@@ -1451,6 +1566,7 @@ class SupportsSessionResume(Protocol):
         operation_id: OperationId,
         epoch: SessionEpochRef,
         generation: ProcessGenerationRef,
+        provider_session: ProviderSessionHandoff,
         requested: RequestedExecutionProfile,
     ) -> SessionStartObservation: ...
 
@@ -1873,6 +1989,139 @@ def process_identities_match(
     )
 
 
+def process_identity_is_complete(process: ProcessIdentityObservation) -> bool:
+    return None not in (
+        process.pid,
+        process.pgid,
+        process.process_start_identity,
+        process.boot_id,
+    )
+
+
+def provider_session_handoff_for_resume(
+    *,
+    epoch: SessionEpochRef,
+    bound_provider_session_id: str,
+) -> ProviderSessionHandoff:
+    """Build the resume IN argument from the already-bound epoch session."""
+
+    session = str(bound_provider_session_id or "").strip()
+    worker = str(epoch.worker_id or "").strip()
+    if not session:
+        raise ValueError("resume requires already-bound provider_session_id")
+    if not worker:
+        raise ValueError("resume handoff requires worker_id")
+    return ProviderSessionHandoff(provider_session_id=session, worker_id=worker)
+
+
+def resume_session_handoff_is_lawful(
+    handoff: ProviderSessionHandoff,
+    *,
+    epoch: SessionEpochRef,
+    bound_provider_session_id: str,
+) -> bool:
+    bound = str(bound_provider_session_id or "").strip()
+    return (
+        bool(bound)
+        and handoff.worker_id == epoch.worker_id
+        and handoff.provider_session_id == bound
+    )
+
+
+def diagnose_resume_bind(
+    snapshot: ResumeBindSnapshot,
+    *,
+    observation: SessionStartObservation,
+    handoff: ProviderSessionHandoff,
+) -> ResumeBindRefusal | None:
+    if not snapshot.intent_committed:
+        return ResumeBindRefusal.INTENT_MISSING
+    if snapshot.epoch_state is not SessionEpochState.CURRENT:
+        return ResumeBindRefusal.EPOCH_NOT_CURRENT
+    if snapshot.creates_new_epoch or snapshot.consumes_attempt:
+        return ResumeBindRefusal.EPOCH_MISMATCH
+    if snapshot.epoch_provider_session_mutated:
+        return ResumeBindRefusal.EPOCH_MISMATCH
+    if snapshot.generation.ref.session_epoch_id != snapshot.epoch.session_epoch_id:
+        return ResumeBindRefusal.EPOCH_MISMATCH
+    if snapshot.generation.ref.worker_id != snapshot.epoch.worker_id:
+        return ResumeBindRefusal.EPOCH_MISMATCH
+    if not snapshot.generation.executive_writer_held:
+        return ResumeBindRefusal.GENERATION_NOT_WRITER
+    bound = str(snapshot.bound_provider_session_id or "").strip()
+    if not bound:
+        return ResumeBindRefusal.EPOCH_SESSION_UNBOUND
+    if not resume_session_handoff_is_lawful(
+        handoff,
+        epoch=snapshot.epoch,
+        bound_provider_session_id=bound,
+    ):
+        return ResumeBindRefusal.HANDOFF_MISMATCH
+    if snapshot.generation.provider_session_id != bound:
+        return ResumeBindRefusal.INDEX_PROJECTION_MISMATCH
+    observed_session = str(observation.provider_session_id or "").strip()
+    if observed_session != bound:
+        return ResumeBindRefusal.PROVIDER_SESSION_MISMATCH
+    if not process_identity_is_complete(observation.process):
+        return ResumeBindRefusal.PROCESS_IDENTITY_INCOMPLETE
+    if snapshot.applied:
+        if snapshot.process is None:
+            return ResumeBindRefusal.ALREADY_APPLIED_CONFLICT
+        if not process_identities_match(snapshot.process, observation.process):
+            return ResumeBindRefusal.ALREADY_APPLIED_CONFLICT
+        return None
+    return None
+
+
+def may_bind_resume_result(
+    snapshot: ResumeBindSnapshot,
+    *,
+    observation: SessionStartObservation,
+    handoff: ProviderSessionHandoff,
+) -> bool:
+    return (
+        diagnose_resume_bind(snapshot, observation=observation, handoff=handoff)
+        is None
+    )
+
+
+def apply_resume_bind(
+    snapshot: ResumeBindSnapshot,
+    *,
+    observation: SessionStartObservation,
+    handoff: ProviderSessionHandoff,
+) -> ResumeBindSnapshot:
+    """Pure TX-11.  Records G2 process identity and APPLIED.  Does not rebind S1."""
+
+    refusal = diagnose_resume_bind(
+        snapshot, observation=observation, handoff=handoff
+    )
+    if refusal is not None:
+        raise ValueError(refusal.value)
+    if snapshot.applied:
+        return snapshot
+    bound = snapshot.bound_provider_session_id
+    return ResumeBindSnapshot(
+        epoch=snapshot.epoch,
+        epoch_state=SessionEpochState.CURRENT,
+        bound_provider_session_id=bound,
+        generation=ProcessGenerationRecord(
+            ref=snapshot.generation.ref,
+            executive_writer_held=True,
+            process_liveness=ProcessLiveness.ALIVE,
+            provider_writer_state=ProviderWriterState.HELD,
+            provider_session_id=bound,
+        ),
+        operation_id=snapshot.operation_id,
+        intent_committed=True,
+        applied=True,
+        process=observation.process,
+        creates_new_epoch=False,
+        consumes_attempt=False,
+        epoch_provider_session_mutated=False,
+    )
+
+
 def derive_resume_safety(
     *,
     epoch_state: SessionEpochState,
@@ -2281,12 +2530,15 @@ __all__ = [
     "ProcessIdentityObservation",
     "ProcessLiveness",
     "ProfileValidation",
+    "ProviderSessionHandoff",
     "ProviderWriterState",
     "REATTEST_TRIGGERS",
     "RESTORE_POLICY",
     "ReconcileObservation",
     "RequestedExecutionProfile",
     "RestoreInvalidationResult",
+    "ResumeBindRefusal",
+    "ResumeBindSnapshot",
     "SameEpochRecoveryRefusal",
     "SameEpochRecoveryReplay",
     "SameEpochRecoverySnapshot",
@@ -2313,11 +2565,13 @@ __all__ = [
     "WriterFacts",
     "abandon_epoch",
     "adapter_method_returns_executive_id",
+    "apply_resume_bind",
     "apply_same_epoch_generation_recovery",
     "classify_capability",
     "classify_observed_capabilities",
     "compare_launch",
     "compare_launch_parameter_names",
+    "diagnose_resume_bind",
     "diagnose_same_epoch_generation_recovery",
     "derive_resume_safety",
     "event_cursor_scoped_to",
@@ -2326,6 +2580,7 @@ __all__ = [
     "may_abandon_epoch",
     "may_bind_epoch_provider_session",
     "may_bind_provider_session",
+    "may_bind_resume_result",
     "may_hold_executive_writer",
     "may_hold_postbind_realm_writer",
     "may_hold_prebind_epoch_writer",
@@ -2336,6 +2591,9 @@ __all__ = [
     "operation_receipt_command_id",
     "process_end_does_not_release_writer",
     "process_identities_match",
+    "process_identity_is_complete",
+    "provider_session_handoff_for_resume",
+    "resume_session_handoff_is_lawful",
     "reconcile_observation_field_names",
     "resolve_operation_after_crash",
     "restore_invalidation",

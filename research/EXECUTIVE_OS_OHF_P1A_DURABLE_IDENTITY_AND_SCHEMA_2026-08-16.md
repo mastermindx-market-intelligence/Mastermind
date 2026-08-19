@@ -201,10 +201,18 @@ Canonical copy: `TRANSACTION_GROUPS` in the typed contract.
 | TX-8 | epoch ABANDONED, clear held, preserve provider writer | only if process PROVEN_DEAD |
 | TX-9 | OHF Attempts LOST, CURRENT epochs ABANDONED, held cleared, history untouched | before service re-enable |
 | TX-10 | same-epoch G2 recovery: release G1 writer, allocate G2, acquire writer, resume INTENT | yes — before resume_session |
+| TX-11 | record G2 process identity + APPLIED; observed session must equal already-bound S1 | after resume observation |
 
 TX-10 does not create a SessionEpoch and does not consume an Attempt. It is
 refused when the old process is UNKNOWN or the provider writer is not
 RELEASED. Duplicate recovery is unique-writer / unique-OperationId refusal.
+`resume_session` receives `ProviderSessionHandoff` of already-bound S1; the
+adapter must not mint a session.
+
+TX-11 does not mutate `epoch.provider_session_id`, does not create a
+SessionEpoch, and does not consume an Attempt. First bind of a NULL epoch
+session remains TX-3 only. Observed S2/NULL refuses. Incomplete process
+identity refuses. Matching APPLIED replay is a no-op.
 
 Context rotation: TX marks old CURRENT TERMINAL, optionally inserts the next
 CURRENT epoch without a writer if launch is deferred. Crash between TX-8 and
@@ -221,6 +229,10 @@ E2 creation leaves Attempt active, no CURRENT epoch, no writer — recoverable.
 | Two Executive writers on W1/S1 | unique index `process_generations_one_executive_writer` | SQL index |
 | Duplicate TX-10 / same-epoch G2 while G2 holds | unique writer indexes + unique command_id; no provider call | SQL index + BEGIN IMMEDIATE |
 | Hard-dead G1 + RELEASED + resume_safe | TX-10 same epoch, same Attempt, G2 resumes S1 | BEGIN IMMEDIATE |
+| resume_session without ProviderSessionHandoff / wrong S1 | Protocol requires handoff; HANDOFF_MISMATCH; no adapter-minted session | contract + PURE_COMPARATOR |
+| Observed S2 or NULL on resume | TX-11 PROVIDER_SESSION_MISMATCH; epoch.provider_session_id unchanged | BEGIN IMMEDIATE |
+| Resume observation before TX-11 | EFFECT_UNKNOWN; hold G2; persist identity+APPLIED in TX-11 if still obtainable | crash window |
+| Duplicate TX-11 matching observation | no-op APPLIED; mismatch is ALREADY_APPLIED_CONFLICT | BEGIN IMMEDIATE |
 | W1/`abc` and W2/`abc` | legal; realm includes worker_id | SQL index |
 | Process dies, writer remains | `ended_at_ms` set; `executive_writer_held=1`; provider UNKNOWN/HELD | TX-7 |
 | UNKNOWN process + UNKNOWN effect, start E2 | refused until process absence proven; else Attempt LOST | supervisor |

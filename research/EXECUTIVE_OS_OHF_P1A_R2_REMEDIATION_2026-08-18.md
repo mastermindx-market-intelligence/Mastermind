@@ -169,3 +169,23 @@ Does not reopen R2-1…R2-5 or CARDINALITY_B.
 - **OperationId receipt closure:** `OperationId` rejects any base id whose
   derived `:{applied,refused,effect-unknown,reconciled}` receipts would miss
   `_COMMAND_ID_RE`. Test: `test_operation_id_receipt_closure_at_max_and_one_beyond`.
+
+## R3.2 (2026-08-19)
+
+Does not reopen R3.1 TX-10 entry conditions, OperationId receipt closure, or
+CARDINALITY_B.
+
+- **Provider-session handoff into resume_session:** Executive passes
+  already-bound S1 as `ProviderSessionHandoff`. Adapter must not mint a
+  session. Tests: `test_resume_session_requires_bound_provider_session_handoff`,
+  `test_optional_protocols_require_operation_id`.
+- **TX-11 post-resume APPLIED / process identity:** after resume observation,
+  atomically record G2 pid/pgid/start/boot and APPLIED without mutating
+  epoch.provider_session_id. Tests:
+  `test_tx11_records_process_identity_and_applied_without_rebinding_s1`,
+  `test_tx11_refuses_observed_session_mismatch_and_does_not_rebind`,
+  `test_tx11_refuses_unbound_epoch_that_belongs_to_tx3`,
+  `test_tx11_refuses_incomplete_process_identity`,
+  `test_tx11_refuses_wrong_handoff_and_missing_intent`,
+  `test_resume_returned_before_tx11_is_effect_unknown_and_holds_g2`,
+  `test_duplicate_tx11_matching_observation_is_noop`.

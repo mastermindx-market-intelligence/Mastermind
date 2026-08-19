@@ -107,8 +107,9 @@ Attack the R3 closure, not CARDINALITY_B. Especially:
 7. Restore preserves historical RELEASED; invalidates authority separately.
 8. Optional methods have typed Protocols and OperationIds.
 9. EventCursor is ProcessGeneration-scoped.
-10. TX-1…TX-10 and the crash-window matrix leave no P1B identity invention.
-    TX-10 is the only same-epoch G2 recovery transaction.
+10. TX-1…TX-11 and the crash-window matrix leave no P1B identity invention.
+    TX-10 is the only same-epoch G2 recovery transaction. TX-11 is the only
+    post-resume process-identity / APPLIED transaction.
 
 ## Reviewer brief for R3.1
 
@@ -124,3 +125,20 @@ rewrite the R1/R2 review artifacts. Especially:
    Never allocate G3 as a replay.
 6. Every accepted OperationId permits applied/refused/effect-unknown/reconciled
    receipts under `_COMMAND_ID_RE`. Max accepted length and one-beyond are tests.
+
+## Reviewer brief for R3.2
+
+R3.1 is materially correct. Attack only the resume handoff and TX-11. Do not
+reopen CARDINALITY_B, TX-10 entry conditions, or rewrite R1/R2 review artifacts.
+
+1. `resume_session` requires `ProviderSessionHandoff` of already-bound S1.
+   `start_session` still does not take a provider session.
+2. Adapter must not allocate `provider_session_id` or create a new session
+   on resume.
+3. TX-11 records G2 process identity + APPLIED; epoch.provider_session_id
+   stays S1; no new SessionEpoch; no Attempt consumed.
+4. Observed S2 / NULL refuses TX-11 and does not rebind.
+5. Incomplete process identity refuses APPLIED.
+6. Crash after resume return before TX-11 → EFFECT_UNKNOWN, hold G2, no G3.
+7. Matching TX-11 replay is a no-op; different pid is ALREADY_APPLIED_CONFLICT.
+8. TX-11 cannot first-bind a NULL epoch session — that remains TX-3.
