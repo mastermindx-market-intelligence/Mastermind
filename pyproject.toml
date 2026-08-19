@@ -34,7 +34,9 @@ dev = [
     # third-party package installed (EXEC-MCP-A commission R5), and it is
     # declared explicitly here rather than inherited transitively from
     # claude-agent-sdk so that an unrelated dependency bump cannot silently
-    # remove the gateway's SDK from CI.
+    # remove the gateway's SDK from CI. Cap below 2.x: mcp 2.0.0 renamed
+    # Server.list_tools and ToolAnnotations.readOnlyHint and broke the existing
+    # Executive MCP tests on an otherwise unchanged architecture head.
     "mcp>=1.2,<2",
 ]
 
