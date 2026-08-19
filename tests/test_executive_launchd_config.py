@@ -1115,9 +1115,21 @@ def _assignment_seal_payload() -> dict:
             },
         },
         "uid_sweep": {
-            "schema_version": "mastermind.executive_uid_sweep/v1",
-            "passed": True,
+            "schema_version": "mastermind.executive_uid_sweep/v2",
+            "observed_at": "2026-08-11T00:00:01+00:00",
+            "reason": "run_terminal",
+            "worker_uid": 451,
+            "broker_pid": 42419,
+            "residual_pids_before": [],
             "residual_pids_after": [],
+            "signal_name": "SIGKILL",
+            "signal_sent": False,
+            "quiescent_observations": 2,
+            "ambient_pids": [],
+            "ambient_identities": [],
+            "ambient_attribution": "absent",
+            "passed": True,
+            "found_residuals": False,
         },
     }
 
