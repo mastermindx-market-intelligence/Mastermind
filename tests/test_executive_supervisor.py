@@ -74,20 +74,31 @@ class FakeProcessController:
         self.inspector.live = False
 
     def uid_sweep_receipt(self, attempt):
+        before = (
+            [attempt.pid]
+            if attempt.attempt_id in self.terminated_attempt_ids
+            else []
+        )
         return {
-            "schema_version": "mastermind.executive_uid_sweep/v1",
-            "passed": True,
+            "schema_version": "mastermind.executive_uid_sweep/v2",
+            "observed_at": "2026-08-11T00:00:01+00:00",
             "reason": (
                 "run_terminal"
                 if attempt.attempt_id in self.terminated_attempt_ids
                 else "status_absence"
             ),
-            "residual_pids_before": (
-                [attempt.pid]
-                if attempt.attempt_id in self.terminated_attempt_ids
-                else []
-            ),
+            "worker_uid": os.geteuid() if os.geteuid() > 1 else 451,
+            "broker_pid": 42419,
+            "residual_pids_before": before,
             "residual_pids_after": [],
+            "signal_name": "SIGKILL",
+            "signal_sent": bool(before),
+            "quiescent_observations": 2,
+            "ambient_pids": [],
+            "ambient_identities": [],
+            "ambient_attribution": "absent",
+            "passed": True,
+            "found_residuals": bool(before),
         }
 
 
@@ -178,11 +189,21 @@ class FakeAdapter:
         assert self.ref is not None and self.ref.run_id == run_id
         self.inspector.live = False
         return {
-            "schema_version": "mastermind.executive_uid_sweep/v1",
+            "schema_version": "mastermind.executive_uid_sweep/v2",
+            "observed_at": "2026-08-11T00:00:01+00:00",
             "reason": "status_absence",
+            "worker_uid": os.geteuid() if os.geteuid() > 1 else 451,
+            "broker_pid": 42419,
             "residual_pids_before": [],
             "residual_pids_after": [],
+            "signal_name": "SIGKILL",
+            "signal_sent": False,
+            "quiescent_observations": 2,
+            "ambient_pids": [],
+            "ambient_identities": [],
+            "ambient_attribution": "absent",
             "passed": True,
+            "found_residuals": False,
         }
 
     async def collect_result(self, ref):
@@ -285,16 +306,19 @@ class FakeAdapter:
     def uid_sweep_receipt(self, ref):
         assert ref == self.ref
         return {
-            "schema_version": "mastermind.executive_uid_sweep/v1",
+            "schema_version": "mastermind.executive_uid_sweep/v2",
             "observed_at": "2026-08-11T00:00:01+00:00",
             "reason": "run_terminal",
-            "worker_uid": os.geteuid(),
+            "worker_uid": os.geteuid() if os.geteuid() > 1 else 451,
             "broker_pid": 42419,
             "residual_pids_before": [],
             "residual_pids_after": [],
             "signal_name": "SIGKILL",
             "signal_sent": False,
             "quiescent_observations": 2,
+            "ambient_pids": [],
+            "ambient_identities": [],
+            "ambient_attribution": "absent",
             "passed": True,
             "found_residuals": False,
         }
@@ -783,3 +807,70 @@ def test_cancel_request_during_direct_validation_prevents_completion(tmp_path: P
     assert receipt.job.status is JobStatus.CANCELLED
     assert receipt.attempt.status is AttemptStatus.CANCELLED
     assert receipt.validation_receipt_path is None
+
+
+def test_invalid_provider_result_with_ambient_pid_fails_job_not_containment(
+    tmp_path: Path,
+) -> None:
+    """A platform ambient process plus INVALID_RESULT is a Job failure, not quarantine."""
+
+    import dataclasses
+
+    from control_plane.executive_ambient_process import (
+        AMBIENT_CODESIGN_IDENTIFIER,
+        AMBIENT_LAUNCHD_LABEL,
+        AMBIENT_PLIST_PATH,
+        AMBIENT_PROGRAM_PATH,
+        AmbientProcessIdentity,
+    )
+
+    class InvalidAmbientAdapter(FakeAdapter):
+        async def collect_result(self, ref):
+            receipt = await super().collect_result(ref)
+            result = dataclasses.replace(
+                receipt.result,
+                status=WorkerRunStatus.INVALID_RESULT,
+                error="INVALID_RESULT",
+                structured_output=None,
+                exit_code=1,
+            )
+            return dataclasses.replace(receipt, result=result)
+
+        def uid_sweep_receipt(self, ref):
+            value = dict(super().uid_sweep_receipt(ref))
+            identity = AmbientProcessIdentity(
+                pid=88688,
+                uid=os.geteuid() if os.geteuid() > 1 else 451,
+                launchd_domain="user/451",
+                launchd_label=AMBIENT_LAUNCHD_LABEL,
+                launchd_reported_pid=88688,
+                plist_path=AMBIENT_PLIST_PATH,
+                program_path=AMBIENT_PROGRAM_PATH,
+                executable_path=AMBIENT_PROGRAM_PATH,
+                executable_device=1,
+                executable_inode=1,
+                codesign_identifier=AMBIENT_CODESIGN_IDENTIFIER,
+                codesign_verified=True,
+            )
+            value["ambient_pids"] = [88688]
+            value["ambient_identities"] = [identity.to_dict()]
+            value["ambient_attribution"] = "attested"
+            return value
+
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    receipt = asyncio.run(
+        _supervisor(runtime, tmp_path, InvalidAmbientAdapter(FakeInspector())).run_once(
+            job_id
+        )
+    )
+    assert receipt.job.status is JobStatus.FAILED
+    assert receipt.attempt.status is AttemptStatus.FAILED
+    assert receipt.attempt.exit_code == 1
+    evidence = Path(receipt.collection_receipt_path)
+    persisted = json.loads(evidence.read_text(encoding="utf-8"))
+    assert persisted["collection"]["result"]["status"] == "INVALID_RESULT"
+    assert persisted["uid_sweep"]["ambient_pids"] == [88688]
+    assert persisted["uid_sweep"]["found_residuals"] is False
+    seal = json.loads(Path(receipt.assignment_seal_receipt_path or "").read_text())
+    assert seal["passed"] is True
+    assert seal["uid_sweep"]["ambient_pids"] == [88688]

@@ -849,6 +849,106 @@ def test_service_still_serves_after_an_abrupt_client_disconnect(
     asyncio.run(exercise())
 
 
+def test_wait_job_records_quarantine_status_and_dispatch_errors(
+    tmp_path: Path,
+) -> None:
+    instance = _acceptance_stub(tmp_path)
+    instance.persisted = {}
+    instance._write_json = instance.persisted.__setitem__
+    instance.helper_pid = None
+    instance.services_started = True
+    instance.release = tmp_path
+    instance._pid_exists = lambda _pid: False
+
+    def fake_control(command, *values, persist=None):
+        if command == "job":
+            raise acceptance.AcceptanceError(
+                "control command job failed with exit 2: "
+                "[state_conflict] Executive control service is QUARANTINED; "
+                "only status, health, and canary activation are available"
+            )
+        if command == "status":
+            return {
+                "ok": True,
+                "result": {
+                    "service_state": "QUARANTINED",
+                    "dispatch_errors": {
+                        "JOB-001": (
+                            "BrokerStateError: worker left a detached "
+                            "same-UID process after collection"
+                        )
+                    },
+                },
+            }
+        raise AssertionError(command)
+
+    instance._control_request = fake_control
+    instance._broker_status = lambda persist: instance.persisted.__setitem__(
+        persist,
+        {"last_sweep": {"reason": "run_terminal", "ambient_pids": [88688]}},
+    ) or {"last_sweep": {"reason": "run_terminal", "ambient_pids": [88688]}}
+
+    with pytest.raises(acceptance.AcceptanceError, match="QUARANTINED"):
+        instance._wait_job("JOB-001", {"COMPLETED"}, timeout=1.0)
+
+    quarantine = instance.persisted["quarantine-status.json"]["result"]
+    assert quarantine["service_state"] == "QUARANTINED"
+    assert "JOB-001" in quarantine["dispatch_errors"]
+    assert "detached" in quarantine["dispatch_errors"]["JOB-001"]
+    assert instance.persisted["quarantine-worker-broker.json"]["last_sweep"]["reason"] == (
+        "run_terminal"
+    )
+
+
+def test_cleanup_after_failure_captures_status_before_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instance = _acceptance_stub(tmp_path)
+    instance.persisted = {}
+    instance._write_json = instance.persisted.__setitem__
+    instance.helper_pid = None
+    instance.services_started = True
+    instance.release = tmp_path
+    instance._pid_exists = lambda _pid: False
+    stopped: list[str] = []
+
+    def fake_control(command, *values, persist=None):
+        assert command == "status"
+        return {
+            "ok": True,
+            "result": {
+                "service_state": "QUARANTINED",
+                "dispatch_errors": {"JOB-001": "BrokerStateError: fixture"},
+            },
+        }
+
+    instance._control_request = fake_control
+    instance._broker_status = lambda persist: {"last_sweep": {"reason": "run_terminal"}}
+
+    def fake_run(argv, **kwargs):
+        stopped.append(str(argv[-1]) if argv else "")
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(
+        acceptance,
+        "subprocess",
+        types.SimpleNamespace(
+            run=fake_run,
+            DEVNULL=subprocess.DEVNULL,
+            PIPE=subprocess.PIPE,
+        ),
+    )
+    (tmp_path / "ops" / "executive_os").mkdir(parents=True)
+    (tmp_path / "ops" / "executive_os" / "service-control.sh").write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
+    instance.cleanup_after_failure()
+    assert instance.persisted["quarantine-status.json"]["result"]["service_state"] == (
+        "QUARANTINED"
+    )
+    assert "stop" in stopped[-1]
+
+
 PREFLIGHT_PATH = ROOT / "ops" / "executive_os" / "git_handoff_preflight.py"
 PREFLIGHT_SPEC = importlib.util.spec_from_file_location(
     "executive_git_handoff_preflight", PREFLIGHT_PATH
