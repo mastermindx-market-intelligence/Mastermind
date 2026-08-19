@@ -139,12 +139,25 @@ def test_api_posture_contract():
 
 
 def test_api_posture_never_500_across_books():
+    """Every KNOWN book answers 200 — a missing/malformed book degrades, it never 500s."""
     client = _client()
-    for book in ("flagship", "autonomous", "heavyweight", "china", "hk", "etf", "bogus_book"):
+    for book in ("flagship", "autonomous", "heavyweight", "china", "hk", "etf"):
         r = client.get(f"/api/posture?book={book}")
         assert r.status_code == 200, f"{book} -> {r.status_code}"
         d = r.json()
-        expected_book = "autonomous" if book == "bogus_book" else book
-        assert d["book"] == expected_book
+        assert d["book"] == book
         # tone is always one of the design-token classes the chip CSS knows about
         assert d["posture_tone"] in ("up", "down", "warn", "info", "muted")
+
+
+def test_api_posture_rejects_an_unknown_book():
+    """An unknown book is a 404 — NOT a silent fall-through to the US Brain.
+
+    This case used to live in the loop above asserting ``bogus_book -> 200`` with
+    ``d["book"] == "autonomous"``: the endpoint served Autonomous data under the caller's own
+    bogus id, so a typo or stale URL produced valid-looking numbers for the wrong book. Rejecting
+    still satisfies the never-500 contract this file pins — a clean 4xx is not a crash.
+    """
+    r = _client().get("/api/posture?book=bogus_book")
+    assert r.status_code == 404, f"unknown book must be rejected; got {r.status_code}"
+    assert r.json()["detail"]["error"] == "unknown_portfolio"
