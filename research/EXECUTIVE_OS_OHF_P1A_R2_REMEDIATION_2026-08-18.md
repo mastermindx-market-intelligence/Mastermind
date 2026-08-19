@@ -189,3 +189,21 @@ CARDINALITY_B.
   `test_tx11_refuses_wrong_handoff_and_missing_intent`,
   `test_resume_returned_before_tx11_is_effect_unknown_and_holds_g2`,
   `test_duplicate_tx11_matching_observation_is_noop`.
+
+## R3.3 (2026-08-19)
+
+Does not reopen R3.2 handoff/TX-11 topology, TX-10 entry conditions,
+OperationId receipt closure, or CARDINALITY_B.
+
+- **Typed TX-10 INTENT target on the Event plane:**
+  `OperationIntentTarget` / `OperationIntentReceipt` bind OperationId to
+  `resume_session` + attempt/epoch/generation/worker/already-bound S1 in
+  `events.payload_json`. TX-11 verifies that receipt against current G2/S1.
+  Tests: `test_hard_dead_released_same_epoch_g2_is_lawful`,
+  `test_tx11_records_process_identity_and_applied_without_rebinding_s1`,
+  `test_tx11_refuses_intent_target_mismatch_before_applied`,
+  `test_tx11_refuses_wrong_handoff_and_missing_intent`.
+- **Process-identity Executive alignment:** positive pid/pgid and nonblank
+  trimmed start/boot; v3 `process_generations` CHECK constraints. Tests:
+  `test_tx11_refuses_incomplete_process_identity`,
+  `test_process_generations_identity_checks_match_executive_law`.

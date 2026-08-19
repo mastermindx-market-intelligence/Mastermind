@@ -134,8 +134,8 @@ CREATE TABLE process_generations (
   worker_id TEXT NOT NULL,                 -- INDEX PROJECTION
   provider_session_id TEXT,                -- INDEX PROJECTION
   generation_number INTEGER NOT NULL CHECK (generation_number >= 1),
-  pid INTEGER,
-  pgid INTEGER,
+  pid INTEGER CHECK (pid IS NULL OR pid > 0),
+  pgid INTEGER CHECK (pgid IS NULL OR pgid > 0),
   process_start_identity TEXT,
   boot_id TEXT,
   started_at_ms INTEGER NOT NULL,
@@ -149,7 +149,13 @@ CREATE TABLE process_generations (
   observed_attestation_json TEXT,
   observed_attestation_digest TEXT,
   created_at_ms INTEGER NOT NULL,
-  UNIQUE (session_epoch_id, generation_number)
+  UNIQUE (session_epoch_id, generation_number),
+  CHECK (
+    (pid IS NULL AND pgid IS NULL AND process_start_identity IS NULL AND boot_id IS NULL)
+    OR
+    (pid IS NOT NULL AND pgid IS NOT NULL
+     AND length(trim(process_start_identity)) > 0 AND length(trim(boot_id)) > 0)
+  )
 );
 
 CREATE UNIQUE INDEX process_generations_one_epoch_writer
@@ -173,6 +179,11 @@ single-host V1.
 
 Do not persist `resume_safe` as independent truth.
 
+Process identity follows existing Executive `record_process` law: pid and pgid
+are positive when present; start/boot are nonblank after trim; all four are
+NULL together or recorded together. Zero, negative, empty, and whitespace-only
+values are refused.
+
 ### 3.4 Operation events (existing Event plane)
 
 ```text
@@ -181,7 +192,27 @@ aggregate_id   = OperationId.command_id
 INTENT command_id = OperationId.command_id          -- ohf-op:…
 APPLIED / REFUSED / EFFECT_UNKNOWN / RECONCILED
   command_id = '{OperationId}:{suffix}'
+events.attempt_id / events.worker_id = OperationIntentTarget fields of the same name
 ```
+
+TX-10 `OPERATOR_OPERATION_INTENT` `payload_json` is the typed
+`OperationIntentTarget`. No sidecar table. Required keys:
+
+```json
+{
+  "operation_kind": "resume_session",
+  "attempt_id": "att-1",
+  "session_epoch_id": "epoch-1",
+  "process_generation_id": "gen-2",
+  "worker_id": "W1",
+  "provider_session_id": "S1"
+}
+```
+
+TX-11 must verify that payload against current durable G2/S1 before APPLIED.
+An INTENT for G3, another epoch, another session, `start_session`, or another
+Attempt is `INTENT_TARGET_MISMATCH`. `intent_committed: bool` is not a lawful
+substitute.
 
 No `operator_operations` table.
 
@@ -200,8 +231,8 @@ Canonical copy: `TRANSACTION_GROUPS` in the typed contract.
 | TX-7 | process death observation; held remains; provider not RELEASED | n/a |
 | TX-8 | epoch ABANDONED, clear held, preserve provider writer | only if process PROVEN_DEAD |
 | TX-9 | OHF Attempts LOST, CURRENT epochs ABANDONED, held cleared, history untouched | before service re-enable |
-| TX-10 | same-epoch G2 recovery: release G1 writer, allocate G2, acquire writer, resume INTENT | yes — before resume_session |
-| TX-11 | record G2 process identity + APPLIED; observed session must equal already-bound S1 | after resume observation |
+| TX-10 | same-epoch G2 recovery: release G1 writer, allocate G2, acquire writer, resume INTENT with typed OperationIntentTarget payload | yes — before resume_session |
+| TX-11 | verify TX-10 INTENT target vs G2/S1; record G2 process identity + APPLIED; observed session must equal already-bound S1 | after resume observation |
 
 TX-10 does not create a SessionEpoch and does not consume an Attempt. It is
 refused when the old process is UNKNOWN or the provider writer is not
@@ -212,7 +243,9 @@ adapter must not mint a session.
 TX-11 does not mutate `epoch.provider_session_id`, does not create a
 SessionEpoch, and does not consume an Attempt. First bind of a NULL epoch
 session remains TX-3 only. Observed S2/NULL refuses. Incomplete process
-identity refuses. Matching APPLIED replay is a no-op.
+identity (including zero/negative pid/pgid and blank/whitespace start/boot)
+refuses. Matching APPLIED replay is a no-op. TX-11 refuses unless the Event
+INTENT payload is the TX-10 `OperationIntentTarget` for this G2/S1.
 
 Context rotation: TX marks old CURRENT TERMINAL, optionally inserts the next
 CURRENT epoch without a writer if launch is deferred. Crash between TX-8 and
@@ -233,6 +266,8 @@ E2 creation leaves Attempt active, no CURRENT epoch, no writer — recoverable.
 | Observed S2 or NULL on resume | TX-11 PROVIDER_SESSION_MISMATCH; epoch.provider_session_id unchanged | BEGIN IMMEDIATE |
 | Resume observation before TX-11 | EFFECT_UNKNOWN; hold G2; persist identity+APPLIED in TX-11 if still obtainable | crash window |
 | Duplicate TX-11 matching observation | no-op APPLIED; mismatch is ALREADY_APPLIED_CONFLICT | BEGIN IMMEDIATE |
+| TX-11 with another OperationId / G3 / other epoch / other session / start_session / other Attempt | INTENT_TARGET_MISMATCH; no APPLIED | Event payload + BEGIN IMMEDIATE |
+| pid=0 / negative / empty or whitespace start/boot on G2 | SQL CHECK plus PROCESS_IDENTITY_INCOMPLETE | SQL CHECK + BEGIN IMMEDIATE |
 | W1/`abc` and W2/`abc` | legal; realm includes worker_id | SQL index |
 | Process dies, writer remains | `ended_at_ms` set; `executive_writer_held=1`; provider UNKNOWN/HELD | TX-7 |
 | UNKNOWN process + UNKNOWN effect, start E2 | refused until process absence proven; else Attempt LOST | supervisor |

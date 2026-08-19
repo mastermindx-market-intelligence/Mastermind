@@ -311,7 +311,10 @@ One `BEGIN IMMEDIATE` transaction:
    on the **existing** epoch
 3. insert the successor with `executive_writer_held=1` and
    `provider_session_id` index projection already bound to S1
-4. append `OPERATOR_OPERATION_INTENT` with `command_id=OperationId`
+4. append `OPERATOR_OPERATION_INTENT` with `command_id=OperationId` and
+   Event-plane `payload_json` = typed `OperationIntentTarget`
+   (`operation_kind=resume_session`, `attempt_id`, `session_epoch_id`,
+   `process_generation_id`, `worker_id`, already-bound `provider_session_id`)
 
 Then, and only then, call `resume_session` with a `ProviderSessionHandoff`
 of the already-bound S1. The adapter must not mint a provider session.
@@ -327,16 +330,21 @@ G2 only if local state proves the adapter was never entered; otherwise
 epoch session). After `resume_session` returns an observation, one
 `BEGIN IMMEDIATE` transaction:
 
-1. verify TX-10 INTENT for this OperationId
+1. verify TX-10 INTENT for this OperationId, including the typed
+   `OperationIntentTarget` against current G2/S1 (`resume_session`, this
+   Attempt, this epoch, this generation, this worker, already-bound S1)
 2. verify epoch `CURRENT` and G2 still holds the writer
 3. verify observed `provider_session_id` equals already-bound S1
 4. record G2 process identity (`pid`/`pgid`/`process_start_identity`/`boot_id`)
+   using existing Executive law: positive pid/pgid, nonblank trimmed start/boot
 5. append `OPERATOR_OPERATION_APPLIED`
 
 TX-11 must **not** mutate `epoch.provider_session_id`, must **not** create a
 SessionEpoch, and must **not** consume an Attempt. Observed S2 / NULL /
 empty session is `PROVIDER_SESSION_MISMATCH`. Incomplete process identity
-is refused. Missing APPLIED after a possible resume call is
+is refused. An INTENT whose target is G3, another epoch, another session,
+`start_session`, or another Attempt is `INTENT_TARGET_MISMATCH`. Missing
+APPLIED after a possible resume call is
 `EFFECT_UNKNOWN`; do not allocate G3. Matching TX-11 replay after APPLIED
 is a no-op; a different process identity is `ALREADY_APPLIED_CONFLICT`.
 G2 still requires TX-4 re-attestation before a work turn
@@ -529,7 +537,9 @@ session. It returns observations. Executive binds `provider_session_id` in TX-3.
 allocated G2 in TX-10. Executive passes that bound S1 **into** the adapter as
 `ProviderSessionHandoff`. The adapter must not allocate `provider_session_id`
 and must not create a new provider session. Observed session must equal the
-handoff. Executive records G2 process identity and APPLIED in TX-11. TX-11 is
+handoff. Executive records G2 process identity and APPLIED in TX-11 only after
+the Event-plane TX-10 INTENT payload proves this OperationId authorized this
+exact G2/S1 `resume_session`. TX-11 is
 not TX-3: a NULL epoch session cannot be bound on the resume path.
 
 ### 12.4 EventCursor

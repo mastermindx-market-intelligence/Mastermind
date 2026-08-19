@@ -142,3 +142,25 @@ reopen CARDINALITY_B, TX-10 entry conditions, or rewrite R1/R2 review artifacts.
 6. Crash after resume return before TX-11 → EFFECT_UNKNOWN, hold G2, no G3.
 7. Matching TX-11 replay is a no-op; different pid is ALREADY_APPLIED_CONFLICT.
 8. TX-11 cannot first-bind a NULL epoch session — that remains TX-3.
+
+## Reviewer brief for R3.3
+
+R3.2 is materially correct on handoff and TX-11 topology. Attack only the
+durable OperationId target binding and process-identity validity. Do not
+reopen CARDINALITY_B, TX-10/TX-11 topology, ProviderSessionHandoff, or
+rewrite R1/R2 review artifacts.
+
+1. TX-10 INTENT `events.payload_json` is typed `OperationIntentTarget` on the
+   existing Event plane. No sidecar table.
+2. The payload binds OperationId to `resume_session`, `attempt_id`,
+   `session_epoch_id`, `process_generation_id`, `worker_id`, and already-bound
+   `provider_session_id`.
+3. TX-11 verifies that receipt against current G2/S1 before APPLIED.
+   `intent_committed: bool` is gone from `ResumeBindSnapshot`.
+4. TX-10 for G2 + TX-11 using an OperationId for G3, another epoch, another
+   session, `start_session`, or another Attempt refuses with
+   `INTENT_TARGET_MISMATCH` before APPLIED.
+5. Process identity completeness matches Executive law: positive pid, positive
+   pgid, nonblank trimmed `process_start_identity`, nonblank trimmed `boot_id`.
+   Zero, negative, empty, and whitespace values refuse. v3
+   `process_generations` SQL CHECKs match.

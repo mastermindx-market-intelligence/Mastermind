@@ -1,4 +1,4 @@
-"""OHF-P1A-R3.2 provider-neutral Operator Harness contract.
+"""OHF-P1A-R3.3 provider-neutral Operator Harness contract.
 
 Pure architecture freeze.  This module must not:
 
@@ -161,6 +161,16 @@ PROPOSED_SQL_INVARIANTS: dict[str, str] = {
         "WHERE provider_session_id IS NOT NULL"
     ),
     "unique_generation_number": "UNIQUE(session_epoch_id, generation_number)",
+    "process_identity_pid_positive": "CHECK (pid IS NULL OR pid > 0)",
+    "process_identity_pgid_positive": "CHECK (pgid IS NULL OR pgid > 0)",
+    "process_identity_recorded_together": (
+        "CHECK ("
+        "(pid IS NULL AND pgid IS NULL AND process_start_identity IS NULL "
+        "AND boot_id IS NULL) OR "
+        "(pid IS NOT NULL AND pgid IS NOT NULL "
+        "AND length(trim(process_start_identity)) > 0 "
+        "AND length(trim(boot_id)) > 0))"
+    ),
 }
 
 
@@ -261,6 +271,24 @@ class OperationReceiptKind(str, Enum):
     RECONCILED = "OPERATOR_OPERATION_RECONCILED"
 
 
+class OperationKind(str, Enum):
+    """What an OperationId INTENT authorized.  Lives in events.payload_json."""
+
+    START_SESSION = "start_session"
+    RESUME_SESSION = "resume_session"
+    BEGIN_TURN = "begin_turn"
+
+
+OPERATION_INTENT_TARGET_FIELDS: tuple[str, ...] = (
+    "operation_kind",
+    "attempt_id",
+    "session_epoch_id",
+    "process_generation_id",
+    "worker_id",
+    "provider_session_id",
+)
+
+
 class OperationResolution(str, Enum):
     NOT_STARTED = "NOT_STARTED"
     MAY_RETRY_SAME_OPERATION_ID = "MAY_RETRY_SAME_OPERATION_ID"
@@ -329,6 +357,7 @@ class SameEpochRecoveryReplay(str, Enum):
 
 class ResumeBindRefusal(str, Enum):
     INTENT_MISSING = "INTENT_MISSING"
+    INTENT_TARGET_MISMATCH = "INTENT_TARGET_MISMATCH"
     EPOCH_NOT_CURRENT = "EPOCH_NOT_CURRENT"
     GENERATION_NOT_WRITER = "GENERATION_NOT_WRITER"
     EPOCH_SESSION_UNBOUND = "EPOCH_SESSION_UNBOUND"
@@ -446,19 +475,26 @@ TRANSACTION_GROUPS: dict[TransactionGroup, str] = {
         "generation_number on the SAME epoch; insert successor with "
         "executive_writer_held=1 and provider_session_id index projection already "
         "bound to S1; append OPERATOR_OPERATION_INTENT command_id=OperationId "
-        "for resume_session. No new SessionEpoch. No new Attempt. Commit before "
-        "resume_session(). Executive then passes ProviderSessionHandoff of the "
-        "already-bound S1 into resume_session. Process identity and APPLIED are "
-        "TX-11, not TX-10."
+        "for resume_session whose events.payload_json is the typed "
+        "OperationIntentTarget (operation_kind=resume_session, attempt_id, "
+        "session_epoch_id, process_generation_id, worker_id, already-bound "
+        "provider_session_id). No sidecar table. No new SessionEpoch. No new "
+        "Attempt. Commit before resume_session(). Executive then passes "
+        "ProviderSessionHandoff of the already-bound S1 into resume_session. "
+        "Process identity and APPLIED are TX-11, not TX-10."
     ),
     TransactionGroup.TX11_BIND_RESUME_RESULT: (
-        "BEGIN IMMEDIATE after resume_session observation: verify TX-10 INTENT; "
-        "verify epoch CURRENT; verify G2 still owns the writer; verify observed "
-        "provider_session_id equals already-bound S1 (refuse rebind / new "
-        "session / NULL); record G2 process identity (pid/pgid/start/boot); "
-        "append OPERATOR_OPERATION_APPLIED. Must not mutate "
-        "epoch.provider_session_id. Must not create a SessionEpoch. Must not "
-        "consume an Attempt. First bind of a NULL epoch session is TX-3 only."
+        "BEGIN IMMEDIATE after resume_session observation: verify TX-10 INTENT "
+        "for this OperationId including typed OperationIntentTarget against "
+        "current G2/S1 (kind, attempt, epoch, generation, worker, bound "
+        "session); verify epoch CURRENT; verify G2 still owns the writer; "
+        "verify observed provider_session_id equals already-bound S1 (refuse "
+        "rebind / new session / NULL); record G2 process identity "
+        "(pid/pgid/start/boot); append OPERATOR_OPERATION_APPLIED. Must not "
+        "mutate epoch.provider_session_id. Must not create a SessionEpoch. "
+        "Must not consume an Attempt. First bind of a NULL epoch session is "
+        "TX-3 only. INTENT for G3, another epoch, another session, "
+        "start_session, or another Attempt is INTENT_TARGET_MISMATCH."
     ),
 }
 
@@ -637,9 +673,25 @@ CRASH_WINDOW_MATRIX: dict[str, dict[str, str]] = {
         "durable_state": "TX-10 committed; S1 bound; APPLIED absent; G2 process identity unset",
         "external_side_effect": "possible G2 process",
         "safe_automatic_retry": "no",
-        "required_reconciliation": "PROCESS_IDENTITY_INCOMPLETE; EFFECT_UNKNOWN; hold G2; do not invent pid/boot",
+        "required_reconciliation": (
+            "PROCESS_IDENTITY_INCOMPLETE; EFFECT_UNKNOWN; hold G2; do not invent "
+            "pid/boot; zero/negative pid/pgid and blank/whitespace start/boot refuse"
+        ),
         "writer_held": "yes, G2",
         "epoch_may_be_abandoned": "not while G2 process may still be alive",
+        "new_epoch_may_start": "no",
+    },
+    "intent_target_mismatch_refuses_tx11": {
+        "durable_state": "TX-10 G2 INTENT committed for OperationId A; APPLIED absent",
+        "external_side_effect": "possible G2 resume of S1",
+        "safe_automatic_retry": "no — do not apply a different OperationId onto G2",
+        "required_reconciliation": (
+            "INTENT_TARGET_MISMATCH when the Event-plane INTENT payload does not "
+            "bind this OperationId to resume_session + this attempt + this epoch "
+            "+ this generation + this worker + already-bound S1"
+        ),
+        "writer_held": "yes, G2",
+        "epoch_may_be_abandoned": "not while G2 process liveness is UNKNOWN",
         "new_epoch_may_start": "no",
     },
     "duplicate_tx11_matching_observation": {
@@ -701,6 +753,8 @@ INVARIANT_ENFORCEMENT: dict[str, EnforcementSite] = {
     "same_epoch_generation_recovery": EnforcementSite.BEGIN_IMMEDIATE,
     "resume_provider_session_handoff": EnforcementSite.PURE_COMPARATOR,
     "resume_bind_process_identity": EnforcementSite.BEGIN_IMMEDIATE,
+    "operation_intent_target": EnforcementSite.BEGIN_IMMEDIATE,
+    "process_identity_positive_nonblank": EnforcementSite.SQL_TRIGGER,
 }
 
 
@@ -721,6 +775,84 @@ class OperationId:
                 "OperationId.command_id must leave room for every derived receipt "
                 "command_id under events.command_id law"
             )
+
+
+@dataclass(frozen=True)
+class OperationIntentTarget:
+    """Durable Event-plane INTENT payload.  No sidecar table.
+
+    Binds ``events.command_id`` (the OperationId) to the exact state
+    transition it authorized.  Canonical JSON keys are
+    ``OPERATION_INTENT_TARGET_FIELDS``.  Event columns ``attempt_id`` and
+    ``worker_id`` must equal the payload fields of the same name.
+    """
+
+    operation_kind: OperationKind
+    attempt_id: str
+    session_epoch_id: str
+    process_generation_id: str
+    worker_id: str
+    provider_session_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.operation_kind, OperationKind):
+            raise ValueError("OperationIntentTarget.operation_kind is required")
+        for name in (
+            "attempt_id",
+            "session_epoch_id",
+            "process_generation_id",
+            "worker_id",
+            "provider_session_id",
+        ):
+            raw = getattr(self, name)
+            value = str(raw or "").strip()
+            if not value:
+                raise ValueError(f"OperationIntentTarget.{name} is required")
+            if raw != value:
+                raise ValueError(f"OperationIntentTarget.{name} must be trimmed")
+
+    def to_event_payload(self) -> dict[str, str]:
+        return {
+            "operation_kind": self.operation_kind.value,
+            "attempt_id": self.attempt_id,
+            "session_epoch_id": self.session_epoch_id,
+            "process_generation_id": self.process_generation_id,
+            "worker_id": self.worker_id,
+            "provider_session_id": self.provider_session_id,
+        }
+
+
+@dataclass(frozen=True)
+class OperationIntentReceipt:
+    """Existing Event-plane INTENT row.  aggregate_id = command_id = OperationId."""
+
+    operation_id: OperationId
+    target: OperationIntentTarget
+    aggregate_type: str = OPERATION_AGGREGATE_TYPE
+
+    def __post_init__(self) -> None:
+        if self.aggregate_type != OPERATION_AGGREGATE_TYPE:
+            raise ValueError("Operation INTENT stays on the operator_operation Event plane")
+
+    @property
+    def aggregate_id(self) -> str:
+        return self.operation_id.command_id
+
+    @property
+    def command_id(self) -> str:
+        return self.operation_id.command_id
+
+    @property
+    def event_type(self) -> str:
+        return OperationReceiptKind.INTENT.value
+
+    @property
+    def attempt_id(self) -> str:
+        return self.target.attempt_id
+
+    @property
+    def worker_id(self) -> str:
+        return self.target.worker_id
 
 
 @dataclass(frozen=True)
@@ -1051,6 +1183,7 @@ class SameEpochRecoverySnapshot:
     provider_session_id: str
     generations: tuple[ProcessGenerationRecord, ...]
     reserved_operation_ids: frozenset[str] = frozenset()
+    intent_receipts: tuple[OperationIntentReceipt, ...] = ()
     creates_new_epoch: bool = False
     consumes_attempt: bool = False
 
@@ -1064,7 +1197,7 @@ class ResumeBindSnapshot:
     bound_provider_session_id: str
     generation: ProcessGenerationRecord
     operation_id: OperationId
-    intent_committed: bool
+    intent_receipt: OperationIntentReceipt | None
     applied: bool = False
     process: ProcessIdentityObservation | None = None
     creates_new_epoch: bool = False
@@ -1916,6 +2049,17 @@ def apply_same_epoch_generation_recovery(
         reserved_operation_ids=frozenset(
             {*snapshot.reserved_operation_ids, operation_id.command_id}
         ),
+        intent_receipts=(
+            *snapshot.intent_receipts,
+            OperationIntentReceipt(
+                operation_id=operation_id,
+                target=tx10_resume_intent_target(
+                    epoch=snapshot.epoch,
+                    generation=new_generation,
+                    provider_session_id=snapshot.provider_session_id,
+                ),
+            ),
+        ),
         creates_new_epoch=False,
         consumes_attempt=False,
     )
@@ -1990,12 +2134,109 @@ def process_identities_match(
 
 
 def process_identity_is_complete(process: ProcessIdentityObservation) -> bool:
-    return None not in (
-        process.pid,
-        process.pgid,
-        process.process_start_identity,
-        process.boot_id,
+    """Executive local-process law: positive pid/pgid and nonblank trimmed start/boot."""
+
+    if process.pid is None or process.pgid is None:
+        return False
+    try:
+        pid = int(process.pid)
+        pgid = int(process.pgid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0 or pgid <= 0:
+        return False
+    start = str(process.process_start_identity or "").strip()
+    boot = str(process.boot_id or "").strip()
+    return bool(start) and bool(boot)
+
+
+def tx10_resume_intent_target(
+    *,
+    epoch: SessionEpochRef,
+    generation: ProcessGenerationRef,
+    provider_session_id: str,
+) -> OperationIntentTarget:
+    """TX-10 Event-plane INTENT payload for resume_session of already-bound S1."""
+
+    return OperationIntentTarget(
+        operation_kind=OperationKind.RESUME_SESSION,
+        attempt_id=epoch.attempt_id,
+        session_epoch_id=epoch.session_epoch_id,
+        process_generation_id=generation.process_generation_id,
+        worker_id=epoch.worker_id,
+        provider_session_id=str(provider_session_id).strip(),
     )
+
+
+def operation_intent_target_from_event_payload(
+    payload: Mapping[str, object],
+) -> OperationIntentTarget:
+    """Parse events.payload_json of OPERATOR_OPERATION_INTENT."""
+
+    missing = [
+        name for name in OPERATION_INTENT_TARGET_FIELDS if name not in payload
+    ]
+    if missing:
+        raise ValueError(
+            "INTENT payload missing " + ", ".join(missing)
+        )
+    try:
+        kind = OperationKind(str(payload["operation_kind"]))
+    except ValueError as exc:
+        raise ValueError("unknown operation_kind in INTENT payload") from exc
+    return OperationIntentTarget(
+        operation_kind=kind,
+        attempt_id=str(payload["attempt_id"]),
+        session_epoch_id=str(payload["session_epoch_id"]),
+        process_generation_id=str(payload["process_generation_id"]),
+        worker_id=str(payload["worker_id"]),
+        provider_session_id=str(payload["provider_session_id"]),
+    )
+
+
+def intent_receipt_for_operation(
+    receipts: Sequence[OperationIntentReceipt],
+    operation_id: OperationId,
+) -> OperationIntentReceipt | None:
+    for receipt in receipts:
+        if receipt.operation_id.command_id == operation_id.command_id:
+            return receipt
+    return None
+
+
+def diagnose_resume_intent_target(
+    receipt: OperationIntentReceipt | None,
+    *,
+    operation_id: OperationId,
+    epoch: SessionEpochRef,
+    generation: ProcessGenerationRecord,
+    bound_provider_session_id: str,
+) -> ResumeBindRefusal | None:
+    if receipt is None:
+        return ResumeBindRefusal.INTENT_MISSING
+    target = receipt.target
+    bound = str(bound_provider_session_id or "").strip()
+    if receipt.operation_id.command_id != operation_id.command_id:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if receipt.aggregate_type != OPERATION_AGGREGATE_TYPE:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if target.operation_kind is not OperationKind.RESUME_SESSION:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if target.attempt_id != epoch.attempt_id:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if target.session_epoch_id != epoch.session_epoch_id:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if target.session_epoch_id != generation.ref.session_epoch_id:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if target.process_generation_id != generation.ref.process_generation_id:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if target.worker_id != epoch.worker_id:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if target.worker_id != generation.ref.worker_id:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    if bound and target.provider_session_id != bound:
+        return ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    return None
 
 
 def provider_session_handoff_for_resume(
@@ -2034,8 +2275,15 @@ def diagnose_resume_bind(
     observation: SessionStartObservation,
     handoff: ProviderSessionHandoff,
 ) -> ResumeBindRefusal | None:
-    if not snapshot.intent_committed:
-        return ResumeBindRefusal.INTENT_MISSING
+    target_refusal = diagnose_resume_intent_target(
+        snapshot.intent_receipt,
+        operation_id=snapshot.operation_id,
+        epoch=snapshot.epoch,
+        generation=snapshot.generation,
+        bound_provider_session_id=snapshot.bound_provider_session_id,
+    )
+    if target_refusal is not None:
+        return target_refusal
     if snapshot.epoch_state is not SessionEpochState.CURRENT:
         return ResumeBindRefusal.EPOCH_NOT_CURRENT
     if snapshot.creates_new_epoch or snapshot.consumes_attempt:
@@ -2113,7 +2361,7 @@ def apply_resume_bind(
             provider_session_id=bound,
         ),
         operation_id=snapshot.operation_id,
-        intent_committed=True,
+        intent_receipt=snapshot.intent_receipt,
         applied=True,
         process=observation.process,
         creates_new_epoch=False,
@@ -2512,6 +2760,7 @@ __all__ = [
     "OPERATOR_HARNESS_INTERFACE_VERSION",
     "OPERATION_AGGREGATE_TYPE",
     "OPERATION_COMMAND_ID_PREFIX",
+    "OPERATION_INTENT_TARGET_FIELDS",
     "OPERATION_RECEIPT_COMMAND_SUFFIXES",
     "OPTIONAL_ADAPTER_PROTOCOLS",
     "ObservedCapabilityIdentity",
@@ -2519,6 +2768,9 @@ __all__ = [
     "ObservedTriState",
     "OperationId",
     "OperationIdempotencyClass",
+    "OperationIntentReceipt",
+    "OperationIntentTarget",
+    "OperationKind",
     "OperationReceiptKind",
     "OperationResolution",
     "OperatorHarnessAdapter",
@@ -2572,10 +2824,12 @@ __all__ = [
     "compare_launch",
     "compare_launch_parameter_names",
     "diagnose_resume_bind",
+    "diagnose_resume_intent_target",
     "diagnose_same_epoch_generation_recovery",
     "derive_resume_safety",
     "event_cursor_scoped_to",
     "first_work_turn_allowed",
+    "intent_receipt_for_operation",
     "may_allocate_another_generation_after_tx10",
     "may_abandon_epoch",
     "may_bind_epoch_provider_session",
@@ -2588,6 +2842,7 @@ __all__ = [
     "may_start_successor_rich_writer",
     "native_helpers_allowed",
     "operation_id_permits_all_derived_receipts",
+    "operation_intent_target_from_event_payload",
     "operation_receipt_command_id",
     "process_end_does_not_release_writer",
     "process_identities_match",
@@ -2599,6 +2854,7 @@ __all__ = [
     "restore_invalidation",
     "rich_ohf_may_rewrite_legacy_attempt_field",
     "same_epoch_recovery_replay_disposition",
+    "tx10_resume_intent_target",
     "workspace_identities_equal",
     "writer_realm_key",
 ]

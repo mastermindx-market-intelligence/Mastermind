@@ -1,9 +1,10 @@
-"""OHF-P1A-R3.2 typed OperatorHarnessAdapter contract freeze."""
+"""OHF-P1A-R3.3 typed OperatorHarnessAdapter contract freeze."""
 from __future__ import annotations
 
 import dataclasses
 import inspect
 import re
+import sqlite3
 from pathlib import Path
 from typing import get_type_hints
 
@@ -46,6 +47,7 @@ from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
     OPERATION_AGGREGATE_TYPE,
     OPERATION_COMMAND_ID_PREFIX,
+    OPERATION_INTENT_TARGET_FIELDS,
     OPERATION_RECEIPT_COMMAND_SUFFIXES,
     OPTIONAL_ADAPTER_PROTOCOLS,
     ObservedCapabilityIdentity,
@@ -53,6 +55,9 @@ from control_plane.operator_harness_contract import (
     ObservedTriState,
     OperationId,
     OperationIdempotencyClass,
+    OperationIntentReceipt,
+    OperationIntentTarget,
+    OperationKind,
     OperationReceiptKind,
     OperationResolution,
     OperatorHarnessAdapter,
@@ -101,10 +106,12 @@ from control_plane.operator_harness_contract import (
     compare_launch,
     compare_launch_parameter_names,
     diagnose_resume_bind,
+    diagnose_resume_intent_target,
     diagnose_same_epoch_generation_recovery,
     derive_resume_safety,
     event_cursor_scoped_to,
     first_work_turn_allowed,
+    intent_receipt_for_operation,
     may_allocate_another_generation_after_tx10,
     may_abandon_epoch,
     may_bind_epoch_provider_session,
@@ -117,6 +124,7 @@ from control_plane.operator_harness_contract import (
     may_start_successor_rich_writer,
     native_helpers_allowed,
     operation_id_permits_all_derived_receipts,
+    operation_intent_target_from_event_payload,
     operation_receipt_command_id,
     process_end_does_not_release_writer,
     process_identity_is_complete,
@@ -126,6 +134,7 @@ from control_plane.operator_harness_contract import (
     rich_ohf_may_rewrite_legacy_attempt_field,
     resolve_operation_after_crash,
     same_epoch_recovery_replay_disposition,
+    tx10_resume_intent_target,
     writer_realm_key,
 )
 
@@ -279,13 +288,16 @@ def _recovered_tx10(
     return recovered, op
 
 
+_UNSET = object()
+
+
 def _resume_bind_snapshot(
     recovered: SameEpochRecoverySnapshot,
     operation_id: OperationId,
     *,
     applied: bool = False,
     process: ProcessIdentityObservation | None = None,
-    intent_committed: bool = True,
+    intent_receipt: OperationIntentReceipt | None | object = _UNSET,
     bound_provider_session_id: str | None = None,
     writer_held: bool = True,
 ) -> ResumeBindSnapshot:
@@ -307,13 +319,17 @@ def _resume_bind_snapshot(
         if bound_provider_session_id is None
         else bound_provider_session_id
     )
+    if intent_receipt is _UNSET:
+        intent_receipt = intent_receipt_for_operation(
+            recovered.intent_receipts, operation_id
+        )
     return ResumeBindSnapshot(
         epoch=recovered.epoch,
         epoch_state=recovered.epoch_state,
         bound_provider_session_id=bound,
         generation=g2,
         operation_id=operation_id,
-        intent_committed=intent_committed,
+        intent_receipt=intent_receipt,
         applied=applied,
         process=process,
     )
@@ -929,6 +945,7 @@ def test_transaction_groups_and_crash_windows_are_frozen():
         "after_tx11_applied",
         "observed_session_mismatch_refuses_tx11",
         "incomplete_process_identity_refuses_tx11",
+        "intent_target_mismatch_refuses_tx11",
         "duplicate_tx11_matching_observation",
         "duplicate_tx10_while_successor_holds",
         "hard_dead_g1_provider_held_or_unknown",
@@ -954,9 +971,18 @@ def test_transaction_groups_and_crash_windows_are_frozen():
     assert "already-bound S1" in tx11
     assert "Must not mutate" in tx11
     assert "TX-3 only" in tx11
+    assert "OperationIntentTarget" in tx10
+    assert "INTENT_TARGET_MISMATCH" in tx11
     assert INVARIANT_ENFORCEMENT["same_epoch_generation_recovery"].value == "BEGIN_IMMEDIATE"
     assert INVARIANT_ENFORCEMENT["resume_provider_session_handoff"].value == "PURE_COMPARATOR"
     assert INVARIANT_ENFORCEMENT["resume_bind_process_identity"].value == "BEGIN_IMMEDIATE"
+    assert INVARIANT_ENFORCEMENT["operation_intent_target"].value == "BEGIN_IMMEDIATE"
+    assert INVARIANT_ENFORCEMENT["process_identity_positive_nonblank"].value == "SQL_TRIGGER"
+    assert "pid > 0" in PROPOSED_SQL_INVARIANTS["process_identity_pid_positive"]
+    assert "pgid > 0" in PROPOSED_SQL_INVARIANTS["process_identity_pgid_positive"]
+    assert "length(trim(process_start_identity))" in PROPOSED_SQL_INVARIANTS[
+        "process_identity_recorded_together"
+    ]
 
 
 def test_scenario_a_graceful_restart_same_epoch():
@@ -1101,6 +1127,19 @@ def test_hard_dead_released_same_epoch_g2_is_lawful():
     assert by_id["gen-2"].ref.generation_number == 2
     assert by_id["gen-2"].provider_session_id == "S1"
     assert op.command_id in recovered.reserved_operation_ids
+    receipt = intent_receipt_for_operation(recovered.intent_receipts, op)
+    assert receipt is not None
+    assert receipt.event_type == OperationReceiptKind.INTENT.value
+    assert receipt.command_id == op.command_id
+    assert receipt.aggregate_id == op.command_id
+    assert receipt.target == tx10_resume_intent_target(
+        epoch=recovered.epoch,
+        generation=g2,
+        provider_session_id="S1",
+    )
+    assert operation_intent_target_from_event_payload(
+        receipt.target.to_event_payload()
+    ) == receipt.target
     assert ATTEMPT_BOUNDARY_MATRIX["safe_crash_recovery"] is AttemptBoundary.SAME_ATTEMPT
 
 
@@ -1316,7 +1355,17 @@ def test_tx11_records_process_identity_and_applied_without_rebinding_s1():
         snapshot, observation=observation, handoff=handoff
     )
     assert bound.applied is True
-    assert bound.intent_committed is True
+    receipt = bound.intent_receipt
+    assert receipt is not None
+    assert receipt.operation_id.command_id == op.command_id
+    assert receipt.target.operation_kind is OperationKind.RESUME_SESSION
+    assert receipt.target.attempt_id == recovered.epoch.attempt_id
+    assert receipt.target.session_epoch_id == recovered.epoch.session_epoch_id
+    assert receipt.target.process_generation_id == "gen-2"
+    assert receipt.target.worker_id == "W1"
+    assert receipt.target.provider_session_id == "S1"
+    assert receipt.aggregate_type == OPERATION_AGGREGATE_TYPE
+    assert tuple(receipt.target.to_event_payload()) == OPERATION_INTENT_TARGET_FIELDS
     assert bound.bound_provider_session_id == "S1"
     assert bound.epoch.session_epoch_id == recovered.epoch.session_epoch_id
     assert bound.epoch.attempt_id == recovered.epoch.attempt_id
@@ -1382,14 +1431,30 @@ def test_tx11_refuses_unbound_epoch_that_belongs_to_tx3():
 def test_tx11_refuses_incomplete_process_identity():
     recovered, op = _recovered_tx10("ohf-op:resume-incomplete")
     snapshot = _resume_bind_snapshot(recovered, op)
-    incomplete = _observation(process=_process(pid=None))
-    assert not process_identity_is_complete(incomplete.process)
-    assert (
-        diagnose_resume_bind(
-            snapshot, observation=incomplete, handoff=_handoff()
-        )
-        is ResumeBindRefusal.PROCESS_IDENTITY_INCOMPLETE
+    incomplete_cases = (
+        _process(pid=None),
+        _process(pgid=None),
+        _process(pid=0),
+        _process(pgid=0),
+        _process(pid=-1),
+        _process(pgid=-8),
+        _process(start=""),
+        _process(boot=""),
+        _process(start="   "),
+        _process(boot="\t"),
+        _process(start=None),
+        _process(boot=None),
     )
+    for process in incomplete_cases:
+        observation = _observation(process=process)
+        assert not process_identity_is_complete(observation.process)
+        assert (
+            diagnose_resume_bind(
+                snapshot, observation=observation, handoff=_handoff()
+            )
+            is ResumeBindRefusal.PROCESS_IDENTITY_INCOMPLETE
+        )
+    assert process_identity_is_complete(_process(pid=1, pgid=1))
 
 
 def test_tx11_refuses_wrong_handoff_and_missing_intent():
@@ -1401,7 +1466,7 @@ def test_tx11_refuses_wrong_handoff_and_missing_intent():
         )
         is ResumeBindRefusal.HANDOFF_MISMATCH
     )
-    no_intent = _resume_bind_snapshot(recovered, op, intent_committed=False)
+    no_intent = _resume_bind_snapshot(recovered, op, intent_receipt=None)
     assert (
         diagnose_resume_bind(
             no_intent, observation=_observation(), handoff=_handoff()
@@ -1463,4 +1528,182 @@ def test_duplicate_tx11_matching_observation_is_noop():
     )
     with pytest.raises(ValueError, match="ALREADY_APPLIED_CONFLICT"):
         apply_resume_bind(first, observation=conflict, handoff=_handoff())
+
+
+def _wrong_intent_receipt(
+    recovered: SameEpochRecoverySnapshot,
+    operation_id: OperationId,
+    **overrides: object,
+) -> OperationIntentReceipt:
+    lawful = intent_receipt_for_operation(recovered.intent_receipts, operation_id)
+    assert lawful is not None
+    payload = dict(lawful.target.to_event_payload())
+    payload.update({key: value for key, value in overrides.items()})
+    if "operation_kind" in overrides and isinstance(overrides["operation_kind"], OperationKind):
+        payload["operation_kind"] = overrides["operation_kind"].value
+    target = operation_intent_target_from_event_payload(payload)
+    return OperationIntentReceipt(operation_id=operation_id, target=target)
+
+
+def test_tx11_refuses_intent_target_mismatch_before_applied():
+    recovered, op_a = _recovered_tx10("ohf-op:resume-target-a")
+    lawful = _resume_bind_snapshot(recovered, op_a)
+    observation = _observation()
+    handoff = _handoff()
+    assert diagnose_resume_bind(
+        lawful, observation=observation, handoff=handoff
+    ) is None
+
+    g3_receipt = _wrong_intent_receipt(
+        recovered, op_a, process_generation_id="gen-3"
+    )
+    g2 = next(
+        row
+        for row in recovered.generations
+        if row.ref.process_generation_id == "gen-2"
+    )
+    assert (
+        diagnose_resume_intent_target(
+            g3_receipt,
+            operation_id=op_a,
+            epoch=recovered.epoch,
+            generation=g2,
+            bound_provider_session_id="S1",
+        )
+        is ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    )
+    assert (
+        diagnose_resume_bind(
+            _resume_bind_snapshot(recovered, op_a, intent_receipt=g3_receipt),
+            observation=observation,
+            handoff=handoff,
+        )
+        is ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    )
+
+    other_epoch = _wrong_intent_receipt(
+        recovered, op_a, session_epoch_id="epoch-other"
+    )
+    assert (
+        diagnose_resume_bind(
+            _resume_bind_snapshot(recovered, op_a, intent_receipt=other_epoch),
+            observation=observation,
+            handoff=handoff,
+        )
+        is ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    )
+
+    other_session = _wrong_intent_receipt(
+        recovered, op_a, provider_session_id="S2"
+    )
+    assert (
+        diagnose_resume_bind(
+            _resume_bind_snapshot(recovered, op_a, intent_receipt=other_session),
+            observation=observation,
+            handoff=handoff,
+        )
+        is ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    )
+
+    start_kind = _wrong_intent_receipt(
+        recovered, op_a, operation_kind=OperationKind.START_SESSION
+    )
+    assert (
+        diagnose_resume_bind(
+            _resume_bind_snapshot(recovered, op_a, intent_receipt=start_kind),
+            observation=observation,
+            handoff=handoff,
+        )
+        is ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    )
+
+    other_attempt = _wrong_intent_receipt(
+        recovered, op_a, attempt_id="att-other"
+    )
+    assert (
+        diagnose_resume_bind(
+            _resume_bind_snapshot(recovered, op_a, intent_receipt=other_attempt),
+            observation=observation,
+            handoff=handoff,
+        )
+        is ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    )
+
+    op_b = OperationId(command_id="ohf-op:resume-target-b")
+    borrowed_a = intent_receipt_for_operation(recovered.intent_receipts, op_a)
+    assert (
+        diagnose_resume_bind(
+            _resume_bind_snapshot(recovered, op_b, intent_receipt=borrowed_a),
+            observation=observation,
+            handoff=handoff,
+        )
+        is ResumeBindRefusal.INTENT_TARGET_MISMATCH
+    )
+    with pytest.raises(ValueError, match="INTENT_TARGET_MISMATCH"):
+        apply_resume_bind(
+            _resume_bind_snapshot(recovered, op_a, intent_receipt=g3_receipt),
+            observation=observation,
+            handoff=handoff,
+        )
+    window = CRASH_WINDOW_MATRIX["intent_target_mismatch_refuses_tx11"]
+    assert "INTENT_TARGET_MISMATCH" in window["required_reconciliation"]
+
+
+def test_process_generations_identity_checks_match_executive_law():
+    schema_doc = Path(
+        "research/EXECUTIVE_OS_OHF_P1A_DURABLE_IDENTITY_AND_SCHEMA_2026-08-16.md"
+    ).read_text(encoding="utf-8")
+    for fragment in (
+        PROPOSED_SQL_INVARIANTS["process_identity_pid_positive"],
+        PROPOSED_SQL_INVARIANTS["process_identity_pgid_positive"],
+        "length(trim(process_start_identity)) > 0",
+        "length(trim(boot_id)) > 0",
+    ):
+        assert fragment in schema_doc
+    connection = sqlite3.connect(":memory:")
+    connection.execute(
+        """
+        CREATE TABLE process_generations (
+          process_generation_id TEXT PRIMARY KEY,
+          pid INTEGER,
+          pgid INTEGER,
+          process_start_identity TEXT,
+          boot_id TEXT,
+          CHECK (pid IS NULL OR pid > 0),
+          CHECK (pgid IS NULL OR pgid > 0),
+          CHECK (
+            (pid IS NULL AND pgid IS NULL AND process_start_identity IS NULL
+             AND boot_id IS NULL)
+            OR
+            (pid IS NOT NULL AND pgid IS NOT NULL
+             AND length(trim(process_start_identity)) > 0
+             AND length(trim(boot_id)) > 0)
+          )
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO process_generations VALUES ('g-null', NULL, NULL, NULL, NULL)"
+    )
+    connection.execute(
+        "INSERT INTO process_generations VALUES ('g-ok', 1, 1, 'start', 'boot')"
+    )
+    bad_rows = (
+        ("g-pid0", 0, 1, "start", "boot"),
+        ("g-pid-neg", -1, 1, "start", "boot"),
+        ("g-pgid0", 1, 0, "start", "boot"),
+        ("g-pgid-neg", 1, -2, "start", "boot"),
+        ("g-empty-start", 1, 1, "", "boot"),
+        ("g-empty-boot", 1, 1, "start", ""),
+        ("g-ws-start", 1, 1, "   ", "boot"),
+        ("g-ws-boot", 1, 1, "start", "   "),
+    )
+    for row in bad_rows:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO process_generations VALUES (?, ?, ?, ?, ?)",
+                row,
+            )
+    connection.close()
+
 
