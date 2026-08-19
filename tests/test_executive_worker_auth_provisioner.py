@@ -89,6 +89,8 @@ def test_worker_auth_runs_codex_only_from_private_provider_home() -> None:
 def test_worker_auth_verification_is_strict_and_non_disclosing() -> None:
     source = _source()
     assert "--verify-only" in source
+    assert "--verify-ready" in source
+    assert "--reauthorize" in source
     assert 'verify_auth_metadata' in source
     assert 'verify_login_without_output' in source
     assert 'verify_complete_auth' in source
@@ -139,8 +141,53 @@ def test_administrator_runbook_explains_bounded_worker_device_login() -> None:
     assert "## Stage 1" in runbook and "### Dedicated worker authentication" in runbook
     assert "provision-worker-auth.sh" in runbook
     assert "--verify-only" in runbook
+    assert "--reauthorize" in runbook
+    assert "provider-inference-canary.sh" in runbook
+    assert "Login status alone is not READY" in runbook
+    assert "Do not invent one" in runbook
+    assert "invalid_workspace_selected" in runbook
+    assert "company Mastermind ChatGPT workspace" in runbook
+    assert "not silently fall back to Personal" in runbook
+    assert "--probe-root" in runbook
+    assert "--receipt-path" in runbook
+    assert "isolation_violation" in runbook
+    assert "not a provider `process_failed`" in runbook
     assert "_mastermind_worker:_mastermind_worker" in runbook
     assert "non-symlink" in runbook and "mode `0600`" in runbook
     assert "never reads or copies" in runbook
     assert "personal `~/.codex/auth.json`" in runbook
     assert "Do not paste a token, API key" in runbook
+
+
+def test_worker_auth_reauthorization_requires_explicit_operator_mode() -> None:
+    source = _source()
+    assert "--reauthorize" in source
+    assert "--verify-ready" in source
+    default_provision = source.split('if [ "$REAUTHORIZE" = "true" ]; then', maxsplit=1)[0]
+    assert "run_codex_as_worker logout" not in default_provision
+    reauth = source.split('if [ "$REAUTHORIZE" = "true" ]; then', maxsplit=1)[1]
+    assert "run_codex_as_worker logout" in reauth
+    assert "run_codex_as_worker login --device-auth" in reauth
+    assert "run_inference_canary" in reauth
+    assert "</dev/tty >/dev/tty 2>/dev/tty" in reauth
+    verify_only = source.split('if [ "$VERIFY_ONLY" = "true" ]; then', maxsplit=1)[1].split(
+        "fi\n", maxsplit=1
+    )[0]
+    assert "run_inference_canary" not in verify_only
+    assert "not READY" in verify_only
+    verify_ready = source.split('if [ "$VERIFY_READY" = "true" ]; then', maxsplit=1)[1].split(
+        "fi\n", maxsplit=1
+    )[0]
+    assert "run_inference_canary" in verify_ready
+    assert "auth.json).read" not in source
+    assert "/usr/bin/jq" not in source
+    canary = (ROOT / "ops" / "executive_os" / "provider-inference-canary.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "auth.json" not in canary
+    assert 'exec "$PYTHON_BINARY"' not in canary
+    python_canary = (
+        ROOT / "ops" / "executive_os" / "provider_inference_canary.py"
+    ).read_text(encoding="utf-8")
+    assert 'OPENAI_API_KEY' in python_canary
+    assert "auth.json" not in python_canary
