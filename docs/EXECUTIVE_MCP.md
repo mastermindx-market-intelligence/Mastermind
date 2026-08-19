@@ -457,7 +457,10 @@ gateway.
 
 The core Wake Fabric contracts now live below MCP in
 `control_plane/wake_events.py`, `session_targets.py`, `wake_router.py`, and
-`wake_dispatcher.py` (see `docs/EXECUTIVE_WAKE_FABRIC.md`). That PR-1 surface
+`wake_dispatcher.py` (see `docs/EXECUTIVE_WAKE_FABRIC.md`). Obligation identity
+is source-anchored (`WAKE-*` from `{source_kind, source_ref, wake_kind}`);
+delivery and acknowledgement are later receipts on existing
+`events.command_id` phase suffixes. That PR-1 surface
 does **not** add a tool, bump `SCHEMA_SNAPSHOT_SHA256`, or arm a write. The MCP
 seam remains exactly this: adding `acknowledge_ceo_wake` is **one `ToolSpec`
 entry in `schemas.TOOL_SPECS` plus one intentional update to
