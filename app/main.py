@@ -67,6 +67,7 @@ def _regime_payload() -> dict:
 
 
 if FastAPI is not None:
+    from fastapi.responses import JSONResponse
     from pydantic import BaseModel
     from brain import cli_bridge
 
@@ -82,16 +83,17 @@ if FastAPI is not None:
     app = FastAPI(title="Mastermind", version="0.0.1")
 
     app.include_router(web.router)
-    # Portfolio Risk Desk CRUD proxy (W1). PRD-R8 (revised): the personal Supabase
-    # portfolio panel. Open on the CANONICAL localhost instance (the browser panel
-    # has no cookie/bearer to send; not in the bearer operator tier), but BLOCKED
-    # entirely (all methods -> 403) on the serve-only mirror now that the browser
-    # login that used to gate it was removed (see app/auth.py _PFOLIO_PATH_PREFIX).
+    # Portfolio Risk Desk CRUD proxy (W1). PRD-R8 (re-revised for the VPS cutover): the
+    # personal Supabase portfolio panel. Its handlers act as the operator with the
+    # SERVICE-ROLE key and take NO caller identity, so app/auth.py owns the boundary —
+    # BLOCKED on a serve-only mirror, BEARER-REQUIRED on the authoritative public VPS
+    # (all methods, GET included; blocked outright when no token is configured), open
+    # only on a local/non-authoritative box. See app/auth.py _PFOLIO_PATH_PREFIX.
     app.include_router(pfolio.router)
 
     # Short-TTL response cache for GET /api/* — installed BEFORE auth so the auth gate stays
     # OUTERMOST (an unauthenticated request never reaches the cache). No-op unless
-    # MASTERMIND_RESP_CACHE_TTL>0 (set on the serve-only mirror; unset on the canonical Mac).
+    # MASTERMIND_RESP_CACHE_TTL>0.
     from app import response_cache
     response_cache.install(app)
 
@@ -115,10 +117,15 @@ if FastAPI is not None:
         except Exception:
             return {}
 
-    @app.get("/health")
-    def health() -> dict:
-        # Keep only non-sensitive fields; uptime probes check `status == "ok"` only.
-        # Filesystem paths and CLI paths are omitted — they leak on an open route.
+    def _runtime_health() -> dict:
+        """Shared body for /health and /ready.
+
+        `status` is HONEST: it is "ok" only when every runtime this instance is
+        expected to be running actually is. Uptime probes check `status == "ok"`
+        only, so a hardcoded "ok" alongside `scheduled_runtime_ok: false` told a
+        simple probe the box was fine while the canonical scheduler was dead.
+        Serve-only instances expect NO scheduler, so their absence is not a fault.
+        """
         from app.auth import serve_only as _serve_only
         from brain import client as _brain_client, codex_bridge as _codex_bridge
         reasoning_backend = _brain_client.backend()
@@ -135,7 +142,7 @@ if FastAPI is not None:
         scheduled_runtime_expected = not is_serve_only
         scheduled_runtime_ok = (not scheduled_runtime_expected) or scheduler_running
         out: dict = {
-            "status": "ok",
+            "status": "ok" if scheduled_runtime_ok else "degraded",
             "paper_only": True,
             "reasoning_policy_scope": "scheduled_portfolio_reasoning",
             "reasoning_backend": reasoning_backend,
@@ -164,6 +171,29 @@ if FastAPI is not None:
         if is_serve_only:
             out["serve_only"] = True
         return out
+
+    @app.get("/health")
+    def health() -> dict:
+        """LIVENESS + provenance. Always HTTP 200 while the process can answer —
+        supervisors and scripts/deploy_code_to_vps.sh both curl this (the deploy probe
+        uses `curl -fsS`, so a non-2xx here would break the release transaction) and
+        then grep the body for reasoning_policy_ok / scheduled_runtime_ok / commit.
+        Readiness lives in the `status` field and, as a hard signal, in /ready.
+
+        Keep only non-sensitive fields; filesystem and CLI paths are omitted — they
+        would leak on an open route.
+        """
+        return _runtime_health()
+
+    @app.get("/ready")
+    def ready() -> JSONResponse:
+        """READINESS. 503 when a runtime this instance is expected to be running is
+        not (today: the scheduler on a non-serve-only box). A serve-only mirror is
+        ready WITHOUT a scheduler because its absence is intentional there."""
+        out = _runtime_health()
+        is_ready = bool(out.get("scheduled_runtime_ok"))
+        return JSONResponse({"ready": is_ready, **out},
+                            status_code=200 if is_ready else 503)
 
     @app.get("/regime")
     def regime() -> dict:
@@ -199,6 +229,14 @@ if FastAPI is not None:
     def _start_scheduler():
         from app import auth as _auth
         from app import scheduler
+
+        # FAIL CLOSED before anything else binds or spawns: an authoritative instance
+        # with no MASTERMIND_AUTH_TOKEN would expose every LLM-spending / book-running
+        # route and the personal portfolio panel unauthenticated. The authoritative
+        # systemd unit loads its secrets from an OPTIONAL EnvironmentFile, so a missing
+        # or unreadable /etc/macro-api.env must abort the start rather than silently
+        # degrade the security posture. Raises auth.AuthorizationMisconfigured.
+        _auth.assert_authoritative_auth_configured()
 
         _is_serve_only = _auth.serve_only()
 

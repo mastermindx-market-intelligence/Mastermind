@@ -138,8 +138,14 @@ def test_operator_route_requires_bearer(monkeypatch):
 
 
 def test_operator_route_passes_without_token_in_dev(monkeypatch):
-    """With no bearer token configured (dev), operator paths pass — dev ergonomics."""
+    """With no bearer token configured on a LOCAL box, operator paths pass — dev ergonomics.
+
+    This convenience is scoped to development ONLY. On an authoritative instance
+    (MASTERMIND_VPS_AUTHORITATIVE=1) the same configuration must fail closed; that half of the
+    contract is pinned by tests/test_mw6_security.py::TestAuthoritativeInstanceFailsClosed.
+    """
     monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("MASTERMIND_VPS_AUTHORITATIVE", raising=False)
 
     app = FastAPI()
     auth.install(app)
@@ -152,3 +158,24 @@ def test_operator_route_passes_without_token_in_dev(monkeypatch):
     c = TestClient(app)
     r = c.post("/api/autonomous/run")
     assert r.status_code == 200
+
+
+def test_operator_route_fails_closed_without_token_when_authoritative(monkeypatch):
+    """The internet-reachable canonical writer must never inherit the dev-ergonomics pass."""
+    monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("MASTERMIND_VPS_AUTHORITATIVE", "1")
+
+    app = FastAPI()
+    auth.install(app)
+
+    @app.post("/api/autonomous/run")
+    def autonomous_run(force: bool = False):
+        return {"started": True}
+
+    auth.reset_rate_buckets()
+    c = TestClient(app, raise_server_exceptions=True)
+    r = c.post("/api/autonomous/run")
+    assert r.status_code == 503, (
+        f"Expected a refusal on an authoritative box with no credential, got {r.status_code}"
+    )
+    assert r.json().get("error") == "operator_auth_misconfigured"
