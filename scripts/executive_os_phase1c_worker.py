@@ -32,6 +32,7 @@ from control_plane.executive_worker_broker import (
     WorkerBrokerError,
     activate_launchd_socket,
 )
+from control_plane.executive_ambient_process import DarwinDistnotedClassifier
 
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v3"
@@ -161,6 +162,7 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
     sweeper = DedicatedUIDSweeper(
         policy.worker_uid,
         receipt_path=Path(config["uid_sweep_receipt"]),
+        ambient_classifier=DarwinDistnotedClassifier(),
     )
     return ExecutiveWorkerBroker(adapter, policy, sweeper)
 

@@ -24,6 +24,13 @@ from control_plane.executive_canary import (
     SecretCanaryConfig,
     run_secret_canary,
 )
+from control_plane.executive_ambient_process import (
+    AMBIENT_CODESIGN_IDENTIFIER,
+    AMBIENT_LAUNCHD_LABEL,
+    AMBIENT_PLIST_PATH,
+    AMBIENT_PROGRAM_PATH,
+    AmbientProcessIdentity,
+)
 from control_plane.executive_service import (
     CONTROL_PROTOCOL_VERSION,
     ExecutiveControlService,
@@ -1463,6 +1470,139 @@ def test_dispatch_refuses_queued_workspace_with_0600_index(
             assert job.current_attempt_id is None
             assert holder["supervisor"].started_jobs == []
             assert stat.S_IMODE((workspace / ".git" / "index").stat().st_mode) == 0o600
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_ambient_process_and_invalid_provider_result_fail_job_keep_service_ready(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    """Dispatch + INVALID_RESULT + ambient PID must FAIL the Job, not quarantine."""
+
+    class _InvalidResultSupervisor(_FakeSupervisor):
+        def __init__(self, runtime: Runtime, *, evidence_root: Path) -> None:
+            super().__init__(runtime)
+            self.evidence_root = evidence_root
+
+        async def finish_job(self, active: _Active):
+            lease = active.lease
+            attempt = lease.attempt
+            result_path = self.evidence_root / "result.json"
+            result_path.write_text("{}\n", encoding="utf-8")
+            self.runtime.attempts.record_process_exit(
+                attempt.attempt_id,
+                fence_generation=attempt.fence_generation,
+                lease_token=lease.lease_token,
+                exit_code=1,
+                result_path=str(result_path),
+            )
+            receipt_dir = self.evidence_root / attempt.attempt_id
+            receipt_dir.mkdir(parents=True, exist_ok=True)
+            uid_sweep = {
+                "schema_version": "mastermind.executive_uid_sweep/v2",
+                "observed_at": "2026-08-11T00:00:01+00:00",
+                "reason": "run_terminal",
+                "worker_uid": 451,
+                "broker_pid": 42419,
+                "residual_pids_before": [],
+                "residual_pids_after": [],
+                "signal_name": "SIGKILL",
+                "signal_sent": False,
+                "quiescent_observations": 2,
+                "ambient_pids": [88688],
+                "ambient_identities": [
+                    AmbientProcessIdentity(
+                        pid=88688,
+                        uid=451,
+                        launchd_domain="user/451",
+                        launchd_label=AMBIENT_LAUNCHD_LABEL,
+                        launchd_reported_pid=88688,
+                        plist_path=AMBIENT_PLIST_PATH,
+                        program_path=AMBIENT_PROGRAM_PATH,
+                        executable_path=AMBIENT_PROGRAM_PATH,
+                        executable_device=1,
+                        executable_inode=1,
+                        codesign_identifier=AMBIENT_CODESIGN_IDENTIFIER,
+                        codesign_verified=True,
+                    ).to_dict()
+                ],
+                "ambient_attribution": "attested",
+                "passed": True,
+                "found_residuals": False,
+            }
+            (receipt_dir / "collection-receipt.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "mastermind.executive_collection_evidence/v1",
+                        "collection": {
+                            "result": {"status": "INVALID_RESULT", "exit_code": 1}
+                        },
+                        "uid_sweep": uid_sweep,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (receipt_dir / "assignment-seal-receipt.json").write_text(
+                json.dumps({"passed": True, "uid_sweep": uid_sweep}) + "\n",
+                encoding="utf-8",
+            )
+            return self.runtime.attempts.fail_attempt(
+                attempt.attempt_id,
+                fence_generation=attempt.fence_generation,
+                lease_token=lease.lease_token,
+                payload=JobPayload(
+                    summary="Codex worker did not return an accepted result",
+                    errors=["INVALID_RESULT"],
+                ),
+            )
+
+    async def exercise():
+        evidence_root = tmp_path / "evidence"
+        evidence_root.mkdir()
+        holder = {}
+
+        def factory(runtime: Runtime):
+            supervisor = _InvalidResultSupervisor(runtime, evidence_root=evidence_root)
+            holder["supervisor"] = supervisor
+            return supervisor
+
+        service = ExecutiveControlService(
+            _config(tmp_path, socket_root=short_socket_root),
+            supervisor_factory=factory,
+        )
+        await service.start()
+        try:
+            registered = await _request(service, "register-worker")
+            assert registered["ok"] is True
+            created = await _request(service, "create-proof-job")
+            job_id = created["result"]["job_id"]
+            dispatched = await _request(service, "dispatch", {"job_id": job_id})
+            assert dispatched["ok"] is True
+            attempt_id = dispatched["result"]["attempt"]["attempt_id"]
+            inspected = None
+            for _ in range(100):
+                inspected = await _request(service, "job", {"job_id": job_id})
+                if inspected["result"]["status"] == "FAILED":
+                    break
+                await asyncio.sleep(0.01)
+            assert inspected is not None
+            assert inspected["result"]["status"] == "FAILED"
+            attempt = await _request(service, "attempt", {"attempt_id": attempt_id})
+            assert attempt["result"]["status"] == "FAILED"
+            assert attempt["result"]["exit_code"] == 1
+            status = await _request(service, "status")
+            assert status["result"]["service_state"] == "READY"
+            assert status["result"]["dispatch_errors"] == {}
+            collection = evidence_root / attempt_id / "collection-receipt.json"
+            seal = evidence_root / attempt_id / "assignment-seal-receipt.json"
+            assert collection.is_file()
+            assert seal.is_file()
+            payload = json.loads(collection.read_text(encoding="utf-8"))
+            assert payload["uid_sweep"]["ambient_pids"] == [88688]
+            assert payload["collection"]["result"]["status"] == "INVALID_RESULT"
         finally:
             await service.close()
 

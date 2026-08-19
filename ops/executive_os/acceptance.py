@@ -59,6 +59,24 @@ _TERMINAL_JOB_STATES = {
     "RATE_LIMITED",
 }
 _ASSIGNMENT_SEAL_SCHEMA = "mastermind.executive_assignment_seal/v1"
+_UID_SWEEP_SCHEMA = "mastermind.executive_uid_sweep/v2"
+_AMBIENT_ATTRIBUTIONS = frozenset({"attested", "absent", "failed_closed"})
+_AMBIENT_IDENTITY_FIELDS = frozenset(
+    {
+        "pid",
+        "uid",
+        "launchd_domain",
+        "launchd_label",
+        "launchd_reported_pid",
+        "plist_path",
+        "program_path",
+        "executable_path",
+        "executable_device",
+        "executable_inode",
+        "codesign_identifier",
+        "codesign_verified",
+    }
+)
 _WORKSPACE_ROTATION_SCHEMA = "mastermind.executive_workspace_rotation/v1"
 _REVIEWED_MACOS_ACCOUNT_GROUPS = {
     "everyone": 12,
@@ -366,13 +384,110 @@ def _validate_assignment_seal_payload(
         ):
             raise AcceptanceError(f"assignment seal for {label} is incomplete")
     sweep = payload.get("uid_sweep")
-    if (
-        not isinstance(sweep, Mapping)
-        or sweep.get("schema_version") != "mastermind.executive_uid_sweep/v1"
-        or sweep.get("passed") is not True
-        or sweep.get("residual_pids_after") != []
-    ):
+    if not _uid_sweep_is_passing(sweep):
         raise AcceptanceError("assignment seal has no final passing UID sweep")
+
+
+def _uid_sweep_is_passing(sweep: Any) -> bool:
+    """Accept only a passing v2 dedicated-UID sweep.  Keep this hermetic: the
+    host wrapper runs ``python -I`` with ``sys.path`` rooted at this directory.
+
+    Ambient-projection coherence must stay semantically identical to
+    ``control_plane.executive_worker_broker.uid_sweep_receipt_is_passing``.
+    """
+
+    if not isinstance(sweep, Mapping):
+        return False
+    before = sweep.get("residual_pids_before")
+    after = sweep.get("residual_pids_after")
+    return (
+        sweep.get("schema_version") == _UID_SWEEP_SCHEMA
+        and sweep.get("passed") is True
+        and isinstance(before, list)
+        and isinstance(after, list)
+        and after == []
+        and all(type(item) is int and item > 1 for item in before)
+        and sweep.get("found_residuals") is bool(before)
+        and _v2_ambient_projection_is_coherent(sweep)
+    )
+
+
+def _positive_pid(value: Any) -> bool:
+    return type(value) is int and value > 1
+
+
+def _ambient_identity_mapping_is_valid(value: Any, *, worker_uid: int) -> bool:
+    if not isinstance(value, Mapping) or set(value) != _AMBIENT_IDENTITY_FIELDS:
+        return False
+    pid = value.get("pid")
+    reported = value.get("launchd_reported_pid")
+    uid = value.get("uid")
+    if not _positive_pid(pid) or type(reported) is not int or reported != pid:
+        return False
+    if type(uid) is not int or uid != worker_uid:
+        return False
+    if type(value.get("executable_device")) is not int:
+        return False
+    if type(value.get("executable_inode")) is not int:
+        return False
+    if value.get("codesign_verified") is not True:
+        return False
+    for key in (
+        "launchd_domain",
+        "launchd_label",
+        "plist_path",
+        "program_path",
+        "executable_path",
+        "codesign_identifier",
+    ):
+        field = value.get(key)
+        if type(field) is not str or not field:
+            return False
+    return True
+
+
+def _v2_ambient_projection_is_coherent(value: Mapping[str, Any]) -> bool:
+    attribution = value.get("ambient_attribution")
+    ambient = value.get("ambient_pids")
+    identities = value.get("ambient_identities")
+    before = value.get("residual_pids_before")
+    after = value.get("residual_pids_after")
+    broker_pid = value.get("broker_pid")
+    worker_uid = value.get("worker_uid")
+    if attribution not in _AMBIENT_ATTRIBUTIONS:
+        return False
+    if not isinstance(ambient, list) or not isinstance(identities, list):
+        return False
+    if not isinstance(before, list) or not isinstance(after, list):
+        return False
+    if not all(_positive_pid(item) for item in ambient):
+        return False
+    if len(ambient) != len(set(ambient)):
+        return False
+    if type(worker_uid) is not int or worker_uid <= 0:
+        return False
+    if not _positive_pid(broker_pid):
+        return False
+    identity_pids: list[int] = []
+    for identity in identities:
+        if not _ambient_identity_mapping_is_valid(identity, worker_uid=worker_uid):
+            return False
+        identity_pids.append(identity["pid"])
+    if len(identity_pids) != len(set(identity_pids)):
+        return False
+    if set(identity_pids) != set(ambient):
+        return False
+    if attribution == "attested":
+        if not ambient or not identities:
+            return False
+    elif ambient or identities:
+        return False
+    pid_sets = (set(ambient), set(before), set(after), {broker_pid})
+    for index, left in enumerate(pid_sets):
+        for right in pid_sets[index + 1 :]:
+            if not left.isdisjoint(right):
+                return False
+    return True
 
 
 def _validate_raw_worker_probe_payload(
@@ -1051,11 +1166,42 @@ class Acceptance:
             self._write_json(persist, response)
         return result
 
+    def _capture_failure_observability(self) -> dict[str, Any] | None:
+        """Persist the commands still allowed after QUARANTINED, before stop.
+
+        ``job`` is refused once the service leaves READY.  ``status`` remains
+        available and is the only place bounded ``dispatch_errors`` exist.
+        """
+
+        try:
+            response = self._control_request("status")
+        except AcceptanceError:
+            return None
+        result = response.get("result")
+        if not isinstance(result, dict):
+            return None
+        self._write_json("failure-control-status.json", response)
+        if result.get("service_state") == "QUARANTINED":
+            self._write_json("quarantine-status.json", response)
+            try:
+                self._broker_status("quarantine-worker-broker.json")
+            except AcceptanceError:
+                pass
+        return result
+
     def _wait_job(self, job_id: str, desired: set[str], *, timeout: float) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         last: dict[str, Any] | None = None
         while time.monotonic() < deadline:
-            last = self._job(job_id)
+            try:
+                last = self._job(job_id)
+            except AcceptanceError as exc:
+                status = self._capture_failure_observability()
+                if isinstance(status, dict) and status.get("service_state") == "QUARANTINED":
+                    raise AcceptanceError(
+                        f"control service entered QUARANTINED while waiting for job {job_id}"
+                    ) from exc
+                raise
             status = last.get("status")
             if status in desired:
                 return last
@@ -2120,16 +2266,12 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         if (
             not isinstance(sweep, dict)
-            or sweep.get("passed") is not True
-            or sweep.get("residual_pids_after") != []
+            or not _uid_sweep_is_passing(sweep)
             or sweep.get("reason") != "status_absence"
             or not isinstance(terminal_sweep, dict)
-            or terminal_sweep.get("schema_version")
-            != "mastermind.executive_uid_sweep/v1"
-            or terminal_sweep.get("passed") is not True
+            or not _uid_sweep_is_passing(terminal_sweep)
             or terminal_sweep.get("reason") != "run_terminal"
             or helper_pid not in terminal_sweep.get("residual_pids_before", [])
-            or terminal_sweep.get("residual_pids_after") != []
         ):
             raise AcceptanceError("control-owned terminal and fresh UID sweeps did not pass")
         self._write_json("interrupted-reconciliation-evidence.json", evidence)
@@ -2489,6 +2631,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
 
     def cleanup_after_failure(self) -> None:
+        if self.services_started:
+            self._capture_failure_observability()
         if self.helper_pid is not None and self._pid_exists(self.helper_pid):
             try:
                 os.kill(self.helper_pid, signal.SIGKILL)

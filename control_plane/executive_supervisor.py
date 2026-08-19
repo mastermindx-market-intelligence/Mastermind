@@ -1041,12 +1041,9 @@ class ExecutiveSupervisor:
 
     @staticmethod
     def _validate_terminal_uid_sweep(value: Any) -> Mapping[str, Any]:
-        if (
-            not isinstance(value, Mapping)
-            or value.get("schema_version") != "mastermind.executive_uid_sweep/v1"
-            or value.get("passed") is not True
-            or value.get("residual_pids_after") != []
-        ):
+        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+        if not uid_sweep_receipt_is_passing(value):
             raise TerminalAssignmentSealError(
                 "terminal assignment has no passing final dedicated-UID sweep"
             )
@@ -1516,11 +1513,9 @@ class ExecutiveSupervisor:
                     "complete restart reconciliation could not obtain a dedicated-UID sweep"
                 ) from exc
             return None
-        if (
-            not isinstance(sweep, Mapping)
-            or sweep.get("schema_version") != "mastermind.executive_uid_sweep/v1"
-            or sweep.get("passed") is not True
-        ):
+        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+        if not uid_sweep_receipt_is_passing(sweep):
             raise SupervisorError(
                 "restart reconciliation received a non-passing dedicated-UID sweep"
             )
