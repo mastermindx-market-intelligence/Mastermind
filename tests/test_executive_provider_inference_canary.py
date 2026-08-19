@@ -1,8 +1,10 @@
 """Linux-safe tests for the Codex provider-inference canary."""
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -255,6 +257,9 @@ def test_canary_source_never_reads_auth_or_allowlists_process_names() -> None:
     assert 'parser.add_argument("--probe-root"' not in source
     assert 'parser.add_argument("--receipt-path"' not in source
     assert 'parser.add_argument("--operator-home"' not in source
+    assert "assign_probe_tree_to_worker" in source
+    assert "LOCAL_FS_EACCES_STDERR" in source
+    assert "config.probe_root" in source
 
 
 def test_live_cli_rejects_path_overrides_including_duplicates(tmp_path: Path) -> None:
@@ -324,3 +329,146 @@ def test_receipt_persistence_cannot_target_executive_or_operator_paths(
             config.control_root / "receipt.json", config
         )
     assert config.executive_database.read_bytes() == b"KEEP"
+
+
+def _ownership(
+    path: Path, uid: int, gid: int, mode: int, is_dir: bool
+) -> object:
+    return canary.PathOwnership(
+        path=path,
+        uid=uid,
+        gid=gid,
+        mode=mode,
+        is_dir=is_dir,
+        is_symlink=False,
+    )
+
+
+def test_local_filesystem_eacces_is_isolation_violation_not_process_failed() -> None:
+    classified = canary.classify_provider_streams(
+        stdout=b"",
+        stderr=canary.LOCAL_FS_EACCES_STDERR,
+        result=None,
+        exit_code=1,
+        timed_out=False,
+    )
+    readiness = canary.evaluate_provider_preflight(
+        login_status_ok=True, canary=classified
+    )
+    assert classified["terminal_event_class"] == "isolation_violation"
+    assert classified["passed"] is False
+    assert readiness["passed"] is False
+    assert readiness["refusal"] == "isolation_violation"
+    assert readiness["refusal"] != "process_failed"
+
+
+def test_root_owned_outer_probe_root_with_worker_descendants_fails_preflight(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    invocation = canary.prepare_probe(config)
+    plan = canary.worker_probe_path_plan(config, invocation)
+    assert plan[0][0] == config.probe_root
+    live_bug = tuple(
+        _ownership(path, 0 if index == 0 else 451, 0 if index == 0 else 451, mode, is_dir)
+        for index, (path, mode, is_dir) in enumerate(plan)
+    )
+    assert (
+        canary.probe_hierarchy_allows_worker_traversal(
+            live_bug, plan, worker_uid=451, worker_gid=451
+        )
+        is False
+    )
+    with pytest.raises(canary.ProviderCanaryError) as refused:
+        canary.assert_worker_probe_hierarchy(config, invocation)
+    assert refused.value.code == "isolation_violation"
+
+
+def test_corrected_451_hierarchy_is_worker_traversable(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    invocation = canary.prepare_probe(config)
+    plan = canary.worker_probe_path_plan(config, invocation)
+    owned = tuple(
+        _ownership(path, 451, 451, mode, is_dir) for path, mode, is_dir in plan
+    )
+    assert (
+        canary.probe_hierarchy_allows_worker_traversal(
+            owned, plan, worker_uid=451, worker_gid=451
+        )
+        is True
+    )
+    world = _ownership(config.probe_root, 451, 451, 0o711, True)
+    assert (
+        canary.worker_principal_owns_mode(
+            world,
+            worker_uid=451,
+            worker_gid=451,
+            expected_mode=0o700,
+            expect_dir=True,
+        )
+        is False
+    )
+    assert canary.WORKER_UID == 451
+    assert canary.WORKER_GID == 451
+
+
+def test_outer_root_not_worker_owned_never_invokes_codex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    invocation = canary.prepare_probe(config)
+    called: list[str] = []
+
+    def fake_assign(_config: object, _invocation: object) -> None:
+        return None
+
+    def fake_subprocess(_invocation: object, *, timeout_seconds: float) -> object:
+        called.append("subprocess")
+        return canary.CodexRunResult(0, b"", b"", timed_out=False)
+
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", fake_assign)
+    monkeypatch.setattr(canary, "subprocess_runner", fake_subprocess)
+    with pytest.raises(canary.ProviderCanaryError) as blocked:
+        canary.live_worker_runner(config, invocation)
+    assert blocked.value.code == "isolation_violation"
+    assert called == []
+
+
+def test_corrected_preparation_makes_probe_root_worker_owned_0700(
+    tmp_path: Path,
+) -> None:
+    uid, gid = os.geteuid(), os.getegid()
+    config = dataclasses.replace(_config(tmp_path), worker_uid=uid, worker_gid=gid)
+    invocation = canary.prepare_probe(config)
+    paths = canary.worker_probe_chown_paths(config, invocation)
+    assert paths[0] == config.probe_root
+    assert (config.probe_root / config.canary_id) in paths
+    assert invocation.workspace in paths
+    assert invocation.schema_path in paths
+    canary.assign_probe_tree_to_worker(config, invocation)
+    canary.assert_worker_probe_hierarchy(config, invocation)
+    for path, mode, is_dir in canary.worker_probe_path_plan(config, invocation):
+        identity = canary.inspect_path_ownership(path)
+        assert identity.uid == uid
+        assert identity.gid == gid
+        assert identity.mode == mode
+        assert identity.mode & 0o077 == 0
+        assert identity.is_dir is is_dir
+        if is_dir:
+            assert os.access(path, os.X_OK | os.R_OK)
+
+
+def test_root_cleanup_removes_worker_owned_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(canary, "LIVE_PROBE_PARENT", tmp_path)
+    uid, gid = os.geteuid(), os.getegid()
+    probe = canary.create_live_probe_root(worker_uid=uid, worker_gid=gid)
+    identity = canary.inspect_path_ownership(probe)
+    assert identity.uid == uid
+    assert identity.gid == gid
+    assert identity.mode == 0o700
+    child = probe / "canary-aaaaaaaaaaaa"
+    child.mkdir(mode=0o700)
+    canary.cleanup_live_probe_root(probe)
+    assert probe.exists() is False

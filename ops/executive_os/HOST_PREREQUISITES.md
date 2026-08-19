@@ -124,6 +124,11 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
 
 The live canary CLI does not accept `--probe-root`, `--operator-home`, or
 `--receipt-path`. Duplicate copies of those options cannot redirect the probe.
+The disposable `/private/tmp/mastermind-provider-canary.*` root is owned by
+`_mastermind_worker:_mastermind_worker` with exact mode `0700` before privilege
+drop. It is not group- or world-traversable. The root process removes that tree
+after the run. A local filesystem preflight failure is `isolation_violation`,
+not a provider `process_failed`.
 
 The inference canary uses the exact installed `codex-0.147.0` binary as
 `_mastermind_worker`, the dedicated `CODEX_HOME`, production model

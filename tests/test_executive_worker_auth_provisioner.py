@@ -150,6 +150,8 @@ def test_administrator_runbook_explains_bounded_worker_device_login() -> None:
     assert "not silently fall back to Personal" in runbook
     assert "--probe-root" in runbook
     assert "--receipt-path" in runbook
+    assert "isolation_violation" in runbook
+    assert "not a provider `process_failed`" in runbook
     assert "_mastermind_worker:_mastermind_worker" in runbook
     assert "non-symlink" in runbook and "mode `0600`" in runbook
     assert "never reads or copies" in runbook

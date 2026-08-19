@@ -55,6 +55,9 @@ LIVE_PROBE_PREFIX = "mastermind-provider-canary."
 LIVE_PATH_OPTION_NAMES = frozenset(
     {"--probe-root", "--operator-home", "--receipt-path"}
 )
+PROBE_DIR_MODE = 0o700
+PROBE_FILE_MODE = 0o600
+LOCAL_FS_EACCES_STDERR = b"Error: Permission denied (os error 13)\n"
 CANARY_ID_RE = re.compile(r"^canary-[0-9a-f]{12}$")
 _INVALID_WORKSPACE_MARKER = "invalid_workspace_selected"
 _JSONL_TERMINAL_EVENTS = frozenset({"turn.completed", "turn.failed", "error"})
@@ -98,6 +101,16 @@ class ProviderCanaryError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True)
+class PathOwnership:
+    path: Path
+    uid: int
+    gid: int
+    mode: int
+    is_dir: bool
+    is_symlink: bool
 
 
 @dataclass(frozen=True)
@@ -277,16 +290,178 @@ def persist_canary_receipt(
     return path
 
 
-def create_live_probe_root() -> Path:
+def inspect_path_ownership(path: Path) -> PathOwnership:
+    info = path.lstat()
+    return PathOwnership(
+        path=path,
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mode=stat.S_IMODE(info.st_mode),
+        is_dir=stat.S_ISDIR(info.st_mode),
+        is_symlink=stat.S_ISLNK(info.st_mode),
+    )
+
+
+def worker_principal_owns_mode(
+    identity: PathOwnership,
+    *,
+    worker_uid: int,
+    worker_gid: int,
+    expected_mode: int,
+    expect_dir: bool,
+) -> bool:
+    """Owner-only worker identity: exact uid/gid/mode, never group/world bits."""
+
+    if identity.is_symlink:
+        return False
+    if identity.uid != worker_uid or identity.gid != worker_gid:
+        return False
+    if identity.mode != expected_mode:
+        return False
+    if (identity.mode & 0o077) != 0:
+        return False
+    if identity.is_dir != expect_dir:
+        return False
+    if expect_dir and (identity.mode & 0o100) == 0:
+        return False
+    return True
+
+
+def worker_probe_path_plan(
+    config: ProviderCanaryConfig, invocation: CodexInvocation
+) -> tuple[tuple[Path, int, bool], ...]:
+    """Required worker-owned hierarchy. Outer probe root is first on purpose."""
+
+    canary_dir = Path(config.probe_root) / config.canary_id
+    return (
+        (Path(config.probe_root), PROBE_DIR_MODE, True),
+        (canary_dir, PROBE_DIR_MODE, True),
+        (invocation.workspace, PROBE_DIR_MODE, True),
+        (invocation.home, PROBE_DIR_MODE, True),
+        (invocation.tmp, PROBE_DIR_MODE, True),
+        (invocation.schema_path, PROBE_FILE_MODE, False),
+    )
+
+
+def worker_probe_chown_paths(
+    config: ProviderCanaryConfig, invocation: CodexInvocation
+) -> tuple[Path, ...]:
+    return tuple(path for path, _mode, _is_dir in worker_probe_path_plan(config, invocation))
+
+
+def probe_hierarchy_allows_worker_traversal(
+    identities: Sequence[PathOwnership],
+    plan: Sequence[tuple[Path, int, bool]],
+    *,
+    worker_uid: int,
+    worker_gid: int,
+) -> bool:
+    if len(identities) != len(plan) or not identities:
+        return False
+    for identity, (path, mode, is_dir) in zip(identities, plan):
+        if identity.path != path:
+            return False
+        if not worker_principal_owns_mode(
+            identity,
+            worker_uid=worker_uid,
+            worker_gid=worker_gid,
+            expected_mode=mode,
+            expect_dir=is_dir,
+        ):
+            return False
+    return True
+
+
+def assert_worker_probe_hierarchy(
+    config: ProviderCanaryConfig, invocation: CodexInvocation
+) -> None:
+    plan = worker_probe_path_plan(config, invocation)
+    identities: list[PathOwnership] = []
+    for path, _mode, _is_dir in plan:
+        if path.exists() is False:
+            raise ProviderCanaryError("isolation_violation")
+        identities.append(inspect_path_ownership(path))
+    if not probe_hierarchy_allows_worker_traversal(
+        identities,
+        plan,
+        worker_uid=config.worker_uid,
+        worker_gid=config.worker_gid,
+    ):
+        raise ProviderCanaryError("isolation_violation")
+    if os.geteuid() != config.worker_uid:
+        return
+    for path, _mode, is_dir in plan:
+        needed = os.X_OK | os.R_OK if is_dir else os.R_OK
+        if os.access(path, needed) is False:
+            raise ProviderCanaryError("isolation_violation")
+
+
+def assign_probe_tree_to_worker(
+    config: ProviderCanaryConfig, invocation: CodexInvocation
+) -> None:
+    """Make the dedicated probe root and descendants worker-owned 0700/0600."""
+
+    for path, mode, is_dir in worker_probe_path_plan(config, invocation):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            raise ProviderCanaryError("isolation_violation")
+        if is_dir and not stat.S_ISDIR(info.st_mode):
+            raise ProviderCanaryError("isolation_violation")
+        if not is_dir and not stat.S_ISREG(info.st_mode):
+            raise ProviderCanaryError("isolation_violation")
+        try:
+            os.chown(path, config.worker_uid, config.worker_gid)
+            os.chmod(path, mode)
+        except OSError as exc:
+            raise ProviderCanaryError("isolation_violation") from exc
+    assert_worker_probe_hierarchy(config, invocation)
+
+
+def cleanup_probe_tree(path: Path) -> None:
+    target = Path(path)
+    if target.is_symlink() or not target.is_dir():
+        raise ProviderCanaryError("isolation_violation")
+    shutil.rmtree(target)
+
+
+def cleanup_live_probe_root(path: Path) -> None:
+    """Root retains cleanup authority over the worker-owned disposable probe."""
+
+    target = Path(path)
+    if target.parent != LIVE_PROBE_PARENT:
+        raise ProviderCanaryError("isolation_violation")
+    if not target.name.startswith(LIVE_PROBE_PREFIX):
+        raise ProviderCanaryError("isolation_violation")
+    cleanup_probe_tree(target)
+
+
+def create_live_probe_root(
+    *, worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID
+) -> Path:
     parent = LIVE_PROBE_PARENT
     if parent.is_symlink() or not parent.is_dir():
         raise ProviderCanaryError("configuration_invalid")
     probe = Path(tempfile.mkdtemp(prefix=LIVE_PROBE_PREFIX, dir=str(parent)))
-    os.chmod(probe, 0o700)
+    try:
+        os.chown(probe, worker_uid, worker_gid)
+        os.chmod(probe, PROBE_DIR_MODE)
+    except OSError as exc:
+        shutil.rmtree(probe, ignore_errors=True)
+        raise ProviderCanaryError("isolation_violation") from exc
     if probe.is_symlink() or probe.parent != parent:
         raise ProviderCanaryError("configuration_invalid")
     if not probe.name.startswith(LIVE_PROBE_PREFIX):
         raise ProviderCanaryError("configuration_invalid")
+    identity = inspect_path_ownership(probe)
+    if not worker_principal_owns_mode(
+        identity,
+        worker_uid=worker_uid,
+        worker_gid=worker_gid,
+        expected_mode=PROBE_DIR_MODE,
+        expect_dir=True,
+    ):
+        shutil.rmtree(probe, ignore_errors=True)
+        raise ProviderCanaryError("isolation_violation")
     return probe
 
 
@@ -473,6 +648,12 @@ def classify_provider_streams(
         return {
             "passed": False,
             "terminal_event_class": "timeout",
+            "result_valid": False,
+        }
+    if stdout == b"" and stderr == LOCAL_FS_EACCES_STDERR:
+        return {
+            "passed": False,
+            "terminal_event_class": "isolation_violation",
             "result_valid": False,
         }
     if _INVALID_WORKSPACE_MARKER.encode("ascii") in combined:
@@ -714,9 +895,8 @@ def subprocess_runner(invocation: CodexInvocation, *, timeout_seconds: float) ->
 def live_worker_runner(
     config: ProviderCanaryConfig, invocation: CodexInvocation
 ) -> CodexRunResult:
-    probe = config.probe_root / config.canary_id
-    for path in (probe, invocation.workspace, invocation.home, invocation.tmp, invocation.schema_path):
-        os.chown(path, config.worker_uid, config.worker_gid)
+    assign_probe_tree_to_worker(config, invocation)
+    assert_worker_probe_hierarchy(config, invocation)
     env_args: list[str] = []
     for key, value in invocation.env.items():
         env_args.append(f"{key}={value}")
@@ -767,66 +947,73 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dump(receipt, sys.stdout, sort_keys=True, indent=2)
         sys.stdout.write("\n")
         return 2
-    probe_root = create_live_probe_root()
-    config = production_config(
-        probe_root=probe_root, operator_home=LIVE_OPERATOR_HOME
-    )
-    binary = config.installed_codex_binary
-    info = binary.lstat()
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise ProviderCanaryError("configuration_invalid")
-    binary_sha256 = _sha256_file(binary)
-    if binary_sha256 != config.expected_codex_sha256:
-        raise ProviderCanaryError("configuration_invalid")
-    if sys.platform == "darwin":
-        verify = subprocess.run(
-            ["/usr/bin/codesign", "--verify", "--strict", str(binary)],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+    probe_root: Path | None = None
+    try:
+        probe_root = create_live_probe_root(
+            worker_uid=WORKER_UID, worker_gid=WORKER_GID
         )
-        if verify.returncode != 0:
+        config = production_config(
+            probe_root=probe_root, operator_home=LIVE_OPERATOR_HOME
+        )
+        binary = config.installed_codex_binary
+        info = binary.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise ProviderCanaryError("configuration_invalid")
-        team = subprocess.run(
-            ["/usr/bin/codesign", "-dv", "--verbose=4", str(binary)],
+        binary_sha256 = _sha256_file(binary)
+        if binary_sha256 != config.expected_codex_sha256:
+            raise ProviderCanaryError("configuration_invalid")
+        if sys.platform == "darwin":
+            verify = subprocess.run(
+                ["/usr/bin/codesign", "--verify", "--strict", str(binary)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if verify.returncode != 0:
+                raise ProviderCanaryError("configuration_invalid")
+            team = subprocess.run(
+                ["/usr/bin/codesign", "-dv", "--verbose=4", str(binary)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            ).stderr
+            observed_team = ""
+            for line in team.splitlines():
+                if line.startswith("TeamIdentifier="):
+                    observed_team = line.split("=", 1)[1]
+            if observed_team != PINNED_CODEX_TEAM_ID:
+                raise ProviderCanaryError("configuration_invalid")
+        version = subprocess.run(
+            [str(binary), "--version"],
             check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
-        ).stderr
-        observed_team = ""
-        for line in team.splitlines():
-            if line.startswith("TeamIdentifier="):
-                observed_team = line.split("=", 1)[1]
-        if observed_team != PINNED_CODEX_TEAM_ID:
+        ).stdout.strip()
+        observed_version = ""
+        for token in version.split():
+            if token == PINNED_CODEX_VERSION or token.startswith(PINNED_CODEX_VERSION):
+                observed_version = PINNED_CODEX_VERSION
+                break
+        if observed_version != PINNED_CODEX_VERSION:
             raise ProviderCanaryError("configuration_invalid")
-    version = subprocess.run(
-        [str(binary), "--version"],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    ).stdout.strip()
-    observed_version = ""
-    for token in version.split():
-        if token == PINNED_CODEX_VERSION or token.startswith(PINNED_CODEX_VERSION):
-            observed_version = PINNED_CODEX_VERSION
-            break
-    if observed_version != PINNED_CODEX_VERSION:
-        raise ProviderCanaryError("configuration_invalid")
 
-    def runner(invocation: CodexInvocation) -> CodexRunResult:
-        return live_worker_runner(config, invocation)
+        def runner(invocation: CodexInvocation) -> CodexRunResult:
+            return live_worker_runner(config, invocation)
 
-    receipt = run_canary(
-        config,
-        runner=runner,
-        binary_sha256=binary_sha256,
-        observed_version=observed_version,
-    )
-    json.dump(receipt, sys.stdout, sort_keys=True, indent=2)
-    sys.stdout.write("\n")
-    return 0 if receipt.get("passed") is True else 2
+        receipt = run_canary(
+            config,
+            runner=runner,
+            binary_sha256=binary_sha256,
+            observed_version=observed_version,
+        )
+        json.dump(receipt, sys.stdout, sort_keys=True, indent=2)
+        sys.stdout.write("\n")
+        return 0 if receipt.get("passed") is True else 2
+    finally:
+        if probe_root is not None:
+            cleanup_live_probe_root(probe_root)
 
 
 if __name__ == "__main__":
