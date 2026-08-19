@@ -21,6 +21,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +49,12 @@ EXECUTIVE_DATABASE = (
 PRODUCTION_WORKSPACES = "/var/db/mastermind-executive/jobs/workspaces"
 PRODUCTION_RUNS = "/var/db/mastermind-executive/jobs/runs"
 CONTROL_ROOT = "/var/db/mastermind-executive/control"
+LIVE_OPERATOR_HOME = Path("/var/empty")
+LIVE_PROBE_PARENT = Path("/private/tmp")
+LIVE_PROBE_PREFIX = "mastermind-provider-canary."
+LIVE_PATH_OPTION_NAMES = frozenset(
+    {"--probe-root", "--operator-home", "--receipt-path"}
+)
 CANARY_ID_RE = re.compile(r"^canary-[0-9a-f]{12}$")
 _INVALID_WORKSPACE_MARKER = "invalid_workspace_selected"
 _JSONL_TERMINAL_EVENTS = frozenset({"turn.completed", "turn.failed", "error"})
@@ -201,6 +208,86 @@ def forbidden_write_roots(config: ProviderCanaryConfig) -> tuple[Path, ...]:
         config.operator_home,
         config.provider_home,
     )
+
+
+def reject_live_path_options(argv: Sequence[str]) -> None:
+    """Live CLI paths are frozen. Duplicate or first-copy overrides both fail."""
+
+    for token in argv:
+        name = str(token).split("=", 1)[0]
+        if name in LIVE_PATH_OPTION_NAMES:
+            raise ProviderCanaryError("configuration_invalid")
+
+
+def receipt_path_for(config: ProviderCanaryConfig) -> Path:
+    return Path(config.probe_root) / config.canary_id / "receipt.json"
+
+
+def assert_receipt_destination_allowed(
+    path: Path, config: ProviderCanaryConfig
+) -> None:
+    target = Path(path)
+    forbidden = (config.executive_database, *forbidden_write_roots(config))
+    for root in forbidden:
+        root_path = Path(root)
+        if target == root_path:
+            raise ProviderCanaryError("isolation_violation")
+        if _is_relative_to(target, root_path):
+            raise ProviderCanaryError("isolation_violation")
+
+
+def persist_canary_receipt(
+    config: ProviderCanaryConfig, receipt: Mapping[str, Any]
+) -> Path:
+    """Owner-only exclusive create under the probe canary directory."""
+
+    probe = Path(config.probe_root)
+    if not probe.is_absolute() or probe.is_symlink() or not probe.is_dir():
+        raise ProviderCanaryError("isolation_violation")
+    if CANARY_ID_RE.fullmatch(config.canary_id) is None:
+        raise ProviderCanaryError("configuration_invalid")
+    canary_dir = probe / config.canary_id
+    path = canary_dir / "receipt.json"
+    if path.is_symlink() or canary_dir.is_symlink():
+        raise ProviderCanaryError("isolation_violation")
+    assert_receipt_destination_allowed(canary_dir, config)
+    assert_receipt_destination_allowed(path, config)
+    if not _is_relative_to(path, probe):
+        raise ProviderCanaryError("isolation_violation")
+    if path.exists():
+        raise ProviderCanaryError("isolation_violation")
+    canary_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    payload = (
+        json.dumps(dict(receipt), sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise ProviderCanaryError("isolation_violation")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
+    return path
+
+
+def create_live_probe_root() -> Path:
+    parent = LIVE_PROBE_PARENT
+    if parent.is_symlink() or not parent.is_dir():
+        raise ProviderCanaryError("configuration_invalid")
+    probe = Path(tempfile.mkdtemp(prefix=LIVE_PROBE_PREFIX, dir=str(parent)))
+    os.chmod(probe, 0o700)
+    if probe.is_symlink() or probe.parent != parent:
+        raise ProviderCanaryError("configuration_invalid")
+    if not probe.name.startswith(LIVE_PROBE_PREFIX):
+        raise ProviderCanaryError("configuration_invalid")
+    return probe
 
 
 def build_exec_argv(
@@ -591,12 +678,7 @@ def run_canary(
             observed_version=observed_version,
             workspace_capability="inert_untrusted_workspace",
         )
-        receipt_path = config.probe_root / config.canary_id / "receipt.json"
-        receipt_path.parent.mkdir(parents=True, exist_ok=True)
-        receipt_path.write_text(
-            json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-        )
-        os.chmod(receipt_path, 0o600)
+        persist_canary_receipt(config, receipt)
         return receipt
     finally:
         _scrub_probe_secrets(invocation)
@@ -665,15 +747,15 @@ def live_worker_runner(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Executive Codex provider-inference canary")
-    parser.add_argument("--probe-root", type=Path, required=True)
-    parser.add_argument("--receipt-path", type=Path)
-    parser.add_argument("--operator-home", type=Path, default=Path("/var/empty"))
-    return parser
+    return argparse.ArgumentParser(
+        description="Executive Codex provider-inference canary"
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    reject_live_path_options(tokens)
+    _parser().parse_args(tokens)
     if sys.platform != "darwin" or os.geteuid() != 0:
         receipt = {
             "schema_version": SCHEMA_VERSION,
@@ -685,11 +767,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dump(receipt, sys.stdout, sort_keys=True, indent=2)
         sys.stdout.write("\n")
         return 2
-    probe_root = Path(args.probe_root)
-    if not probe_root.is_absolute() or probe_root.is_symlink() or not probe_root.is_dir():
-        raise ProviderCanaryError("configuration_invalid")
+    probe_root = create_live_probe_root()
     config = production_config(
-        probe_root=probe_root, operator_home=Path(args.operator_home)
+        probe_root=probe_root, operator_home=LIVE_OPERATOR_HOME
     )
     binary = config.installed_codex_binary
     info = binary.lstat()
@@ -744,11 +824,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         binary_sha256=binary_sha256,
         observed_version=observed_version,
     )
-    if args.receipt_path is not None:
-        Path(args.receipt_path).write_text(
-            json.dumps(receipt, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-        )
-        os.chmod(args.receipt_path, 0o600)
     json.dump(receipt, sys.stdout, sort_keys=True, indent=2)
     sys.stdout.write("\n")
     return 0 if receipt.get("passed") is True else 2

@@ -234,6 +234,13 @@ def test_canary_script_is_executable_and_syntax_valid() -> None:
     source = script.read_text(encoding="utf-8")
     assert "-I -S -B" in source
     assert "must run as root" in source
+    python_line = next(
+        line for line in source.splitlines() if "provider_inference_canary.py" in line
+    )
+    assert '"$@"' not in source
+    assert "--probe-root" not in python_line
+    assert "--operator-home" not in python_line
+    assert "--receipt-path" not in python_line
 
 
 def test_canary_source_never_reads_auth_or_allowlists_process_names() -> None:
@@ -245,3 +252,75 @@ def test_canary_source_never_reads_auth_or_allowlists_process_names() -> None:
     assert "OPENAI_API_KEY" in source
     assert "/bin/cat" not in source
     assert "jq " not in source
+    assert 'parser.add_argument("--probe-root"' not in source
+    assert 'parser.add_argument("--receipt-path"' not in source
+    assert 'parser.add_argument("--operator-home"' not in source
+
+
+def test_live_cli_rejects_path_overrides_including_duplicates(tmp_path: Path) -> None:
+    db = tmp_path / "control" / "db" / "data" / "control_plane" / "executive.sqlite3"
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b"KEEP")
+    argv_sets = [
+        ["--probe-root", str(tmp_path / "probe")],
+        ["--probe-root", str(tmp_path / "safe"), "--probe-root", str(db.parent)],
+        ["--receipt-path", str(db)],
+        ["--operator-home", str(tmp_path / "Users" / "operator")],
+        [
+            "--probe-root",
+            str(tmp_path / "probe"),
+            "--receipt-path",
+            str(db),
+            "--operator-home",
+            str(tmp_path / "Users" / "operator"),
+        ],
+        [f"--probe-root={db.parent}", f"--receipt-path={db}"],
+    ]
+    dests = [action.dest for action in canary._parser()._actions]
+    assert "probe_root" not in dests
+    assert "receipt_path" not in dests
+    assert "operator_home" not in dests
+    for argv in argv_sets:
+        with pytest.raises(canary.ProviderCanaryError) as rejected:
+            canary.reject_live_path_options(argv)
+        assert rejected.value.code == "configuration_invalid"
+        with pytest.raises(canary.ProviderCanaryError):
+            canary.main(argv)
+    assert db.read_bytes() == b"KEEP"
+    assert not db.with_name("receipt.json").exists()
+
+
+def test_receipt_persistence_cannot_target_executive_or_operator_paths(
+    tmp_path: Path,
+) -> None:
+    import dataclasses
+
+    config = _config(tmp_path)
+    config.provider_home.mkdir()
+    config.executive_database.parent.mkdir(parents=True)
+    config.executive_database.write_bytes(b"KEEP")
+    config.production_workspaces.mkdir(parents=True)
+    config.production_runs.mkdir(parents=True)
+    config.control_root.mkdir(parents=True, exist_ok=True)
+    config.operator_home.mkdir(parents=True)
+    receipt = {"schema_version": canary.SCHEMA_VERSION, "passed": False}
+    poisoned = [
+        dataclasses.replace(config, probe_root=config.control_root),
+        dataclasses.replace(config, probe_root=config.production_workspaces),
+        dataclasses.replace(config, probe_root=config.production_runs),
+        dataclasses.replace(config, probe_root=config.provider_home),
+        dataclasses.replace(config, probe_root=config.operator_home),
+        dataclasses.replace(config, probe_root=config.executive_database.parent),
+    ]
+    for bad in poisoned:
+        with pytest.raises(canary.ProviderCanaryError) as blocked:
+            canary.persist_canary_receipt(bad, receipt)
+        assert blocked.value.code == "isolation_violation"
+        assert not (Path(bad.probe_root) / bad.canary_id / "receipt.json").exists()
+    with pytest.raises(canary.ProviderCanaryError):
+        canary.assert_receipt_destination_allowed(config.executive_database, config)
+    with pytest.raises(canary.ProviderCanaryError):
+        canary.assert_receipt_destination_allowed(
+            config.control_root / "receipt.json", config
+        )
+    assert config.executive_database.read_bytes() == b"KEEP"

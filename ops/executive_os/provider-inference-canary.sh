@@ -2,6 +2,10 @@
 # Root-gated wrapper for the zero-Executive-write Codex inference canary.
 # This does not start services, open the control database, or write production
 # workspaces. It never prints credential contents.
+#
+# Live production CLI paths are frozen. This wrapper does not forward caller
+# arguments: --probe-root, --operator-home, and --receipt-path are not public
+# options. The Python helper creates its own disposable probe root.
 set -euo pipefail
 umask 077
 
@@ -21,18 +25,6 @@ PYTHON_BINARY="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12
   exit 65
 }
 
-PROBE_ROOT="$(/usr/bin/mktemp -d /private/tmp/mastermind-provider-canary.XXXXXX)"
-/bin/chmod 0700 "$PROBE_ROOT"
-cleanup() {
-  if [ -d "$PROBE_ROOT" ]; then
-    /usr/bin/find "$PROBE_ROOT" -mindepth 1 \( -name receipt.json -prune \) -o -exec /bin/rm -rf {} + 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT
-
-"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_inference_canary.py" \
-  --probe-root "$PROBE_ROOT" \
-  --operator-home /var/empty \
-  "$@"
+"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_inference_canary.py"
 status=$?
 exit "$status"

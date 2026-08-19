@@ -106,7 +106,11 @@ discarding both output streams and checks the file metadata again. Login status 
 new login or calling the model. A preexisting credential is never overwritten
 or repaired unless the administrator passes the explicit `--reauthorize` flag.
 `--reauthorize` uses Codex's own `logout` plus device login on a controlling
-terminal, then requires the provider inference canary to pass. Do not select a ChatGPT workspace merely because it happens to work; if the intended workspace cannot be bound unambiguously, stop for Chairman/COO ruling.
+terminal, then requires the provider inference canary to pass. Production
+Executive OS binds to the company Mastermind ChatGPT workspace/seat, not
+Personal. Do not silently fall back to Personal. If the supported device-login
+flow cannot unambiguously bind that company workspace, stop for Chairman/COO
+ruling rather than reauthorizing to whichever workspace happens to work.
 
 Pinned Codex `0.147.0` has no `login`/`exec` workspace-selection flag. Do not invent one, and do not hand-edit `auth.json`.
 
@@ -117,6 +121,9 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provider-inference-canary.sh"
 sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
   --verify-ready
 ```
+
+The live canary CLI does not accept `--probe-root`, `--operator-home`, or
+`--receipt-path`. Duplicate copies of those options cannot redirect the probe.
 
 The inference canary uses the exact installed `codex-0.147.0` binary as
 `_mastermind_worker`, the dedicated `CODEX_HOME`, production model
