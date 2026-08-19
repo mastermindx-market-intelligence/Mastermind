@@ -59,6 +59,9 @@ def _app_with_operator_routes(monkeypatch, *, token=None):
         monkeypatch.setenv("MASTERMIND_AUTH_TOKEN", token)
     else:
         monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
+    # These apps model a LOCAL/dev process. Pin it explicitly so the authoritative-mode
+    # fail-closed rules can never leak in from the ambient environment.
+    monkeypatch.delenv("MASTERMIND_VPS_AUTHORITATIVE", raising=False)
 
     return app
 
@@ -93,8 +96,8 @@ class TestOperatorRouteRequiresBearer:
         app = _app_with_operator_routes(monkeypatch, token="operator-secret")
 
         c = TestClient(app, raise_server_exceptions=True)
-        # Reset the rate-limit buckets so this isolated test doesn't hit the limit.
-        auth._llm_bucket.tokens = auth._llm_bucket.capacity
+        # Reset the rate limiters so this isolated test doesn't hit the limit.
+        auth.reset_rate_buckets()
         r = c.post("/api/autonomous/run",
                    headers={"authorization": "Bearer operator-secret"})
         assert r.status_code == 200, (
@@ -125,8 +128,13 @@ class TestOperatorRouteRequiresBearer:
         )
 
     def test_no_token_operator_passes(self, monkeypatch):
-        """With no bearer token configured (dev mode), operator paths pass — dev ergonomics."""
+        """With no bearer token configured on a LOCAL/dev box, operator paths pass.
+
+        This convenience is scoped to development. The authoritative-instance counterpart is
+        TestAuthoritativeInstanceFailsClosed below, which proves the same configuration is
+        REFUSED when MASTERMIND_VPS_AUTHORITATIVE=1."""
         monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("MASTERMIND_VPS_AUTHORITATIVE", raising=False)
         app = FastAPI()
         auth.install(app)
 
@@ -135,12 +143,94 @@ class TestOperatorRouteRequiresBearer:
             return {"started": True}
 
         c = TestClient(app)
-        # Reset bucket to avoid spillover from other tests.
-        auth._llm_bucket.tokens = auth._llm_bucket.capacity
+        auth.reset_rate_buckets()   # avoid spillover from other tests
         r = c.post("/api/autonomous/run")
         assert r.status_code == 200, (
             f"Auth-disabled dev mode must allow operator paths; got {r.status_code}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test 1b: the authoritative instance must never inherit the dev-ergonomics pass
+# ---------------------------------------------------------------------------
+
+class TestAuthoritativeInstanceFailsClosed:
+    """MASTERMIND_VPS_AUTHORITATIVE=1 is the public, internet-reachable canonical writer.
+
+    Its systemd unit loads secrets from ``EnvironmentFile=-/etc/macro-api.env`` — the leading ``-``
+    makes that file OPTIONAL. A missing or unreadable secrets file therefore used to convert every
+    LLM-spending and book-running route into an unauthenticated one, because an unset
+    MASTERMIND_AUTH_TOKEN meant "operator paths pass". It must fail CLOSED instead.
+    """
+
+    def _app(self, monkeypatch, *, token=None):
+        monkeypatch.setenv("MASTERMIND_VPS_AUTHORITATIVE", "1")
+        monkeypatch.setenv("MASTERMIND_SERVE_ONLY", "0")
+        if token:
+            monkeypatch.setenv("MASTERMIND_AUTH_TOKEN", token)
+        else:
+            monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
+        app = FastAPI()
+        auth.install(app)
+
+        @app.post("/api/autonomous/run")
+        def autonomous_run():
+            return {"started": True}
+
+        auth.reset_rate_buckets()
+        return TestClient(app, raise_server_exceptions=True)
+
+    def test_missing_token_refuses_operator_routes(self, monkeypatch):
+        c = self._app(monkeypatch, token=None)
+        r = c.post("/api/autonomous/run")
+        assert r.status_code == 503, (
+            f"An authoritative box with no operator credential must refuse, got {r.status_code}"
+        )
+        assert r.json().get("error") == "operator_auth_misconfigured"
+
+    def test_missing_token_refuses_startup(self, monkeypatch):
+        """Defence in depth: the process should not come up at all in this state."""
+        monkeypatch.setenv("MASTERMIND_VPS_AUTHORITATIVE", "1")
+        monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
+        with pytest.raises(auth.AuthorizationMisconfigured):
+            auth.assert_authoritative_auth_configured()
+
+    def test_correct_token_succeeds(self, monkeypatch):
+        c = self._app(monkeypatch, token="operator-secret")
+        r = c.post("/api/autonomous/run",
+                   headers={"authorization": "Bearer operator-secret"})
+        assert r.status_code == 200
+        auth.assert_authoritative_auth_configured()   # a configured box starts cleanly
+
+    def test_wrong_or_missing_bearer_is_rejected(self, monkeypatch):
+        c = self._app(monkeypatch, token="operator-secret")
+        assert c.post("/api/autonomous/run").status_code == 401
+        auth.reset_rate_buckets()
+        r = c.post("/api/autonomous/run", headers={"authorization": "Bearer wrong"})
+        assert r.status_code == 401
+
+    def test_local_dev_startup_check_is_a_noop(self, monkeypatch):
+        """A developer box without the flag keeps its no-token ergonomics."""
+        monkeypatch.delenv("MASTERMIND_VPS_AUTHORITATIVE", raising=False)
+        monkeypatch.delenv("MASTERMIND_AUTH_TOKEN", raising=False)
+        auth.assert_authoritative_auth_configured()   # must not raise
+
+    def test_serve_only_semantics_are_unchanged_when_authoritative_is_off(self, monkeypatch):
+        """Serve-only remains a supported mode and still 403s operator mutations."""
+        monkeypatch.setenv("MASTERMIND_SERVE_ONLY", "1")
+        monkeypatch.delenv("MASTERMIND_VPS_AUTHORITATIVE", raising=False)
+        monkeypatch.setenv("MASTERMIND_AUTH_TOKEN", "tok")
+        app = FastAPI()
+        auth.install(app)
+
+        @app.post("/api/autonomous/run")
+        def autonomous_run():
+            return {"started": True}
+
+        c = TestClient(app, raise_server_exceptions=True)
+        r = c.post("/api/autonomous/run", headers={"authorization": "Bearer tok"})
+        assert r.status_code == 403
+        assert r.json().get("error") == "serve_only"
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +241,12 @@ class TestRateLimits:
     """In-memory token buckets enforce operator-path rate limits."""
 
     def _reset_llm_bucket(self):
-        """Fully replenish the LLM bucket for isolated test runs."""
-        auth._llm_bucket.tokens = auth._llm_bucket.capacity
-        auth._llm_bucket.last_refill = time.monotonic()
+        """Clear the LLM limiter for isolated test runs."""
+        auth._llm_limiter.reset()
 
     def _reset_operator_bucket(self):
-        """Fully replenish the non-LLM operator bucket."""
-        auth._operator_bucket.tokens = auth._operator_bucket.capacity
-        auth._operator_bucket.last_refill = time.monotonic()
+        """Clear the non-LLM operator limiter."""
+        auth._operator_limiter.reset()
 
     def test_llm_burst_then_429(self, monkeypatch):
         """After exhausting the LLM bucket burst capacity, the next call returns 429."""
@@ -174,8 +262,8 @@ class TestRateLimits:
         c = TestClient(app, raise_server_exceptions=False)
         self._reset_llm_bucket()
 
-        # Drain the burst capacity (capacity=2.0).
-        for _ in range(int(auth._llm_bucket.capacity)):
+        # Drain the burst allowance (2 per minute).
+        for _ in range(auth._llm_limiter.burst_limit):
             r = c.post("/api/autonomous/run", headers={"authorization": "Bearer tok"})
             # Accept 200 or any non-429 (background threads etc. may return other codes).
             assert r.status_code != 429, f"First burst calls should not be rate-limited"
@@ -210,7 +298,7 @@ class TestRateLimits:
         c = TestClient(app, raise_server_exceptions=False)
         # Exhaust the bucket.
         self._reset_llm_bucket()
-        for _ in range(int(auth._llm_bucket.capacity)):
+        for _ in range(auth._llm_limiter.burst_limit):
             c.post("/api/autonomous/run", headers={"authorization": "Bearer tok"})
 
         # Trigger the 429.
@@ -245,6 +333,119 @@ class TestRateLimits:
         assert r.status_code != 429, (
             f"First non-LLM operator call should not be rate-limited; got {r.status_code}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test 2b: the LLM limiter implements its DOCUMENTED policy, not an approximation
+# ---------------------------------------------------------------------------
+
+class _FakeClock:
+    """A monotonic clock the test drives, so boundaries are exact and nothing sleeps."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.t = start
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+
+class TestLlmRateLimitContract:
+    """The written contract is '8 fires/hour shared + 2/min burst' — two INDEPENDENT quotas.
+
+    The previous implementation was a single token bucket (capacity 2, refill 8/3600s) described
+    in-code as "the stricter composition". It was neither limit: after the opening two calls it
+    admitted only one request per 450s (7.5 min — far stricter than 2/min), while the opening burst
+    plus refill could exceed 8 within some rolling hours (looser than 8/hr). The old tests only
+    proved "2 then 429", which both implementations satisfy, so the contradiction survived.
+    """
+
+    def test_declared_rules_match_the_documented_policy(self):
+        assert set(auth._LLM_RULES) == {(2, 60.0), (8, 3600.0)}
+        assert auth._llm_limiter.burst_limit == 2
+
+    def test_two_per_minute_is_enforced(self):
+        clock = _FakeClock()
+        lim = auth._SlidingWindowLimiter(auth._LLM_RULES, clock=clock)
+
+        assert lim.consume() is None, "call 1 must be admitted"
+        assert lim.consume() is None, "call 2 must be admitted"
+
+        third = lim.consume()
+        assert third is not None, "call 3 in the same minute must be refused"
+        assert 0 < third <= 60, f"the wait must be within the minute window; got {third}"
+
+    def test_the_minute_window_actually_rolls(self):
+        """The token bucket refilled one slot per 450s, so this is where it visibly differed."""
+        clock = _FakeClock()
+        lim = auth._SlidingWindowLimiter(auth._LLM_RULES, clock=clock)
+        lim.consume()
+        lim.consume()
+        assert lim.consume() is not None
+
+        clock.advance(60.0)
+        assert lim.consume() is None, "a full minute later, the burst allowance must be back"
+        assert lim.consume() is None
+        assert lim.consume() is not None, "and the 2/min ceiling still applies afterwards"
+
+    def test_eight_per_hour_is_enforced_independently(self):
+        clock = _FakeClock()
+        lim = auth._SlidingWindowLimiter(auth._LLM_RULES, clock=clock)
+
+        # Spend the hourly quota two-at-a-time, one minute apart: 8 accepted calls.
+        for _ in range(4):
+            assert lim.consume() is None
+            assert lim.consume() is None
+            clock.advance(60.0)
+
+        ninth = lim.consume()
+        assert ninth is not None, "the 9th call inside the rolling hour must be refused"
+        assert ninth > 60, (
+            f"the refusal must come from the HOURLY window, not the minute one; got {ninth}"
+        )
+
+        # Once the oldest pair ages out of the trailing hour there is room again.
+        clock.advance(ninth + 0.001)
+        assert lim.consume() is None, "room must reappear as the oldest hourly event expires"
+
+    def test_a_refused_call_is_not_recorded(self):
+        """Hammering a limited endpoint must not push the caller's own retry deadline out."""
+        clock = _FakeClock()
+        lim = auth._SlidingWindowLimiter(auth._LLM_RULES, clock=clock)
+        lim.consume()
+        lim.consume()
+
+        first_refusal = lim.consume()
+        clock.advance(10.0)
+        for _ in range(20):
+            lim.consume()
+        later_refusal = lim.consume()
+
+        assert later_refusal is not None
+        assert later_refusal <= first_refusal - 10.0 + 1e-6, (
+            "rejected attempts must not extend the wait"
+        )
+
+    def test_operator_limiter_is_thirty_per_hour(self):
+        clock = _FakeClock()
+        lim = auth._SlidingWindowLimiter(auth._OPERATOR_RULES, clock=clock)
+        for i in range(30):
+            assert lim.consume() is None, f"call {i + 1} of 30 must be admitted"
+        assert lim.consume() is not None, "the 31st call in the hour must be refused"
+
+        clock.advance(3600.0)
+        assert lim.consume() is None, "the hour rolls and the quota resets"
+
+    def test_limiter_memory_is_bounded(self):
+        """The event deque must stay bounded by the largest limit regardless of traffic."""
+        clock = _FakeClock()
+        lim = auth._SlidingWindowLimiter(auth._LLM_RULES, clock=clock)
+        for _ in range(500):
+            lim.consume()
+            clock.advance(31.0)          # keep offering traffic across many windows
+        assert len(lim._events) <= 8
 
 
 # ---------------------------------------------------------------------------

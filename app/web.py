@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
@@ -63,9 +63,28 @@ def _portfolio_dir(portfolio_id: str | None = None) -> Path:
 
 
 def _product_portfolio_id(portfolio_id: str | None) -> str:
-    """Resolve an API-facing book id without falling through to the archived storage default."""
-    return (portfolio_id if _portfolio_registry.is_known(portfolio_id)
-            else _PRODUCT_DEFAULT_ID)
+    """Resolve an API-facing book id, REJECTING an explicit unknown id.
+
+    Three distinct cases, deliberately kept apart:
+      * omitted / blank  -> the dashboard default (``autonomous``). A caller that named no book
+        is asking for the default book.
+      * a known registry id -> itself, archived books included (they keep serving frozen history).
+      * an explicit UNKNOWN id -> HTTP 404. It must NOT silently become the default.
+
+    That last case used to fall through to ``DASHBOARD_DEFAULT_ID``, so a typo, a stale bookmark,
+    or malformed client state answered with a valid-looking Autonomous/US-Brain payload labelled
+    with the caller's own bogus id. For a portfolio surface, wrong data is worse than no data:
+    fail closed, exactly as ``registry.canonical_id`` already does before any filesystem use.
+    """
+    if not portfolio_id:
+        return _PRODUCT_DEFAULT_ID
+    if _portfolio_registry.is_known(portfolio_id):
+        return portfolio_id
+    raise HTTPException(status_code=404, detail={
+        "error": "unknown_portfolio",
+        "portfolio_id": portfolio_id,
+        "known": _portfolio_registry.ids(),
+    })
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

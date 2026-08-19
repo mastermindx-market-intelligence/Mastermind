@@ -131,29 +131,37 @@ def _seed_held_book(pid: str, prices: dict, asof: str) -> None:
     paper_account.mark(prices, asof, portfolio_id=pid)
 
 
+# Consecutive REAL trading sessions on all three venues (US/CN/HK), verified against
+# portfolio.market_calendar + portfolio.china_calendar. These used to be 2026-01-02 -> 2026-01-03,
+# but 2026-01-03 is a SATURDAY: the job's mark date was never a trading session on any exchange,
+# which is precisely the class of defect the per-venue gate now rejects.
+_SEED_DAY = "2026-01-02"    # Friday
+_MARK_DAY = "2026-01-05"    # the following Monday
+
+
 def test_daily_mark_job_advances_unrebuilt_book(tmp_books: Path, monkeypatch) -> None:
     from app import scheduler
     from portfolio import paper_account
 
     # the autonomous Brain book was built + marked on day 1, then never rebuilt
-    _seed_held_book("autonomous", {"AAPL": 200.0, "SPY": 500.0}, "2026-01-02")
+    _seed_held_book("autonomous", {"AAPL": 200.0, "SPY": 500.0}, _SEED_DAY)
     before = paper_account._load_jsonl(paper_account._paths("autonomous")["nav"])
-    assert {r["date"] for r in before} == {"2026-01-02"}
+    assert {r["date"] for r in before} == {_SEED_DAY}
 
     # day 2: no rebuild — only the daily mark job runs, at fresh (higher) prices via a stubbed feed
     def _fake_price(t: str):
         return {"AAPL": 250.0, "SPY": 520.0}.get(t)
     monkeypatch.setattr(paper_account, "_current_price", _fake_price)
-    monkeypatch.setattr(scheduler, "_today_iso", lambda: "2026-01-03")
+    monkeypatch.setattr(scheduler, "_today_iso", lambda: _MARK_DAY)
 
     scheduler._daily_mark_job()
 
     after = paper_account._load_jsonl(paper_account._paths("autonomous")["nav"])
     dates = {r["date"] for r in after}
-    assert "2026-01-03" in dates, "daily mark job must append a fresh nav row for the new date"
+    assert _MARK_DAY in dates, "daily mark job must append a fresh nav row for the new date"
     # the new row reflects the higher AAPL mark (the book actually advanced)
-    new_row = next(r for r in after if r["date"] == "2026-01-03")
-    old_row = next(r for r in before if r["date"] == "2026-01-02")
+    new_row = next(r for r in after if r["date"] == _MARK_DAY)
+    old_row = next(r for r in before if r["date"] == _SEED_DAY)
     assert new_row["nav"] > old_row["nav"]
 
 
@@ -161,16 +169,16 @@ def test_daily_mark_job_is_idempotent_per_date(tmp_books: Path, monkeypatch) -> 
     from app import scheduler
     from portfolio import paper_account
 
-    _seed_held_book("autonomous", {"AAPL": 200.0, "SPY": 500.0}, "2026-01-02")
+    _seed_held_book("autonomous", {"AAPL": 200.0, "SPY": 500.0}, _SEED_DAY)
     monkeypatch.setattr(paper_account, "_current_price",
                         lambda t: {"AAPL": 250.0, "SPY": 520.0}.get(t))
-    monkeypatch.setattr(scheduler, "_today_iso", lambda: "2026-01-03")
+    monkeypatch.setattr(scheduler, "_today_iso", lambda: _MARK_DAY)
 
     scheduler._daily_mark_job()
     scheduler._daily_mark_job()  # twice in the same day
 
     rows = paper_account._load_jsonl(paper_account._paths("autonomous")["nav"])
-    same_day = [r for r in rows if r["date"] == "2026-01-03"]
+    same_day = [r for r in rows if r["date"] == _MARK_DAY]
     assert len(same_day) == 1, "mark() is idempotent per date — exactly one row per calendar day"
 
 
@@ -187,8 +195,8 @@ def test_daily_mark_job_one_failure_does_not_abort_others(tmp_books: Path, monke
         def __exit__(self, *args):
             return False
 
-    _seed_held_book("autonomous", {"AAPL": 200.0, "SPY": 500.0}, "2026-01-02")
-    _seed_held_book("china", {"600519.SS": 100.0}, "2026-01-02")
+    _seed_held_book("autonomous", {"AAPL": 200.0, "SPY": 500.0}, _SEED_DAY)
+    _seed_held_book("china", {"600519.SS": 100.0}, _SEED_DAY)
 
     real_mark = paper_account.mark
 
@@ -204,13 +212,13 @@ def test_daily_mark_job_one_failure_does_not_abort_others(tmp_books: Path, monke
     monkeypatch.setattr(paper_account, "pending_settlement_receipts", lambda pid=None: [])
     monkeypatch.setattr(locks, "acquire_or_log", lambda *args, **kwargs: _Lock())
     monkeypatch.setattr(paper_account, "mark", _flaky_mark)
-    monkeypatch.setattr(scheduler, "_today_iso", lambda: "2026-01-03")
+    monkeypatch.setattr(scheduler, "_today_iso", lambda: _MARK_DAY)
 
     scheduler._daily_mark_job()  # must not raise
 
     # china still got its fresh mark even though autonomous blew up
     china_rows = paper_account._load_jsonl(paper_account._paths("china")["nav"])
-    assert "2026-01-03" in {r["date"] for r in china_rows}
+    assert _MARK_DAY in {r["date"] for r in china_rows}
 
 
 def test_daily_mark_job_skips_empty_books(tmp_books: Path, monkeypatch) -> None:
@@ -231,6 +239,174 @@ def test_daily_mark_job_skips_empty_books(tmp_books: Path, monkeypatch) -> None:
     for pid in scheduler._MARK_BOOK_IDS:
         rows = paper_account._load_jsonl(paper_account._paths(pid)["nav"])
         assert rows == [], f"{pid} should have no nav rows when nothing is priceable"
+
+
+# ---------------------------------------------------------------------------
+# 2b) the sweep is gated on each book's OWN venue trading calendar
+# ---------------------------------------------------------------------------
+# The cron is CronTrigger(day_of_week="mon-fri"), which excludes weekends and nothing else. Every
+# venue also shuts on weekday holidays, and the three books trade on three different calendars, so
+# a single cron expression cannot express them. Without a per-book gate a weekday holiday would
+# accrue an extra rate/252 cash-yield day, append a nav_history row dated to a session that never
+# happened, and carry stale prices forward as though the mark date had advanced.
+
+_BOOK_TICKER = {"autonomous": "AAPL", "china": "600519.SS", "hk": "0700.HK"}
+
+# Each row is a WEEKDAY (so the Mon–Fri cron fires) on which EXACTLY ONE venue is closed and the
+# other two trade — verified against this repo's own portfolio.market_calendar (US) and
+# portfolio.china_calendar (CN/HK) rather than assumed.
+_VENUE_HOLIDAYS = [
+    pytest.param("2026-01-19", "autonomous", id="mon-us-mlk-day"),
+    pytest.param("2026-11-26", "autonomous", id="thu-us-thanksgiving"),
+    pytest.param("2026-07-01", "hk", id="wed-hkex-sar-establishment-day"),
+    pytest.param("2026-10-19", "hk", id="mon-hkex-chung-yeung"),
+    # Mainland golden week: HKEX only closes 10-01, so 10-02 is CN-shut / US+HK trading.
+    pytest.param("2026-10-02", "china", id="fri-cn-golden-week"),
+    pytest.param("2026-05-04", "china", id="mon-cn-labour-day-bridge"),
+]
+
+
+def _assert_holiday_fixture_is_honest(asof: str, closed_book: str) -> None:
+    """Guard the guard: if a calendar is ever corrected, fail loudly here rather than let a
+    parametrised case quietly stop testing anything."""
+    from app import scheduler
+    for pid in scheduler._MARK_BOOK_IDS:
+        venue = scheduler._MARK_BOOK_VENUES[pid]
+        expected_open = pid != closed_book
+        assert scheduler._is_trading_date(venue, asof) is expected_open, (
+            f"fixture drift: {asof} on {venue} should be "
+            f"{'open' if expected_open else 'closed'}"
+        )
+
+
+@pytest.fixture()
+def three_books(tmp_books: Path, monkeypatch):
+    """All three managed books held and marked once at _SEED_DAY, with every external seam stubbed
+    so the ONLY thing that can stop a mark is the trading-date gate under test."""
+    from control_plane import locks
+    from portfolio import fx, marks, paper_account
+
+    class _Lock:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    for pid, ticker in _BOOK_TICKER.items():
+        _seed_held_book(pid, {ticker: 100.0}, _SEED_DAY)
+
+    monkeypatch.setattr(paper_account, "_current_price", lambda t: 110.0)   # everything priceable
+    monkeypatch.setattr(marks, "prices_for", lambda syms, asof, **kw: {})   # no live union marks
+    monkeypatch.setattr(fx, "usd_to", lambda px, ccy: px)                   # no FX distortion
+    monkeypatch.setattr(paper_account, "pending_settlement_receipts", lambda pid=None: [])
+    monkeypatch.setattr(locks, "acquire_or_log", lambda *args, **kwargs: _Lock())
+    return paper_account
+
+
+def _book_state(paper_account, pid: str) -> dict:
+    """Everything the daily sweep is allowed to mutate, in one comparable snapshot."""
+    state = paper_account._load_account(pid)
+    rows = paper_account._load_jsonl(paper_account._paths(pid)["nav"])
+    return {
+        "cash": state.get("cash"),
+        "cash_yield_through": state.get("cash_yield_through"),
+        "nav_dates": {r["date"] for r in rows},
+        "price_asof": {t: lot.get("current_price_asof")
+                       for t, lot in (state.get("positions") or {}).items()},
+        "price": {t: lot.get("current_price")
+                  for t, lot in (state.get("positions") or {}).items()},
+    }
+
+
+@pytest.mark.parametrize("asof,closed_book", _VENUE_HOLIDAYS)
+def test_venue_holiday_leaves_the_closed_book_untouched(three_books, monkeypatch,
+                                                        asof: str, closed_book: str) -> None:
+    from app import scheduler
+    paper_account = three_books
+    _assert_holiday_fixture_is_honest(asof, closed_book)
+
+    before = _book_state(paper_account, closed_book)
+    monkeypatch.setattr(scheduler, "_today_iso", lambda: asof)
+
+    scheduler._daily_mark_job()
+
+    after = _book_state(paper_account, closed_book)
+    assert after["cash"] == before["cash"], "cash yield accrued on a closed session"
+    assert after["cash_yield_through"] == before["cash_yield_through"], (
+        "cash_yield_through advanced onto a day the venue never traded"
+    )
+    assert asof not in after["nav_dates"], "a NAV row was written for a closed session"
+    assert after["nav_dates"] == before["nav_dates"]
+    assert after["price_asof"] == before["price_asof"], "a current_price date was fabricated"
+    assert after["price"] == before["price"]
+
+
+@pytest.mark.parametrize("asof,closed_book", _VENUE_HOLIDAYS)
+def test_venue_holiday_still_marks_the_books_that_are_open(three_books, monkeypatch,
+                                                           asof: str, closed_book: str) -> None:
+    """One venue's holiday must not become a firm-wide outage."""
+    from app import scheduler
+    paper_account = three_books
+    _assert_holiday_fixture_is_honest(asof, closed_book)
+    monkeypatch.setattr(scheduler, "_today_iso", lambda: asof)
+
+    scheduler._daily_mark_job()
+
+    for pid in scheduler._MARK_BOOK_IDS:
+        if pid == closed_book:
+            continue
+        state = _book_state(paper_account, pid)
+        assert asof in state["nav_dates"], f"{pid} trades on {asof} and must still mark"
+        assert state["cash_yield_through"] == asof, f"{pid} must accrue its trading-day yield"
+
+
+def test_normal_trading_date_marks_and_accrues_every_book_once(three_books, monkeypatch) -> None:
+    from app import scheduler
+    paper_account = three_books
+    for pid in scheduler._MARK_BOOK_IDS:
+        assert scheduler._is_trading_date(scheduler._MARK_BOOK_VENUES[pid], _MARK_DAY)
+
+    monkeypatch.setattr(scheduler, "_today_iso", lambda: _MARK_DAY)
+    scheduler._daily_mark_job()
+    first = {pid: _book_state(paper_account, pid) for pid in scheduler._MARK_BOOK_IDS}
+
+    scheduler._daily_mark_job()   # same date again — must be a no-op, not a second accrual
+    second = {pid: _book_state(paper_account, pid) for pid in scheduler._MARK_BOOK_IDS}
+
+    for pid in scheduler._MARK_BOOK_IDS:
+        assert _MARK_DAY in first[pid]["nav_dates"]
+        assert first[pid]["cash_yield_through"] == _MARK_DAY
+        assert second[pid]["cash"] == first[pid]["cash"], f"{pid} double-accrued on a re-run"
+        rows = paper_account._load_jsonl(paper_account._paths(pid)["nav"])
+        assert len([r for r in rows if r["date"] == _MARK_DAY]) == 1
+
+
+def test_weekend_is_not_a_trading_date_for_any_venue() -> None:
+    """The old tests marked on 2026-01-03, a Saturday. Pin why that is now refused."""
+    from app import scheduler
+    for venue in ("US", "CN", "HK"):
+        assert scheduler._is_trading_date(venue, "2026-01-03") is False
+
+
+def test_trading_date_gate_fails_closed_on_bad_input() -> None:
+    """A malformed date or unknown venue must never be read as 'open'."""
+    from app import scheduler
+    assert scheduler._is_trading_date("US", "not-a-date") is False
+    assert scheduler._is_trading_date("US", "") is False
+    assert scheduler._is_trading_date("", "2026-01-05") is False
+    assert scheduler._is_trading_date("XX", "2026-01-05") is False
+
+
+def test_trading_date_gate_fails_closed_when_the_calendar_raises(monkeypatch) -> None:
+    from app import scheduler
+    from portfolio import market_calendar
+
+    def _boom(_d):
+        raise RuntimeError("calendar unavailable")
+
+    monkeypatch.setattr(market_calendar, "is_trading_day", _boom)
+    assert scheduler._is_trading_date("US", _MARK_DAY) is False
 
 
 # ---------------------------------------------------------------------------

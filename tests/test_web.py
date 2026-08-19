@@ -65,7 +65,140 @@ def test_product_api_defaults_agree_with_active_us_brain():
         (web.api_trades, "portfolio"),
     ):
         assert inspect.signature(endpoint).parameters[parameter].default == expected
-    assert web._product_portfolio_id("not-a-book") == expected
+    # An OMITTED book still resolves to the dashboard default. An explicitly-named UNKNOWN book
+    # does NOT — see TestUnknownPortfolioIsRejected below for why that distinction matters.
+    assert web._product_portfolio_id(None) == expected
+    assert web._product_portfolio_id("") == expected
+    assert web._product_portfolio_id(expected) == expected
+
+
+# ---------------------------------------------------------------------------
+# an explicitly-named unknown book must 4xx, never silently become the US Brain
+# ---------------------------------------------------------------------------
+
+_RESOLVER_ENDPOINTS = (
+    ("/api/performance", "portfolio"),
+    ("/api/live_marks", "portfolio"),
+    ("/api/risk", "portfolio"),
+    ("/api/portfolio", "portfolio"),
+    ("/api/posture", "book"),
+    ("/api/trades", "portfolio"),
+)
+
+_UNKNOWN_IDS = ("not-a-book", "autonomou", "AUTONOMOUS", "../portfolio", "flagship ")
+
+
+class TestUnknownPortfolioIsRejected:
+    """``_product_portfolio_id`` used to coerce ANY unknown id to DASHBOARD_DEFAULT_ID.
+
+    A typo, a stale bookmark, or malformed client state therefore answered with a valid-looking
+    Autonomous/US-Brain payload while the caller believed it was reading some other book. On a
+    portfolio surface, wrong data is more dangerous than no data — so an explicit unknown id now
+    fails closed, exactly as ``registry.canonical_id`` already does before any filesystem use.
+    """
+
+    def test_resolver_raises_rather_than_defaulting(self):
+        from fastapi import HTTPException
+        from app import web
+
+        for bogus in _UNKNOWN_IDS:
+            with _pytest_w8.raises(HTTPException) as excinfo:
+                web._product_portfolio_id(bogus)
+            assert excinfo.value.status_code == 404
+            assert excinfo.value.detail["error"] == "unknown_portfolio"
+            assert excinfo.value.detail["portfolio_id"] == bogus
+
+    @_pytest_w8.mark.parametrize("path,param", _RESOLVER_ENDPOINTS)
+    def test_endpoint_returns_404_for_an_unknown_book(self, path, param):
+        client = _client()
+        r = client.get(path, params={param: "not-a-book"})
+        assert r.status_code == 404, (
+            f"{path} must reject an unknown book; got {r.status_code} {r.text[:200]}"
+        )
+        detail = r.json().get("detail") or {}
+        assert detail.get("error") == "unknown_portfolio", (
+            f"{path} returned a 404 for the wrong reason: {r.text[:200]}"
+        )
+        assert detail.get("portfolio_id") == "not-a-book"
+
+    @_pytest_w8.mark.parametrize("path,param", _RESOLVER_ENDPOINTS)
+    def test_unknown_book_never_reads_the_autonomous_book(self, path, param, monkeypatch):
+        """The rejection must happen BEFORE any book state is resolved or read."""
+        from portfolio import registry
+
+        touched: list[str | None] = []
+        real_data_dir = registry.data_dir
+
+        def _spy(portfolio_id=None):
+            touched.append(portfolio_id)
+            return real_data_dir(portfolio_id)
+
+        monkeypatch.setattr(registry, "data_dir", _spy)
+
+        client = _client()
+        r = client.get(path, params={param: "not-a-book"})
+        assert r.status_code == 404
+        assert touched == [], (
+            f"{path} resolved a book directory {touched} while serving a rejected id"
+        )
+
+    # The positive-resolution matrix is asserted at the resolver rather than over HTTP on purpose:
+    # a 200 from /api/risk with no persisted snapshot triggers safety.compute_safety(bootstrap=True),
+    # a full historical backtest. The resolver is the whole of the behaviour under test here, and
+    # every one of these six endpoints calls it on its first line, before any book state is read.
+    @_pytest_w8.mark.parametrize("book", ("autonomous", "china", "hk", "flagship",
+                                          "heavyweight", "etf", "self_directed"))
+    def test_each_known_book_resolves_to_itself(self, book):
+        from app import web
+        from portfolio import registry
+        assert registry.is_known(book), f"fixture drift: {book} left the registry"
+        assert web._product_portfolio_id(book) == book
+
+    def test_omitted_book_resolves_to_the_dashboard_default(self):
+        from app import web
+        from portfolio import registry
+        for omitted in (None, ""):
+            assert web._product_portfolio_id(omitted) == registry.DASHBOARD_DEFAULT_ID
+
+    def test_every_resolver_endpoint_calls_the_resolver(self):
+        """Pin the coupling the tests above rely on: each endpoint resolves its id on entry.
+
+        The positive branches are asserted at the resolver rather than over HTTP because a 200
+        from /api/risk with no persisted snapshot runs safety.compute_safety(bootstrap=True) — a
+        full historical backtest. This check keeps that substitution honest: if an endpoint ever
+        stopped routing through _product_portfolio_id, its rejection behaviour would silently
+        stop being covered.
+        """
+        import inspect
+        from app import web
+
+        for path, _param in _RESOLVER_ENDPOINTS:
+            handler = {
+                "/api/performance": web.api_performance,
+                "/api/live_marks": web.api_live_marks,
+                "/api/risk": web.api_risk,
+                "/api/portfolio": web.api_portfolio,
+                "/api/posture": web.api_posture,
+                "/api/trades": web.api_trades,
+            }[path]
+            source = inspect.getsource(handler)
+            assert "_product_portfolio_id(" in source, (
+                f"{path} no longer resolves its book id through _product_portfolio_id"
+            )
+
+    @_pytest_w8.mark.parametrize("book", ("flagship", "heavyweight", "etf"))
+    def test_archived_books_keep_serving_frozen_history(self, book):
+        """Archived ids are KNOWN ids — the fail-closed change must not retire their history."""
+        from portfolio import registry
+        assert registry.is_archived(book), f"fixture drift: {book} is no longer archived"
+
+        client = _client()
+        r = client.get("/api/performance", params={"portfolio": book})
+        assert r.status_code == 200, r.text[:200]
+
+        risk = client.get("/api/risk", params={"portfolio": book})
+        assert risk.status_code == 200
+        assert risk.json().get("archived") is True
 
 
 def test_account_script_serves_javascript():
