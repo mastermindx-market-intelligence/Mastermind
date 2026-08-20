@@ -33,9 +33,43 @@ from control_plane.executive_authority import (
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
 )
+from control_plane.operator_harness_contract import (
+    AttemptExecutionMode,
+    CandidateResult,
+    EventCursor,
+    LaunchDecision,
+    NormalizedEvent,
+    OperationId,
+    OperationIntentTarget,
+    OperationKind,
+    OperationReceiptKind,
+    ObservedHarnessAttestation,
+    ProcessGenerationRef,
+    ProcessIdentityObservation,
+    ProcessLiveness,
+    ProviderWriterState,
+    ReconcileObservation,
+    RequestedExecutionProfile,
+    SessionEpochRef,
+    SessionEpochState,
+    TurnRef,
+    TurnStartObservation,
+    operation_receipt_command_id,
+    compare_launch,
+)
+from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION = (
+    "mastermind.operator_harness_internal_generation_operation/v1"
+)
+OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION = (
+    "mastermind.operator_harness_reconcile_observation/v1"
+)
+OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION = (
+    "mastermind.operator_harness_candidate_evidence/v1"
+)
 DEFAULT_LEASE_SECONDS = 60
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
 _ROOT = Path(__file__).resolve().parent.parent
@@ -552,6 +586,9 @@ class Attempt:
     result_path: str | None
     exit_code: int | None
     launch_metadata: dict[str, Any]
+    execution_mode: str | None = None
+    requested_execution_profile: dict[str, Any] | None = None
+    requested_execution_profile_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return public attempt state.  The opaque lease token is never exposed."""
@@ -867,9 +904,176 @@ _MIGRATION_2: tuple[str, ...] = (
     """,
 )
 
+
+# OHF state is deliberately additive to the existing Executive authority store.
+# The old Attempt identity columns remain the sealed-worker projection; rich
+# harness identity lives exclusively in the two tables below.
+_MIGRATION_3: tuple[str, ...] = (
+    """
+    ALTER TABLE attempts ADD COLUMN execution_mode TEXT
+    CHECK (execution_mode IN ('SEALED_WORKER','OPERATOR_HARNESS'))
+    """,
+    "ALTER TABLE attempts ADD COLUMN requested_execution_profile_json TEXT",
+    "ALTER TABLE attempts ADD COLUMN requested_execution_profile_digest TEXT",
+    """
+    CREATE TABLE harness_session_epochs (
+      session_epoch_id TEXT PRIMARY KEY,
+      attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id),
+      worker_id TEXT NOT NULL,
+      epoch_number INTEGER NOT NULL CHECK (epoch_number >= 1),
+      provider_session_id TEXT,
+      state TEXT NOT NULL CHECK (state IN ('CURRENT','TERMINAL','ABANDONED')),
+      created_at_ms INTEGER NOT NULL,
+      ended_at_ms INTEGER,
+      abandonment_class TEXT,
+      UNIQUE(attempt_id,epoch_number)
+    )
+    """,
+    """
+    CREATE TABLE process_generations (
+      process_generation_id TEXT PRIMARY KEY,
+      session_epoch_id TEXT NOT NULL REFERENCES harness_session_epochs(session_epoch_id),
+      worker_id TEXT NOT NULL,
+      provider_session_id TEXT,
+      generation_number INTEGER NOT NULL CHECK (generation_number >= 1),
+      pid INTEGER CHECK (pid IS NULL OR pid > 0),
+      pgid INTEGER CHECK (pgid IS NULL OR pgid > 0),
+      process_start_identity TEXT,
+      boot_id TEXT,
+      started_at_ms INTEGER NOT NULL,
+      last_observed_at_ms INTEGER,
+      ended_at_ms INTEGER,
+      termination_class TEXT,
+      exit_code INTEGER,
+      executive_writer_held INTEGER NOT NULL CHECK (executive_writer_held IN (0,1)),
+      provider_writer_state TEXT NOT NULL CHECK (provider_writer_state IN ('HELD','RELEASED','UNKNOWN')),
+      observed_attestation_json TEXT,
+      observed_attestation_digest TEXT,
+      created_at_ms INTEGER NOT NULL,
+      UNIQUE(session_epoch_id,generation_number),
+      CHECK((pid IS NULL AND pgid IS NULL AND process_start_identity IS NULL AND boot_id IS NULL)
+        OR (pid IS NOT NULL AND pgid IS NOT NULL
+          AND coalesce(length(trim(process_start_identity)),0) > 0
+          AND coalesce(length(trim(boot_id)),0) > 0))
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX harness_session_epochs_one_current
+    ON harness_session_epochs(attempt_id) WHERE state='CURRENT'
+    """,
+    """
+    CREATE UNIQUE INDEX harness_session_epochs_session_realm
+    ON harness_session_epochs(worker_id,provider_session_id)
+    WHERE provider_session_id IS NOT NULL
+    """,
+    """
+    CREATE UNIQUE INDEX process_generations_one_epoch_writer
+    ON process_generations(session_epoch_id) WHERE executive_writer_held=1
+    """,
+    """
+    CREATE UNIQUE INDEX process_generations_one_executive_writer
+    ON process_generations(worker_id,provider_session_id)
+    WHERE executive_writer_held=1 AND provider_session_id IS NOT NULL
+    """,
+    """
+    CREATE TRIGGER attempts_ohf_mode_immutable
+    BEFORE UPDATE OF execution_mode ON attempts
+    WHEN OLD.execution_mode IS NOT NULL AND OLD.execution_mode IS NOT NEW.execution_mode
+    BEGIN SELECT RAISE(ABORT, 'attempt execution mode is immutable'); END
+    """,
+    """
+    CREATE TRIGGER attempts_ohf_profile_pair
+    BEFORE INSERT ON attempts
+    WHEN (NEW.requested_execution_profile_json IS NULL) != (NEW.requested_execution_profile_digest IS NULL)
+      OR (NEW.execution_mode='OPERATOR_HARNESS'
+          AND NEW.requested_execution_profile_json IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'requested profile json and digest must be paired'); END
+    """,
+    """
+    CREATE TRIGGER attempts_ohf_profile_pair_update
+    BEFORE UPDATE OF requested_execution_profile_json,requested_execution_profile_digest ON attempts
+    WHEN (NEW.requested_execution_profile_json IS NULL) != (NEW.requested_execution_profile_digest IS NULL)
+      OR (NEW.execution_mode='OPERATOR_HARNESS'
+          AND NEW.requested_execution_profile_json IS NULL)
+      OR (OLD.requested_execution_profile_json IS NOT NULL AND
+          (OLD.requested_execution_profile_json IS NOT NEW.requested_execution_profile_json
+           OR OLD.requested_execution_profile_digest IS NOT NEW.requested_execution_profile_digest))
+    BEGIN SELECT RAISE(ABORT, 'requested profile is immutable and paired'); END
+    """,
+    """
+    CREATE TRIGGER attempts_ohf_mode_requires_profile
+    BEFORE UPDATE OF execution_mode ON attempts
+    WHEN NEW.execution_mode='OPERATOR_HARNESS'
+      AND (NEW.requested_execution_profile_json IS NULL
+           OR NEW.requested_execution_profile_digest IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'OHF mode requires a sealed requested profile'); END
+    """,
+    """
+    CREATE TRIGGER harness_session_epoch_session_immutable
+    BEFORE UPDATE OF provider_session_id ON harness_session_epochs
+    WHEN OLD.provider_session_id IS NOT NULL AND OLD.provider_session_id IS NOT NEW.provider_session_id
+    BEGIN SELECT RAISE(ABORT, 'epoch provider session is immutable'); END
+    """,
+    """
+    CREATE TRIGGER harness_session_epoch_identity_immutable
+    BEFORE UPDATE OF session_epoch_id,attempt_id,worker_id,epoch_number
+    ON harness_session_epochs
+    WHEN OLD.session_epoch_id IS NOT NEW.session_epoch_id
+      OR OLD.attempt_id IS NOT NEW.attempt_id
+      OR OLD.worker_id IS NOT NEW.worker_id
+      OR OLD.epoch_number IS NOT NEW.epoch_number
+    BEGIN SELECT RAISE(ABORT, 'epoch identity and projection are immutable'); END
+    """,
+    """
+    CREATE TRIGGER harness_session_epoch_no_reopen
+    BEFORE UPDATE OF state ON harness_session_epochs
+    WHEN OLD.state IN ('TERMINAL','ABANDONED') AND NEW.state='CURRENT'
+    BEGIN SELECT RAISE(ABORT, 'terminal or abandoned epoch cannot become current'); END
+    """,
+    """
+    CREATE TRIGGER harness_epoch_worker_projection_insert
+    BEFORE INSERT ON harness_session_epochs
+    WHEN NEW.worker_id != (SELECT worker_id FROM attempts WHERE attempt_id=NEW.attempt_id)
+      OR (NEW.provider_session_id IS NOT NULL AND length(trim(NEW.provider_session_id))=0)
+    BEGIN SELECT RAISE(ABORT, 'epoch worker/session projection mismatch'); END
+    """,
+    """
+    CREATE TRIGGER process_generation_projection_insert
+    BEFORE INSERT ON process_generations
+    WHEN NEW.worker_id != (SELECT worker_id FROM harness_session_epochs WHERE session_epoch_id=NEW.session_epoch_id)
+      OR NEW.provider_session_id IS NOT
+         (SELECT provider_session_id FROM harness_session_epochs WHERE session_epoch_id=NEW.session_epoch_id)
+      OR (NEW.provider_session_id IS NOT NULL AND length(trim(NEW.provider_session_id))=0)
+    BEGIN SELECT RAISE(ABORT, 'generation worker/session projection mismatch'); END
+    """,
+    """
+    CREATE TRIGGER process_generation_projection_update
+    BEFORE UPDATE OF process_generation_id,session_epoch_id,worker_id,
+                     generation_number,provider_session_id ON process_generations
+    WHEN OLD.process_generation_id IS NOT NEW.process_generation_id
+      OR OLD.session_epoch_id IS NOT NEW.session_epoch_id
+      OR OLD.worker_id IS NOT NEW.worker_id
+      OR OLD.generation_number IS NOT NEW.generation_number
+      OR NEW.worker_id != (SELECT worker_id FROM harness_session_epochs WHERE session_epoch_id=NEW.session_epoch_id)
+      OR NEW.provider_session_id IS NOT
+         (SELECT provider_session_id FROM harness_session_epochs WHERE session_epoch_id=NEW.session_epoch_id)
+      OR (NEW.provider_session_id IS NOT NULL AND length(trim(NEW.provider_session_id))=0)
+    BEGIN SELECT RAISE(ABORT, 'generation worker/session projection mismatch'); END
+    """,
+    """
+    CREATE TRIGGER attempts_ohf_legacy_identity_null
+    BEFORE UPDATE ON attempts
+    WHEN NEW.execution_mode='OPERATOR_HARNESS' AND (
+      NEW.pid IS NOT NULL OR NEW.pgid IS NOT NULL OR NEW.process_start_identity IS NOT NULL
+      OR NEW.boot_id IS NOT NULL OR NEW.provider_session_id IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT, 'OHF legacy Attempt identity must remain NULL'); END
+    """,
+)
+
 _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (1, "executive_runtime_core", _MIGRATION_1),
     (2, "durable_parent_child_review_contract", _MIGRATION_2),
+    (3, "ohf_session_epochs_and_process_generations", _MIGRATION_3),
 )
 
 
@@ -885,9 +1089,14 @@ class RuntimeStore:
         busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS,
         create: bool = True,
         existing_writable: bool = False,
+        database_path: str | Path | None = None,
     ) -> None:
         self.root = Path(root).resolve() if root is not None else _ROOT
-        self.path = self.root / _DB_RELATIVE_PATH
+        self.path = (
+            Path(database_path).resolve()
+            if database_path is not None
+            else self.root / _DB_RELATIVE_PATH
+        )
         self.clock = clock
         self.lease_seconds = int(lease_seconds)
         self.busy_timeout_ms = int(busy_timeout_ms)
@@ -965,7 +1174,9 @@ class RuntimeStore:
             ) from exc
         if not self._schema_ready:
             try:
-                connection.execute("SELECT version FROM schema_migrations LIMIT 1").fetchone()
+                connection.execute(
+                    "SELECT version FROM schema_migrations LIMIT 1"
+                ).fetchone()
             except sqlite3.Error as exc:
                 connection.close()
                 message = str(exc)
@@ -1078,21 +1289,21 @@ class RuntimeStore:
         except (OSError, sqlite3.Error) as exc:
             if connection is not None:
                 connection.close()
-            raise PersistenceError(f"executive runtime database is unavailable: {exc}") from exc
+            raise PersistenceError(
+                f"executive runtime database is unavailable: {exc}"
+            ) from exc
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
         try:
             connection.execute("BEGIN EXCLUSIVE")
-            connection.execute(
-                """
+            connection.execute("""
                 CREATE TABLE IF NOT EXISTS schema_migrations (
                   version INTEGER PRIMARY KEY,
                   name TEXT NOT NULL UNIQUE,
                   checksum TEXT NOT NULL,
                   applied_at_ms INTEGER NOT NULL
                 )
-                """
-            )
+                """)
             existing = {
                 int(row["version"]): row
                 for row in connection.execute("SELECT * FROM schema_migrations")
@@ -1105,7 +1316,9 @@ class RuntimeStore:
                 )
             for version, name, statements in _MIGRATIONS:
                 checksum = hashlib.sha256(
-                    "\n".join(statement.strip() for statement in statements).encode("utf-8")
+                    "\n".join(statement.strip() for statement in statements).encode(
+                        "utf-8"
+                    )
                 ).hexdigest()
                 row = existing.get(version)
                 if row is not None:
@@ -1120,10 +1333,12 @@ class RuntimeStore:
                     "INSERT INTO schema_migrations(version,name,checksum,applied_at_ms) VALUES(?,?,?,?)",
                     (version, name, checksum, self.now_ms()),
                 )
-            connection.commit()
             violations = connection.execute("PRAGMA foreign_key_check").fetchall()
             if violations:
-                raise PersistenceError(f"database foreign-key check failed: {violations!r}")
+                raise PersistenceError(
+                    f"database foreign-key check failed: {violations!r}"
+                )
+            connection.commit()
         except PersistenceError:
             if connection.in_transaction:
                 connection.rollback()
@@ -1413,6 +1628,11 @@ def _attempt_from_row(row: sqlite3.Row) -> Attempt:
         launch_metadata=dict(
             _json_loads(row["launch_metadata_json"], fallback={})
         ),
+        execution_mode=row["execution_mode"],
+        requested_execution_profile=_json_loads(
+            row["requested_execution_profile_json"], fallback=None
+        ),
+        requested_execution_profile_digest=row["requested_execution_profile_digest"],
     )
 
 
@@ -2775,7 +2995,9 @@ class AttemptRegistry:
         owner = str(lease_owner).strip()
         if not owner:
             raise StateConflict("lease_owner is required for adoption")
-        duration = self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
+        duration = (
+            self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
+        )
         if duration <= 0:
             raise StateConflict("lease_seconds must be positive")
         timestamp = self.store.now_ms()
@@ -2795,12 +3017,19 @@ class AttemptRegistry:
             ).fetchone()
             if row is None:
                 raise StateConflict(f"attempt {attempt_id!r} does not exist")
+            if row["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value:
+                raise StateConflict(
+                    "OPERATOR_HARNESS adoption uses epoch/generation state"
+                )
             attempt_status = AttemptStatus(row["status"])
             if attempt_status not in _LEASE_ACTIVE_ATTEMPT_STATUSES:
                 raise StateConflict(
                     f"attempt {attempt_id} cannot be adopted from {row['status']}"
                 )
-            if JobStatus(row["job_status"]) != _ACTIVE_JOB_STATUS_BY_ATTEMPT[attempt_status]:
+            if (
+                JobStatus(row["job_status"])
+                != _ACTIVE_JOB_STATUS_BY_ATTEMPT[attempt_status]
+            ):
                 raise PersistenceError(
                     f"attempt {attempt_id} and job have inconsistent active states"
                 )
@@ -2812,19 +3041,24 @@ class AttemptRegistry:
                     f"attempt {attempt_id} and quota class have inconsistent fences"
                 )
             if timestamp >= int(row["lease_expires_at_ms"]):
-                raise StateConflict(f"attempt {attempt_id} lease has expired; reconcile it first")
+                raise StateConflict(
+                    f"attempt {attempt_id} lease has expired; reconcile it first"
+                )
             if row["lease_token"] is None:
-                raise PersistenceError(f"active attempt {attempt_id} has no lease token")
-            if row["current_attempt_id"] != attempt_id or row["held_attempt_id"] != attempt_id:
+                raise PersistenceError(
+                    f"active attempt {attempt_id} has no lease token"
+                )
+            if (
+                row["current_attempt_id"] != attempt_id
+                or row["held_attempt_id"] != attempt_id
+            ):
                 raise StateConflict(f"attempt {attempt_id} is no longer current")
             if row["pid"] is None and row["provider_session_id"] is None:
                 raise StateConflict(
                     f"attempt {attempt_id} has no durable process/provider identity to adopt"
                 )
             next_fence = current_fence + 1
-            expiry = max(
-                int(row["lease_expires_at_ms"]), timestamp + duration * 1_000
-            )
+            expiry = max(int(row["lease_expires_at_ms"]), timestamp + duration * 1_000)
             updated_quota = connection.execute(
                 """
                 UPDATE worker_quota_classes
@@ -2896,7 +3130,9 @@ class AttemptRegistry:
         lease_token: str,
         extend_seconds: int | None = None,
     ) -> Attempt:
-        duration = self.store.lease_seconds if extend_seconds is None else int(extend_seconds)
+        duration = (
+            self.store.lease_seconds if extend_seconds is None else int(extend_seconds)
+        )
         if duration <= 0:
             raise StateConflict("extend_seconds must be positive")
         timestamp = self.store.now_ms()
@@ -2923,7 +3159,13 @@ class AttemptRegistry:
                 SET last_seen_at_ms=?,updated_at_ms=?,version=version+1
                 WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
                 """,
-                (timestamp, timestamp, row["worker_id"], row["quota_class"], attempt_id),
+                (
+                    timestamp,
+                    timestamp,
+                    row["worker_id"],
+                    row["quota_class"],
+                    attempt_id,
+                ),
             )
             self.store.append_event(
                 connection,
@@ -2940,6 +3182,125 @@ class AttemptRegistry:
         attempt = self.get_attempt(attempt_id)
         assert attempt is not None
         return attempt
+
+    def takeover_expired_operator_harness(
+        self,
+        attempt_id: str,
+        *,
+        expected_fence_generation: int,
+        lease_owner: str,
+        lease_seconds: int | None = None,
+    ) -> AttemptLease:
+        """CAS-fence an expired OHF lease without adopting provider/process state."""
+
+        owner = str(lease_owner or "").strip()
+        duration = (
+            self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
+        )
+        if not owner or duration <= 0:
+            raise StateConflict(
+                "OHF takeover requires owner and positive lease_seconds"
+            )
+        timestamp = self.store.now_ms()
+        token = secrets.token_urlsafe(32)
+        with self.store.transaction() as connection:
+            row = connection.execute(
+                """SELECT a.*,j.current_attempt_id,j.status AS job_status,
+                          q.held_attempt_id,q.fence_counter AS quota_fence_counter
+                   FROM attempts a JOIN jobs j ON j.job_id=a.job_id
+                   JOIN worker_quota_classes q
+                     ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
+                   WHERE a.attempt_id=?""",
+                (attempt_id,),
+            ).fetchone()
+            if (
+                row is None
+                or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+            ):
+                raise StateConflict("expired takeover is only for OPERATOR_HARNESS")
+            status = AttemptStatus(row["status"])
+            current_fence = int(row["fence_generation"])
+            if (
+                status not in _LEASE_ACTIVE_ATTEMPT_STATUSES
+                or JobStatus(row["job_status"]) != _ACTIVE_JOB_STATUS_BY_ATTEMPT[status]
+                or row["current_attempt_id"] != attempt_id
+                or row["held_attempt_id"] != attempt_id
+                or int(row["quota_fence_counter"]) != current_fence
+                or current_fence != int(expected_fence_generation)
+                or timestamp < int(row["lease_expires_at_ms"])
+            ):
+                raise StateConflict("expired OHF takeover preconditions failed")
+            authority = connection.execute(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM harness_session_epochs
+                   WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
+                  (SELECT COUNT(*) FROM process_generations g
+                   JOIN harness_session_epochs e
+                     ON e.session_epoch_id=g.session_epoch_id
+                   WHERE e.attempt_id=? AND g.executive_writer_held=1) AS writers
+                """,
+                (attempt_id, attempt_id),
+            ).fetchone()
+            cardinality = (int(authority["current_epochs"]), int(authority["writers"]))
+            if cardinality not in {(0, 0), (1, 1)}:
+                raise StateConflict(
+                    "expired OHF takeover found incoherent epoch/writer cardinality"
+                )
+            next_fence = current_fence + 1
+            expiry = timestamp + duration * 1000
+            quota = connection.execute(
+                """UPDATE worker_quota_classes SET fence_counter=?,updated_at_ms=?,version=version+1
+                   WHERE worker_id=? AND quota_class=? AND held_attempt_id=? AND fence_counter=?""",
+                (
+                    next_fence,
+                    timestamp,
+                    row["worker_id"],
+                    row["quota_class"],
+                    attempt_id,
+                    current_fence,
+                ),
+            )
+            attempt = connection.execute(
+                """UPDATE attempts SET fence_generation=?,lease_token=?,lease_owner=?,
+                          lease_expires_at_ms=?,heartbeat_at_ms=?,updated_at_ms=?,version=version+1
+                   WHERE attempt_id=? AND fence_generation=? AND lease_expires_at_ms<=?
+                     AND status IN ('CLAIMED','RUNNING','CHECKPOINTED','CANCEL_REQUESTED')""",
+                (
+                    next_fence,
+                    token,
+                    owner,
+                    expiry,
+                    timestamp,
+                    timestamp,
+                    attempt_id,
+                    current_fence,
+                    timestamp,
+                ),
+            )
+            if quota.rowcount != 1 or attempt.rowcount != 1:
+                raise StateConflict("expired OHF takeover lost its CAS race")
+            self.store.append_event(
+                connection,
+                aggregate_type="attempt",
+                aggregate_id=attempt_id,
+                event_type="OHF_EXPIRED_LEASE_TAKEN_OVER",
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=attempt_id,
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={
+                    "previous_fence_generation": current_fence,
+                    "fence_generation": next_fence,
+                    "lease_owner": owner,
+                    "lease_expires_at_ms": expiry,
+                },
+                timestamp_ms=timestamp,
+            )
+        value = self.get_attempt(attempt_id)
+        assert value is not None
+        return AttemptLease(attempt=value, lease_token=token)
 
     def record_process(
         self,
@@ -2975,7 +3336,10 @@ class AttemptRegistry:
         else:
             if int(pid) <= 0 or pgid is None or int(pgid) <= 0:
                 raise StateConflict("pid and pgid must be positive")
-            if not str(process_start_identity or "").strip() or not str(boot_id or "").strip():
+            if (
+                not str(process_start_identity or "").strip()
+                or not str(boot_id or "").strip()
+            ):
                 raise StateConflict(
                     "a local process requires process_start_identity and boot_id"
                 )
@@ -2995,11 +3359,18 @@ class AttemptRegistry:
                 statuses={AttemptStatus.CLAIMED},
             )
             if row["pid"] is not None or row["provider_session_id"] is not None:
-                raise StateConflict(f"attempt {attempt_id} already has a process identity")
+                raise StateConflict(
+                    f"attempt {attempt_id} already has a process identity"
+                )
+            if row["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value:
+                raise StateConflict(
+                    "OPERATOR_HARNESS may not write legacy Attempt identity"
+                )
             connection.execute(
                 """
                 UPDATE attempts
-                SET pid=?,pgid=?,process_start_identity=?,boot_id=?,provider_session_id=?,
+                SET execution_mode=COALESCE(execution_mode,'SEALED_WORKER'),
+                    pid=?,pgid=?,process_start_identity=?,boot_id=?,provider_session_id=?,
                     stdout_path=?,stderr_path=?,result_path=?,launch_metadata_json=?,
                     updated_at_ms=?,version=version+1
                 WHERE attempt_id=? AND status='CLAIMED'
@@ -3007,9 +3378,11 @@ class AttemptRegistry:
                 (
                     int(pid) if pid is not None else None,
                     int(pgid) if pgid is not None else None,
-                    str(process_start_identity).strip()
-                    if process_start_identity is not None
-                    else None,
+                    (
+                        str(process_start_identity).strip()
+                        if process_start_identity is not None
+                        else None
+                    ),
                     str(boot_id).strip() if boot_id is not None else None,
                     provider_session,
                     str(stdout_path) if stdout_path is not None else None,
@@ -3060,6 +3433,10 @@ class AttemptRegistry:
                 raise StateConflict(
                     f"attempt {attempt_id} has no durable process/provider identity"
                 )
+            if row["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value:
+                raise StateConflict(
+                    "OPERATOR_HARNESS running transition is owned by harness state"
+                )
             if required_launch_attestation_schema is not None:
                 metadata = _json_loads(row["launch_metadata_json"], fallback={})
                 attestation = (
@@ -3085,28 +3462,41 @@ class AttemptRegistry:
                     "launch_nonce",
                     "process_identity",
                 }
-                if not isinstance(attestation, dict) or not required.issubset(attestation):
+                if not isinstance(attestation, dict) or not required.issubset(
+                    attestation
+                ):
                     raise StateConflict(
                         f"attempt {attempt_id} has no complete launch attestation"
                     )
-                if attestation.get("schema_version") != required_launch_attestation_schema:
+                if (
+                    attestation.get("schema_version")
+                    != required_launch_attestation_schema
+                ):
                     raise StateConflict(
                         f"attempt {attempt_id} launch attestation schema is not accepted"
                     )
-                if not isinstance(attestation.get("rendered_argv"), list) or not attestation[
-                    "rendered_argv"
-                ]:
+                if (
+                    not isinstance(attestation.get("rendered_argv"), list)
+                    or not attestation["rendered_argv"]
+                ):
                     raise StateConflict("launch attestation has no rendered argv")
                 environment_keys = attestation.get("environment_keys")
                 if (
                     not isinstance(environment_keys, list)
-                    or any(not isinstance(key, str) or not key for key in environment_keys)
+                    or any(
+                        not isinstance(key, str) or not key for key in environment_keys
+                    )
                     or len(environment_keys) != len(set(environment_keys))
                 ):
-                    raise StateConflict("launch attestation environment allow-list is invalid")
+                    raise StateConflict(
+                        "launch attestation environment allow-list is invalid"
+                    )
                 for digest_field in ("permission_profile_sha256", "prompt_sha256"):
                     digest = attestation.get(digest_field)
-                    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                    if (
+                        not isinstance(digest, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                    ):
                         raise StateConflict(
                             f"launch attestation {digest_field} is not a SHA-256"
                         )
@@ -3178,7 +3568,13 @@ class AttemptRegistry:
                 },
             )
             if row["exit_code"] is not None:
-                raise StateConflict(f"attempt {attempt_id} already has an exit observation")
+                raise StateConflict(
+                    f"attempt {attempt_id} already has an exit observation"
+                )
+            if row["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value:
+                raise StateConflict(
+                    "OPERATOR_HARNESS may not write legacy Attempt identity"
+                )
             if (
                 provider_session is not None
                 and row["provider_session_id"] is not None
@@ -3240,7 +3636,9 @@ class AttemptRegistry:
                 statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
             )
             expected = int(row["checkpoint_sequence"]) + 1
-            sequence = expected if checkpoint_sequence is None else int(checkpoint_sequence)
+            sequence = (
+                expected if checkpoint_sequence is None else int(checkpoint_sequence)
+            )
             if sequence != expected:
                 raise StateConflict(
                     f"attempt {attempt_id} expected checkpoint sequence {expected}, got {sequence}"
@@ -3256,7 +3654,14 @@ class AttemptRegistry:
                     lease_expires_at_ms=?,updated_at_ms=?,version=version+1
                 WHERE attempt_id=?
                 """,
-                (sequence, _json_dumps(checkpoint), timestamp, expiry, timestamp, attempt_id),
+                (
+                    sequence,
+                    _json_dumps(checkpoint),
+                    timestamp,
+                    expiry,
+                    timestamp,
+                    attempt_id,
+                ),
             )
             connection.execute(
                 """
@@ -3281,6 +3686,25 @@ class AttemptRegistry:
         assert job is not None
         return job
 
+    @staticmethod
+    def _require_ohf_shutdown_before_legacy_terminal(
+        connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> None:
+        if row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value:
+            return
+        active = connection.execute(
+            """SELECT 1 FROM harness_session_epochs e
+               LEFT JOIN process_generations g ON g.session_epoch_id=e.session_epoch_id
+               WHERE e.attempt_id=?
+                 AND (e.state='CURRENT' OR COALESCE(g.executive_writer_held,0)=1)
+               LIMIT 1""",
+            (row["attempt_id"],),
+        ).fetchone()
+        if active is not None:
+            raise StateConflict(
+                "OHF Attempt requires shutdown/abandon evidence before legacy terminal transition"
+            )
+
     def _terminal(
         self,
         attempt_id: str,
@@ -3303,6 +3727,7 @@ class AttemptRegistry:
                 timestamp=timestamp,
                 statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
             )
+            self._require_ohf_shutdown_before_legacy_terminal(connection, row)
             if status is AttemptStatus.COMPLETED:
                 _assert_parent_aggregation_allowed(
                     connection, parent_job_id=str(row["job_id"])
@@ -3437,6 +3862,10 @@ class AttemptRegistry:
                 raise StateConflict(
                     f"attempt {attempt_id} has no durable process/provider identity to verify"
                 )
+            if row["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value:
+                raise StateConflict(
+                    "OPERATOR_HARNESS LOST transition is owned by harness reconciliation"
+                )
             error = {
                 "reason": reason,
                 "verified_process_absent": True,
@@ -3504,11 +3933,14 @@ class AttemptRegistry:
             timestamp=timestamp,
             statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
         )
+        self._require_ohf_shutdown_before_legacy_terminal(connection, guarded)
         checkpoint = (
             JobPayload.from_value(payload).to_dict() if payload is not None else None
         )
         checkpoint_json = (
-            _json_dumps(checkpoint) if checkpoint is not None else guarded["checkpoint_json"]
+            _json_dumps(checkpoint)
+            if checkpoint is not None
+            else guarded["checkpoint_json"]
         )
         checkpoint_sequence = int(guarded["checkpoint_sequence"]) + (
             1 if payload is not None else 0
@@ -3608,6 +4040,7 @@ class AttemptRegistry:
                 timestamp=timestamp,
                 statuses={AttemptStatus.CANCEL_REQUESTED},
             )
+            self._require_ohf_shutdown_before_legacy_terminal(connection, row)
             connection.execute(
                 """
                 UPDATE attempts SET status='CANCELLED',lease_token=NULL,finished_at_ms=?,
@@ -3666,9 +4099,7 @@ class AttemptRegistry:
         with self.store.transaction() as connection:
             target_clause = " AND a.attempt_id=?" if attempt_id is not None else ""
             parameters: tuple[Any, ...] = (
-                (timestamp, str(attempt_id))
-                if attempt_id is not None
-                else (timestamp,)
+                (timestamp, str(attempt_id)) if attempt_id is not None else (timestamp,)
             )
             rows = connection.execute(
                 f"""
@@ -3687,7 +4118,10 @@ class AttemptRegistry:
             ).fetchall()
             for row in rows:
                 attempt_id = str(row["attempt_id"])
-                if row["current_attempt_id"] != attempt_id or row["held_attempt_id"] != attempt_id:
+                if (
+                    row["current_attempt_id"] != attempt_id
+                    or row["held_attempt_id"] != attempt_id
+                ):
                     raise PersistenceError(
                         f"expired attempt {attempt_id} has inconsistent current links"
                     )
@@ -3696,13 +4130,50 @@ class AttemptRegistry:
                         f"expired attempt {attempt_id} has an inconsistent quota fence"
                     )
                 attempt_status = AttemptStatus(row["status"])
-                if JobStatus(row["job_status"]) != _ACTIVE_JOB_STATUS_BY_ATTEMPT[attempt_status]:
+                if (
+                    JobStatus(row["job_status"])
+                    != _ACTIVE_JOB_STATUS_BY_ATTEMPT[attempt_status]
+                ):
                     raise PersistenceError(
                         f"expired attempt {attempt_id} has an inconsistent job state"
                     )
-                cancel_was_requested = (
-                    attempt_status == AttemptStatus.CANCEL_REQUESTED
-                )
+                if row["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value:
+                    error = {
+                        "reason": "ohf_lease_expired_fenced",
+                        "expired_at_ms": int(row["lease_expires_at_ms"]),
+                    }
+                    connection.execute(
+                        """UPDATE attempts
+                           SET error_json=?,updated_at_ms=?,version=version+1
+                           WHERE attempt_id=? AND lease_expires_at_ms<=?""",
+                        (_json_dumps(error), timestamp, attempt_id, timestamp),
+                    )
+                    command_id = (
+                        f"ohf-expiry-fence:{attempt_id}:{row['fence_generation']}"
+                    )
+                    if (
+                        self.store.get_event_by_command_id(
+                            command_id, connection=connection
+                        )
+                        is None
+                    ):
+                        self.store.append_event(
+                            connection,
+                            aggregate_type="attempt",
+                            aggregate_id=attempt_id,
+                            event_type="OHF_LEASE_EXPIRED_FENCED",
+                            command_id=command_id,
+                            actor="reconciler",
+                            job_id=str(row["job_id"]),
+                            attempt_id=attempt_id,
+                            worker_id=str(row["worker_id"]),
+                            quota_class=str(row["quota_class"]),
+                            payload=error,
+                            timestamp_ms=timestamp,
+                        )
+                    lost_ids.append(attempt_id)
+                    continue
+                cancel_was_requested = attempt_status == AttemptStatus.CANCEL_REQUESTED
                 error = {
                     "reason": "lease_expired",
                     "expired_at_ms": int(row["lease_expires_at_ms"]),
@@ -3723,9 +4194,11 @@ class AttemptRegistry:
                     WHERE job_id=? AND current_attempt_id=?
                     """,
                     (
-                        JobStatus.CANCELLED.value
-                        if cancel_was_requested
-                        else JobStatus.LOST.value,
+                        (
+                            JobStatus.CANCELLED.value
+                            if cancel_was_requested
+                            else JobStatus.LOST.value
+                        ),
                         timestamp,
                         row["job_id"],
                         attempt_id,
@@ -3772,6 +4245,2429 @@ class AttemptRegistry:
         ]
 
     restart_reconcile = reconcile_expired
+
+
+def _ohf_jsonable(value: Any) -> Any:
+    if dataclasses.is_dataclass(value):
+        return _ohf_jsonable(dataclasses.asdict(value))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _ohf_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_ohf_jsonable(item) for item in value]
+    return value
+
+
+def _ohf_json_digest(value: Any) -> tuple[str, str]:
+    encoded = json.dumps(
+        _ohf_jsonable(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _ohf_process(process: ProcessIdentityObservation) -> tuple[int, int, str, str]:
+    try:
+        pid, pgid = int(process.pid), int(process.pgid)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise StateConflict("OHF process identity is incomplete") from exc
+    start, boot = (
+        str(process.process_start_identity or "").strip(),
+        str(process.boot_id or "").strip(),
+    )
+    if pid <= 0 or pgid <= 0 or not start or not boot:
+        raise StateConflict("OHF process identity is incomplete")
+    return pid, pgid, start, boot
+
+
+class OperatorHarnessRegistry:
+    """The sole durable OHF state-plane; it owns no provider or process calls."""
+
+    def __init__(self, store: RuntimeStore) -> None:
+        self.store = store
+
+    def _leased(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        attempt_id: str,
+        fence_generation: int,
+        lease_token: str,
+        timestamp: int,
+        statuses: set[AttemptStatus] | None = None,
+    ) -> sqlite3.Row:
+        row = AttemptRegistry(self.store)._leased_row(
+            connection,
+            attempt_id=attempt_id,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+            timestamp=timestamp,
+            statuses=statuses or _LEASE_ACTIVE_ATTEMPT_STATUSES,
+        )
+        profile_json = row["requested_execution_profile_json"]
+        profile_digest = row["requested_execution_profile_digest"]
+        if (
+            row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+            or not profile_json
+            or not profile_digest
+            or hashlib.sha256(str(profile_json).encode("utf-8")).hexdigest()
+            != profile_digest
+        ):
+            raise StateConflict("attempt has no valid sealed OPERATOR_HARNESS profile")
+        return row
+
+    def _event(
+        self, connection: sqlite3.Connection, command_id: str
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            "SELECT * FROM events WHERE command_id=?", (command_id,)
+        ).fetchone()
+
+    def _owned_generation(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        leased: sqlite3.Row,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        require_current: bool = False,
+        require_writer: bool = False,
+    ) -> sqlite3.Row:
+        durable = connection.execute(
+            """SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,
+                      e.epoch_number,e.state,e.provider_session_id AS epoch_session
+               FROM process_generations g JOIN harness_session_epochs e
+                 ON e.session_epoch_id=g.session_epoch_id
+               WHERE e.session_epoch_id=? AND g.process_generation_id=?""",
+            (epoch.session_epoch_id, generation.process_generation_id),
+        ).fetchone()
+        if (
+            durable is None
+            or durable["attempt_id"] != leased["attempt_id"]
+            or durable["attempt_id"] != epoch.attempt_id
+            or durable["epoch_worker"] != leased["worker_id"]
+            or durable["epoch_worker"] != epoch.worker_id
+            or int(durable["epoch_number"]) != epoch.epoch_number
+            or durable["session_epoch_id"] != generation.session_epoch_id
+            or durable["worker_id"] != leased["worker_id"]
+            or durable["worker_id"] != generation.worker_id
+            or int(durable["generation_number"]) != generation.generation_number
+            or (require_current and durable["state"] != SessionEpochState.CURRENT.value)
+            or (require_writer and not durable["executive_writer_held"])
+        ):
+            raise StateConflict(
+                "OHF epoch/generation refs are not exactly owned by the lease"
+            )
+        return durable
+
+    def _receipt(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        op: OperationId,
+        kind: OperationReceiptKind,
+        row: sqlite3.Row,
+        payload: dict[str, Any],
+    ) -> None:
+        opposite = {
+            OperationReceiptKind.APPLIED: OperationReceiptKind.EFFECT_UNKNOWN,
+            OperationReceiptKind.EFFECT_UNKNOWN: OperationReceiptKind.APPLIED,
+        }.get(kind)
+        if (
+            opposite is not None
+            and self._event(connection, operation_receipt_command_id(op, opposite))
+            is not None
+        ):
+            raise StateConflict(
+                f"operation cannot have both {kind.value} and {opposite.value} receipts"
+            )
+        command_id = (
+            op.command_id
+            if kind is OperationReceiptKind.INTENT
+            else operation_receipt_command_id(op, kind)
+        )
+        self.store.append_event(
+            connection,
+            aggregate_type="operator_operation",
+            aggregate_id=op.command_id,
+            event_type=kind.value,
+            command_id=command_id,
+            actor="supervisor",
+            job_id=str(row["job_id"]),
+            attempt_id=str(row["attempt_id"]),
+            worker_id=str(row["worker_id"]),
+            quota_class=str(row["quota_class"]),
+            payload=payload,
+        )
+
+    def seal_operator_harness_attempt(
+        self,
+        attempt_id: str,
+        *,
+        fence_generation: int,
+        lease_token: str,
+        requested: RequestedExecutionProfile,
+    ) -> Attempt:
+        payload, digest = _ohf_json_digest(requested)
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = AttemptRegistry(self.store)._leased_row(
+                connection,
+                attempt_id=attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.CLAIMED,
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            if (
+                requested.worker_id != row["worker_id"]
+                or requested.authority_policy_hash != row["authority_policy_hash"]
+            ):
+                raise StateConflict("requested profile does not match Attempt")
+            if row["execution_mode"] not in {
+                None,
+                AttemptExecutionMode.OPERATOR_HARNESS.value,
+            } or row["requested_execution_profile_json"] not in {None, payload}:
+                raise StateConflict("attempt execution mode/profile already sealed")
+            if row["requested_execution_profile_json"] is None:
+                if row["status"] != AttemptStatus.CLAIMED.value:
+                    raise StateConflict(
+                        "only a CLAIMED Attempt may seal its first OHF profile"
+                    )
+                connection.execute(
+                    """
+                    UPDATE attempts
+                    SET execution_mode='OPERATOR_HARNESS',
+                        requested_execution_profile_json=?,
+                        requested_execution_profile_digest=?,
+                        updated_at_ms=?,version=version+1
+                    WHERE attempt_id=?
+                    """,
+                    (payload, digest, timestamp, attempt_id),
+                )
+                self.store.append_event(
+                    connection,
+                    aggregate_type="attempt",
+                    aggregate_id=attempt_id,
+                    event_type="OHF_PROFILE_SEALED",
+                    actor="supervisor",
+                    job_id=str(row["job_id"]),
+                    attempt_id=attempt_id,
+                    worker_id=str(row["worker_id"]),
+                    quota_class=str(row["quota_class"]),
+                    payload={"profile_digest": digest},
+                    timestamp_ms=timestamp,
+                )
+        value = AttemptRegistry(self.store).get_attempt(attempt_id)
+        assert value is not None
+        return value
+
+    def reserve_start(
+        self,
+        attempt_id: str,
+        *,
+        fence_generation: int,
+        lease_token: str,
+        operation_id: OperationId,
+    ) -> tuple[SessionEpochRef, ProcessGenerationRef]:
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.CLAIMED,
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            seal = connection.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE aggregate_type='attempt' AND aggregate_id=?
+                  AND event_type='OHF_PROFILE_SEALED'
+                  AND attempt_id=? AND worker_id=?
+                ORDER BY event_id DESC LIMIT 1
+                """,
+                (attempt_id, attempt_id, row["worker_id"]),
+            ).fetchone()
+            seal_payload = (
+                _json_loads(seal["payload_json"], fallback={}) if seal else {}
+            )
+            if seal is None or seal_payload != {
+                "profile_digest": row["requested_execution_profile_digest"]
+            }:
+                raise StateConflict(
+                    "TX-2 requires an exact committed TX-1 profile seal"
+                )
+            existing_intent = self._event(connection, operation_id.command_id)
+            if existing_intent is not None:
+                existing_payload = _json_loads(
+                    existing_intent["payload_json"], fallback={}
+                )
+                allocated = connection.execute(
+                    """SELECT e.*,g.process_generation_id,g.generation_number,
+                                      g.worker_id AS generation_worker,g.executive_writer_held
+                       FROM harness_session_epochs e JOIN process_generations g
+                         ON g.session_epoch_id=e.session_epoch_id
+                       WHERE e.session_epoch_id=? AND g.process_generation_id=?""",
+                    (
+                        existing_payload.get("session_epoch_id"),
+                        existing_payload.get("process_generation_id"),
+                    ),
+                ).fetchone()
+                if (
+                    existing_intent["event_type"] != OperationReceiptKind.INTENT.value
+                    or existing_intent["aggregate_id"] != operation_id.command_id
+                    or existing_payload.get("operation_kind")
+                    != OperationKind.START_SESSION.value
+                    or existing_payload.get("attempt_id") != attempt_id
+                    or allocated is None
+                    or allocated["attempt_id"] != attempt_id
+                    or allocated["state"] != SessionEpochState.CURRENT.value
+                    or int(allocated["generation_number"]) != 1
+                    or not allocated["executive_writer_held"]
+                    or self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.APPLIED
+                        ),
+                    )
+                    is not None
+                    or self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.EFFECT_UNKNOWN
+                        ),
+                    )
+                    is not None
+                ):
+                    raise StateConflict("OHF start operation is not retryable")
+                return (
+                    SessionEpochRef(
+                        str(allocated["session_epoch_id"]),
+                        attempt_id,
+                        str(allocated["worker_id"]),
+                        int(allocated["epoch_number"]),
+                    ),
+                    ProcessGenerationRef(
+                        str(allocated["process_generation_id"]),
+                        str(allocated["session_epoch_id"]),
+                        1,
+                        str(allocated["generation_worker"]),
+                    ),
+                )
+            if connection.execute(
+                "SELECT 1 FROM harness_session_epochs WHERE attempt_id=? AND state='CURRENT'",
+                (attempt_id,),
+            ).fetchone():
+                raise StateConflict("CURRENT epoch already exists")
+            epoch_stats = connection.execute(
+                """
+                SELECT COUNT(*) AS n,
+                       COALESCE(MIN(epoch_number),0) AS first,
+                       COALESCE(MAX(epoch_number),0) AS last
+                FROM harness_session_epochs
+                WHERE attempt_id=?
+                """,
+                (attempt_id,),
+            ).fetchone()
+            assert epoch_stats is not None
+            if int(epoch_stats["n"]):
+                if int(epoch_stats["first"]) != 1 or int(epoch_stats["n"]) != int(
+                    epoch_stats["last"]
+                ):
+                    raise StateConflict("OHF epoch ordinals are not contiguous")
+                unsafe = connection.execute(
+                    """SELECT 1 FROM harness_session_epochs e
+                       LEFT JOIN process_generations g ON g.session_epoch_id=e.session_epoch_id
+                       WHERE e.attempt_id=? AND (e.state!='ABANDONED' OR COALESCE(g.executive_writer_held,0)!=0)
+                       LIMIT 1""",
+                    (attempt_id,),
+                ).fetchone()
+                if unsafe is not None:
+                    raise StateConflict(
+                        "a replacement epoch requires only abandoned writer-free history"
+                    )
+            elif row["status"] != AttemptStatus.CLAIMED.value:
+                raise StateConflict("the first epoch requires a CLAIMED Attempt")
+            epoch_number = int(epoch_stats["last"]) + 1
+            eid, gid = f"ohf-epoch-{uuid4().hex}", f"ohf-generation-{uuid4().hex}"
+            connection.execute(
+                """
+                INSERT INTO harness_session_epochs(
+                    session_epoch_id,attempt_id,worker_id,epoch_number,state,created_at_ms
+                ) VALUES(?,?,?,?, 'CURRENT',?)
+                """,
+                (eid, attempt_id, row["worker_id"], epoch_number, timestamp),
+            )
+            connection.execute(
+                """
+                INSERT INTO process_generations(
+                    process_generation_id,session_epoch_id,worker_id,generation_number,
+                    started_at_ms,executive_writer_held,provider_writer_state,created_at_ms
+                ) VALUES(?,?,?,?,?,1,'UNKNOWN',?)
+                """,
+                (gid, eid, row["worker_id"], 1, timestamp, timestamp),
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload={
+                    "schema_version": "mastermind.operator_harness_intent/v1",
+                    "operation_kind": "start_session",
+                    "attempt_id": attempt_id,
+                    "session_epoch_id": eid,
+                    "process_generation_id": gid,
+                    "worker_id": row["worker_id"],
+                    "provider_session_id": None,
+                },
+            )
+        return SessionEpochRef(
+            eid, attempt_id, str(row["worker_id"]), epoch_number
+        ), ProcessGenerationRef(gid, eid, 1, str(row["worker_id"]))
+
+    def bind_start_result(
+        self,
+        *,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        provider_session_id: str,
+        process: ProcessIdentityObservation,
+    ) -> ProcessGenerationRef:
+        session = str(provider_session_id or "").strip()
+        pid, pgid, start, boot = _ohf_process(process)
+        if not session:
+            raise StateConflict("TX-3 requires provider_session_id")
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=epoch.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.CLAIMED,
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            intent = self._event(connection, operation_id.command_id)
+            item = connection.execute(
+                """
+                SELECT g.*,e.provider_session_id AS epoch_session,e.state
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            intent_payload = (
+                _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            )
+            expected_intent = {
+                "schema_version": "mastermind.operator_harness_intent/v1",
+                "operation_kind": OperationKind.START_SESSION.value,
+                "attempt_id": epoch.attempt_id,
+                "session_epoch_id": epoch.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": epoch.worker_id,
+                "provider_session_id": None,
+            }
+            if (
+                intent is None
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent["aggregate_type"] != "operator_operation"
+                or intent["aggregate_id"] != operation_id.command_id
+                or intent["attempt_id"] != epoch.attempt_id
+                or intent["worker_id"] != epoch.worker_id
+                or intent_payload != expected_intent
+                or item is None
+                or item["session_epoch_id"] != epoch.session_epoch_id
+                or item["state"] != "CURRENT"
+                or not item["executive_writer_held"]
+                or item["epoch_session"] not in {None, session}
+            ):
+                raise StateConflict("TX-3 target mismatch")
+            applied = self._event(
+                connection,
+                operation_receipt_command_id(
+                    operation_id, OperationReceiptKind.APPLIED
+                ),
+            )
+            if applied:
+                if (
+                    item["pid"] == pid
+                    and item["pgid"] == pgid
+                    and item["process_start_identity"] == start
+                    and item["boot_id"] == boot
+                    and item["epoch_session"] == session
+                ):
+                    return generation
+                raise StateConflict("TX-3 already applied differently")
+            connection.execute(
+                "UPDATE harness_session_epochs SET provider_session_id=? WHERE session_epoch_id=?",
+                (session, epoch.session_epoch_id),
+            )
+            connection.execute(
+                """
+                UPDATE process_generations
+                SET provider_session_id=?,pid=?,pgid=?,process_start_identity=?,
+                    boot_id=?,last_observed_at_ms=?
+                WHERE process_generation_id=?
+                """,
+                (
+                    session,
+                    pid,
+                    pgid,
+                    start,
+                    boot,
+                    timestamp,
+                    generation.process_generation_id,
+                ),
+            )
+            connection.execute(
+                "UPDATE attempts SET status='RUNNING',updated_at_ms=?,version=version+1 WHERE attempt_id=?",
+                (timestamp, epoch.attempt_id),
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.APPLIED,
+                row=row,
+                payload={
+                    "operation_kind": "start_session",
+                    "provider_session_id": session,
+                    "process_generation_id": generation.process_generation_id,
+                },
+            )
+        return generation
+
+    def seal_attestation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        fence_generation: int,
+        lease_token: str,
+        requested: RequestedExecutionProfile,
+        attestation: ObservedHarnessAttestation,
+    ) -> str:
+        """TX-4: immutable, per-generation observed attestation receipt."""
+        if not isinstance(attestation, ObservedHarnessAttestation):
+            raise StateConflict("TX-4 requires typed ObservedHarnessAttestation")
+        profile_json, profile_digest = _ohf_json_digest(requested)
+        payload, digest = _ohf_json_digest(attestation)
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT e.attempt_id,e.worker_id AS epoch_worker,
+                       g.session_epoch_id,g.worker_id,g.generation_number
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if not found:
+                raise StateConflict("unknown OHF generation")
+            if (
+                found["session_epoch_id"] != generation.session_epoch_id
+                or found["worker_id"] != generation.worker_id
+                or found["epoch_worker"] != generation.worker_id
+                or int(found["generation_number"]) != generation.generation_number
+            ):
+                raise StateConflict("TX-4 generation ref mismatch")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            old = connection.execute(
+                "SELECT observed_attestation_json FROM process_generations WHERE process_generation_id=?",
+                (generation.process_generation_id,),
+            ).fetchone()
+            if (
+                row["requested_execution_profile_json"] != profile_json
+                or row["requested_execution_profile_digest"] != profile_digest
+            ):
+                raise StateConflict(
+                    "TX-4 requested profile does not match the sealed Attempt"
+                )
+            if old and old["observed_attestation_json"] not in {None, payload}:
+                raise StateConflict("generation attestation is already sealed")
+            connection.execute(
+                """
+                UPDATE process_generations
+                SET observed_attestation_json=?,observed_attestation_digest=?
+                WHERE process_generation_id=?
+                """,
+                (payload, digest, generation.process_generation_id),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="process_generation",
+                aggregate_id=generation.process_generation_id,
+                event_type="OHF_ATTESTATION_OBSERVED",
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={"attestation_digest": digest},
+                timestamp_ms=timestamp,
+            )
+            comparison = compare_launch(requested, attestation)
+            self.store.append_event(
+                connection,
+                aggregate_type="process_generation",
+                aggregate_id=generation.process_generation_id,
+                event_type="OHF_LAUNCH_DECISION",
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={
+                    "decision": comparison.decision.value,
+                    "attestation_digest": digest,
+                },
+                timestamp_ms=timestamp,
+            )
+        return digest
+
+    def reserve_turn(
+        self,
+        *,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+    ) -> TurnRef:
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=epoch.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            item = connection.execute(
+                """
+                SELECT e.attempt_id,e.worker_id AS epoch_worker,e.epoch_number,
+                       e.provider_session_id,e.state,g.session_epoch_id,
+                       g.worker_id AS generation_worker,g.generation_number,
+                       g.executive_writer_held
+                FROM harness_session_epochs e
+                JOIN process_generations g
+                  ON g.session_epoch_id=e.session_epoch_id
+                WHERE e.session_epoch_id=? AND g.process_generation_id=?
+                """,
+                (epoch.session_epoch_id, generation.process_generation_id),
+            ).fetchone()
+            decision = connection.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE aggregate_type='process_generation' AND aggregate_id=?
+                  AND event_type='OHF_LAUNCH_DECISION'
+                ORDER BY event_id DESC LIMIT 1
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            decision_payload = (
+                _json_loads(decision["payload_json"], fallback={}) if decision else {}
+            )
+            if (
+                item is None
+                or item["attempt_id"] != epoch.attempt_id
+                or item["attempt_id"] != row["attempt_id"]
+                or item["epoch_worker"] != epoch.worker_id
+                or item["epoch_worker"] != row["worker_id"]
+                or int(item["epoch_number"]) != epoch.epoch_number
+                or item["session_epoch_id"] != generation.session_epoch_id
+                or item["generation_worker"] != generation.worker_id
+                or item["generation_worker"] != row["worker_id"]
+                or int(item["generation_number"]) != generation.generation_number
+                or item["state"] != "CURRENT"
+                or not item["executive_writer_held"]
+                or not item["provider_session_id"]
+                or decision_payload.get("decision") != LaunchDecision.ALLOW.value
+            ):
+                raise StateConflict(
+                    "TX-5 requires exact owned refs and typed attestation with ALLOW"
+                )
+            existing_intent = self._event(connection, operation_id.command_id)
+            if existing_intent is not None:
+                payload = _json_loads(existing_intent["payload_json"], fallback={})
+                if (
+                    existing_intent["event_type"] != OperationReceiptKind.INTENT.value
+                    or existing_intent["aggregate_id"] != operation_id.command_id
+                    or payload.get("operation_kind") != OperationKind.BEGIN_TURN.value
+                    or payload.get("attempt_id") != epoch.attempt_id
+                    or payload.get("session_epoch_id") != epoch.session_epoch_id
+                    or payload.get("process_generation_id")
+                    != generation.process_generation_id
+                    or payload.get("worker_id") != epoch.worker_id
+                    or self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.APPLIED
+                        ),
+                    )
+                    is not None
+                    or self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.EFFECT_UNKNOWN
+                        ),
+                    )
+                    is not None
+                ):
+                    raise StateConflict("TX-5 operation is not retryable")
+                return TurnRef(
+                    str(payload.get("turn_id")),
+                    epoch.session_epoch_id,
+                    generation.process_generation_id,
+                    epoch.attempt_id,
+                )
+            turn = TurnRef(
+                f"ohf-turn-{uuid4().hex}",
+                epoch.session_epoch_id,
+                generation.process_generation_id,
+                epoch.attempt_id,
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload={
+                    "schema_version": "mastermind.operator_harness_turn_intent/v1",
+                    "operation_kind": "begin_turn",
+                    "attempt_id": epoch.attempt_id,
+                    "session_epoch_id": epoch.session_epoch_id,
+                    "process_generation_id": generation.process_generation_id,
+                    "worker_id": row["worker_id"],
+                    "provider_session_id": item["provider_session_id"],
+                    "turn_id": turn.turn_id,
+                },
+            )
+        return turn
+
+    def acknowledge_turn(
+        self,
+        *,
+        turn: TurnRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        observation: TurnStartObservation | None = None,
+    ) -> bool:
+        timestamp = self.store.now_ms()
+        if observation is not None and not observation.acknowledged:
+            raise StateConflict("TX-5 provider did not acknowledge the turn")
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=turn.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            intent = self._event(connection, operation_id.command_id)
+            intent_payload = (
+                _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            )
+            durable = connection.execute(
+                """SELECT e.attempt_id,e.worker_id AS epoch_worker,e.provider_session_id,
+                          e.state,g.worker_id AS generation_worker,g.executive_writer_held
+                   FROM harness_session_epochs e JOIN process_generations g
+                     ON g.session_epoch_id=e.session_epoch_id
+                   WHERE e.session_epoch_id=? AND g.process_generation_id=?""",
+                (turn.session_epoch_id, turn.process_generation_id),
+            ).fetchone()
+            expected_intent = {
+                "schema_version": "mastermind.operator_harness_turn_intent/v1",
+                "operation_kind": OperationKind.BEGIN_TURN.value,
+                "attempt_id": turn.attempt_id,
+                "session_epoch_id": turn.session_epoch_id,
+                "process_generation_id": turn.process_generation_id,
+                "worker_id": str(row["worker_id"]),
+                "provider_session_id": (
+                    None if durable is None else durable["provider_session_id"]
+                ),
+                "turn_id": turn.turn_id,
+            }
+            if (
+                intent is None
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent["aggregate_id"] != operation_id.command_id
+                or intent["attempt_id"] != turn.attempt_id
+                or intent["worker_id"] != row["worker_id"]
+                or intent_payload != expected_intent
+                or durable is None
+                or durable["attempt_id"] != turn.attempt_id
+                or durable["epoch_worker"] != row["worker_id"]
+                or durable["generation_worker"] != row["worker_id"]
+                or durable["state"] != SessionEpochState.CURRENT.value
+                or not durable["executive_writer_held"]
+            ):
+                raise StateConflict("TX-5 target mismatch")
+            applied_payload = {
+                "schema_version": "mastermind.operator_harness_turn_applied/v1",
+                "operation_kind": OperationKind.BEGIN_TURN.value,
+                "attempt_id": turn.attempt_id,
+                "session_epoch_id": turn.session_epoch_id,
+                "process_generation_id": turn.process_generation_id,
+                "turn_id": turn.turn_id,
+                "provider_native_turn_id": (
+                    None if observation is None else observation.provider_native_turn_id
+                ),
+                "acknowledged": (
+                    True if observation is None else observation.acknowledged
+                ),
+            }
+            applied_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            applied = self._event(connection, applied_id)
+            if applied is not None:
+                if _json_loads(applied["payload_json"], fallback={}) == applied_payload:
+                    return
+                raise StateConflict("TX-5 already applied differently")
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.APPLIED,
+                row=row,
+                payload=applied_payload,
+            )
+
+    def generation_refs(
+        self, process_generation_id: str
+    ) -> tuple[SessionEpochRef, ProcessGenerationRef]:
+        """Reconstruct Executive identities from authoritative OHF rows."""
+
+        with self.store.read() as connection:
+            row = connection.execute(
+                """
+                SELECT g.process_generation_id,g.session_epoch_id,g.generation_number,
+                       g.worker_id,e.attempt_id,e.epoch_number
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (process_generation_id,),
+            ).fetchone()
+        if row is None:
+            raise StateConflict("unknown OHF generation")
+        epoch = SessionEpochRef(
+            str(row["session_epoch_id"]),
+            str(row["attempt_id"]),
+            str(row["worker_id"]),
+            int(row["epoch_number"]),
+        )
+        generation = ProcessGenerationRef(
+            str(row["process_generation_id"]),
+            str(row["session_epoch_id"]),
+            int(row["generation_number"]),
+            str(row["worker_id"]),
+        )
+        return epoch, generation
+
+    def current_writer_generation(self, epoch: SessionEpochRef) -> ProcessGenerationRef:
+        """Return the one durable Executive writer for a CURRENT epoch."""
+
+        with self.store.read() as connection:
+            row = connection.execute(
+                """
+                SELECT g.process_generation_id,g.session_epoch_id,
+                       g.generation_number,g.worker_id,e.attempt_id,e.state
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE e.session_epoch_id=? AND g.executive_writer_held=1
+                """,
+                (epoch.session_epoch_id,),
+            ).fetchone()
+        if (
+            row is None
+            or row["attempt_id"] != epoch.attempt_id
+            or row["worker_id"] != epoch.worker_id
+            or row["state"] != SessionEpochState.CURRENT.value
+        ):
+            raise StateConflict("CURRENT epoch has no matching Executive writer")
+        return ProcessGenerationRef(
+            str(row["process_generation_id"]),
+            str(row["session_epoch_id"]),
+            int(row["generation_number"]),
+            str(row["worker_id"]),
+        )
+
+    def record_effect_unknown(
+        self,
+        *,
+        attempt_id: str,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        phase: str,
+        detail: str,
+    ) -> bool:
+        """Persist EFFECT_UNKNOWN, returning False when APPLIED already won."""
+
+        timestamp = self.store.now_ms()
+        bounded_phase = str(phase or "").strip()[:64]
+        bounded_detail = str(detail or "").strip()[:512]
+        if not bounded_phase:
+            raise StateConflict("EFFECT_UNKNOWN phase is required")
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+            )
+            intent = self._event(connection, operation_id.command_id)
+            if (
+                intent is None
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent["attempt_id"] != attempt_id
+            ):
+                raise StateConflict("EFFECT_UNKNOWN requires its committed INTENT")
+            receipt_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.EFFECT_UNKNOWN
+            )
+            existing = self._event(connection, receipt_id)
+            payload = {
+                "schema_version": "mastermind.operator_harness_effect_unknown/v1",
+                "phase": bounded_phase,
+                "detail": bounded_detail,
+            }
+            if existing is not None:
+                if _json_loads(existing["payload_json"], fallback={}) == payload:
+                    return True
+                raise StateConflict("EFFECT_UNKNOWN already recorded differently")
+            if (
+                self._event(
+                    connection,
+                    operation_receipt_command_id(
+                        operation_id, OperationReceiptKind.APPLIED
+                    ),
+                )
+                is not None
+            ):
+                return False
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.EFFECT_UNKNOWN,
+                row=row,
+                payload=payload,
+            )
+            return True
+
+    def record_candidate_evidence(
+        self,
+        *,
+        turn: TurnRef,
+        candidate: CandidateResult,
+        events: Sequence[NormalizedEvent],
+        cursor: EventCursor,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Persist provider output as evidence only; never mutate Job completion."""
+
+        if candidate.complete_job_permitted:
+            raise StateConflict("OHF candidate cannot complete a Job")
+        candidate = dataclasses.replace(
+            candidate,
+            summary=(
+                None
+                if candidate.summary is None
+                else redact_evidence_text(candidate.summary)
+            ),
+        )
+        events = tuple(
+            dataclasses.replace(
+                event,
+                provider_event_id=(
+                    None
+                    if event.provider_event_id is None
+                    else redact_evidence_text(event.provider_event_id)
+                ),
+                payload_redacted=redact_evidence(event.payload_redacted),
+            )
+            for event in events
+        )
+        if (
+            candidate.attempt_id != turn.attempt_id
+            or candidate.session_epoch_id != turn.session_epoch_id
+            or candidate.process_generation_id != turn.process_generation_id
+            or cursor.attempt_id != turn.attempt_id
+            or cursor.session_epoch_id != turn.session_epoch_id
+            or cursor.process_generation_id != turn.process_generation_id
+            or cursor.turn_id != turn.turn_id
+        ):
+            raise StateConflict("candidate/event evidence is outside the turn scope")
+        for event in events:
+            if (
+                event.attempt_id != turn.attempt_id
+                or event.session_epoch_id != turn.session_epoch_id
+                or event.process_generation_id != turn.process_generation_id
+                or event.turn_id not in {None, turn.turn_id}
+            ):
+                raise StateConflict("normalized event is outside the turn scope")
+        timestamp = self.store.now_ms()
+        command_id = f"ohf-candidate:{turn.turn_id}"
+        payload = {
+            "schema_version": OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION,
+            "turn": _ohf_jsonable(turn),
+            "candidate": _ohf_jsonable(candidate),
+            "events": _ohf_jsonable(tuple(events)),
+            "cursor": _ohf_jsonable(cursor),
+        }
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=turn.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            generation = connection.execute(
+                """
+                SELECT 1 FROM process_generations
+                WHERE process_generation_id=? AND session_epoch_id=?
+                """,
+                (turn.process_generation_id, turn.session_epoch_id),
+            ).fetchone()
+            if generation is None:
+                raise StateConflict("candidate generation does not exist")
+            matching_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            for intent in connection.execute(
+                """SELECT * FROM events
+                   WHERE aggregate_type='operator_operation'
+                     AND event_type=? AND attempt_id=?""",
+                (OperationReceiptKind.INTENT.value, turn.attempt_id),
+            ):
+                intent_payload = _json_loads(intent["payload_json"], fallback={})
+                if intent_payload.get("turn_id") == turn.turn_id:
+                    matching_intents.append((intent, intent_payload))
+            if len(matching_intents) != 1:
+                raise StateConflict(
+                    "candidate requires exactly one matching TX-5 INTENT"
+                )
+            intent, intent_payload = matching_intents[0]
+            expected_intent = {
+                "schema_version": "mastermind.operator_harness_turn_intent/v1",
+                "operation_kind": OperationKind.BEGIN_TURN.value,
+                "attempt_id": turn.attempt_id,
+                "session_epoch_id": turn.session_epoch_id,
+                "process_generation_id": turn.process_generation_id,
+                "worker_id": str(row["worker_id"]),
+                "provider_session_id": intent_payload.get("provider_session_id"),
+                "turn_id": turn.turn_id,
+            }
+            if (
+                intent["aggregate_id"] != intent["command_id"]
+                or intent["worker_id"] != row["worker_id"]
+                or not intent_payload.get("provider_session_id")
+                or intent_payload != expected_intent
+            ):
+                raise StateConflict("candidate TX-5 INTENT provenance mismatch")
+            operation = OperationId(str(intent["command_id"]))
+            applied = self._event(
+                connection,
+                operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
+            )
+            applied_payload = (
+                _json_loads(applied["payload_json"], fallback={}) if applied else {}
+            )
+            if (
+                applied is None
+                or applied["aggregate_type"] != "operator_operation"
+                or applied["aggregate_id"] != operation.command_id
+                or applied["event_type"] != OperationReceiptKind.APPLIED.value
+                or applied["attempt_id"] != turn.attempt_id
+                or applied["worker_id"] != row["worker_id"]
+                or applied_payload.get("schema_version")
+                != "mastermind.operator_harness_turn_applied/v1"
+                or applied_payload.get("operation_kind")
+                != OperationKind.BEGIN_TURN.value
+                or applied_payload.get("attempt_id") != turn.attempt_id
+                or applied_payload.get("session_epoch_id") != turn.session_epoch_id
+                or applied_payload.get("process_generation_id")
+                != turn.process_generation_id
+                or applied_payload.get("turn_id") != turn.turn_id
+                or applied_payload.get("acknowledged") is not True
+                or set(applied_payload)
+                != {
+                    "schema_version",
+                    "operation_kind",
+                    "attempt_id",
+                    "session_epoch_id",
+                    "process_generation_id",
+                    "turn_id",
+                    "provider_native_turn_id",
+                    "acknowledged",
+                }
+            ):
+                raise StateConflict("candidate requires exact matching TX-5 APPLIED")
+            existing = self._event(connection, command_id)
+            if existing is not None:
+                if _json_loads(existing["payload_json"], fallback={}) == payload:
+                    return
+                raise StateConflict("candidate evidence already recorded differently")
+            self.store.append_event(
+                connection,
+                aggregate_type="operator_turn",
+                aggregate_id=turn.turn_id,
+                event_type="OHF_CANDIDATE_RESULT_RECORDED",
+                command_id=command_id,
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=turn.attempt_id,
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload=payload,
+                timestamp_ms=timestamp,
+            )
+
+    def reserve_generation_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        operation_kind: str,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Commit an internal stop/cancel INTENT before the adapter call."""
+
+        kind = str(operation_kind or "").strip()
+        if kind not in {"graceful_stop", "cancel"}:
+            raise StateConflict("unsupported internal generation operation")
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                    AttemptStatus.CANCEL_REQUESTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            if (
+                self._event(connection, operation_id.command_id) is not None
+                or found["state"] != SessionEpochState.CURRENT.value
+                or not found["executive_writer_held"]
+                or found["ended_at_ms"] is not None
+            ):
+                raise StateConflict("generation operation INTENT preconditions failed")
+            payload = {
+                "schema_version": OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+                "operation_kind": kind,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+            }
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload=payload,
+            )
+
+    def apply_generation_operation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        operation_kind: str,
+        observation: ReconcileObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Apply stop/cancel only from an exact committed internal INTENT."""
+
+        kind = str(operation_kind or "").strip()
+        if kind not in {"graceful_stop", "cancel"}:
+            raise StateConflict("unsupported internal generation operation")
+        if observation.process_liveness is not ProcessLiveness.PROVEN_DEAD:
+            raise StateConflict("generation operation requires PROVEN_DEAD")
+        if (
+            kind == "graceful_stop"
+            and observation.provider_writer_state is not ProviderWriterState.RELEASED
+        ):
+            raise StateConflict("graceful stop requires provider RELEASED")
+        pid, pgid, start, boot = _ohf_process(observation.observed_process)
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                    AttemptStatus.CANCEL_REQUESTED,
+                },
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            expected = {
+                "schema_version": OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+                "operation_kind": kind,
+                "attempt_id": str(found["attempt_id"]),
+                "session_epoch_id": generation.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": generation.worker_id,
+                "provider_session_id": found["epoch_session"],
+            }
+            intent = self._event(connection, operation_id.command_id)
+            intent_payload = (
+                _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            )
+            if (
+                intent is None
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent_payload != expected
+                or (
+                    found["pid"],
+                    found["pgid"],
+                    found["process_start_identity"],
+                    found["boot_id"],
+                )
+                != (pid, pgid, start, boot)
+                or observation.observed_provider_session_id
+                not in {None, found["epoch_session"]}
+            ):
+                raise StateConflict("generation operation result does not match INTENT")
+            applied_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            if self._event(connection, applied_id) is not None:
+                return
+            release = kind == "graceful_stop"
+            connection.execute(
+                """
+                UPDATE process_generations
+                SET ended_at_ms=?,last_observed_at_ms=?,provider_writer_state=?,
+                    executive_writer_held=?
+                WHERE process_generation_id=?
+                """,
+                (
+                    timestamp,
+                    timestamp,
+                    observation.provider_writer_state.value,
+                    0 if release else 1,
+                    generation.process_generation_id,
+                ),
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.APPLIED,
+                row=row,
+                payload={
+                    "schema_version": OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+                    "operation_kind": kind,
+                    "process_generation_id": generation.process_generation_id,
+                    "process_liveness": observation.process_liveness.value,
+                    "provider_writer_state": observation.provider_writer_state.value,
+                    "executive_writer_released": release,
+                },
+            )
+
+    def record_reconcile_observation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        observation: ReconcileObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Persist observations without accepting caller-supplied authority."""
+
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+            )
+            if observation.process_liveness is ProcessLiveness.UNKNOWN:
+                if observation.observed_process != ProcessIdentityObservation():
+                    raise StateConflict(
+                        "UNKNOWN liveness cannot assert process identity"
+                    )
+            else:
+                pid, pgid, start, boot = _ohf_process(observation.observed_process)
+                if (
+                    found["pid"],
+                    found["pgid"],
+                    found["process_start_identity"],
+                    found["boot_id"],
+                ) != (pid, pgid, start, boot):
+                    raise StateConflict("reconcile process identity mismatch")
+            if observation.observed_provider_session_id not in {
+                None,
+                found["epoch_session"],
+            }:
+                raise StateConflict("reconcile provider session mismatch")
+            if observation.observed_config_digest is not None:
+                attestation = _json_loads(
+                    found["observed_attestation_json"], fallback={}
+                )
+                if (
+                    attestation.get("effective_config_digest")
+                    != observation.observed_config_digest
+                ):
+                    raise StateConflict("reconcile config digest mismatch")
+            ended = (
+                timestamp
+                if observation.process_liveness is ProcessLiveness.PROVEN_DEAD
+                else found["ended_at_ms"]
+            )
+            connection.execute(
+                """
+                UPDATE process_generations
+                SET ended_at_ms=?,last_observed_at_ms=?,provider_writer_state=?
+                WHERE process_generation_id=?
+                """,
+                (
+                    ended,
+                    timestamp,
+                    observation.provider_writer_state.value,
+                    generation.process_generation_id,
+                ),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="process_generation",
+                aggregate_id=generation.process_generation_id,
+                event_type="OHF_RECONCILE_OBSERVED",
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={
+                    "schema_version": OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION,
+                    "process_generation_id": generation.process_generation_id,
+                    "observation": _ohf_jsonable(observation),
+                },
+                timestamp_ms=timestamp,
+            )
+
+    def record_hard_process_death(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        observation: ReconcileObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        if observation.process_liveness is not ProcessLiveness.PROVEN_DEAD:
+            raise StateConflict(
+                "hard process death requires typed PROVEN_DEAD observation"
+            )
+        self.record_reconcile_observation(
+            generation=generation,
+            observation=observation,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+        )
+
+    def record_graceful_stop(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        observation: ReconcileObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        if (
+            observation.process_liveness is not ProcessLiveness.PROVEN_DEAD
+            or observation.provider_writer_state is not ProviderWriterState.RELEASED
+        ):
+            raise StateConflict(
+                "TX-6 requires typed PROVEN_DEAD and RELEASED observation"
+            )
+        self.record_reconcile_observation(
+            generation=generation,
+            observation=observation,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+        )
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            found = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.state,e.epoch_number,
+                       e.worker_id AS epoch_worker
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if found is None:
+                raise StateConflict("unknown OHF generation")
+            row = self._leased(
+                connection,
+                attempt_id=str(found["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+            )
+            epoch = SessionEpochRef(
+                str(found["session_epoch_id"]),
+                str(found["attempt_id"]),
+                str(found["epoch_worker"]),
+                int(found["epoch_number"]),
+            )
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            if found["ended_at_ms"] is None:
+                raise StateConflict("TX-6 requires process PROVEN_DEAD")
+            connection.execute(
+                """
+                UPDATE process_generations
+                SET provider_writer_state='RELEASED',executive_writer_held=0,
+                    last_observed_at_ms=?
+                WHERE process_generation_id=?
+                """,
+                (timestamp, generation.process_generation_id),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="process_generation",
+                aggregate_id=generation.process_generation_id,
+                event_type="OHF_GRACEFUL_STOP",
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={"writer_released": True},
+                timestamp_ms=timestamp,
+            )
+
+    def record_provider_writer_observation(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        observation: ReconcileObservation,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        """Persist a typed observation without clearing Executive writer authority."""
+        self.record_reconcile_observation(
+            generation=generation,
+            observation=observation,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+        )
+
+    def abandon_epoch(
+        self, *, epoch: SessionEpochRef, fence_generation: int, lease_token: str
+    ) -> None:
+        """TX-8: only an observed-dead epoch may lose its Executive writer."""
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=epoch.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+            )
+            item = connection.execute(
+                """
+                SELECT state,worker_id,epoch_number
+                FROM harness_session_epochs
+                WHERE session_epoch_id=? AND attempt_id=?
+                """,
+                (epoch.session_epoch_id, epoch.attempt_id),
+            ).fetchone()
+            live = connection.execute(
+                "SELECT 1 FROM process_generations WHERE session_epoch_id=? AND ended_at_ms IS NULL",
+                (epoch.session_epoch_id,),
+            ).fetchone()
+            if (
+                item is None
+                or item["worker_id"] != epoch.worker_id
+                or item["worker_id"] != row["worker_id"]
+                or int(item["epoch_number"]) != epoch.epoch_number
+                or item["state"] != "CURRENT"
+                or live is not None
+            ):
+                raise StateConflict(
+                    "TX-8 requires an exact CURRENT epoch with all processes PROVEN_DEAD"
+                )
+            connection.execute(
+                "UPDATE harness_session_epochs SET state='ABANDONED',ended_at_ms=? WHERE session_epoch_id=?",
+                (timestamp, epoch.session_epoch_id),
+            )
+            connection.execute(
+                "UPDATE process_generations SET executive_writer_held=0 WHERE session_epoch_id=?",
+                (epoch.session_epoch_id,),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="harness_session_epoch",
+                aggregate_id=epoch.session_epoch_id,
+                event_type="OHF_EPOCH_ABANDONED",
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=epoch.attempt_id,
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={"transaction_group": "TX-8"},
+                timestamp_ms=timestamp,
+            )
+
+    def reserve_same_epoch_resume(
+        self,
+        *,
+        epoch: SessionEpochRef,
+        old_generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+    ) -> ProcessGenerationRef:
+        """TX-10: derive safety from stored evidence and allocate G2 only."""
+
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=epoch.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+            )
+            existing_intent = self._event(connection, operation_id.command_id)
+            if existing_intent is not None:
+                applied = self._event(
+                    connection,
+                    operation_receipt_command_id(
+                        operation_id, OperationReceiptKind.APPLIED
+                    ),
+                )
+                unknown = self._event(
+                    connection,
+                    operation_receipt_command_id(
+                        operation_id, OperationReceiptKind.EFFECT_UNKNOWN
+                    ),
+                )
+                existing_payload = _json_loads(
+                    existing_intent["payload_json"], fallback={}
+                )
+                allocated = connection.execute(
+                    """SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,
+                                      e.provider_session_id AS epoch_session,e.state
+                       FROM process_generations g
+                       JOIN harness_session_epochs e
+                         ON e.session_epoch_id=g.session_epoch_id
+                       WHERE g.process_generation_id=?""",
+                    (existing_payload.get("process_generation_id"),),
+                ).fetchone()
+                expected = {
+                    "operation_kind": OperationKind.RESUME_SESSION.value,
+                    "attempt_id": epoch.attempt_id,
+                    "session_epoch_id": epoch.session_epoch_id,
+                    "process_generation_id": (
+                        None
+                        if allocated is None
+                        else allocated["process_generation_id"]
+                    ),
+                    "worker_id": epoch.worker_id,
+                    "provider_session_id": (
+                        None if allocated is None else allocated["epoch_session"]
+                    ),
+                }
+                if (
+                    applied is not None
+                    or unknown is not None
+                    or existing_intent["event_type"]
+                    != OperationReceiptKind.INTENT.value
+                    or existing_intent["aggregate_type"] != "operator_operation"
+                    or existing_intent["aggregate_id"] != operation_id.command_id
+                    or existing_intent["attempt_id"] != epoch.attempt_id
+                    or existing_intent["worker_id"] != epoch.worker_id
+                    or allocated is None
+                    or allocated["session_epoch_id"] != epoch.session_epoch_id
+                    or allocated["epoch_worker"] != epoch.worker_id
+                    or allocated["state"] != SessionEpochState.CURRENT.value
+                    or int(allocated["generation_number"]) != 2
+                    or not allocated["executive_writer_held"]
+                    or existing_payload != expected
+                ):
+                    raise StateConflict("TX-10 existing operation is not retryable")
+                retry_generation = ProcessGenerationRef(
+                    str(allocated["process_generation_id"]),
+                    str(allocated["session_epoch_id"]),
+                    2,
+                    str(allocated["worker_id"]),
+                )
+                self._owned_generation(
+                    connection,
+                    leased=row,
+                    epoch=epoch,
+                    generation=retry_generation,
+                    require_current=True,
+                    require_writer=True,
+                )
+                return retry_generation
+            old = connection.execute(
+                """
+                SELECT g.*,e.state,e.provider_session_id AS epoch_session,
+                       e.worker_id AS epoch_worker
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=? AND e.session_epoch_id=?
+                """,
+                (
+                    old_generation.process_generation_id,
+                    epoch.session_epoch_id,
+                ),
+            ).fetchone()
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=old_generation,
+                require_current=True,
+                require_writer=True,
+            )
+            newest_number = int(
+                connection.execute(
+                    """
+                    SELECT COALESCE(MAX(generation_number),0)
+                    FROM process_generations WHERE session_epoch_id=?
+                    """,
+                    (epoch.session_epoch_id,),
+                ).fetchone()[0]
+            )
+            launch = connection.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE aggregate_type='process_generation' AND aggregate_id=?
+                  AND event_type='OHF_LAUNCH_DECISION'
+                ORDER BY event_id DESC LIMIT 1
+                """,
+                (old_generation.process_generation_id,),
+            ).fetchone()
+            reconcile = connection.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE aggregate_type='process_generation' AND aggregate_id=?
+                  AND event_type='OHF_RECONCILE_OBSERVED'
+                ORDER BY event_id DESC LIMIT 1
+                """,
+                (old_generation.process_generation_id,),
+            ).fetchone()
+            launch_payload = (
+                _json_loads(launch["payload_json"], fallback={}) if launch else {}
+            )
+            reconcile_payload = (
+                _json_loads(reconcile["payload_json"], fallback={}) if reconcile else {}
+            )
+            observed = reconcile_payload.get("observation") or {}
+            observed_process = observed.get("observed_process") or {}
+            if (
+                old is None
+                or old["state"] != SessionEpochState.CURRENT.value
+                or old["epoch_worker"] != epoch.worker_id
+                or not old["executive_writer_held"]
+                or old["ended_at_ms"] is None
+                or old["provider_writer_state"] != ProviderWriterState.RELEASED.value
+                or not old["provider_session_id"]
+                or old["provider_session_id"] != old["epoch_session"]
+                or int(old["generation_number"]) != 1
+                or newest_number != 1
+                or not old["observed_attestation_json"]
+                or not old["observed_attestation_digest"]
+                or launch_payload.get("decision") != LaunchDecision.ALLOW.value
+                or launch_payload.get("attestation_digest")
+                != old["observed_attestation_digest"]
+                or reconcile_payload.get("schema_version")
+                != OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION
+                or reconcile_payload.get("process_generation_id")
+                != old_generation.process_generation_id
+                or observed.get("process_liveness") != ProcessLiveness.PROVEN_DEAD.value
+                or observed.get("provider_writer_state")
+                != ProviderWriterState.RELEASED.value
+                or observed_process.get("pid") != old["pid"]
+                or observed_process.get("pgid") != old["pgid"]
+                or observed_process.get("process_start_identity")
+                != old["process_start_identity"]
+                or observed_process.get("boot_id") != old["boot_id"]
+            ):
+                raise StateConflict("TX-10 derived recovery preconditions failed")
+            generation = ProcessGenerationRef(
+                f"ohf-generation-{uuid4().hex}",
+                epoch.session_epoch_id,
+                2,
+                epoch.worker_id,
+            )
+            connection.execute(
+                """
+                UPDATE process_generations SET executive_writer_held=0
+                WHERE process_generation_id=?
+                """,
+                (old_generation.process_generation_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO process_generations(
+                  process_generation_id,session_epoch_id,worker_id,
+                  provider_session_id,generation_number,started_at_ms,
+                  executive_writer_held,provider_writer_state,created_at_ms
+                ) VALUES(?,?,?,?,?,?,1,'UNKNOWN',?)
+                """,
+                (
+                    generation.process_generation_id,
+                    epoch.session_epoch_id,
+                    row["worker_id"],
+                    old["provider_session_id"],
+                    2,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="process_generation",
+                aggregate_id=old_generation.process_generation_id,
+                event_type="OHF_RESUME_SAFETY_DERIVED",
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=epoch.attempt_id,
+                worker_id=epoch.worker_id,
+                quota_class=str(row["quota_class"]),
+                payload={
+                    "resume_safe": True,
+                    "derived_from_reconcile": True,
+                    "launch_decision": LaunchDecision.ALLOW.value,
+                    "attestation_digest": old["observed_attestation_digest"],
+                    "process_ended_at_ms": old["ended_at_ms"],
+                    "provider_writer_state": old["provider_writer_state"],
+                },
+                timestamp_ms=timestamp,
+            )
+            target = OperationIntentTarget(
+                OperationKind.RESUME_SESSION,
+                epoch.attempt_id,
+                epoch.session_epoch_id,
+                generation.process_generation_id,
+                epoch.worker_id,
+                str(old["provider_session_id"]),
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload=target.to_event_payload(),
+            )
+        return generation
+
+    def commit_provider_dispatch(
+        self,
+        *,
+        attempt_id: str,
+        operation_id: OperationId,
+        operation_kind: OperationKind | str,
+        fence_generation: int,
+        lease_token: str,
+    ) -> bool:
+        """Commit a provider-call boundary; False means fail-closed replay."""
+
+        timestamp = self.store.now_ms()
+        kind_value = (
+            operation_kind.value
+            if isinstance(operation_kind, OperationKind)
+            else str(operation_kind)
+        )
+        dispatch_id = f"{operation_id.command_id}:dispatch"
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+            )
+            intent = self._event(connection, operation_id.command_id)
+            intent_payload = (
+                _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            )
+            durable = connection.execute(
+                """
+                SELECT e.attempt_id,e.worker_id AS epoch_worker,e.state,
+                       e.provider_session_id AS epoch_session,
+                       g.worker_id AS generation_worker,g.executive_writer_held
+                FROM harness_session_epochs e
+                JOIN process_generations g
+                  ON g.session_epoch_id=e.session_epoch_id
+                WHERE e.session_epoch_id=? AND g.process_generation_id=?
+                """,
+                (
+                    intent_payload.get("session_epoch_id"),
+                    intent_payload.get("process_generation_id"),
+                ),
+            ).fetchone()
+            expected_keys = {
+                OperationKind.START_SESSION.value: {
+                    "schema_version",
+                    "operation_kind",
+                    "attempt_id",
+                    "session_epoch_id",
+                    "process_generation_id",
+                    "worker_id",
+                    "provider_session_id",
+                },
+                OperationKind.BEGIN_TURN.value: {
+                    "schema_version",
+                    "operation_kind",
+                    "attempt_id",
+                    "session_epoch_id",
+                    "process_generation_id",
+                    "worker_id",
+                    "provider_session_id",
+                    "turn_id",
+                },
+                OperationKind.RESUME_SESSION.value: {
+                    "operation_kind",
+                    "attempt_id",
+                    "session_epoch_id",
+                    "process_generation_id",
+                    "worker_id",
+                    "provider_session_id",
+                },
+                "interrupt_turn": {
+                    "schema_version",
+                    "operation_kind",
+                    "attempt_id",
+                    "session_epoch_id",
+                    "process_generation_id",
+                    "worker_id",
+                    "turn_id",
+                },
+            }.get(kind_value)
+            expected_schema = {
+                OperationKind.START_SESSION.value: "mastermind.operator_harness_intent/v1",
+                OperationKind.BEGIN_TURN.value: "mastermind.operator_harness_turn_intent/v1",
+                "interrupt_turn": "mastermind.operator_harness_turn_operation/v1",
+            }.get(kind_value)
+            if (
+                intent is None
+                or intent["command_id"] != operation_id.command_id
+                or intent["aggregate_type"] != "operator_operation"
+                or intent["aggregate_id"] != operation_id.command_id
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent["attempt_id"] != attempt_id
+                or intent["worker_id"] != row["worker_id"]
+                or intent["job_id"] != row["job_id"]
+                or intent["quota_class"] != row["quota_class"]
+                or intent_payload.get("operation_kind") != kind_value
+                or intent_payload.get("attempt_id") != attempt_id
+                or intent_payload.get("worker_id") != row["worker_id"]
+                or expected_keys is None
+                or set(intent_payload) != expected_keys
+                or (
+                    "schema_version" in expected_keys
+                    and intent_payload.get("schema_version") != expected_schema
+                )
+                or durable is None
+                or durable["attempt_id"] != attempt_id
+                or durable["epoch_worker"] != row["worker_id"]
+                or durable["generation_worker"] != row["worker_id"]
+                or durable["state"] != SessionEpochState.CURRENT.value
+                or not durable["executive_writer_held"]
+                or (
+                    "provider_session_id" in expected_keys
+                    and intent_payload.get("provider_session_id")
+                    != durable["epoch_session"]
+                )
+                or (
+                    "turn_id" in expected_keys
+                    and not str(intent_payload.get("turn_id") or "").strip()
+                )
+            ):
+                raise StateConflict(
+                    "provider dispatch requires matching operation INTENT"
+                )
+            existing = self._event(connection, dispatch_id)
+            if existing is not None:
+                if (
+                    self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.APPLIED
+                        ),
+                    )
+                    is not None
+                ):
+                    raise StateConflict("resume operation is already APPLIED")
+                if (
+                    self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.EFFECT_UNKNOWN
+                        ),
+                    )
+                    is None
+                ):
+                    self._receipt(
+                        connection,
+                        op=operation_id,
+                        kind=OperationReceiptKind.EFFECT_UNKNOWN,
+                        row=row,
+                        payload={
+                            "schema_version": "mastermind.operator_harness_effect_unknown/v1",
+                            "phase": f"{kind_value}_dispatch"[:64],
+                            "detail": "dispatch_committed_without_terminal_receipt",
+                        },
+                    )
+                return False
+            self.store.append_event(
+                connection,
+                aggregate_type="operator_operation",
+                aggregate_id=operation_id.command_id,
+                event_type="OHF_PROVIDER_DISPATCH_COMMITTED",
+                command_id=dispatch_id,
+                actor="supervisor",
+                job_id=str(row["job_id"]),
+                attempt_id=attempt_id,
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={
+                    "schema_version": "mastermind.operator_harness_provider_dispatch/v1",
+                    "operation_kind": kind_value,
+                },
+                timestamp_ms=timestamp,
+            )
+            return True
+
+    def reserve_turn_operation(
+        self,
+        *,
+        turn: TurnRef,
+        operation_id: OperationId,
+        operation_kind: str,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        kind = str(operation_kind or "").strip()
+        if kind != "interrupt_turn":
+            raise StateConflict("unsupported turn operation")
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=turn.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            durable = connection.execute(
+                """
+                SELECT e.attempt_id,e.worker_id AS epoch_worker,e.state,
+                       g.worker_id AS generation_worker,g.executive_writer_held
+                FROM harness_session_epochs e
+                JOIN process_generations g
+                  ON g.session_epoch_id=e.session_epoch_id
+                WHERE e.session_epoch_id=? AND g.process_generation_id=?
+                """,
+                (turn.session_epoch_id, turn.process_generation_id),
+            ).fetchone()
+            source = None
+            for event in connection.execute(
+                "SELECT * FROM events WHERE event_type=? AND attempt_id=?",
+                (OperationReceiptKind.INTENT.value, turn.attempt_id),
+            ):
+                payload = _json_loads(event["payload_json"], fallback={})
+                if (
+                    payload.get("operation_kind") == OperationKind.BEGIN_TURN.value
+                    and payload.get("turn_id") == turn.turn_id
+                ):
+                    source = (event, payload)
+                    break
+            source_applied = (
+                None
+                if source is None
+                else self._event(
+                    connection,
+                    operation_receipt_command_id(
+                        OperationId(str(source[0]["command_id"])),
+                        OperationReceiptKind.APPLIED,
+                    ),
+                )
+            )
+            if (
+                durable is None
+                or durable["attempt_id"] != row["attempt_id"]
+                or durable["epoch_worker"] != row["worker_id"]
+                or durable["generation_worker"] != row["worker_id"]
+                or durable["state"] != SessionEpochState.CURRENT.value
+                or not durable["executive_writer_held"]
+                or source is None
+                or source_applied is None
+            ):
+                raise StateConflict("turn operation lacks exact durable TX-5 ownership")
+            payload = {
+                "schema_version": "mastermind.operator_harness_turn_operation/v1",
+                "operation_kind": kind,
+                "attempt_id": turn.attempt_id,
+                "session_epoch_id": turn.session_epoch_id,
+                "process_generation_id": turn.process_generation_id,
+                "worker_id": str(row["worker_id"]),
+                "turn_id": turn.turn_id,
+            }
+            existing = self._event(connection, operation_id.command_id)
+            if existing is not None:
+                if (
+                    _json_loads(existing["payload_json"], fallback={}) == payload
+                    and self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.APPLIED
+                        ),
+                    )
+                    is None
+                    and self._event(
+                        connection,
+                        operation_receipt_command_id(
+                            operation_id, OperationReceiptKind.EFFECT_UNKNOWN
+                        ),
+                    )
+                    is None
+                ):
+                    return
+                raise StateConflict("turn operation is not retryable")
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload=payload,
+            )
+
+    def apply_turn_operation(
+        self,
+        *,
+        turn: TurnRef,
+        operation_id: OperationId,
+        operation_kind: str,
+        fence_generation: int,
+        lease_token: str,
+    ) -> None:
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=turn.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            intent = self._event(connection, operation_id.command_id)
+            expected = {
+                "schema_version": "mastermind.operator_harness_turn_operation/v1",
+                "operation_kind": "interrupt_turn",
+                "attempt_id": turn.attempt_id,
+                "session_epoch_id": turn.session_epoch_id,
+                "process_generation_id": turn.process_generation_id,
+                "worker_id": str(row["worker_id"]),
+                "turn_id": turn.turn_id,
+            }
+            if (
+                operation_kind != "interrupt_turn"
+                or intent is None
+                or _json_loads(intent["payload_json"], fallback={}) != expected
+            ):
+                raise StateConflict("turn operation INTENT mismatch")
+            if (
+                self._event(
+                    connection,
+                    operation_receipt_command_id(
+                        operation_id, OperationReceiptKind.APPLIED
+                    ),
+                )
+                is None
+            ):
+                self._receipt(
+                    connection,
+                    op=operation_id,
+                    kind=OperationReceiptKind.APPLIED,
+                    row=row,
+                    payload={
+                        "schema_version": "mastermind.operator_harness_turn_operation_applied/v1",
+                        "operation_kind": "interrupt_turn",
+                        "turn_id": turn.turn_id,
+                    },
+                )
+
+    def bind_resume_result(
+        self,
+        *,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        provider_session_id: str,
+        process: ProcessIdentityObservation,
+    ) -> ProcessGenerationRef:
+        """TX-11: validate full immutable INTENT in this transaction, then bind G2."""
+        session = str(provider_session_id or "").strip()
+        pid, pgid, start, boot = _ohf_process(process)
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased(
+                connection,
+                attempt_id=epoch.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+            )
+            intent = self._event(connection, operation_id.command_id)
+            item = connection.execute(
+                """
+                SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,
+                       e.provider_session_id AS epoch_session,e.state
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            self._owned_generation(
+                connection,
+                leased=row,
+                epoch=epoch,
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            payload = _json_loads(intent["payload_json"], fallback={}) if intent else {}
+            required = {
+                "operation_kind": "resume_session",
+                "attempt_id": epoch.attempt_id,
+                "session_epoch_id": epoch.session_epoch_id,
+                "process_generation_id": generation.process_generation_id,
+                "worker_id": epoch.worker_id,
+                "provider_session_id": None if item is None else item["epoch_session"],
+            }
+            resume_allocation = connection.execute(
+                """SELECT COUNT(*) FROM process_generations
+                   WHERE session_epoch_id=? AND generation_number=2
+                     AND executive_writer_held=1""",
+                (epoch.session_epoch_id,),
+            ).fetchone()[0]
+            tx10_safety = connection.execute(
+                """SELECT 1 FROM events safety
+                   JOIN process_generations old
+                     ON old.process_generation_id=safety.aggregate_id
+                   WHERE safety.aggregate_type='process_generation'
+                     AND safety.event_type='OHF_RESUME_SAFETY_DERIVED'
+                     AND safety.attempt_id=?
+                     AND old.session_epoch_id=? AND old.generation_number=1
+                     AND safety.event_id < ? LIMIT 1""",
+                (
+                    epoch.attempt_id,
+                    epoch.session_epoch_id,
+                    0 if intent is None else intent["event_id"],
+                ),
+            ).fetchone()
+            if (
+                intent is None
+                or item is None
+                or intent["command_id"] != operation_id.command_id
+                or intent["aggregate_type"] != "operator_operation"
+                or intent["aggregate_id"] != operation_id.command_id
+                or intent["event_type"] != OperationReceiptKind.INTENT.value
+                or intent["attempt_id"] != epoch.attempt_id
+                or intent["worker_id"] != epoch.worker_id
+                or set(payload) != set(required)
+                or any(payload.get(k) != v for k, v in required.items())
+                or item["state"] != "CURRENT"
+                or item["attempt_id"] != epoch.attempt_id
+                or item["session_epoch_id"] != epoch.session_epoch_id
+                or item["epoch_worker"] != epoch.worker_id
+                or item["worker_id"] != epoch.worker_id
+                or generation.session_epoch_id != epoch.session_epoch_id
+                or generation.worker_id != epoch.worker_id
+                or generation.generation_number != 2
+                or int(item["generation_number"]) != 2
+                or resume_allocation != 1
+                or tx10_safety is None
+                or not item["executive_writer_held"]
+                or not session
+                or session != item["epoch_session"]
+                or item["provider_session_id"] != session
+            ):
+                raise StateConflict("TX-11 intent target or provider session mismatch")
+            applied = self._event(
+                connection,
+                operation_receipt_command_id(
+                    operation_id, OperationReceiptKind.APPLIED
+                ),
+            )
+            if applied:
+                if (
+                    item["pid"] == pid
+                    and item["pgid"] == pgid
+                    and item["process_start_identity"] == start
+                    and item["boot_id"] == boot
+                ):
+                    return generation
+                raise StateConflict("TX-11 already applied differently")
+            if any(
+                item[name] is not None
+                for name in ("pid", "pgid", "process_start_identity", "boot_id")
+            ):
+                raise StateConflict("TX-11 refuses to overwrite process identity")
+            connection.execute(
+                """
+                UPDATE process_generations
+                SET pid=?,pgid=?,process_start_identity=?,boot_id=?,last_observed_at_ms=?
+                WHERE process_generation_id=?
+                """,
+                (pid, pgid, start, boot, timestamp, generation.process_generation_id),
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.APPLIED,
+                row=row,
+                payload={
+                    "operation_kind": "resume_session",
+                    "process_generation_id": generation.process_generation_id,
+                    "provider_session_id": session,
+                },
+            )
+        return generation
+
+    def invalidate_after_restore(self) -> int:
+        timestamp = self.store.now_ms()
+        count = 0
+        with self.store.transaction() as connection:
+            rows = connection.execute("""
+                SELECT * FROM attempts
+                WHERE execution_mode='OPERATOR_HARNESS'
+                  AND status IN (
+                      'CLAIMED','RUNNING','CHECKPOINTED','CANCEL_REQUESTED'
+                  )
+                """).fetchall()
+            for row in rows:
+                aid = str(row["attempt_id"])
+                count += 1
+                connection.execute(
+                    """
+                    UPDATE process_generations SET executive_writer_held=0
+                    WHERE session_epoch_id IN (
+                        SELECT session_epoch_id FROM harness_session_epochs
+                        WHERE attempt_id=?
+                    )
+                    """,
+                    (aid,),
+                )
+                connection.execute(
+                    """
+                    UPDATE harness_session_epochs
+                    SET state='ABANDONED',ended_at_ms=COALESCE(ended_at_ms,?)
+                    WHERE attempt_id=? AND state='CURRENT'
+                    """,
+                    (timestamp, aid),
+                )
+                connection.execute(
+                    """
+                    UPDATE attempts
+                    SET status='LOST',lease_token=NULL,finished_at_ms=?,
+                        updated_at_ms=?,version=version+1
+                    WHERE attempt_id=?
+                    """,
+                    (timestamp, timestamp, aid),
+                )
+                connection.execute(
+                    """
+                    UPDATE jobs
+                    SET status='LOST',updated_at_ms=?,version=version+1
+                    WHERE job_id=? AND current_attempt_id=?
+                    """,
+                    (timestamp, row["job_id"], aid),
+                )
+                connection.execute(
+                    """
+                    UPDATE worker_quota_classes
+                    SET status='ERROR',held_attempt_id=NULL,updated_at_ms=?,
+                        version=version+1
+                    WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
+                    """,
+                    (timestamp, row["worker_id"], row["quota_class"], aid),
+                )
+                self.store.append_event(
+                    connection,
+                    aggregate_type="attempt",
+                    aggregate_id=aid,
+                    event_type="OHF_RESTORE_INVALIDATED",
+                    actor="restore",
+                    job_id=str(row["job_id"]),
+                    attempt_id=aid,
+                    worker_id=str(row["worker_id"]),
+                    quota_class=str(row["quota_class"]),
+                    payload={"transaction_group": "TX-9"},
+                    command_id=f"ohf-restore:{aid}",
+                    timestamp_ms=timestamp,
+                )
+        return count
 
 
 class EventRegistry:
@@ -3831,21 +6727,17 @@ class ResourceBroker:
         required_model = str(job.constraints.get("model") or "")
         required_effort = str(job.constraints.get("effort") or "")
         required_cost_class = str(job.constraints.get("cost_class") or "")
-        required_capabilities = set(
-            job.constraints.get("required_capabilities") or []
-        )
+        required_capabilities = set(job.constraints.get("required_capabilities") or [])
         eligible = set(job.constraints["eligible_quota_classes"])
         with self.store.read() as connection:
-            rows = connection.execute(
-                """
+            rows = connection.execute("""
                 SELECT q.*,a.job_id AS active_job_id,w.provider AS worker_provider,w.identity_status
                 FROM worker_quota_classes q
                 JOIN workers w ON w.worker_id=q.worker_id
                 LEFT JOIN attempts a ON a.attempt_id=q.held_attempt_id
                 WHERE q.status='AVAILABLE' AND q.held_attempt_id IS NULL
                 ORDER BY q.worker_id,q.quota_class
-                """
-            ).fetchall()
+                """).fetchall()
         candidates: list[sqlite3.Row] = []
         for row in rows:
             if worker_id and row["worker_id"] != worker_id:
@@ -3907,6 +6799,7 @@ class Runtime:
     jobs: JobRegistry
     attempts: AttemptRegistry
     events: EventRegistry
+    operator_harness: OperatorHarnessRegistry
     broker: ResourceBroker
 
     @classmethod
@@ -3917,6 +6810,7 @@ class Runtime:
             jobs=JobRegistry(store),
             attempts=AttemptRegistry(store),
             events=EventRegistry(store),
+            operator_harness=OperatorHarnessRegistry(store),
             broker=ResourceBroker(store),
         )
 
@@ -3954,6 +6848,7 @@ __all__ = [
     "JobPayload",
     "JobRegistry",
     "JobStatus",
+    "OperatorHarnessRegistry",
     "PersistenceError",
     "ResourceBroker",
     "Runtime",

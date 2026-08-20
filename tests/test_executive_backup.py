@@ -158,7 +158,7 @@ def test_restore_drill_uses_an_isolated_copy_and_leaves_live_state_unchanged(tmp
     assert drill.database_sha256 == receipt.database_sha256
     assert drill.integrity_check == "ok"
     assert drill.foreign_key_check == "ok"
-    assert drill.migration_versions == (1, 2)
+    assert drill.migration_versions == (1, 2, 3)
     assert _logical_state(runtime) == before
 
 
@@ -189,6 +189,46 @@ def test_offline_restore_atomically_replaces_live_database_and_keeps_rollback(tm
     assert hashlib.sha256(rollback.read_bytes()).hexdigest() == restored.rollback_sha256
     assert all(Path(path).is_file() for path in restored.rollback_sidecar_paths)
     assert _logical_state(Runtime.at(tmp_path / "runtime")) == backup_state
+
+
+def test_offline_restore_invalidates_ohf_on_staged_copy_before_swap(tmp_path):
+    runtime, _lease_token = _runtime_with_claim(tmp_path / "runtime")
+    with runtime.store.transaction() as connection:
+        attempt = connection.execute("SELECT * FROM attempts").fetchone()
+        connection.execute(
+            "UPDATE attempts SET execution_mode='OPERATOR_HARNESS',requested_execution_profile_json='{}',requested_execution_profile_digest='digest' WHERE attempt_id=?",
+            (attempt["attempt_id"],),
+        )
+        connection.execute(
+            "INSERT INTO harness_session_epochs(session_epoch_id,attempt_id,worker_id,epoch_number,provider_session_id,state,created_at_ms) VALUES('epoch-1',?,?,1,'S1','CURRENT',1)",
+            (attempt["attempt_id"], attempt["worker_id"]),
+        )
+        connection.execute(
+            "INSERT INTO process_generations(process_generation_id,session_epoch_id,worker_id,provider_session_id,generation_number,started_at_ms,executive_writer_held,provider_writer_state,created_at_ms) VALUES('generation-1','epoch-1',?,'S1',1,1,1,'HELD',1)",
+            (attempt["worker_id"],),
+        )
+    backup = create_online_backup(runtime.store, tmp_path / "backups")
+    # Force a real replacement instead of same-file restoration while preserving
+    # the rich active snapshot as the backup source.
+    runtime.jobs.create_job("post-backup change")
+    restored = restore_backup_offline(
+        runtime.store, backup.database_path, backup.manifest_path
+    )
+    assert restored.ohf_invalidated_attempts == 1
+    assert restored.source_backup_sha256 == backup.database_sha256
+    assert restored.final_runtime_sha256 == restored.restored_sha256
+    assert restored.final_runtime_sha256 != restored.source_backup_sha256
+    with Runtime.at(tmp_path / "runtime").store.read() as connection:
+        assert connection.execute(
+            "SELECT status FROM attempts WHERE attempt_id=?",
+            (attempt["attempt_id"],),
+        ).fetchone()[0] == "LOST"
+        assert connection.execute(
+            "SELECT state FROM harness_session_epochs WHERE session_epoch_id='epoch-1'"
+        ).fetchone()[0] == "ABANDONED"
+        assert connection.execute(
+            "SELECT executive_writer_held FROM process_generations WHERE process_generation_id='generation-1'"
+        ).fetchone()[0] == 0
 
 
 def test_offline_restore_refuses_service_marker_and_held_lock_without_mutation(
