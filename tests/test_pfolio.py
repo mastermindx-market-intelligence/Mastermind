@@ -8,7 +8,12 @@ Covers:
 - serve-only pfolio block (GET/POST/PATCH/DELETE /api/pfolio/* -> 403 when
   MASTERMIND_SERVE_ONLY=1; the personal panel is disabled on the read mirror
   now that the browser-login cookie that used to gate it was removed) while a
-  standard operator POST also stays blocked; canonical instance leaves pfolio open
+  standard operator POST also stays blocked; a LOCAL/non-authoritative instance
+  leaves pfolio open
+
+The authoritative-VPS half of that boundary (MASTERMIND_VPS_AUTHORITATIVE=1, where the
+panel is bearer-gated on every method and blocked outright with no token configured)
+lives in tests/test_pfolio_auth_boundary.py. The apps built here model a LOCAL box.
 - missing-table error shape
 
 No network calls: httpx and yahoo_feed are fully mocked.

@@ -588,9 +588,16 @@ def _snapshot_job():
 
 
 def _vps_state_sync_job():
-    """Push the live paper-trading state (data/) to the serve-only VPS mirror so the public
-    dashboard (bot.mastermind-x.com, /opt/mastermind/data/) tracks the Mac — the SINGLE canonical
-    writer — within one cron tick.
+    """LEGACY (Mac-canonical topology). Push the live paper-trading state (data/) to the serve-only
+    VPS mirror so the public dashboard (bot.mastermind-x.com, /opt/mastermind/data/) tracks the Mac
+    within one cron tick.
+
+    SUPERSEDED: the public VPS is now the one canonical scheduler/writer
+    (ops/mastermind-vps.service.d/authoritative.conf sets MASTERMIND_VPS_AUTHORITATIVE=1), so this
+    job is NOT registered there — pushing a Mac's data/ onto the authoritative box would roll live
+    state backward. It is retained, and still registered on a non-authoritative process, for the
+    legacy Mac-writer deployment; see the registration site for the gate. The paragraphs below
+    describe that legacy topology.
 
     WHY THIS LIVES IN THE SCHEDULER (not a launchd job): the box reads the data/ the Brain writes
     under ~/Documents, and launchd agents on this Mac are TCC-denied from reading ~/Documents (every
@@ -1124,6 +1131,60 @@ def _run_loop_maintenance_steps():
 # self_directed is excluded: it is NOT a paper_account book (its own engine owns its NAV).
 _MARK_BOOK_IDS = ["autonomous", "china", "hk"]
 
+# Each managed book's VENUE, for the trading-date gate below. The daily-mark cron is
+# ``day_of_week="mon-fri"``, which is a weekend filter, NOT a trading-day filter — every venue
+# closes on weekday holidays too, and the three venues close on DIFFERENT ones.
+_MARK_BOOK_VENUES = {"autonomous": "US", "china": "CN", "hk": "HK"}
+#: The Self-Directed book marks in the same sweep and is a US book.
+_SELF_DIRECTED_VENUE = "US"
+
+
+def _is_trading_date(venue: str, asof: str) -> bool:
+    """True iff ``asof`` (an ISO date) is a real trading session on ``venue``.
+
+    This asks about the DATE, deliberately not "is the exchange open right now": the sweep runs on a
+    single UTC cron that is intentionally at a different wall-clock point from each venue's close, so
+    an ``is_open()`` check would answer about the wrong instant for two of the three books.
+
+    Fails CLOSED (False) on an unknown venue or any calendar/parse error. A skipped mark is
+    recoverable — the next session re-marks and ``mark()`` is idempotent per date. A mark booked on a
+    closed session is not: it accrues an extra ``rate/252`` cash-yield day, writes a NAV row dated to
+    a day the venue never traded, and carries stale prices forward as though the mark date advanced.
+    """
+    from datetime import date as _date
+    try:
+        d = _date.fromisoformat(asof)
+    except (TypeError, ValueError):
+        return False
+    try:
+        if venue == "US":
+            from portfolio import market_calendar
+            return bool(market_calendar.is_trading_day(d))
+        if venue in ("CN", "HK"):
+            from portfolio import china_calendar
+            return bool(china_calendar.is_trading_day(d, venue=venue))
+    except Exception:  # noqa: BLE001 — a calendar hiccup must not fabricate a session
+        return False
+    return False
+
+
+def _calendar_skip_event(job: str, book: str, venue: str, asof: str) -> None:
+    """Advisory run_event recording that a book was skipped because its venue was closed."""
+    try:
+        from control_plane import run_events
+        run_events.append({
+            "kind": "run_skipped",
+            "job": job,
+            "book": book,
+            "step": "trading_calendar",
+            "status": "venue_closed",
+            "severity": "ADVISORY_ONLY",
+            "actor": "system",
+            "extra": {"venue": venue, "asof": asof},
+        })
+    except Exception:  # noqa: BLE001
+        pass
+
 
 def _daily_mark_job():
     """Mark EVERY paper book to market once per trading day, regardless of whether it rebuilt.
@@ -1137,7 +1198,11 @@ def _daily_mark_job():
 
     Runs Mon–Fri shortly BEFORE the flagship build (22:35 UTC) so a fresh daily mark is in place
     before the evening builds; mark() is idempotent per date, so a later same-day build just
-    replaces the row. Never raises into the scheduler."""
+    replaces the row. Never raises into the scheduler.
+
+    The Mon–Fri cron only excludes WEEKENDS. Each book is additionally gated on its own venue's
+    trading calendar (``_is_trading_date``) before any cash accrual or NAV write, so a weekday
+    holiday on one exchange cannot fabricate a session for that book while the others still mark."""
     handle = _ledger_start("daily_mark", trigger="cron")
     try:
         from portfolio import paper_account, registry
@@ -1176,6 +1241,17 @@ def _daily_mark_job():
         pass
     for pid in _MARK_BOOK_IDS:
         try:
+            # TRADING-DATE GATE (before any lock, any accrual, any write): the cron is Mon–Fri, which
+            # excludes weekends but NOT weekday exchange holidays — and the three books trade on three
+            # different calendars (e.g. 2026-01-19 US-closed/CN+HK-open, 2026-07-01 HK-closed/US+CN-open,
+            # 2026-10-01 CN-closed/US+HK-open). Marking a book on its own venue's holiday accrued a
+            # phantom cash-yield day, wrote a NAV row dated to a session that never happened, and carried
+            # stale prices forward as a fresh mark. Each book is judged on ITS OWN venue, so the books
+            # whose exchanges really are open still mark that day.
+            venue = _MARK_BOOK_VENUES.get(pid)
+            if not _is_trading_date(venue or "", asof):
+                _calendar_skip_event("daily_mark", pid, venue or "unknown", asof)
+                continue
             # LOCKING (MW1 fix): take each book's lock briefly while we mark it to avoid racing a
             # concurrent build (e.g. flagship at 22:40 vs daily_mark at 22:35).  This job is read-
             # only w.r.t. positions/cash — it only appends a nav_history row — but mark() writes
@@ -1200,7 +1276,10 @@ def _daily_mark_job():
                     continue
                 # cash sweep first: idle cash earns ~4%/yr (money-market), idempotent per date, so the
                 # NAV we mark below already reflects today's accrued cash. Best-effort (never raises).
-                paper_account.accrue_cash_yield(_today_iso(), portfolio_id=pid)
+                # `asof` (one snapshot per sweep), NOT a second _today_iso() call: the accrual is
+                # idempotent per (book, date) and must key off the SAME date the gate approved and
+                # mark() writes below, or a run spanning UTC midnight books them against two days.
+                paper_account.accrue_cash_yield(asof, portfolio_id=pid)
                 state = paper_account._load_account(pid)
                 bench = paper_account._benchmark_for(pid)
                 ccy = registry.currency(pid)
@@ -1246,6 +1325,12 @@ def _daily_mark_job():
     # It is NOT a paper_account book, so it marks through its own mark seam. Install the ONE marking
     # layer as its injected resolver for this sweep so it reads the same price every other book does
     # (fixing the phantom-zero-return bug), then snapshot its NAV.
+    # Same trading-date gate as the paper books: Self-Directed is a US book, so a US-holiday
+    # weekday must not advance its nav_history either.
+    if not _is_trading_date(_SELF_DIRECTED_VENUE, asof):
+        _calendar_skip_event("daily_mark", "self_directed", _SELF_DIRECTED_VENUE, asof)
+        _ledger_end(handle, "ok")
+        return
     try:
         from portfolio import self_directed, marks
         _sd_state = self_directed._load_account()
@@ -1617,6 +1702,9 @@ def start():
     # forward. Fires Mon–Fri at <flagship hour>:35, just BEFORE the 22:40 flagship build, so a fresh
     # daily mark is in place before the evening builds (mark() is idempotent per date, so a later
     # same-day build merely replaces the row). UTC pinned for the same reason as settle_pending below.
+    # day_of_week is a WEEKEND filter only — the per-venue weekday-holiday gate lives inside the job
+    # (_is_trading_date), because the US/CN/HK books close on different days and a single cron
+    # expression cannot express three calendars.
     sch.add_job(_daily_mark_job,
                 CronTrigger(day_of_week="mon-fri", hour=hour, minute=35, timezone="UTC"),
                 id="daily_mark", replace_existing=True, misfire_grace_time=3600, coalesce=True)

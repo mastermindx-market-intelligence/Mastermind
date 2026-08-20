@@ -119,6 +119,21 @@ flags:
     note: >
       Cookie/session lifetime in days.  No portfolio effect; advisory-level change.
 
+  MASTERMIND_VPS_AUTHORITATIVE:
+    authority_level: A4
+    allowed_effect: [arm_authoritative_instance, disarm_authoritative_instance]
+    note: >
+      Declares this process the canonical, internet-reachable scheduler/writer
+      (ops/mastermind-vps.service.d/authoritative.conf, which also sets
+      MASTERMIND_SERVE_ONLY=0).  Security-load-bearing, not cosmetic: when armed the
+      personal Supabase portfolio panel (/api/pfolio/*) requires the operator bearer
+      token on EVERY method and is blocked outright when no token is configured, an
+      unset MASTERMIND_AUTH_TOKEN makes operator/LLM paths fail CLOSED instead of
+      passing for dev ergonomics, and app startup refuses outright without a token
+      (the authoritative unit's EnvironmentFile is optional, so a missing secrets file
+      must abort the start).  It also suppresses the legacy vps_state_sync job.
+      A4 gate: arm/disarm is a boolean toggle taking effect on the NEXT process restart.
+
   # ── Bot / phase2 ─────────────────────────────────────────────────────────────
   MASTERMIND_FAST_DERISK:
     authority_level: A4

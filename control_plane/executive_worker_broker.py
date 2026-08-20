@@ -39,6 +39,12 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from common.redaction import sanitize_external_text
+from control_plane.executive_ambient_process import (
+    AmbientClassification,
+    AmbientProcessClassifier,
+    AmbientProcessIdentity,
+    NullAmbientClassifier,
+)
 from control_plane.codex_worker import (
     ArtifactReceipt,
     BinaryAttestation,
@@ -60,7 +66,25 @@ from control_plane.codex_worker import (
 
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
-UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v1"
+UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
+UID_SWEEP_TERMINAL_REASONS = frozenset({"run_terminal"})
+_AMBIENT_ATTRIBUTIONS = frozenset({"attested", "absent", "failed_closed"})
+_AMBIENT_IDENTITY_FIELDS = frozenset(
+    {
+        "pid",
+        "uid",
+        "launchd_domain",
+        "launchd_label",
+        "launchd_reported_pid",
+        "plist_path",
+        "program_path",
+        "executable_path",
+        "executable_device",
+        "executable_inode",
+        "codesign_identifier",
+        "codesign_verified",
+    }
+)
 
 # Error code carried by the envelope a connection handler frames when it is
 # unwound by a ``BaseException`` -- a launchd stop cancelling the in-flight
@@ -124,7 +148,15 @@ class PeerCredentials:
 
 @dataclasses.dataclass(frozen=True)
 class UIDSweepReceipt:
-    """Secret-free receipt for one dedicated-UID residual sweep."""
+    """Secret-free receipt for one dedicated-UID residual sweep.
+
+    v2 distinguishes three PID classes so ``residual_pids_before`` is never
+    silently widened or narrowed:
+
+    * ``broker_pid`` — exact broker identity, never a residual
+    * ``ambient_pids`` — launchd/codesign-attested platform helpers
+    * ``residual_pids_*`` — untrusted same-UID processes only
+    """
 
     schema_version: str
     observed_at: str
@@ -136,6 +168,9 @@ class UIDSweepReceipt:
     signal_name: str
     signal_sent: bool
     quiescent_observations: int
+    ambient_pids: tuple[int, ...] = ()
+    ambient_identities: tuple[AmbientProcessIdentity, ...] = ()
+    ambient_attribution: str = "absent"
 
     @property
     def passed(self) -> bool:
@@ -149,9 +184,120 @@ class UIDSweepReceipt:
         value = dataclasses.asdict(self)
         value["residual_pids_before"] = list(self.residual_pids_before)
         value["residual_pids_after"] = list(self.residual_pids_after)
+        value["ambient_pids"] = list(self.ambient_pids)
+        value["ambient_identities"] = [
+            identity.to_dict() if isinstance(identity, AmbientProcessIdentity) else dict(identity)
+            for identity in self.ambient_identities
+        ]
         value["passed"] = self.passed
         value["found_residuals"] = self.found_residuals
         return value
+
+
+def _positive_pid(value: Any) -> bool:
+    return type(value) is int and value > 1
+
+
+def _ambient_identity_mapping_is_valid(value: Any, *, worker_uid: int) -> bool:
+    """True when ``value`` is one reviewed ambient identity mapping."""
+
+    if not isinstance(value, Mapping) or set(value) != _AMBIENT_IDENTITY_FIELDS:
+        return False
+    pid = value.get("pid")
+    reported = value.get("launchd_reported_pid")
+    uid = value.get("uid")
+    if not _positive_pid(pid) or type(reported) is not int or reported != pid:
+        return False
+    if type(uid) is not int or uid != worker_uid:
+        return False
+    if type(value.get("executable_device")) is not int:
+        return False
+    if type(value.get("executable_inode")) is not int:
+        return False
+    if value.get("codesign_verified") is not True:
+        return False
+    for key in (
+        "launchd_domain",
+        "launchd_label",
+        "plist_path",
+        "program_path",
+        "executable_path",
+        "codesign_identifier",
+    ):
+        field = value.get(key)
+        if type(field) is not str or not field:
+            return False
+    return True
+
+
+def _v2_ambient_projection_is_coherent(value: Mapping[str, Any]) -> bool:
+    """Keep in sync with ``ops.executive_os.acceptance._uid_sweep_is_passing``."""
+
+    attribution = value.get("ambient_attribution")
+    ambient = value.get("ambient_pids")
+    identities = value.get("ambient_identities")
+    before = value.get("residual_pids_before")
+    after = value.get("residual_pids_after")
+    broker_pid = value.get("broker_pid")
+    worker_uid = value.get("worker_uid")
+    if attribution not in _AMBIENT_ATTRIBUTIONS:
+        return False
+    if not isinstance(ambient, list) or not isinstance(identities, list):
+        return False
+    if not isinstance(before, list) or not isinstance(after, list):
+        return False
+    if not all(_positive_pid(item) for item in ambient):
+        return False
+    if len(ambient) != len(set(ambient)):
+        return False
+    if type(worker_uid) is not int or worker_uid <= 0:
+        return False
+    if not _positive_pid(broker_pid):
+        return False
+    identity_pids: list[int] = []
+    for identity in identities:
+        if not _ambient_identity_mapping_is_valid(identity, worker_uid=worker_uid):
+            return False
+        identity_pids.append(identity["pid"])
+    if len(identity_pids) != len(set(identity_pids)):
+        return False
+    if set(identity_pids) != set(ambient):
+        return False
+    if attribution == "attested":
+        if not ambient or not identities:
+            return False
+    elif ambient or identities:
+        return False
+    pid_sets = (set(ambient), set(before), set(after), {broker_pid})
+    for index, left in enumerate(pid_sets):
+        for right in pid_sets[index + 1 :]:
+            if not left.isdisjoint(right):
+                return False
+    return True
+
+
+def uid_sweep_receipt_is_passing(value: Any) -> bool:
+    """True when ``value`` is a passing v2 dedicated-UID sweep receipt.
+
+    The ambient projection must be internally coherent: attested receipts carry
+    matching PID/identity sets of the reviewed shape; non-attested receipts
+    carry neither. A malformed attested/empty-PID receipt does not pass.
+    """
+
+    if not isinstance(value, Mapping):
+        return False
+    before = value.get("residual_pids_before")
+    after = value.get("residual_pids_after")
+    return (
+        value.get("schema_version") == UID_SWEEP_SCHEMA_VERSION
+        and value.get("passed") is True
+        and isinstance(before, list)
+        and isinstance(after, list)
+        and after == []
+        and all(_positive_pid(item) for item in before)
+        and value.get("found_residuals") is bool(before)
+        and _v2_ambient_projection_is_coherent(value)
+    )
 
 
 class ResidualSweeper(Protocol):
@@ -387,6 +533,7 @@ class DedicatedUIDSweeper:
         settle_interval: float = 0.05,
         timeout_seconds: float = 5.0,
         required_quiescent_observations: int = 2,
+        ambient_classifier: AmbientProcessClassifier | None = None,
     ) -> None:
         self.worker_uid = int(worker_uid)
         self.receipt_path = Path(receipt_path) if receipt_path is not None else None
@@ -398,6 +545,7 @@ class DedicatedUIDSweeper:
         self.settle_interval = float(settle_interval)
         self.timeout_seconds = float(timeout_seconds)
         self.required_quiescent_observations = int(required_quiescent_observations)
+        self.ambient_classifier = ambient_classifier or NullAmbientClassifier()
         if self.worker_uid <= 0:
             raise DedicatedUIDError("the dedicated worker UID must be non-root")
         if self.settle_interval <= 0 or self.timeout_seconds <= 0:
@@ -405,12 +553,42 @@ class DedicatedUIDSweeper:
         if self.required_quiescent_observations < 2:
             raise DedicatedUIDError("UID sweep requires at least two quiescent observations")
 
-    def _residuals(self, broker_pid: int) -> tuple[int, ...]:
+    def _classify_ambient(self) -> AmbientClassification:
+        try:
+            classified = self.ambient_classifier.classify(worker_uid=self.worker_uid)
+        except Exception:
+            return AmbientClassification(status="failed_closed")
+        if not isinstance(classified, AmbientClassification):
+            return AmbientClassification(status="failed_closed")
+        return classified
+
+    def _observed(self, broker_pid: int) -> tuple[int, ...]:
         return tuple(
             pid
             for pid in self.process_lister(self.worker_uid)
             if pid > 1 and pid != broker_pid
         )
+
+    def _partition(
+        self, broker_pid: int, classified: AmbientClassification
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[AmbientProcessIdentity, ...]]:
+        observed = set(self._observed(broker_pid))
+        attested = tuple(
+            identity
+            for identity in classified.identities
+            if identity.pid in observed
+            and identity.uid == self.worker_uid
+            and identity.launchd_reported_pid == identity.pid
+        )
+        ambient_pids = {identity.pid for identity in attested}
+        residuals = tuple(sorted(pid for pid in observed if pid not in ambient_pids))
+        return residuals, tuple(sorted(ambient_pids)), attested
+
+    def _residuals(self, broker_pid: int) -> tuple[int, ...]:
+        residuals, _ambient, _identities = self._partition(
+            broker_pid, self._classify_ambient()
+        )
+        return residuals
 
     def _kill_residuals(self, residuals: Sequence[int]) -> bool:
         """SIGKILL only the residual PIDs captured by the last observation.
@@ -448,7 +626,8 @@ class DedicatedUIDSweeper:
                 f"broker effective UID {observed_uid} does not match worker UID {self.worker_uid}"
             )
         broker_pid = int(self.current_pid())
-        before = self._residuals(broker_pid)
+        classified = self._classify_ambient()
+        before, ambient_before, identities_before = self._partition(broker_pid, classified)
         sent = False
         if before:
             sent = self._kill_residuals(before)
@@ -456,8 +635,11 @@ class DedicatedUIDSweeper:
         deadline = time.monotonic() + self.timeout_seconds
         quiescent = 0
         after: tuple[int, ...] = before
+        ambient_after = ambient_before
+        identities_after = identities_before
         while time.monotonic() < deadline:
-            after = self._residuals(broker_pid)
+            classified = self._classify_ambient()
+            after, ambient_after, identities_after = self._partition(broker_pid, classified)
             if after:
                 quiescent = 0
                 sent = self._kill_residuals(after) or sent
@@ -478,9 +660,16 @@ class DedicatedUIDSweeper:
             signal_name="SIGKILL",
             signal_sent=sent,
             quiescent_observations=quiescent,
+            ambient_pids=ambient_after,
+            ambient_identities=identities_after,
+            ambient_attribution=classified.status,
         )
+        payload = receipt.to_dict()
         if self.receipt_path is not None:
-            _write_private_json(self.receipt_path, receipt.to_dict())
+            _write_private_json(self.receipt_path, payload)
+            if reason in UID_SWEEP_TERMINAL_REASONS:
+                terminal_path = self.receipt_path.with_name("uid-sweep-terminal.json")
+                _write_private_json(terminal_path, payload)
         if not receipt.passed or quiescent < self.required_quiescent_observations:
             raise DedicatedUIDError("worker UID did not become quiescent after SIGKILL")
         return receipt
@@ -1761,8 +1950,8 @@ def _validation_from_json(value: Any) -> ValidationReceipt:
 
 def _uid_sweep_from_json(value: Any) -> dict[str, Any]:
     raw = _mapping(value, field="UID sweep receipt").copy()
-    if raw.get("schema_version") != UID_SWEEP_SCHEMA_VERSION or raw.get("passed") is not True:
-        raise BrokerProtocolError("remote UID sweep receipt is not a passing v1 receipt")
+    if not uid_sweep_receipt_is_passing(raw):
+        raise BrokerProtocolError("remote UID sweep receipt is not a passing v2 receipt")
     return raw
 
 
@@ -2099,6 +2288,7 @@ __all__ = [
     "BROKER_RESPONSE_SCHEMA_VERSION",
     "BROKER_UNAVAILABLE_ERROR_CODE",
     "UID_SWEEP_SCHEMA_VERSION",
+    "uid_sweep_receipt_is_passing",
     "BrokerPolicy",
     "BrokerProtocolError",
     "BrokerStateError",

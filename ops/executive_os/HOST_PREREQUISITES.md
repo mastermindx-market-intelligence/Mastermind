@@ -100,10 +100,42 @@ device code into the shell, this runbook, a PR, or chat.
 Success requires the dedicated file to be a non-empty, regular, non-symlink,
 single-link file owned by `_mastermind_worker:_mastermind_worker` with exact
 mode `0600` and no ACL. The helper then asks Codex to validate the login while
-discarding both output streams and checks the file metadata again. A preexisting
-invalid credential is never overwritten or repaired; the command stops for
-administrator review. `--verify-only` repeats these checks without starting a
-new login.
+discarding both output streams and checks the file metadata again. Login status alone is not READY.
+
+`--verify-only` repeats the metadata and login-status checks without starting a
+new login or calling the model. A preexisting credential is never overwritten
+or repaired unless the administrator passes the explicit `--reauthorize` flag.
+`--reauthorize` uses Codex's own `logout` plus device login on a controlling
+terminal, then requires the provider inference canary to pass. Production
+Executive OS binds to the company Mastermind ChatGPT workspace/seat, not
+Personal. Do not silently fall back to Personal. If the supported device-login
+flow cannot unambiguously bind that company workspace, stop for Chairman/COO
+ruling rather than reauthorizing to whichever workspace happens to work.
+
+Pinned Codex `0.147.0` has no `login`/`exec` workspace-selection flag. Do not invent one, and do not hand-edit `auth.json`.
+
+```bash
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
+  --verify-only
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provider-inference-canary.sh"
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
+  --verify-ready
+```
+
+The live canary CLI does not accept `--probe-root`, `--operator-home`, or
+`--receipt-path`. Duplicate copies of those options cannot redirect the probe.
+The disposable `/private/tmp/mastermind-provider-canary.*` root is owned by
+`_mastermind_worker:_mastermind_worker` with exact mode `0700` before privilege
+drop. It is not group- or world-traversable. The root process removes that tree
+after the run. A local filesystem preflight failure is `isolation_violation`,
+not a provider `process_failed`.
+
+The inference canary uses the exact installed `codex-0.147.0` binary as
+`_mastermind_worker`, the dedicated `CODEX_HOME`, production model
+`gpt-5.6-sol`, and an inert disposable workspace. It does not start services,
+open Executive SQLite, write production workspaces/runs, or print credentials.
+A completed inference lifecycle is required for READY. `invalid_workspace_selected`
+is a typed provider-readiness refusal, not a control-plane quarantine.
 
 The Python helper prints the exact runtime root, binary, and TeamIdentifier to
 use in Stage 2. Record those three non-secret values. The expected default

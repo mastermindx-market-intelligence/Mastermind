@@ -16,6 +16,8 @@ CODEX_TEAM_ID="2DC432GLL2"
 CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
 SYSTEM_BIN="/Library/Application Support/MastermindExecutive/bin"
 VERIFY_ONLY="false"
+VERIFY_READY="false"
+REAUTHORIZE="false"
 PINNED_CODEX_BINARY=""
 
 cleanup() {
@@ -26,13 +28,15 @@ cleanup() {
 trap cleanup EXIT
 
 usage() {
-  /bin/echo "usage: sudo /bin/bash $0 [--verify-only] [--codex-binary PATH] [--codex-version VERSION] [--worker-uid N] [--provider-home PATH]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 [--verify-only|--verify-ready|--reauthorize] [--codex-binary PATH] [--codex-version VERSION] [--worker-uid N] [--provider-home PATH]" >&2
   exit 64
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --verify-only) VERIFY_ONLY="true"; shift ;;
+    --verify-ready) VERIFY_READY="true"; shift ;;
+    --reauthorize) REAUTHORIZE="true"; shift ;;
     --codex-binary) CODEX_BINARY="${2:-}"; shift 2 ;;
     --codex-version) CODEX_VERSION="${2:-}"; shift 2 ;;
     --worker-uid) WORKER_UID="${2:-}"; WORKER_GID="${2:-}"; shift 2 ;;
@@ -40,6 +44,12 @@ while [ "$#" -gt 0 ]; do
     *) usage ;;
   esac
 done
+
+mode_count=0
+[ "$VERIFY_ONLY" = "true" ] && mode_count=$((mode_count + 1))
+[ "$VERIFY_READY" = "true" ] && mode_count=$((mode_count + 1))
+[ "$REAUTHORIZE" = "true" ] && mode_count=$((mode_count + 1))
+[ "$mode_count" -le 1 ] || usage
 
 [ "$(/usr/bin/id -u)" -eq 0 ] || {
   /bin/echo "provision-worker-auth.sh must run as root" >&2
@@ -286,15 +296,60 @@ verify_complete_auth() {
   verify_auth_metadata
 }
 
+run_inference_canary() {
+  local canary_script script_dir
+  script_dir="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
+  canary_script="$script_dir/provider-inference-canary.sh"
+  [ -f "$canary_script" ] && [ -x "$canary_script" ] || {
+    /bin/echo "provider inference canary is missing" >&2
+    exit 65
+  }
+  if /bin/bash "$canary_script"; then
+    /bin/echo "provider inference canary passed"
+    return 0
+  fi
+  /bin/echo "login status is not provider readiness; inference canary failed" >&2
+  exit 65
+}
+
 if [ "$VERIFY_ONLY" = "true" ]; then
   verify_complete_auth
-  /bin/echo "dedicated worker auth verification passed"
+  /bin/echo "dedicated worker login status passed; provider inference canary not run; not READY"
+  exit 0
+fi
+
+if [ "$VERIFY_READY" = "true" ]; then
+  verify_complete_auth
+  run_inference_canary
+  /bin/echo "dedicated worker auth is READY"
+  exit 0
+fi
+
+if [ "$REAUTHORIZE" = "true" ]; then
+  /usr/bin/tty -s || {
+    /bin/echo "device authorization requires an interactive controlling terminal" >&2
+    exit 65
+  }
+  if [ -e "$AUTH_PATH" ] || [ -L "$AUTH_PATH" ]; then
+    verify_auth_metadata
+    run_codex_as_worker logout -c 'cli_auth_credentials_store="file"' \
+      >/dev/null 2>&1 || true
+    [ ! -e "$AUTH_PATH" ] && [ ! -L "$AUTH_PATH" ] || verify_auth_metadata
+  fi
+  /bin/echo "Starting OpenAI device authorization for the dedicated worker account."
+  /bin/echo "Open the URL shown by Codex, enter its one-time code, and finish sign-in; do not share the code."
+  /bin/echo "Do not select a ChatGPT workspace because it happens to work; stop if the intended workspace cannot be bound."
+  run_codex_as_worker login --device-auth -c 'cli_auth_credentials_store="file"' \
+    </dev/tty >/dev/tty 2>/dev/tty
+  verify_complete_auth
+  run_inference_canary
+  /bin/echo "dedicated worker reauthorization is READY"
   exit 0
 fi
 
 if [ -e "$AUTH_PATH" ] || [ -L "$AUTH_PATH" ]; then
   verify_complete_auth
-  /bin/echo "dedicated worker auth already exists and verification passed"
+  /bin/echo "dedicated worker auth already exists and login status passed; provider inference canary not run; not READY"
   exit 0
 fi
 
@@ -310,4 +365,4 @@ run_codex_as_worker login --device-auth -c 'cli_auth_credentials_store="file"' \
   </dev/tty >/dev/tty 2>/dev/tty
 
 verify_complete_auth
-/bin/echo "dedicated worker auth provisioning and verification passed"
+/bin/echo "dedicated worker auth provisioning and login status passed; provider inference canary not run; not READY"
