@@ -608,15 +608,17 @@ verify_numeric_owner Groups PrimaryGroupID "$OPS_GID" "_mastermind_ops"
   /bin/echo "dedicated worker auth is missing: $AUTH_PATH" >&2
   exit 65
 }
-[ "$(/usr/bin/stat -f '%u' "$AUTH_PATH")" = "$WORKER_UID" ] || {
-  /bin/echo "dedicated worker auth has the wrong owner" >&2
+[ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$AUTH_PATH")" = "$WORKER_UID:$WORKER_GID:600:1" ] || {
+  /bin/echo "dedicated worker auth must be exact worker:worker mode 0600 with one hard link" >&2
   exit 65
 }
-AUTH_MODE="$(/usr/bin/stat -f '%Lp' "$AUTH_PATH")"
-[ "$((8#$AUTH_MODE & 8#077))" -eq 0 ] || {
-  /bin/echo "dedicated worker auth is accessible to group or other" >&2
+[ "$(/usr/bin/stat -f '%z' "$AUTH_PATH")" -gt 0 ] || {
+  /bin/echo "dedicated worker auth is empty" >&2
   exit 65
 }
+case "$(/usr/bin/stat -f '%Sp' "$AUTH_PATH")" in
+  *+) /bin/echo "dedicated worker auth has an unexpected filesystem ACL" >&2; exit 65 ;;
+esac
 
 # Cross the mutation boundary only after the identity, runtime, source, auth,
 # and exact-SHA preflight above. From here to process exit the trap keeps both
@@ -1154,5 +1156,5 @@ done
   --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
 
 /bin/echo "installed exact Executive OS release $EXPECTED_SHA"
-/bin/echo "services remain stopped until the secret canary has a passing receipt"
-/bin/echo "next: sudo /bin/bash '$RELEASE_ROOT/ops/executive_os/acceptance.sh' --source-repo '$SOURCE_REPO' --expected-sha '$EXPECTED_SHA' --operator-user '$OPERATOR_USER'"
+/bin/echo "services remain stopped until provider readiness and the secret canary have passing receipts"
+/bin/echo "next: run provision-worker-auth.sh --verify-ready with the reviewed credential kind and admin-attested company binding, then acceptance.sh"

@@ -1,8 +1,9 @@
 # Executive OS macOS administrator runbook
 
 There are deliberately two stages. Stage 1 is unprivileged review and merge of
-the inert implementation. Stage 2 begins only after PR #25 is merged and runs
-every administrator action from the exact commit currently at `origin/master`.
+the inert implementation. Stage 2 begins only after the delivery pull request
+is merged and runs every administrator action from the exact commit currently
+at `origin/master`.
 This avoids both granting an unmerged branch root authority and pretending that
 a PR head is the deployed default branch.
 
@@ -14,7 +15,7 @@ be pasted into a terminal transcript, issue, PR, or chat.
 
 ## Stage 1 — review and merge (no administrator actions)
 
-PR #25 must have a clean pushed head, passing deterministic CI and CodeQL, and
+The delivery pull request must have a clean pushed head, passing deterministic CI and CodeQL, and
 completed security review. It may then be squash-merged as inert code. Do not
 run `sudo`, create service accounts, replace Python, create worker credentials,
 or load a LaunchDaemon from the unmerged PR checkout. Merge alone is not host
@@ -22,8 +23,8 @@ acceptance and does not make Phase 1C-A complete or live.
 
 ## Stage 2 — exact `origin/master` provisioning, install, and acceptance
 
-Start in a fresh Terminal after PR #25 merges and paste every Stage 2 block into
-that same Terminal, in order. The first line enables fail-closed shell behavior:
+Start in a fresh Terminal after the delivery pull request merges and paste every
+Stage 2 block into that same Terminal, in order. The first line enables fail-closed shell behavior:
 any failed merge, ancestry, SHA, cleanliness, provisioning, or acceptance check
 stops the sequence before later commands run. If the Terminal closes or any
 command fails, begin again at this first block rather than skipping ahead.
@@ -35,12 +36,14 @@ set -euo pipefail
 test "$(/usr/bin/id -u)" -ne 0
 REPOSITORY=/absolute/path/to/Mastermind
 OPERATOR_USER="$(/usr/bin/id -un)"
+DELIVERY_PR=<delivery-pr-number>
 test "$OPERATOR_USER" != root
+test "$DELIVERY_PR" -gt 0
 
 git -C "$REPOSITORY" fetch origin
-test "$(gh pr view 25 --repo mastermindx-market-intelligence/Mastermind \
+test "$(gh pr view "$DELIVERY_PR" --repo mastermindx-market-intelligence/Mastermind \
   --json state --jq .state)" = "MERGED"
-PR_MERGE_SHA="$(gh pr view 25 --repo mastermindx-market-intelligence/Mastermind \
+PR_MERGE_SHA="$(gh pr view "$DELIVERY_PR" --repo mastermindx-market-intelligence/Mastermind \
   --json mergeCommit --jq .mergeCommit.oid)"
 MERGE_SHA="$(git -C "$REPOSITORY" rev-parse refs/remotes/origin/master)"
 git -C "$REPOSITORY" merge-base --is-ancestor "$PR_MERGE_SHA" "$MERGE_SHA"
@@ -73,54 +76,90 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-python-runtime.sh" \
   --verify-only
 ```
 
-Then create and verify a fresh Codex device login directly as the disabled
-worker principal:
-
-```bash
-sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh"
-sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
-  --verify-only
-```
-
 ### Dedicated worker authentication
 
 The auth helper runs the pinned native Codex executable as
 `_mastermind_worker`, with an otherwise empty environment whose `HOME` and
-`CODEX_HOME` are both the worker-only provider home. It verifies the native
-signature, OpenAI TeamIdentifier, and exact Codex version before showing the
-official device-authorization prompt.
+`CODEX_HOME` are both the worker-only provider home. The primary identity is a
+company ChatGPT workspace **service account** with a finite-lived Codex access
+token. Before enrollment, a workspace administrator must attest out of band:
 
-Open the URL shown in that terminal, enter its one-time code, and complete the
-OpenAI sign-in in the browser. The helper never reads or copies the operator's
-personal `~/.codex/auth.json`; Codex creates a separate
+- the intended Mastermind company workspace and its workspace ID;
+- that the service account is a member of that workspace and has Codex access;
+- that the plan supports service accounts/access tokens and is a reviewed
+  company plan; and
+- the token expiry and rotation owner.
+
+The local receipt records only the class
+`company-workspace-admin-attested`. The exact workspace name/ID is
+administrator evidence, not something `account/read` can observe, and is never
+invented or forced locally.
+
+Store the finite-lived token in the operator's Keychain under the reviewed
+service/account labels. After `sudo -v` has already established administrator
+credentials, pipe it directly from Keychain into the helper:
+
+```bash
+sudo -v
+/usr/bin/security find-generic-password -w \
+  -a mastermind-executive-codex-service \
+  -s mastermind-executive-codex-access-token \
+| sudo -n /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
+    --enroll-service-account
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
+  --verify-only
+```
+
+The token crosses only that stdin pipe after sudo credentials are established.
+It is never placed in argv, an environment variable, a temporary file, a shell
+variable/command substitution, a log, or a receipt. Enrollment calls pinned
+Codex `login --with-access-token`, then checks exact credential metadata and an
+output-discarded `login status`. It does **not** call inference and is not READY.
+The helper never reads or copies the operator's personal `~/.codex/auth.json`;
+Codex creates a separate
 `/var/db/mastermind-executive/workers/codex-01/provider-home/auth.json`
-directly as the worker. Do not paste a token, API key, existing `auth.json`, or
-device code into the shell, this runbook, a PR, or chat.
+directly as the worker.
 
 Success requires the dedicated file to be a non-empty, regular, non-symlink,
 single-link file owned by `_mastermind_worker:_mastermind_worker` with exact
 mode `0600` and no ACL. The helper then asks Codex to validate the login while
 discarding both output streams and checks the file metadata again. Login status alone is not READY.
 
-`--verify-only` repeats the metadata and login-status checks without starting a
-new login or calling the model. A preexisting credential is never overwritten
-or repaired unless the administrator passes the explicit `--reauthorize` flag.
-`--reauthorize` uses Codex's own `logout` plus device login on a controlling
-terminal, then requires the provider inference canary to pass. Production
-Executive OS binds to the company Mastermind ChatGPT workspace/seat, not
-Personal. Do not silently fall back to Personal. If the supported device-login
-flow cannot unambiguously bind that company workspace, stop for Chairman/COO
-ruling rather than reauthorizing to whichever workspace happens to work.
+`--verify-only` repeats metadata and login status without mutation or inference.
+A preexisting credential is never overwritten unless the administrator passes
+`--replace-existing` with an explicit enrollment mode. A rotation invalidates
+the prior readiness receipt before Codex logs out; a failed replacement remains
+fail-closed and never restores or copies credential bytes.
 
-Pinned Codex `0.147.0` has no `login`/`exec` workspace-selection flag. Do not invent one, and do not hand-edit `auth.json`.
+Before the recorded expiry, replace the Keychain item through the approved
+workspace-admin workflow, re-establish sudo, and rotate explicitly:
 
 ```bash
-sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
-  --verify-only
-sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provider-inference-canary.sh"
-sudo /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
-  --verify-ready
+sudo -v
+/usr/bin/security find-generic-password -w \
+  -a mastermind-executive-codex-service \
+  -s mastermind-executive-codex-access-token \
+| sudo -n /bin/bash "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
+    --enroll-service-account --replace-existing
 ```
+
+The rotated credential is again only enrolled, not READY; install/attestation
+must still be current and the single `--verify-ready` provider-readiness command
+below must mint a new composite receipt before any later formal acceptance.
+
+An access token for a named human in the same company workspace is an explicit
+fallback only (`--enroll-personal-access-token`); pinned Codex `login status`
+must classify it exactly as `personalAccessToken`. Device auth is the last
+explicit fallback (`--reauthorize-device`); it must bind the
+administrator-attested company workspace and later classify exactly as
+`chatgpt`. Service-account access-token auth must classify exactly as
+`agentIdentity`. The same initialized App Server validates the account plan and
+proves from `config/read` with all layers included that no forced workspace or
+forced login policy was applied. Neither fallback is implicit. Personal,
+API-key, platform API-key, `CODEX_ACCESS_TOKEN` runtime injection, forced
+workspace IDs, operator credential copying, and manual `auth.json` edits are
+forbidden. Pinned Codex `0.147.0` has no reviewed workspace-selection flag; do
+not invent one and never silently fall back to Personal.
 
 The live canary CLI does not accept `--probe-root`, `--operator-home`, or
 `--receipt-path`. Duplicate copies of those options cannot redirect the probe.
@@ -198,7 +237,89 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
 ```
 
 Installation leaves both LaunchDaemons disabled and stopped. Run the installed
-wrapper for the first start, per-PID canary quarantine, worker-principal live
+release's auth helper exactly once to cross the provider-readiness gate:
+
+```bash
+CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --verify-ready \
+  --expected-credential-kind service-account \
+  --workspace-binding-class company-workspace-admin-attested \
+  --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
+```
+
+For a service or personal access token, `CREDENTIAL_EXPIRES_AT` is the exact
+nonsecret UTC expiry attested by the workspace administrator; do not estimate or
+extend it locally. For the device-auth fallback, it is a Chairman-approved
+revalidation deadline. A readiness receipt is valid for no more than 24 hours,
+never beyond that deadline, and is refused unless at least 30 minutes remain.
+The same exact deadline is required to reuse the receipt, and formal acceptance
+rechecks the remaining margin.
+
+`--verify-ready` first repeats metadata and output-discarded login status. If a
+passing composite receipt already binds the requested credential kind,
+workspace-binding class, current credential lstat, and exact installed Codex
+identity, it reuses that receipt and spends no allocation. Otherwise it runs the
+pinned identity probe, accepts only `agentIdentity` plus an explicit company
+plan for service-account policy, and exclusive-creates a non-passing
+`canary_reserved` receipt *before* inference. Only the process holding that
+reservation may run **exactly one** inference canary. It then repeats the
+identity probe, proves the credential and installed binary remained bound to
+the same safe identity, incorporates both subprocess statuses, and atomically
+replaces the reservation with the final root-only
+`provider-readiness-v2.json` receipt. A typed canary refusal becomes a durable
+non-passing receipt. A crash, malformed output, stale identity, or abandoned
+reservation remains non-passing and blocks an automatic retry; it never spends
+a second canary. There is no separate canary command in this runbook.
+
+A single root-owned transaction lock covers receipt reuse, both identity probes,
+reservation, canary, finalization, readiness invalidation, logout, and credential
+replacement. A concurrent Terminal fails before mutation or inference. Normal
+exit releases the lock. A killed process or host crash leaves it as a fail-closed
+marker. Only after independently proving the recorded owner PID is no longer
+alive and no readiness or enrollment process remains may an administrator clear
+that marker explicitly:
+
+```bash
+sudo /bin/bash \
+  "$SOURCE_REPO/ops/executive_os/provision-worker-auth.sh" \
+  --recover-readiness-transaction
+```
+
+Recovery removes only the stale transaction marker. It never removes a receipt,
+changes a credential, or authorizes another canary. A reserved or adverse
+receipt still requires a newly authorized credential-replacement attempt.
+
+This install-before-readiness order is deliberate, not circular: `install.sh`
+requires strong structural auth metadata (exact worker UID/GID, mode `0600`,
+nonempty regular non-symlink single-link file with no ACL) and leaves services
+stopped; the readiness probe then uses the exact installed, attested binary.
+Formal acceptance validates the composite receipt against the current auth
+lstat and installed Codex identity before it creates a Job or starts services.
+
+Provider readiness is not Git handoff Gate B. With both LaunchDaemons still
+disabled and stopped, run the installed distinct-UID Git preflight exactly once:
+
+```bash
+umask 077
+GATE_B_RECEIPT="/private/tmp/executive-os-gate-b-$MERGE_SHA.json"
+sudo "$PYTHON_BINARY" -I -S -B \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/git_handoff_preflight.py" \
+  --expected-sha "$MERGE_SHA" \
+  > "$GATE_B_RECEIPT"
+sudo /usr/sbin/chown root:wheel "$GATE_B_RECEIPT"
+sudo /bin/chmod 0600 "$GATE_B_RECEIPT"
+```
+
+Gate B must emit `mastermind.executive_git_handoff_preflight/v1` with
+`passed: true` and the exact installed SHA. Stop here for independent receipt
+review. Do not substitute provider readiness, local tests, or an older Gate B
+receipt for this distinct-UID Git handoff proof.
+
+Only after that receipt review explicitly releases the stop may the installed
+acceptance wrapper perform the first
+start, per-PID canary quarantine, worker-principal live
 probe, private-socket canary activation, fault injection, cleanup, restore drill, and
 no-public-listener proof:
 
