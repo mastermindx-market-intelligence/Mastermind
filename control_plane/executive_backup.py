@@ -36,6 +36,7 @@ from uuid import uuid4
 from control_plane.executive_runtime import (
     _MIGRATIONS,
     SCHEMA_VERSION,
+    Runtime,
     RuntimeProofError,
     RuntimeStore,
 )
@@ -144,6 +145,9 @@ class RestoreReceipt:
     rollback_sha256: str
     manifest_sha256: str
     restored_at: str
+    source_backup_sha256: str | None = None
+    final_runtime_sha256: str | None = None
+    ohf_invalidated_attempts: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -784,6 +788,19 @@ def restore_backup_offline(
                 raise BackupVerificationError(
                     "staged restore differs from the verified backup"
                 )
+            # TX-9 is deliberately applied to the staged copy, before any live
+            # filename changes.  A controller crash can therefore leave either
+            # the old authority or an already-invalidated replacement, never a
+            # raw restored OHF writer authority at the live path.
+            staged_store = RuntimeStore(
+                store.root,
+                busy_timeout_ms=store.busy_timeout_ms,
+                database_path=staged,
+            )
+            invalidated = Runtime.from_store(
+                staged_store
+            ).operator_harness.invalidate_after_restore()
+            final_staged = _verify_database_file(staged)
             copied_rollback = _preserve_rollback_set(target, rollback)
             if _marker_exists(marker):
                 raise RestoreSafetyError(
@@ -802,9 +819,9 @@ def restore_backup_offline(
             target.chmod(0o600)
             _fsync_directory(runtime_directory)
             restored = _verify_database_file(target)
-            if restored.database_sha256 != verified.database_sha256:
+            if restored.database_sha256 != final_staged.database_sha256:
                 raise BackupVerificationError(
-                    "restored database hash differs from the verified backup"
+                    "restored database hash differs from staged invalidated runtime"
                 )
             store._schema_ready = False
             return RestoreReceipt(
@@ -817,6 +834,9 @@ def restore_backup_offline(
                 rollback_sha256=_sha256_path(rollback),
                 manifest_sha256=verified.manifest_sha256,
                 restored_at=_utc_now(),
+                source_backup_sha256=verified.database_sha256,
+                final_runtime_sha256=restored.database_sha256,
+                ohf_invalidated_attempts=invalidated,
             )
         except Exception as exc:
             if live_mutated and rollback.exists():

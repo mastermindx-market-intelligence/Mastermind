@@ -437,7 +437,7 @@ def test_schema_mcp_and_table_census_unchanged(tmp_path, frozen_git):
     after = _tables(runtime)
     assert before == after
     assert not any("wake" in name.lower() for name in after)
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
     assert len(TOOL_SPECS) == 5
     assert "acknowledge_ceo_wake" not in tool_names()
     with runtime.store.read() as connection:

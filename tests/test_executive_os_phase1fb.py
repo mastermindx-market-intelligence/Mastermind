@@ -126,7 +126,7 @@ def test_parent_child_fields_migrate_preserve_and_derive_root_depth(tmp_path):
     with Runtime.at(tmp_path).store.read() as connection:
         assert connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
-        ).fetchone()[0] == 2
+        ).fetchone()[0] == 3
 
 
 def test_v1_populated_store_upgrades_to_v2_and_preserves_legacy_rows(tmp_path):
@@ -153,12 +153,12 @@ def test_v1_populated_store_upgrades_to_v2_and_preserves_legacy_rows(tmp_path):
     assert job.owner_seat == "coo"
     assert job.escalation_target == "coo"
     assert job.review_required is False
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION == 3
     with runtime.store.read() as connection:
         assert [
             int(row[0])
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2]
+        ] == [1, 2, 3]
 
 
 def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
@@ -170,7 +170,7 @@ def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
         assert [
             int(row[0])
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2]
+        ] == [1, 2, 3]
 
 
 def test_v1_database_restored_into_new_code_keeps_legacy_childless_completion(tmp_path):

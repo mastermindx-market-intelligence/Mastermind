@@ -82,6 +82,7 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
     assert [row[0:2] for row in migrations] == [
         (1, "executive_runtime_core"),
         (2, "durable_parent_child_review_contract"),
+        (3, "ohf_session_epochs_and_process_generations"),
     ]
     assert all(len(row[2]) == 64 for row in migrations)
 
@@ -657,3 +658,45 @@ def test_migration_checksum_tampering_fails_closed(tmp_path):
 
     with pytest.raises(PersistenceError, match="checksum"):
         _runtime(tmp_path)
+
+
+def test_failed_v2_to_v3_foreign_key_check_rolls_back_all_v3_artifacts(
+    tmp_path, monkeypatch
+):
+    migrations = executive_runtime._MIGRATIONS
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations[:2])
+    v2 = _runtime(tmp_path)
+    database = v2.store.path
+
+    deferred_violation = (
+        "CREATE TABLE migration_fk_parent(id TEXT PRIMARY KEY)",
+        "CREATE TABLE migration_fk_child(parent_id TEXT REFERENCES migration_fk_parent(id) DEFERRABLE INITIALLY DEFERRED)",
+        "INSERT INTO migration_fk_child(parent_id) VALUES('missing')",
+    )
+    broken_v3 = (*migrations[2][2], *deferred_violation)
+    monkeypatch.setattr(
+        executive_runtime,
+        "_MIGRATIONS",
+        (*migrations[:2], (3, migrations[2][1], broken_v3)),
+    )
+    with pytest.raises(PersistenceError, match="foreign-key check"):
+        _runtime(tmp_path)
+
+    connection = sqlite3.connect(database)
+    try:
+        assert connection.execute(
+            "SELECT MAX(version) FROM schema_migrations"
+        ).fetchone()[0] == 2
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(attempts)")}
+    finally:
+        connection.close()
+    assert "harness_session_epochs" not in tables
+    assert "process_generations" not in tables
+    assert "migration_fk_child" not in tables
+    assert "execution_mode" not in columns
