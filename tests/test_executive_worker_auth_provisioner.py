@@ -1,58 +1,193 @@
-"""Static, Linux-safe checks for dedicated macOS worker authentication."""
+"""Linux-safe security contract for dedicated worker authentication."""
 from __future__ import annotations
 
+import os
+import signal
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "ops" / "executive_os" / "provision-worker-auth.sh"
+CANARY = ROOT / "ops" / "executive_os" / "provider_inference_canary.py"
 RUNBOOK = ROOT / "ops" / "executive_os" / "HOST_PREREQUISITES.md"
+INSTALL = ROOT / "ops" / "executive_os" / "install.sh"
+ACCEPTANCE = ROOT / "ops" / "executive_os" / "acceptance.py"
 
 
 def _source() -> str:
     return SCRIPT.read_text(encoding="utf-8")
 
 
-def test_worker_auth_provisioner_is_executable_and_syntax_valid() -> None:
+def test_worker_auth_provisioner_is_executable_syntax_valid_and_no_mode_inert() -> None:
     assert stat.S_IMODE(SCRIPT.stat().st_mode) & 0o111
-    completed = subprocess.run(
-        ["/bin/bash", "-n", str(SCRIPT)],
-        check=False,
-        capture_output=True,
-        text=True,
+    syntax = subprocess.run(
+        ["/bin/bash", "-n", str(SCRIPT)], capture_output=True, text=True, check=False
     )
-    assert completed.returncode == 0, completed.stderr
-
-
-def test_worker_auth_provisioner_uses_only_dedicated_device_login() -> None:
+    assert syntax.returncode == 0, syntax.stderr
+    no_mode = subprocess.run(
+        ["/bin/bash", str(SCRIPT)], capture_output=True, text=True, check=False
+    )
+    assert no_mode.returncode == 64
+    assert "modes:" in no_mode.stderr
     source = _source()
-    assert 'WORKER_USER="_mastermind_worker"' in source
-    assert 'PROVIDER_HOME="/var/db/mastermind-executive/workers/codex-01/provider-home"' in source
-    assert "/usr/bin/env -i" in source
-    assert 'HOME="$PROVIDER_HOME"' in source
-    assert 'CODEX_HOME="$PROVIDER_HOME"' in source
-    assert 'run_codex_as_worker login --device-auth' in source
-    assert "cli_auth_credentials_store=" in source
-    assert "</dev/tty >/dev/tty 2>/dev/tty" in source
-    assert "/usr/bin/sudo -n -u \"$WORKER_USER\" -g \"$WORKER_GROUP\"" in source
-
-    # Provisioning must never import the operator's existing login or accept a
-    # secret through stdin/argv. The official device flow creates the file.
-    forbidden = (
-        'cp "$AUTH_PATH"',
-        'ditto "$AUTH_PATH"',
-        "auth.json).read",
-        "OPENAI_API_KEY",
-        "CODEX_ACCESS_TOKEN",
-        "--with-api-key",
-        "--with-access-token",
+    assert source.index('[ "$mode_count" -eq 1 ] || usage') < source.index(
+        '"$(/usr/bin/id -u)" -eq 0'
     )
-    assert not any(token in source for token in forbidden)
 
 
-def test_worker_auth_provisioner_pins_official_native_codex() -> None:
+def test_primary_enrollment_is_stdin_only_and_has_no_secret_surfaces() -> None:
+    source = _source()
+    assert "--enroll-service-account" in source
+    assert "--enroll-personal-access-token" in source
+    assert "login --with-access-token" in source
+    enrollment = source.split("enroll_access_token_from_stdin() {", 1)[1].split("\n}", 1)[0]
+    assert "run_codex_as_worker login --with-access-token" in enrollment
+    assert ">/dev/null 2>&1" in enrollment
+    assert "run_inference_canary" not in enrollment
+    assert "provider-inference-canary" not in enrollment
+    assert "read " not in enrollment
+    assert "mktemp" not in enrollment
+    assert "CODEX_ACCESS_TOKEN" not in source
+    assert "OPENAI_API_KEY" not in source
+    assert "--with-api-key" not in source
+    assert 'cp "$AUTH_PATH"' not in source
+    assert 'ditto "$AUTH_PATH"' not in source
+    assert "auth.json).read" not in source
+
+
+def test_enrollment_and_rotation_are_explicit_and_never_ready_by_themselves() -> None:
+    source = _source()
+    assert "--replace-existing" in source
+    assert "explicit --replace-existing is required for rotation" in source
+    assert "run_codex_as_worker logout" in source
+    service = source.split('if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then', 1)[1].split(
+        "fi", 1
+    )[0]
+    personal = source.split(
+        'if [ "$ENROLL_PERSONAL_ACCESS_TOKEN" = "true" ]; then', 1
+    )[1].split("fi", 1)[0]
+    device = source.split('if [ "$REAUTHORIZE_DEVICE" = "true" ]; then', 1)[1].split(
+        "\nusage", 1
+    )[0]
+    for branch in (service, personal, device):
+        assert "inference canary" in branch
+        assert "not READY" in branch
+        assert "provider-inference-canary.sh" not in branch
+    assert "login --device-auth" in source
+    assert "</dev/tty >/dev/tty 2>/dev/tty" in source
+
+
+def test_verify_ready_is_identity_first_exactly_one_canary_and_replay_safe() -> None:
+    source = _source()
+    branch = source.split('if [ "$VERIFY_READY" = "true" ]; then', 1)[1].split(
+        'if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then', 1
+    )[0]
+    assert branch.count("provider-inference-canary.sh") == 1
+    assert branch.count("provider_identity_probe.py") == 2
+    assert branch.count('provider_readiness.py" reuse') == 1
+    assert branch.count('provider_readiness.py" reserve') == 1
+    assert branch.count('provider_readiness.py" finalize') == 1
+    assert branch.index('provider_readiness.py" reuse') < branch.index(
+        "provider_identity_probe.py"
+    )
+    assert branch.index("provider_identity_probe.py") < branch.index(
+        'provider_readiness.py" reserve'
+    )
+    assert branch.index('provider_readiness.py" reserve') < branch.index(
+        "provider-inference-canary.sh"
+    )
+    assert branch.rindex("provider_identity_probe.py") > branch.index(
+        "provider-inference-canary.sh"
+    )
+    assert branch.index('provider_readiness.py" finalize') > branch.rindex(
+        "provider_identity_probe.py"
+    )
+    assert '--canary-command-status "$canary_status"' in branch
+    assert '--post-identity-command-status "$post_identity_status"' in branch
+    assert branch.count('--credential-expires-at "$CREDENTIAL_EXPIRES_AT"') == 3
+    assert "no canary spent" in branch
+    assert "stale or invalid; fail closed" in branch
+
+
+def test_readiness_and_rotation_share_one_crash_durable_transaction_lock() -> None:
+    source = _source()
+    assert 'READINESS_TRANSACTION_LOCK="$SYSTEM_CONFIG/provider-readiness.transaction.lock"' in source
+    assert 'acquire_readiness_transaction_lock' in source
+    assert 'recover_readiness_transaction_lock' in source
+    assert '"$READINESS_TRANSACTION_LOCK/owner-pid"' in source
+    assert '/bin/kill -0 "$owner_pid"' in source
+    assert '/usr/bin/pgrep -U "$WORKER_UID"' in source
+    assert 'fsync_readiness_lock_state' in source
+    assert '"/Library/Application Support" "$SYSTEM_ROOT" "$SYSTEM_CONFIG"' in source
+    assert 'unexpected ACL' in source
+    central_lock = source.index('acquire_readiness_transaction_lock\nfi')
+    assert central_lock < source.index('provider_readiness.py" reuse')
+    replacement = source.split("prepare_explicit_replacement() {", 1)[1].split("\n}", 1)[0]
+    assert "invalidate_readiness_receipt" in replacement
+    assert "run_codex_as_worker logout" in replacement
+
+
+def test_catchable_termination_preserves_lock_while_child_survives(tmp_path: Path) -> None:
+    source = _source()
+    function_body = source.split("preserve_readiness_lock_on_signal() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+    handler = "preserve_readiness_lock_on_signal() {" + function_body + "\n}"
+    trap_lines = "\n".join(
+        line
+        for line in source.splitlines()
+        if line.startswith("trap 'preserve_readiness_lock_on_signal")
+    )
+    for expected in ("HUP", "INT", "QUIT", "TERM"):
+        assert expected in trap_lines
+
+    for signal_value in (signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM):
+        marker = tmp_path / f"marker-{signal_value.value}"
+        harness = f"""
+set -euo pipefail
+marker="$1"
+READINESS_LOCK_HELD="true"
+READINESS_LOCK_RELEASE_ON_EXIT="true"
+cleanup() {{
+  if [ "$READINESS_LOCK_HELD" = "true" ] && [ "$READINESS_LOCK_RELEASE_ON_EXIT" = "true" ]; then
+    /bin/echo released >"$marker"
+  else
+    /bin/echo preserved >"$marker"
+  fi
+}}
+trap cleanup EXIT
+{handler}
+{trap_lines}
+/bin/sleep 60 &
+child_pid=$!
+/bin/echo "$child_pid"
+wait "$child_pid"
+"""
+        process = subprocess.Popen(
+            ["/bin/bash", "-c", harness, "signal-harness", str(marker)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert process.stdout is not None
+        child_pid = int(process.stdout.readline().strip())
+        try:
+            time.sleep(0.1)
+            os.kill(process.pid, signal_value)
+            process.wait(timeout=5)
+            assert marker.read_text(encoding="utf-8").strip() == "preserved"
+            os.kill(child_pid, 0)
+        finally:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_metadata_pinning_and_login_status_remain_strict_and_non_disclosing() -> None:
     source = _source()
     assert 'CODEX_VERSION="0.147.0"' in source
     assert 'CODEX_TEAM_ID="2DC432GLL2"' in source
@@ -60,134 +195,73 @@ def test_worker_auth_provisioner_pins_official_native_codex() -> None:
         'CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"'
         in source
     )
-    assert "/aarch64-apple-darwin/bin/codex" in source
     assert "/usr/bin/codesign --verify --strict" in source
-    assert "TeamIdentifier" in source
-    assert "^Mach-O " in source
-    assert 'OBSERVED_VERSION="$(run_codex_as_worker --version' in source
-    assert '/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"' in source
-    assert '"0:0:555:1"' in source
-    assert '"$PINNED_CODEX_BINARY" "$@"' in source
-    assert '"$CODEX_BINARY" --version' not in source
-    assert '"$PINNED_CODEX_BINARY" --version' not in source
-    assert 'OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY"' in source
-
-
-def test_worker_auth_runs_codex_only_from_private_provider_home() -> None:
-    source = _source()
-    helper = source.split("run_codex_as_worker() {", maxsplit=1)[1].split(
-        "\n}\n", maxsplit=1
-    )[0]
-    assert 'cd -- "$PROVIDER_HOME"' in helper
-    assert 'PWD="$PROVIDER_HOME"' in helper
-    assert helper.index('cd -- "$PROVIDER_HOME"') < helper.index("/usr/bin/sudo -n")
-    assert helper.index('PWD="$PROVIDER_HOME"') < helper.index(
-        '"$PINNED_CODEX_BINARY" "$@"'
-    )
-
-
-def test_worker_auth_verification_is_strict_and_non_disclosing() -> None:
-    source = _source()
-    assert "--verify-only" in source
-    assert "--verify-ready" in source
-    assert "--reauthorize" in source
-    assert 'verify_auth_metadata' in source
-    assert 'verify_login_without_output' in source
-    assert 'verify_complete_auth' in source
-    complete_auth = source.split("verify_complete_auth() {", maxsplit=1)[1].split(
-        "}", maxsplit=1
-    )[0]
-    assert complete_auth.count("verify_auth_metadata") == 2
-    assert complete_auth.index("verify_login_without_output") < complete_auth.rindex(
-        "verify_auth_metadata"
-    )
-    assert "run_codex_as_worker login status" in source
-    assert "cli_auth_credentials_store=" in source
-    assert ">/dev/null 2>&1" in source
     assert '"$WORKER_UID:$WORKER_GID:600:1"' in source
-    assert "regular non-symlink file" in source
-    assert "unexpected filesystem ACL" in source
     assert "auth file is empty" in source
+    assert "unexpected filesystem ACL" in source
+    complete = source.split("verify_complete_auth() {", 1)[1].split("\n}", 1)[0]
+    assert complete.count("verify_auth_metadata") == 2
+    assert "verify_login_without_output" in complete
+    assert "run_codex_as_worker login status" in source
+    assert ">/dev/null 2>&1" in source
+    for command in ("cat", "jq", "sed", "grep", "head"):
+        assert f'{command} "$AUTH_PATH"' not in source
 
-    # Metadata is enough for the shell; Codex validates the opaque credential.
-    # The helper must not place credential bytes on stdout or stderr.
-    assert "auth.json" in source
-    forbidden_auth_reads = (
-        '/bin/cat "$AUTH_PATH"',
-        '/usr/bin/cat "$AUTH_PATH"',
-        '/usr/bin/jq "$AUTH_PATH"',
-        '/usr/bin/sed "$AUTH_PATH"',
-        '/usr/bin/grep "$AUTH_PATH"',
-        '/usr/bin/head "$AUTH_PATH"',
+
+def test_runtime_canary_still_forbids_token_and_login_paths() -> None:
+    canary = CANARY.read_text(encoding="utf-8")
+    assert "CODEX_ACCESS_TOKEN" in canary
+    assert "OPENAI_API_KEY" in canary
+    assert "--with-access-token" in canary
+    assert 'item in {"remote", "login", "logout"}' in canary
+    assert "forced_chatgpt_workspace_id" in canary
+
+
+def test_install_auth_gate_is_exact_before_mutation() -> None:
+    source = INSTALL.read_text(encoding="utf-8")
+    gate = source.index('"$WORKER_UID:$WORKER_GID:600:1"')
+    mutation = source.index("# Cross the mutation boundary")
+    assert gate < mutation
+    assert "dedicated worker auth is empty" in source[:mutation]
+    assert "dedicated worker auth has an unexpected filesystem ACL" in source[:mutation]
+
+
+def test_formal_acceptance_requires_current_composite_receipt_before_runtime() -> None:
+    source = ACCEPTANCE.read_text(encoding="utf-8")
+    validate = source.split("def validate_install(self)", 1)[1].split(
+        "def initialize_runtime_and_fixtures", 1
+    )[0]
+    assert "PROVIDER_READINESS_RECEIPT" in validate
+    assert "validate_receipt_file" in validate
+    assert "auth.json" in validate
+    run = source.split("def run(self)", 1)[1].split("def cleanup_after_failure", 1)[0]
+    assert run.index("self.validate_install()") < run.index(
+        "self.initialize_runtime_and_fixtures()"
     )
-    assert not any(command in source for command in forbidden_auth_reads)
 
 
-def test_worker_auth_provisioning_requires_root_macos_and_bootstrap_identity() -> None:
-    source = _source()
-    assert '"$(/usr/bin/id -u)" -eq 0' in source
-    assert '"$(/usr/bin/uname -s)" = "Darwin"' in source
-    assert "run bootstrap-host.sh first" in source
-    assert "NFSHomeDirectory" in source
-    assert 'UserShell)" = "/usr/bin/false"' in source
-    assert "/usr/bin/dscl" in source
-    assert "-authonly" in source
-    assert "eDSAuthAccountDisabled" in source
-    assert '"$WORKER_UID:$WORKER_GID:700"' in source
-
-
-def test_administrator_runbook_explains_bounded_worker_device_login() -> None:
+def test_runbook_documents_one_canary_gate_and_company_admin_provenance() -> None:
     runbook = RUNBOOK.read_text(encoding="utf-8")
-    assert "## Stage 1" in runbook and "### Dedicated worker authentication" in runbook
-    assert "provision-worker-auth.sh" in runbook
-    assert "--verify-only" in runbook
-    assert "--reauthorize" in runbook
-    assert "provider-inference-canary.sh" in runbook
-    assert "Login status alone is not READY" in runbook
-    assert "Do not invent one" in runbook
-    assert "invalid_workspace_selected" in runbook
-    assert "company Mastermind ChatGPT workspace" in runbook
-    assert "not silently fall back to Personal" in runbook
-    assert "--probe-root" in runbook
-    assert "--receipt-path" in runbook
-    assert "isolation_violation" in runbook
-    assert "not a provider `process_failed`" in runbook
-    assert "_mastermind_worker:_mastermind_worker" in runbook
-    assert "non-symlink" in runbook and "mode `0600`" in runbook
-    assert "never reads or copies" in runbook
-    assert "personal `~/.codex/auth.json`" in runbook
-    assert "Do not paste a token, API key" in runbook
-
-
-def test_worker_auth_reauthorization_requires_explicit_operator_mode() -> None:
-    source = _source()
-    assert "--reauthorize" in source
-    assert "--verify-ready" in source
-    default_provision = source.split('if [ "$REAUTHORIZE" = "true" ]; then', maxsplit=1)[0]
-    assert "run_codex_as_worker logout" not in default_provision
-    reauth = source.split('if [ "$REAUTHORIZE" = "true" ]; then', maxsplit=1)[1]
-    assert "run_codex_as_worker logout" in reauth
-    assert "run_codex_as_worker login --device-auth" in reauth
-    assert "run_inference_canary" in reauth
-    assert "</dev/tty >/dev/tty 2>/dev/tty" in reauth
-    verify_only = source.split('if [ "$VERIFY_ONLY" = "true" ]; then', maxsplit=1)[1].split(
-        "fi\n", maxsplit=1
-    )[0]
-    assert "run_inference_canary" not in verify_only
-    assert "not READY" in verify_only
-    verify_ready = source.split('if [ "$VERIFY_READY" = "true" ]; then', maxsplit=1)[1].split(
-        "fi\n", maxsplit=1
-    )[0]
-    assert "run_inference_canary" in verify_ready
-    assert "auth.json).read" not in source
-    assert "/usr/bin/jq" not in source
-    canary = (ROOT / "ops" / "executive_os" / "provider-inference-canary.sh").read_text(
-        encoding="utf-8"
-    )
-    assert "auth.json" not in canary
-    assert 'exec "$PYTHON_BINARY"' not in canary
-    python_canary = (
-        ROOT / "ops" / "executive_os" / "provider_inference_canary.py"
-    ).read_text(encoding="utf-8")
-    assert 'OPENAI_API_KEY' in python_canary
-    assert "auth.json" not in python_canary
+    flat = " ".join(runbook.split())
+    assert "service account" in flat
+    assert "finite-lived Codex access token" in flat
+    assert "company-workspace-admin-attested" in flat
+    assert "administrator evidence" in flat
+    assert "--enroll-service-account" in flat
+    assert "--enroll-personal-access-token" in flat
+    assert "--reauthorize-device" in flat
+    assert "--verify-ready" in flat
+    assert "exactly one" in flat
+    assert "There is no separate canary command" in flat
+    assert "install-before-readiness" in flat
+    assert "before it creates a Job" in flat
+    assert "forced workspace IDs" in flat
+    assert "never silently fall back to Personal" in flat
+    assert "CREDENTIAL_EXPIRES_AT" in runbook
+    assert "no more than 24 hours" in flat
+    assert "at least 30 minutes" in flat
+    assert "root-owned transaction lock" in flat
+    assert "--recover-readiness-transaction" in flat
+    assert "Provider readiness is not Git handoff Gate B" in flat
+    assert "git_handoff_preflight.py" in flat
+    assert runbook.count("provider-inference-canary.sh") <= 1

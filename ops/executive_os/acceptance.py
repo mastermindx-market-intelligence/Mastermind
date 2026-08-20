@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import plistlib
@@ -39,6 +40,7 @@ SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 RUNTIME_ROOT = Path("/var/db/mastermind-executive")
 CONTROL_CONFIG = SYSTEM_ROOT / "config" / "control.json"
 WORKER_CONFIG = SYSTEM_ROOT / "config" / "worker-codex.json"
+PROVIDER_READINESS_RECEIPT = SYSTEM_ROOT / "config" / "provider-readiness-v2.json"
 CONTROL_PLIST = Path(f"/Library/LaunchDaemons/{CONTROL_LABEL}.plist")
 WORKER_PLIST = Path(f"/Library/LaunchDaemons/{WORKER_LABEL}.plist")
 CONTROL_SOCKET = Path("/var/run/mastermind-executive/control.sock")
@@ -260,6 +262,16 @@ def _safe_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AcceptanceError(f"JSON file does not contain an object: {path}")
     return value
+
+
+def _provider_readiness_module(release: Path) -> Any:
+    path = release / "ops" / "executive_os" / "provider_readiness.py"
+    spec = importlib.util.spec_from_file_location("executive_provider_readiness", path)
+    if spec is None or spec.loader is None:
+        raise AcceptanceError("provider readiness validator is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _canonical_canary_paths(config: Mapping[str, Any]) -> dict[str, Path]:
@@ -1600,9 +1612,11 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             Path(self.config["proof_workspace_root"]),
             Path(self.config["worker_runs_root"]),
             Path(self.config["worker_provider_home"]),
+            Path(self.config["worker_provider_home"]) / "auth.json",
             CONTROL_CONFIG,
             WORKER_CONFIG,
             Path(self.worker_config["codex_attestation_receipt"]),
+            PROVIDER_READINESS_RECEIPT,
             CONTROL_PLIST,
             WORKER_PLIST,
         ):
@@ -1679,6 +1693,17 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             raise AcceptanceError(
                 "Codex attestation receipt content differs from the installed worker policy"
             )
+        try:
+            readiness = _provider_readiness_module(self.release)
+            readiness.validate_receipt_file(
+                PROVIDER_READINESS_RECEIPT,
+                auth_path=Path(self.config["worker_provider_home"]) / "auth.json",
+                binary_path=Path(self.worker_config["codex_binary"]),
+            )
+        except Exception as exc:
+            raise AcceptanceError(
+                "provider readiness receipt is missing, stale, or invalid"
+            ) from exc
         for shared_root in (
             Path(self.config["proof_workspace_root"]),
             Path(self.config["worker_runs_root"]),

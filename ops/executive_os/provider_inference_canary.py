@@ -762,6 +762,7 @@ def _receipt(
         "observed_at": now_iso(),
         "codex_version": observed_version,
         "codex_sha256": binary_sha256,
+        "codex_team_identifier": config.expected_codex_team,
         "model": config.model,
         "exit_code": int(exit_code),
         "timed_out": classification.get("terminal_event_class") == "timeout",
