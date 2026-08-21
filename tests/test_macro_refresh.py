@@ -11,12 +11,18 @@ Tests are grouped into four sections:
   D. refresh() hardening (2026-07-14 silent-freeze incident) — failed reset/sparse-checkout
        legs fail the refresh instead of reporting last-good as fresh-pulled, and the
        orphaned-index.lock self-heal (stale lock removed, fresh/held lock left alone).
+  E. Private-repo remote + SSH identity (Sol Day-6 Wave B, 2026-08-21) — MACRO_GIT_REMOTE /
+       MACRO_GIT_SSH_COMMAND are env-configurable with today's public-HTTPS defaults; the
+       clone subprocess's argv and child env are asserted via a mocked subprocess.run
+       (no network, no real git invocation).
 
 All tests use tmp_path or monkeypatch to stay network-free.
 """
 import datetime
+import importlib
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -496,7 +502,7 @@ def test_refresh_wires_sparse_set_and_r2(monkeypatch):
     run_calls: list[list[str]] = []
     monkeypatch.setattr(mr, "ensure_clone", lambda: True)
     monkeypatch.setattr(mr, "_run",
-                        lambda args, cwd=None, timeout=240:
+                        lambda args, cwd=None, timeout=240, env=None:
                         (run_calls.append(list(args)), types.SimpleNamespace(returncode=0))[1])
     synced: list[bool] = []
     monkeypatch.setattr(mr, "_sync_r2", lambda log=print: synced.append(True))
@@ -555,7 +561,7 @@ def _patch_run(monkeypatch, *, fail_leg: str | None = None, stderr: str = ""):
     import types
     calls: list[list[str]] = []
 
-    def fake(args, cwd=None, timeout=240):
+    def fake(args, cwd=None, timeout=240, env=None):
         calls.append(list(args))
         failed = fail_leg is not None and fail_leg in args
         return types.SimpleNamespace(returncode=1 if failed else 0,
@@ -660,3 +666,148 @@ def test_no_lock_is_a_noop(monkeypatch, tmp_path):
     msgs: list[str] = []
     mr._clear_stale_lock(log=msgs.append)
     assert not msgs
+
+
+# ---------------------------------------------------------------------------
+# Section E — private-repo remote + SSH identity (Sol Day-6 Wave B, 2026-08-21)
+#
+# MACRO_GIT_REMOTE / MACRO_GIT_SSH_COMMAND are read once at import time (same pattern as the
+# existing _R2_BASE constant), so these tests reload the module under a controlled env via
+# monkeypatch.setenv/delenv, then restore the module's default state on teardown so later
+# tests in this file are never polluted by a reload that happened here.
+# ---------------------------------------------------------------------------
+
+_PUBLIC_HTTPS_REMOTE = "https://github.com/mastermindx-market-intelligence/macro.git"
+
+
+@pytest.fixture()
+def reload_with_env(monkeypatch):
+    """Yields a function that reloads data_layer.macro_refresh under the given
+    MACRO_GIT_REMOTE / MACRO_GIT_SSH_COMMAND (None = unset), returning the reloaded module.
+    Restores the module to its unset-env defaults on teardown."""
+    import data_layer.macro_refresh as mod
+
+    def _apply(*, remote: str | None = None, ssh_command: str | None = None):
+        if remote is None:
+            monkeypatch.delenv("MACRO_GIT_REMOTE", raising=False)
+        else:
+            monkeypatch.setenv("MACRO_GIT_REMOTE", remote)
+        if ssh_command is None:
+            monkeypatch.delenv("MACRO_GIT_SSH_COMMAND", raising=False)
+        else:
+            monkeypatch.setenv("MACRO_GIT_SSH_COMMAND", ssh_command)
+        return importlib.reload(mod)
+
+    yield _apply
+    # Restore default (unset) state for any test running after this one in the same session.
+    monkeypatch.delenv("MACRO_GIT_REMOTE", raising=False)
+    monkeypatch.delenv("MACRO_GIT_SSH_COMMAND", raising=False)
+    importlib.reload(mod)
+
+
+def _patch_clone_subprocess(monkeypatch, mod, tmp_path):
+    """Point mod._SRC at an empty tmp_path (so ensure_clone() attempts a clone) and replace
+    subprocess.run (the real network-facing seam, per the TESTS spec) with a recorder. Returns
+    the list of recorded {"args", "cwd", "env"} call dicts."""
+    monkeypatch.setattr(mod, "_SRC", tmp_path / "macro_src")
+    calls: list[dict] = []
+
+    def fake_run(args, cwd=None, capture_output=None, text=None, timeout=None, env=None):
+        calls.append({"args": list(args), "cwd": cwd, "env": env})
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    return calls
+
+
+def test_remote_defaults_to_public_https_when_unset(reload_with_env):
+    """No MACRO_GIT_REMOTE / MACRO_GIT_SSH_COMMAND set -> byte-identical to today's hardcoded
+    values, and _remote_env() resolves to None (no forced GIT_SSH_COMMAND)."""
+    mod = reload_with_env()
+    assert mod._REMOTE == _PUBLIC_HTTPS_REMOTE
+    assert mod._GIT_SSH_COMMAND == ""
+    assert mod._remote_env() is None
+
+
+def test_macro_git_remote_override_reaches_clone_argv(monkeypatch, tmp_path, reload_with_env):
+    """MACRO_GIT_REMOTE overrides _REMOTE, and the clone subprocess's argv carries the override."""
+    custom_remote = "git@github.com:mastermindx-market-intelligence/macro.git"
+    mod = reload_with_env(remote=custom_remote)
+    assert mod._REMOTE == custom_remote
+    calls = _patch_clone_subprocess(monkeypatch, mod, tmp_path)
+
+    mod.ensure_clone()
+
+    assert calls, "expected ensure_clone() to invoke subprocess.run for git clone"
+    clone_call = calls[0]
+    assert clone_call["args"][:2] == ["git", "clone"]
+    assert custom_remote in clone_call["args"]
+    # SSH command unset in this test -> the clone's child env must still be unforced
+    assert clone_call["env"] is None
+
+
+def test_macro_git_ssh_command_reaches_clone_child_env(monkeypatch, tmp_path, reload_with_env):
+    """MACRO_GIT_SSH_COMMAND, when set, is carried as GIT_SSH_COMMAND in the clone subprocess's
+    child env — a COPY of the environment (never a global os.environ mutation)."""
+    ssh_cmd = ("ssh -i /etc/mastermind/deploy_keys/vps-mastermind-ro-macro-b1 "
+               "-o IdentitiesOnly=yes")
+    mod = reload_with_env(ssh_command=ssh_cmd)
+    assert mod._GIT_SSH_COMMAND == ssh_cmd
+    calls = _patch_clone_subprocess(monkeypatch, mod, tmp_path)
+
+    mod.ensure_clone()
+
+    assert calls, "expected ensure_clone() to invoke subprocess.run for git clone"
+    clone_env = calls[0]["env"]
+    assert clone_env is not None
+    assert clone_env.get("GIT_SSH_COMMAND") == ssh_cmd
+    # never a global mutation of the real process environment
+    assert clone_env is not os.environ
+    assert os.environ.get("GIT_SSH_COMMAND") != ssh_cmd
+
+
+def test_macro_git_ssh_command_unset_forces_no_override_in_child_env(
+        monkeypatch, tmp_path, reload_with_env):
+    """With MACRO_GIT_SSH_COMMAND unset, the clone's child env is None — subprocess.run then
+    inherits the parent process env unchanged, identical to pre-change behavior. GIT_SSH_COMMAND
+    is never forced."""
+    mod = reload_with_env()
+    calls = _patch_clone_subprocess(monkeypatch, mod, tmp_path)
+
+    mod.ensure_clone()
+
+    assert calls, "expected ensure_clone() to invoke subprocess.run for git clone"
+    assert calls[0]["env"] is None
+
+
+def test_fetch_leg_also_carries_remote_env(monkeypatch, tmp_path, reload_with_env):
+    """refresh()'s fetch leg (the other remote-facing subprocess call) also carries the
+    MACRO_GIT_SSH_COMMAND override, not just the clone."""
+    ssh_cmd = "ssh -i /etc/mastermind/deploy_keys/vps-mastermind-ro-macro-b1"
+    mod = reload_with_env(ssh_command=ssh_cmd)
+    src = tmp_path / "macro_src"
+    (src / "site").mkdir(parents=True)   # ensure_clone() short-circuits: site/ already present
+    monkeypatch.setattr(mod, "_SRC", src)
+    monkeypatch.setattr(mod, "_clear_stale_lock", lambda log=print: None)
+    monkeypatch.setattr(mod, "_sync_r2", lambda log=print: None)
+    monkeypatch.setattr(mod, "asof", lambda: "2026-08-21")
+
+    calls: list[dict] = []
+
+    def fake_run(args, cwd=None, capture_output=None, text=None, timeout=None, env=None):
+        calls.append({"args": list(args), "env": env})
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    assert mod.refresh() == "2026-08-21"
+
+    fetch_calls = [c for c in calls if c["args"][:2] == ["git", "fetch"]]
+    assert fetch_calls, "expected a git fetch subprocess call"
+    assert fetch_calls[0]["env"] is not None
+    assert fetch_calls[0]["env"].get("GIT_SSH_COMMAND") == ssh_cmd
+    # the local-only legs (reset, sparse-checkout) must NOT carry the remote env override
+    local_calls = [c for c in calls if c["args"][:2] in (["git", "reset"],
+                                                          ["git", "sparse-checkout"])]
+    assert local_calls, "expected reset + sparse-checkout legs to run"
+    assert all(c["env"] is None for c in local_calls)

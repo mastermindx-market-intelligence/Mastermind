@@ -70,6 +70,26 @@ Default ON.  MACRO_STALE_BLOCK (hard refuse) remains as the stricter opt-in abov
 
 `site/stockdata/` is always checked and reported in `data_gaps` — so the runlog surfaces an
 R2-sync failure loudly on every build, even when everything else is fresh.
+
+--- PRIVATE-REPO REMOTE + IDENTITY (Sol Day-6 Wave B, 2026-08-21) ---
+
+The production VPS reads macro via a symlink (vendor/macro -> /opt/macro) that needs no GitHub
+access at all — that host never calls ensure_clone()/refresh() below. Any OTHER host (DR, dev, a
+rebuilt box) falls through to the git clone/fetch in this module. Once the macro repo goes
+PRIVATE, an anonymous HTTPS clone/fetch 404s and the vendor tree can never materialize on those
+hosts, so the remote and its SSH identity are env-configurable:
+
+  MACRO_GIT_REMOTE      — the git remote URL. Defaults to the public HTTPS form (unchanged
+                          behavior pre-flip and on the symlink-covered VPS). A private host sets
+                          this to the SSH form, e.g.
+                          git@github.com:mastermindx-market-intelligence/macro.git
+  MACRO_GIT_SSH_COMMAND — when set, becomes GIT_SSH_COMMAND in the child env of every git
+                          subprocess that talks to the remote (clone + fetch), typically an
+                          `ssh -i <deploy-key-path> ...` invocation for a dedicated read-only
+                          deploy key (e.g. "vps-mastermind-ro-macro-b1"). Unset by default —
+                          the child env is then unchanged from today, no GIT_SSH_COMMAND forced.
+
+Neither variable is read anywhere else; both default to today's exact behavior when unset.
 """
 from __future__ import annotations
 
@@ -85,7 +105,11 @@ from typing import NamedTuple
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SRC = _ROOT / "vendor" / "macro_src"            # the dedicated checkout (gitignored)
-_REMOTE = "https://github.com/mastermindx-market-intelligence/macro.git"
+_REMOTE = os.environ.get("MACRO_GIT_REMOTE",
+                         "https://github.com/mastermindx-market-intelligence/macro.git")
+# SSH identity for the remote (e.g. a dedicated read-only deploy key) when the private-repo
+# SSH form of _REMOTE is used. Empty by default -> no GIT_SSH_COMMAND override (today's behavior).
+_GIT_SSH_COMMAND = os.environ.get("MACRO_GIT_SSH_COMMAND", "")
 # cone-mode sparse set: `site` alone misses data/regime/latest.json (anchor 2).
 # engine/ + lib/ are LOAD-BEARING: the bot imports the macro analyzer as a library
 # (CLAUDE.md contract; loop/harness.py does `from engine import active_alloc, validation`,
@@ -216,9 +240,23 @@ _ANCHORS: tuple[str, ...] = tuple(a.rel for a in _ANCHOR_DEFS)
 _STOCKDATA_GAP_REL = "site/stockdata"
 
 
-def _run(args: list[str], cwd: Path | None = None, timeout: int = 240):
+def _run(args: list[str], cwd: Path | None = None, timeout: int = 240, env: dict | None = None):
     return subprocess.run(args, cwd=str(cwd) if cwd else None,
-                          capture_output=True, text=True, timeout=timeout)
+                          capture_output=True, text=True, timeout=timeout, env=env)
+
+
+def _remote_env() -> dict | None:
+    """Child env for the git subprocesses that talk to the remote (clone + fetch).
+
+    Returns None (subprocess.run then inherits the parent env unchanged, identical to today)
+    when MACRO_GIT_SSH_COMMAND is unset. When set, returns a COPY of the current environment
+    with GIT_SSH_COMMAND overridden — never mutates os.environ globally, and the override
+    applies only to the remote-facing subprocess call it is passed to."""
+    if not _GIT_SSH_COMMAND:
+        return None
+    env = os.environ.copy()
+    env["GIT_SSH_COMMAND"] = _GIT_SSH_COMMAND
+    return env
 
 
 # A bot process that dies mid-pull can orphan .git/index.lock; every later `git reset --hard`
@@ -268,7 +306,7 @@ def ensure_clone() -> bool:
     try:
         _SRC.parent.mkdir(parents=True, exist_ok=True)
         r = _run(["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", _REMOTE, str(_SRC)],
-                 timeout=900)
+                 timeout=900, env=_remote_env())
         if r.returncode == 0:
             _run(["git", "sparse-checkout", "set", *_SPARSE_PATHS], cwd=_SRC)
     except Exception:
@@ -372,7 +410,7 @@ def refresh(log=print) -> str | None:
         if not ensure_clone():
             return None
         _clear_stale_lock(log=log)
-        f = _run(["git", "fetch", "--depth", "1", "origin", "main"], cwd=_SRC)
+        f = _run(["git", "fetch", "--depth", "1", "origin", "main"], cwd=_SRC, env=_remote_env())
         if f.returncode != 0:
             return None                                  # network down -> keep last-good data
         r = _run(["git", "reset", "--hard", "origin/main"], cwd=_SRC)
