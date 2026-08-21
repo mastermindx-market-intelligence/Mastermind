@@ -11,18 +11,28 @@ This directory is the protected procedural layer for the Personal-Pro Sol Execut
 It contains **procedure, not company state**. Never copy live workstream status, current PR
 state, Slack receipts, runtime counts, credentials or Chairman decisions into this package.
 
+Canonical Skillpack repository:
+
+```text
+mastermindx-market-intelligence/Mastermind
+```
+
+Canonical publication branch: protected `master`.
+
 ## Atomic-load law
 
 For every substantial Mastermind task:
 
-1. Fetch this `INDEX.md` from protected Mastermind `master`.
+1. Fetch this `docs/sol_skills/INDEX.md` from protected `master` in
+   `mastermindx-market-intelligence/Mastermind`.
 2. Record the exact commit SHA that supplied it.
-3. Fetch every required skill below from **that same commit SHA**.
+3. Fetch every required skill below from **that same commit SHA** in that repository.
 4. Verify `schema`, `skillpack_version` and `minimum_bootstrap_major` compatibility.
-5. If compatibility cannot be established, read-only investigation may continue with an
-   explicit warning; modifying workflow is unavailable.
+5. If protected Git read or compatibility cannot be established, read-only investigation may
+   continue with an explicit warning; modifying workflow is unavailable.
 
-Never load INDEX from one revision and a procedure from a moving later revision.
+Never load INDEX from one revision and a procedure from a moving later revision. Never substitute
+a pasted/manual copy for an unavailable protected Git read and then treat it as current procedure.
 
 ## Canonical source ownership
 
