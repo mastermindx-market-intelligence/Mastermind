@@ -782,7 +782,17 @@ def test_macro_git_ssh_command_unset_forces_no_override_in_child_env(
 
 def test_fetch_leg_also_carries_remote_env(monkeypatch, tmp_path, reload_with_env):
     """refresh()'s fetch leg (the other remote-facing subprocess call) also carries the
-    MACRO_GIT_SSH_COMMAND override, not just the clone."""
+    MACRO_GIT_SSH_COMMAND override, not just the clone.
+
+    CORRECTED 2026-08-21 (Sol Day-6 Wave B / DEC:B1-MACRO-PRIVATE-CUTOVER): this test used to
+    assert the OPPOSITE for reset/sparse-checkout — that they must NOT carry the override,
+    on the assumption that they are "local-only" legs. A live test against a real SSH remote +
+    dedicated deploy key proved that assumption wrong: this checkout is a blobless partial
+    clone (`--filter=blob:none`), so `git reset --hard` and `git sparse-checkout set` are
+    REMOTE-FACING — they fetch blobs for newly-materialized paths from the promisor remote.
+    Without the credential, `sparse-checkout set` printed
+    "fatal: could not fetch <sha> from promisor remote" while still exiting 0, and site/ was
+    never materialized. All four remote-facing legs must carry the same credential env."""
     ssh_cmd = "ssh -i /etc/mastermind/deploy_keys/vps-mastermind-ro-macro-b1"
     mod = reload_with_env(ssh_command=ssh_cmd)
     src = tmp_path / "macro_src"
@@ -806,8 +816,159 @@ def test_fetch_leg_also_carries_remote_env(monkeypatch, tmp_path, reload_with_en
     assert fetch_calls, "expected a git fetch subprocess call"
     assert fetch_calls[0]["env"] is not None
     assert fetch_calls[0]["env"].get("GIT_SSH_COMMAND") == ssh_cmd
-    # the local-only legs (reset, sparse-checkout) must NOT carry the remote env override
-    local_calls = [c for c in calls if c["args"][:2] in (["git", "reset"],
-                                                          ["git", "sparse-checkout"])]
-    assert local_calls, "expected reset + sparse-checkout legs to run"
-    assert all(c["env"] is None for c in local_calls)
+    # reset + sparse-checkout are ALSO remote-facing in a blobless partial clone and must carry
+    # the same credential override — this is the defect this whole change fixes.
+    remote_calls = [c for c in calls if c["args"][:2] in (["git", "reset"],
+                                                           ["git", "sparse-checkout"])]
+    assert remote_calls, "expected reset + sparse-checkout legs to run"
+    assert all(c["env"] is not None and c["env"].get("GIT_SSH_COMMAND") == ssh_cmd
+               for c in remote_calls), (
+        "reset/sparse-checkout must carry GIT_SSH_COMMAND — they are remote-facing in a "
+        "blobless partial clone (DEC:B1-MACRO-PRIVATE-CUTOVER)")
+
+
+# ---------------------------------------------------------------------------
+# Section F — ALL FIVE remote-facing git call sites (2026-08-21 follow-up)
+#
+# A live test against a real SSH remote + dedicated read-only deploy key, run on the
+# production VPS into a disposable directory, PROVED that 3 of 5 git subprocess call sites
+# in this module did not carry the credential into their child env: `git sparse-checkout set`
+# inside ensure_clone(), and `git reset --hard` + `git sparse-checkout set` inside refresh().
+# The checkout is a blobless PARTIAL clone (`--filter=blob:none`), so materializing any path —
+# moving HEAD, or widening the sparse cone — fetches blobs from the promisor remote; without
+# the credential, `git sparse-checkout set` printed
+# "fatal: could not fetch <sha> from promisor remote" to stderr while STILL EXITING 0, leaving
+# site/ absent with no loud failure signal. Unlike Section E (which reloads the module because
+# _REMOTE/_GIT_SSH_COMMAND are read once at import time to build _REMOTE), these tests drive
+# the credential via monkeypatch.setattr(mr, "_GIT_SSH_COMMAND", ...) directly — _remote_env()
+# re-reads that module attribute on every call, so no reload is needed here.
+# ---------------------------------------------------------------------------
+
+_REMOTE_CALL_SHAPES = (["git", "clone"], ["git", "fetch"], ["git", "reset"],
+                       ["git", "sparse-checkout"])
+
+
+def _patch_run_recorder(monkeypatch, tmp_path):
+    """Point mr._SRC at a fresh empty dir (so ensure_clone() attempts a real clone) and replace
+    mr._run with a recorder that always succeeds, simulating `git clone` materializing site/
+    (as the real command would) so ensure_clone() and refresh() both run their full call chain.
+    Returns the list of recorded {"args", "env"} call dicts."""
+    import types
+    src = tmp_path / "macro_src"
+    monkeypatch.setattr(mr, "_SRC", src)
+    monkeypatch.setattr(mr, "_clear_stale_lock", lambda log=print: None)
+    monkeypatch.setattr(mr, "_sync_r2", lambda log=print: None)
+    monkeypatch.setattr(mr, "asof", lambda: "2026-08-21")
+    calls: list[dict] = []
+
+    def fake_run(args, cwd=None, timeout=240, env=None):
+        calls.append({"args": list(args), "env": env})
+        if args[:2] == ["git", "clone"]:
+            (src / "site").mkdir(parents=True, exist_ok=True)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(mr, "_run", fake_run)
+    return calls
+
+
+def test_all_five_remote_calls_carry_ssh_env_when_set(monkeypatch, tmp_path):
+    """TESTS item 1: every git invocation that talks to the remote (clone, fetch, reset --hard,
+    sparse-checkout set — 5 call sites total: clone + sparse-checkout in ensure_clone(), fetch +
+    reset + sparse-checkout in refresh()) must carry env=_remote_env() with GIT_SSH_COMMAND set
+    when MACRO_GIT_SSH_COMMAND is configured."""
+    ssh_cmd = "ssh -i /etc/mastermind/deploy_keys/vps-mastermind-ro-macro-b1 -o IdentitiesOnly=yes"
+    monkeypatch.setattr(mr, "_GIT_SSH_COMMAND", ssh_cmd)
+    calls = _patch_run_recorder(monkeypatch, tmp_path)
+
+    assert mr.refresh(log=lambda *_: None) == "2026-08-21"
+
+    remote_calls = [c for c in calls if c["args"][:2] in _REMOTE_CALL_SHAPES]
+    assert len(remote_calls) == 5, (
+        f"expected 5 remote-facing subprocess calls (clone, fetch, reset, "
+        f"sparse-checkout x2), got {len(remote_calls)}: {[c['args'] for c in remote_calls]}")
+    for c in remote_calls:
+        assert c["env"] is not None and c["env"].get("GIT_SSH_COMMAND") == ssh_cmd, (
+            f"remote-facing call {c['args']} did not carry GIT_SSH_COMMAND in its child env — "
+            f"this is exactly the proven defect (fatal: could not fetch ... from promisor "
+            f"remote, while the caller saw returncode 0)")
+
+
+def test_all_five_remote_calls_get_no_forced_env_when_unset(monkeypatch, tmp_path):
+    """TESTS item 2 (inverse): with _GIT_SSH_COMMAND empty, _remote_env() returns None and NO
+    call receives a forced GIT_SSH_COMMAND — proving default (today's) behavior is unchanged
+    for every host relying on ambient git auth (e.g. the VPS's symlink-covered path never even
+    reaches this module, and any other host with default SSH/HTTPS credentials already works)."""
+    monkeypatch.setattr(mr, "_GIT_SSH_COMMAND", "")
+    assert mr._remote_env() is None
+    calls = _patch_run_recorder(monkeypatch, tmp_path)
+
+    assert mr.refresh(log=lambda *_: None) == "2026-08-21"
+
+    remote_calls = [c for c in calls if c["args"][:2] in _REMOTE_CALL_SHAPES]
+    assert len(remote_calls) == 5
+    assert all(c["env"] is None for c in remote_calls), (
+        "no remote-facing call may receive a forced env when MACRO_GIT_SSH_COMMAND is unset — "
+        "subprocess.run must inherit the parent env unchanged, identical to today")
+
+
+# NOTE on TESTS item 3 (non-vacuity): test_all_five_remote_calls_carry_ssh_env_when_set above is
+# written to fail if a future edit drops env=_remote_env() from ANY of the 5 call sites, because
+# it iterates every recorded remote-facing call and asserts on each individually (not just one
+# sampled call). This was verified by hand: temporarily removing `env=_remote_env()` from the
+# `git sparse-checkout set` call inside refresh() and rerunning
+# `pytest tests/test_macro_refresh.py::test_all_five_remote_calls_carry_ssh_env_when_set -q`
+# produced exactly one failure —
+#   AssertionError: remote-facing call ['git', 'sparse-checkout', 'set', ...] did not carry
+#   GIT_SSH_COMMAND in its child env — this is exactly the proven defect ...
+# — and reapplying the fix restored the pass. See the EVIDENCE section of the shipping packet
+# for the full pasted transcript of that run.
+
+
+def test_refresh_returns_none_on_quiet_promisor_failure(monkeypatch, tmp_path):
+    """TESTS item 4: `git sparse-checkout set` can exit 0 while a promisor blob fetch silently
+    failed (proven live 2026-08-21: "fatal: could not fetch ... from promisor remote" on
+    stderr, site/ never materialized, returncode 0 anyway). refresh() must detect this and
+    return None with a logged reason — callers must never see this as a successful refresh."""
+    import types
+    src = tmp_path / "macro_src"
+    (src / "site").mkdir(parents=True)   # ensure_clone() short-circuits: site/ already present
+    monkeypatch.setattr(mr, "_SRC", src)
+    monkeypatch.setattr(mr, "_clear_stale_lock", lambda log=print: None)
+    synced: list[bool] = []
+    monkeypatch.setattr(mr, "_sync_r2", lambda log=print: synced.append(True))
+
+    def fake_run(args, cwd=None, timeout=240, env=None):
+        if args[:2] == ["git", "sparse-checkout"]:
+            return types.SimpleNamespace(
+                returncode=0, stdout="",
+                stderr="fatal: could not fetch abc123def from promisor remote\n")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(mr, "_run", fake_run)
+    msgs: list[str] = []
+    assert mr.refresh(log=msgs.append) is None
+    assert not synced, "a quiet promisor failure must not proceed to the R2 leg"
+    assert any("promisor" in m.lower() for m in msgs), (
+        "expected a logged reason naming the promisor failure")
+
+
+def test_refresh_fetch_failure_returns_none(monkeypatch, tmp_path):
+    """TESTS item 5: a failed `git fetch` (network down) must still fail the refresh (None),
+    exactly as before this change — regression guard on the existing early-return contract."""
+    import types
+    src = tmp_path / "macro_src"
+    monkeypatch.setattr(mr, "_SRC", src)
+    monkeypatch.setattr(mr, "ensure_clone", lambda: True)
+    monkeypatch.setattr(mr, "_clear_stale_lock", lambda log=print: None)
+    synced: list[bool] = []
+    monkeypatch.setattr(mr, "_sync_r2", lambda log=print: synced.append(True))
+
+    def fake_run(args, cwd=None, timeout=240, env=None):
+        if args[:2] == ["git", "fetch"]:
+            return types.SimpleNamespace(returncode=1, stdout="",
+                                         stderr="fatal: unable to access remote")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(mr, "_run", fake_run)
+    assert mr.refresh(log=lambda *_: None) is None
+    assert not synced, "a failed fetch must not proceed to the R2 leg"
