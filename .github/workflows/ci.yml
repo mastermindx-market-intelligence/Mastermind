@@ -28,6 +28,18 @@ jobs:
       # Pin the exact Macro engine revision used by this release and fetch only
       # its importable code surface; runtime data remains VPS-owned and is never
       # copied into CI or this repository.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- macro is going private. The default
+      # `github.token` this job otherwise relies on is scoped to THIS
+      # repository only and cannot read another repo, so this checkout works
+      # today solely because mastermindx-market-intelligence/macro is still
+      # public. The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback
+      # keeps CI green right now (an undefined secret evaluates to an empty,
+      # falsy string, so behavior stays byte-identical to today) and keeps it
+      # green after the flip once the operator adds a read-only
+      # MACRO_CI_READ_TOKEN secret (fine-grained PAT or GitHub App
+      # installation token with Contents: Read on
+      # mastermindx-market-intelligence/macro, or an `ssh-key:` deploy-key
+      # equivalent) before or at the visibility flip.
       - name: Checkout pinned Macro engine
         uses: actions/checkout@v4
         with:
@@ -38,6 +50,7 @@ jobs:
             engine
             lib
           persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
       - uses: actions/setup-python@v5
         with:
