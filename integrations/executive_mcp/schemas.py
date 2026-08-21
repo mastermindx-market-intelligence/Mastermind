@@ -39,6 +39,7 @@ from typing import Any
 
 from common.redaction import sanitize_external_text
 from control_plane import ceo_intent as _ceo_intent
+from control_plane import ceo_request as _ceo_request
 
 __all__ = [
     "ERROR_CODES",
@@ -274,16 +275,11 @@ PROFILE_CAPABILITY_CEILING = frozenset({"READ", "RESEARCH", "RUN_TESTS", "WRITE_
 #: durable record says the CEO seat asked, and confers no privilege by saying so.
 GATEWAY_ACTOR = "ceo-sol"
 
-#: Namespace prefix for every derived intent id.
+#: Namespace prefix for every derived intent id.  MAS-75 PR-A: the byte-frozen
+#: value now lives in ``control_plane.ceo_request.MCP_INTENT_ID_PREFIX``
+#: (``derive_intent_id`` below delegates there); retained here as the
+#: documented public name for this pin.
 INTENT_ID_PREFIX = "mcp-"
-
-#: Domain separator for the operation-key digest.  Prevents a digest computed
-#: for one purpose from ever colliding with one computed for another.
-_INTENT_ID_DOMAIN = b"mastermind.executive_mcp.operation_key.v1\x00"
-
-#: Hex characters of the digest carried into the intent id.  36 total characters
-#: (``mcp-`` + 32) stays well inside the upstream 64-character ``INTENT_ID_RE``.
-_INTENT_ID_DIGEST_CHARS = 32
 
 
 # ---------------------------------------------------------------------------
@@ -471,20 +467,15 @@ def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list
     the commands.  ``python3 -c``, caller-chosen module names, shells, and
     interpreters are unreachable by construction — there is no code path here
     that copies a caller string into ``argv[0]`` or into a flag position.
+
+    MAS-75 PR-A: delegates to the shared, transport-agnostic builder in
+    ``control_plane.ceo_request`` (pure function of ``validation`` alone, no
+    module-global dependency), so MCP and the future dedicated Slack ingress
+    construct the identical reviewed argv family (pytest, compileall, then
+    ``git diff --check``) from one implementation.
     """
 
-    if not validation:
-        return []
-    commands: list[list[str]] = []
-    targets = validation.get("pytest_targets") or []
-    if targets:
-        commands.append(["python3", "-m", "pytest", "-q", *targets])
-    paths = validation.get("compileall_paths") or []
-    if paths:
-        commands.append(["python3", "-m", "compileall", *paths])
-    if validation.get("git_diff_check"):
-        commands.append(["git", "diff", "--check"])
-    return commands
+    return _ceo_request.build_validation_commands(validation)
 
 
 # ---------------------------------------------------------------------------
@@ -492,27 +483,31 @@ def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list
 # ---------------------------------------------------------------------------
 
 
-def _operation_digest(operation_key: str) -> str:
-    """sha256 over the operation key ALONE.
-
-    Deriving from the whole payload would be the bug: the same operation key
-    with a changed objective would silently become a different intent id and
-    therefore a second Job.  Keying on the operation identity only is what makes
-    a changed payload collide with the upstream fingerprint law and REFUSE
-    (§10.6, §10.7).
-    """
-
-    return hashlib.sha256(_INTENT_ID_DOMAIN + operation_key.encode("utf-8")).hexdigest()
+#: MAS-75 PR-A: the operation-key digest law, the ``mcp-`` prefix/domain bytes,
+#: ``derive_branch``, and ``derive_worktree`` below now delegate to the shared
+#: cross-transport law in ``control_plane.ceo_request`` (the future dedicated
+#: Slack ingress derives byte-identically over its OWN separately namespaced
+#: identity there). The frozen MCP prefix/domain bytes and every observable
+#: value are unchanged — proven by ``tests/test_executive_mcp*`` (unmodified)
+#: and by the literal cross-transport regression vectors in
+#: ``tests/test_executive_ceo_request.py``.
 
 
 def derive_intent_id(operation_key: str) -> str:
     """``mcp-<32 hex>`` — stable, legal upstream, and payload-independent."""
 
-    key = _matches(operation_key, "operation_key", _OPERATION_KEY_RE, max_chars=MAX_OPERATION_KEY_CHARS)
-    intent_id = INTENT_ID_PREFIX + _operation_digest(key)[:_INTENT_ID_DIGEST_CHARS]
+    try:
+        intent_id = _ceo_request.mcp_intent_id(operation_key)
+    except _ceo_request.CeoRequestInternalError as exc:
+        # MINOR 11: an internal-defect path (never a caller mistake) keeps its
+        # pre-refactor public category rather than being folded into the
+        # caller-facing "invalid_input" bucket below.
+        raise GatewayError("internal_error", str(exc)) from exc
+    except _ceo_request.CeoRequestInvalid as exc:
+        raise GatewayError("invalid_input", str(exc)) from exc
     if _INTENT_ID_RE.fullmatch(intent_id) is None or len(intent_id) > 64:
-        # Unreachable with the constants above; asserted rather than assumed so
-        # a future prefix change cannot quietly mint an illegal upstream id.
+        # Unreachable with the shared constants; asserted rather than assumed
+        # so a future prefix change cannot quietly mint an illegal upstream id.
         raise GatewayError("internal_error", "derived intent id is not upstream-legal")
     return intent_id
 
@@ -520,7 +515,7 @@ def derive_intent_id(operation_key: str) -> str:
 def derive_branch(intent_id: str) -> str:
     """``codex/<intent-id>`` — deterministic, always under the reviewed prefix."""
 
-    return f"codex/{intent_id}"
+    return _ceo_request.derive_branch(intent_id)
 
 
 def derive_worktree(workspace_root: str, intent_id: str) -> str:
@@ -532,10 +527,21 @@ def derive_worktree(workspace_root: str, intent_id: str) -> str:
     construction instead of by coincidence.
     """
 
-    root = workspace_root.rstrip("/")
-    if not root.startswith("/"):
-        raise GatewayError("internal_error", "workspace root must be absolute")
-    return f"{root}/{intent_id}"
+    # MINOR 12: preserve pre-refactor strictness for a non-``str`` argument.
+    # ``_ceo_request.derive_worktree`` itself calls ``str(workspace_root)``
+    # before ``.rstrip("/")``, which would silently coerce e.g. ``None`` or an
+    # int instead of raising.  Touch a str-only method directly on the
+    # caller-supplied value first so a non-str argument still raises
+    # ``AttributeError`` exactly as the pre-refactor implementation did; for an
+    # actual ``str`` this is a pure, side-effect-free no-op (the result is
+    # discarded) and str behavior stays byte-identical.
+    workspace_root.rstrip("/")
+    try:
+        return _ceo_request.derive_worktree(workspace_root, intent_id)
+    except _ceo_request.CeoRequestInternalError as exc:
+        raise GatewayError("internal_error", str(exc)) from exc
+    except _ceo_request.CeoRequestInvalid as exc:
+        raise GatewayError("invalid_input", str(exc)) from exc
 
 
 def derive_authorities(execution_profile: str) -> list[str]:

@@ -34,6 +34,7 @@ from uuid import uuid4
 
 from common.redaction import sanitize_external_text
 from control_plane import ceo_intent
+from control_plane import executive_ceo_ingress as ceo_ingress
 from control_plane.executive_runtime import (
     Job,
     JobStatus,
@@ -330,6 +331,11 @@ class ExecutiveControlService:
         activated_socket: socket.socket | None = None,
         service_state: str = "READY",
         canary_loader: Callable[[], Mapping[str, Any]] | None = None,
+        ceo_ingress_socket_path: Path | str | None = None,
+        ceo_ingress_peer_uid: int | None = None,
+        ceo_ingress_grounding_provider: "ceo_ingress.GroundingProvider | None" = None,
+        ceo_ingress_armed: bool = False,
+        ceo_ingress_activated_socket: socket.socket | None = None,
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
@@ -369,6 +375,99 @@ class ExecutiveControlService:
         self._service_state = service_state
         self._canary_loader = canary_loader
         self.instance_id = f"executive-service-{uuid4().hex}"
+
+        # --- MAS-75 PR-A: optional dedicated CeoIngress composition --------
+        #
+        # Absent (the default) => byte-compatible-unchanged current behavior
+        # (adjudication §8.2, R2 §3): no second listener, no startup latch, no
+        # ingress handler drain set is ever populated.  One process / one
+        # Runtime / one service lock still governs both listeners when
+        # present (§8.1) — CeoIngress never opens its own Runtime or lock.
+        if ceo_ingress_socket_path is None:
+            if ceo_ingress_activated_socket is not None:
+                raise ValueError(
+                    "ceo_ingress_activated_socket requires ceo_ingress_socket_path"
+                )
+            if ceo_ingress_peer_uid is not None or ceo_ingress_grounding_provider is not None:
+                raise ValueError(
+                    "ceo_ingress_peer_uid/ceo_ingress_grounding_provider require "
+                    "ceo_ingress_socket_path"
+                )
+            self._ceo_ingress_socket_path: Path | None = None
+        else:
+            resolved_ceo_ingress_path = Path(ceo_ingress_socket_path)
+            if not resolved_ceo_ingress_path.is_absolute():
+                raise ValueError("ceo_ingress_socket_path must be absolute")
+            resolved_ceo_ingress_path = resolved_ceo_ingress_path.resolve(strict=False)
+            # §17.1: ingress path same as Operator path -> constructor/
+            # composition refusal.  The two sockets are transport separation,
+            # never one path serving both surfaces.
+            if resolved_ceo_ingress_path == config.socket_path:
+                raise ValueError(
+                    "ceo_ingress_socket_path must differ from the Operator socket_path"
+                )
+            if ceo_ingress_peer_uid is None:
+                raise ValueError(
+                    "ceo_ingress_peer_uid is required when ceo_ingress_socket_path is set"
+                )
+            if ceo_ingress_grounding_provider is None:
+                raise ValueError(
+                    "ceo_ingress_grounding_provider is required when "
+                    "ceo_ingress_socket_path is set"
+                )
+            if ceo_ingress_activated_socket is not None:
+                if ceo_ingress_activated_socket.family != socket.AF_UNIX:
+                    raise ValueError("ceo_ingress_activated_socket must use AF_UNIX")
+                bound = ceo_ingress_activated_socket.getsockname()
+                if isinstance(bound, bytes):
+                    bound = os.fsdecode(bound)
+                if (
+                    not isinstance(bound, str)
+                    or not bound
+                    or bound.startswith("\0")
+                    or Path(bound).resolve(strict=False) != resolved_ceo_ingress_path
+                ):
+                    raise ValueError(
+                        "ceo_ingress_activated_socket path does not match "
+                        "ceo_ingress_socket_path"
+                    )
+                try:
+                    _require_listening_if_queryable(ceo_ingress_activated_socket)
+                except ServiceError as exc:
+                    raise ValueError(
+                        "ceo_ingress_activated_socket must already be listening"
+                    ) from exc
+            self._ceo_ingress_socket_path = resolved_ceo_ingress_path
+        self._ceo_ingress_peer_uid = ceo_ingress_peer_uid
+        self._ceo_ingress_grounding_provider = ceo_ingress_grounding_provider
+        # §9: host-owned/injected policy, default false.  Never set by a
+        # request; PR-A models it as constructor/test policy only.
+        self._ceo_ingress_armed = bool(ceo_ingress_armed)
+        self._ceo_ingress_activated_socket = ceo_ingress_activated_socket
+        self._ceo_ingress_launchd_activated = ceo_ingress_activated_socket is not None
+        self._ceo_ingress_server: asyncio.AbstractServer | None = None
+        # R1 §2.1 in-memory, non-durable startup/readiness latch.  Process
+        # lifecycle only; grants no durable authority and is never set by a
+        # request.
+        self._ceo_ingress_ready = False
+        # §14.1 in-memory handler drain set.  No durable request registry,
+        # lease, or table backs this.
+        self._ceo_ingress_tasks: set[asyncio.Task[Any]] = set()
+
+    @property
+    def ceo_ingress_socket_path(self) -> Path | None:
+        return self._ceo_ingress_socket_path
+
+    @property
+    def ceo_ingress_armed(self) -> bool:
+        return self._ceo_ingress_armed
+
+    @property
+    def ceo_ingress_ready(self) -> bool:
+        """The R1/R2 in-memory startup latch — true only after BOTH listeners
+        have started serving in dual-listener mode."""
+
+        return self._ceo_ingress_ready
 
     @property
     def socket_path(self) -> Path:
@@ -543,6 +642,104 @@ class ExecutiveControlService:
             "migrations": migrations,
         }
 
+    def _prepare_ceo_ingress_socket_path(self) -> None:
+        """Directory/stale-node preparation for the dedicated CeoIngress path.
+
+        Deliberately does NOT acquire/release the service lock: §8.1 is one
+        process / one Runtime / one lock for BOTH listeners, and the single
+        lock is already held by ``_prepare_socket()`` earlier in ``start()``.
+        A failure here is handled uniformly by ``start()``'s outer
+        ``except Exception: await self.close(); raise``.
+        """
+
+        assert self._ceo_ingress_socket_path is not None
+        parent = self._ceo_ingress_socket_path.parent
+        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        parent_info = parent.lstat()
+        if (
+            not stat.S_ISDIR(parent_info.st_mode)
+            or stat.S_ISLNK(parent_info.st_mode)
+            or parent_info.st_uid != os.geteuid()
+        ):
+            raise ServiceError(
+                "CeoIngress control socket directory is not owned by the service uid"
+            )
+        parent.chmod(0o700)
+        try:
+            info = self._ceo_ingress_socket_path.lstat()
+        except FileNotFoundError:
+            return
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.geteuid():
+            raise ServiceError(
+                "refusing to replace an unowned or non-socket CeoIngress control path"
+            )
+        self._ceo_ingress_socket_path.unlink()
+
+    async def _bind_operator_server(self, *, start_serving: bool) -> None:
+        """Construct (bind) the generic Operator listener.
+
+        ``self._server`` is assigned IMMEDIATELY once ``start_unix_server``
+        returns — before the activated-socket mode/world-accessible check
+        below — so a failure in that check still leaves a real server object
+        reachable from ``close()`` rather than leaking an unclosed socket.
+        Passing ``start_serving=True`` (the legacy single-listener path)
+        reproduces the previous unparameterized call byte-for-byte, since
+        that was already asyncio's own default.
+        """
+
+        if self._activated_socket is None:
+            self._server = await asyncio.start_unix_server(
+                self._handle_connection,
+                path=str(self.socket_path),
+                limit=self.config.max_request_bytes + 1,
+                start_serving=start_serving,
+            )
+            self.socket_path.chmod(0o600)
+        else:
+            activated, self._activated_socket = self._activated_socket, None
+            self._server = await asyncio.start_unix_server(
+                self._handle_connection,
+                sock=activated,
+                limit=self.config.max_request_bytes + 1,
+                start_serving=start_serving,
+            )
+            mode = stat.S_IMODE(self.socket_path.stat().st_mode)
+            if mode & 0o007:
+                raise ServiceError("launchd control socket must not be world-accessible")
+
+    async def _bind_ceo_ingress_server(self, *, start_serving: bool) -> None:
+        """Construct (bind) the dedicated CeoIngress listener; see ``_bind_operator_server``."""
+
+        assert self._ceo_ingress_socket_path is not None
+        if self._ceo_ingress_activated_socket is None:
+            self._prepare_ceo_ingress_socket_path()
+            self._ceo_ingress_server = await asyncio.start_unix_server(
+                self._handle_ceo_ingress_connection,
+                path=str(self._ceo_ingress_socket_path),
+                limit=ceo_ingress.MAX_REQUEST_BYTES + 1,
+                start_serving=start_serving,
+            )
+            self._ceo_ingress_socket_path.chmod(0o600)
+        else:
+            activated, self._ceo_ingress_activated_socket = (
+                self._ceo_ingress_activated_socket,
+                None,
+            )
+            self._ceo_ingress_server = await asyncio.start_unix_server(
+                self._handle_ceo_ingress_connection,
+                sock=activated,
+                limit=ceo_ingress.MAX_REQUEST_BYTES + 1,
+                start_serving=start_serving,
+            )
+
+    async def _start_ceo_ingress_serving(self) -> None:
+        assert self._ceo_ingress_server is not None
+        await self._ceo_ingress_server.start_serving()
+
+    async def _start_operator_serving(self) -> None:
+        assert self._server is not None
+        await self._server.start_serving()
+
     async def start(self) -> None:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
@@ -561,33 +758,59 @@ class ExecutiveControlService:
                 self._startup_reconciliation = await asyncio.to_thread(
                     self.supervisor.reconcile_restart, requeue_lost=False
                 )
-            if self._activated_socket is None:
-                self._server = await asyncio.start_unix_server(
-                    self._handle_connection,
-                    path=str(self.socket_path),
-                    limit=self.config.max_request_bytes + 1,
-                )
-                self.socket_path.chmod(0o600)
+            if self._ceo_ingress_socket_path is not None:
+                # R1 §2.1 / R2 §3 atomic dual-listener startup.  Construct/bind
+                # BOTH listeners with no-accept first; only then start serving,
+                # CeoIngress FIRST while its own startup latch is still false
+                # (so a request racing this narrow window gets only
+                # ``ingress_unavailable`` and never reaches business
+                # parsing/mutation), Operator SECOND.  The startup latch flips
+                # true only after BOTH ``start_serving()`` calls succeed.  Any
+                # failure anywhere in this block is handled uniformly by the
+                # outer ``except Exception: await self.close(); raise`` below,
+                # which tears down whichever listener(s) were constructed.
+                await self._bind_ceo_ingress_server(start_serving=False)
+                await self._bind_operator_server(start_serving=False)
+                await self._start_ceo_ingress_serving()
+                await self._start_operator_serving()
+                self._ceo_ingress_ready = True
             else:
-                activated, self._activated_socket = self._activated_socket, None
-                self._server = await asyncio.start_unix_server(
-                    self._handle_connection,
-                    sock=activated,
-                    limit=self.config.max_request_bytes + 1,
-                )
-                mode = stat.S_IMODE(self.socket_path.stat().st_mode)
-                if mode & 0o007:
-                    raise ServiceError("launchd control socket must not be world-accessible")
+                # Byte-compatible-unchanged: identical to the previous
+                # unconditional call (start_serving defaults to True).
+                await self._bind_operator_server(start_serving=True)
+            # R2 §3: set/update _started_at exactly where the service records
+            # successful startup — after BOTH listeners in dual-listener mode
+            # (Operator starts second, so this line already runs after both),
+            # unchanged single-listener timing otherwise.
             self._started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         except Exception:
             await self.close()
             raise
 
     async def close(self) -> None:
+        # R1/R2: the startup latch is process lifecycle only; reset it before
+        # anything else so a mid-startup failure or a fresh restart never
+        # observes a stale true value.
+        self._ceo_ingress_ready = False
+
+        # §14.2 step 1 — stop BOTH listeners first, preventing new
+        # connections, before awaiting either one's ``wait_closed()``.  Calling
+        # ``.close()`` on both up front (rather than close+await, close+await)
+        # is what actually "stops both listeners first": ``.close()`` alone
+        # already stops the server from accepting new connections, so doing it
+        # for both before either await removes the narrow window in which the
+        # second listener could still accept a connection while this coroutine
+        # is suspended awaiting the first listener's ``wait_closed()``.
         server, self._server = self._server, None
+        ceo_ingress_server, self._ceo_ingress_server = self._ceo_ingress_server, None
         if server is not None:
             server.close()
+        if ceo_ingress_server is not None:
+            ceo_ingress_server.close()
+        if server is not None:
             await server.wait_closed()
+        if ceo_ingress_server is not None:
+            await ceo_ingress_server.wait_closed()
 
         tasks = [task for task in self._dispatch_tasks.values() if not task.done()]
         runtime = self.runtime
@@ -617,6 +840,18 @@ class ExecutiveControlService:
                 await asyncio.gather(*pending, return_exceptions=True)
         self._dispatch_tasks.clear()
 
+        # §14.2 — CeoIngress handler tasks are NEVER cancelled here, unlike the
+        # dispatch tasks above.  A handler whose sync ``submit_intent`` thread
+        # has already started cannot be safely cancelled (cancelling the
+        # awaiting coroutine does not cancel the underlying thread/
+        # transaction), so ``close()`` waits every already-started handler to
+        # a REAL terminal outcome with no grace-period timeout.  The service
+        # lock/marker below is not released until this drains.
+        ceo_ingress_tasks = [task for task in self._ceo_ingress_tasks if not task.done()]
+        if ceo_ingress_tasks:
+            await asyncio.gather(*ceo_ingress_tasks, return_exceptions=True)
+        self._ceo_ingress_tasks.clear()
+
         if not self._launchd_activated:
             try:
                 info = self.socket_path.lstat()
@@ -625,6 +860,14 @@ class ExecutiveControlService:
             else:
                 if stat.S_ISSOCK(info.st_mode):
                     self.socket_path.unlink()
+        if self._ceo_ingress_socket_path is not None and not self._ceo_ingress_launchd_activated:
+            try:
+                info = self._ceo_ingress_socket_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if stat.S_ISSOCK(info.st_mode):
+                    self._ceo_ingress_socket_path.unlink()
         self._release_service_lock()
 
     async def serve_until_stopped(self) -> None:
@@ -754,6 +997,193 @@ class ExecutiveControlService:
             # flight.  Nothing the service decided changes, and the caller's
             # `finally` still tears the connection down.
             return
+
+    # -----------------------------------------------------------------
+    # MAS-75 PR-A: dedicated CeoIngress connection handling
+    # -----------------------------------------------------------------
+
+    def _ceo_ingress_ready_for_admission(self) -> bool:
+        """R2 §5 final readiness predicate (minus the always-true "this
+        service instance/lock is valid" clause, which holds trivially while
+        the service itself is running): the startup latch, the host-owned
+        arming decision, and the current service-state allowlist.  Every
+        other/future/dynamic state (including ``QUARANTINED``) refuses.
+        Arming this predicate never changes ``_service_state``, clears
+        quarantine, or touches any worker/provider/broker.
+        """
+
+        return (
+            self._ceo_ingress_ready
+            and self._ceo_ingress_armed
+            and self._service_state in {"READY", "AWAITING_CANARY"}
+        )
+
+    async def _send_ceo_ingress_response(
+        self, writer: asyncio.StreamWriter, payload: Mapping[str, Any]
+    ) -> None:
+        """Dedicated bounded sender (§7.4) — the 32 KiB ingress ceiling, never
+        the generic ``_send()``'s ``ServiceConfig.max_response_bytes``.  A
+        successful canonical receipt above the ingress bound is a protocol/
+        backend defect and refuses; it is never truncated."""
+
+        raw = _canonical_json(payload)
+        if len(raw) > ceo_ingress.MAX_RESPONSE_BYTES:
+            raw = _canonical_json(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "response_too_large",
+                        "message": "response exceeds byte limit",
+                    },
+                }
+            )
+        try:
+            writer.write(raw)
+            await writer.drain()
+        except _CLIENT_GONE:
+            return
+
+    async def _send_ceo_ingress_error(
+        self, writer: asyncio.StreamWriter, code: str, message: str
+    ) -> None:
+        await self._send_ceo_ingress_response(
+            writer, {"ok": False, "error": {"code": code, "message": message}}
+        )
+
+    async def _handle_ceo_ingress_connection(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        """The dedicated CeoIngress protocol handler (§7, §8, R1 §2).
+
+        Peer identity is authenticated against the ONE exact configured
+        ingress peer uid — separate from the generic Operator
+        ``allowed_peer_uids`` set — before any body read/parsing.  There is no
+        generic dispatcher on this path: everything past peer authentication
+        and the startup-readiness gate is delegated to
+        ``executive_ceo_ingress.handle_frame``, which owns the closed submit/
+        status frame validation and typed error law.  Exactly one frame is
+        read and one response is written per connection (§7.3).
+        """
+
+        task = asyncio.current_task()
+        if task is not None:
+            # §14.1: register on entry.  Removed in ``finally`` only once this
+            # handler's admission/readback and response cleanup reaches the
+            # real terminal point — a client disconnect does not remove it
+            # while a canonical mutation is running.
+            self._ceo_ingress_tasks.add(task)
+        try:
+            connection = writer.get_extra_info("socket")
+            if connection is None:
+                await self._send_ceo_ingress_error(
+                    writer,
+                    "peer_credentials_unavailable",
+                    "control connection has no local socket identity",
+                )
+                return
+            try:
+                peer = _peer_uid(connection)
+            except OSError:
+                await self._send_ceo_ingress_error(
+                    writer,
+                    "peer_credentials_unavailable",
+                    "kernel peer credentials could not be read",
+                )
+                return
+            if peer is None:
+                await self._send_ceo_ingress_error(
+                    writer,
+                    "peer_credentials_unavailable",
+                    "platform exposes no trusted local peer uid",
+                )
+                return
+            if peer != self._ceo_ingress_peer_uid:
+                await self._send_ceo_ingress_error(
+                    writer, "peer_denied", "peer uid is not authorized"
+                )
+                return
+            # R1 §2.1: refuse before business parsing/mutation whenever the
+            # startup latch is still false, the ingress is unarmed, or the
+            # current service state is outside the readiness allowlist.  Zero
+            # grounding-provider calls, zero Runtime business access, and no
+            # generic dispatcher is reachable past this point either way.
+            if not self._ceo_ingress_ready_for_admission():
+                await self._send_ceo_ingress_error(
+                    writer,
+                    "ingress_unavailable",
+                    "Executive CEO ingress is not currently admitting requests",
+                )
+                return
+            try:
+                raw = await reader.readuntil(b"\n")
+            except asyncio.LimitOverrunError:
+                await self._send_ceo_ingress_error(
+                    writer, "request_too_large", "request exceeds byte limit"
+                )
+                return
+            except asyncio.IncompleteReadError:
+                # §7.3: EOF before newline is an incomplete/refused frame even
+                # if the partial bytes would parse as valid JSON.
+                await self._send_ceo_ingress_error(
+                    writer, "invalid_json", "request frame is incomplete"
+                )
+                return
+            # NIT 15b: unlike the generic Operator path (which falls through to
+            # here with ``raw = exc.partial`` on ``IncompleteReadError`` and so
+            # can reach this point with an empty ``raw``), BOTH exception
+            # branches above ``return`` early; the only way to reach this line
+            # is ``readuntil(b"\n")`` returning normally, which always yields
+            # at least the separator byte.  ``not raw`` is therefore
+            # unreachable here and is intentionally omitted (verified by
+            # grepping both except clauses above: neither falls through).
+            if len(raw) > ceo_ingress.MAX_REQUEST_BYTES:
+                await self._send_ceo_ingress_error(
+                    writer, "request_too_large", "request exceeds byte limit"
+                )
+                return
+            try:
+                text = raw.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                await self._send_ceo_ingress_error(
+                    writer, "invalid_json", "request is not valid UTF-8"
+                )
+                return
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                await self._send_ceo_ingress_error(
+                    writer, "invalid_json", "request is not valid JSON"
+                )
+                return
+            try:
+                result = await ceo_ingress.handle_frame(
+                    parsed,
+                    runtime=self._require_runtime(),
+                    grounding_provider=self._ceo_ingress_grounding_provider,
+                    workspace_root=self.config.proof_workspace_root,
+                )
+            except ceo_ingress.CeoIngressError as exc:
+                await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                return
+            except Exception:  # fail closed without a traceback or local paths
+                await self._send_ceo_ingress_error(
+                    writer, "internal_error", "Executive CEO ingress failed"
+                )
+                return
+            await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+        finally:
+            # §14.1 — remove the task from the drain set only AFTER its
+            # admission/readback and response cleanup (writer close/drain)
+            # reaches the real terminal point, so ``close()``'s drain-set wait
+            # cannot observe this handler as "done" while its writer is still
+            # being torn down.
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except _CLIENT_GONE:
+                pass
+            if task is not None:
+                self._ceo_ingress_tasks.discard(task)
 
     @staticmethod
     def _request(request: Any) -> tuple[str, dict[str, Any]]:
