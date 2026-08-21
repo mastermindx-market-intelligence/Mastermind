@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 from control_plane import ceo_boot_packet
+from control_plane import ceo_request
 from control_plane.executive_runtime import JobStatus, Runtime
 from control_plane.executive_service import (
     ExecutiveControlService,
@@ -415,15 +416,24 @@ def test_20_09_authority_refusal_creates_no_job(
     that ``config/authority_map.yml`` refuses ``MERGE``, not merely that the
     gateway refused to ask for it (which is proven separately in the mutation
     battery).
+
+    MAS-75 PR-A (P1 repair, single canonical authority): the ceiling/profile
+    table lifted here must be the CANONICAL ``control_plane.ceo_request``
+    pair, not the ``integrations.executive_mcp.schemas`` re-export snapshot —
+    ``schemas.derive_authorities`` now delegates to
+    ``ceo_request.derive_authorities``, which reads its own module globals
+    fresh on every call, so patching the schemas-local names would no longer
+    reach it at all (the request would never even get past the gateway's own
+    ceiling to exercise this downstream fence).
     """
 
     monkeypatch.setattr(
-        schemas, "PROFILE_CAPABILITY_CEILING", frozenset({"READ", "RESEARCH", "MERGE"})
+        ceo_request, "PROFILE_CAPABILITY_CEILING", frozenset({"READ", "RESEARCH", "MERGE"})
     )
     monkeypatch.setattr(
-        schemas,
+        ceo_request,
         "EXECUTION_PROFILES",
-        {**schemas.EXECUTION_PROFILES, "research_only": ("READ", "MERGE")},
+        {**ceo_request.EXECUTION_PROFILES, "research_only": ("READ", "MERGE")},
     )
 
     async def exercise(gateway, service):

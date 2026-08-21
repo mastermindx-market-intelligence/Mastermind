@@ -14,9 +14,20 @@ Three families are proven here:
   ``control_plane.ceo_intent`` envelope/fingerprint code paths.
 
 ``integrations.executive_mcp.schemas`` is imported here ONLY for a compatibility
-parity check (its own already-frozen ``FORBIDDEN_INPUT_FIELDS`` tuple and its
+check (its own already-frozen ``FORBIDDEN_INPUT_FIELDS`` tuple and its
 ``_validate_submit``); ``control_plane.ceo_request`` itself never imports it —
 see the import-boundary check at the bottom of this file.
+
+MAS-75 PR-A P1 repair (single canonical authority): ``schemas._validate_submit``
+is now a pure DELEGATING WRAPPER over ``normalize_high_level_request`` below —
+it holds no independent field/path/validation policy of its own.  The
+"byte-for-byte"/"refusal parity" tests near the bottom of this file therefore
+no longer compare two independently-arrived-at implementations; they are
+DELEGATION-WIRING checks that the wrapper still calls through and still maps
+errors/messages correctly.  The boundary-edge probes (operation_key/objective/
+priority/attempt_limit accept-vs-refuse edges) still attack
+``normalize_high_level_request`` DIRECTLY as well, so the canonical law keeps
+its own regression fence independent of the MCP wrapper.
 """
 from __future__ import annotations
 
@@ -583,7 +594,10 @@ def test_golden_fixture_envelopes_differ_only_where_transport_identity_propagate
 
 
 # ===========================================================================
-# byte/semantic parity between the shared law and the existing MCP gateway
+# delegation-wiring parity between the shared law and the MCP wrapper
+# (pre-P1-repair this section proved parity between two INDEPENDENT copies;
+# post-repair ``schemas._validate_submit`` delegates to ``cr`` directly, so
+# these now pin the WRAPPER's call-through + error-mapping behavior instead)
 # ===========================================================================
 
 
@@ -606,11 +620,14 @@ def test_golden_fixture_envelopes_differ_only_where_transport_identity_propagate
 def test_normalization_matches_the_existing_mcp_gateway_byte_for_byte(payload_factory):
     """The shared law and ``integrations.executive_mcp.schemas`` must agree.
 
-    ``schemas._validate_submit`` remains the MCP gateway's own frozen
-    implementation (unmodified by this commission); this test proves the new
-    shared ``control_plane.ceo_request`` law produces an IDENTICAL normalized
-    dict for the same accepted MCP-shaped input, which is exactly the
-    compatibility property adjudication §15 requires.
+    MAS-75 PR-A P1 repair: ``schemas._validate_submit`` is now a pure
+    DELEGATING WRAPPER over ``cr.normalize_high_level_request`` — this is no
+    longer a parity check between two independently-arrived-at
+    implementations, it is a DELEGATION-WIRING check: it proves the wrapper
+    still calls through and returns the shared law's own normalized dict
+    unchanged for the same accepted MCP-shaped input (the compatibility
+    property adjudication §15 requires, now satisfied by construction rather
+    than by two copies happening to agree).
     """
 
     payload = payload_factory()
@@ -646,11 +663,16 @@ def test_module_imports_no_integrations_or_sdk_surface():
 # MAJOR 3, kills M3 — refusal-parity corpus across §4.2's exact boundaries
 # ===========================================================================
 #
-# Pins the two physical copies (the shared ``control_plane.ceo_request`` law
-# and the MCP gateway's own frozen ``schemas._validate_submit``) together on
-# the refusal surface: every case below must refuse on BOTH, never merely on
-# one. A mutation that loosens/tightens ONE copy's boundary independently of
-# the other is what this corpus is built to catch.
+# Pre-P1-repair, this pinned two PHYSICAL copies (the shared
+# ``control_plane.ceo_request`` law and the MCP gateway's own independently
+# re-implemented ``schemas._validate_submit``) together on the refusal
+# surface. Post-repair, ``schemas._validate_submit`` is a wrapper that calls
+# straight into ``cr.normalize_high_level_request`` and maps the error type —
+# so this corpus now proves the WRAPPER's mapping is complete (every one of
+# these §4.2 refusal boundaries, exercised directly against the canonical
+# law, also refuses through the wrapper with ``invalid_input`` and the
+# translated-if-needed message), never that two independent copies happen to
+# agree.
 
 _REFUSAL_CASES = [
     (
@@ -736,8 +758,11 @@ _REFUSAL_CASES = [
 )
 def test_refusal_parity_corpus_both_copies_refuse_identically(base_factory, overrides):
     """MAJOR 3, kills M3 — every §4.2 refusal boundary refuses on BOTH the
-    shared law (``CeoRequestInvalid``) and the MCP gateway's own frozen
-    validator (``GatewayError`` with code ``invalid_input``)."""
+    shared law directly (``CeoRequestInvalid``) and through the MCP wrapper
+    (``GatewayError`` with code ``invalid_input``).  Post-P1-repair the second
+    call is a delegation-wiring check on ``schemas._validate_submit``, not an
+    independent implementation — it still kills a real mutant: a wrapper that
+    stopped delegating, or mapped ``caller_fault`` wrong, would surface here."""
 
     payload = base_factory(**overrides)
     with pytest.raises(cr.CeoRequestInvalid):
@@ -750,8 +775,9 @@ def test_refusal_parity_corpus_both_copies_refuse_identically(base_factory, over
 @pytest.mark.parametrize("value", [4000])
 def test_objective_length_bound_accept_edge_is_identical_between_copies(value):
     """MAJOR 3 boundary probe — the ACCEPT side of the objective length bound
-    (§4.2) is identical between the two copies: both accept, and normalize to
-    the same dict."""
+    (§4.2): the canonical law accepts, and the MCP wrapper's delegated result
+    normalizes to the same dict (post-P1-repair this is delegation-wiring,
+    not two copies happening to agree)."""
 
     payload = _research_only_payload(objective="a" * value)
     cr_normalized = cr.normalize_high_level_request(payload)
@@ -761,7 +787,8 @@ def test_objective_length_bound_accept_edge_is_identical_between_copies(value):
 
 def test_objective_length_bound_refuse_edge_is_identical_between_copies():
     """MAJOR 3 boundary probe — the REFUSE side, one character past the
-    accept edge: both copies refuse identically."""
+    accept edge: the canonical law and the delegating MCP wrapper refuse
+    identically."""
 
     payload = _research_only_payload(objective="a" * 4001)
     with pytest.raises(cr.CeoRequestInvalid):
@@ -774,7 +801,8 @@ def test_objective_length_bound_refuse_edge_is_identical_between_copies():
 @pytest.mark.parametrize("value", [-100, 100])
 def test_priority_bound_accept_edge_is_identical_between_copies(value):
     """MAJOR 3 boundary probe — the ACCEPT side of the priority min/max bound
-    (§4.2) is identical between the two copies."""
+    (§4.2): identical between the canonical law and the delegating MCP
+    wrapper."""
 
     payload = _research_only_payload(priority=value)
     cr_normalized = cr.normalize_high_level_request(payload)
@@ -785,7 +813,8 @@ def test_priority_bound_accept_edge_is_identical_between_copies(value):
 @pytest.mark.parametrize("value", [-101, 101])
 def test_priority_bound_refuse_edge_is_identical_between_copies(value):
     """MAJOR 3 boundary probe — the REFUSE side, one past the priority
-    min/max accept edge: both copies refuse identically."""
+    min/max accept edge: the canonical law and the delegating MCP wrapper
+    refuse identically."""
 
     payload = _research_only_payload(priority=value)
     with pytest.raises(cr.CeoRequestInvalid):
