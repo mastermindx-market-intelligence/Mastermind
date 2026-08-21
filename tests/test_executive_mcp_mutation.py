@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 
 from control_plane import ceo_boot_packet
+from control_plane import ceo_request
 from control_plane.executive_runtime import Runtime
 from control_plane.executive_service import (
     ExecutiveControlService,
@@ -227,8 +228,18 @@ def _invariant_privileged_field_is_refused(field: str) -> None:
 
 
 def _invariant_profile_authorities_are_bounded() -> None:
-    assert schemas.EXECUTION_PROFILES["research_only"] == ("READ", "RESEARCH")
-    for capabilities in schemas.EXECUTION_PROFILES.values():
+    """MAS-75 PR-A (P1 repair): single authority means the ONLY table whose
+    mutation this invariant can observe is ``control_plane.ceo_request``'s —
+    ``schemas.EXECUTION_PROFILES`` is now a re-export snapshot, never consulted
+    by ``derive_authorities`` (see ``ceo_request.derive_authorities`` and the
+    delegating ``schemas.derive_authorities``).  This invariant therefore reads
+    the canonical table directly (attacking the shared law's own fence) AND
+    calls through ``schemas.derive_authorities`` (the MCP public path) so a
+    mutation is proven observable end-to-end, not just on a dead copy.
+    """
+
+    assert ceo_request.EXECUTION_PROFILES["research_only"] == ("READ", "RESEARCH")
+    for capabilities in ceo_request.EXECUTION_PROFILES.values():
         assert not set(capabilities) & {
             "OPEN_PR",
             "PUSH_BRANCH",
@@ -237,7 +248,8 @@ def _invariant_profile_authorities_are_bounded() -> None:
             "WRITE_BRANCH",
         } - {"WRITE_BRANCH"} or "WRITE_BRANCH" in capabilities
         assert not set(capabilities) & {"OPEN_PR", "PUSH_BRANCH", "MERGE", "DEPLOY"}
-    assert "WRITE_BRANCH" not in schemas.EXECUTION_PROFILES["research_only"]
+    assert "WRITE_BRANCH" not in ceo_request.EXECUTION_PROFILES["research_only"]
+    assert "WRITE_BRANCH" not in schemas.derive_authorities("research_only")
 
 
 def _invariant_non_loopback_bind_refused(tmp_path: Path) -> None:
@@ -283,11 +295,18 @@ def _invariant_control_plane_never_imports_the_sdk(sources: dict[str, str]) -> N
 def test_mutant_caller_supplied_identity_field_is_observable(
     monkeypatch: pytest.MonkeyPatch, field: str
 ):
+    """MAS-75 PR-A (P1 repair): the accepted-key law now lives ONLY in
+    ``control_plane.ceo_request.OPTIONAL_FIELDS`` — ``schemas._validate_submit``
+    delegates the exact-keys check there, so widening the old schemas-local
+    ``_SUBMIT_OPTIONAL`` copy would no longer reach the validator at all.  The
+    canonical field set is what must be observably widened.
+    """
+
     _invariant_privileged_field_is_refused(field)
 
     # MUTANT: widen the accepted key set so the field reaches the validator.
     monkeypatch.setattr(
-        schemas, "_SUBMIT_OPTIONAL", schemas._SUBMIT_OPTIONAL | {field}
+        ceo_request, "OPTIONAL_FIELDS", ceo_request.OPTIONAL_FIELDS | {field}
     )
     widened = dict(schemas.tool_spec(MODIFYING_TOOL).input_schema)
     widened["properties"] = {**widened["properties"], field: {"type": "string"}}
@@ -380,6 +399,9 @@ def test_mutant_removed_toctou_recheck_is_observable(
 
 
 def test_mutant_exposed_requested_authorities_is_observable(monkeypatch: pytest.MonkeyPatch):
+    """MAS-75 PR-A (P1 repair): same canonical-target migration as M1-M3 —
+    the accepted-key set lives only in ``ceo_request.OPTIONAL_FIELDS`` now."""
+
     def invariant() -> None:
         with pytest.raises(schemas.GatewayError):
             schemas.validate_tool_arguments(
@@ -389,7 +411,7 @@ def test_mutant_exposed_requested_authorities_is_observable(monkeypatch: pytest.
     invariant()
     # MUTANT: the raw authority field becomes an accepted MCP input.
     monkeypatch.setattr(
-        schemas, "_SUBMIT_OPTIONAL", schemas._SUBMIT_OPTIONAL | {"requested_authorities"}
+        ceo_request, "OPTIONAL_FIELDS", ceo_request.OPTIONAL_FIELDS | {"requested_authorities"}
     )
     with _mutation_visible():
         invariant()
@@ -423,8 +445,15 @@ def test_mutant_exposed_validation_argv_is_observable(
 
     assert _run(tmp_path, short_socket_root, invariant) is True
 
-    # MUTANT: the recipe accepts raw argv AND the builder honours it.
-    monkeypatch.setattr(schemas, "_VALIDATION_KEYS", schemas._VALIDATION_KEYS | {"commands"})
+    # MUTANT: the recipe accepts raw argv AND the builder honours it.  MAS-75
+    # PR-A (P1 repair): the accepted validation-key set lives only in
+    # ``ceo_request.VALIDATION_KEYS`` now — widening the dead
+    # ``schemas._VALIDATION_KEYS`` re-export would no longer reach the
+    # validator (``_validate_submit`` delegates the whole recipe check to
+    # ``ceo_request.normalize_high_level_request``).
+    monkeypatch.setattr(
+        ceo_request, "VALIDATION_KEYS", ceo_request.VALIDATION_KEYS | {"commands"}
+    )
     original_validate = schemas._validate_submit
 
     def _leaky_validate(arguments):
@@ -472,11 +501,19 @@ def test_mutant_argv_builder_splicing_a_caller_string_is_observable():
 def test_mutant_research_only_with_write_authority_is_observable(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """MAS-75 PR-A (P1 repair): the mutation target moved from
+    ``schemas.EXECUTION_PROFILES`` (now a dead re-export snapshot) to the
+    canonical ``control_plane.ceo_request.EXECUTION_PROFILES`` — patching the
+    schemas-local copy would no longer reach ``derive_authorities`` at all."""
+
     _invariant_profile_authorities_are_bounded()
     monkeypatch.setattr(
-        schemas,
+        ceo_request,
         "EXECUTION_PROFILES",
-        {**schemas.EXECUTION_PROFILES, "research_only": ("READ", "RESEARCH", "WRITE_BRANCH")},
+        {
+            **ceo_request.EXECUTION_PROFILES,
+            "research_only": ("READ", "RESEARCH", "WRITE_BRANCH"),
+        },
     )
     with _mutation_visible():
         _invariant_profile_authorities_are_bounded()
@@ -486,20 +523,23 @@ def test_mutant_research_only_with_write_authority_is_observable(
 def test_mutant_profile_growing_high_authority_is_observable(
     monkeypatch: pytest.MonkeyPatch, capability: str
 ):
+    """MAS-75 PR-A (P1 repair): same canonical-target migration as above."""
+
     _invariant_profile_authorities_are_bounded()
     monkeypatch.setattr(
-        schemas,
+        ceo_request,
         "EXECUTION_PROFILES",
         {
-            **schemas.EXECUTION_PROFILES,
+            **ceo_request.EXECUTION_PROFILES,
             "bounded_code_change": ("READ", "RUN_TESTS", "WRITE_BRANCH", capability),
         },
     )
     with _mutation_visible():
         _invariant_profile_authorities_are_bounded()
 
-    # Second, independent fence: even with the table mutated, the gateway's own
-    # ceiling refuses to derive an unreviewed capability.
+    # Second, independent fence: even with the table mutated, the shared law's
+    # own ceiling refuses to derive an unreviewed capability — observed here
+    # through the MCP public wrapper, which must carry the refusal through.
     with pytest.raises(schemas.GatewayError) as excinfo:
         schemas.derive_authorities("bounded_code_change")
     assert excinfo.value.code == "internal_error"
@@ -508,15 +548,27 @@ def test_mutant_profile_growing_high_authority_is_observable(
 def test_mutant_bypassing_the_ceiling_still_dies_at_the_authority_policy(
     tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Third fence: config/authority_map.yml refuses, and no Job is created."""
+    """Third fence: config/authority_map.yml refuses, and no Job is created.
+
+    MAS-75 PR-A (P1 repair): both the ceiling and the profile table must be
+    widened on the CANONICAL ``control_plane.ceo_request`` law, never on the
+    ``schemas`` re-export snapshot — ``schemas.derive_authorities`` delegates
+    to ``ceo_request.derive_authorities``, which reads ITS OWN module globals
+    fresh on every call, so a patch on the schemas-local names is invisible to
+    it post-refactor.  Patching the canonical pair together is what lets
+    ``derive_authorities`` compute the (compromised) authority set without
+    raising, so the request reaches the real downstream
+    ``config/authority_map.yml`` gate — which is the actual property this test
+    proves.
+    """
 
     monkeypatch.setattr(
-        schemas, "PROFILE_CAPABILITY_CEILING", frozenset({"READ", "RESEARCH", "DEPLOY"})
+        ceo_request, "PROFILE_CAPABILITY_CEILING", frozenset({"READ", "RESEARCH", "DEPLOY"})
     )
     monkeypatch.setattr(
-        schemas,
+        ceo_request,
         "EXECUTION_PROFILES",
-        {**schemas.EXECUTION_PROFILES, "research_only": ("READ", "DEPLOY")},
+        {**ceo_request.EXECUTION_PROFILES, "research_only": ("READ", "DEPLOY")},
     )
 
     async def exercise(gateway, service):
@@ -880,3 +932,71 @@ def test_mutant_runtime_opened_with_create_true_is_observable(tmp_path: Path):
     with _mutation_visible():
         # MUTANT: the read accessor starts creating.
         invariant(lambda root: Runtime.at(root, create=True))
+
+
+# ===========================================================================
+# M17 — the MCP submit path bypassing the shared canonical normalizer
+# ===========================================================================
+#
+# MAS-75 PR-A (P1 repair): ``schemas._validate_submit`` must be a pure
+# compatibility WRAPPER over ``control_plane.ceo_request.normalize_high_level_
+# request`` — never an independent re-implementation.  Every other mutation in
+# this file proves a NARROW policy fact (a field stays refused, a profile stays
+# bounded, ...); this one proves the WIRING itself: that the public MCP submit
+# path (``schemas.validate_tool_arguments``) always traverses the one shared
+# law, in both directions (an accepted result and a refusal).
+#
+# KILL RECEIPT (required by the commissioning packet, never applied to this
+# real module): restoring the pre-refactor, independently-reimplementing
+# ``_validate_submit`` body in a SCRATCH COPY (a throwaway script that imports
+# the real modules and monkeypatches only ``schemas._validate_submit`` to the
+# old-style function) makes this exact test FAIL, because the restored body
+# never calls ``ceo_request.normalize_high_level_request`` at all and so
+# cannot observe either sentinel.  See the EVIDENCE section of this
+# commission's return for the actual receipt (a standalone script under the
+# scratchpad directory, run once, output captured — nothing under
+# ``tests/`` or the real package was ever changed to produce it).
+
+
+def test_mcp_submit_path_traverses_the_shared_canonical_normalizer(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The MCP submit path must always traverse the shared canonical
+    normalizer — never re-decide validity on its own.
+
+    Two directions are proven against the PUBLIC boundary
+    (``schemas.validate_tool_arguments``), never against ``_validate_submit``
+    directly, because the public boundary is what a real MCP call reaches:
+
+    1. a sentinel SUCCESS value returned by a patched
+       ``ceo_request.normalize_high_level_request`` crosses unchanged;
+    2. a sentinel REFUSAL (a marked ``CeoRequestInvalid``) crosses as a
+       ``GatewayError`` carrying the same marked text.
+
+    Neither is reachable unless ``_validate_submit`` calls through rather than
+    re-implementing the policy itself.
+    """
+
+    baseline = ceo_request.normalize_high_level_request(_args())
+    sentinel_result = {**baseline, "__sentinel_success__": "mas-75-p1-9f2c"}
+
+    monkeypatch.setattr(
+        ceo_request,
+        "normalize_high_level_request",
+        lambda payload: dict(sentinel_result),
+    )
+    observed = schemas.validate_tool_arguments(MODIFYING_TOOL, _args())
+    assert observed.get("__sentinel_success__") == "mas-75-p1-9f2c"
+
+    _SENTINEL_REFUSAL_TEXT = "SENTINEL-REFUSAL-mas-75-p1-7ad0"
+
+    def _raise_sentinel_refusal(payload):
+        raise ceo_request.CeoRequestInvalid(_SENTINEL_REFUSAL_TEXT)
+
+    monkeypatch.setattr(
+        ceo_request, "normalize_high_level_request", _raise_sentinel_refusal
+    )
+    with pytest.raises(schemas.GatewayError) as excinfo:
+        schemas.validate_tool_arguments(MODIFYING_TOOL, _args())
+    assert excinfo.value.code == "invalid_input"
+    assert _SENTINEL_REFUSAL_TEXT in excinfo.value.message

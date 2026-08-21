@@ -39,6 +39,7 @@ from typing import Any
 
 from common.redaction import sanitize_external_text
 from control_plane import ceo_intent as _ceo_intent
+from control_plane import ceo_request as _ceo_request
 
 __all__ = [
     "ERROR_CODES",
@@ -261,29 +262,29 @@ def loopback_bind_host(value: Any, field: str = "bind_host") -> str:
 #: ``PUSH_BRANCH``, ``MERGE``, ``DEPLOY``, ``SERVICE_CONTROL``, or
 #: ``CROSS_REPO_PUBLISH`` — those are denied by
 #: ``config/authority_map.yml`` and this gateway may only NARROW that law.
-EXECUTION_PROFILES: dict[str, tuple[str, ...]] = {
-    "research_only": ("READ", "RESEARCH"),
-    "bounded_code_change": ("READ", "RUN_TESTS", "WRITE_BRANCH"),
-}
+#:
+#: MAS-75 PR-A (P1 repair): this is now a re-export of the ONE shared,
+#: transport-agnostic table in ``control_plane.ceo_request`` — the enforced
+#: law lives there (:func:`derive_authorities` below delegates); this name is
+#: kept alive for external readers (docs, the JSON-schema enum below, and any
+#: existing import of ``schemas.EXECUTION_PROFILES``) but is no longer an
+#: independent policy copy.
+EXECUTION_PROFILES: dict[str, tuple[str, ...]] = _ceo_request.EXECUTION_PROFILES
 
 #: Every capability any profile may ever emit.  A profile naming anything
-#: outside this set is a defect and is refused at derivation time.
-PROFILE_CAPABILITY_CEILING = frozenset({"READ", "RESEARCH", "RUN_TESTS", "WRITE_BRANCH"})
+#: outside this set is a defect and is refused at derivation time.  Re-export
+#: of the shared ``control_plane.ceo_request`` ceiling — see note above.
+PROFILE_CAPABILITY_CEILING = _ceo_request.PROFILE_CAPABILITY_CEILING
 
 #: The gateway-injected submitter.  Provenance, never authentication (R6): the
 #: durable record says the CEO seat asked, and confers no privilege by saying so.
 GATEWAY_ACTOR = "ceo-sol"
 
-#: Namespace prefix for every derived intent id.
+#: Namespace prefix for every derived intent id.  MAS-75 PR-A: the byte-frozen
+#: value now lives in ``control_plane.ceo_request.MCP_INTENT_ID_PREFIX``
+#: (``derive_intent_id`` below delegates there); retained here as the
+#: documented public name for this pin.
 INTENT_ID_PREFIX = "mcp-"
-
-#: Domain separator for the operation-key digest.  Prevents a digest computed
-#: for one purpose from ever colliding with one computed for another.
-_INTENT_ID_DOMAIN = b"mastermind.executive_mcp.operation_key.v1\x00"
-
-#: Hex characters of the digest carried into the intent id.  36 total characters
-#: (``mcp-`` + 32) stays well inside the upstream 64-character ``INTENT_ID_RE``.
-_INTENT_ID_DIGEST_CHARS = 32
 
 
 # ---------------------------------------------------------------------------
@@ -317,15 +318,11 @@ MAX_CONCURRENT_READS = 4
 MAX_READ_RETRIES = 2
 MAX_SUBMIT_RETRIES = 0
 
-_OPERATION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,95}$")
-_DEPARTMENT_RE = re.compile(r"^[a-z][a-z0-9._-]{1,63}$")
-_WORKSTREAM_RE = re.compile(r"^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$")
+#: Still used directly by ``validate_tool_arguments`` for the read-only
+#: ``executive_job``/``ceo_intent_status`` tools (unrelated to the submit
+#: normalization law, which now lives entirely in ``control_plane.ceo_request``).
 _JOB_ID_RE = re.compile(r"^JOB-[0-9]{1,9}$")
 _INTENT_ID_RE = _ceo_intent.INTENT_ID_RE
-_PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
-
-#: Git internals a declared write path may never name.
-_GIT_INTERNAL_SEGMENTS = frozenset({".git", ".gitmodules"})
 
 
 # ---------------------------------------------------------------------------
@@ -347,27 +344,6 @@ def _plain_text(value: Any, field: str, *, max_chars: int) -> str:
                 "invalid_input", f"{field} contains a control or surrogate character"
             )
     return value
-
-
-def _bounded_int(value: Any, field: str, *, minimum: int, maximum: int) -> int:
-    # ``bool`` is an ``int`` in Python.  ``priority: true`` is a type error, not 1.
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise GatewayError("invalid_input", f"{field} must be an integer")
-    if not minimum <= value <= maximum:
-        raise GatewayError(
-            "invalid_input", f"{field} must be between {minimum} and {maximum}"
-        )
-    return value
-
-
-def _bounded_list(value: Any, field: str, *, max_items: int) -> list[Any]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, list):
-        raise GatewayError("invalid_input", f"{field} must be a list")
-    if len(value) > max_items:
-        raise GatewayError(
-            "invalid_input", f"{field} holds more than {max_items} entries"
-        )
-    return list(value)
 
 
 def _exact_keys(
@@ -399,69 +375,14 @@ def _matches(value: Any, field: str, pattern: re.Pattern[str], *, max_chars: int
 # ---------------------------------------------------------------------------
 # write-path and validation-recipe law (§10.3, §10.4 / R4)
 # ---------------------------------------------------------------------------
-
-
-def _repo_relative_path(value: Any, field: str) -> str:
-    """Normalize one model-supplied repository-relative path, or refuse.
-
-    Refuses: absolute paths, ``..`` at any position, NUL/control characters,
-    backslash separators, ``.git`` and Git internals, an empty path, and any
-    segment that is not a conservative filename.  Symlink escape is NOT checked
-    here and cannot be: the job worktree does not exist at submission time.  The
-    downstream worker resolves paths inside its own assigned workspace, and
-    ``ExecutiveAuthorityPolicy`` re-refuses absolute and ``..`` paths
-    independently — this is the first of three fences, not the only one.
-    """
-
-    text = _plain_text(value, field, max_chars=MAX_WRITE_PATH_CHARS).strip()
-    if not text:
-        raise GatewayError("invalid_input", f"{field} must be a non-empty path")
-    if "\\" in text:
-        raise GatewayError(
-            "invalid_input", f"{field} must use '/' separators, never '\\'"
-        )
-    if text.startswith("/") or text.startswith("~"):
-        raise GatewayError(
-            "invalid_input", f"{field} must be repository-relative, not absolute"
-        )
-    segments = [segment for segment in text.split("/") if segment not in ("", ".")]
-    if not segments:
-        raise GatewayError("invalid_input", f"{field} must name a path inside the repository")
-    for segment in segments:
-        if segment == "..":
-            raise GatewayError("invalid_input", f"{field} must not traverse with '..'")
-        if segment.lower() in _GIT_INTERNAL_SEGMENTS:
-            raise GatewayError(
-                "invalid_input", f"{field} must not name Git internals ({segment})"
-            )
-        if _PATH_SEGMENT_RE.fullmatch(segment) is None:
-            # A leading '-' would also read as a flag once the gateway splices
-            # the path into a validation argv.
-            raise GatewayError(
-                "invalid_input", f"{field} has an unsupported path segment {segment!r}"
-            )
-    return "/".join(segments)
-
-
-def _pytest_target(value: Any, field: str) -> str:
-    path = _repo_relative_path(value, field)
-    if not path.startswith("tests/"):
-        raise GatewayError("invalid_input", f"{field} must resolve under 'tests/'")
-    if not path.endswith(".py"):
-        raise GatewayError("invalid_input", f"{field} must name a '.py' test file")
-    return path
-
-
-def _compileall_path(value: Any, field: str) -> str:
-    path = _repo_relative_path(value, field)
-    if path.endswith(".py"):
-        # ``compileall`` accepts files, but the reviewed recipe is package/module
-        # DIRECTORIES; keeping it to directories is what makes the constructed
-        # argv predictable.
-        raise GatewayError(
-            "invalid_input", f"{field} must name a package/module directory, not a file"
-        )
-    return path
+#
+# MAS-75 PR-A (P1 repair): the write-path/pytest-target/compileall-path
+# normalization rules that used to live here as private helpers
+# (``_repo_relative_path``/``_pytest_target``/``_compileall_path``) are now
+# ENFORCED ONLY inside ``control_plane.ceo_request.normalize_high_level_request``
+# — ``_validate_submit`` below delegates the whole recipe to it.  Only the argv
+# *builder* (a pure function of an already-normalized recipe, never itself a
+# validator) still has a name here, and it too delegates.
 
 
 def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list[str]]:
@@ -471,20 +392,15 @@ def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list
     the commands.  ``python3 -c``, caller-chosen module names, shells, and
     interpreters are unreachable by construction — there is no code path here
     that copies a caller string into ``argv[0]`` or into a flag position.
+
+    MAS-75 PR-A: delegates to the shared, transport-agnostic builder in
+    ``control_plane.ceo_request`` (pure function of ``validation`` alone, no
+    module-global dependency), so MCP and the future dedicated Slack ingress
+    construct the identical reviewed argv family (pytest, compileall, then
+    ``git diff --check``) from one implementation.
     """
 
-    if not validation:
-        return []
-    commands: list[list[str]] = []
-    targets = validation.get("pytest_targets") or []
-    if targets:
-        commands.append(["python3", "-m", "pytest", "-q", *targets])
-    paths = validation.get("compileall_paths") or []
-    if paths:
-        commands.append(["python3", "-m", "compileall", *paths])
-    if validation.get("git_diff_check"):
-        commands.append(["git", "diff", "--check"])
-    return commands
+    return _ceo_request.build_validation_commands(validation)
 
 
 # ---------------------------------------------------------------------------
@@ -492,27 +408,31 @@ def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list
 # ---------------------------------------------------------------------------
 
 
-def _operation_digest(operation_key: str) -> str:
-    """sha256 over the operation key ALONE.
-
-    Deriving from the whole payload would be the bug: the same operation key
-    with a changed objective would silently become a different intent id and
-    therefore a second Job.  Keying on the operation identity only is what makes
-    a changed payload collide with the upstream fingerprint law and REFUSE
-    (§10.6, §10.7).
-    """
-
-    return hashlib.sha256(_INTENT_ID_DOMAIN + operation_key.encode("utf-8")).hexdigest()
+#: MAS-75 PR-A: the operation-key digest law, the ``mcp-`` prefix/domain bytes,
+#: ``derive_branch``, and ``derive_worktree`` below now delegate to the shared
+#: cross-transport law in ``control_plane.ceo_request`` (the future dedicated
+#: Slack ingress derives byte-identically over its OWN separately namespaced
+#: identity there). The frozen MCP prefix/domain bytes and every observable
+#: value are unchanged — proven by ``tests/test_executive_mcp*`` (unmodified)
+#: and by the literal cross-transport regression vectors in
+#: ``tests/test_executive_ceo_request.py``.
 
 
 def derive_intent_id(operation_key: str) -> str:
     """``mcp-<32 hex>`` — stable, legal upstream, and payload-independent."""
 
-    key = _matches(operation_key, "operation_key", _OPERATION_KEY_RE, max_chars=MAX_OPERATION_KEY_CHARS)
-    intent_id = INTENT_ID_PREFIX + _operation_digest(key)[:_INTENT_ID_DIGEST_CHARS]
+    try:
+        intent_id = _ceo_request.mcp_intent_id(operation_key)
+    except _ceo_request.CeoRequestInternalError as exc:
+        # MINOR 11: an internal-defect path (never a caller mistake) keeps its
+        # pre-refactor public category rather than being folded into the
+        # caller-facing "invalid_input" bucket below.
+        raise GatewayError("internal_error", str(exc)) from exc
+    except _ceo_request.CeoRequestInvalid as exc:
+        raise GatewayError("invalid_input", str(exc)) from exc
     if _INTENT_ID_RE.fullmatch(intent_id) is None or len(intent_id) > 64:
-        # Unreachable with the constants above; asserted rather than assumed so
-        # a future prefix change cannot quietly mint an illegal upstream id.
+        # Unreachable with the shared constants; asserted rather than assumed
+        # so a future prefix change cannot quietly mint an illegal upstream id.
         raise GatewayError("internal_error", "derived intent id is not upstream-legal")
     return intent_id
 
@@ -520,7 +440,7 @@ def derive_intent_id(operation_key: str) -> str:
 def derive_branch(intent_id: str) -> str:
     """``codex/<intent-id>`` — deterministic, always under the reviewed prefix."""
 
-    return f"codex/{intent_id}"
+    return _ceo_request.derive_branch(intent_id)
 
 
 def derive_worktree(workspace_root: str, intent_id: str) -> str:
@@ -532,30 +452,80 @@ def derive_worktree(workspace_root: str, intent_id: str) -> str:
     construction instead of by coincidence.
     """
 
-    root = workspace_root.rstrip("/")
-    if not root.startswith("/"):
-        raise GatewayError("internal_error", "workspace root must be absolute")
-    return f"{root}/{intent_id}"
+    # MINOR 12: preserve pre-refactor strictness for a non-``str`` argument.
+    # ``_ceo_request.derive_worktree`` itself calls ``str(workspace_root)``
+    # before ``.rstrip("/")``, which would silently coerce e.g. ``None`` or an
+    # int instead of raising.  Touch a str-only method directly on the
+    # caller-supplied value first so a non-str argument still raises
+    # ``AttributeError`` exactly as the pre-refactor implementation did; for an
+    # actual ``str`` this is a pure, side-effect-free no-op (the result is
+    # discarded) and str behavior stays byte-identical.
+    workspace_root.rstrip("/")
+    try:
+        return _ceo_request.derive_worktree(workspace_root, intent_id)
+    except _ceo_request.CeoRequestInternalError as exc:
+        raise GatewayError("internal_error", str(exc)) from exc
+    except _ceo_request.CeoRequestInvalid as exc:
+        raise GatewayError("invalid_input", str(exc)) from exc
+
+
+#: ``control_plane.ceo_request.normalize_high_level_request`` is deliberately
+#: transport-agnostic and names its top-level payload ``"request"``; the
+#: pre-refactor MCP-only ``_validate_submit`` body named the very same
+#: structural checks against ``"arguments"`` (the MCP tool-call parameter
+#: name).  This is the ONLY wording difference between the two — every other
+#: field name (``operation_key``, ``objective``, ``priority``, ...) is shared
+#: verbatim — so the translation is a literal, exhaustive prefix swap over the
+#: two templates ``_exact_keys`` can raise for the top-level object, never a
+#: general regex, and is exercised by the refusal-parity corpus in
+#: ``tests/test_executive_ceo_request.py``.
+_TOP_LEVEL_FIELD_MESSAGE_PREFIXES = (
+    "request has unexpected field(s): ",
+    "request is missing required field(s): ",
+    "request must be an object",
+)
+
+
+def _translate_ceo_request_message(message: str) -> str:
+    for prefix in _TOP_LEVEL_FIELD_MESSAGE_PREFIXES:
+        if message.startswith(prefix):
+            return "arguments" + message[len("request"):]
+    return message
+
+
+def _raise_as_gateway_error(exc: _ceo_request.CeoRequestError) -> Any:
+    """Map one ``control_plane.ceo_request`` typed error onto the MCP gateway's
+    OWN public error vocabulary (never onto ``ceo_request``'s message text
+    verbatim if it named a transport-neutral field the MCP surface never used
+    — see :func:`_translate_ceo_request_message`).
+
+    ``caller_fault`` is the dispatch key, not string-sniffing: an internal
+    policy defect (never a caller mistake) stays ``internal_error``; every
+    caller-supplied refusal stays ``invalid_input``.  This is the one shared
+    mapping every ``ceo_request`` delegation in this module goes through.
+    """
+
+    message = _translate_ceo_request_message(exc.message)
+    if exc.caller_fault:
+        raise GatewayError("invalid_input", message) from exc
+    raise GatewayError("internal_error", message) from exc
 
 
 def derive_authorities(execution_profile: str) -> list[str]:
-    """Profile name -> reviewed capability list.  No caller input reaches here."""
+    """Profile name -> reviewed capability list.  No caller input reaches here.
 
-    capabilities = EXECUTION_PROFILES.get(execution_profile)
-    if capabilities is None:
-        raise GatewayError(
-            "invalid_input",
-            f"execution_profile must be one of {sorted(EXECUTION_PROFILES)}",
-        )
-    escaped = set(capabilities) - PROFILE_CAPABILITY_CEILING
-    if escaped:
-        # A profile that grew a capability outside the reviewed ceiling is a
-        # defect in THIS file; refuse rather than submit it (mutation target).
-        raise GatewayError(
-            "internal_error",
-            f"execution profile {execution_profile!r} names unreviewed capabilities",
-        )
-    return sorted(capabilities)
+    MAS-75 PR-A (P1 repair): delegates entirely to the shared, transport-
+    agnostic profile->authorities law in ``control_plane.ceo_request`` — this
+    module holds no independent copy of the profile/ceiling enforcement (only
+    the re-exported ``EXECUTION_PROFILES``/``PROFILE_CAPABILITY_CEILING``
+    tables above, kept alive for external readers, never consulted here).
+    """
+
+    try:
+        return _ceo_request.derive_authorities(execution_profile)
+    except _ceo_request.CeoRequestError as exc:
+        _raise_as_gateway_error(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -844,13 +814,11 @@ def tool_spec(name: str) -> ToolSpec:
 # input validation (server-side; the JSON schema is the client-side mirror)
 # ---------------------------------------------------------------------------
 
-_SUBMIT_REQUIRED = frozenset(
-    {"operation_key", "objective", "department", "priority", "execution_profile"}
-)
-_SUBMIT_OPTIONAL = frozenset(
-    {"workstream", "allowed_write_paths", "validation", "attempt_limit"}
-)
-_VALIDATION_KEYS = frozenset({"pytest_targets", "compileall_paths", "git_diff_check"})
+#: Re-export of the shared ``control_plane.ceo_request`` validation-recipe key
+#: set (MAS-75 PR-A P1 repair).  Kept alive by name for external readers; the
+#: enforced set is ``ceo_request.VALIDATION_KEYS`` alone (``_validate_submit``
+#: below never consults this module-level copy).
+_VALIDATION_KEYS = _ceo_request.VALIDATION_KEYS
 
 #: Fields that must be structurally IMPOSSIBLE to supply.  Listed by name so the
 #: refusal is legible and so the test battery can assert on the concept rather
@@ -876,124 +844,28 @@ FORBIDDEN_INPUT_FIELDS = (
 
 
 def _validate_submit(arguments: Mapping[str, Any]) -> dict[str, Any]:
-    _exact_keys(arguments, "arguments", _SUBMIT_REQUIRED, _SUBMIT_OPTIONAL)
-    profile = _plain_text(arguments["execution_profile"], "execution_profile", max_chars=64)
-    if profile not in EXECUTION_PROFILES:
-        raise GatewayError(
-            "invalid_input",
-            f"execution_profile must be one of {sorted(EXECUTION_PROFILES)}",
-        )
+    """Validate+normalize one ``submit_ceo_intent`` call.
 
-    result: dict[str, Any] = {
-        "operation_key": _matches(
-            arguments["operation_key"], "operation_key", _OPERATION_KEY_RE,
-            max_chars=MAX_OPERATION_KEY_CHARS,
-        ),
-        "objective": _plain_text(
-            arguments["objective"], "objective", max_chars=MAX_OBJECTIVE_CHARS
-        ).strip(),
-        "department": _matches(
-            arguments["department"], "department", _DEPARTMENT_RE, max_chars=64
-        ),
-        "priority": _bounded_int(
-            arguments["priority"], "priority", minimum=MIN_PRIORITY, maximum=MAX_PRIORITY
-        ),
-        "execution_profile": profile,
-    }
-    if not result["objective"]:
-        raise GatewayError("invalid_input", "objective must be a non-empty string")
+    MAS-75 PR-A (P1 repair): this is a pure COMPATIBILITY WRAPPER over the one
+    shared, transport-agnostic normalization law in ``control_plane.ceo_request``
+    — it holds no independent field/path/validation rule of its own.  The single
+    check kept here (``arguments`` must be a ``Mapping``) exists only because
+    ``validate_tool_arguments`` already guarantees this for every real call path
+    but this function is also exercised directly (tests, and any future direct
+    caller) with a raw payload; it is the exact pre-refactor defensive check,
+    kept verbatim so a non-mapping argument still refuses with the exact
+    pre-refactor message rather than an ``AttributeError`` from ``ceo_request``'s
+    own ``Mapping``-typed check (which names its payload ``"request"``, never
+    seen here because this check short-circuits before delegating).
+    """
 
-    if "workstream" in arguments:
-        result["workstream"] = _matches(
-            arguments["workstream"], "workstream", _WORKSTREAM_RE, max_chars=72
-        )
-
-    raw_paths = arguments.get("allowed_write_paths")
-    paths: list[str] = []
-    if raw_paths is not None:
-        items = _bounded_list(raw_paths, "allowed_write_paths", max_items=MAX_WRITE_PATHS)
-        paths = sorted(
-            {
-                _repo_relative_path(item, f"allowed_write_paths[{index}]")
-                for index, item in enumerate(items)
-            }
-        )
-    result["allowed_write_paths"] = paths
-
-    raw_validation = arguments.get("validation")
-    validation: dict[str, Any] = {}
-    if raw_validation is not None:
-        _exact_keys(raw_validation, "validation", frozenset(), _VALIDATION_KEYS)
-        targets = raw_validation.get("pytest_targets")
-        if targets is not None:
-            items = _bounded_list(
-                targets, "validation.pytest_targets", max_items=MAX_PYTEST_TARGETS
-            )
-            validation["pytest_targets"] = sorted(
-                {
-                    _pytest_target(item, f"validation.pytest_targets[{index}]")
-                    for index, item in enumerate(items)
-                }
-            )
-        compile_paths = raw_validation.get("compileall_paths")
-        if compile_paths is not None:
-            items = _bounded_list(
-                compile_paths, "validation.compileall_paths", max_items=MAX_COMPILEALL_PATHS
-            )
-            validation["compileall_paths"] = sorted(
-                {
-                    _compileall_path(item, f"validation.compileall_paths[{index}]")
-                    for index, item in enumerate(items)
-                }
-            )
-        if "git_diff_check" in raw_validation:
-            flag = raw_validation["git_diff_check"]
-            if not isinstance(flag, bool):
-                raise GatewayError(
-                    "invalid_input", "validation.git_diff_check must be a boolean"
-                )
-            validation["git_diff_check"] = flag
-    # Drop empty lists so an all-empty recipe is indistinguishable from none.
-    validation = {key: value for key, value in validation.items() if value}
-    result["validation"] = validation
-
-    result["attempt_limit"] = (
-        _bounded_int(
-            arguments["attempt_limit"], "attempt_limit",
-            minimum=MIN_ATTEMPT_LIMIT, maximum=MAX_ATTEMPT_LIMIT,
-        )
-        if "attempt_limit" in arguments
-        else DEFAULT_ATTEMPT_LIMIT
-    )
-
-    # --- profile coherence (R1) --------------------------------------------
-    if profile == "research_only":
-        if paths:
-            raise GatewayError(
-                "invalid_input",
-                "execution_profile 'research_only' grants no write authority; "
-                "allowed_write_paths is refused",
-            )
-        if validation:
-            raise GatewayError(
-                "invalid_input",
-                "execution_profile 'research_only' grants no test authority; "
-                "validation is refused",
-            )
-    else:  # bounded_code_change
-        if not paths:
-            raise GatewayError(
-                "invalid_input",
-                "execution_profile 'bounded_code_change' requires at least one "
-                "allowed_write_paths entry",
-            )
-        if not validation:
-            raise GatewayError(
-                "invalid_input",
-                "execution_profile 'bounded_code_change' requires at least one "
-                "validation entry",
-            )
-    return result
+    if not isinstance(arguments, Mapping):
+        raise GatewayError("invalid_input", "arguments must be an object")
+    try:
+        return _ceo_request.normalize_high_level_request(arguments)
+    except _ceo_request.CeoRequestError as exc:
+        _raise_as_gateway_error(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
