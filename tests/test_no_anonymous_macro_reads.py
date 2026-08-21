@@ -22,11 +22,23 @@ unconfigured post-flip host fail LOUDLY (404) rather than silently -- is allowli
 exact (file, matched-string) pair, not by weakening any pattern. See _ALLOWLIST below;
 it is asserted to still exist and still match, so the exception stays reviewable rather
 than silently rotting into a blanket exemption.
+
+A SECOND, structural fence lives at the bottom of this file
+(find_unauthenticated_macro_checkouts): the URL-regex fence above cannot see a
+`.github/workflows/*.yml` `actions/checkout` step that names the canonical Macro
+repo via the structured `with.repository:` key -- that is not a URL string, it is
+YAML the Actions runner turns into a cross-repo checkout using the job's default
+`github.token` (scoped to THIS repo only, and therefore silently 404-prone the
+moment macro goes private). That fence parses every workflow file with
+`yaml.safe_load` and walks `jobs.*.steps[]` rather than regexing raw text, because
+the whole point is that this shape is structural, not textual.
 """
 from __future__ import annotations
 
 import re
 from pathlib import Path
+
+import yaml
 
 import pytest
 
@@ -259,3 +271,184 @@ def test_non_vacuity_second_owner_alias_also_fires():
     a fence keyed on only one owner would miss reads against the alias."""
     text = "https://raw.githubusercontent.com/chriswong6031-creator/macro/main/x.json"
     assert "raw_githubusercontent" in find_anonymous_macro_reads(text)
+
+
+# ---------------------------------------------------------------------------
+# structural fence: actions/checkout cross-repo steps naming canonical Macro
+# ---------------------------------------------------------------------------
+# DEC:B1-MACRO-PRIVATE-CUTOVER -- a `.github/workflows/*.yml` step that uses
+# `actions/checkout` with `with.repository:` naming the canonical Macro repo
+# authenticates with the job's default `github.token` unless it carries its own
+# `token:` or `ssh-key:` input. `github.token` is scoped to THIS repository only,
+# so such a step works today ONLY because macro is still public; the moment it
+# flips private the checkout 404s. This is a structured-YAML construction, not a
+# URL string, so it is invisible to the regex fence above by design -- this check
+# parses every workflow file and walks jobs.*.steps[] instead.
+
+_WORKFLOWS_DIR = _ROOT / ".github" / "workflows"
+
+
+def _iter_checkout_steps(workflow: dict):
+    """Yield (job_name, step_index, step_dict) for every actions/checkout step in a
+    parsed workflow dict's jobs.*.steps[]."""
+    jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+    if not isinstance(jobs, dict):
+        return
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for idx, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if isinstance(uses, str) and uses.split("@", 1)[0] == "actions/checkout":
+                yield job_name, idx, step
+
+
+def find_unauthenticated_macro_checkouts(workflow: dict) -> list[str]:
+    """Return `"{job_name}/{step_index}"` labels for every actions/checkout step in
+    `workflow` whose `with.repository:` names the canonical Macro repo (either
+    owner) and which carries neither a `token:` nor an `ssh-key:` input. A pure
+    function over an already-parsed workflow dict, exercised directly against
+    synthetic dicts by the non-vacuity tests below and against every real
+    `.github/workflows/*.yml` file by the repo-wide fence test."""
+    violations: list[str] = []
+    for job_name, idx, step in _iter_checkout_steps(workflow):
+        with_block = step.get("with")
+        if not isinstance(with_block, dict):
+            continue
+        repository = with_block.get("repository")
+        if not isinstance(repository, str):
+            continue
+        if repository.strip() not in {f"{owner}/{_REPO}" for owner in _OWNERS}:
+            continue
+        if "token" in with_block or "ssh-key" in with_block:
+            continue
+        violations.append(f"{job_name}/{idx}")
+    return violations
+
+
+def _load_workflow_files() -> list[Path]:
+    if not _WORKFLOWS_DIR.is_dir():
+        return []
+    return sorted(
+        p for p in _WORKFLOWS_DIR.iterdir()
+        if p.is_file() and p.suffix in (".yml", ".yaml")
+    )
+
+
+def test_no_unauthenticated_macro_checkout_in_workflows():
+    """Every `.github/workflows/*.yml` file's actions/checkout steps that name the
+    canonical Macro repo must carry a `token:` or `ssh-key:` input -- otherwise the
+    step silently relies on the job's default github.token, which cannot read a
+    private cross-repo checkout. A hit here means a NEW anonymous cross-repo
+    checkout was introduced; give it its own credential input rather than widening
+    this check."""
+    all_violations: dict[str, list[str]] = {}
+    for path in _load_workflow_files():
+        workflow = yaml.safe_load(path.read_text())
+        if not isinstance(workflow, dict):
+            continue
+        hits = find_unauthenticated_macro_checkouts(workflow)
+        if hits:
+            all_violations[str(path.relative_to(_ROOT))] = hits
+    assert not all_violations, (
+        f"actions/checkout step(s) naming the canonical Macro repo with no "
+        f"token:/ssh-key: input (job/step-index): {all_violations}")
+
+
+def test_workflows_directory_is_actually_scanned():
+    """Guards the guard: if the workflows directory goes missing or empty, the
+    check above passes vacuously. Pin that this repo actually has workflow files
+    for it to walk."""
+    files = _load_workflow_files()
+    assert files, f"expected at least one workflow file under {_WORKFLOWS_DIR}"
+    assert any(p.name == "ci.yml" for p in files), (
+        "expected .github/workflows/ci.yml to exist and be scanned")
+
+
+def test_non_vacuity_unauthenticated_macro_checkout_is_flagged():
+    """Synthetic workflow: a checkout step naming the canonical Macro repo with no
+    token:/ssh-key: input must be flagged -- proves the check actually fires."""
+    workflow = {
+        "jobs": {
+            "test": {
+                "steps": [
+                    {
+                        "name": "Checkout pinned Macro engine",
+                        "uses": "actions/checkout@v4",
+                        "with": {
+                            "repository": "mastermindx-market-intelligence/macro",
+                            "ref": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
+                            "path": "vendor/macro_src",
+                            "persist-credentials": False,
+                        },
+                    }
+                ]
+            }
+        }
+    }
+    assert find_unauthenticated_macro_checkouts(workflow) == ["test/0"]
+
+
+def test_non_vacuity_authenticated_macro_checkout_is_not_flagged():
+    """Synthetic workflow: the same step, but with a token: input -- must NOT be
+    flagged, proving the check distinguishes authenticated from unauthenticated
+    rather than banning every cross-repo checkout outright."""
+    workflow = {
+        "jobs": {
+            "test": {
+                "steps": [
+                    {
+                        "name": "Checkout pinned Macro engine",
+                        "uses": "actions/checkout@v4",
+                        "with": {
+                            "repository": "mastermindx-market-intelligence/macro",
+                            "ref": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
+                            "path": "vendor/macro_src",
+                            "persist-credentials": False,
+                            "token": "${{ secrets.MACRO_CI_READ_TOKEN || github.token }}",
+                        },
+                    }
+                ]
+            }
+        }
+    }
+    assert find_unauthenticated_macro_checkouts(workflow) == []
+
+
+def test_same_repo_checkout_is_not_flagged():
+    """Synthetic workflow: an ordinary same-repo `actions/checkout@v4` step with no
+    `repository:` key at all -- the normal case in nearly every job -- must stay
+    clean."""
+    workflow = {
+        "jobs": {
+            "test": {
+                "steps": [
+                    {"uses": "actions/checkout@v4"},
+                ]
+            }
+        }
+    }
+    assert find_unauthenticated_macro_checkouts(workflow) == []
+
+
+def test_ci_yml_macro_checkout_step_is_authenticated():
+    """Direct pin on the real step this fence exists for: ci.yml's 'Checkout pinned
+    Macro engine' step must be the one carrying the token fallback, not merely
+    'some step somewhere' -- catches a future edit that authenticates a different
+    step while leaving this one bare."""
+    ci_path = _WORKFLOWS_DIR / "ci.yml"
+    workflow = yaml.safe_load(ci_path.read_text())
+    steps = workflow["jobs"]["test"]["steps"]
+    macro_step = next(
+        s for s in steps if isinstance(s, dict) and s.get("name") == "Checkout pinned Macro engine"
+    )
+    token = macro_step["with"]["token"]
+    assert token == "${{ secrets.MACRO_CI_READ_TOKEN || github.token }}", (
+        f"expected the || github.token fallback form exactly, got {token!r} -- a "
+        f"bare secrets.MACRO_CI_READ_TOKEN with no fallback breaks CI immediately "
+        f"while the secret does not exist")
