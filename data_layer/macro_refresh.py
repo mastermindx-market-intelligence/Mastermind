@@ -83,11 +83,21 @@ hosts, so the remote and its SSH identity are env-configurable:
                           behavior pre-flip and on the symlink-covered VPS). A private host sets
                           this to the SSH form, e.g.
                           git@github.com:mastermindx-market-intelligence/macro.git
-  MACRO_GIT_SSH_COMMAND — when set, becomes GIT_SSH_COMMAND in the child env of every git
-                          subprocess that talks to the remote (clone + fetch), typically an
-                          `ssh -i <deploy-key-path> ...` invocation for a dedicated read-only
-                          deploy key (e.g. "vps-mastermind-ro-macro-b1"). Unset by default —
-                          the child env is then unchanged from today, no GIT_SSH_COMMAND forced.
+  MACRO_GIT_SSH_COMMAND — when set, becomes GIT_SSH_COMMAND in the child env of EVERY
+                          remote-facing git subprocess in this module (clone, fetch, reset
+                          --hard, and sparse-checkout set — see DEC:B1-MACRO-PRIVATE-CUTOVER),
+                          typically an `ssh -i <deploy-key-path> ...` invocation for a
+                          dedicated read-only deploy key (e.g. "vps-mastermind-ro-macro-b1").
+                          Unset by default — the child env is then unchanged from today, no
+                          GIT_SSH_COMMAND forced.
+
+`reset --hard` and `sparse-checkout set` LOOK local (they touch no network flag) but are not:
+the checkout is created with `--filter=blob:none` (a blobless PARTIAL clone), so materializing
+any path — moving HEAD to a new commit, or widening the sparse cone — fetches that path's
+blobs from the promisor remote on demand. Proven live 2026-08-21 against a real SSH remote +
+deploy key: with the credential absent from the child env, `sparse-checkout set` printed
+`fatal: could not fetch <sha> from promisor remote` and left site/ absent, while exiting 0 —
+so all four legs need the same credential seam, not just clone + fetch.
 
 Neither variable is read anywhere else; both default to today's exact behavior when unset.
 """
@@ -298,7 +308,7 @@ def _clear_stale_lock(log=print) -> None:
         pass
 
 
-def ensure_clone() -> bool:
+def ensure_clone(log=print) -> bool:
     """Create the sparse checkout (site/ + data/regime) if it is missing. Returns whether site/
     is present."""
     if (_SRC / "site").is_dir():
@@ -308,7 +318,19 @@ def ensure_clone() -> bool:
         r = _run(["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", _REMOTE, str(_SRC)],
                  timeout=900, env=_remote_env())
         if r.returncode == 0:
-            _run(["git", "sparse-checkout", "set", *_SPARSE_PATHS], cwd=_SRC)
+            # `--filter=blob:none` makes this a blobless PARTIAL clone: `sparse-checkout set`
+            # is REMOTE-FACING even though it looks local — widening the cone fetches the newly
+            # materialized paths' blobs from the promisor remote (DEC:B1-MACRO-PRIVATE-CUTOVER).
+            # Proven live 2026-08-21: without the credential in the child env, this step printed
+            # "fatal: could not fetch ... from promisor remote" to stderr while still exiting 0,
+            # leaving site/ absent with no loud signal — so it must carry env=_remote_env() too.
+            s = _run(["git", "sparse-checkout", "set", *_SPARSE_PATHS], cwd=_SRC, env=_remote_env())
+            if s.returncode == 0 and not (_SRC / "site").is_dir():
+                # Quiet promisor failure: the step exited 0 but never materialized site/ — log
+                # the stderr so the cause (missing remote credential) is visible, not a bare False.
+                log(f"[macro_refresh] sparse-checkout set exited 0 but site/ is still absent — "
+                    f"likely a quiet promisor-fetch failure (missing remote credential?): "
+                    f"{(getattr(s, 'stderr', '') or '').strip()}")
     except Exception:
         pass
     return (_SRC / "site").is_dir()
@@ -413,7 +435,10 @@ def refresh(log=print) -> str | None:
         f = _run(["git", "fetch", "--depth", "1", "origin", "main"], cwd=_SRC, env=_remote_env())
         if f.returncode != 0:
             return None                                  # network down -> keep last-good data
-        r = _run(["git", "reset", "--hard", "origin/main"], cwd=_SRC)
+        # `reset --hard` is remote-facing in this blobless partial clone (moving HEAD may need
+        # to fetch blobs for paths already in the sparse cone) — see the module docstring /
+        # DEC:B1-MACRO-PRIVATE-CUTOVER; it needs the same credential env as clone + fetch.
+        r = _run(["git", "reset", "--hard", "origin/main"], cwd=_SRC, env=_remote_env())
         if r.returncode != 0:
             # A failed reset means the tree never advanced — callers must see the refresh as
             # FAILED, not read last-good data as fresh-pulled (the 2026-07-11→14 silent freeze:
@@ -421,10 +446,23 @@ def refresh(log=print) -> str | None:
             # 3-hourly refresh "succeed" for 3 days while the checkout stood still).
             log(f"[macro_refresh] git reset --hard failed: {(r.stderr or '').strip()}")
             return None
-        # `set` (not `reapply`) so pre-existing clones self-migrate to the current sparse set
-        s = _run(["git", "sparse-checkout", "set", *_SPARSE_PATHS], cwd=_SRC)
+        # `set` (not `reapply`) so pre-existing clones self-migrate to the current sparse set.
+        # Also remote-facing (widening the cone fetches newly-materialized blobs) — same env.
+        s = _run(["git", "sparse-checkout", "set", *_SPARSE_PATHS], cwd=_SRC, env=_remote_env())
         if s.returncode != 0:
             log(f"[macro_refresh] git sparse-checkout set failed: {(s.stderr or '').strip()}")
+            return None
+        # Quiet-failure hardening: `sparse-checkout set` can exit 0 while a promisor blob fetch
+        # silently failed (proven live 2026-08-21: "fatal: could not fetch ... from promisor
+        # remote" on stderr, site/ left absent, returncode 0 anyway). A returncode-only check
+        # would let this read as a successful refresh — the exact 2026-07-14 failure shape this
+        # function exists to prevent, just from a different git leg. Detected by scanning the
+        # combined stdout+stderr for the promisor-fetch failure text, so it never depends on
+        # the real filesystem state of a mocked checkout in tests.
+        combined = f"{getattr(s, 'stdout', '') or ''}\n{getattr(s, 'stderr', '') or ''}"
+        if ("promisor remote" in combined) or ("could not fetch" in combined):
+            log(f"[macro_refresh] git sparse-checkout set reported success (rc=0) but a "
+                f"promisor fetch failed — treating refresh as FAILED: {combined.strip()}")
             return None
         _sync_r2(log=log)                                # the stores git no longer carries
         return asof()
