@@ -163,13 +163,16 @@ End with exactly one primary continuation action and its gate, plus any independ
 
 Bad:
 
-> Continue Slack integration.
+> Continue the integration.
 
 Good:
 
-> After PR-A head X closes the shared-normalizer blocker and hosted CI is green, Sol completes the
-> remaining adversarial review; only on PASS may R0 state-read law be authored. S0/SHELL-1 may
-> continue independently because they touch no PR-A runtime path.
+> After implementation head `<sha>` closes the named release blocker and exact-head CI is green,
+> Sol completes the required adversarial review; only on PASS may `<next gated wave>` start.
+> `<independent wave>` may continue in parallel because its authority and changed paths are disjoint.
+
+The example uses placeholders deliberately. Never teach live program state by embedding it in the
+Skillpack.
 
 ## Closeout output
 
