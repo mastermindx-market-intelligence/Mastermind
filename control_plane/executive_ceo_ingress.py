@@ -1,14 +1,14 @@
-"""control_plane.executive_ceo_ingress — the dedicated MAS-75 PR-A CeoIngress surface.
+"""Dedicated PR-A CeoIngress plus the R0 diagnostic hot-state read.
 
-This module is the closed submit/status frame validator, trusted-grounding/
+This module preserves the closed submit/status validator, trusted-grounding/
 replay/admission law, and dedicated response/error law for the future Slack
-transport's local ingress (adjudication §3, §7-§14; R1 security correction;
-R2 lifecycle correction).  It is deliberately narrow:
+transport's local ingress, while adding only R0's no-input diagnostic state
+read (adjudication §3, §7-§14; R1 security correction; R2 lifecycle
+correction).  It is deliberately narrow:
 
 * **No generic dispatcher.**  There is no ``command/version/args`` shape here
-  (unlike the broad Operator control protocol).  Exactly two frame schemas
-  exist: ``mastermind.executive_ceo_ingress_submit.v1`` and
-  ``mastermind.executive_ceo_ingress_status.v1`` (§7.1/§7.2).
+  (unlike the broad Operator control protocol).  PR-A's submit/status schemas
+  remain unchanged; R0 adds exactly one no-input diagnostic state schema.
 * **Never opens its own Runtime, socket, or Git/Agent OS root.**  Every call
   here receives an already-open ``Runtime`` and an opaque, already-injected
   grounding provider; this module discovers nothing (§8.1, §10).  It therefore
@@ -55,6 +55,7 @@ from typing import Any, Protocol
 
 from control_plane import ceo_intent
 from control_plane import ceo_request
+from control_plane import executive_hot_state as hot_state
 from control_plane.executive_authority import AuthorityPolicyError
 from control_plane.executive_runtime import StateConflict
 
@@ -65,6 +66,7 @@ __all__ = [
     "GroundingProvider",
     "MAX_REQUEST_BYTES",
     "MAX_RESPONSE_BYTES",
+    "STATE_SCHEMA",
     "STATUS_ID_RE",
     "STATUS_SCHEMA",
     "SUBMIT_SCHEMA",
@@ -80,6 +82,8 @@ __all__ = [
 SUBMIT_SCHEMA = "mastermind.executive_ceo_ingress_submit.v1"
 #: §7.2.
 STATUS_SCHEMA = "mastermind.executive_ceo_ingress_status.v1"
+#: R0 §3 — the only post-PR-A additive diagnostic frame.
+STATE_SCHEMA = hot_state.STATE_REQUEST_SCHEMA
 
 #: §7.3 — request line maximum, including frame/newline budget.  Separate from
 #: (far below) the broad Operator ``ServiceConfig.max_request_bytes`` ceiling.
@@ -99,6 +103,7 @@ BOOT_PACKET_SCHEMA = "mastermind.ceo_boot_packet.v1"
 
 _SUBMIT_TOP_KEYS = frozenset({"schema", "observed_grounding", "request"})
 _STATUS_TOP_KEYS = frozenset({"schema", "intent_id"})
+_STATE_TOP_KEYS = frozenset({"schema"})
 _GROUNDING_KEYS = frozenset({"mastermind_sha", "macro_sha", "boot_packet_schema"})
 
 
@@ -498,10 +503,15 @@ async def handle_frame(
     runtime: Any,
     grounding_provider: GroundingProvider,
     workspace_root: "Path | str",
+    service_state: Any = None,
+    ceo_ingress_armed: bool = False,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
-    There is no generic dispatcher: exactly two ``schema`` values are legal.
+    There is no generic dispatcher: exactly three closed ``schema`` values are
+    legal.  The caller applies PR-A's full admission predicate to submit/status
+    before invoking this function; the R0 state branch is read-only and uses
+    only current in-process values supplied by that same service instance.
     Everything else — including a recognized schema whose object shape is
     wrong — refuses via :class:`CeoIngressError` with a code from
     :data:`ERROR_CODES`.  The caller (``executive_service``'s dedicated ingress
@@ -524,7 +534,20 @@ async def handle_frame(
     if schema == STATUS_SCHEMA:
         _exact_top_keys(parsed, "status frame", _STATUS_TOP_KEYS)
         return await _handle_status(parsed, runtime=runtime)
+    if schema == STATE_SCHEMA:
+        _exact_top_keys(parsed, "state frame", _STATE_TOP_KEYS)
+        try:
+            return await hot_state.build_hot_state(
+                runtime=runtime,
+                grounding_provider=grounding_provider,
+                service_state=service_state,
+                ceo_ingress_armed=ceo_ingress_armed,
+            )
+        except hot_state.HotStateTooLarge as exc:
+            raise CeoIngressError(
+                "response_too_large", "Executive hot-state exceeds byte limit"
+            ) from exc
     raise CeoIngressError(
         "unsupported_ingress_schema",
-        f"schema must be one of {sorted([SUBMIT_SCHEMA, STATUS_SCHEMA])}",
+        f"schema must be one of {sorted([STATE_SCHEMA, STATUS_SCHEMA, SUBMIT_SCHEMA])}",
     )

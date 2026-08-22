@@ -1060,9 +1060,9 @@ class ExecutiveControlService:
         ``allowed_peer_uids`` set — before any body read/parsing.  There is no
         generic dispatcher on this path: everything past peer authentication
         and the startup-readiness gate is delegated to
-        ``executive_ceo_ingress.handle_frame``, which owns the closed submit/
-        status frame validation and typed error law.  Exactly one frame is
-        read and one response is written per connection (§7.3).
+        ``executive_ceo_ingress.handle_frame``, which owns the three closed
+        submit/status/state frame validators and typed error law.  Exactly one
+        frame is read and one response is written per connection (§7.3).
         """
 
         task = asyncio.current_task()
@@ -1102,12 +1102,13 @@ class ExecutiveControlService:
                     writer, "peer_denied", "peer uid is not authorized"
                 )
                 return
-            # R1 §2.1: refuse before business parsing/mutation whenever the
-            # startup latch is still false, the ingress is unarmed, or the
-            # current service state is outside the readiness allowlist.  Zero
-            # grounding-provider calls, zero Runtime business access, and no
-            # generic dispatcher is reachable past this point either way.
-            if not self._ceo_ingress_ready_for_admission():
+            # R1 §2.1 + R0 §4.2: startup remains refusal-only before ANY body
+            # read.  Once both listeners are ready, exact-peer callers may
+            # supply one bounded frame so R0 can identify the diagnostic state
+            # schema.  PR-A submit/status still receive the unchanged full
+            # admission predicate after schema discrimination and before any
+            # grounding/business/ceo_intent call.
+            if not self._ceo_ingress_ready:
                 await self._send_ceo_ingress_error(
                     writer,
                     "ingress_unavailable",
@@ -1155,12 +1156,26 @@ class ExecutiveControlService:
                     writer, "invalid_json", "request is not valid JSON"
                 )
                 return
+            if (
+                isinstance(parsed, Mapping)
+                and parsed.get("schema")
+                in {ceo_ingress.SUBMIT_SCHEMA, ceo_ingress.STATUS_SCHEMA}
+                and not self._ceo_ingress_ready_for_admission()
+            ):
+                await self._send_ceo_ingress_error(
+                    writer,
+                    "ingress_unavailable",
+                    "Executive CEO ingress is not currently admitting requests",
+                )
+                return
             try:
                 result = await ceo_ingress.handle_frame(
                     parsed,
                     runtime=self._require_runtime(),
                     grounding_provider=self._ceo_ingress_grounding_provider,
                     workspace_root=self.config.proof_workspace_root,
+                    service_state=self._service_state,
+                    ceo_ingress_armed=self._ceo_ingress_armed,
                 )
             except ceo_ingress.CeoIngressError as exc:
                 await self._send_ceo_ingress_error(writer, exc.code, exc.message)
