@@ -1,26 +1,40 @@
-"""control_plane.chairman_control_room — Chairman Control Room P0 Wave A tests.
+"""control_plane.chairman_control_room — Chairman Control Room P0 Wave A(.1) tests.
 
 ``mastermind.chairman_control_room.v1`` is a deterministic, read-only
-projection over four already-independent sources (Agent OS brief via the CEO
-boot packet, the Executive Inbox, Macro's compiled active-build snapshot, and
-the local surface-bindings navigation cache).  These tests prove the
+projection over six already-independent sources: the Agent OS brief (via the
+CEO boot packet), the Executive Inbox, Macro's compiled active-build
+snapshot, Macro's compiled ``agent_os_state.v1`` artifact, runtime jobs read
+via public executive_runtime/executive_inbox APIs, and the local
+surface-bindings navigation cache.  The last three (``agent_os_state``,
+``runtime_jobs``, and the PR file-path join) are the Wave A.1 amendment
+adjudicated on top of the original Wave A commission.  These tests prove the
 properties the architecture doc (research/MASTERMIND_CHAIRMAN_CONTROL_ROOM_
 P0_ARCHITECTURE_AND_FABLE00_COMMISSION_2026-08-21.md §7/§10/§11/§22) demands:
 
   5. missing bindings is NOT degradation
   6. duplicate bindings surface a visible conflict, no winner
   8. a similar-but-different workstream key never fuzzy-joins
-  9. PR joins are exact, word-boundary WS: tokens only
+  9. PR joins are exact, word-boundary WS: tokens only (title AND, Wave A.1,
+     exact workstream-file / handoff-file-prefix citations)
  10-12. each source's absence degrades by name without erasing the others
  13. determinism, including under shuffled input list order
  14. attention items pass through unmodified
  15. zero I/O in the pure compositor; zero filesystem writes in the gather
      layer over fixture-fed sources
- 16. disagreements are preserved, never resolved
+ 16. disagreements are preserved, never resolved (including, Wave A.1, an
+     agent_os_state-vs-brief-readiness disagreement)
+
+Wave A.1 additions: ``agent_os_state=None`` degrades by name without erasing
+other-source cards; ``runtime_jobs=None`` degrades by name while
+attention-derived jobs still show (this closes the acceptance-row-3
+suppressed-healthy-job blindness the other direction: ``runtime_jobs``
+present surfaces a job the inbox itself suppressed); PR file-path join
+exactness (``WS-XY.md`` never joins ``WS:X``; a handoff-file prefix match
+requires the full key before the hyphen).
 
 Hermetic: ``compose_control_room`` tests build dicts directly (it is pure —
 no I/O, no clock, no subprocess).  ``build_control_room`` tests monkeypatch
-the three collector functions it calls, so no real Macro checkout, Agent OS
+the collector functions it calls, so no real Macro checkout, Agent OS
 subprocess, or Executive SQLite database is ever touched.
 """
 from __future__ import annotations
@@ -58,21 +72,44 @@ def active_builds() -> dict:
 
 
 @pytest.fixture
+def agent_os_state() -> dict:
+    return _load("agent_os_state_v1.json")
+
+
+@pytest.fixture
+def runtime_jobs() -> list:
+    return _load("runtime_jobs_v1.json")
+
+
+@pytest.fixture
 def bindings() -> dict:
     return _load("bindings_v1.json")
 
 
-def _compose(boot_packet, inbox, active_builds, bindings, **overrides):
+def _compose(
+    boot_packet, inbox, active_builds, bindings,
+    *, agent_os_state=None, runtime_jobs=None, **overrides,
+):
     kwargs = dict(
         inbox=inbox,
         boot_packet=boot_packet,
         active_builds=active_builds,
+        agent_os_state=agent_os_state,
+        runtime_jobs=runtime_jobs,
         bindings=bindings,
         binding_problems=(),
         generated_at="2026-08-21T00:10:00Z",
     )
     kwargs.update(overrides)
     return ccr.compose_control_room(**kwargs)
+
+
+def _compose_full(boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings, **overrides):
+    """Compose with every Wave A + Wave A.1 source present — the rich scenario."""
+    return _compose(
+        boot_packet, inbox, active_builds, bindings,
+        agent_os_state=agent_os_state, runtime_jobs=runtime_jobs, **overrides,
+    )
 
 
 def _card(doc: dict, work_ref: str) -> dict:
@@ -95,6 +132,13 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
     assert set(doc.keys()) == {
         "schema", "generated_at", "sources", "degraded", "attention", "work",
         "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
+    }
+    assert set(doc["sources"].keys()) == {
+        "mastermind_sha", "mastermind_branch", "macro_sha", "macro_root",
+        "executive_inbox_schema", "agent_os_brief_schema",
+        "agent_os_state_schema", "agent_os_state_generated_at",
+        "active_builds_schema", "active_builds_collected_at",
+        "runtime_db_present", "bindings_path_present",
     }
 
 
@@ -119,23 +163,55 @@ def test_no_overall_or_combined_status_field_anywhere(boot_packet, inbox, active
 # ---------------------------------------------------------------------------
 
 
-def test_full_fixture_scenario_shape(boot_packet, inbox, active_builds, bindings):
-    doc = _compose(boot_packet, inbox, active_builds, bindings)
+def test_full_fixture_scenario_shape(boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings):
+    doc = _compose_full(boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings)
     refs = {c["work_ref"] for c in doc["work"]}
-    assert refs == {"WS:ALPHA-ONE", "WS:ALPHA-ONEX", "WS:BETA-TWO", "WS:GAMMA-THREE"}
+    assert refs == {
+        "WS:ALPHA-ONE", "WS:ALPHA-ONEX", "WS:BETA-TWO", "WS:GAMMA-THREE",
+        "WS:DELTA-FOUR",  # minted purely from the agent_os_state artifact
+    }
+    assert doc["sources"]["agent_os_state_schema"] == ccr.AGENT_OS_STATE_SCHEMA
+    assert doc["sources"]["agent_os_state_generated_at"] == "2026-08-21T00:04:00Z"
 
     alpha = _card(doc, "WS:ALPHA-ONE")
+    # brief readiness overlay, unchanged from Wave A:
     assert alpha["agent_os"]["state"] == "in_progress"
+    # agent_os_state artifact enrichment (Wave A.1), exact source key names:
     assert alpha["agent_os"]["title"] == "Alpha One Rollout"
+    assert alpha["agent_os"]["status"] == "active"
+    assert alpha["agent_os"]["program"] == "EXEC-OS"
+    assert alpha["agent_os"]["next_action"] == "Get the CEO ruling on ship vs hold"
+    # executive.jobs is the union of attention-derived (job-alpha-001, FAILED)
+    # and runtime_jobs-derived (job-alpha-002, QUEUED — never an inbox
+    # attention item, since queued jobs are suppressed there) job rows.
     assert alpha["executive"]["jobs"] == [
-        {"job_id": "job-alpha-001", "status": "failed", "workstream": "WS:ALPHA-ONE"}
+        {"job_id": "job-alpha-001", "status": "failed", "workstream": "WS:ALPHA-ONE"},
+        {"job_id": "job-alpha-002", "status": "queued", "workstream": "WS:ALPHA-ONE"},
     ]
     assert alpha["executive"]["joined_by"] == "ceo_intent_provenance"
     assert alpha["attention_ids"] == ["eia-aaaaaaaaaaaa", "eia-bbbbbbbbbbbb"]
     assert len(alpha["bindings"]) == 2
 
+    delta = _card(doc, "WS:DELTA-FOUR")
+    assert delta["agent_os"] == {
+        "workstream": "DELTA-FOUR",
+        "title": "Delta Four (artifact-only workstream)",
+        "status": "proposed",
+        "program": "EXEC-OS",
+        "next_action": "Kickoff wave 1",
+        "state": None,
+        "reason_code": None,
+        "reason": None,
+        "source": None,
+        "depends_on": [],
+        "unmet_dependencies": [],
+    }
+    assert delta["executive"] == {"jobs": [], "joined_by": None}
+    assert delta["github"] == {"prs": []}
+
     gamma = _card(doc, "WS:GAMMA-THREE")
     assert gamma["agent_os"]["state"] == "ready"
+    assert gamma["agent_os"]["status"] is None  # not in the agent_os_state fixture
     assert gamma["executive"] == {"jobs": [], "joined_by": None}
     assert gamma["github"] == {"prs": []}
     assert gamma["bindings"] == []
@@ -275,6 +351,88 @@ def test_falsifier_ws_token_word_boundary_exact_match():
     assert all(pr["number"] != 3 for pr in x_card["github"]["prs"])
 
 
+def _pr_row(number: int, *, title: str = "no workstream cited", files=()) -> dict:
+    return {
+        "repo": "org/repo", "number": number,
+        "url": f"https://github.com/org/repo/pull/{number}",
+        "title": title, "branch": f"b{number}", "draft": False,
+        "merge_state": "CLEAN", "files": list(files),
+    }
+
+
+def _active_builds_with_prs(*prs: dict) -> dict:
+    return {
+        "schema": ccr.ACTIVE_BUILDS_SCHEMA,
+        "collected_at": "2026-08-21T00:00:00Z",
+        "repositories": [{"open_prs": list(prs)}],
+    }
+
+
+def test_falsifier_workstream_file_join_exact_key_no_join_on_similar_key():
+    """agentos/workstreams/WS-XY.md joins WS:XY, never WS:X (Wave A.1)."""
+    pr1 = _pr_row(1, files=["agentos/workstreams/WS-X.md"])
+    pr2 = _pr_row(2, files=["agentos/workstreams/WS-XY.md"])
+    active_builds = _active_builds_with_prs(pr1, pr2)
+
+    doc = ccr.compose_control_room(
+        inbox=None, boot_packet=None, active_builds=active_builds, bindings=None,
+        generated_at="2026-08-21T00:00:00Z",
+    )
+    refs = {c["work_ref"] for c in doc["work"]}
+    assert {"WS:X", "WS:XY"} <= refs
+
+    x_card = _card(doc, "WS:X")
+    xy_card = _card(doc, "WS:XY")
+    assert [pr["number"] for pr in x_card["github"]["prs"]] == [1]
+    assert [pr["number"] for pr in xy_card["github"]["prs"]] == [2]
+    assert doc["unjoined_open_prs"] == []
+
+
+def test_falsifier_handoff_file_join_requires_full_key_before_hyphen():
+    """agentos/handoffs/<KEY>- must match the FULL candidate key (Wave A.1).
+
+    A candidate key "X" (minted from a title token on PR #1) must NOT be
+    joined by PR #2's handoff citation "agentos/handoffs/XY-2026-08-21.md" —
+    "XY-..." does not start with "X-".  PR #3's handoff citation
+    "agentos/handoffs/X-2026-08-21.md" DOES start with "X-" and joins.
+    Handoff citations can only attach to an existing candidate key — they
+    never mint a new card on their own (PR #2's own citation mints WS:XY
+    only because #2 ALSO carries the workstream-file citation, added purely
+    to prove #2 exists as a card and its handoff file still does not leak
+    into WS:X).
+    """
+    pr1 = _pr_row(1, title="fix WS:X full stop")
+    pr2 = _pr_row(2, files=[
+        "agentos/workstreams/WS-XY.md",
+        "agentos/handoffs/XY-2026-08-21.md",
+    ])
+    pr3 = _pr_row(3, files=["agentos/handoffs/X-2026-08-21.md"])
+    active_builds = _active_builds_with_prs(pr1, pr2, pr3)
+
+    doc = ccr.compose_control_room(
+        inbox=None, boot_packet=None, active_builds=active_builds, bindings=None,
+        generated_at="2026-08-21T00:00:00Z",
+    )
+    x_card = _card(doc, "WS:X")
+    xy_card = _card(doc, "WS:XY")
+    assert {pr["number"] for pr in x_card["github"]["prs"]} == {1, 3}
+    assert {pr["number"] for pr in xy_card["github"]["prs"]} == {2}
+    assert doc["unjoined_open_prs"] == []
+
+
+def test_falsifier_handoff_citation_alone_never_mints_a_card():
+    """A handoff-file citation for a key nobody else mentions stays unjoined."""
+    pr1 = _pr_row(1, files=["agentos/handoffs/GHOST-KEY-2026-08-21.md"])
+    active_builds = _active_builds_with_prs(pr1)
+
+    doc = ccr.compose_control_room(
+        inbox=None, boot_packet=None, active_builds=active_builds, bindings=None,
+        generated_at="2026-08-21T00:00:00Z",
+    )
+    assert doc["work"] == []
+    assert [pr["number"] for pr in doc["unjoined_open_prs"]] == [1]
+
+
 # ---------------------------------------------------------------------------
 # falsifiers 10-12 — per-source absence degrades by name, others survive
 # ---------------------------------------------------------------------------
@@ -340,24 +498,81 @@ def _load_active_builds() -> dict:
     return _load("active_builds_v1.json")
 
 
+def test_falsifier_agent_os_state_none_degrades_named_not_zero_workstreams(
+    boot_packet, inbox, active_builds, runtime_jobs, bindings
+):
+    """Wave A.1: agent_os_state=None degrades by name; other-source cards unaffected."""
+    with_state = _compose(
+        boot_packet, inbox, active_builds, bindings,
+        agent_os_state=_load("agent_os_state_v1.json"), runtime_jobs=runtime_jobs,
+    )
+    without_state = _compose(
+        boot_packet, inbox, active_builds, bindings,
+        agent_os_state=None, runtime_jobs=runtime_jobs,
+    )
+
+    assert any(
+        entry.startswith("agent_os_state: unavailable") for entry in without_state["degraded"]
+    )
+    # The artifact-only card disappears (nothing else names it)...
+    refs_without = {c["work_ref"] for c in without_state["work"]}
+    assert "WS:DELTA-FOUR" not in refs_without
+    # ...but every card another source names is still there, NOT a
+    # zero-workstreams claim.
+    assert "WS:ALPHA-ONE" in refs_without
+    assert "WS:BETA-TWO" in refs_without
+    assert "WS:GAMMA-THREE" in refs_without
+
+    # The brief-readiness half of agent_os survives untouched; only the
+    # artifact-owned fields (title/status/program/next_action) go missing.
+    alpha_with = _card(with_state, "WS:ALPHA-ONE")
+    alpha_without = _card(without_state, "WS:ALPHA-ONE")
+    assert alpha_with["agent_os"]["state"] == alpha_without["agent_os"]["state"]
+    assert alpha_without["agent_os"]["status"] is None
+    assert alpha_without["agent_os"]["program"] is None
+
+
+def test_falsifier_runtime_jobs_none_degrades_named_attention_jobs_survive(
+    boot_packet, inbox, active_builds, agent_os_state, bindings
+):
+    """Wave A.1: runtime_jobs=None degrades by name; attention-derived jobs still present."""
+    doc = _compose(
+        boot_packet, inbox, active_builds, bindings,
+        agent_os_state=agent_os_state, runtime_jobs=None,
+    )
+    assert any(
+        entry.startswith("executive_runtime: unavailable") for entry in doc["degraded"]
+    )
+    alpha = _card(doc, "WS:ALPHA-ONE")
+    # job-alpha-001 comes from the Executive Inbox attention item and does
+    # NOT depend on runtime_jobs at all.
+    assert alpha["executive"]["jobs"] == [
+        {"job_id": "job-alpha-001", "status": "failed", "workstream": "WS:ALPHA-ONE"}
+    ]
+    assert alpha["executive"]["joined_by"] == "ceo_intent_provenance"
+
+
 # ---------------------------------------------------------------------------
 # falsifier 13 — determinism, including under shuffled input list order
 # ---------------------------------------------------------------------------
 
 
-def test_falsifier_determinism_same_inputs(boot_packet, inbox, active_builds, bindings):
-    doc_a = _compose(boot_packet, inbox, active_builds, bindings)
-    doc_b = _compose(
+def test_falsifier_determinism_same_inputs(
+    boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings
+):
+    doc_a = _compose_full(boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings)
+    doc_b = _compose_full(
         copy.deepcopy(boot_packet), copy.deepcopy(inbox),
-        copy.deepcopy(active_builds), copy.deepcopy(bindings),
+        copy.deepcopy(active_builds), copy.deepcopy(agent_os_state),
+        copy.deepcopy(runtime_jobs), copy.deepcopy(bindings),
     )
     assert json.dumps(doc_a, sort_keys=True) == json.dumps(doc_b, sort_keys=True)
 
 
 def test_falsifier_determinism_under_shuffled_input_order(
-    boot_packet, inbox, active_builds, bindings
+    boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings
 ):
-    doc_a = _compose(boot_packet, inbox, active_builds, bindings)
+    doc_a = _compose_full(boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings)
 
     shuffled_bindings = copy.deepcopy(bindings)
     shuffled_bindings["bindings"] = list(reversed(shuffled_bindings["bindings"]))
@@ -367,7 +582,15 @@ def test_falsifier_determinism_under_shuffled_input_order(
         reversed(shuffled_builds["repositories"][0]["open_prs"])
     )
 
-    doc_b = _compose(boot_packet, inbox, shuffled_builds, shuffled_bindings)
+    shuffled_state = copy.deepcopy(agent_os_state)
+    shuffled_state["workstreams"] = list(reversed(shuffled_state["workstreams"]))
+
+    shuffled_runtime_jobs = list(reversed(copy.deepcopy(runtime_jobs)))
+
+    doc_b = _compose_full(
+        boot_packet, inbox, shuffled_builds, shuffled_state, shuffled_runtime_jobs,
+        shuffled_bindings,
+    )
     assert json.dumps(doc_a, sort_keys=True) == json.dumps(doc_b, sort_keys=True)
 
 
@@ -401,7 +624,7 @@ def test_falsifier_attention_passthrough_no_added_or_removed_keys(
 
 
 def test_falsifier_compose_control_room_performs_no_io(
-    boot_packet, inbox, active_builds, bindings, monkeypatch
+    boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings, monkeypatch
 ):
     def _boom(*args, **kwargs):
         raise AssertionError("compose_control_room must not perform file I/O")
@@ -409,7 +632,7 @@ def test_falsifier_compose_control_room_performs_no_io(
     monkeypatch.setattr("builtins.open", _boom)
     monkeypatch.setattr(Path, "open", _boom)
 
-    doc = _compose(boot_packet, inbox, active_builds, bindings)
+    doc = _compose_full(boot_packet, inbox, active_builds, agent_os_state, runtime_jobs, bindings)
     assert doc["schema"] == ccr.SCHEMA
 
 
@@ -423,12 +646,17 @@ def _tree_snapshot(root: Path) -> set[tuple[str, int, float]]:
 
 
 def test_falsifier_build_control_room_writes_nothing(
-    tmp_path, monkeypatch, boot_packet, inbox, active_builds, bindings
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, agent_os_state, bindings
 ):
     macro_root = tmp_path / "macro"
     (macro_root / "data" / "governance").mkdir(parents=True)
     active_builds_path = macro_root / "data" / "governance" / "project_active_builds.json"
     active_builds_path.write_text(json.dumps(active_builds), encoding="utf-8")
+    agent_os_state_path = macro_root / "data" / "governance" / "agent_os_state.json"
+    agent_os_state_path.write_text(json.dumps(agent_os_state), encoding="utf-8")
+    # Runtime DB deliberately absent: `_read_runtime_jobs` must degrade by
+    # name rather than write/create anything (mirrors executive_inbox.py's
+    # own existence-check-before-construction contract).
 
     bindings_path = tmp_path / "bindings" / "surface_bindings.json"
     sb.save_bindings(bindings, path=bindings_path)
@@ -458,7 +686,9 @@ def test_falsifier_build_control_room_writes_nothing(
     assert doc["schema"] == ccr.SCHEMA
     assert doc["sources"]["macro_root"] == str(macro_root)
     assert doc["sources"]["active_builds_schema"] == ccr.ACTIVE_BUILDS_SCHEMA
+    assert doc["sources"]["agent_os_state_schema"] == ccr.AGENT_OS_STATE_SCHEMA
     assert doc["sources"]["bindings_path_present"] is True
+    assert any(entry.startswith("executive_runtime: unavailable") for entry in doc["degraded"])
     assert before == after
 
 
@@ -487,3 +717,50 @@ def test_falsifier_disagreement_preservation(boot_packet, inbox, active_builds, 
     ]
     assert alpha["agent_os"]["state"] == "in_progress"
     assert alpha["executive"]["jobs"][0]["status"] == "failed"
+
+
+def test_falsifier_artifact_vs_brief_disagreement_preservation():
+    """Wave A.1: the artifact's authored status and the live readiness state can
+
+    themselves disagree (one is a materialized snapshot, the other live) —
+    preserved as a disagreement, both raw values kept, never resolved.
+    """
+    boot_packet = {
+        "schema": ccr.BOOT_PACKET_SCHEMA,
+        "mastermind": {"root": "/x", "sha": "a" * 40, "branch": "main"},
+        "macro": {"root": "/y", "sha": "b" * 40},
+        "degraded": [],
+        "brief": {
+            "schema": ccr.AGENT_OS_BRIEF_SCHEMA,
+            "readiness": {"items": [{
+                "workstream": "ZETA-SIX", "wave": None, "state": "in_progress",
+                "reason_code": "status_in_progress",
+                "reason": "Authored workstream status is active.",
+                "depends_on": [], "unmet_dependencies": [],
+                "source": "agentos/workstreams/ZETA-SIX.yml",
+            }]},
+            "blocked": [], "finished": [], "needs_ceo": [],
+        },
+    }
+    agent_os_state = {
+        "schema": ccr.AGENT_OS_STATE_SCHEMA,
+        "generated_at": "2026-08-21T00:00:00Z",
+        "workstreams": [{
+            "key": "ZETA-SIX", "title": "Zeta Six", "status": "done",
+            "program": "P0-EXEC", "next_action": "",
+        }],
+    }
+
+    doc = ccr.compose_control_room(
+        inbox=None, boot_packet=boot_packet, active_builds=None,
+        agent_os_state=agent_os_state, runtime_jobs=None, bindings=None,
+        generated_at="2026-08-21T00:00:00Z",
+    )
+    card = _card(doc, "WS:ZETA-SIX")
+    assert card["disagreements"] == [
+        "agent_os_state reports status='done' while agent os readiness "
+        "reports state='in_progress' for this workstream"
+    ]
+    # Both raw values survive unchanged alongside the disagreement note.
+    assert card["agent_os"]["status"] == "done"
+    assert card["agent_os"]["state"] == "in_progress"

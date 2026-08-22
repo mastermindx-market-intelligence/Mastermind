@@ -64,7 +64,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from control_plane import ceo_boot_packet, executive_inbox, surface_bindings
+from control_plane import ceo_boot_packet, executive_inbox, executive_runtime, surface_bindings
 
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.chairman_control_room.v1"
@@ -95,6 +95,21 @@ ACTIVE_BUILDS_SCHEMA = "project_active_builds.v1"
 #: "project_active_builds.json"``).
 ACTIVE_BUILDS_RELATIVE_PATH = Path("data") / "governance" / "project_active_builds.json"
 
+#: The compiled per-workstream Agent OS artifact this module reads (Wave A.1
+#: amendment).  Owned by Macro ``scripts/agentos.py`` (``STATE_SCHEMA``,
+#: pinned SHA ``5ad347240a1a744746e01a472f80d6698e73b413``, line 96).  Unlike
+#: the ``ceo_brief.v1`` embedded in the boot packet, this artifact DOES carry
+#: a flat per-workstream ``key/title/status/program/next_action`` directory
+#: (``build_state()`` lines 1778-1811, record shape lines ~1485-1510) — it
+#: fills exactly the gap :func:`_agent_os_workstreams` names in its own
+#: docstring.
+AGENT_OS_STATE_SCHEMA = "agent_os_state.v1"
+
+#: Relative path, inside a resolved Macro checkout, of the compiled artifact.
+#: Verified against ``scripts/agentos.py`` line 92
+#: (``_STATE_JSON = _ROOT / "data" / "governance" / "agent_os_state.json"``).
+AGENT_OS_STATE_RELATIVE_PATH = Path("data") / "governance" / "agent_os_state.json"
+
 #: This Mastermind checkout — same idiom as :mod:`control_plane.ceo_boot_packet`.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -115,6 +130,25 @@ _ATTENTION_TARGETS = ("chairman", "ceo", "coo")
 #: dangling ``Y`` — which is what keeps a card for ``WS:X`` from joining a PR
 #: that only cites ``WS:XY`` (falsifier: similar-but-different key, no join).
 _WS_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])WS:[A-Za-z0-9_.\-]+")
+
+#: Exact workstream-record file path a PR can cite instead of (or in addition
+#: to) a title token — Wave A.1 amendment.  Matches literally
+#: ``agentos/workstreams/WS-<KEY>.md`` and captures ``<KEY>`` (which may
+#: itself contain hyphens, e.g. ``CHAIRMAN-CONTROL-ROOM``) unambiguously: the
+#: filename has exactly one ``WS-`` prefix and one ``.md`` suffix, so regex
+#: backtracking resolves the greedy capture correctly with no key-boundary
+#: guesswork. This — like the title-token join — can MINT a new work card.
+_WORKSTREAM_FILE_RE = re.compile(r"^agentos/workstreams/WS-(.+)\.md$")
+
+#: Handoff-file prefix a PR can cite.  Unlike the workstream-file path above,
+#: a handoff filename (``agentos/handoffs/<KEY>-<date>.md``) cannot be
+#: unambiguously reverse-parsed into a key when the key itself may contain
+#: hyphens — ``CHAIRMAN-CONTROL-ROOM-2026-08-21.md`` has no marked boundary
+#: between key and date.  So this join is evaluated the OTHER direction: for
+#: each candidate key already known from another source, check whether a PR
+#: cites ``agentos/handoffs/<KEY>-``.  It can therefore only ATTACH a PR to
+#: an existing card, never mint a new one on its own.
+_HANDOFF_FILE_PREFIX = "agentos/handoffs/"
 
 #: Binding-summary keys shared by ``unbound_surfaces`` and every work card's
 #: ``bindings`` list.  Deliberately excludes ``locator`` — a card projection
@@ -256,6 +290,86 @@ def _agent_os_workstreams(brief: Any) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _agent_os_state_workstreams(artifact: Any) -> dict[str, dict[str, Any]]:
+    """Every workstream the ``agent_os_state.v1`` artifact names, keyed by its bare key.
+
+    Wave A.1 amendment: this is the flat per-workstream directory the brief's
+    ``ceo_brief.v1`` JSON does NOT carry (see :func:`_agent_os_workstreams`).
+    Verified against Macro ``scripts/agentos.py`` (pinned SHA
+    ``5ad347240a1a744746e01a472f80d6698e73b413``): the artifact's top-level
+    ``workstreams`` list (``build_state()`` line 1795, ``"workstreams":
+    records``) and each record's exact keys (record construction ~lines
+    1485-1510): ``key`` (used as this dict's key, never emitted twice),
+    ``title``, ``status``, ``program``, ``next_action``.  Every other record
+    field (``owner``, ``class``, ``repos``, ``waves``, ``wave_detail``,
+    ``prs``, ``claim``, ``collisions``, ``depends_on``, ``blocked_by``, ...)
+    is deliberately NOT copied — only the four fields the commissioned
+    WorkCard contract names.
+    """
+    if not isinstance(artifact, Mapping):
+        return {}
+    rows = artifact.get("workstreams")
+    result: dict[str, dict[str, Any]] = {}
+    if isinstance(rows, Sequence) and not isinstance(rows, (str, bytes)):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            key = row.get("key")
+            if not isinstance(key, str) or not key:
+                continue
+            result[key] = {
+                "title": row.get("title"),
+                "status": row.get("status"),
+                "program": row.get("program"),
+                "next_action": row.get("next_action"),
+            }
+    return result
+
+
+def _merged_agent_os_entry(
+    bare_key: str,
+    brief_ws: Mapping[str, dict[str, Any]],
+    state_ws: Mapping[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Merge the artifact's per-workstream facts with the brief's live readiness overlay.
+
+    ``agent_os_state.v1`` (:func:`_agent_os_state_workstreams`) is the base:
+    ``title``/``status``/``program``/``next_action``, present for every
+    workstream it knows about.  ``ceo_brief.v1``'s readiness projection
+    (:func:`_agent_os_workstreams`) is layered on top as the LIVE overlay —
+    its own ``state``/``reason_code``/``reason``/``source``/``depends_on``/
+    ``unmet_dependencies`` fields, unchanged from the original Wave A design.
+    Neither layer overwrites the other's fields — both raw values stay
+    present so a caller can compare them (see the artifact-vs-brief
+    disagreement check in :func:`_disagreements`).  ``title`` falls back to
+    the brief's ``blocked``/``finished`` title only when the artifact did not
+    know this workstream at all.
+    """
+    state_entry = state_ws.get(bare_key)
+    brief_entry = brief_ws.get(bare_key)
+    if state_entry is None and brief_entry is None:
+        return None
+
+    entry: dict[str, Any] = {
+        "workstream": bare_key,
+        "title": state_entry.get("title") if state_entry else None,
+        "status": state_entry.get("status") if state_entry else None,
+        "program": state_entry.get("program") if state_entry else None,
+        "next_action": state_entry.get("next_action") if state_entry else None,
+        "state": brief_entry.get("state") if brief_entry else None,
+        "reason_code": brief_entry.get("reason_code") if brief_entry else None,
+        "reason": brief_entry.get("reason") if brief_entry else None,
+        "source": brief_entry.get("source") if brief_entry else None,
+        "depends_on": list(brief_entry.get("depends_on") or []) if brief_entry else [],
+        "unmet_dependencies": (
+            list(brief_entry.get("unmet_dependencies") or []) if brief_entry else []
+        ),
+    }
+    if entry["title"] is None and brief_entry is not None:
+        entry["title"] = brief_entry.get("title")
+    return entry
+
+
 # ---------------------------------------------------------------------------
 # Executive Inbox consumption
 # ---------------------------------------------------------------------------
@@ -332,6 +446,37 @@ def _attention_ids_by_workstream(items: list[dict[str, Any]]) -> dict[str, list[
     return grouped
 
 
+def _group_jobs_by_ref(jobs: Any) -> dict[str, list[dict[str, Any]]]:
+    """Group a flat ``[{job_id, status, workstream}, ...]`` list by ``workstream``.
+
+    Wave A.1 amendment: the shape the gather layer's ``_read_runtime_jobs``
+    produces is deliberately identical to the entries
+    :func:`_executive_jobs_by_workstream` already builds from Executive
+    Inbox attention items, so both can be merged with the same downstream
+    dedupe-by-``job_id`` logic in :func:`compose_control_room`.  The
+    ``workstream`` on each row is expected to already be the full
+    ``WS:<KEY>`` ref (``_read_runtime_jobs`` sources it from
+    :func:`control_plane.executive_inbox.ceo_intent_provenance`, the exact
+    same provenance field :func:`_executive_jobs_by_workstream` reads).
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(jobs, Sequence) or isinstance(jobs, (str, bytes)):
+        return grouped
+    for job in jobs:
+        if not isinstance(job, Mapping):
+            continue
+        workstream = job.get("workstream")
+        job_id = job.get("job_id")
+        if not isinstance(workstream, str) or not workstream or job_id is None:
+            continue
+        grouped.setdefault(workstream, []).append({
+            "job_id": job_id,
+            "status": job.get("status"),
+            "workstream": workstream,
+        })
+    return grouped
+
+
 # ---------------------------------------------------------------------------
 # active-builds consumption
 # ---------------------------------------------------------------------------
@@ -353,16 +498,62 @@ def _open_prs(active_builds: Any) -> list[dict[str, Any]]:
     return prs
 
 
-def _prs_by_ws_token(open_prs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _pr_files(pr: Mapping[str, Any]) -> list[str]:
+    files = pr.get("files")
+    if isinstance(files, Sequence) and not isinstance(files, (str, bytes)):
+        return [f for f in files if isinstance(f, str)]
+    return []
+
+
+def _pr_workstream_file_refs(pr: Mapping[str, Any]) -> set[str]:
+    """WS: refs cited by an exact ``agentos/workstreams/WS-<KEY>.md`` file path.
+
+    See :data:`_WORKSTREAM_FILE_RE` for the exactness/mint-a-new-card receipt.
+    """
+    refs: set[str] = set()
+    for f in _pr_files(pr):
+        match = _WORKSTREAM_FILE_RE.match(f)
+        if match:
+            refs.add(f"WS:{match.group(1)}")
+    return refs
+
+
+def _pr_cites_handoff_for_key(pr: Mapping[str, Any], bare_key: str) -> bool:
+    """Whether one of ``pr``'s files starts with ``agentos/handoffs/<bare_key>-``.
+
+    See :data:`_HANDOFF_FILE_PREFIX` for why this direction (candidate key ->
+    prefix check) is the only unambiguous way to evaluate this join.
+    """
+    prefix = f"{_HANDOFF_FILE_PREFIX}{bare_key}-"
+    return any(f.startswith(prefix) for f in _pr_files(pr))
+
+
+def _prs_by_extractable_ref(open_prs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """PRs grouped by every ref they can MINT a card for on their own.
+
+    Union of title/body ``WS:`` tokens and exact ``agentos/workstreams/
+    WS-<KEY>.md`` file citations — both are unambiguous extractions that
+    need no pre-existing candidate key list, so (like the original title-
+    token join) either can create a brand-new work card.  Handoff-file
+    citations are deliberately NOT part of this function; see
+    :func:`_pr_cites_handoff_for_key`.
+    """
     grouped: dict[str, list[dict[str, Any]]] = {}
     for pr in open_prs:
-        for token in _pr_ws_tokens(pr):
-            grouped.setdefault(token, []).append(_pr_summary(pr))
+        refs = _pr_ws_tokens(pr) | _pr_workstream_file_refs(pr)
+        for ref in refs:
+            grouped.setdefault(ref, []).append(_pr_summary(pr))
     return grouped
 
 
-def _unjoined_open_prs(open_prs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    unjoined = [_pr_summary(pr) for pr in open_prs if not _pr_ws_tokens(pr)]
+def _unjoined_open_prs(
+    open_prs: list[dict[str, Any]], joined_pr_identities: set[tuple[Any, Any]]
+) -> list[dict[str, Any]]:
+    """Open PRs that joined no card by ANY method (title token, workstream-file, or handoff-file)."""
+    unjoined = [
+        _pr_summary(pr) for pr in open_prs
+        if (pr.get("repo"), pr.get("number")) not in joined_pr_identities
+    ]
     unjoined.sort(key=lambda pr: (str(pr.get("repo") or ""), pr.get("number") or 0))
     return unjoined
 
@@ -378,14 +569,20 @@ def _disagreements(
 ) -> list[str]:
     """Preserve, never resolve, a conflict between two source-owned facts.
 
-    Both checks compare the Agent OS readiness ``state`` (the closest
+    Two checks compare the Agent OS readiness ``state`` (the closest
     source-owned analog to an authored lifecycle label the JSON brief
     exposes — see :func:`_agent_os_workstreams`) against a DIFFERENT
-    source's own raw fact.  Neither branch invents or overwrites either
-    source's value; it only reports that they disagree.
+    source's own raw fact.  A third (Wave A.1 amendment) compares the
+    ``agent_os_state.v1`` artifact's own authored ``status`` against that
+    same brief readiness ``state`` — the two Agent-OS-family layers
+    :func:`_merged_agent_os_entry` merges together can themselves disagree,
+    since one is a point-in-time materialized snapshot and the other is
+    live. No branch invents or overwrites either source's value; each only
+    reports that they disagree.
     """
     out: list[str] = []
     state = agent_os_entry.get("state") if agent_os_entry else None
+    status = agent_os_entry.get("status") if agent_os_entry else None
 
     if state == "done" and prs:
         out.append(
@@ -402,6 +599,12 @@ def _disagreements(
                 f"workstream while agent_os reports readiness state=in_progress"
             )
 
+    if status in ("done", "killed") and state not in (None, "done"):
+        out.append(
+            f"agent_os_state reports status={status!r} while agent os readiness "
+            f"reports state={state!r} for this workstream"
+        )
+
     return out
 
 
@@ -414,6 +617,8 @@ def compose_control_room(
     inbox: dict[str, Any] | None,
     boot_packet: dict[str, Any] | None,
     active_builds: dict[str, Any] | None,
+    agent_os_state: dict[str, Any] | None = None,
+    runtime_jobs: list[dict[str, Any]] | None = None,
     bindings: dict[str, Any] | None,
     binding_problems: Sequence[str] = (),
     generated_at: str,
@@ -474,6 +679,25 @@ def compose_control_room(
         else:
             degraded.append("boot_packet: no agent os brief available")
 
+    # --- agent os state artifact (Wave A.1 amendment) -----------------------
+    agent_os_state_schema: str | None = None
+    agent_os_state_generated_at: str | None = None
+    agent_os_state_ws: dict[str, dict[str, Any]] = {}
+
+    if agent_os_state is None:
+        degraded.append("agent_os_state: unavailable")
+    elif not isinstance(agent_os_state, Mapping):
+        degraded.append(f"agent_os_state: expected an object, got {type(agent_os_state).__name__}")
+    else:
+        agent_os_state_schema = agent_os_state.get("schema")
+        if agent_os_state_schema != AGENT_OS_STATE_SCHEMA:
+            degraded.append(
+                f"agent_os_state: schema is {agent_os_state_schema!r}, expected "
+                f"{AGENT_OS_STATE_SCHEMA!r}"
+            )
+        agent_os_state_generated_at = agent_os_state.get("generated_at")
+        agent_os_state_ws = _agent_os_state_workstreams(agent_os_state)
+
     # --- executive inbox -----------------------------------------------------
     attention: dict[str, list[dict[str, Any]]] = {target: [] for target in _ATTENTION_TARGETS}
     executive_inbox_schema: str | None = None
@@ -515,6 +739,16 @@ def compose_control_room(
             if target in attention:
                 attention[target].append(item)
 
+    # --- runtime jobs (Wave A.1 amendment) -----------------------------------
+    # Distinct prefix from "executive_inbox:" on purpose: this closes the
+    # suppressed-healthy-job blindness (acceptance row 3) that attention-only
+    # jobs left — a job that never became an inbox attention item (queued,
+    # running, cleanly completed) can still carry CEO-intent provenance and
+    # belongs on its card.
+    if runtime_jobs is None:
+        degraded.append("executive_runtime: unavailable")
+    runtime_jobs_by_ref = _group_jobs_by_ref(runtime_jobs) if runtime_jobs is not None else {}
+
     # --- active builds ---------------------------------------------------
     active_builds_schema: str | None = None
     active_builds_collected_at: str | None = None
@@ -549,12 +783,37 @@ def compose_control_room(
     agent_os_ws = _agent_os_workstreams(brief)
     exec_jobs_by_ref = _executive_jobs_by_workstream(raw_attention_items)
     attention_ids_by_ref = _attention_ids_by_workstream(raw_attention_items)
-    prs_by_ref = _prs_by_ws_token(open_prs)
+    prs_by_ref = _prs_by_extractable_ref(open_prs)  # title tokens + workstream-file refs
+
+    # Every "mintable" ref: a card can come into existence from the Agent OS
+    # brief, the agent_os_state artifact, an executive job's CEO-intent
+    # provenance (attention-derived OR runtime_jobs-derived), or a PR's own
+    # title-token/workstream-file citation.  A binding's work_ref and a PR's
+    # handoff-file citation can only ATTACH to one of these — never mint one.
+    combined_jobs_by_ref: dict[str, list[dict[str, Any]]] = {}
+    for ref, job_rows in exec_jobs_by_ref.items():
+        combined_jobs_by_ref.setdefault(ref, []).extend(job_rows)
+    for ref, job_rows in runtime_jobs_by_ref.items():
+        combined_jobs_by_ref.setdefault(ref, []).extend(job_rows)
 
     card_refs: set[str] = set()
     card_refs.update(f"WS:{key}" for key in agent_os_ws)
-    card_refs.update(exec_jobs_by_ref.keys())
+    card_refs.update(f"WS:{key}" for key in agent_os_state_ws)
+    card_refs.update(combined_jobs_by_ref.keys())
     card_refs.update(prs_by_ref.keys())
+
+    # Handoff-file attachment pass: evaluated against the now-final card_refs
+    # only, so it can never mint a card — see `_HANDOFF_FILE_PREFIX`.
+    for ref in card_refs:
+        bare_key = ref.split(":", 1)[1]
+        for pr in open_prs:
+            if _pr_cites_handoff_for_key(pr, bare_key):
+                prs_by_ref.setdefault(ref, []).append(_pr_summary(pr))
+
+    joined_pr_identities: set[tuple[Any, Any]] = set()
+    for pr_rows in prs_by_ref.values():
+        for pr_summary in pr_rows:
+            joined_pr_identities.add((pr_summary.get("repo"), pr_summary.get("number")))
 
     bindings_by_ref: dict[str, list[dict[str, Any]]] = {}
     unbound_surfaces: list[dict[str, Any]] = []
@@ -572,11 +831,11 @@ def compose_control_room(
     work: list[dict[str, Any]] = []
     for ref in sorted(card_refs):
         bare_key = ref.split(":", 1)[1]
-        agent_os_entry = dict(agent_os_ws[bare_key]) if bare_key in agent_os_ws else None
+        agent_os_entry = _merged_agent_os_entry(bare_key, agent_os_ws, agent_os_state_ws)
 
         seen_jobs: set[str] = set()
         jobs: list[dict[str, Any]] = []
-        for job in sorted(exec_jobs_by_ref.get(ref, []), key=lambda j: str(j["job_id"])):
+        for job in sorted(combined_jobs_by_ref.get(ref, []), key=lambda j: str(j["job_id"])):
             if job["job_id"] in seen_jobs:
                 continue
             seen_jobs.add(job["job_id"])
@@ -621,6 +880,8 @@ def compose_control_room(
             "macro_root": macro_root,
             "executive_inbox_schema": executive_inbox_schema,
             "agent_os_brief_schema": agent_os_brief_schema,
+            "agent_os_state_schema": agent_os_state_schema,
+            "agent_os_state_generated_at": agent_os_state_generated_at,
             "active_builds_schema": active_builds_schema,
             "active_builds_collected_at": active_builds_collected_at,
             "runtime_db_present": runtime_db_present,
@@ -629,7 +890,7 @@ def compose_control_room(
         "degraded": sorted(degraded),
         "attention": attention,
         "work": work,
-        "unjoined_open_prs": _unjoined_open_prs(open_prs),
+        "unjoined_open_prs": _unjoined_open_prs(open_prs, joined_pr_identities),
         "unbound_surfaces": unbound_surfaces,
         "binding_conflicts": binding_conflicts,
     }
@@ -667,6 +928,81 @@ def _read_active_builds(macro_root: str | None) -> tuple[dict[str, Any] | None, 
     if not isinstance(loaded, dict):
         return None, f"{path}: not a JSON object"
     return loaded, None
+
+
+def _read_agent_os_state(macro_root: str | None) -> tuple[dict[str, Any] | None, str | None]:
+    """Read the compiled ``agent_os_state.v1`` artifact; never raises.
+
+    Same no-write read pattern as :func:`_read_active_builds`: this only
+    reads a file Macro's own ``scripts/agentos.py status`` already produces
+    on its own schedule.
+    """
+    if not macro_root:
+        return None, "no macro root resolved; agent_os_state not read"
+
+    path = Path(macro_root) / AGENT_OS_STATE_RELATIVE_PATH
+    try:
+        if not path.is_file():
+            return None, f"{path}: not found"
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, f"{path}: cannot read ({exc})"
+
+    try:
+        loaded = json.loads(raw)
+    except ValueError as exc:
+        return None, f"{path}: invalid JSON ({exc})"
+
+    if not isinstance(loaded, dict):
+        return None, f"{path}: not a JSON object"
+    return loaded, None
+
+
+def _read_runtime_jobs(root: Path) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Runtime jobs whose CEO-intent provenance carries a workstream.
+
+    Uses ONLY existing PUBLIC APIs — :meth:`control_plane.executive_runtime.
+    Runtime.at` (``create=False``), :meth:`control_plane.executive_runtime.
+    JobRegistry.list_jobs`, and :func:`control_plane.executive_inbox.
+    ceo_intent_provenance` — exactly the same three calls
+    ``executive_inbox.project_runtime`` itself makes.  No raw SQL; no edits
+    to either module.  The existence check BEFORE construction mirrors
+    ``executive_inbox.py`` lines 716-726: a bare ``Runtime.at(root)`` call
+    defaults ``create=True`` and would manufacture an empty database, then
+    report a quiet, job-free company — this never does that.  Distinct
+    "executive_runtime:" degraded prefix from "executive_inbox:" so a caller
+    can tell which read failed.
+    """
+    db_path = root / executive_inbox.DB_RELATIVE_PATH
+    if not db_path.is_file():
+        return None, f"database missing at {db_path}"
+
+    try:
+        runtime = executive_runtime.Runtime.at(root, create=False)
+    except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError) as exc:
+        return None, f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
+
+    try:
+        jobs = runtime.jobs.list_jobs()
+    except (executive_runtime.RuntimeProofError, ValueError, KeyError) as exc:
+        return None, (
+            f"jobs unreadable: {str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__}"
+        )
+
+    result: list[dict[str, Any]] = []
+    for job in jobs:
+        try:
+            provenance, _warning = executive_inbox.ceo_intent_provenance(runtime, job.job_id)
+        except (executive_runtime.RuntimeProofError, ValueError, KeyError):
+            continue
+        if provenance is None:
+            continue
+        workstream = provenance.get("workstream")
+        if not isinstance(workstream, str) or not workstream:
+            continue
+        status = getattr(job.status, "value", None) or str(job.status)
+        result.append({"job_id": job.job_id, "status": status, "workstream": workstream})
+    return result, None
 
 
 def build_control_room(
@@ -739,6 +1075,8 @@ def build_control_room(
             macro_root = os.fspath(resolved)
 
     active_builds, active_builds_failure = _read_active_builds(macro_root)
+    agent_os_state, agent_os_state_failure = _read_agent_os_state(macro_root)
+    runtime_jobs, runtime_jobs_failure = _read_runtime_jobs(root)
 
     bindings, binding_problems = surface_bindings.load_bindings(bindings_path)
 
@@ -746,6 +1084,8 @@ def build_control_room(
         inbox=inbox,
         boot_packet=packet,
         active_builds=active_builds,
+        agent_os_state=agent_os_state,
+        runtime_jobs=runtime_jobs,
         bindings=bindings,
         binding_problems=binding_problems,
         generated_at=generated_at,
@@ -758,6 +1098,10 @@ def build_control_room(
         extra_degraded.append(f"executive_inbox: unavailable — {inbox_failure}")
     if active_builds_failure:
         extra_degraded.append(f"active_builds: {active_builds_failure}")
+    if agent_os_state_failure:
+        extra_degraded.append(f"agent_os_state: {agent_os_state_failure}")
+    if runtime_jobs_failure:
+        extra_degraded.append(f"executive_runtime: {runtime_jobs_failure}")
     if extra_degraded:
         doc = dict(doc)
         doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)
