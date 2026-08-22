@@ -213,6 +213,45 @@ def test_post_open_with_correct_token_and_matching_origin_is_not_forbidden(tmp_p
     assert status == 200
 
 
+def test_token_is_a_browser_origin_nonce_not_local_process_auth(tmp_path):
+    """H1 repair, Sol review 5000983751 Blocker 1: X-CCR-Token is a
+    per-process browser-origin capability nonce (cross-site/CSRF defense),
+    NOT local-process authentication. GET / is itself unauthenticated and
+    is what delivers the nonce to the browser, so a same-user local process
+    can retrieve it the same way — that adversary is deliberately outside
+    this nonce's threat boundary. What it actually stops: a browser cannot
+    forge the custom header cross-site, and this server offers no
+    CORS/preflight path for a browser to ever be granted permission to.
+    """
+    config = _make_config(tmp_path)
+    with _running_server(config) as (_httpd, port):
+        status_root, headers_root, body_root = _get(port, "/")  # no token
+        status_no_token, headers_no_token, _b1 = _get(port, "/api/state")  # no token
+        status_wrong_origin, headers_wrong_origin, _b2 = _get(
+            port, "/api/state", headers=_auth_headers(config, {"Origin": "http://evil.example"})
+        )
+        status_ok, headers_ok, body_ok = _get(port, "/api/state", headers=_auth_headers(config))
+
+    # GET / is deliberately unauthenticated — a same-user local process CAN
+    # retrieve the nonce this way, exactly as the browser does.
+    assert status_root == 200
+    assert config.token in body_root.decode("utf-8")
+
+    # /api/state still enforces the nonce + Origin gate.
+    assert status_no_token == 403
+    assert status_wrong_origin == 403
+    assert status_ok == 200
+
+    # No CORS path exists anywhere on this server — not on the bootstrap
+    # page, not on a forbidden response, not on an authenticated one.
+    for headers in (headers_root, headers_no_token, headers_wrong_origin, headers_ok):
+        assert not any(name.lower().startswith("access-control-") for name in headers), headers
+
+    # The nonce is delivered only via the index page substitution — never
+    # echoed back through an API response body.
+    assert config.token not in body_ok.decode("utf-8")
+
+
 # ---------------------------------------------------------------------------
 # 2. Host header allowlist
 # ---------------------------------------------------------------------------
@@ -1107,10 +1146,10 @@ def test_single_flight_background_refresh_serves_stale_doc_promptly(tmp_path, mo
         # unobservable from outside. Reading the bookkeeping fields directly
         # has no such side effect.
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and config.state_refresh_in_flight:
+        while time.monotonic() < deadline and config.state_refreshes_in_flight:
             time.sleep(0.02)
 
-    assert config.state_refresh_in_flight is False
+    assert config.state_refreshes_in_flight == 0
     assert config.state_cache.get("doc") == {"marker": "refreshed-doc"}
     # Exactly one background recompose ran, no matter how many concurrent
     # stale GETs asked for one (single-flight — F5).
@@ -1151,9 +1190,9 @@ def test_failed_background_refresh_keeps_last_good_doc_then_a_later_success_clea
         # Poll the CONFIG directly (no HTTP — see the single-flight test's
         # comment for why) until that background recompose concludes.
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and config.state_refresh_in_flight:
+        while time.monotonic() < deadline and config.state_refreshes_in_flight:
             time.sleep(0.02)
-        assert config.state_refresh_in_flight is False
+        assert config.state_refreshes_in_flight == 0
         assert calls["n"] == 2
 
         # This GET observes the failure (last good doc preserved, static
@@ -1167,12 +1206,155 @@ def test_failed_background_refresh_keeps_last_good_doc_then_a_later_success_clea
 
         allow_recovery.set()
         deadline2 = time.monotonic() + 5
-        while time.monotonic() < deadline2 and config.state_refresh_in_flight:
+        while time.monotonic() < deadline2 and config.state_refreshes_in_flight:
             time.sleep(0.02)
 
-    assert config.state_refresh_in_flight is False
+    assert config.state_refreshes_in_flight == 0
     assert config.state_cache.get("doc") == {"marker": "doc-3"}
     assert config.state_refresh_error is None
+
+
+def test_superseded_background_refresh_never_overwrites_newer_explicit_recomposition(tmp_path, monkeypatch):
+    """H1 repair, Sol review 5000983751 Blocker 2 — Sol's exact required
+    regression: a stale-GET background composition (A) that starts before
+    an explicit ``POST /api/refresh-builds`` recomposition (B) but FINISHES
+    after B has already published must never overwrite B's result. B's
+    generation raises ``state_explicit_floor``, which makes A's later,
+    lower-generation publish a no-op (discarded entirely — no cache write,
+    no composed_at/composed_monotonic touch).
+    """
+    monkeypatch.setattr(server_mod.capability, "census", lambda **_kw: {})
+    calls = {"n": 0}
+    entered_A = threading.Event()
+    release_A = threading.Event()
+
+    def fake_compose(config, *, timeout=60.0):
+        calls["n"] += 1
+        n = calls["n"]
+        if n == 1:
+            return {"marker": "startup-doc"}
+        if n == 2:
+            entered_A.set()
+            release_A.wait(timeout=5)
+            return {"marker": "old-background-doc"}
+        return {"marker": "explicit-doc"}
+
+    monkeypatch.setattr(server_mod, "_compose_state_doc", fake_compose)
+
+    runner = FakeRunner(responses=[
+        {"code": 0, "stdout": json.dumps(_STUB_FIXTURE_DOC), "stderr": "", "timed_out": False},
+    ])
+    config = _make_config(tmp_path, runner=runner)
+    config.state_ttl = 0.0  # every GET below is against a stale cache
+    _write_stub_build_script(Path(config.macro_root))
+
+    with _running_server(config) as (_httpd, port):
+        # Startup pre-compose already ran (call #1). This GET is against a
+        # stale (TTL=0) cache, so it kicks background recompose A (call #2)
+        # while itself still returning the last good (startup) doc.
+        status1, _h1, body1 = _get(port, "/api/state", headers=_auth_headers(config))
+        assert status1 == 200
+        assert json.loads(body1)["control_room"]["marker"] == "startup-doc"
+
+        assert entered_A.wait(timeout=5), "background recompose A never started"
+
+        # Explicit recompose B: reserves a HIGHER generation, raises
+        # state_explicit_floor, and — because fake_compose call #3 returns
+        # immediately, unlike gated A — publishes before A does.
+        status_post, _hp, body_post = _post(
+            port, "/api/refresh-builds", {}, headers=_auth_headers(config)
+        )
+        assert status_post == 200
+        assert json.loads(body_post)["ok"] is True
+
+        # Poll the CONFIG directly (no further HTTP — a GET here would
+        # itself be a stale read with TTL=0 and kick yet another
+        # background refresh) to confirm B's doc is already published.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and config.state_cache.get("doc") != {"marker": "explicit-doc"}:
+            time.sleep(0.02)
+        assert config.state_cache.get("doc") == {"marker": "explicit-doc"}
+        composed_at_after_b = config.state_cache.get("composed_at")
+        composed_monotonic_after_b = config.state_cache.get("composed_monotonic")
+
+        # Release the gated background composition A — its result (an
+        # OLDER generation than B) must be discarded entirely, not
+        # overwrite B's already-published doc.
+        release_A.set()
+        deadline2 = time.monotonic() + 5
+        while time.monotonic() < deadline2 and config.state_refreshes_in_flight:
+            time.sleep(0.02)
+
+    assert config.state_refreshes_in_flight == 0
+    assert config.state_cache.get("doc") == {"marker": "explicit-doc"}
+    assert config.state_refresh_error is None
+    assert config.state_cache.get("composed_at") == composed_at_after_b
+    assert config.state_cache.get("composed_monotonic") == composed_monotonic_after_b
+    assert calls["n"] == 3
+
+
+def test_superseded_background_failure_does_not_mask_newer_explicit_success(tmp_path, monkeypatch):
+    """H1 repair, Sol review 5000983751 Blocker 2 — the same race as the
+    superseded-success regression above, but the gated background
+    composition A RAISES (instead of returning a doc) after it is
+    released. A superseded FAILURE must be discarded exactly like a
+    superseded success: it must never record state_refresh_error over a
+    newer explicit recomposition's clean success, and the published doc
+    must stay B's.
+    """
+    monkeypatch.setattr(server_mod.capability, "census", lambda **_kw: {})
+    calls = {"n": 0}
+    entered_A = threading.Event()
+    release_A = threading.Event()
+
+    def fake_compose(config, *, timeout=60.0):
+        calls["n"] += 1
+        n = calls["n"]
+        if n == 1:
+            return {"marker": "startup-doc"}
+        if n == 2:
+            entered_A.set()
+            release_A.wait(timeout=5)
+            raise RuntimeError("synthetic superseded background failure")
+        return {"marker": "explicit-doc"}
+
+    monkeypatch.setattr(server_mod, "_compose_state_doc", fake_compose)
+
+    runner = FakeRunner(responses=[
+        {"code": 0, "stdout": json.dumps(_STUB_FIXTURE_DOC), "stderr": "", "timed_out": False},
+    ])
+    config = _make_config(tmp_path, runner=runner)
+    config.state_ttl = 0.0
+    _write_stub_build_script(Path(config.macro_root))
+
+    with _running_server(config) as (_httpd, port):
+        status1, _h1, body1 = _get(port, "/api/state", headers=_auth_headers(config))
+        assert status1 == 200
+        assert json.loads(body1)["control_room"]["marker"] == "startup-doc"
+
+        assert entered_A.wait(timeout=5), "background recompose A never started"
+
+        status_post, _hp, body_post = _post(
+            port, "/api/refresh-builds", {}, headers=_auth_headers(config)
+        )
+        assert status_post == 200
+        assert json.loads(body_post)["ok"] is True
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and config.state_cache.get("doc") != {"marker": "explicit-doc"}:
+            time.sleep(0.02)
+        assert config.state_cache.get("doc") == {"marker": "explicit-doc"}
+        assert config.state_refresh_error is None
+
+        release_A.set()
+        deadline2 = time.monotonic() + 5
+        while time.monotonic() < deadline2 and config.state_refreshes_in_flight:
+            time.sleep(0.02)
+
+    assert config.state_refreshes_in_flight == 0
+    assert config.state_refresh_error is None
+    assert config.state_cache.get("doc") == {"marker": "explicit-doc"}
+    assert calls["n"] == 3
 
 
 def test_startup_precompose_first_get_served_from_cache_not_recomposed(tmp_path, monkeypatch):

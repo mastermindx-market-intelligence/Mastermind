@@ -45,8 +45,20 @@ repair, 2026-08-22)
 * every request is loopback + Host-header gated; every mutating (``POST``)
   request, plus the two read ``GET``s that expose full org state
   (``/api/state``, ``/api/discover``), additionally requires the
-  ``X-CCR-Token`` minted fresh at process start and, when an ``Origin``
-  header is present, an exact match against the server's own origin;
+  ``X-CCR-Token`` header. That token is a **per-process browser-origin
+  capability nonce** (cross-site/CSRF defense for the local UI), NOT
+  local-process authentication (H1 repair, Sol review 5000983751 Blocker
+  1): ``GET /`` is itself unauthenticated and is what DELIVERS the nonce to
+  the browser (``_serve_index`` substitutes it into the served HTML), so
+  any same-user local process can fetch ``/`` and extract it the same way
+  the browser does — that adversary is deliberately OUTSIDE this nonce's
+  threat boundary. What it DOES guarantee: a simple cross-site browser
+  request cannot set the custom header, and this server implements no
+  CORS/preflight response at all, so a browser can never be granted
+  cross-origin permission to attach it; when an ``Origin`` header is
+  present it must additionally match the server's own origin exactly;
+  tokenless or wrong-origin API requests are rejected fast, BEFORE any
+  composition/discovery work runs;
 * static assets are served from a closed, explicit ``{name: (path, mime)}``
   map — a request path is only ever used as a dict LOOKUP key, never
   concatenated into a filesystem path, so path traversal has no code path to
@@ -258,6 +270,8 @@ class ServerConfig:
     repo_root: Path
     macro_root: str | None
     bindings_path: str | Path | None
+    #: per-process browser-origin capability nonce — cross-site defense, NOT
+    #: local-process auth; see _api_auth_ok
     token: str
     origin: str
     port: int
@@ -290,14 +304,36 @@ class ServerConfig:
     #: fresh ``ServerConfig`` (process restart) always starts empty — nothing
     #: here is durable, exactly like ``live_cache`` above.
     state_cache: dict[str, Any] = field(default_factory=dict)
-    #: Guards ``state_cache`` plus the two bookkeeping fields below across the
-    #: serving threads (``ThreadingHTTPServer``) and the one background
-    #: recompose thread a stale cache may spawn.
+    #: Guards ``state_cache`` plus the bookkeeping fields below across the
+    #: serving threads (``ThreadingHTTPServer``) and any background/explicit
+    #: recompose in flight.
     state_lock: threading.Lock = field(default_factory=threading.Lock)
-    #: True while exactly one background recompose thread is running. Read
-    #: and written only under ``state_lock`` — this is the single-flight gate
-    #: that stops N concurrent stale GETs from spawning N compositions (F5).
-    state_refresh_in_flight: bool = False
+    #: H1 repair (Sol review 5000983751 Blocker 2): monotonic reservation
+    #: counter — EVERY composition attempt (startup pre-compose, background
+    #: refresh, explicit refresh-builds) reserves the next value, via
+    #: :func:`_reserve_composition` (or its exact inline equivalent — see
+    #: :func:`_maybe_start_background_refresh`), before composing. Read and
+    #: written only under ``state_lock``.
+    state_compose_seq: int = 0
+    #: Generation currently published in ``state_cache``. Read and written
+    #: only under ``state_lock``.
+    state_published_seq: int = 0
+    #: Highest generation reserved by an EXPLICIT recomposition (an
+    #: authenticated ``POST /api/refresh-builds``). A generation strictly
+    #: below this floor may never publish OR record error metadata — this is
+    #: what stops a stale background composition from overwriting a newer
+    #: explicit recomposition that already finished (the race Sol's review
+    #: named). Read and written only under ``state_lock``.
+    state_explicit_floor: int = 0
+    #: Count of composition attempts currently running. Read and written
+    #: only under ``state_lock``. Replaces a prior ``state_refresh_in_flight:
+    #: bool`` (H1 repair): an explicit recompose may now lawfully run
+    #: concurrently with one background refresh, and with a bool the first
+    #: of the two to exit would clear the flag while the other was still
+    #: running — both lying to the snapshot and re-opening the single-flight
+    #: gate early. The envelope's ``refresh_in_flight`` key stays a bool,
+    #: derived as ``count > 0`` in :func:`_cached_state_snapshot`.
+    state_refreshes_in_flight: int = 0
     #: Cache max-age (seconds, monotonic clock) before a GET kicks a
     #: background recompose. CLI flag ``--state-ttl``.
     state_ttl: float = 120.0
@@ -446,25 +482,63 @@ def _compose_with_live_active_builds(
 # calls them, through the existing ``_compose_state_doc`` seam.
 # ---------------------------------------------------------------------------
 
+def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int:
+    """Reserve the next composition generation, under ``state_lock``, and
+    count one more composition as in flight (H1 repair, Sol review
+    5000983751 Blocker 2).
+
+    EVERY composition attempt — startup pre-compose, a background refresh,
+    or an explicit ``POST /api/refresh-builds`` recompose — must reserve a
+    generation this way (or via the exact inline equivalent under an
+    already-held lock — see :func:`_maybe_start_background_refresh`)
+    BEFORE composing, so :func:`_refresh_state_cache` can tell an older
+    generation from a newer one when it finishes. ``explicit=True`` also
+    raises :attr:`ServerConfig.state_explicit_floor` to this generation —
+    the floor a background composition may never publish (or record an
+    error) below.
+    """
+    with config.state_lock:
+        config.state_compose_seq += 1
+        gen = config.state_compose_seq
+        if explicit:
+            config.state_explicit_floor = gen
+        config.state_refreshes_in_flight += 1
+        return gen
+
+
 def _refresh_state_cache(
-    config: ServerConfig, *, timeout: float, include_capabilities: bool = True
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
 ) -> None:
-    """Compose a fresh doc (+ capability census, when requested) and
+    """Compose a fresh doc (+ capability census, when requested) for
+    ``generation`` and, unless a newer generation has already published,
     atomically swap the cache.
 
     Never raises into the caller (startup pre-compose runs this inline on
-    the main thread; every other call runs on a daemon background thread) —
-    a composition failure keeps the last good cached doc and records a
-    static :attr:`ServerConfig.state_refresh_error` instead. On success the
-    error is cleared. ``state_refresh_in_flight`` is the caller's
-    responsibility to SET (before calling this / before spawning the
-    thread that calls this); this function always clears it on the way out.
+    the main thread; every other call runs on a daemon background thread or
+    the POST-handling thread) — a composition failure keeps the last good
+    cached doc and records a static :attr:`ServerConfig.state_refresh_error`
+    instead, UNLESS this generation is superseded (see below), in which case
+    even the failure is discarded. On a non-superseded success the error is
+    cleared. The caller (or :func:`_reserve_composition`) is responsible for
+    incrementing :attr:`ServerConfig.state_refreshes_in_flight` before
+    calling this; this function always decrements it on the way out.
+
+    Superseded gating (H1 repair, Sol review 5000983751 Blocker 2): a
+    generation is superseded when it is strictly below
+    :attr:`ServerConfig.state_explicit_floor` (an explicit recompose was
+    reserved after this one started) OR at/below
+    :attr:`ServerConfig.state_published_seq` (a newer generation — explicit
+    or background — has already published). A superseded composition's
+    result is discarded ENTIRELY: no cache write, no error write/clear, no
+    ``composed_at``/``composed_monotonic`` touch. This is what stops a
+    stale background composition from overwriting a newer explicit
+    recomposition that already finished.
 
     ``include_capabilities=False`` is the constructor-time startup path
     ONLY — see :func:`_ensure_capabilities_cached` for why census is kept
-    out of it. Every other caller (background refresh) recomposes doc +
-    census together, "alongside" each other in the same cache entry, per
-    the frozen spec.
+    out of it. Every other caller (background refresh, explicit refresh)
+    recomposes doc + census together, "alongside" each other in the same
+    cache entry, per the frozen spec.
     """
     try:
         doc = _compose_state_doc(config, timeout=timeout)
@@ -472,20 +546,44 @@ def _refresh_state_cache(
     except Exception as exc:  # noqa: BLE001 — never raise into a serving thread
         detail = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
         with config.state_lock:
-            config.state_refresh_error = "state refresh failed; serving last good composition"
-            config.state_refresh_in_flight = False
-        print(f"state refresh failed: {detail}", flush=True)
+            config.state_refreshes_in_flight -= 1
+            superseded = (
+                generation < config.state_explicit_floor or generation <= config.state_published_seq
+            )
+            if not superseded:
+                config.state_refresh_error = "state refresh failed; serving last good composition"
+            published = config.state_published_seq
+            floor = config.state_explicit_floor
+        if superseded:
+            print(
+                f"superseded state refresh failure discarded: generation={generation} "
+                f"published={published} explicit_floor={floor}: {detail}",
+                flush=True,
+            )
+        else:
+            print(f"state refresh failed: {detail}", flush=True)
         return
 
     composed_at = config.now_fn()
     with config.state_lock:
-        config.state_cache["doc"] = doc
-        if include_capabilities:
-            config.state_cache["capabilities"] = capabilities
-        config.state_cache["composed_at"] = composed_at
-        config.state_cache["composed_monotonic"] = time.monotonic()
-        config.state_refresh_error = None
-        config.state_refresh_in_flight = False
+        config.state_refreshes_in_flight -= 1
+        superseded = generation < config.state_explicit_floor or generation <= config.state_published_seq
+        published = config.state_published_seq
+        floor = config.state_explicit_floor
+        if not superseded:
+            config.state_cache["doc"] = doc
+            if include_capabilities:
+                config.state_cache["capabilities"] = capabilities
+            config.state_cache["composed_at"] = composed_at
+            config.state_cache["composed_monotonic"] = time.monotonic()
+            config.state_published_seq = generation
+            config.state_refresh_error = None
+    if superseded:
+        print(
+            f"superseded composition discarded (generation={generation} published={published} "
+            f"explicit_floor={floor})",
+            flush=True,
+        )
 
 
 def _precompose_initial_state(config: ServerConfig) -> None:
@@ -499,32 +597,40 @@ def _precompose_initial_state(config: ServerConfig) -> None:
     """
     print("composing initial state…", flush=True)
     started = time.monotonic()
-    with config.state_lock:
-        config.state_refresh_in_flight = True
-    _refresh_state_cache(config, timeout=config.compose_timeout, include_capabilities=False)
+    gen = _reserve_composition(config)
+    _refresh_state_cache(config, timeout=config.compose_timeout, generation=gen, include_capabilities=False)
     elapsed = time.monotonic() - started
     print(f"state composed in {elapsed:.1f}s", flush=True)
 
 
 def _maybe_start_background_refresh(config: ServerConfig) -> None:
-    """If the cache is stale and no refresh is already running, start
+    """If the cache is stale and no composition is already running, start
     exactly ONE daemon background recompose thread (single-flight — F5:
     without this, N concurrent stale GETs would each spawn a full
     composition). Never blocks the calling (serving) thread. Recomposes
     doc + census together (``include_capabilities=True``) — by the time
     the cache can go stale, an authenticated GET has already run
     :func:`_ensure_capabilities_cached` at least once.
+
+    Reserves the generation INLINE under the same lock hold as the
+    staleness/in-flight check (not via :func:`_reserve_composition`, which
+    would re-take the lock) so the check-and-reserve is atomic.
     """
     with config.state_lock:
         composed_monotonic = config.state_cache.get("composed_monotonic")
         age = None if composed_monotonic is None else time.monotonic() - composed_monotonic
         is_stale = age is None or age > config.state_ttl
-        if not is_stale or config.state_refresh_in_flight:
+        if not is_stale or config.state_refreshes_in_flight:
             return
-        config.state_refresh_in_flight = True
+        config.state_compose_seq += 1
+        gen = config.state_compose_seq
+        config.state_refreshes_in_flight += 1
     thread = threading.Thread(
         target=_refresh_state_cache,
-        kwargs={"config": config, "timeout": config.compose_timeout, "include_capabilities": True},
+        kwargs={
+            "config": config, "timeout": config.compose_timeout, "generation": gen,
+            "include_capabilities": True,
+        },
         daemon=True,
     )
     thread.start()
@@ -566,13 +672,19 @@ def _ensure_capabilities_cached(config: ServerConfig) -> None:
 def _cached_state_snapshot(config: ServerConfig) -> dict[str, Any]:
     """Read the current cache + bookkeeping fields under one lock acquisition
     so a response envelope never mixes fields from two different compositions.
+
+    ``refresh_in_flight`` stays a bool in the envelope (H1 repair, Sol
+    review 5000983751 Blocker 2): derived as
+    ``state_refreshes_in_flight > 0`` — a background refresh and an
+    explicit recompose may now lawfully run concurrently, so the envelope
+    reports "something is composing", not a count.
     """
     with config.state_lock:
         return {
             "doc": config.state_cache.get("doc"),
             "capabilities": config.state_cache.get("capabilities") or {},
             "composed_at": config.state_cache.get("composed_at"),
-            "refresh_in_flight": config.state_refresh_in_flight,
+            "refresh_in_flight": config.state_refreshes_in_flight > 0,
             "state_refresh_error": config.state_refresh_error,
         }
 
@@ -778,10 +890,14 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         return True
 
     def _api_auth_ok(self) -> bool:
-        """Token + Origin check shared by every mutating POST and by the two
-        read GET endpoints that expose full org state (``/api/state``,
-        ``/api/discover`` — F4/H0 hardening, 2026-08-22). Static assets and
-        the index page stay token-free (the index page is what DELIVERS the
+        """Browser-origin nonce check shared by every mutating POST and by
+        the two read GET endpoints that expose full org state
+        (``/api/state``, ``/api/discover`` — F4/H0 hardening, 2026-08-22).
+        ``X-CCR-Token`` is a per-process browser-origin capability nonce —
+        cross-site/CSRF defense, NOT local-process authentication (H1
+        repair, Sol review 5000983751 Blocker 1; see the module docstring
+        for the full threat-boundary statement). Static assets and the
+        index page stay token-free (the index page is what DELIVERS the
         token to the browser in the first place) — this method is never
         called on that path.
         """
@@ -1095,9 +1211,12 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         # explicit, infrequent, user-initiated action with its own 180s
         # subprocess timeout; this costs the same gather-layer time GET
         # /api/state used to pay on every request, but only for this action.
-        with config.state_lock:
-            config.state_refresh_in_flight = True
-        _refresh_state_cache(config, timeout=config.compose_timeout, include_capabilities=True)
+        # H1 repair (Sol review 5000983751 Blocker 2): reserve this as an
+        # EXPLICIT generation — it raises state_explicit_floor, so an older
+        # background recompose that finishes after this one may never
+        # overwrite it.
+        gen = _reserve_composition(config, explicit=True)
+        _refresh_state_cache(config, timeout=config.compose_timeout, generation=gen, include_capabilities=True)
         self._send_json(200, {"ok": True, "collected_at": parsed.get("collected_at")}, no_store=True)
 
 
