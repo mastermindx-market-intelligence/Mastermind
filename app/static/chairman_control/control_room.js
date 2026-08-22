@@ -11,9 +11,12 @@
  *     innerHTML, never builds markup from a template string, and never puts
  *     source-owned text into an attribute that is parsed as code. No source
  *     value can inject markup into this page.
- *   * Every POST attaches the X-CCR-Token minted server-side and injected
- *     once into <meta name="ccr-token">. No other credential or secret ever
- *     appears in this file or in any DOM node it creates.
+ *   * Every request this file makes — every POST, and every GET against
+ *     /api/state or /api/discover (H0 hardening, 2026-08-22: those two read
+ *     endpoints expose full org state and are token-gated like a POST) —
+ *     attaches the X-CCR-Token minted server-side and injected once into
+ *     <meta name="ccr-token">. No other credential or secret ever appears
+ *     in this file or in any DOM node it creates.
  *
  * Presentation law (see control_room.css for the full statement):
  *   * The three sources are never blended. Every work card renders all three
@@ -127,7 +130,11 @@
   // -- transport -----------------------------------------------------------
 
   function getJSON(path) {
-    return fetch(path, { method: "GET", credentials: "same-origin" }).then(function (resp) {
+    return fetch(path, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { "X-CCR-Token": TOKEN },
+    }).then(function (resp) {
       return resp.json();
     });
   }
@@ -151,6 +158,7 @@
   var SOURCE_STAMPS = [
     { key: "mastermind_sha", label: "Mastermind", sha: true, extra: "mastermind_branch" },
     { key: "macro_sha", label: "Macro", sha: true },
+    { key: "composed_at", label: "State composed", age: true },
     { key: "agent_os_state_generated_at", label: "Agent OS state generated", age: true },
     { key: "active_builds_collected_at", label: "Active builds collected", age: true },
     { key: "runtime_db_present", label: "Runtime database", bool: true },
@@ -725,11 +733,38 @@
 
   // -- state ---------------------------------------------------------------
 
+  /** Freshness + degraded surfacing for the H0 hardening envelope fields
+   *  (composed_at / refresh_in_flight / state_refresh_error — cached,
+   *  single-flight background composition, 2026-08-22). None of this is
+   *  part of the pure control_room document itself; it describes the
+   *  cache serving it. */
+  function renderStateFreshness(body) {
+    var docSources = (body && body.control_room && body.control_room.sources) || {};
+    var sources = {};
+    for (var key in docSources) {
+      sources[key] = docSources[key];
+    }
+    sources.composed_at = body && body.composed_at;
+
+    var refreshingEl = document.getElementById("ccr-refreshing");
+    if (refreshingEl) refreshingEl.hidden = !(body && body.refresh_in_flight);
+
+    return sources;
+  }
+
   function loadState() {
     return getJSON("/api/state").then(function (body) {
       var doc = (body && body.control_room) || {};
-      renderSources(doc.sources || {});
-      renderDegraded(doc.degraded);
+      renderSources(renderStateFreshness(body));
+
+      // state_refresh_error describes the CACHE (a background recompose
+      // that failed, last good doc still served), never the document
+      // itself — folded into the same degraded list/rendering so it reads
+      // with the same honesty law (never hidden, never summarised away)
+      // without inventing a second alarm surface.
+      var degradedRows = (doc.degraded || []).slice();
+      if (body && body.state_refresh_error) degradedRows.push(body.state_refresh_error);
+      renderDegraded(degradedRows);
 
       var attention = doc.attention || {};
       var chairmanCount = renderAttentionList(

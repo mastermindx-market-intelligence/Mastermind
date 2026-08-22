@@ -18,21 +18,35 @@ GitHub / Macro state is ever written by this process — see the module-level
 design laws in ``control_plane/chairman_control_room.py`` and
 ``control_plane/surface_bindings.py``, both reused, never re-implemented, here.
 
-Runtime shape (architecture §8.2/§8.3)
+Runtime shape (architecture §8.2/§8.3; state caching per the H0 hardening
+repair, 2026-08-22)
 ---------------------------------------
 * binds ``127.0.0.1`` ONLY — there is no ``--host`` flag, and the server
   refuses to start (``assert``) if the bound socket is ever not loopback;
-* no background scheduler, no durable event loop — every ``GET`` recomputes
-  state fresh from canonical readers (`Fresh composition on every call`);
+* ``GET /api/state`` is served from a process-memory cache, not recomposed
+  per request: the server composes ONCE, synchronously, before it starts
+  accepting requests, and a stale cache (default TTL 120s) refreshes via at
+  most ONE background thread at a time (single-flight) — a request never
+  blocks on a fresh composition, and N concurrent requests never spawn N
+  compositions. This exists because the real gather-layer cost (Agent OS
+  brief, blobless-clone git reads) measured 60-95s+ on the host this
+  process actually runs on, well past what a synchronous per-request GET
+  can afford; ``ServerConfig.compose_timeout`` (default 240s, CLI
+  ``--compose-timeout``) is the timeout given to that OFF-request-path
+  composition, deliberately wider than the shared library's own
+  ``ceo_boot_packet.DEFAULT_TIMEOUT`` (60s, unchanged — still what
+  ``--check`` and any other direct caller gets). All of this is process
+  memory only — a restart forgets it, exactly like ``live_cache`` below;
 * the one exception, by design (P0 acceptance row 28 — restart-forgets
   proof): a successful ``POST /api/refresh-builds`` stores its live
   ``project_active_builds.v1`` document in **process memory only**
   (``ServerConfig.live_cache``); a process restart forgets it, exactly like
   every other piece of server state;
 * every request is loopback + Host-header gated; every mutating (``POST``)
-  request additionally requires the ``X-CCR-Token`` minted fresh at process
-  start and, when an ``Origin`` header is present, an exact match against the
-  server's own origin;
+  request, plus the two read ``GET``s that expose full org state
+  (``/api/state``, ``/api/discover``), additionally requires the
+  ``X-CCR-Token`` minted fresh at process start and, when an ``Origin``
+  header is present, an exact match against the server's own origin;
 * static assets are served from a closed, explicit ``{name: (path, mime)}``
   map — a request path is only ever used as a dict LOOKUP key, never
   concatenated into a filesystem path, so path traversal has no code path to
@@ -58,6 +72,8 @@ import secrets
 import signal
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -153,9 +169,12 @@ def default_runner(
     :func:`integrations.chairman_surfaces.runner.run_argv` — the ONE
     subprocess boundary that package's own tests pin — so ``/api/open``'s
     subprocess behavior is byte-identical to Wave B's. ``max_bytes`` is
-    IGNORED on this branch (``run_argv`` itself has no such parameter and is
-    outside this packet's edit scope; its fixed 64 KiB cap is exactly what
-    those small adapter outputs need).
+    PASSED THROUGH on this branch (``run_argv`` has carried its own
+    ``max_bytes`` parameter since 98c8834; this seam simply forwards the
+    caller's value, or ``run_argv``'s own 64 KiB default when the caller
+    passes ``None``) — those small adapter outputs stay at the 64 KiB
+    default in every live call today; this only matters if a future caller
+    ever needs to widen it on this branch too.
 
     Only ``/api/refresh-builds`` (invoking Macro's active-build compiler
     script) needs a working directory, and ``run_argv`` has no ``cwd``
@@ -170,7 +189,7 @@ def default_runner(
     truncated below valid JSON at the old fixed 64 KiB bound).
     """
     if cwd is None:
-        return surfaces_runner.run_argv(argv, timeout=timeout)
+        return surfaces_runner.run_argv(argv, timeout=timeout, max_bytes=max_bytes)
 
     limit = max_bytes if max_bytes is not None else _DEFAULT_CWD_RUNNER_MAX_BYTES
     validated = surfaces_runner._validate_argv(argv)  # reuse, not duplicate, the gate
@@ -263,13 +282,48 @@ class ServerConfig:
     #: Process-memory-only live active-builds cache — see module docstring.
     #: A fresh ``ServerConfig`` (i.e. a process restart) always starts empty.
     live_cache: dict[str, Any] = field(default_factory=dict)
+    #: H0 hardening (2026-08-22): process-memory-only cache for the composed
+    #: ``/api/state`` document + capability census, keyed "doc" / "capabilities"
+    #: / "composed_at" (wall-clock ISO, ``config.now_fn`` at composition time)
+    #: / "composed_monotonic" (``time.monotonic()`` at composition time — the
+    #: TTL clock; wall clock is display-only and never drives staleness). A
+    #: fresh ``ServerConfig`` (process restart) always starts empty — nothing
+    #: here is durable, exactly like ``live_cache`` above.
+    state_cache: dict[str, Any] = field(default_factory=dict)
+    #: Guards ``state_cache`` plus the two bookkeeping fields below across the
+    #: serving threads (``ThreadingHTTPServer``) and the one background
+    #: recompose thread a stale cache may spawn.
+    state_lock: threading.Lock = field(default_factory=threading.Lock)
+    #: True while exactly one background recompose thread is running. Read
+    #: and written only under ``state_lock`` — this is the single-flight gate
+    #: that stops N concurrent stale GETs from spawning N compositions (F5).
+    state_refresh_in_flight: bool = False
+    #: Cache max-age (seconds, monotonic clock) before a GET kicks a
+    #: background recompose. CLI flag ``--state-ttl``.
+    state_ttl: float = 120.0
+    #: Timeout handed to the gather layer (``build_control_room`` /
+    #: ``build_packet`` / ``build_inbox``) for a cache-populating
+    #: composition — startup pre-compose and every background recompose.
+    #: Deliberately wider than ``ceo_boot_packet.DEFAULT_TIMEOUT`` (60s, kept
+    #: UNCHANGED — shared machinery, still used by ``--check`` and any other
+    #: direct caller) because this cost now runs off the request path: the
+    #: 240s default covers the measured 94-206s real-host brief cost with
+    #: headroom, where 60s always timed out (F1). CLI flag
+    #: ``--compose-timeout``.
+    compose_timeout: float = 240.0
+    #: Static reason string for the LAST FAILED background recompose, or
+    #: ``None``. Cleared on the next successful recompose. Never raised into
+    #: a serving thread — surfaced only in the ``/api/state`` envelope.
+    state_refresh_error: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # state composition — reuses build_control_room/compose_control_room
 # ---------------------------------------------------------------------------
 
-def _compose_state_doc(config: ServerConfig) -> dict[str, Any]:
+def _compose_state_doc(
+    config: ServerConfig, *, timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT
+) -> dict[str, Any]:
     """Fresh ``mastermind.chairman_control_room.v1`` document for ``/api/state``.
 
     No live-active-builds cache -> a plain, un-duplicated call to
@@ -283,6 +337,15 @@ def _compose_state_doc(config: ServerConfig) -> dict[str, Any]:
     exposes no injection point for this (and ``chairman_control_room.py`` is
     out of this packet's edit scope), so :func:`_compose_with_live_active_builds`
     replicates that function's own gather-layer sequencing for this one path.
+
+    ``timeout`` defaults to ``ceo_boot_packet.DEFAULT_TIMEOUT`` (60s) — the
+    library default, unchanged, and exactly what every existing caller
+    (``run_check``/``--check``) still gets with no argument. The H0
+    cache-populating callers (startup pre-compose, background recompose)
+    pass ``config.compose_timeout`` (default 240s) explicitly instead — this
+    cost now runs off the request path, so it can afford to wait out the
+    real host's measured 94-206s brief cost rather than the 60s bound that
+    always timed out on the request path (F1/F2).
     """
     generated_at = config.now_fn()
     live_active_builds = config.live_cache.get("active_builds")
@@ -292,14 +355,18 @@ def _compose_state_doc(config: ServerConfig) -> dict[str, Any]:
             macro_root_flag=config.macro_root,
             environ=os.environ,
             now=generated_at,
-            timeout=ceo_boot_packet.DEFAULT_TIMEOUT,
+            timeout=timeout,
             bindings_path=config.bindings_path,
         )
-    return _compose_with_live_active_builds(config, live_active_builds, generated_at)
+    return _compose_with_live_active_builds(config, live_active_builds, generated_at, timeout=timeout)
 
 
 def _compose_with_live_active_builds(
-    config: ServerConfig, live_active_builds: dict[str, Any], generated_at: str
+    config: ServerConfig,
+    live_active_builds: dict[str, Any],
+    generated_at: str,
+    *,
+    timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     root = config.repo_root
 
@@ -308,7 +375,7 @@ def _compose_with_live_active_builds(
     try:
         packet = ceo_boot_packet.build_packet(
             repo_root=root, macro_root_flag=config.macro_root, environ=os.environ,
-            now=generated_at, timeout=ceo_boot_packet.DEFAULT_TIMEOUT,
+            now=generated_at, timeout=timeout,
         )
     except Exception as exc:  # noqa: BLE001 — gather layer never raises
         packet_failure = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
@@ -318,7 +385,7 @@ def _compose_with_live_active_builds(
     try:
         inbox = executive_inbox.build_inbox(
             repo_root=root, boot_packet=packet, environ=os.environ,
-            now=generated_at, timeout=ceo_boot_packet.DEFAULT_TIMEOUT,
+            now=generated_at, timeout=timeout,
         )
     except Exception as exc:  # noqa: BLE001 — gather layer never raises
         inbox_failure = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
@@ -368,6 +435,146 @@ def _compose_with_live_active_builds(
         doc = dict(doc)
         doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)
     return doc
+
+
+# ---------------------------------------------------------------------------
+# state cache — cached, single-flight background composition (H0 hardening,
+# 2026-08-22). Everything below is process memory only; a restart forgets
+# it, exactly like ``live_cache`` above. The pure compositor
+# (``compose_control_room``) and the gather layer (``build_control_room`` /
+# ``build_packet`` / ``build_inbox``) are UNTOUCHED — this section only ever
+# calls them, through the existing ``_compose_state_doc`` seam.
+# ---------------------------------------------------------------------------
+
+def _refresh_state_cache(
+    config: ServerConfig, *, timeout: float, include_capabilities: bool = True
+) -> None:
+    """Compose a fresh doc (+ capability census, when requested) and
+    atomically swap the cache.
+
+    Never raises into the caller (startup pre-compose runs this inline on
+    the main thread; every other call runs on a daemon background thread) —
+    a composition failure keeps the last good cached doc and records a
+    static :attr:`ServerConfig.state_refresh_error` instead. On success the
+    error is cleared. ``state_refresh_in_flight`` is the caller's
+    responsibility to SET (before calling this / before spawning the
+    thread that calls this); this function always clears it on the way out.
+
+    ``include_capabilities=False`` is the constructor-time startup path
+    ONLY — see :func:`_ensure_capabilities_cached` for why census is kept
+    out of it. Every other caller (background refresh) recomposes doc +
+    census together, "alongside" each other in the same cache entry, per
+    the frozen spec.
+    """
+    try:
+        doc = _compose_state_doc(config, timeout=timeout)
+        capabilities = capability.census(runner=config.runner) if include_capabilities else None
+    except Exception as exc:  # noqa: BLE001 — never raise into a serving thread
+        detail = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
+        with config.state_lock:
+            config.state_refresh_error = "state refresh failed; serving last good composition"
+            config.state_refresh_in_flight = False
+        print(f"state refresh failed: {detail}", flush=True)
+        return
+
+    composed_at = config.now_fn()
+    with config.state_lock:
+        config.state_cache["doc"] = doc
+        if include_capabilities:
+            config.state_cache["capabilities"] = capabilities
+        config.state_cache["composed_at"] = composed_at
+        config.state_cache["composed_monotonic"] = time.monotonic()
+        config.state_refresh_error = None
+        config.state_refresh_in_flight = False
+
+
+def _precompose_initial_state(config: ServerConfig) -> None:
+    """Startup pre-compose (run/main only, NOT ``--check``) — composes once,
+    synchronously, before the server accepts any request, so the first
+    ``GET /api/state`` is always served from cache rather than stalling on a
+    fresh composition (F1).
+
+    Deliberately composes the DOC only, not the capability census — see
+    :func:`_ensure_capabilities_cached`.
+    """
+    print("composing initial state…", flush=True)
+    started = time.monotonic()
+    with config.state_lock:
+        config.state_refresh_in_flight = True
+    _refresh_state_cache(config, timeout=config.compose_timeout, include_capabilities=False)
+    elapsed = time.monotonic() - started
+    print(f"state composed in {elapsed:.1f}s", flush=True)
+
+
+def _maybe_start_background_refresh(config: ServerConfig) -> None:
+    """If the cache is stale and no refresh is already running, start
+    exactly ONE daemon background recompose thread (single-flight — F5:
+    without this, N concurrent stale GETs would each spawn a full
+    composition). Never blocks the calling (serving) thread. Recomposes
+    doc + census together (``include_capabilities=True``) — by the time
+    the cache can go stale, an authenticated GET has already run
+    :func:`_ensure_capabilities_cached` at least once.
+    """
+    with config.state_lock:
+        composed_monotonic = config.state_cache.get("composed_monotonic")
+        age = None if composed_monotonic is None else time.monotonic() - composed_monotonic
+        is_stale = age is None or age > config.state_ttl
+        if not is_stale or config.state_refresh_in_flight:
+            return
+        config.state_refresh_in_flight = True
+    thread = threading.Thread(
+        target=_refresh_state_cache,
+        kwargs={"config": config, "timeout": config.compose_timeout, "include_capabilities": True},
+        daemon=True,
+    )
+    thread.start()
+
+
+def _ensure_capabilities_cached(config: ServerConfig) -> None:
+    """Populate the capability census once, synchronously, on first demand.
+
+    Kept OUT of the unconditional constructor-time pre-compose on purpose:
+    ``capability.census`` is the ONE piece of this cache that touches
+    ``config.runner`` (its optional ``--version`` probe of whichever of
+    claude/codex/cursor-agent are found on ``PATH``) — every OTHER
+    composition step (``build_control_room`` / ``build_packet`` /
+    ``build_inbox``) never calls ``config.runner`` at all. Folding census
+    into the mandatory startup pre-compose would mean EVERY server
+    construction — including the many existing tests that never call
+    ``/api/state`` — records calls against that test's own narrowly-scoped
+    ``FakeRunner`` (real hosts have claude/codex/cursor-agent installed,
+    confirmed via ``shutil.which`` on this checkout's host), silently
+    breaking ``runner.calls == []``-style assertions that predate H0 and are
+    about an unrelated endpoint. Deferred to first actual demand instead:
+    the first authenticated ``/api/state`` call blocks briefly for this
+    (matching pre-H0 per-request behavior exactly, once, for that one
+    call); every call after reads the cache, and every later background
+    refresh recomputes doc + census together as one unit (frozen spec:
+    "composed alongside the doc").
+    """
+    with config.state_lock:
+        if "capabilities" in config.state_cache:
+            return
+    try:
+        capabilities = capability.census(runner=config.runner)
+    except Exception:  # noqa: BLE001 — never raise into a serving thread
+        capabilities = {}
+    with config.state_lock:
+        config.state_cache.setdefault("capabilities", capabilities)
+
+
+def _cached_state_snapshot(config: ServerConfig) -> dict[str, Any]:
+    """Read the current cache + bookkeeping fields under one lock acquisition
+    so a response envelope never mixes fields from two different compositions.
+    """
+    with config.state_lock:
+        return {
+            "doc": config.state_cache.get("doc"),
+            "capabilities": config.state_cache.get("capabilities") or {},
+            "composed_at": config.state_cache.get("composed_at"),
+            "refresh_in_flight": config.state_refresh_in_flight,
+            "state_refresh_error": config.state_refresh_error,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +777,14 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return False
         return True
 
-    def _post_auth_ok(self) -> bool:
+    def _api_auth_ok(self) -> bool:
+        """Token + Origin check shared by every mutating POST and by the two
+        read GET endpoints that expose full org state (``/api/state``,
+        ``/api/discover`` — F4/H0 hardening, 2026-08-22). Static assets and
+        the index page stay token-free (the index page is what DELIVERS the
+        token to the browser in the first place) — this method is never
+        called on that path.
+        """
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
         token = self.headers.get("X-CCR-Token")
         if token != config.token:
@@ -619,8 +833,12 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path == "/api/state":
+            if not self._api_auth_ok():
+                return
             return self._handle_state()
         if path == "/api/discover":
+            if not self._api_auth_ok():
+                return
             return self._handle_discover()
         self._not_found()
 
@@ -644,12 +862,26 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         self._write(200, body, content_type=mime)
 
     def _handle_state(self) -> None:
+        """Serve the cached composition immediately (H0 hardening, 2026-08-22
+        — F1/F5). A stale cache kicks at most one background recompose
+        (single-flight) and this request still returns the last good doc —
+        it never blocks on a fresh composition. ``capability.census`` moved
+        into the cached composition work, so an authenticated GET against a
+        warm cache does zero subprocess work. ``live_builds_active`` is
+        computed live off ``config.live_cache`` (unchanged semantics — a
+        cheap dict lookup, not part of the composition cache).
+        """
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        doc = _compose_state_doc(config)
+        _ensure_capabilities_cached(config)
+        _maybe_start_background_refresh(config)
+        snapshot = _cached_state_snapshot(config)
         body = {
-            "control_room": doc,
-            "capabilities": capability.census(runner=config.runner),
+            "control_room": snapshot["doc"],
+            "capabilities": snapshot["capabilities"],
             "live_builds_active": config.live_cache.get("active_builds") is not None,
+            "composed_at": snapshot["composed_at"],
+            "refresh_in_flight": snapshot["refresh_in_flight"],
+            "state_refresh_error": snapshot["state_refresh_error"],
         }
         self._send_json(200, body, no_store=True)
 
@@ -662,7 +894,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
         if not self._loopback_and_host_ok():
             return
-        if not self._post_auth_ok():
+        if not self._api_auth_ok():
             return
         path = urlsplit(self.path).path
         if path == "/api/open":
@@ -854,6 +1086,18 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             )
 
         config.live_cache["active_builds"] = parsed
+        # H0 hardening (2026-08-22): GET /api/state now serves a cache, not
+        # a fresh composition per request — but this ONE write path (a live
+        # active-builds refresh) must still be visible on the very next GET,
+        # not eventually-consistent up to state_ttl. Recompose synchronously
+        # here, once, rather than leaving the cache stamped with whatever
+        # was true before this refresh. refresh-builds is already an
+        # explicit, infrequent, user-initiated action with its own 180s
+        # subprocess timeout; this costs the same gather-layer time GET
+        # /api/state used to pay on every request, but only for this action.
+        with config.state_lock:
+            config.state_refresh_in_flight = True
+        _refresh_state_cache(config, timeout=config.compose_timeout, include_capabilities=True)
         self._send_json(200, {"ok": True, "collected_at": parsed.get("collected_at")}, no_store=True)
 
 
@@ -864,6 +1108,11 @@ class ControlRoomServer(http.server.ThreadingHTTPServer):
     def __init__(self, server_address: tuple[str, int], handler_cls: type, config: ServerConfig) -> None:
         self.config = config
         super().__init__(server_address, handler_cls)
+        # H0 hardening (2026-08-22, F1): compose once, synchronously, before
+        # this constructor returns — i.e. before any caller can start
+        # accepting requests via serve_forever(). Never reached from
+        # --check (run_check never constructs this class).
+        _precompose_initial_state(config)
 
 
 # ---------------------------------------------------------------------------
@@ -921,6 +1170,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--bindings-path", default=None, help="surface_bindings.json path (default: platform default)")
     parser.add_argument("--open", action="store_true", help="open the Control Room URL after startup")
     parser.add_argument("--check", action="store_true", help="build one document + capability census, print, exit 0")
+    parser.add_argument(
+        "--compose-timeout", type=float, default=240.0,
+        help="timeout (seconds) for a cache-populating composition — startup pre-compose and every "
+             "background recompose (default 240; --check is unaffected, it always uses the library's "
+             "own 60s default)",
+    )
+    parser.add_argument(
+        "--state-ttl", type=float, default=120.0,
+        help="cache max-age (seconds) before a GET /api/state kicks a background recompose (default 120)",
+    )
     return parser
 
 
@@ -937,6 +1196,8 @@ def _build_config(args: argparse.Namespace) -> ServerConfig:
         origin=f"http://{HOST}:{args.port}",
         port=args.port,
         static_dir=DEFAULT_STATIC_DIR,
+        compose_timeout=args.compose_timeout,
+        state_ttl=args.state_ttl,
     )
 
 
