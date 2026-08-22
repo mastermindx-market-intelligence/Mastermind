@@ -27,6 +27,24 @@ returns to Sol and passes adversarial review against the accepted architecture.
   and are not touched by this program; no open PR touches
   `scripts/build_project_active_build_map.py`.
 
+## Build hygiene notes (verified)
+
+- This repository tracks BOTH `.github/PULL_REQUEST_TEMPLATE.md` and
+  `.github/pull_request_template.md` (`git ls-files` shows the two casings with
+  different contents), so on a case-insensitive filesystem one of them
+  permanently reports as modified in `git status`. Never stage with
+  `git add -A`/`-u` in a CCR worktree; stage explicit paths only.
+- Concurrent-claim anomaly, 2026-08-22 ~06:08Z (reconciled): an unattributed
+  edit briefly appeared in this worktree claiming a second "current FABLE-00
+  session" had found this branch "unpushed" and adopted it, then vanished.
+  Verified against GitHub at the time: branch head `f8dc90c` was already
+  pushed, PR #110's body was never edited, exactly one worktree exists on this
+  branch, and no competing CCR branch/PR exists. The original FABLE-00 session
+  (owner of `f8dc90c`/PR #110) remains the single principal builder; the
+  anomaly is escalated to Sol in the PR #110 thread. Any genuinely live
+  duplicate FABLE-00 dispatch must reconcile through Sol, not adopt this
+  branch.
+
 ## What P0 is
 
 A private, loopback-only, read-only local product on the Chairman's M3 Ultra that
