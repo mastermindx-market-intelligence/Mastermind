@@ -1,0 +1,747 @@
+"""integrations.chairman_surfaces — Chairman Control Room P0 Wave B tests.
+
+Falsifiers for the provider navigation adapters: given a validated
+``mastermind.surface_bindings.v1`` binding, an adapter may only focus/open/
+launch — never send a message, never inject a keystroke, never persist a
+locator value into an outcome. Every test here runs against an injected
+fake runner; the real ``osascript``/``open``/``claude``/``cursor-agent``/
+``codex`` binaries are never invoked.
+
+Hermetic: Chrome's real "Local State" and the real filesystem outside
+``tmp_path`` are never read (except for the safe existence checks the
+package itself does against ``/Applications`` paths in a couple of
+capability tests, which only ever return booleans and never open a file).
+"""
+from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
+
+import pytest
+
+from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import (
+    capability,
+    chatgpt,
+    claude,
+    codex,
+    contract,
+    cursor,
+)
+from integrations.chairman_surfaces import runner as runner_module
+
+PACKAGE_DIR = Path(runner_module.__file__).resolve().parent
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "chairman_surfaces"
+
+
+# ---------------------------------------------------------------------------
+# fake runner
+# ---------------------------------------------------------------------------
+
+
+class FakeRunner:
+    """Records every call; returns canned responses in order, then a default."""
+
+    def __init__(self, responses=None, default=None):
+        self.calls: list[tuple[list[str], float]] = []
+        self._responses = list(responses or [])
+        self._default = default or {"code": 0, "stdout": "", "stderr": "", "timed_out": False}
+
+    def __call__(self, argv, *, timeout: float = 20.0):
+        self.calls.append((list(argv), timeout))
+        if self._responses:
+            return self._responses.pop(0)
+        return dict(self._default)
+
+
+def never_called_runner():
+    def _boom(argv, *, timeout=20.0):  # pragma: no cover - only reached on regression
+        raise AssertionError(f"runner must not be invoked; got argv={argv!r}")
+    return _boom
+
+
+# ---------------------------------------------------------------------------
+# binding builders
+# ---------------------------------------------------------------------------
+
+
+def _chatgpt_binding(*, url="https://chatgpt.com/c/session-alpha", profile="Default", **overrides):
+    binding = sb.new_binding(
+        work_ref="WS:CCR",
+        role="chairman",
+        provider="chatgpt",
+        locator_kind="chatgpt_url",
+        locator={"browser_profile": profile, "url": url},
+        observed_at="2026-08-22T00:00:00Z",
+        seat_ref="chatgpt-seat-1",
+        binding_id="11111111-1111-4111-8111-111111111111",
+    )
+    binding.update(overrides)
+    return binding
+
+
+def _claude_code_binding(*, project_dir, session_id="22222222-2222-4222-8222-222222222222", **overrides):
+    binding = sb.new_binding(
+        work_ref="WS:CCR",
+        role="chairman",
+        provider="claude_code",
+        locator_kind="claude_code_session",
+        locator={"project_dir": project_dir, "session_id": session_id},
+        observed_at="2026-08-22T00:00:00Z",
+        binding_id="33333333-3333-4333-8333-333333333333",
+    )
+    binding.update(overrides)
+    return binding
+
+
+def _claude_desktop_binding(*, url="https://claude.ai/chat/session-beta", **overrides):
+    binding = sb.new_binding(
+        work_ref="WS:CCR",
+        role="chairman",
+        provider="claude_desktop",
+        locator_kind="claude_desktop_url",
+        locator={"url": url},
+        observed_at="2026-08-22T00:00:00Z",
+        binding_id="44444444-4444-4444-8444-444444444444",
+    )
+    binding.update(overrides)
+    return binding
+
+
+def _cursor_binding(*, chat_id="cursor-chat-gamma", workspace_dir=None, **overrides):
+    binding = sb.new_binding(
+        work_ref="WS:CCR",
+        role="chairman",
+        provider="cursor_agent",
+        locator_kind="cursor_agent_thread",
+        locator={"chat_id": chat_id, "workspace_dir": workspace_dir},
+        observed_at="2026-08-22T00:00:00Z",
+        binding_id="55555555-5555-4555-8555-555555555555",
+    )
+    binding.update(overrides)
+    return binding
+
+
+def _codex_binding(*, session_id="codex-session-delta", cwd=None, **overrides):
+    binding = sb.new_binding(
+        work_ref="WS:CCR",
+        role="chairman",
+        provider="codex",
+        locator_kind="codex_session",
+        locator={"session_id": session_id, "cwd": cwd},
+        observed_at="2026-08-22T00:00:00Z",
+        binding_id="66666666-6666-4666-8666-666666666666",
+    )
+    binding.update(overrides)
+    return binding
+
+
+_FIXTURE_PROFILES = {"Default": "Personal", "Profile 2": "Work Ops"}
+
+
+# ---------------------------------------------------------------------------
+# falsifier 1: unsafe token in a chat_id/session_id refuses, runner untouched
+# ---------------------------------------------------------------------------
+
+BAD_TOKENS = [
+    "has space",
+    "semi;colon",
+    "cmd$(sub)",
+    "backtick`x`",
+    "line\nbreak",
+    "../escape",
+]
+
+
+@pytest.mark.parametrize("bad", BAD_TOKENS)
+def test_falsifier_cursor_chat_id_unsafe_token_refused(bad):
+    fake = FakeRunner()
+    binding = _cursor_binding(chat_id=bad)
+    outcome = cursor.open_surface(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "unsafe_token"
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("bad", BAD_TOKENS)
+def test_falsifier_codex_session_id_unsafe_token_refused(bad):
+    fake = FakeRunner()
+    binding = _codex_binding(session_id=bad)
+    outcome = codex.open_surface(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "unsafe_token"
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("bad", BAD_TOKENS)
+def test_falsifier_claude_code_session_id_unsafe_token_refused(bad, tmp_path):
+    fake = FakeRunner()
+    binding = _claude_code_binding(project_dir=str(tmp_path), session_id=bad)
+    outcome = claude.open_claude_code(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "unsafe_token"
+    assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
+# falsifier 2: chatgpt binding URL host not in the allowlist -> invalid_binding
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_chatgpt_bad_host_refused_at_open_binding():
+    fake = FakeRunner()
+    binding = _chatgpt_binding(url="https://evil.example.com/c/session-alpha")
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "invalid_binding"
+    assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
+# falsifier 3: chatgpt profile_dir absence / unsafe charset
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_chatgpt_profile_absent_from_enumeration_disallowed():
+    fake = FakeRunner()
+    binding = _chatgpt_binding(profile="Ghost Profile")
+    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "disallowed_target"
+    assert fake.calls == []
+
+
+def test_falsifier_chatgpt_profile_unsafe_charset_refused():
+    fake = FakeRunner()
+    binding = _chatgpt_binding(profile="Profile/../12")
+    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "unsafe_token"
+    assert fake.calls == []
+
+
+def test_falsifier_chatgpt_open_in_profile_standalone_same_gates():
+    fake = FakeRunner()
+    outcome = chatgpt.open_in_profile("Profile/../12", "https://chatgpt.com/c/x", fake, profiles=_FIXTURE_PROFILES)
+    assert outcome["failure_kind"] == "unsafe_token"
+    outcome2 = chatgpt.open_in_profile("Ghost Profile", "https://chatgpt.com/c/x", fake, profiles=_FIXTURE_PROFILES)
+    assert outcome2["failure_kind"] == "disallowed_target"
+    assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
+# falsifier 4: unknown provider / locator_kind -> refused
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_unknown_provider_refused():
+    fake = FakeRunner()
+    binding = _chatgpt_binding()
+    binding["provider"] = "smoke_signal"
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "refused"
+    assert fake.calls == []
+
+
+def test_falsifier_locator_kind_mismatch_refused():
+    fake = FakeRunner()
+    binding = _chatgpt_binding()
+    binding["locator_kind"] = "codex_session"
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "refused"
+    assert fake.calls == []
+
+
+def test_falsifier_non_dict_binding_refused():
+    fake = FakeRunner()
+    outcome = contract.open_binding("not-a-binding", fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "invalid_binding"
+    assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
+# falsifier 5: a lifecycle key smuggled into the binding -> invalid_binding
+#              (proves re-validation happens again at open time)
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_lifecycle_key_refused_at_open_time():
+    fake = FakeRunner()
+    binding = _chatgpt_binding()
+    binding["status"] = "done"  # forbidden semantic key, not part of the closed schema
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "invalid_binding"
+    assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
+# falsifier 6: AppleScript constants never interpolate a locator value
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_chatgpt_applescript_argv_identical_across_bindings():
+    argv_a = chatgpt._focus_argv("https://chatgpt.com/c/session-alpha")
+    argv_b = chatgpt._focus_argv("https://chatgpt.com/c/totally-different-session")
+    assert argv_a[:-1] == argv_b[:-1]
+    assert argv_a[-1] != argv_b[-1]
+    for line in argv_a[:-1]:
+        assert "session-alpha" not in line
+    for line in argv_b[:-1]:
+        assert "totally-different-session" not in line
+
+
+def test_falsifier_terminal_launch_argv_identical_across_bindings():
+    argv_a = contract.terminal_launch_argv("claude --resume aaaa")
+    argv_b = contract.terminal_launch_argv("codex resume bbbb")
+    assert argv_a[:-1] == argv_b[:-1]
+    assert argv_a[-1] != argv_b[-1]
+    for line in argv_a[:-1]:
+        assert "aaaa" not in line
+    for line in argv_b[:-1]:
+        assert "bbbb" not in line
+
+
+# ---------------------------------------------------------------------------
+# falsifier 7: subprocess isolated to runner.py; run_argv rejects bad argv
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_run_argv_rejects_non_list():
+    with pytest.raises(ValueError):
+        runner_module.run_argv("osascript -e foo")
+
+
+def test_falsifier_run_argv_rejects_nul_byte():
+    with pytest.raises(ValueError):
+        runner_module.run_argv(["osascript", "bad\x00arg"])
+
+
+def test_falsifier_run_argv_rejects_newline():
+    with pytest.raises(ValueError):
+        runner_module.run_argv(["osascript", "bad\narg"])
+
+
+def test_falsifier_run_argv_rejects_non_str_element():
+    with pytest.raises(ValueError):
+        runner_module.run_argv(["osascript", 5])
+
+
+def test_falsifier_subprocess_isolated_to_runner():
+    py_files = sorted(PACKAGE_DIR.glob("*.py"))
+    assert py_files, "expected package sources to scan"
+    offenders = []
+    for path in py_files:
+        if path.name == "runner.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] == "subprocess":
+                        offenders.append(path.name)
+            elif isinstance(node, ast.ImportFrom):
+                if (node.module or "").split(".")[0] == "subprocess":
+                    offenders.append(path.name)
+    assert offenders == [], f"only runner.py may import subprocess; found imports in: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# falsifier 8: zero-message law — no keystroke/GUI-scripting vocabulary
+# ---------------------------------------------------------------------------
+
+
+_BANNED_PHRASES = ("keystroke", "key code", "type text", "System Events")
+
+
+def test_falsifier_zero_message_law_no_gui_scripting_vocabulary():
+    py_files = sorted(PACKAGE_DIR.glob("*.py"))
+    offenders = []
+    for path in py_files:
+        text = path.read_text(encoding="utf-8")
+        lowered = text.lower()
+        for phrase in _BANNED_PHRASES:
+            if phrase.lower() in lowered:
+                offenders.append((path.name, phrase))
+    assert offenders == [], f"zero-message law violated: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# falsifier 9: Chrome not running -> straight to open_in_profile, no re-focus
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_chrome_not_running_goes_straight_to_open_in_profile():
+    fake = FakeRunner(responses=[
+        {"code": 0, "stdout": "NOT_RUNNING", "stderr": "", "timed_out": False},
+        {"code": 0, "stdout": "", "stderr": "", "timed_out": False},
+    ])
+    binding = _chatgpt_binding(profile="Default", url="https://chatgpt.com/c/session-alpha")
+    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+
+    assert outcome["ok"] is True
+    assert outcome["action"] == "opened"
+    assert len(fake.calls) == 2
+
+    focus_argv, _ = fake.calls[0]
+    assert focus_argv[0] == "osascript"
+
+    open_argv, _ = fake.calls[1]
+    assert open_argv == [
+        "/usr/bin/open", "-na", "Google Chrome", "--args",
+        "--profile-directory=Default", "https://chatgpt.com/c/session-alpha",
+    ]
+
+
+def test_falsifier_chatgpt_not_found_also_falls_back_to_open_in_profile():
+    fake = FakeRunner(responses=[
+        {"code": 0, "stdout": "NOT_FOUND", "stderr": "", "timed_out": False},
+        {"code": 0, "stdout": "", "stderr": "", "timed_out": False},
+    ])
+    binding = _chatgpt_binding(profile="Default")
+    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+    assert outcome["ok"] is True
+    assert outcome["action"] == "opened"
+    assert len(fake.calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# falsifier 10: FOCUSED n>1 outcome carries no tab/window id
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_focused_duplicate_tabs_outcome_has_no_id_leak():
+    fake = FakeRunner(responses=[
+        {"code": 0, "stdout": "FOCUSED 3", "stderr": "", "timed_out": False},
+    ])
+    binding = _chatgpt_binding(profile="Default")
+    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+
+    assert outcome["ok"] is True
+    assert outcome["action"] == "focused"
+    assert "first of 3" in outcome["detail"]
+    assert set(outcome.keys()) == {"ok", "action", "provider", "binding_id", "detail", "failure_kind"}
+    digits = re.findall(r"\d+", outcome["detail"])
+    assert digits == ["3"]
+    assert len(fake.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# falsifier 11: outcome privacy — no locator literal ever appears in detail
+# ---------------------------------------------------------------------------
+
+
+_SECRET_URL = "https://chatgpt.com/c/super-secret-session-token-9f8e"
+_SECRET_CLAUDE_URL = "https://claude.ai/chat/super-secret-claude-token-7a6b"
+_SECRET_SESSION_UUID = "77777777-7777-4777-8777-777777777777"
+_SECRET_CHAT_ID = "cursor-super-secret-chat"
+_SECRET_CODEX_ID = "codex-super-secret-session"
+
+
+def _assert_no_leak(outcome, *secrets):
+    detail = outcome.get("detail", "")
+    for secret in secrets:
+        assert secret not in detail, f"outcome leaked a locator value: {secret!r} in {detail!r}"
+
+
+def test_falsifier_privacy_chatgpt_success_and_failure(tmp_path):
+    fake_ok = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 1", "stderr": "", "timed_out": False}])
+    binding = _chatgpt_binding(url=_SECRET_URL, profile="Default")
+    ok_outcome = chatgpt.open_surface(binding, fake_ok, profiles=_FIXTURE_PROFILES)
+    _assert_no_leak(ok_outcome, _SECRET_URL)
+
+    fake_bad_host = FakeRunner()
+    bad_binding = _chatgpt_binding(url="https://evil.example.com/c/" + _SECRET_URL)
+    bad_outcome = contract.open_binding(bad_binding, fake_bad_host)
+    _assert_no_leak(bad_outcome, _SECRET_URL)
+
+
+def test_falsifier_privacy_claude_code(tmp_path):
+    fake = FakeRunner()
+    binding = _claude_code_binding(project_dir=str(tmp_path), session_id=_SECRET_SESSION_UUID)
+    outcome = claude.open_claude_code(binding, fake)
+    assert outcome["ok"] is True
+    _assert_no_leak(outcome, _SECRET_SESSION_UUID, str(tmp_path))
+
+
+def test_falsifier_privacy_claude_desktop():
+    fake = FakeRunner()
+    binding = _claude_desktop_binding(url=_SECRET_CLAUDE_URL)
+    outcome = claude.open_claude_desktop(binding, fake)
+    assert outcome["ok"] is True
+    _assert_no_leak(outcome, _SECRET_CLAUDE_URL)
+
+
+def test_falsifier_privacy_cursor(tmp_path):
+    fake = FakeRunner()
+    binding = _cursor_binding(chat_id=_SECRET_CHAT_ID, workspace_dir=str(tmp_path))
+    outcome = cursor.open_surface(binding, fake)
+    assert outcome["ok"] is True
+    _assert_no_leak(outcome, _SECRET_CHAT_ID, str(tmp_path))
+
+
+def test_falsifier_privacy_codex(tmp_path):
+    fake = FakeRunner()
+    binding = _codex_binding(session_id=_SECRET_CODEX_ID, cwd=str(tmp_path))
+    outcome = codex.open_surface(binding, fake)
+    assert outcome["ok"] is True
+    _assert_no_leak(outcome, _SECRET_CODEX_ID, str(tmp_path))
+
+
+def test_falsifier_privacy_refusals_carry_no_locator(tmp_path):
+    fake = FakeRunner()
+    binding = _cursor_binding(chat_id="bad token " + _SECRET_CHAT_ID)
+    outcome = cursor.open_surface(binding, fake)
+    assert outcome["ok"] is False
+    _assert_no_leak(outcome, _SECRET_CHAT_ID)
+
+
+# ---------------------------------------------------------------------------
+# falsifier 12: capability census — absent everything, never invokes runner
+# ---------------------------------------------------------------------------
+
+
+def test_falsifier_capability_census_all_absent():
+    fake = FakeRunner()
+    result = capability.census(fake, which=lambda _name: None, app_exists=lambda _path: False)
+
+    assert set(result.keys()) == {"chatgpt", "claude_code", "claude_desktop", "cursor_agent", "codex", "aionui"}
+    for provider, info in result.items():
+        if provider == "aionui":
+            assert info["state"] == contract.UNSUPPORTED
+            assert info["installed"] is False
+        else:
+            assert info["state"] == contract.NOT_INSTALLED, f"{provider} expected NOT_INSTALLED, got {info}"
+            assert info["installed"] is False
+        assert info["version"] is None
+    assert fake.calls == []
+
+
+def test_falsifier_capability_census_never_raises_without_runner():
+    result = capability.census(None, which=lambda _name: None, app_exists=lambda _path: False)
+    assert all(info["version"] is None for info in result.values())
+
+
+def test_falsifier_capability_census_installed_binary_is_partial_never_proven():
+    fake = FakeRunner(responses=[{"code": 0, "stdout": "1.2.3\n", "stderr": "", "timed_out": False}])
+    result = capability.census(fake, which=lambda name: f"/usr/local/bin/{name}", app_exists=lambda _path: True)
+    for provider in ("claude_code", "cursor_agent", "codex"):
+        assert result[provider]["state"] == contract.PARTIAL
+        assert result[provider]["state"] != contract.PROVEN
+        assert result[provider]["installed"] is True
+    # chatgpt/claude_desktop are app-bundle based, never PROVEN from census either
+    assert result["chatgpt"]["state"] in (contract.PARTIAL, contract.NOT_INSTALLED)
+    assert result["chatgpt"]["state"] != contract.PROVEN
+    assert result["claude_desktop"]["state"] == contract.PARTIAL
+    assert result["claude_desktop"]["state"] != contract.PROVEN
+    assert result["aionui"]["state"] == contract.UNSUPPORTED
+
+
+def test_falsifier_capability_census_version_capture_failure_is_none_not_exception():
+    def _raising_runner(argv, *, timeout=20.0):
+        raise RuntimeError("boom")
+
+    result = capability.census(_raising_runner, which=lambda name: f"/usr/local/bin/{name}", app_exists=lambda _path: True)
+    assert result["claude_code"]["version"] is None
+    assert result["claude_code"]["state"] == contract.PARTIAL
+
+
+# ---------------------------------------------------------------------------
+# Terminal shell-string construction: exact composed command + quoting
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_command_composition_exact_string(tmp_path):
+    fake = FakeRunner()
+    session_id = "88888888-8888-4888-8888-888888888888"
+    project_dir = str(tmp_path)
+    binding = _claude_code_binding(project_dir=project_dir, session_id=session_id)
+    claude.open_claude_code(binding, fake)
+
+    assert len(fake.calls) == 1
+    argv, _ = fake.calls[0]
+    command = argv[-1]
+    expected = f"cd {project_dir} && claude --resume {session_id}"
+    assert command == expected
+
+
+def test_claude_code_command_composition_quotes_space_in_path(tmp_path):
+    spaced_dir = tmp_path / "My Project"
+    spaced_dir.mkdir()
+    fake = FakeRunner()
+    session_id = "99999999-9999-4999-9999-999999999999"
+    binding = _claude_code_binding(project_dir=str(spaced_dir), session_id=session_id)
+    claude.open_claude_code(binding, fake)
+
+    argv, _ = fake.calls[0]
+    command = argv[-1]
+    import shlex as _shlex
+    expected = "cd " + _shlex.quote(str(spaced_dir)) + " && claude --resume " + session_id
+    assert command == expected
+    assert "'" in command  # the space forced shlex to quote the path
+
+
+def test_cursor_command_composition_exact_string_no_workspace():
+    fake = FakeRunner()
+    binding = _cursor_binding(chat_id="chat-123", workspace_dir=None)
+    cursor.open_surface(binding, fake)
+    argv, _ = fake.calls[0]
+    assert argv[-1] == "cursor-agent --resume chat-123"
+
+
+def test_cursor_command_composition_with_workspace_quotes_space(tmp_path):
+    spaced_dir = tmp_path / "Cursor Workspace"
+    spaced_dir.mkdir()
+    fake = FakeRunner()
+    binding = _cursor_binding(chat_id="chat-123", workspace_dir=str(spaced_dir))
+    cursor.open_surface(binding, fake)
+    argv, _ = fake.calls[0]
+    import shlex as _shlex
+    expected = "cd " + _shlex.quote(str(spaced_dir)) + " && cursor-agent --resume chat-123"
+    assert argv[-1] == expected
+    assert "'" in argv[-1]
+
+
+def test_codex_command_composition_exact_string_no_cwd():
+    fake = FakeRunner()
+    binding = _codex_binding(session_id="session-xyz", cwd=None)
+    codex.open_surface(binding, fake)
+    argv, _ = fake.calls[0]
+    assert argv[-1] == "codex resume session-xyz"
+
+
+def test_codex_command_composition_with_cwd_quotes_space(tmp_path):
+    spaced_dir = tmp_path / "Codex Dir"
+    spaced_dir.mkdir()
+    fake = FakeRunner()
+    binding = _codex_binding(session_id="session-xyz", cwd=str(spaced_dir))
+    codex.open_surface(binding, fake)
+    argv, _ = fake.calls[0]
+    import shlex as _shlex
+    expected = "cd " + _shlex.quote(str(spaced_dir)) + " && codex resume session-xyz"
+    assert argv[-1] == expected
+    assert "'" in argv[-1]
+
+
+# ---------------------------------------------------------------------------
+# missing-directory -> not_found (project_dir / workspace_dir / cwd)
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_missing_project_dir_not_found():
+    fake = FakeRunner()
+    binding = _claude_code_binding(project_dir="/nonexistent/definitely/not/here")
+    outcome = claude.open_claude_code(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert fake.calls == []
+
+
+def test_cursor_missing_workspace_dir_not_found():
+    fake = FakeRunner()
+    binding = _cursor_binding(chat_id="chat-1", workspace_dir="/nonexistent/definitely/not/here")
+    outcome = cursor.open_surface(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert fake.calls == []
+
+
+def test_codex_missing_cwd_not_found():
+    fake = FakeRunner()
+    binding = _codex_binding(session_id="session-1", cwd="/nonexistent/definitely/not/here")
+    outcome = codex.open_surface(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert fake.calls == []
+
+
+# ---------------------------------------------------------------------------
+# claude_desktop happy path
+# ---------------------------------------------------------------------------
+
+
+def test_claude_desktop_open_success():
+    fake = FakeRunner()
+    binding = _claude_desktop_binding(url="claude://open/session-xyz")
+    outcome = claude.open_claude_desktop(binding, fake)
+    assert outcome["ok"] is True
+    assert outcome["action"] == "opened"
+    argv, _ = fake.calls[0]
+    assert argv == ["/usr/bin/open", "claude://open/session-xyz"]
+
+
+# ---------------------------------------------------------------------------
+# list_profiles against the fixture Local State file
+# ---------------------------------------------------------------------------
+
+
+def test_list_profiles_reads_fixture_local_state():
+    profiles = chatgpt.list_profiles(FIXTURE_DIR / "local_state.json")
+    assert profiles == {"Default": "Personal", "Profile 2": "Work Ops"}
+
+
+def test_list_profiles_missing_file_returns_empty(tmp_path):
+    profiles = chatgpt.list_profiles(tmp_path / "does-not-exist.json")
+    assert profiles == {}
+
+
+def test_list_profiles_malformed_json_returns_empty(tmp_path):
+    bad = tmp_path / "Local State"
+    bad.write_text("{not json", encoding="utf-8")
+    profiles = chatgpt.list_profiles(bad)
+    assert profiles == {}
+
+
+# ---------------------------------------------------------------------------
+# end-to-end open_binding happy paths (dispatch works for every provider)
+# ---------------------------------------------------------------------------
+
+
+def test_open_binding_dispatches_claude_desktop():
+    fake = FakeRunner()
+    binding = _claude_desktop_binding()
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is True
+    assert outcome["provider"] == "claude_desktop"
+
+
+def test_open_binding_dispatches_claude_code(tmp_path):
+    fake = FakeRunner()
+    binding = _claude_code_binding(project_dir=str(tmp_path))
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is True
+    assert outcome["provider"] == "claude_code"
+
+
+def test_open_binding_dispatches_cursor_agent():
+    fake = FakeRunner()
+    binding = _cursor_binding()
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is True
+    assert outcome["provider"] == "cursor_agent"
+
+
+def test_open_binding_dispatches_codex():
+    fake = FakeRunner()
+    binding = _codex_binding()
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is True
+    assert outcome["provider"] == "codex"
+
+
+def test_open_binding_dispatches_chatgpt(monkeypatch):
+    # contract.open_binding's chatgpt path calls chatgpt.open_surface without
+    # a profiles override, which defaults to list_profiles() reading the real
+    # Local State file. Monkeypatch that function so this stays hermetic and
+    # deterministic instead of depending on developer-machine Chrome state.
+    monkeypatch.setattr(chatgpt, "list_profiles", lambda *a, **k: dict(_FIXTURE_PROFILES))
+    fake = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 1", "stderr": "", "timed_out": False}])
+    binding = _chatgpt_binding(profile="Default")
+    outcome = contract.open_binding(binding, fake)
+    assert outcome["ok"] is True
+    assert outcome["provider"] == "chatgpt"
+    assert outcome["action"] == "focused"
