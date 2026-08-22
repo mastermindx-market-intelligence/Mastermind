@@ -12,6 +12,7 @@ the sole Job/Attempt/Worker/Event lifecycle authority.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -28,6 +29,9 @@ MAX_MESSAGE_BYTES = 4500
 DEFAULT_MAX_EXECUTIVE_AGE_SECONDS = 120
 DEFAULT_HISTORY_LIMIT = 100
 DEFAULT_RELAY_VERSION = "mas-108-b1-development"
+_STATE_HASH_EXCLUDED_FIELDS = frozenset(
+    {"generated_at", "relay_checked_at", "state_hash"}
+)
 
 ERROR_CODES = frozenset(
     {
@@ -76,7 +80,7 @@ class HistoryPage:
 class PublicationReceipt:
     action: str
     message_ts: str
-    state_hash: str | None
+    state_hash: str
     byte_count: int
 
 
@@ -119,6 +123,19 @@ def _canonical_json(value: Any) -> str:
         ensure_ascii=False,
         allow_nan=False,
     )
+
+
+def semantic_sol_state_hash(document: dict[str, Any]) -> str:
+    """Hash every semantic wrapper field and only omit wrapper clocks/self-hash."""
+
+    semantic_document = {
+        key: value
+        for key, value in document.items()
+        if key not in _STATE_HASH_EXCLUDED_FIELDS
+    }
+    return hashlib.sha256(
+        _canonical_json(semantic_document).encode("utf-8")
+    ).hexdigest()
 
 
 def _valid_executive_state(value: Any) -> bool:
@@ -173,18 +190,16 @@ def build_sol_state_document(
 
     if current is None:
         generated_at = checked_text
-        state_hash = None
         status = "DEGRADED"
     else:
         generated_at = current["generated_at"]
-        state_hash = current["snapshot_hash"]
         status = "DEGRADED" if current["do_not_submit"] or current["degraded"] else "OK"
 
-    return {
+    document = {
         "schema": SOL_STATE_SCHEMA,
         "generated_at": generated_at,
         "relay_checked_at": checked_text,
-        "state_hash": state_hash,
+        "state_hash": "",
         "status": status,
         "executive": current,
         "relay": {
@@ -196,6 +211,8 @@ def build_sol_state_document(
         "relay_degraded": sorted(relay_degraded),
         "do_not_submit": True,
     }
+    document["state_hash"] = semantic_sol_state_hash(document)
+    return document
 
 
 def _render_document(document: dict[str, Any]) -> str:
