@@ -451,15 +451,15 @@ def _build_large_active_builds_doc(min_bytes: int) -> dict:
             "schema": "project_active_builds.v1",
             "collected_at": "2026-08-22T02:00:00Z",
             "repositories": [
-                {"repo": "mastermindx-market-intelligence/macro", "open_prs": pr_rows}
+                {"repo": "example-org/synthetic-repo", "open_prs": pr_rows}
             ],
         }
         if len(json.dumps(doc).encode("utf-8")) >= min_bytes:
             return doc
         pr_rows.append({
-            "repo": "mastermindx-market-intelligence/macro",
+            "repo": "example-org/synthetic-repo",
             "number": 6000 + i,
-            "url": f"https://github.com/mastermindx-market-intelligence/macro/pull/{6000 + i}",
+            "url": f"https://github.com/example-org/synthetic-repo/pull/{6000 + i}",
             "title": f"padding row {i} " + ("x" * 80),
             "branch": f"branch-{i}",
             "draft": False,
