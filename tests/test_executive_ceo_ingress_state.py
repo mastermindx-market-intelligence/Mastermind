@@ -331,11 +331,13 @@ async def test_real_state_frame_flows_to_development_outbound_publisher(
         )
         receipt = await publisher.publish(executive, relay_checked_at=checked)
         assert receipt.action == "created"
-        assert receipt.state_hash == executive["snapshot_hash"]
         assert len(client.messages) == 1
         discriminator, payload = client.messages[0].text.split("\n", 1)
         assert discriminator == sol_state.DISCRIMINATOR
         document = json.loads(payload)
+        assert receipt.state_hash == document["state_hash"]
+        assert receipt.state_hash == sol_state.semantic_sol_state_hash(document)
+        assert receipt.state_hash != executive["snapshot_hash"]
         assert document["executive"] == executive
         assert document["status"] == "DEGRADED"
         assert document["do_not_submit"] is True
