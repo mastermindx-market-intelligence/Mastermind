@@ -116,18 +116,39 @@ def _utc_now_z() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _cap_text(data: bytes | str | None) -> str:
-    """Bound captured subprocess text to 64 KiB, mirroring ``surfaces_runner._cap``."""
+#: Default output cap for the cwd-supporting branch of :func:`default_runner`
+#: — matches ``integrations.chairman_surfaces.runner``'s own 64 KiB bound
+#: (:data:`integrations.chairman_surfaces.runner._MAX_BYTES`) so a caller
+#: that does not explicitly widen it (i.e. every adapter-shaped call this
+#: branch might ever receive) keeps byte-identical behavior to Wave B.
+_DEFAULT_CWD_RUNNER_MAX_BYTES = 65536
+
+#: Output cap for the ONE caller that needs more than 64 KiB: the Macro
+#: active-build compiler's ``--json-stdout`` document, which is real
+#: organizational data (measured 112,569 bytes in Wave D live proof — see
+#: the fix commission) and must never be silently truncated before
+#: ``json.loads`` sees it. 4 MiB is a generous multiple of that measured
+#: size, not a guess; ``integrations/chairman_surfaces/runner.py`` itself is
+#: NOT touched — its 64 KiB cap stays exactly as-is for every adapter call,
+#: whose outputs are tiny (osascript/open exit codes and short strings) by
+#: design.
+_REFRESH_BUILDS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+
+
+def _cap_text(data: bytes | str | None, limit: int = _DEFAULT_CWD_RUNNER_MAX_BYTES) -> str:
+    """Bound captured subprocess text to ``limit`` bytes, mirroring ``surfaces_runner._cap``."""
     if not data:
         return ""
     text = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else data
     encoded = text.encode("utf-8", errors="replace")
-    if len(encoded) > 65536:
-        return encoded[:65536].decode("utf-8", errors="ignore")
+    if len(encoded) > limit:
+        return encoded[:limit].decode("utf-8", errors="ignore")
     return text
 
 
-def default_runner(argv: list[str], *, timeout: float = 20.0, cwd: str | None = None) -> dict:
+def default_runner(
+    argv: list[str], *, timeout: float = 20.0, cwd: str | None = None, max_bytes: int | None = None
+) -> dict:
     """The server's default subprocess runner.
 
     Every provider-adapter navigation call dispatched through
@@ -135,7 +156,10 @@ def default_runner(argv: list[str], *, timeout: float = 20.0, cwd: str | None = 
     call this function receives WITHOUT a ``cwd``) delegates straight to
     :func:`integrations.chairman_surfaces.runner.run_argv` — the ONE
     subprocess boundary that package's own tests pin — so ``/api/open``'s
-    subprocess behavior is byte-identical to Wave B's.
+    subprocess behavior is byte-identical to Wave B's. ``max_bytes`` is
+    IGNORED on this branch (``run_argv`` itself has no such parameter and is
+    outside this packet's edit scope; its fixed 64 KiB cap is exactly what
+    those small adapter outputs need).
 
     Only ``/api/refresh-builds`` (invoking Macro's active-build compiler
     script) needs a working directory, and ``run_argv`` has no ``cwd``
@@ -143,12 +167,16 @@ def default_runner(argv: list[str], *, timeout: float = 20.0, cwd: str | None = 
     build commission's OWNED FILES). This branch reuses ``run_argv``'s own
     argv-validation gate (:func:`integrations.chairman_surfaces.runner.
     _validate_argv`) and reproduces its exact safety properties (``shell=
-    False``, bounded stdout/stderr, never raising on subprocess failure)
-    rather than re-deriving them.
+    False``, never raising on subprocess failure), but takes an explicit
+    ``max_bytes`` output cap (default matches ``run_argv``'s own 64 KiB;
+    ``/api/refresh-builds`` widens it to 4 MiB — Wave D live proof found the
+    real ``project_active_builds.v1`` document, 112,569 bytes, silently
+    truncated below valid JSON at the old fixed 64 KiB bound).
     """
     if cwd is None:
         return surfaces_runner.run_argv(argv, timeout=timeout)
 
+    limit = max_bytes if max_bytes is not None else _DEFAULT_CWD_RUNNER_MAX_BYTES
     validated = surfaces_runner._validate_argv(argv)  # reuse, not duplicate, the gate
     try:
         completed = subprocess.run(
@@ -156,15 +184,15 @@ def default_runner(argv: list[str], *, timeout: float = 20.0, cwd: str | None = 
         )
     except subprocess.TimeoutExpired as exc:
         return {
-            "code": None, "stdout": _cap_text(exc.stdout), "stderr": _cap_text(exc.stderr),
+            "code": None, "stdout": _cap_text(exc.stdout, limit), "stderr": _cap_text(exc.stderr, limit),
             "timed_out": True,
         }
     except OSError as exc:
-        return {"code": None, "stdout": "", "stderr": _cap_text(str(exc)), "timed_out": False}
+        return {"code": None, "stdout": "", "stderr": _cap_text(str(exc), limit), "timed_out": False}
     return {
         "code": completed.returncode,
-        "stdout": _cap_text(completed.stdout),
-        "stderr": _cap_text(completed.stderr),
+        "stdout": _cap_text(completed.stdout, limit),
+        "stderr": _cap_text(completed.stderr, limit),
         "timed_out": False,
     }
 
@@ -837,7 +865,13 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             )
 
         argv = [sys.executable, str(script_path), "--json-stdout"]
-        result = config.runner(argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root)
+        # 4 MiB, not the runner's default 64 KiB — the real project_active_
+        # builds.v1 document is real organizational data (Wave D live proof:
+        # 112,569 bytes) and must never be silently truncated below valid
+        # JSON. See _REFRESH_BUILDS_MAX_OUTPUT_BYTES's docstring.
+        result = config.runner(
+            argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root, max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES
+        )
 
         if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
             stderr_tail = ""

@@ -42,8 +42,8 @@ class FakeRunner:
         self._responses = list(responses or [])
         self._default = default or {"code": 0, "stdout": "", "stderr": "", "timed_out": False}
 
-    def __call__(self, argv, *, timeout: float = 20.0, cwd=None):
-        self.calls.append({"argv": list(argv), "timeout": timeout, "cwd": cwd})
+    def __call__(self, argv, *, timeout: float = 20.0, cwd=None, max_bytes=None):
+        self.calls.append({"argv": list(argv), "timeout": timeout, "cwd": cwd, "max_bytes": max_bytes})
         if self._responses:
             return self._responses.pop(0)
         return dict(self._default)
@@ -436,6 +436,135 @@ def _write_stub_build_script(macro_root: Path) -> None:
     )
 
 
+def _build_large_active_builds_doc(min_bytes: int) -> dict:
+    """A synthetic ``project_active_builds.v1`` doc padded past ``min_bytes``.
+
+    Regression fixture for the Wave D live-proof defect: the real document
+    was measured at 112,569 bytes (well over the old fixed 64 KiB runner
+    cap). Padded with many synthetic PR rows rather than one huge field, so
+    it exercises the same shape real repositories/open_prs data has.
+    """
+    pr_rows: list[dict] = []
+    i = 0
+    while True:
+        doc = {
+            "schema": "project_active_builds.v1",
+            "collected_at": "2026-08-22T02:00:00Z",
+            "repositories": [
+                {"repo": "mastermindx-market-intelligence/macro", "open_prs": pr_rows}
+            ],
+        }
+        if len(json.dumps(doc).encode("utf-8")) >= min_bytes:
+            return doc
+        pr_rows.append({
+            "repo": "mastermindx-market-intelligence/macro",
+            "number": 6000 + i,
+            "url": f"https://github.com/mastermindx-market-intelligence/macro/pull/{6000 + i}",
+            "title": f"padding row {i} " + ("x" * 80),
+            "branch": f"branch-{i}",
+            "draft": False,
+            "merge_state": "clean",
+        })
+        i += 1
+
+
+def _write_large_doc_build_script(macro_root: Path, doc: dict) -> None:
+    """A REAL stub script (actually executed, not intercepted by a fake
+    runner) that prints ``doc`` to stdout on ``--json-stdout`` — the exact
+    shape of the real Wave D defect (subprocess stdout, not a canned dict).
+    """
+    scripts_dir = macro_root / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(doc)
+    (scripts_dir / "build_project_active_build_map.py").write_text(
+        "import sys\n"
+        f"DOC = {payload!r}\n"
+        "if '--json-stdout' in sys.argv:\n"
+        "    sys.stdout.write(DOC)\n"
+        "    sys.exit(0)\n"
+        "sys.exit(2)\n",
+        encoding="utf-8",
+    )
+
+
+def test_default_runner_cwd_branch_does_not_truncate_below_max_bytes(tmp_path):
+    """Unit-level proof of the fix: the REAL subprocess path (not a fake)
+    must not truncate a >64 KiB document when max_bytes widens the cap.
+    """
+    big_doc = _build_large_active_builds_doc(70_000)
+    assert len(json.dumps(big_doc).encode("utf-8")) > 65536
+
+    macro_root = tmp_path / "macro_big_unit"
+    _write_large_doc_build_script(macro_root, big_doc)
+
+    argv = [server_mod.sys.executable, str(macro_root / "scripts" / "build_project_active_build_map.py"), "--json-stdout"]
+    result = server_mod.default_runner(
+        argv, timeout=30, cwd=str(macro_root), max_bytes=server_mod._REFRESH_BUILDS_MAX_OUTPUT_BYTES
+    )
+
+    assert result["code"] == 0
+    assert result["timed_out"] is False
+    parsed = json.loads(result["stdout"])
+    assert parsed["schema"] == "project_active_builds.v1"
+    assert len(parsed["repositories"][0]["open_prs"]) == len(big_doc["repositories"][0]["open_prs"])
+
+
+def test_default_runner_cwd_branch_still_honors_an_explicit_smaller_cap(tmp_path):
+    # Proves the cap is a real, honored parameter — not just "big enough now".
+    macro_root = tmp_path / "macro_tiny_cap"
+    scripts_dir = macro_root / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "build_project_active_build_map.py").write_text(
+        "import sys\nsys.stdout.write('A' * 1000)\nsys.exit(0)\n", encoding="utf-8",
+    )
+    argv = [server_mod.sys.executable, str(scripts_dir / "build_project_active_build_map.py"), "--json-stdout"]
+    result = server_mod.default_runner(argv, timeout=10, cwd=str(macro_root), max_bytes=100)
+    assert len(result["stdout"].encode("utf-8")) <= 100
+
+
+def test_refresh_builds_end_to_end_large_document_is_not_truncated(tmp_path):
+    """Full HTTP round trip through the REAL subprocess runner (default_runner,
+    not FakeRunner) reproducing the exact Wave D live-proof defect shape:
+    a >64 KiB ``project_active_builds.v1`` document on a real subprocess's
+    stdout must reach /api/state intact, not fail with "stdout was not
+    valid JSON".
+    """
+    big_doc = _build_large_active_builds_doc(70_000)
+    config = _make_config(tmp_path, runner=server_mod.default_runner)
+    _write_large_doc_build_script(Path(config.macro_root), big_doc)
+
+    with _running_server(config) as (_httpd, port):
+        status, _headers, body = _post(port, "/api/refresh-builds", {}, headers=_auth_headers(config))
+        assert status == 200
+        payload = json.loads(body)
+        assert payload["ok"] is True
+        assert payload["collected_at"] == big_doc["collected_at"]
+
+        status2, _headers2, body2 = _get(port, "/api/state", headers=_auth_headers(config))
+    state_payload = json.loads(body2)
+    assert state_payload["live_builds_active"] is True
+    assert state_payload["control_room"]["sources"]["active_builds_collected_at"] == big_doc["collected_at"]
+
+
+def test_refresh_builds_truncated_or_invalid_stdout_fails_closed(tmp_path):
+    """A truncated/invalid stdout (code 0, but not parseable JSON — what the
+    OLD 64 KiB cap silently produced from a real 112,569-byte document) must
+    still refuse closed with ok:false, never crash, never poison the cache.
+    """
+    truncated = json.dumps(_STUB_FIXTURE_DOC)[:20]  # deliberately cut mid-object
+    runner = FakeRunner(responses=[{"code": 0, "stdout": truncated, "stderr": "", "timed_out": False}])
+    config = _make_config(tmp_path, runner=runner)
+    _write_stub_build_script(Path(config.macro_root))
+
+    with _running_server(config) as (_httpd, port):
+        status, _headers, body = _post(port, "/api/refresh-builds", {}, headers=_auth_headers(config))
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is False
+    assert "not valid JSON" in payload["detail"]
+    assert config.live_cache.get("active_builds") is None
+
+
 def test_refresh_builds_happy_path_sets_live_cache_and_restart_forgets_it(tmp_path):
     runner = FakeRunner(responses=[
         {"code": 0, "stdout": json.dumps(_STUB_FIXTURE_DOC), "stderr": "", "timed_out": False},
@@ -456,6 +585,7 @@ def test_refresh_builds_happy_path_sets_live_cache_and_restart_forgets_it(tmp_pa
         assert call["argv"][-1] == "--json-stdout"
         assert call["cwd"] == config.macro_root
         assert call["timeout"] == server_mod._REFRESH_BUILDS_TIMEOUT
+        assert call["max_bytes"] == server_mod._REFRESH_BUILDS_MAX_OUTPUT_BYTES
 
         status2, _headers2, body2 = _get(port, "/api/state", headers=_auth_headers(config))
         payload2 = json.loads(body2)
