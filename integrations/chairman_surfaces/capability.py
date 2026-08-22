@@ -83,29 +83,32 @@ def census(runner=None, *, which=shutil.which, app_exists=_default_app_exists) -
     """
     result: dict[str, dict] = {}
 
-    chrome_installed = bool(app_exists("/Applications/Google Chrome.app"))
-    local_state_path = str(Path(_chatgpt.CHROME_LOCAL_STATE).expanduser())
-    local_state_present = bool(app_exists(local_state_path)) if chrome_installed else False
-    if not chrome_installed:
+    # Sol architecture correction (MAS-113, 2026-08-22): chatgpt seats live in
+    # managed-browser (GoLogin/Multilogin) environments, never a Chrome
+    # profile — "installed" here means "a local managed-browser profile
+    # store is present", not "Chrome.app exists". Census alone still never
+    # proves PROVEN (integrations.chairman_surfaces.chatgpt.open_surface
+    # refuses closed on every path by design; see that module's docstring).
+    mlx_root = str(Path(_chatgpt.MLX_PROFILES_ROOT).expanduser())
+    gologin_root = str(Path(_chatgpt.GOLOGIN_PROFILES_ROOT).expanduser())
+    mlx_present = bool(app_exists(mlx_root))
+    gologin_present = bool(app_exists(gologin_root))
+    if not mlx_present and not gologin_present:
         result["chatgpt"] = {
             "installed": False,
             "version": None,
             "state": contract.NOT_INSTALLED,
-            "detail": "Google Chrome.app was not found",
-        }
-    elif not local_state_present:
-        result["chatgpt"] = {
-            "installed": True,
-            "version": None,
-            "state": contract.PARTIAL,
-            "detail": "Chrome is installed but its Local State file was not found (no profile enumerated yet)",
+            "detail": "no local GoLogin/Multilogin managed-browser profile store was found",
         }
     else:
         result["chatgpt"] = {
             "installed": True,
             "version": None,
             "state": contract.PARTIAL,
-            "detail": "Chrome installed with profile data; live tab-focus proof pending Wave D",
+            "detail": (
+                "a local managed-browser profile store is present; navigation is refused — "
+                "see integrations.chairman_surfaces.chatgpt's managed-environment seat law"
+            ),
         }
 
     result["claude_code"] = _binary_provider("claude_code", "claude", runner=runner, which=which)

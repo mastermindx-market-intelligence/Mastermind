@@ -36,7 +36,7 @@
    *  .open_binding refuses before it ever reaches an adapter, so the page can
    *  honestly show UNSUPPORTED without asking the server first. */
   var PROVIDER_LOCATOR_KIND = {
-    chatgpt: "chatgpt_url",
+    chatgpt: "chatgpt_managed_env",
     claude_code: "claude_code_session",
     claude_desktop: "claude_desktop_url",
     cursor_agent: "cursor_agent_thread",
@@ -789,14 +789,44 @@
     container.appendChild(list);
   }
 
+  /** ChatGPT discovery groups: read-only local environment identities.
+   *  Rendered with the existing chip style (ccr-chip-verified for a running
+   *  environment, ccr-chip-unbound for a stopped one) rather than plain
+   *  text, so "running" reads the same way it does on a bound surface row.
+   *  A plain list — like the existing Claude Code / Codex discovery groups,
+   *  there is no click-to-prefill wiring in this codebase to mirror.
+   *  Discovery confers zero ownership by itself; nothing is bound until the
+   *  Bind form below is filled in and submitted by hand. */
+  function discoverEnvGroup(container, heading, rows, buildLine, emptyLine) {
+    container.appendChild(el("h3", { text: heading }));
+    var list = el("ul");
+    (rows || []).forEach(function (row) {
+      var li = el("li", { className: "ccr-row" });
+      var left = el("span", { className: "ccr-row-title ccr-mono" });
+      buildLine(left, row);
+      li.appendChild(left);
+      li.appendChild(chip(row.running ? "running" : "not running", row.running ? "ccr-chip-verified" : "ccr-chip-unbound"));
+      list.appendChild(li);
+    });
+    if (!rows || !rows.length) {
+      list.appendChild(el("li", { text: emptyLine, className: "ccr-empty" }));
+    }
+    container.appendChild(list);
+  }
+
   function renderDiscoverResults(doc) {
     var container = document.getElementById("discover-results");
     clear(container);
     doc = doc || {};
+    var envs = doc.chatgpt_environments || {};
 
-    discoverGroup(container, "ChatGPT tabs", doc.chatgpt_tabs, function (tab) {
-      return String(tab.title) + " — " + String(tab.url);
-    }, "No ChatGPT tab was found.");
+    discoverEnvGroup(container, "ChatGPT — Multilogin environments", envs.multilogin, function (left, row) {
+      left.appendChild(el("span", { text: "f:" + String(row.folder_id) + " p:" + String(row.profile_id) }));
+    }, "No local Multilogin environment was found.");
+
+    discoverEnvGroup(container, "ChatGPT — GoLogin environments", envs.gologin, function (left, row) {
+      left.appendChild(el("span", { text: "p:" + String(row.profile_id) }));
+    }, "No local GoLogin environment was found.");
 
     discoverGroup(container, "Claude Code sessions", doc.claude_code_sessions, function (s) {
       return String(s.project_dir) + " / " + String(s.session_id);
@@ -872,25 +902,75 @@
       });
     });
 
+    // -- chatgpt bind fields: managed-environment identity, never a Chrome
+    //    profile (Sol architecture correction, MAS-113, 2026-08-22). ------
+
+    function updateBindFieldVisibility() {
+      var provider = document.getElementById("bind-provider").value;
+      var isChatgpt = provider === "chatgpt";
+      document.getElementById("bind-chatgpt-fields").hidden = !isChatgpt;
+      document.getElementById("bind-locator-field").hidden = isChatgpt;
+      document.getElementById("bind-locator").required = !isChatgpt;
+
+      var manager = document.getElementById("bind-chatgpt-manager").value;
+      var folderField = document.getElementById("bind-chatgpt-folder-field");
+      folderField.hidden = !isChatgpt || manager !== "multilogin";
+    }
+
+    document.getElementById("bind-provider").addEventListener("change", updateBindFieldVisibility);
+    document.getElementById("bind-chatgpt-manager").addEventListener("change", updateBindFieldVisibility);
+    updateBindFieldVisibility();
+
+    /** Builds the chatgpt locator from the dedicated fields — never from the
+     *  generic JSON textarea, which is hidden for this provider. Returns
+     *  ``null`` (never throws) when a required field is blank; the caller
+     *  reports that as a problem instead of posting an incomplete locator. */
+    function buildChatgptLocator() {
+      var manager = document.getElementById("bind-chatgpt-manager").value;
+      var profileId = document.getElementById("bind-chatgpt-profile-id").value.trim();
+      var url = document.getElementById("bind-chatgpt-url").value.trim();
+      if (!profileId || !url) return null;
+      var locator = { env_manager: manager, profile_id: profileId, url: url };
+      if (manager === "multilogin") {
+        var folderId = document.getElementById("bind-chatgpt-folder-id").value.trim();
+        if (!folderId) return null;
+        locator.folder_id = folderId;
+      }
+      return locator;
+    }
+
     document.getElementById("bind-form").addEventListener("submit", function (event) {
       event.preventDefault();
       var resultNode = document.getElementById("bind-result");
-      var locatorText = document.getElementById("bind-locator").value;
+      var provider = document.getElementById("bind-provider").value;
       var locator;
-      try {
-        locator = JSON.parse(locatorText || "{}");
-      } catch (e) {
-        clear(resultNode);
-        resultNode.appendChild(el("div", {
-          text: "The locator is not valid JSON. Fix it and bind again.",
-          className: "ccr-problem",
-        }));
-        return;
+      if (provider === "chatgpt") {
+        locator = buildChatgptLocator();
+        if (locator === null) {
+          clear(resultNode);
+          resultNode.appendChild(el("div", {
+            text: "Fill in the environment manager, profile ID (and folder ID for multilogin), and conversation URL.",
+            className: "ccr-problem",
+          }));
+          return;
+        }
+      } else {
+        var locatorText = document.getElementById("bind-locator").value;
+        try {
+          locator = JSON.parse(locatorText || "{}");
+        } catch (e) {
+          clear(resultNode);
+          resultNode.appendChild(el("div", {
+            text: "The locator is not valid JSON. Fix it and bind again.",
+            className: "ccr-problem",
+          }));
+          return;
+        }
       }
       var body = {
         work_ref: document.getElementById("bind-work-ref").value,
         role: document.getElementById("bind-role").value,
-        provider: document.getElementById("bind-provider").value,
+        provider: provider,
         locator: locator,
       };
       var seatRef = document.getElementById("bind-seat-ref").value;

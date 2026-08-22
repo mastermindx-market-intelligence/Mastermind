@@ -91,17 +91,35 @@ python3 scripts/chairman_control_room.py [--port 8787] [--macro-root PATH] \
   `~/Library/Application Support/Mastermind/control-room/surface_bindings.json`
   (mode 0600, parent 0700, atomic writes). Deleting the file removes Open
   buttons and changes no canonical fact.
-- ChatGPT tab focus/enumeration requires a one-time macOS Automation grant
-  (osascript → Google Chrome). Profile-targeted opens
-  (`open -na "Google Chrome" --args --profile-directory=…`) need no grant.
-  Terminal-launched resumes (claude/cursor-agent/codex) use the
-  osascript → Terminal grant.
-- `Open Sol` (and every ChatGPT binding) always opens via the exact bound
-  Chrome profile; focus-by-URL on an already-open tab is disabled, because
-  the installed automation surface cannot prove which profile a matching
-  tab actually belongs to (Sol review 5000169412).
+- Terminal-launched resumes (claude/cursor-agent/codex) use the
+  osascript → Terminal grant. ChatGPT never uses osascript/AppleScript/Chrome
+  at all — see the managed-environment law below.
+- **ChatGPT seats live in persistent GoLogin/Multilogin managed-browser
+  environments, never a Chrome profile (Sol architecture correction,
+  MAS-113, 2026-08-22 — supersedes the Chrome-profile law of review
+  5000169412).** The `chatgpt` locator (`chatgpt_managed_env`) stores an
+  exact local environment identity — a GoLogin `profile_id` or a Multilogin
+  `folder_id` + `profile_id` — plus the exact conversation URL, and NEVER
+  proxy, IP, fingerprint, cookie, credential, or token material
+  (`control_plane.surface_bindings.FORBIDDEN_SEMANTIC_KEYS`). Every
+  `chatgpt` open currently refuses with `unsupported_surface`: an
+  investigation on the real machine plus a sweep of both vendors' official
+  documentation (multilogin.com/help "API basics — key terms & concepts",
+  "How to use headless mode", "Learn CLI commands", "Learn CLI command
+  flags", "Start working with CLI"; gologin.com/docs quickstart + "Local
+  Agent Browser CLI"; api.gologin.com/docs-json OpenAPI enumeration) found
+  that neither vendor documents a surface that can open a URL in, focus, or
+  attach automation to an environment that is already running as a
+  GUI-started profile — refusing is the lawful outcome, not a bug to work
+  around. Discovery (`GET /api/discover`) lists local environment
+  identities read-only, ids only (a display name requires cloud
+  authentication no session may perform). GoLogin's local store
+  (`~/Library/Caches/GoLogin`) is under a standing operator no-delete veto
+  and this product only ever `stat`s directory names inside it — it never
+  writes there.
 - `last_verified_at` / VERIFIED_OPENABLE advances ONLY on an open that
   proved the provider-native session actually exists (`claude_code`/`codex`,
-  via their local session-store read). `chatgpt`/`claude_desktop`/
+  via their local session-store read). `chatgpt` can never advance this
+  stamp in the current state (every open refuses); `claude_desktop`/
   `cursor_agent` opens are launch-ACK only and remain BOUND_UNVERIFIED —
-  they never advance the stamp.
+  they never advance the stamp either.

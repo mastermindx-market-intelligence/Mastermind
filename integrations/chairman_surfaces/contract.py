@@ -73,9 +73,6 @@ NAV_CONFIDENCE = (VERIFIED_OPENABLE, BOUND_UNVERIFIED, UNBOUND, STALE, UNSUPPORT
 #: ``session_id`` uses its own stricter UUID regex, defined in ``claude.py``.
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
-#: Chrome profile directory name gate (e.g. ``"Default"``, ``"Profile 3"``).
-SAFE_PROFILE_RE = re.compile(r"^[A-Za-z0-9 ._-]{1,64}$")
-
 _SAFE_ABS_DIR_CHARSET_RE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
 
 
@@ -106,9 +103,17 @@ def safe_abs_dir(path: object) -> bool:
 # ---------------------------------------------------------------------------
 
 #: Closed vocabulary of OpenOutcome failure kinds.
+#:
+#: ``unsupported_surface`` (Sol architecture correction, MAS-113,
+#: 2026-08-22): the provider's installed official surface set documents no
+#: verb for the requested navigation — e.g. the managed-browser (GoLogin/
+#: Multilogin) launcher APIs document no way to open a URL in, focus, or
+#: attach automation to an already-running GUI-started profile. Refusing is
+#: the lawful outcome here, never a fallback to an unofficial mechanism.
 FAILURE_KINDS = frozenset({
     "invalid_binding", "unsafe_token", "disallowed_target", "not_installed",
     "not_running", "not_found", "ambiguous", "runner_error", "refused",
+    "unsupported_surface",
 })
 
 
@@ -213,7 +218,7 @@ def terminal_launch_argv(command: str) -> list[str]:
 #: BEFORE the full document re-validation below (which instead reports
 #: ``invalid_binding`` for a known provider carrying a malformed binding).
 _EXPECTED_LOCATOR_KIND = {
-    "chatgpt": "chatgpt_url",
+    "chatgpt": "chatgpt_managed_env",
     "claude_code": "claude_code_session",
     "claude_desktop": "claude_desktop_url",
     "cursor_agent": "cursor_agent_thread",
@@ -233,6 +238,9 @@ def open_binding(
     *,
     claude_projects_dir: str | None = None,
     codex_sessions_dir: str | None = None,
+    mlx_profiles_root: str | None = None,
+    gologin_profiles_root: str | None = None,
+    process_args_reader=None,
 ) -> dict:
     """Re-validate ``binding`` then dispatch to the owning provider adapter.
 
@@ -247,6 +255,13 @@ def open_binding(
     adapter's own real default" (``~/.claude/projects`` /
     ``~/.codex/sessions``); tests always inject a ``tmp_path`` here instead.
     They are ignored by the other three providers.
+
+    ``mlx_profiles_root``/``gologin_profiles_root``/``process_args_reader``
+    are the equivalent overrides for the ``chatgpt`` adapter's managed-browser
+    environment stores (Sol architecture correction, MAS-113, 2026-08-22) —
+    ``None`` means "use :mod:`integrations.chairman_surfaces.chatgpt`'s own
+    real defaults"; tests inject a ``tmp_path`` root and a fake reader
+    instead. They are ignored by the other four providers.
 
     Dispatch order (every step refuses closed, never touching ``runner``,
     before the one that follows it runs):
@@ -287,7 +302,12 @@ def open_binding(
     from . import cursor as _cursor
 
     if provider == "chatgpt":
-        return _chatgpt.open_surface(binding, runner)
+        return _chatgpt.open_surface(
+            binding, runner,
+            mlx_profiles_root=mlx_profiles_root,
+            gologin_profiles_root=gologin_profiles_root,
+            process_args_reader=process_args_reader,
+        )
     if provider == "claude_code":
         return _claude.open_claude_code(binding, runner, claude_projects_dir=claude_projects_dir)
     if provider == "claude_desktop":

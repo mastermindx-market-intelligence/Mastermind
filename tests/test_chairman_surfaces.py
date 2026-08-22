@@ -7,14 +7,21 @@ locator value into an outcome. Every test here runs against an injected
 fake runner; the real ``osascript``/``open``/``claude``/``cursor-agent``/
 ``codex`` binaries are never invoked.
 
-Hermetic: Chrome's real "Local State" and the real filesystem outside
-``tmp_path`` are never read (except for the safe existence checks the
-package itself does against ``/Applications`` paths in a couple of
-capability tests, which only ever return booleans and never open a file).
+Hermetic: the real filesystem outside ``tmp_path`` is never read (except for
+the safe existence checks the package itself does against ``/Applications``
+and managed-browser profile-store paths in a couple of capability/chatgpt
+tests, which only ever return booleans and never open a file).
+
+``test_sol_corr_*`` prove the Sol architecture correction (MAS-113,
+2026-08-22): ChatGPT seats live in persistent GoLogin/Multilogin
+managed-browser environments, never a Chrome profile, and
+``chatgpt.open_surface`` refuses closed on every path — the installed
+vendors document no surface that can address an already-running profile.
 """
 from __future__ import annotations
 
 import ast
+import inspect
 from pathlib import Path
 
 import pytest
@@ -65,19 +72,47 @@ def never_called_runner():
 # ---------------------------------------------------------------------------
 
 
-def _chatgpt_binding(*, url="https://chatgpt.com/c/session-alpha", profile="Default", **overrides):
+#: A syntactically valid GoLogin profile id (24 lowercase hex chars).
+GOLOGIN_PROFILE_ID = "aaaaaaaaaaaaaaaaaaaaaaaa"
+MLX_FOLDER_ID = "11111111-1111-4111-8111-111111111111"
+MLX_PROFILE_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def _gologin_binding(*, url="https://chatgpt.com/c/session-alpha", profile_id=GOLOGIN_PROFILE_ID, **overrides):
     binding = sb.new_binding(
         work_ref="WS:CCR",
         role="chairman",
         provider="chatgpt",
-        locator_kind="chatgpt_url",
-        locator={"browser_profile": profile, "url": url},
+        locator_kind="chatgpt_managed_env",
+        locator={"env_manager": "gologin", "profile_id": profile_id, "url": url},
         observed_at="2026-08-22T00:00:00Z",
         seat_ref="chatgpt-seat-1",
         binding_id="11111111-1111-4111-8111-111111111111",
     )
     binding.update(overrides)
     return binding
+
+
+def _multilogin_binding(
+    *, url="https://chatgpt.com/c/session-alpha", folder_id=MLX_FOLDER_ID, profile_id=MLX_PROFILE_ID, **overrides,
+):
+    binding = sb.new_binding(
+        work_ref="WS:CCR",
+        role="chairman",
+        provider="chatgpt",
+        locator_kind="chatgpt_managed_env",
+        locator={"env_manager": "multilogin", "folder_id": folder_id, "profile_id": profile_id, "url": url},
+        observed_at="2026-08-22T00:00:00Z",
+        seat_ref="chatgpt-seat-1",
+        binding_id="77777777-7777-4777-8777-777777777777",
+    )
+    binding.update(overrides)
+    return binding
+
+
+#: Back-compat alias: most cross-cutting tests below (unrelated to the
+#: chatgpt adapter's own internals) only need SOME valid chatgpt binding.
+_chatgpt_binding = _gologin_binding
 
 
 def _claude_code_binding(*, project_dir, session_id="22222222-2222-4222-8222-222222222222", **overrides):
@@ -217,34 +252,38 @@ def test_falsifier_chatgpt_bad_host_refused_at_open_binding():
 
 
 # ---------------------------------------------------------------------------
-# falsifier 3: chatgpt profile_dir absence / unsafe charset
+# falsifier 3: chatgpt managed-environment identity absence -> not_found
 # ---------------------------------------------------------------------------
 
 
-def test_falsifier_chatgpt_profile_absent_from_enumeration_disallowed():
+def test_falsifier_chatgpt_environment_absent_from_store_not_found(tmp_path):
     fake = FakeRunner()
-    binding = _chatgpt_binding(profile="Ghost Profile")
-    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+    binding = _gologin_binding()
+    outcome = chatgpt.open_surface(
+        binding, fake, mlx_profiles_root=str(tmp_path / "mlx"), gologin_profiles_root=str(tmp_path / "gologin"),
+    )
     assert outcome["ok"] is False
-    assert outcome["failure_kind"] == "disallowed_target"
+    assert outcome["failure_kind"] == "not_found"
     assert fake.calls == []
 
 
-def test_falsifier_chatgpt_profile_unsafe_charset_refused():
+def test_falsifier_chatgpt_malformed_gologin_profile_id_unsafe_token():
     fake = FakeRunner()
-    binding = _chatgpt_binding(profile="Profile/../12")
-    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+    binding = _gologin_binding(profile_id="not-hex-not-24")
+    outcome = chatgpt.open_surface(binding, fake)
     assert outcome["ok"] is False
     assert outcome["failure_kind"] == "unsafe_token"
     assert fake.calls == []
 
 
-def test_falsifier_chatgpt_open_in_profile_standalone_same_gates():
+def test_falsifier_chatgpt_gologin_with_folder_id_invalid_binding():
     fake = FakeRunner()
-    outcome = chatgpt.open_in_profile("Profile/../12", "https://chatgpt.com/c/x", fake, profiles=_FIXTURE_PROFILES)
-    assert outcome["failure_kind"] == "unsafe_token"
-    outcome2 = chatgpt.open_in_profile("Ghost Profile", "https://chatgpt.com/c/x", fake, profiles=_FIXTURE_PROFILES)
-    assert outcome2["failure_kind"] == "disallowed_target"
+    binding = _gologin_binding()
+    binding["locator"] = dict(binding["locator"])
+    binding["locator"]["folder_id"] = MLX_FOLDER_ID
+    outcome = chatgpt.open_surface(binding, fake)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "invalid_binding"
     assert fake.calls == []
 
 
@@ -299,18 +338,9 @@ def test_falsifier_lifecycle_key_refused_at_open_time():
 
 # ---------------------------------------------------------------------------
 # falsifier 6: AppleScript constants never interpolate a locator value
+# (Terminal-launch adapters only — chatgpt uses no AppleScript at all, see
+# test_sol_corr_r4_no_chrome_machinery below)
 # ---------------------------------------------------------------------------
-
-
-def test_falsifier_chatgpt_applescript_argv_identical_across_bindings():
-    argv_a = chatgpt._focus_argv("https://chatgpt.com/c/session-alpha")
-    argv_b = chatgpt._focus_argv("https://chatgpt.com/c/totally-different-session")
-    assert argv_a[:-1] == argv_b[:-1]
-    assert argv_a[-1] != argv_b[-1]
-    for line in argv_a[:-1]:
-        assert "session-alpha" not in line
-    for line in argv_b[:-1]:
-        assert "totally-different-session" not in line
 
 
 def test_falsifier_terminal_launch_argv_identical_across_bindings():
@@ -389,111 +419,242 @@ def test_falsifier_zero_message_law_no_gui_scripting_vocabulary():
 
 
 # ---------------------------------------------------------------------------
-# falsifier 9: open_surface ALWAYS opens via the exact bound profile — no
-# probe, no focus, whether Chrome is running or not (Sol review 5000169412,
-# blocker 1 repair)
+# Sol architecture correction (MAS-113, 2026-08-22): open_surface REFUSES
+# CLOSED on every path — no chrome/AppleScript, no vendor binary execution,
+# no fallback navigation mechanism. These replace the superseded Chrome-
+# profile "blocker 1" regressions above (review 5000169412).
 # ---------------------------------------------------------------------------
 
+#: The two exact, static ``detail`` strings open_surface may report once an
+#: environment's existence is proven — copied verbatim from
+#: ``chatgpt.open_surface`` so a drift between the source and this test is
+#: caught by a plain string mismatch rather than silently passing.
+_MSG_RUNNING = (
+    "the bound environment is running, but the installed managed-browser surface "
+    "documents no way to open a URL in, focus, or attach to a running profile; "
+    "seat navigation is held rather than using an unofficial mechanism"
+)
+_MSG_NOT_RUNNING = (
+    "the bound environment is not running; starting it requires cloud authentication "
+    "and an undocumented restart path that could disrupt the persistent seat; "
+    "navigation is held"
+)
 
-def test_falsifier_chatgpt_open_surface_opens_via_exact_profile_one_call():
+
+def test_sol_corr_r1_runner_never_invoked(tmp_path):
+    """Zero runner calls across all four outcome paths: invalid, missing
+    environment, running environment, stopped environment."""
     fake = FakeRunner()
-    binding = _chatgpt_binding(profile="Default", url="https://chatgpt.com/c/session-alpha")
-    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
 
-    assert outcome["ok"] is True
-    assert outcome["action"] == "opened"
-    assert outcome["verified"] is False
-    assert len(fake.calls) == 1
+    invalid = _gologin_binding()
+    invalid["locator"] = dict(invalid["locator"])
+    invalid["locator"]["env_manager"] = "chrome"
+    outcome_invalid = chatgpt.open_surface(invalid, fake)
+    assert outcome_invalid["ok"] is False
+    assert outcome_invalid["failure_kind"] == "invalid_binding"
 
-    open_argv, _ = fake.calls[0]
-    assert open_argv == [
-        "/usr/bin/open", "-na", "Google Chrome", "--args",
-        "--profile-directory=Default", "https://chatgpt.com/c/session-alpha",
-    ]
-    # never probes Chrome via osascript for this path
-    assert all(call[0][0] != "osascript" for call in fake.calls)
+    missing = _gologin_binding()
+    outcome_missing = chatgpt.open_surface(
+        missing, fake,
+        gologin_profiles_root=str(tmp_path / "empty_gologin"),
+        mlx_profiles_root=str(tmp_path / "empty_mlx"),
+    )
+    assert outcome_missing["ok"] is False
+    assert outcome_missing["failure_kind"] == "not_found"
 
+    gologin_root = tmp_path / "gologin_profiles"
+    (gologin_root / GOLOGIN_PROFILE_ID).mkdir(parents=True)
 
-def test_falsifier_chatgpt_open_surface_outcome_key_set_includes_verified():
-    fake = FakeRunner()
-    binding = _chatgpt_binding(profile="Default")
-    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
-    assert outcome["ok"] is True
-    assert set(outcome.keys()) == {"ok", "action", "provider", "binding_id", "detail", "failure_kind", "verified"}
+    def running_reader():
+        return [f"/Applications/GoLogin.app/orbita --user-data-dir=/x/{GOLOGIN_PROFILE_ID} --proxy-server=1.2.3.4:9"]
 
+    outcome_running = chatgpt.open_surface(
+        _gologin_binding(), fake, gologin_profiles_root=str(gologin_root), process_args_reader=running_reader,
+    )
+    assert outcome_running["ok"] is False
+    assert outcome_running["failure_kind"] == "unsupported_surface"
+    assert outcome_running["detail"] == _MSG_RUNNING
 
-# ---------------------------------------------------------------------------
-# Sol regression R1/R2 (blocker 1): a matching URL open in the WRONG profile,
-# or duplicated across TWO profiles, must never be treated as the bound
-# seat's tab — open_surface never even asks Chrome what is open, so a fake
-# runner primed with a "FOCUSED" response that WOULD have matched the old
-# behavior is never given the chance to.
-# ---------------------------------------------------------------------------
+    outcome_stopped = chatgpt.open_surface(
+        _gologin_binding(), fake, gologin_profiles_root=str(gologin_root), process_args_reader=lambda: [],
+    )
+    assert outcome_stopped["ok"] is False
+    assert outcome_stopped["failure_kind"] == "unsupported_surface"
+    assert outcome_stopped["detail"] == _MSG_NOT_RUNNING
 
-
-def test_sol_r1_exact_url_open_in_different_profile_never_focused():
-    # Primed as though the exact bound URL were already open and focusable
-    # in a DIFFERENT profile — open_surface must never see this, because it
-    # never probes Chrome at all.
-    fake = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 1", "stderr": "", "timed_out": False}])
-    binding = _chatgpt_binding(profile="Default", url="https://chatgpt.com/c/session-alpha")
-    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
-
-    assert outcome["ok"] is True
-    assert outcome["action"] == "opened"
-    for argv, _timeout in fake.calls:
-        assert argv[0] != "osascript", f"open_surface must never call osascript/focus, got {argv!r}"
-
-
-def test_sol_r2_exact_url_open_in_two_profiles_no_first_winner_focus():
-    # Primed as though the exact bound URL were duplicated across TWO open
-    # profiles (the old code's "first match wins" hazard) — same invariant:
-    # open_surface never asks, so there is no first winner to pick.
-    fake = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 2", "stderr": "", "timed_out": False}])
-    binding = _chatgpt_binding(profile="Profile 2", url="https://chatgpt.com/c/session-alpha")
-    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
-
-    assert outcome["ok"] is True
-    assert outcome["action"] == "opened"
-    for argv, _timeout in fake.calls:
-        assert argv[0] != "osascript", f"open_surface must never call osascript/focus, got {argv!r}"
-
-
-# ---------------------------------------------------------------------------
-# Sol regression R3 (blocker 1): focus_exact_tab is capability-gated off —
-# with no profile_prover, it refuses closed and never invokes the runner.
-# ---------------------------------------------------------------------------
-
-
-def test_sol_r3_focus_exact_tab_without_prover_refused_runner_never_called():
-    fake = FakeRunner()
-    binding = _chatgpt_binding(profile="Default", url="https://chatgpt.com/c/session-alpha")
-    outcome = chatgpt.focus_exact_tab(binding, fake, profile_prover=None)
-
-    assert outcome["ok"] is False
-    assert outcome["failure_kind"] == "refused"
-    assert outcome["verified"] is False
-    assert len(fake.calls) == 0
-
-
-# ---------------------------------------------------------------------------
-# Sol regression R4 (blocker 1): wrong/unknown bound profile refuses, and no
-# subsequent runner call ever carries any OTHER --profile-directory value —
-# no cross-seat failover.
-# ---------------------------------------------------------------------------
-
-
-def test_sol_r4_unknown_bound_profile_refused_no_cross_seat_failover():
-    fake = FakeRunner()
-    binding = _chatgpt_binding(profile="Ghost Profile", url="https://chatgpt.com/c/session-alpha")
-    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
-
-    assert outcome["ok"] is False
-    assert outcome["failure_kind"] == "disallowed_target"
-    assert outcome["verified"] is False
     assert fake.calls == []
-    for argv, _timeout in fake.calls:
-        assert not any(str(a).startswith("--profile-directory=") and a != "--profile-directory=Ghost Profile" for a in argv)
+
+
+def test_sol_corr_r2_no_cross_env_fallback(tmp_path):
+    """Env B present+running must never leak into env A's outcome — A's
+    detail is one of the two static strings, never dynamic content about B."""
+    fake = FakeRunner()
+    profile_a = "aaaaaaaaaaaaaaaaaaaaaaaa"
+    profile_b = "bbbbbbbbbbbbbbbbbbbbbbbb"
+    root = tmp_path / "gologin_profiles"
+    (root / profile_a).mkdir(parents=True)
+    (root / profile_b).mkdir(parents=True)
+
+    def reader():
+        return [f"/Applications/GoLogin.app/orbita --user-data-dir=/x/{profile_b} --proxy-server=9.9.9.9:1"]
+
+    binding_a = _gologin_binding(profile_id=profile_a)
+    outcome = chatgpt.open_surface(binding_a, fake, gologin_profiles_root=str(root), process_args_reader=reader)
+
+    assert outcome["ok"] is False
+    assert outcome["detail"] in (_MSG_RUNNING, _MSG_NOT_RUNNING)
+    assert outcome["detail"] == _MSG_NOT_RUNNING  # A itself is not the running process — B's aliveness never leaks in
+    assert profile_b not in outcome["detail"]
+    assert fake.calls == []
+
+
+def test_sol_corr_r3_never_verified(tmp_path):
+    fake = FakeRunner()
+
+    invalid = _gologin_binding()
+    invalid["locator"] = dict(invalid["locator"])
+    invalid["locator"]["env_manager"] = "chrome"
+    outcomes = [chatgpt.open_surface(invalid, fake)]
+
+    outcomes.append(chatgpt.open_surface(
+        _gologin_binding(), fake,
+        gologin_profiles_root=str(tmp_path / "empty_gologin"), mlx_profiles_root=str(tmp_path / "empty_mlx"),
+    ))
+
+    gologin_root = tmp_path / "gologin_profiles"
+    (gologin_root / GOLOGIN_PROFILE_ID).mkdir(parents=True)
+    running_reader = lambda: [f"--user-data-dir=/x/{GOLOGIN_PROFILE_ID}"]  # noqa: E731
+    outcomes.append(chatgpt.open_surface(
+        _gologin_binding(), fake, gologin_profiles_root=str(gologin_root), process_args_reader=running_reader,
+    ))
+    outcomes.append(chatgpt.open_surface(
+        _gologin_binding(), fake, gologin_profiles_root=str(gologin_root), process_args_reader=lambda: [],
+    ))
+
+    for outcome in outcomes:
+        assert outcome["ok"] is False
+        assert outcome["verified"] is False
+
+
+def test_sol_corr_r4_no_chrome_machinery():
+    source = inspect.getsource(chatgpt)
+    for banned in ("Google Chrome", "osascript", "open -na", "AppleScript"):
+        assert banned not in source, f"chatgpt.py must never mention {banned!r}"
+
+
+def test_argv_privacy(tmp_path):
+    marker = "SECRETMARKER"
+    root = tmp_path / "gologin_profiles"
+    (root / GOLOGIN_PROFILE_ID).mkdir(parents=True)
+
+    def reader():
+        return [f"/Applications/GoLogin.app/orbita --user-data-dir=/x/{GOLOGIN_PROFILE_ID} --proxy-password={marker}"]
+
+    fake = FakeRunner()
+    binding = _gologin_binding()
+    outcome = chatgpt.open_surface(binding, fake, gologin_profiles_root=str(root), process_args_reader=reader)
+    for value in outcome.values():
+        assert marker not in str(value)
+
+    running = chatgpt.env_running(binding["locator"], process_args_reader=reader)
+    assert running is True  # documented shape: exactly a bool, never the raw line
+
+    envs = chatgpt.list_local_environments(
+        gologin_profiles_root=str(root), mlx_profiles_root=str(tmp_path / "no_mlx"), process_args_reader=reader,
+    )
+    assert set(envs.keys()) == {"multilogin", "gologin"}
+    for entry in envs["gologin"]:
+        assert set(entry.keys()) == {"profile_id", "running"}
+        assert marker not in entry["profile_id"]
+    for entry in envs["multilogin"]:
+        assert set(entry.keys()) == {"workspace_id", "folder_id", "profile_id", "running"}
+
+    def _raising_reader():
+        raise RuntimeError(f"boom {marker}")
+
+    assert chatgpt.env_running(binding["locator"], process_args_reader=_raising_reader) is False
+
+
+# ---------------------------------------------------------------------------
+# env_exists — bounded, tolerant existence gates (both managers)
+# ---------------------------------------------------------------------------
+
+
+def test_env_exists_multilogin_true_with_non_uuid_sibling_skipped(tmp_path):
+    root = tmp_path / "mlx"
+    workspace_id = "99999999-9999-4999-8999-999999999999"
+    (root / workspace_id / MLX_FOLDER_ID / MLX_PROFILE_ID).mkdir(parents=True)
+    (root / "branding").mkdir(parents=True)  # non-UUID sibling — must be skipped, not raise
+    locator = {"env_manager": "multilogin", "folder_id": MLX_FOLDER_ID, "profile_id": MLX_PROFILE_ID, "url": "https://chatgpt.com/c/x"}
+    assert chatgpt.env_exists(locator, mlx_profiles_root=str(root)) is True
+
+
+def test_env_exists_multilogin_missing_is_false(tmp_path):
+    root = tmp_path / "mlx"
+    root.mkdir()
+    locator = {"env_manager": "multilogin", "folder_id": MLX_FOLDER_ID, "profile_id": MLX_PROFILE_ID, "url": "https://chatgpt.com/c/x"}
+    assert chatgpt.env_exists(locator, mlx_profiles_root=str(root)) is False
+
+
+def test_env_exists_gologin_true_and_missing(tmp_path):
+    root = tmp_path / "gologin"
+    (root / GOLOGIN_PROFILE_ID).mkdir(parents=True)
+    locator = {"env_manager": "gologin", "profile_id": GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/x"}
+    assert chatgpt.env_exists(locator, gologin_profiles_root=str(root)) is True
+    other = {"env_manager": "gologin", "profile_id": "b" * 24, "url": "https://chatgpt.com/c/x"}
+    assert chatgpt.env_exists(other, gologin_profiles_root=str(root)) is False
+
+
+def test_env_exists_unreadable_root_returns_false(tmp_path):
+    missing_root = tmp_path / "does_not_exist_at_all" / "nested"
+    locator = {"env_manager": "gologin", "profile_id": GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/x"}
+    assert chatgpt.env_exists(locator, gologin_profiles_root=str(missing_root)) is False
+
+
+# ---------------------------------------------------------------------------
+# list_local_environments — shape, sorting, 200-cap, running from injected
+# reader
+# ---------------------------------------------------------------------------
+
+
+def test_list_local_environments_shape_sorting_and_running(tmp_path):
+    mlx_root = tmp_path / "mlx"
+    gologin_root = tmp_path / "gologin"
+    workspace_id = "99999999-9999-4999-8999-999999999999"
+    folder_a, folder_b = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+    profile_a, profile_b = "33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444"
+    (mlx_root / workspace_id / folder_b / profile_b).mkdir(parents=True)
+    (mlx_root / workspace_id / folder_a / profile_a).mkdir(parents=True)
+    (mlx_root / "branding").mkdir(parents=True)
+
+    gologin_a, gologin_b = "aaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbb"
+    (gologin_root / gologin_b).mkdir(parents=True)
+    (gologin_root / gologin_a).mkdir(parents=True)
+
+    def reader():
+        return [f"/x --user-data-dir=/y/{folder_a}/{profile_a}"]
+
+    envs = chatgpt.list_local_environments(
+        mlx_profiles_root=str(mlx_root), gologin_profiles_root=str(gologin_root), process_args_reader=reader,
+    )
+
+    assert [e["folder_id"] for e in envs["multilogin"]] == [folder_a, folder_b]
+    assert envs["multilogin"][0]["running"] is True
+    assert envs["multilogin"][1]["running"] is False
+    assert [e["profile_id"] for e in envs["gologin"]] == [gologin_a, gologin_b]
+    assert all(e["running"] is False for e in envs["gologin"])
+
+
+def test_list_local_environments_200_cap(tmp_path):
+    gologin_root = tmp_path / "gologin"
+    gologin_root.mkdir()
+    for i in range(201):
+        (gologin_root / f"{i:024x}").mkdir()
+    envs = chatgpt.list_local_environments(
+        gologin_profiles_root=str(gologin_root), mlx_profiles_root=str(tmp_path / "no_mlx"),
+        process_args_reader=lambda: [],
+    )
+    assert len(envs["gologin"]) == 200
 
 
 # ---------------------------------------------------------------------------
@@ -514,14 +675,20 @@ def _assert_no_leak(outcome, *secrets):
         assert secret not in detail, f"outcome leaked a locator value: {secret!r} in {detail!r}"
 
 
-def test_falsifier_privacy_chatgpt_success_and_failure(tmp_path):
-    fake_ok = FakeRunner()
-    binding = _chatgpt_binding(url=_SECRET_URL, profile="Default")
-    ok_outcome = chatgpt.open_surface(binding, fake_ok, profiles=_FIXTURE_PROFILES)
-    _assert_no_leak(ok_outcome, _SECRET_URL)
+def test_falsifier_privacy_chatgpt_refusals(tmp_path):
+    # chatgpt.open_surface refuses on every path (Sol architecture correction,
+    # MAS-113, 2026-08-22) — every refusal kind must still carry no locator
+    # value, including the not_found path exercised via an empty tmp store.
+    fake_missing = FakeRunner()
+    missing_binding = _gologin_binding(url=_SECRET_URL)
+    missing_outcome = chatgpt.open_surface(
+        missing_binding, fake_missing,
+        gologin_profiles_root=str(tmp_path / "empty_gologin"), mlx_profiles_root=str(tmp_path / "empty_mlx"),
+    )
+    _assert_no_leak(missing_outcome, _SECRET_URL)
 
     fake_bad_host = FakeRunner()
-    bad_binding = _chatgpt_binding(url="https://evil.example.com/c/" + _SECRET_URL)
+    bad_binding = _gologin_binding(url="https://evil.example.com/c/" + _SECRET_URL)
     bad_outcome = contract.open_binding(bad_binding, fake_bad_host)
     _assert_no_leak(bad_outcome, _SECRET_URL)
 
@@ -891,28 +1058,6 @@ def test_claude_desktop_open_success():
 
 
 # ---------------------------------------------------------------------------
-# list_profiles against the fixture Local State file
-# ---------------------------------------------------------------------------
-
-
-def test_list_profiles_reads_fixture_local_state():
-    profiles = chatgpt.list_profiles(FIXTURE_DIR / "local_state.json")
-    assert profiles == {"Default": "Personal", "Profile 2": "Work Ops"}
-
-
-def test_list_profiles_missing_file_returns_empty(tmp_path):
-    profiles = chatgpt.list_profiles(tmp_path / "does-not-exist.json")
-    assert profiles == {}
-
-
-def test_list_profiles_malformed_json_returns_empty(tmp_path):
-    bad = tmp_path / "Local State"
-    bad.write_text("{not json", encoding="utf-8")
-    profiles = chatgpt.list_profiles(bad)
-    assert profiles == {}
-
-
-# ---------------------------------------------------------------------------
 # end-to-end open_binding happy paths (dispatch works for every provider)
 # ---------------------------------------------------------------------------
 
@@ -958,16 +1103,20 @@ def test_open_binding_dispatches_codex(tmp_path):
     assert outcome["verified"] is True
 
 
-def test_open_binding_dispatches_chatgpt(monkeypatch):
-    # contract.open_binding's chatgpt path calls chatgpt.open_surface without
-    # a profiles override, which defaults to list_profiles() reading the real
-    # Local State file. Monkeypatch that function so this stays hermetic and
-    # deterministic instead of depending on developer-machine Chrome state.
-    monkeypatch.setattr(chatgpt, "list_profiles", lambda *a, **k: dict(_FIXTURE_PROFILES))
+def test_open_binding_dispatches_chatgpt(tmp_path):
+    # contract.open_binding's chatgpt path forwards mlx_profiles_root/
+    # gologin_profiles_root/process_args_reader through to chatgpt.open_surface
+    # — an empty tmp store keeps this hermetic instead of depending on
+    # developer-machine managed-browser state.
     fake = FakeRunner()
-    binding = _chatgpt_binding(profile="Default")
-    outcome = contract.open_binding(binding, fake)
-    assert outcome["ok"] is True
-    assert outcome["action"] == "opened"
+    binding = _gologin_binding()
+    outcome = contract.open_binding(
+        binding, fake,
+        mlx_profiles_root=str(tmp_path / "empty_mlx"), gologin_profiles_root=str(tmp_path / "empty_gologin"),
+        process_args_reader=lambda: [],
+    )
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
     assert outcome["verified"] is False
     assert outcome["provider"] == "chatgpt"
+    assert fake.calls == []

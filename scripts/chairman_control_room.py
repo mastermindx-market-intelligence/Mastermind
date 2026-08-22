@@ -94,10 +94,6 @@ _MAX_BODY_BYTES = 64 * 1024
 #: Timeout for the Macro active-builds refresh subprocess (frozen spec).
 _REFRESH_BUILDS_TIMEOUT = 180.0
 
-#: Timeout for the discover-tabs AppleScript probe — short, this is a
-#: read-only local enumeration a human is waiting on synchronously.
-_DISCOVER_TABS_TIMEOUT = 10.0
-
 #: Cap applied to both discovery listings (claude_code_sessions, codex_sessions).
 _DISCOVER_CAP = 40
 
@@ -257,6 +253,13 @@ class ServerConfig:
     #: ``tmp_path`` here instead.
     claude_projects_dir: str | None = None
     codex_sessions_dir: str | None = None
+    #: Overrides for the ``chatgpt`` adapter's managed-browser environment
+    #: store roots (Sol architecture correction, MAS-113, 2026-08-22) —
+    #: ``None`` (the production default) means the adapter's own real default
+    #: (``~/mlx/profiles`` / ``~/Library/Caches/GoLogin/profiles``). Tests
+    #: inject a ``tmp_path`` here instead.
+    mlx_profiles_root: str | None = None
+    gologin_profiles_root: str | None = None
     #: Process-memory-only live active-builds cache — see module docstring.
     #: A fresh ``ServerConfig`` (i.e. a process restart) always starts empty.
     live_cache: dict[str, Any] = field(default_factory=dict)
@@ -371,65 +374,6 @@ def _compose_with_live_active_builds(
 # discovery — candidate surfaces, zero ownership conferred
 # ---------------------------------------------------------------------------
 
-#: Fixed AppleScript source enumerating every open Chrome tab's URL + title,
-#: tab-separated, one per line. Filtering to ChatGPT hosts happens
-#: SERVER-SIDE in :func:`_chatgpt_tabs`, never inside the script. Returns an
-#: empty string (never launches Chrome) when Chrome is not running — same
-#: "check before touching the app" discipline as
-#: ``integrations.chairman_surfaces.chatgpt.APPLESCRIPT_FOCUS``.
-DISCOVER_TABS_APPLESCRIPT = """\
-on run argv
-    if application "Google Chrome" is not running then
-        return ""
-    end if
-    set outputLines to {}
-    tell application "Google Chrome"
-        repeat with w in windows
-            repeat with t in tabs of w
-                set end of outputLines to ((URL of t as string) & tab & (title of t as string))
-            end repeat
-        end repeat
-    end tell
-    set AppleScript's text item delimiters to linefeed
-    set outputText to outputLines as string
-    set AppleScript's text item delimiters to ""
-    return outputText
-end run
-"""
-
-#: Hosts a discovered ChatGPT tab may report — mirrors
-#: ``integrations.chairman_surfaces.chatgpt._CHATGPT_HOSTS`` (repeated, not
-#: imported, since that name is private to a different package and this is a
-#: one-line constant, not shared validation logic).
-_CHATGPT_DISCOVER_HOSTS = frozenset({"chatgpt.com", "chat.openai.com"})
-
-
-def _discover_tabs_argv() -> list[str]:
-    argv = ["osascript"]
-    for line in DISCOVER_TABS_APPLESCRIPT.splitlines():
-        argv.append("-e")
-        argv.append(line)
-    return argv
-
-
-def _chatgpt_tabs(config: ServerConfig) -> list[dict[str, Any]]:
-    result = config.runner(_discover_tabs_argv(), timeout=_DISCOVER_TABS_TIMEOUT)
-    if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
-        return []
-    stdout = (result.get("stdout") or "").strip("\n")
-    if not stdout:
-        return []
-    tabs: list[dict[str, Any]] = []
-    for line in stdout.split("\n"):
-        if "\t" not in line:
-            continue
-        url, _, title = line.partition("\t")
-        host = (urlsplit(url).hostname or "").lower()
-        if host in _CHATGPT_DISCOVER_HOSTS:
-            tabs.append({"profile": None, "url": url, "title": title})
-    return tabs
-
-
 def _decode_claude_project_slug(slug: str) -> str:
     """Best-effort reverse of Claude Code's ``/`` -> ``-`` project-dir slug.
 
@@ -510,11 +454,10 @@ def _codex_sessions() -> list[dict[str, Any]]:
 
 def _discover_document(config: ServerConfig) -> dict[str, Any]:
     """Zero-write candidate-surface census. Confers zero ownership/binding."""
-    profiles = chatgpt.list_profiles()
-    chatgpt_profiles = [{"dir": d, "name": n} for d, n in sorted(profiles.items())]
     return {
-        "chatgpt_profiles": chatgpt_profiles,
-        "chatgpt_tabs": _chatgpt_tabs(config),
+        "chatgpt_environments": chatgpt.list_local_environments(
+            mlx_profiles_root=config.mlx_profiles_root, gologin_profiles_root=config.gologin_profiles_root,
+        ),
         "claude_code_sessions": _claude_code_sessions(),
         "codex_sessions": _codex_sessions(),
         "cursor": {
@@ -768,6 +711,8 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             binding, config.runner,
             claude_projects_dir=config.claude_projects_dir,
             codex_sessions_dir=config.codex_sessions_dir,
+            mlx_profiles_root=config.mlx_profiles_root,
+            gologin_profiles_root=config.gologin_profiles_root,
         )
         # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
         # blocker 2): a mere Terminal-launch ACK must never advance this —

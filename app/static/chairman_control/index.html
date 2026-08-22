@@ -177,7 +177,35 @@
             <p class="ccr-field-note">Required when the provider is chatgpt.</p>
           </div>
 
-          <div class="ccr-field ccr-field-wide">
+          <div class="ccr-field ccr-field-wide" id="bind-chatgpt-fields" hidden>
+            <p class="ccr-field-note">
+              ChatGPT seats live in a persistent GoLogin or Multilogin managed-browser
+              environment. Bind its exact local identity plus the conversation URL —
+              never a Chrome profile, and never proxy/fingerprint/cookie material.
+            </p>
+            <div class="ccr-field">
+              <label for="bind-chatgpt-manager">Environment manager</label>
+              <select id="bind-chatgpt-manager" name="env_manager">
+                <option value="gologin">gologin</option>
+                <option value="multilogin">multilogin</option>
+              </select>
+            </div>
+            <div class="ccr-field" id="bind-chatgpt-folder-field" hidden>
+              <label for="bind-chatgpt-folder-id">Folder ID</label>
+              <input type="text" id="bind-chatgpt-folder-id" name="folder_id" placeholder="uuid">
+              <p class="ccr-field-note">Multilogin only.</p>
+            </div>
+            <div class="ccr-field">
+              <label for="bind-chatgpt-profile-id">Profile ID</label>
+              <input type="text" id="bind-chatgpt-profile-id" name="profile_id">
+            </div>
+            <div class="ccr-field">
+              <label for="bind-chatgpt-url">Conversation URL</label>
+              <input type="text" id="bind-chatgpt-url" name="url" placeholder="https://chatgpt.com/c/...">
+            </div>
+          </div>
+
+          <div class="ccr-field ccr-field-wide" id="bind-locator-field">
             <label for="bind-locator">Locator</label>
             <textarea id="bind-locator" name="locator" rows="3" required spellcheck="false">{}</textarea>
             <p class="ccr-field-note">A JSON object. Its allowed keys depend on the provider.</p>

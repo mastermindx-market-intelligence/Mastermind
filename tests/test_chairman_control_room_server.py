@@ -9,9 +9,16 @@ zero-ownership discovery endpoint (``/api/discover``), and response headers
 
 Hermetic: the server always runs in-process on an OS-assigned ephemeral port
 (``127.0.0.1:0``) against a throwaway ``tmp_path`` repo/macro root and a
-throwaway bindings file. Every subprocess call is intercepted by an injected
-``FakeRunner`` — no real ``osascript``/Chrome/``open``/build-map subprocess is
-ever spawned by this suite.
+throwaway bindings file. Every subprocess call the server itself dispatches
+via ``config.runner`` is intercepted by an injected ``FakeRunner`` — no real
+``osascript``/Chrome/``open``/build-map subprocess is ever spawned by this
+suite through that seam. The one documented exception: the chatgpt discovery
+endpoint's local ``ps`` liveness probe (``integrations.chairman_surfaces.
+chatgpt._default_process_args_reader``, Sol architecture correction,
+MAS-113, 2026-08-22) is a bounded, read-only, harmless local process-list
+read with no seam threaded through ``ServerConfig`` (frozen spec scope); it
+never matches this suite's fixture UUIDs, so its result is always
+deterministic here.
 """
 from __future__ import annotations
 
@@ -69,6 +76,8 @@ def _make_config(
     live_cache=None,
     claude_projects_dir=None,
     codex_sessions_dir=None,
+    mlx_profiles_root=None,
+    gologin_profiles_root=None,
 ) -> "server_mod.ServerConfig":
     repo_root = tmp_path / "mastermind_repo"
     repo_root.mkdir(exist_ok=True)
@@ -97,6 +106,8 @@ def _make_config(
         live_cache=live_cache if live_cache is not None else {},
         claude_projects_dir=claude_projects_dir,
         codex_sessions_dir=codex_sessions_dir,
+        mlx_profiles_root=mlx_profiles_root if mlx_profiles_root is not None else str(tmp_path / "empty_mlx"),
+        gologin_profiles_root=gologin_profiles_root if gologin_profiles_root is not None else str(tmp_path / "empty_gologin"),
     )
 
 
@@ -377,6 +388,56 @@ def test_valid_bind_then_unbind_roundtrip(tmp_path):
 
         doc, _problems = sb.load_bindings(config.bindings_path)
         assert doc["bindings"] == []
+
+
+def test_chatgpt_bind_via_managed_env_fields_round_trips(tmp_path):
+    """Sol architecture correction (MAS-113, 2026-08-22): a chatgpt bind body
+    built from the new env_manager/folder_id/profile_id/url fields (the
+    client-side form's shape) round-trips through the store, and the old
+    ``browser_profile``/``chatgpt_url`` form is refused by schema validation."""
+    config = _make_config(tmp_path)
+    body = {
+        "work_ref": "WS:CHATGPT-BIND-TEST",
+        "role": "chairman",
+        "provider": "chatgpt",
+        "seat_ref": "chatgpt-seat-1",
+        "locator": {
+            "env_manager": "multilogin",
+            "folder_id": "11111111-1111-4111-8111-111111111111",
+            "profile_id": "22222222-2222-4222-8222-222222222222",
+            "url": "https://chatgpt.com/c/abc123",
+        },
+    }
+    with _running_server(config) as (_httpd, port):
+        status, _headers, resp_body = _post(port, "/api/bind", body, headers=_auth_headers(config))
+        assert status == 200
+        payload = json.loads(resp_body)
+        assert payload["ok"] is True
+
+        doc, problems = sb.load_bindings(config.bindings_path)
+        assert problems == []
+        bound = doc["bindings"][0]
+        assert bound["provider"] == "chatgpt"
+        assert bound["locator_kind"] == "chatgpt_managed_env"
+        assert bound["locator"] == body["locator"]
+
+
+def test_chatgpt_bind_old_browser_profile_form_rejected(tmp_path):
+    config = _make_config(tmp_path)
+    body = {
+        "work_ref": "WS:CHATGPT-OLD-FORM",
+        "role": "worker",
+        "provider": "chatgpt",
+        "seat_ref": "chatgpt-seat-1",
+        "locator": {"browser_profile": "Default", "url": "https://chatgpt.com/c/abc123"},
+    }
+    with _running_server(config) as (_httpd, port):
+        status, _headers, resp_body = _post(port, "/api/bind", body, headers=_auth_headers(config))
+    assert status == 200
+    payload = json.loads(resp_body)
+    assert payload["ok"] is False
+    assert any("browser_profile" in p for p in payload["problems"])
+    assert not config.bindings_path.exists()
 
 
 def test_unbind_unknown_binding_id_is_ok_false(tmp_path):
@@ -667,19 +728,24 @@ def test_refresh_builds_rejects_unknown_body_keys(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 10. /api/discover — chatgpt-host filtering, zero writes, cursor unsupported
+# 10. /api/discover — chatgpt managed-environment identities, zero writes,
+#     cursor unsupported (Sol architecture correction, MAS-113, 2026-08-22)
 # ---------------------------------------------------------------------------
 
 
-def test_discover_filters_to_chatgpt_hosts_only_and_writes_nothing(tmp_path):
-    mixed_stdout = "\n".join([
-        "https://chatgpt.com/c/aaa\tFirst Chat",
-        "https://example.com/not-chatgpt\tSomething Else",
-        "https://chat.openai.com/c/bbb\tSecond Chat",
-        "https://evil.example/chatgpt.com.phish\tPhish",
-    ])
-    runner = FakeRunner(responses=[{"code": 0, "stdout": mixed_stdout, "stderr": "", "timed_out": False}])
-    config = _make_config(tmp_path, runner=runner)
+def test_discover_reports_chatgpt_environments_from_injected_roots_and_writes_nothing(tmp_path):
+    gologin_id = "aaaaaaaaaaaaaaaaaaaaaaaa"
+    workspace_id = "99999999-9999-4999-8999-999999999999"
+    folder_id = "11111111-1111-4111-8111-111111111111"
+    profile_id = "22222222-2222-4222-8222-222222222222"
+
+    mlx_root = tmp_path / "mlx"
+    gologin_root = tmp_path / "gologin"
+    (mlx_root / workspace_id / folder_id / profile_id).mkdir(parents=True)
+    (gologin_root / gologin_id).mkdir(parents=True)
+
+    runner = FakeRunner(responses=[{"code": 0, "stdout": "", "stderr": "", "timed_out": False}])
+    config = _make_config(tmp_path, runner=runner, mlx_profiles_root=str(mlx_root), gologin_profiles_root=str(gologin_root))
 
     before = _snapshot_tree(tmp_path)
     with _running_server(config) as (_httpd, port):
@@ -688,67 +754,30 @@ def test_discover_filters_to_chatgpt_hosts_only_and_writes_nothing(tmp_path):
 
     assert status == 200
     payload = json.loads(body)
-    urls = {tab["url"] for tab in payload["chatgpt_tabs"]}
-    assert urls == {"https://chatgpt.com/c/aaa", "https://chat.openai.com/c/bbb"}
-    assert all(tab["profile"] is None for tab in payload["chatgpt_tabs"])
+    envs = payload["chatgpt_environments"]
+    assert envs["gologin"] == [{"profile_id": gologin_id, "running": False}]
+    assert envs["multilogin"] == [
+        {"workspace_id": workspace_id, "folder_id": folder_id, "profile_id": profile_id, "running": False}
+    ]
     assert payload["cursor"] == {"supported": False, "note": payload["cursor"]["note"]}
     assert payload["cursor"]["supported"] is False
     assert isinstance(payload["claude_code_sessions"], list)
     assert isinstance(payload["codex_sessions"], list)
-    # bindings-file writes excluded (never touched by discover); repo/macro
-    # trees must be byte-for-byte unchanged.
+    # bindings-file writes excluded (never touched by discover); repo/macro/
+    # mlx/gologin trees must be byte-for-byte unchanged (read-only stat only).
     assert before == after
 
 
-def test_discover_chrome_not_running_returns_empty_tabs(tmp_path):
-    runner = FakeRunner(responses=[{"code": 0, "stdout": "", "stderr": "", "timed_out": False}])
-    config = _make_config(tmp_path, runner=runner)
+def test_discover_no_chatgpt_key_carries_chrome_vocabulary(tmp_path):
+    config = _make_config(tmp_path)
     with _running_server(config) as (_httpd, port):
         status, _headers, body = _get(port, "/api/discover", headers=_auth_headers(config))
     assert status == 200
-    assert json.loads(body)["chatgpt_tabs"] == []
-
-
-# ---------------------------------------------------------------------------
-# AppleScript byte-stability + server-side filtering unit test
-# ---------------------------------------------------------------------------
-
-
-def test_discover_tabs_applescript_is_byte_stable():
-    expected = (
-        'on run argv\n'
-        '    if application "Google Chrome" is not running then\n'
-        '        return ""\n'
-        '    end if\n'
-        '    set outputLines to {}\n'
-        '    tell application "Google Chrome"\n'
-        '        repeat with w in windows\n'
-        '            repeat with t in tabs of w\n'
-        '                set end of outputLines to ((URL of t as string) & tab & (title of t as string))\n'
-        '            end repeat\n'
-        '        end repeat\n'
-        '    end tell\n'
-        '    set AppleScript\'s text item delimiters to linefeed\n'
-        '    set outputText to outputLines as string\n'
-        '    set AppleScript\'s text item delimiters to ""\n'
-        '    return outputText\n'
-        'end run\n'
-    )
-    assert server_mod.DISCOVER_TABS_APPLESCRIPT == expected
-
-
-def test_discover_url_filter_is_server_side_not_in_the_script():
-    # The AppleScript itself performs no host filtering — that happens in
-    # Python (_chatgpt_tabs) after the argv/subprocess boundary.
-    assert "chatgpt" not in server_mod.DISCOVER_TABS_APPLESCRIPT.lower()
-
-    runner = FakeRunner(responses=[{"code": 0, "stdout": "https://not-chatgpt.example/x\tTitle", "stderr": "", "timed_out": False}])
-    config = server_mod.ServerConfig(
-        repo_root=Path("/tmp"), macro_root=None, bindings_path=None, token="t", origin="http://127.0.0.1:0",
-        port=0, runner=runner,
-    )
-    tabs = server_mod._chatgpt_tabs(config)
-    assert tabs == []
+    payload = json.loads(body)
+    assert "chatgpt_tabs" not in payload
+    assert "chatgpt_profiles" not in payload
+    assert set(payload["chatgpt_environments"].keys()) == {"multilogin", "gologin"}
+    assert payload["chatgpt_environments"] == {"multilogin": [], "gologin": []}
 
 
 # ---------------------------------------------------------------------------
@@ -890,6 +919,56 @@ def test_open_valid_shaped_nonexistent_codex_session_not_found_file_unchanged(tm
     outcome = json.loads(body)
     assert outcome["ok"] is False
     assert outcome["failure_kind"] == "not_found"
+    assert runner.calls == []
+
+    after_bytes = config.bindings_path.read_bytes()
+    assert after_bytes == before_bytes
+
+
+def test_open_chatgpt_binding_returns_refusal_and_leaves_bindings_file_byte_identical(tmp_path):
+    """(d) Sol architecture correction (MAS-113, 2026-08-22): a chatgpt
+    binding's managed environment is absent from the injected (empty) local
+    stores -> 200, ok:false, failure_kind not_found, verified:false; the
+    bindings file is byte-unchanged (the ``last_verified_at`` stamp law) and
+    the navigation runner is never invoked."""
+    binding_id = "66666666-6666-4666-8666-666666666666"
+    doc = {
+        "schema": sb.SCHEMA,
+        "bindings": [
+            sb.new_binding(
+                work_ref="WS:OPEN-TEST",
+                role="worker",
+                provider="chatgpt",
+                locator_kind="chatgpt_managed_env",
+                locator={
+                    "env_manager": "gologin",
+                    "profile_id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+                    "url": "https://chatgpt.com/c/abc123",
+                },
+                observed_at="2026-08-22T00:00:00Z",
+                last_verified_at=None,
+                seat_ref="chatgpt-seat-1",
+                binding_id=binding_id,
+            )
+        ],
+    }
+    # _make_config's default mlx_profiles_root/gologin_profiles_root point at
+    # empty tmp directories, so env_exists is False and env_running (the one
+    # path that would probe /bin/ps) is never even reached.
+    config = _make_config(tmp_path, now_value="2026-08-22T05:00:00Z")
+    sb.save_bindings(doc, config.bindings_path)
+    before_bytes = config.bindings_path.read_bytes()
+
+    runner = FakeRunner(responses=[{"code": 0, "stdout": "", "stderr": "", "timed_out": False}])
+    config.runner = runner
+
+    with _running_server(config) as (_httpd, port):
+        status, _headers, body = _post(port, "/api/open", {"binding_id": binding_id}, headers=_auth_headers(config))
+    assert status == 200
+    outcome = json.loads(body)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert outcome["verified"] is False
     assert runner.calls == []
 
     after_bytes = config.bindings_path.read_bytes()

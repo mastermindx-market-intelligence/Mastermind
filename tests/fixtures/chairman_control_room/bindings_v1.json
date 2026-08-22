@@ -7,9 +7,10 @@
       "role": "ceo",
       "seat_ref": "chatgpt1",
       "provider": "chatgpt",
-      "locator_kind": "chatgpt_url",
+      "locator_kind": "chatgpt_managed_env",
       "locator": {
-        "browser_profile": "chatgpt1",
+        "env_manager": "gologin",
+        "profile_id": "aaaaaaaaaaaaaaaaaaaaaaaa",
         "url": "https://chatgpt.com/c/fixture-alpha-one"
       },
       "observed_at": "2026-08-21T00:00:00Z",
@@ -21,9 +22,11 @@
       "role": "ceo",
       "seat_ref": "chatgpt2",
       "provider": "chatgpt",
-      "locator_kind": "chatgpt_url",
+      "locator_kind": "chatgpt_managed_env",
       "locator": {
-        "browser_profile": "chatgpt2",
+        "env_manager": "multilogin",
+        "folder_id": "44444444-4444-4444-8444-444444444444",
+        "profile_id": "55555555-5555-4555-8555-555555555555",
         "url": "https://chatgpt.com/c/fixture-alpha-one-dup"
       },
       "observed_at": "2026-08-21T00:01:00Z",

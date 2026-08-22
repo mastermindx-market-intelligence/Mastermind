@@ -10,7 +10,9 @@ plane:
   2. ``test_falsifier_unknown_key_*`` — an unknown key anywhere (document,
      binding, or locator level) is refused.
   3. ``test_falsifier_chatgpt_url_*`` — a disallowed host, non-https scheme,
-     or embedded credential in a ``chatgpt_url`` locator is refused.
+     or embedded credential in a ``chatgpt_managed_env`` locator's ``url`` is
+     refused; ``test_chatgpt_managed_env_*`` — GoLogin/Multilogin environment
+     identity shape (Sol architecture correction, MAS-113, 2026-08-22).
   4. ``test_falsifier_save_bindings_*`` — writes are ``0600`` inside a
      ``0700`` parent, atomic (via a same-directory temp file plus
      ``os.replace``), and byte-deterministic.
@@ -38,13 +40,22 @@ from control_plane import surface_bindings as sb
 # ---------------------------------------------------------------------------
 
 
+#: A syntactically valid GoLogin profile id (24 lowercase hex chars) reused
+#: across the schema tests below.
+_GOLOGIN_PROFILE_ID = "aaaaaaaaaaaaaaaaaaaaaaaa"
+
+
 def _valid_binding(**overrides) -> dict:
     binding = sb.new_binding(
         work_ref="WS:FOO",
         role="ceo",
         provider="chatgpt",
-        locator_kind="chatgpt_url",
-        locator={"browser_profile": "p1", "url": "https://chatgpt.com/c/abc123"},
+        locator_kind="chatgpt_managed_env",
+        locator={
+            "env_manager": "gologin",
+            "profile_id": _GOLOGIN_PROFILE_ID,
+            "url": "https://chatgpt.com/c/abc123",
+        },
         observed_at="2026-08-21T00:00:00Z",
         seat_ref="chatgpt1",
         binding_id="11111111-1111-4111-8111-111111111111",
@@ -156,15 +167,149 @@ def test_falsifier_unknown_key_at_locator_level():
 )
 def test_falsifier_chatgpt_url_refused(url):
     binding = _valid_binding()
-    binding["locator"] = {"browser_profile": "p1", "url": url}
+    binding["locator"] = {"env_manager": "gologin", "profile_id": _GOLOGIN_PROFILE_ID, "url": url}
     problems = sb.validate_bindings_document(_doc(binding))
     assert any(".locator.url" in p for p in problems), problems
 
 
 def test_chatgpt_url_chat_openai_com_host_allowed():
     binding = _valid_binding()
-    binding["locator"] = {"browser_profile": "p1", "url": "https://chat.openai.com/c/abc"}
+    binding["locator"] = {
+        "env_manager": "gologin", "profile_id": _GOLOGIN_PROFILE_ID, "url": "https://chat.openai.com/c/abc",
+    }
     assert sb.validate_bindings_document(_doc(binding)) == []
+
+
+# ---------------------------------------------------------------------------
+# falsifier 3b — chatgpt_managed_env law (Sol architecture correction,
+# MAS-113, 2026-08-22): GoLogin/Multilogin environment identity, never a
+# Chrome profile.
+# ---------------------------------------------------------------------------
+
+
+def test_chatgpt_managed_env_multilogin_valid():
+    binding = _valid_binding(
+        locator={
+            "env_manager": "multilogin",
+            "folder_id": "11111111-1111-4111-8111-111111111111",
+            "profile_id": "22222222-2222-4222-8222-222222222222",
+            "url": "https://chatgpt.com/c/abc123",
+        },
+    )
+    assert sb.validate_bindings_document(_doc(binding)) == []
+
+
+def test_chatgpt_managed_env_gologin_valid():
+    binding = _valid_binding(
+        locator={"env_manager": "gologin", "profile_id": _GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/abc123"},
+    )
+    assert sb.validate_bindings_document(_doc(binding)) == []
+
+
+def test_chatgpt_managed_env_gologin_with_folder_id_rejected_with_exact_text():
+    binding = _valid_binding(
+        locator={
+            "env_manager": "gologin",
+            "folder_id": "11111111-1111-4111-8111-111111111111",
+            "profile_id": _GOLOGIN_PROFILE_ID,
+            "url": "https://chatgpt.com/c/abc123",
+        },
+    )
+    problems = sb.validate_bindings_document(_doc(binding))
+    expected = (
+        "gologin environments are addressed by profile_id only; folder_id is not part of the durable address"
+    )
+    assert any(expected in p for p in problems), problems
+
+
+def test_chatgpt_managed_env_multilogin_missing_folder_id_rejected():
+    binding = _valid_binding(
+        locator={
+            "env_manager": "multilogin",
+            "profile_id": "22222222-2222-4222-8222-222222222222",
+            "url": "https://chatgpt.com/c/abc123",
+        },
+    )
+    problems = sb.validate_bindings_document(_doc(binding))
+    assert any(".locator.folder_id" in p for p in problems), problems
+
+
+@pytest.mark.parametrize(
+    "bad_profile_id",
+    [
+        "AAAAAAAAAAAAAAAAAAAAAAAA",  # uppercase — the store is lowercase only
+        "not-hex-not-24-chars",
+        "short",
+    ],
+)
+def test_chatgpt_managed_env_gologin_malformed_profile_id_rejected(bad_profile_id):
+    binding = _valid_binding(
+        locator={"env_manager": "gologin", "profile_id": bad_profile_id, "url": "https://chatgpt.com/c/abc123"},
+    )
+    problems = sb.validate_bindings_document(_doc(binding))
+    assert any(".locator.profile_id" in p for p in problems), problems
+
+
+def test_chatgpt_managed_env_multilogin_non_uuid_ids_rejected():
+    binding = _valid_binding(
+        locator={
+            "env_manager": "multilogin",
+            "folder_id": "not-a-uuid",
+            "profile_id": "also-not-a-uuid",
+            "url": "https://chatgpt.com/c/abc123",
+        },
+    )
+    problems = sb.validate_bindings_document(_doc(binding))
+    assert any(".locator.folder_id" in p for p in problems), problems
+    assert any(".locator.profile_id" in p for p in problems), problems
+
+
+def test_chatgpt_managed_env_unknown_env_manager_rejected():
+    binding = _valid_binding(
+        locator={"env_manager": "chrome", "profile_id": _GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/abc123"},
+    )
+    problems = sb.validate_bindings_document(_doc(binding))
+    assert any(".locator.env_manager" in p for p in problems), problems
+
+
+def test_chatgpt_old_url_locator_kind_rejected():
+    """The pre-correction ``chatgpt_url`` locator_kind no longer exists."""
+    binding = _valid_binding(locator_kind="chatgpt_url")
+    problems = sb.validate_bindings_document(_doc(binding))
+    assert any("locator_kind" in p for p in problems), problems
+
+
+def test_chatgpt_old_browser_profile_form_rejected():
+    """The pre-correction ``browser_profile`` locator key is unknown now."""
+    binding = _valid_binding(
+        locator={"browser_profile": "Default", "url": "https://chatgpt.com/c/abc123"},
+    )
+    problems = sb.validate_bindings_document(_doc(binding))
+    assert any("browser_profile" in p for p in problems), problems
+    assert any(".locator.env_manager" in p for p in problems), problems
+
+
+# ---------------------------------------------------------------------------
+# falsifier 1b — proxy/IP/fingerprint/cookie/credential/token belt (Sol
+# architecture correction, MAS-113, 2026-08-22)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["proxy", "proxy_password", "fingerprint", "cookies", "ip", "access_token", "user_agent", "api_key"],
+)
+def test_falsifier_managed_env_belt_forbidden_key_in_locator(key):
+    binding = _valid_binding()
+    binding["locator"] = dict(binding["locator"])
+    binding["locator"][key] = "should-never-be-here"
+    doc = _doc(binding)
+
+    problems = sb.validate_bindings_document(doc)
+    assert any(key.lower() in p.lower() and "forbidden" in p.lower() for p in problems), problems
+    with pytest.raises(sb.SurfaceBindingViolation) as excinfo:
+        sb.save_bindings(doc, path="/tmp/should-not-be-reached-belt.json")
+    assert key.lower() in str(excinfo.value).lower()
 
 
 def test_claude_desktop_url_scheme_allowed():
@@ -490,15 +635,15 @@ def test_new_binding_requires_caller_supplied_observed_at():
     with pytest.raises(TypeError):
         sb.new_binding(  # missing observed_at
             work_ref="WS:FOO", role="ceo", provider="chatgpt",
-            locator_kind="chatgpt_url",
-            locator={"browser_profile": "p1", "url": "https://chatgpt.com/c/x"},
+            locator_kind="chatgpt_managed_env",
+            locator={"env_manager": "gologin", "profile_id": _GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/x"},
         )
 
 
 def test_new_binding_mints_uuid4_binding_id():
     binding = sb.new_binding(
-        work_ref="WS:FOO", role="ceo", provider="chatgpt", locator_kind="chatgpt_url",
-        locator={"browser_profile": "p1", "url": "https://chatgpt.com/c/x"},
+        work_ref="WS:FOO", role="ceo", provider="chatgpt", locator_kind="chatgpt_managed_env",
+        locator={"env_manager": "gologin", "profile_id": _GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/x"},
         observed_at="2026-08-21T00:00:00Z", seat_ref="chatgpt1",
     )
     assert sb._UUID_RE.match(binding["binding_id"])
@@ -507,14 +652,14 @@ def test_new_binding_mints_uuid4_binding_id():
 
 def test_new_binding_is_deterministic_given_explicit_binding_id():
     a = sb.new_binding(
-        work_ref="WS:FOO", role="ceo", provider="chatgpt", locator_kind="chatgpt_url",
-        locator={"browser_profile": "p1", "url": "https://chatgpt.com/c/x"},
+        work_ref="WS:FOO", role="ceo", provider="chatgpt", locator_kind="chatgpt_managed_env",
+        locator={"env_manager": "gologin", "profile_id": _GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/x"},
         observed_at="2026-08-21T00:00:00Z", seat_ref="chatgpt1",
         binding_id="11111111-1111-4111-8111-111111111111",
     )
     b = sb.new_binding(
-        work_ref="WS:FOO", role="ceo", provider="chatgpt", locator_kind="chatgpt_url",
-        locator={"browser_profile": "p1", "url": "https://chatgpt.com/c/x"},
+        work_ref="WS:FOO", role="ceo", provider="chatgpt", locator_kind="chatgpt_managed_env",
+        locator={"env_manager": "gologin", "profile_id": _GOLOGIN_PROFILE_ID, "url": "https://chatgpt.com/c/x"},
         observed_at="2026-08-21T00:00:00Z", seat_ref="chatgpt1",
         binding_id="11111111-1111-4111-8111-111111111111",
     )

@@ -86,7 +86,7 @@ ROLES = ("chairman", "ceo", "coo", "worker")
 PROVIDERS = ("chatgpt", "claude_code", "claude_desktop", "cursor_agent", "codex")
 
 _PROVIDER_LOCATOR_KIND: dict[str, str] = {
-    "chatgpt": "chatgpt_url",
+    "chatgpt": "chatgpt_managed_env",
     "claude_code": "claude_code_session",
     "claude_desktop": "claude_desktop_url",
     "cursor_agent": "cursor_agent_thread",
@@ -95,12 +95,31 @@ _PROVIDER_LOCATOR_KIND: dict[str, str] = {
 
 #: Closed key set for each locator kind.
 _LOCATOR_ALLOWED_KEYS: dict[str, frozenset[str]] = {
-    "chatgpt_url": frozenset({"browser_profile", "url"}),
+    "chatgpt_managed_env": frozenset({"env_manager", "folder_id", "profile_id", "url"}),
     "claude_code_session": frozenset({"project_dir", "session_id"}),
     "claude_desktop_url": frozenset({"url"}),
     "cursor_agent_thread": frozenset({"chat_id", "workspace_dir"}),
     "codex_session": frozenset({"session_id", "cwd"}),
 }
+
+#: Managed-browser environment vendors a ``chatgpt`` seat may be addressed
+#: in (Sol architecture correction, MAS-113, 2026-08-22). ChatGPT seats live
+#: in persistent GoLogin/Multilogin environments, never an ordinary Chrome
+#: profile — see :mod:`integrations.chairman_surfaces.chatgpt` for the full
+#: law and the falsifier evidence behind it.
+ENV_MANAGERS = ("gologin", "multilogin")
+
+#: GoLogin's on-disk profile id shape: a 24-character lowercase hex string
+#: (matches the real local ``~/Library/Caches/GoLogin/profiles/<id>`` store —
+#: lowercase only, never validated case-insensitively).
+_GOLOGIN_PROFILE_ID_RE = re.compile(r"^[0-9a-f]{24}$")
+
+#: Public aliases for the two id-shape regexes a caller outside this module
+#: (currently :mod:`integrations.chairman_surfaces.chatgpt`) needs to reuse
+#: rather than duplicate. The private names above remain this module's own
+#: canonical definitions; these are read-only re-exports of the same compiled
+#: pattern objects, never a second definition to drift out of sync.
+GOLOGIN_PROFILE_ID_RE = _GOLOGIN_PROFILE_ID_RE
 
 #: Closed key set for a Binding.
 _BINDING_ALLOWED_KEYS = frozenset({
@@ -126,17 +145,35 @@ _DOCUMENT_ALLOWED_KEYS = frozenset({"schema", "bindings"})
 #: a replacement for the closed-key check: it exists so the refusal is
 #: precisely diagnosable ("key X carries lifecycle/authority semantics")
 #: rather than only "key X is unknown here".
+#:
+#: The proxy/IP/fingerprint/cookie/credential/token entries exist specifically
+#: for the managed-browser (GoLogin/Multilogin) chatgpt locator (Sol
+#: architecture correction, MAS-113, 2026-08-22): those environments carry
+#: live proxy and fingerprint configuration in the vendor's own store, and
+#: this belt keeps that material from ever being copied into a navigation-only
+#: cache alongside the seat's durable address — the address is an
+#: environment/profile ID plus a conversation URL, never the environment's
+#: network or fingerprint material.
 FORBIDDEN_SEMANTIC_KEYS = frozenset({
     "status", "state", "lifecycle", "priority", "rank", "next_action",
     "completion", "complete", "done", "queue", "queue_position", "lease",
     "claim", "authority", "permission", "attention", "target", "result",
     "verdict", "review", "token", "cookie", "credential", "secret",
     "password", "prompt", "transcript", "message",
+    "proxy", "proxy_server", "proxy_username", "proxy_password", "proxies",
+    "ip", "ip_address", "fingerprint", "fingerprints", "cookies",
+    "user_agent", "api_key", "apikey", "access_token", "refresh_token",
 })
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
 )
+
+#: Public re-export of :data:`_UUID_RE` — see :data:`GOLOGIN_PROFILE_ID_RE`'s
+#: comment; one definition, reused rather than duplicated by callers outside
+#: this module.
+UUID_RE = _UUID_RE
+
 _WORK_REF_RE = re.compile(r"^(WS|JOB|PR):\S+$")
 
 _CHATGPT_HOSTS = frozenset({"chatgpt.com", "chat.openai.com"})
@@ -253,10 +290,26 @@ def _validate_locator(provider: str, locator: Any, path: str, problems: list[str
     kind = _PROVIDER_LOCATOR_KIND[provider]
     _check_closed(locator, _LOCATOR_ALLOWED_KEYS[kind], path, problems)
 
-    if kind == "chatgpt_url":
-        profile = locator.get("browser_profile")
-        if not isinstance(profile, str) or not profile.strip():
-            problems.append(f"{path}.browser_profile: must be a non-empty string")
+    if kind == "chatgpt_managed_env":
+        manager = locator.get("env_manager")
+        if manager not in ENV_MANAGERS:
+            problems.append(f"{path}.env_manager: must be one of {sorted(ENV_MANAGERS)}")
+        elif manager == "multilogin":
+            folder_id = locator.get("folder_id")
+            if not isinstance(folder_id, str) or not _UUID_RE.match(folder_id):
+                problems.append(f"{path}.folder_id: must be a uuid string")
+            profile_id = locator.get("profile_id")
+            if not isinstance(profile_id, str) or not _UUID_RE.match(profile_id):
+                problems.append(f"{path}.profile_id: must be a uuid string")
+        elif manager == "gologin":
+            if "folder_id" in locator:
+                problems.append(
+                    f"{path}.folder_id: gologin environments are addressed by "
+                    f"profile_id only; folder_id is not part of the durable address"
+                )
+            profile_id = locator.get("profile_id")
+            if not isinstance(profile_id, str) or not _GOLOGIN_PROFILE_ID_RE.match(profile_id):
+                problems.append(f"{path}.profile_id: must be a 24-character lowercase hex string")
         err = _check_chatgpt_url(locator.get("url"))
         if err:
             problems.append(f"{path}.url: {err}")
