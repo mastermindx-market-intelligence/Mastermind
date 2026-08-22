@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
 import threading
@@ -9,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import control_plane.codex_operator_adapter as codex_operator_adapter
 from control_plane.codex_operator_adapter import (
     CodexAdapterError,
     CodexOperatorAdapter,
@@ -35,7 +38,7 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_orchestrator import OperatorHarnessOrchestrator
-from scripts.ohf.laboratory import AppServerClient
+from scripts.ohf.laboratory import AppServerClient, PrivateRawTurnPage
 from scripts.ohf.redaction import REDACTED
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -924,6 +927,190 @@ def test_event_cursor_is_generation_scoped_and_candidate_is_never_completion(
         harness.adapter.read_events(
             EventCursor("wrong-attempt", "epoch-1", "gen-1", turn_id="turn-1")
         )
+
+
+def test_orchestration_principal_observations_bind_exact_launched_process_and_home(
+    harness: Harness,
+) -> None:
+    started, _, _ = _start(harness)
+
+    process = harness.adapter.observe_process_credentials(harness.generation)
+    provider_home = harness.adapter.observe_provider_home_identity(harness.generation)
+
+    assert process.process_identity == {
+        "pid": started.process.pid,
+        "pgid": started.process.pgid,
+        "process_start_identity": started.process.process_start_identity,
+        "boot_id": started.process.boot_id,
+    }
+    assert process.os_principal_uid == os.getuid()
+    assert process.os_principal_name
+    assert provider_home.provider_home_identity["path"] == str(
+        harness.adapter.codex_home
+    )
+    assert provider_home.provider_home_identity["mode"] == 0o700
+
+
+def test_private_raw_role_result_is_canonical_lossless_and_digest_bound(
+    tmp_path: Path,
+) -> None:
+    envelope = {
+        "schema_version": "mastermind.executive_orchestration_result/v1",
+        "job_id": "JOB-PLAN",
+        "attempt_id": "ATT-PLAN",
+        "role": "plan",
+        "worker_id": "slot-a",
+        "provider": "openai-codex",
+        "account_label": "slot-a@company",
+        "process_generation_id": "gen-1",
+        "provider_session_id": "session-fixture",
+        "role_result": {
+            "schema_version": "mastermind.execution_plan/v1",
+            "root_job_id": "JOB-ROOT",
+            "plan_attempt_id": "ATT-PLAN",
+            "steps": [
+                {
+                    "ordinal": 0,
+                    "step_id": "STEP-1",
+                    "objective": "Perform one bounded read-only task.",
+                    "business_impact": "routine",
+                    "review_required": False,
+                    "requested_authorities": ["READ"],
+                    "allowed_write_paths": [],
+                    "validation_ids": [],
+                    "attempt_limit": 1,
+                    "cost_class": "small",
+                }
+            ],
+        },
+    }
+    canonical = json.dumps(
+        envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    harness = _make_harness(
+        tmp_path,
+        extra_env={"OHF_FAKE_TURN_REPLY": canonical},
+        turn_input="Produce the exact closed planning result.",
+    )
+    _, _, launch = _start(harness)
+    turn = TurnRef("turn-1", "epoch-1", "gen-1", "attempt-1")
+    started = harness.adapter.begin_turn(
+        operation_id=_op("raw-turn"),
+        turn=turn,
+        generation=harness.generation,
+        launch=launch,
+    )
+    candidate = harness.adapter.collect_candidate_result(turn)
+
+    observation = harness.adapter.observe_raw_role_result(turn)
+
+    assert observation.provider_native_turn_id == started.provider_native_turn_id
+    assert observation.provider_turn_artifact_digest == candidate.artifact_digest
+    assert observation.canonical_result_json == canonical
+    assert observation.canonical_result_digest == hashlib.sha256(
+        canonical.encode("utf-8")
+    ).hexdigest()
+    assert observation.canonical_result_byte_length == len(canonical.encode("utf-8"))
+    assert canonical not in repr(observation)
+
+
+def _raw_turn_fixture(tmp_path: Path, *, reply: str):
+    harness = _make_harness(
+        tmp_path,
+        extra_env={"OHF_FAKE_TURN_REPLY": reply},
+        turn_input="Produce the exact closed result.",
+    )
+    _, _, launch = _start(harness)
+    turn = TurnRef("turn-1", "epoch-1", "gen-1", "attempt-1")
+    started = harness.adapter.begin_turn(
+        operation_id=_op("raw-pagination-turn"),
+        turn=turn,
+        generation=harness.generation,
+        launch=launch,
+    )
+    harness.adapter.collect_candidate_result(turn)
+    state = harness.adapter._generations[turn.process_generation_id]
+    ordinary = state.client.request(
+        "thread/turns/list", {"threadId": state.provider_session_id}
+    )
+    row = next(item for item in ordinary["data"] if item["id"] == started.provider_native_turn_id)
+    return harness, state, turn, row
+
+
+def test_raw_turn_paginates_to_end_and_refuses_duplicate_match(
+    tmp_path: Path, monkeypatch
+) -> None:
+    canonical = json.dumps({"safe": True}, sort_keys=True, separators=(",", ":"))
+    harness, state, turn, row = _raw_turn_fixture(tmp_path, reply=canonical)
+    pages = iter(
+        [
+            PrivateRawTurnPage({"data": [row], "nextCursor": "cursor-2"}, 10),
+            PrivateRawTurnPage({"data": [row], "nextCursor": None}, 10),
+        ]
+    )
+    monkeypatch.setattr(state.client, "request_raw_turn_page", lambda **_kwargs: next(pages))
+
+    with pytest.raises(CodexAdapterError, match="missing or ambiguous"):
+        harness.adapter.observe_raw_role_result(turn)
+
+
+@pytest.mark.parametrize("next_cursor", [17, "", " repeated "])
+def test_raw_turn_refuses_malformed_cursor(
+    tmp_path: Path, monkeypatch, next_cursor
+) -> None:
+    canonical = json.dumps({"safe": True}, sort_keys=True, separators=(",", ":"))
+    harness, state, turn, _row = _raw_turn_fixture(tmp_path, reply=canonical)
+    monkeypatch.setattr(
+        state.client,
+        "request_raw_turn_page",
+        lambda **_kwargs: PrivateRawTurnPage(
+            {"data": [], "nextCursor": next_cursor}, 10
+        ),
+    )
+
+    with pytest.raises(CodexAdapterError, match="cursor is malformed"):
+        harness.adapter.observe_raw_role_result(turn)
+
+
+def test_raw_turn_refuses_repeated_cursor_and_closed_page_exhaustion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    canonical = json.dumps({"safe": True}, sort_keys=True, separators=(",", ":"))
+    harness, state, turn, _row = _raw_turn_fixture(tmp_path, reply=canonical)
+    monkeypatch.setattr(
+        state.client,
+        "request_raw_turn_page",
+        lambda **_kwargs: PrivateRawTurnPage(
+            {"data": [], "nextCursor": "cursor-repeat"}, 10
+        ),
+    )
+    with pytest.raises(CodexAdapterError, match="cursor is malformed or repeated"):
+        harness.adapter.observe_raw_role_result(turn)
+
+    calls = iter(range(3))
+
+    def endless_pages(**_kwargs):
+        index = next(calls)
+        return PrivateRawTurnPage({"data": [], "nextCursor": f"cursor-{index}"}, 10)
+
+    monkeypatch.setattr(codex_operator_adapter, "MAX_RAW_TURN_PAGES", 2)
+    monkeypatch.setattr(state.client, "request_raw_turn_page", endless_pages)
+    with pytest.raises(CodexAdapterError, match="closed page bound"):
+        harness.adapter.observe_raw_role_result(turn)
+
+
+def test_raw_result_validation_error_never_exposes_secret_shaped_key(
+    tmp_path: Path,
+) -> None:
+    secret = "sk-phase1fc-secret-shaped-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    noncanonical = f'{{"{secret}":1,"{secret}":2}}'
+    harness, _state, turn, _row = _raw_turn_fixture(tmp_path, reply=noncanonical)
+
+    with pytest.raises(CodexAdapterError, match="canonical validation failed") as excinfo:
+        harness.adapter.observe_raw_role_result(turn)
+
+    assert secret not in str(excinfo.value)
+    assert secret not in repr(excinfo.value)
 
 
 def test_constructor_and_import_do_not_start_or_register_provider(

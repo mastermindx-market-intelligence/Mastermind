@@ -163,6 +163,23 @@ def _intent(tmp_path: Path, **overrides) -> dict:
     return intent
 
 
+def _v2_intent(tmp_path: Path, **overrides) -> dict:
+    intent = _intent(tmp_path)
+    intent.update(
+        {
+            "schema": "mastermind.ceo_intent.v2",
+            "intent_kind": "executive_coo_cycle",
+            "business_impact": "material",
+            "execution_contract": {
+                "requested_authorities": ["READ"],
+                "attempt_limit": 2,
+            },
+        }
+    )
+    intent.update(overrides)
+    return intent
+
+
 def _submit(runtime: Runtime, intent: dict, tmp_path: Path) -> dict:
     """Direct-adapter submission with the workspace fence the service supplies."""
 
@@ -988,10 +1005,48 @@ def test_bounds_are_refusals(tmp_path: Path):
     with pytest.raises(CeoIntentError, match="must be between -100 and 100"):
         validate_intent(_intent(tmp_path, priority=101))
     with pytest.raises(CeoIntentError, match="intent.schema must be"):
-        validate_intent(_intent(tmp_path, schema="mastermind.ceo_intent.v2"))
+        validate_intent(_intent(tmp_path, schema="mastermind.ceo_intent.v3"))
     intent = _intent(tmp_path)
     intent["execution_contract"] = dict(intent["execution_contract"], requested_authorities=[])
     with pytest.raises(CeoIntentError, match="must not be empty"):
+        validate_intent(intent)
+
+
+def test_strict_v2_root_is_closed_fingerprinted_and_replay_safe(tmp_path: Path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    intent = _v2_intent(tmp_path)
+    normalized = validate_intent(intent)
+    assert normalized["intent_kind"] == "executive_coo_cycle"
+    assert normalized["business_impact"] == "material"
+
+    first = _submit(runtime, intent, tmp_path)
+    second = _submit(runtime, intent, tmp_path)
+    assert first["schema"] == "mastermind.ceo_intent_receipt.v2"
+    assert second["job_id"] == first["job_id"]
+    assert second["duplicate"] is True
+    root = runtime.jobs.get_job(first["job_id"])
+    assert root is not None
+    assert root.orchestration_role == "aggregation"
+    assert root.orchestration_provenance["source_digest"] == first["fingerprint"]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.pop("business_impact"), "missing required"),
+        (lambda value: value.update({"unexpected": True}), "unexpected key"),
+        (
+            lambda value: value["execution_contract"].update(
+                {"requested_authorities": ["RUN_TESTS"]}
+            ),
+            "must contain READ",
+        ),
+    ],
+)
+def test_strict_v2_missing_unknown_and_no_read_refuse(tmp_path, mutation, message):
+    intent = _v2_intent(tmp_path)
+    mutation(intent)
+    with pytest.raises(CeoIntentError, match=message):
         validate_intent(intent)
 
 

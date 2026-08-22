@@ -3,9 +3,10 @@
 Phase 1D-A gave the AI CEO seat a way to *read* organizational state
 (:mod:`control_plane.ceo_boot_packet`).  This module is the deliberately narrow
 inverse: a trusted local caller submits one typed ``mastermind.ceo_intent.v1``
-envelope, it is validated, adjudicated by the existing authority policy, and
-turned into exactly one durable QUEUED Job through the existing
-``Runtime.jobs.create_job(...)``.  Then it stops.
+or strict cycle-eligible ``mastermind.ceo_intent.v2`` envelope.  It is validated,
+adjudicated by the existing authority policy, and turned into exactly one durable
+QUEUED Job.  V1 uses the compatibility ``Runtime.jobs.create_job(...)`` path;
+v2 uses the runtime-owned strict aggregation-root boundary.  Then it stops.
 
 Design laws
 -----------
@@ -22,20 +23,18 @@ Design laws
   :mod:`control_plane.executive_supervisor`, not
   :mod:`control_plane.executive_worker_broker`, not
   :mod:`control_plane.codex_worker`.  The receipt carries an always-``False``
-  ``dispatched`` field so a caller can never read acceptance as execution.
+  ``dispatched`` field so a caller can never read acceptance as execution.  A
+  v2 root remains unclaimable until the deterministic COO cycle has durably
+  produced and revalidated its aggregation handoff.
   ``ExecutiveControlService.dispatch``/``requeue`` additionally refuse any job
   that is not the fixed proof job, so the *service* will not run a CEO job.
 
-  Do not over-read that.  ``scripts/executive_os_phase1b.py run-once`` calls
-  ``ExecutiveSupervisor.run_once``, which has **no** proof-job gate: it claims
-  and executes ANY queued job, building its launch spec from that job's own
-  ``worktree``, ``allowed_write_paths``, and ``validation_commands``.  So the
-  containment here is that nothing *automatically* runs a CEO job — an operator
-  invoking ``run-once`` can.  What is genuinely new in this phase is the
-  PRINCIPAL: this is the first path on which an LLM-authored JSON envelope
-  determines a job's worktree and argv.  That is why the worktree is fenced to a
-  configured workspace root and argv[0] is shape-bounded below, and why neither
-  fence may be relaxed without review.
+  Do not over-read the v1 compatibility lane: the generic Phase 1B supervisor
+  can still claim a role-null v1 Job when an operator explicitly invokes it.
+  V2 is different by construction.  Its aggregation root and every child are
+  command-bound Phase 1F-C Jobs; generic selection/claim refuses them, planner
+  dispatch is exact-ID cycle-only, and the root remains unclaimable until an
+  exact current aggregation handoff exists.  Neither lane is automatic.
 * **Authority is downstream truth — the CEO is provenance, not root.**  The
   requested authorities travel to :meth:`JobRegistry.create_job` unchanged and
   are adjudicated there by :class:`~control_plane.executive_authority.
@@ -81,9 +80,11 @@ from control_plane.executive_runtime import Job, StateConflict
 
 #: Schema of the envelope this module accepts.  A bump means a migration.
 INTENT_SCHEMA = "mastermind.ceo_intent.v1"
+INTENT_SCHEMA_V2 = "mastermind.ceo_intent.v2"
 
 #: Schema of the receipt this module returns.
 RECEIPT_SCHEMA = "mastermind.ceo_intent_receipt.v1"
+RECEIPT_SCHEMA_V2 = "mastermind.ceo_intent_receipt.v2"
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
 #: ids from colliding with the runtime's own ``uuid4().hex`` command ids, which
@@ -123,6 +124,9 @@ _REQUIRED_KEYS = frozenset(
     }
 )
 _OPTIONAL_KEYS = frozenset({"workstream"})
+_V2_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"intent_kind", "business_impact"})
+_V2_INTENT_KIND = "executive_coo_cycle"
+_V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 
 _GROUNDING_REQUIRED = frozenset({"mastermind_sha", "macro_sha"})
 _GROUNDING_OPTIONAL = frozenset({"boot_packet_schema"})
@@ -528,23 +532,30 @@ def _execution_contract(value: Any) -> dict[str, Any]:
 
 
 def validate_intent(payload: Any) -> dict[str, Any]:
-    """Return the canonical form of one ``mastermind.ceo_intent.v1`` envelope.
+    """Return the canonical form of one closed CEO intent envelope.
 
     Pure: no I/O, no clock, no database, no authority load.  Raises
     :class:`CeoIntentError` with a precise message on anything unrecognized.
+    The v1 branch is unchanged; v2 is a separate discriminator and never
+    upgrades or reinterprets a v1 object.
     """
 
     raw = _mapping(payload, "intent")
     _scan_forbidden(raw)
-    _exact_keys(raw, "intent", _REQUIRED_KEYS, _OPTIONAL_KEYS)
-
+    if "schema" not in raw:
+        raise CeoIntentError("intent is missing required key(s): ['schema']")
     schema = _text(raw["schema"], "intent.schema", max_chars=128)
-    if schema != INTENT_SCHEMA:
+    if schema == INTENT_SCHEMA:
+        _exact_keys(raw, "intent", _REQUIRED_KEYS, _OPTIONAL_KEYS)
+    elif schema == INTENT_SCHEMA_V2:
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _OPTIONAL_KEYS)
+    else:
         raise CeoIntentError(
-            f"intent.schema must be {INTENT_SCHEMA!r}; got {schema!r}"
+            f"intent.schema must be {INTENT_SCHEMA!r} or {INTENT_SCHEMA_V2!r}; "
+            f"got {schema!r}"
         )
     intent: dict[str, Any] = {
-        "schema": INTENT_SCHEMA,
+        "schema": schema,
         "intent_id": _text(raw["intent_id"], "intent.intent_id", pattern=INTENT_ID_RE, max_chars=64),
         "actor": _text(raw["actor"], "intent.actor", pattern=_ACTOR_RE, max_chars=64),
         "objective": _text(raw["objective"], "intent.objective", max_chars=MAX_OBJECTIVE_CHARS),
@@ -557,6 +568,36 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         "grounding": _grounding(raw["grounding"]),
         "execution_contract": _execution_contract(raw["execution_contract"]),
     }
+    if schema == INTENT_SCHEMA_V2:
+        intent_kind = _text(
+            raw["intent_kind"], "intent.intent_kind", max_chars=64
+        )
+        if intent_kind != _V2_INTENT_KIND:
+            raise CeoIntentError(
+                f"intent.intent_kind must be {_V2_INTENT_KIND!r}"
+            )
+        impact = _text(
+            raw["business_impact"], "intent.business_impact", max_chars=16
+        )
+        if impact not in _V2_BUSINESS_IMPACTS:
+            raise CeoIntentError(
+                "intent.business_impact must be routine, material, or critical"
+            )
+        contract = intent["execution_contract"]
+        if "READ" not in contract["requested_authorities"]:
+            raise CeoIntentError(
+                "v2 execution_contract.requested_authorities must contain READ"
+            )
+        if "attempt_limit" not in contract:
+            raise CeoIntentError(
+                "v2 execution_contract.attempt_limit is required"
+            )
+        if not 1 <= int(contract["attempt_limit"]) <= 2:
+            raise CeoIntentError(
+                "v2 execution_contract.attempt_limit must be between 1 and 2"
+            )
+        intent["intent_kind"] = intent_kind
+        intent["business_impact"] = impact
     if "workstream" in raw:
         # A pointer into the Agent OS knowledge plane, recorded for provenance.
         # Nothing in this path opens, resolves, or writes that store.
@@ -624,9 +665,10 @@ def _receipt(
     grounding: Mapping[str, Any],
     duplicate: bool,
     created_at_ms: int,
+    receipt_schema: str = RECEIPT_SCHEMA,
 ) -> dict[str, Any]:
     return {
-        "schema": RECEIPT_SCHEMA,
+        "schema": receipt_schema,
         "intent_id": intent_id,
         "fingerprint": fingerprint,
         "job_id": job.job_id,
@@ -665,6 +707,11 @@ def build_receipt(
         grounding=intent["grounding"],
         duplicate=duplicate,
         created_at_ms=created_at_ms,
+        receipt_schema=(
+            RECEIPT_SCHEMA_V2
+            if intent.get("schema") == INTENT_SCHEMA_V2
+            else RECEIPT_SCHEMA
+        ),
     )
 
 
@@ -672,7 +719,7 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
     """The durable record of WHO asked, for WHAT, grounded on WHICH revisions."""
 
     value = {
-        "schema": INTENT_SCHEMA,
+        "schema": intent["schema"],
         "intent_id": intent["intent_id"],
         "actor": intent["actor"],
         "fingerprint": fingerprint,
@@ -705,10 +752,11 @@ def _receipt_from_event(
     # record before treating it as a CEO intent so a malformed or foreign event
     # under this prefix is a legible refusal, never a receipt for an objective
     # the CEO never sent.
-    if provenance.get("schema") != INTENT_SCHEMA:
+    provenance_schema = provenance.get("schema")
+    if provenance_schema not in {INTENT_SCHEMA, INTENT_SCHEMA_V2}:
         raise CeoIntentError(
             f"intent {intent_id!r} resolves to a record whose provenance schema is "
-            f"{provenance.get('schema')!r}, not {INTENT_SCHEMA!r}"
+            f"{provenance_schema!r}, not a closed CEO intent schema"
         )
     if provenance.get("intent_id") != intent_id:
         raise CeoIntentError(
@@ -730,6 +778,32 @@ def _receipt_from_event(
     job = runtime.jobs.get_job(job_id) if job_id else None
     if job is None:
         raise CeoIntentError(f"intent {intent_id!r} names job {job_id!r}, which does not exist")
+    if provenance_schema == INTENT_SCHEMA_V2:
+        cycle = job.orchestration_provenance
+        if (
+            job.orchestration_role != "aggregation"
+            or job.parent_job_id is not None
+            or job.root_job_id != job.job_id
+            or not isinstance(cycle, Mapping)
+            or cycle.get("schema_version")
+            != "mastermind.executive_orchestration_provenance/v1"
+            or cycle.get("creator") != "ceo_intent"
+            or cycle.get("source_id") != intent_id
+            or cycle.get("source_digest") != recorded
+            or cycle.get("command_id") != command_id_for(intent_id)
+            or cycle.get("job_id") != job.job_id
+            or cycle.get("root_job_id") != job.job_id
+            or payload.get("orchestration_role") != "aggregation"
+            or payload.get("orchestration_provenance_digest")
+            != job.orchestration_provenance_digest
+        ):
+            raise CeoIntentError(
+                f"intent {intent_id!r} does not resolve to its strict v2 aggregation root"
+            )
+    elif job.orchestration_role is not None:
+        raise CeoIntentError(
+            f"v1 intent {intent_id!r} resolved to a cycle-eligible Job"
+        )
     grounding = provenance.get("grounding")
     return _receipt(
         job,
@@ -738,6 +812,11 @@ def _receipt_from_event(
         grounding=grounding if isinstance(grounding, Mapping) else {},
         duplicate=True,
         created_at_ms=int(event.get("created_at_ms") or 0),
+        receipt_schema=(
+            RECEIPT_SCHEMA_V2
+            if provenance_schema == INTENT_SCHEMA_V2
+            else RECEIPT_SCHEMA
+        ),
     )
 
 
@@ -809,24 +888,31 @@ def submit_intent(
 
     contract = intent["execution_contract"]
     try:
-        job = runtime.jobs.create_job(
-            intent["objective"],
-            department=intent["department"],
-            priority=intent["priority"],
-            authority_level=contract.get("authority_level", "A0"),
-            branch=contract.get("branch"),
-            worktree=contract.get("worktree"),
-            constraints=contract.get("constraints"),
-            attempt_limit=contract.get("attempt_limit", 10),
-            # The REQUEST's authorities travel unchanged; the policy inside
-            # create_job is the adjudicator.  Substituting a constant here
-            # would be exactly the bypass this bridge must not contain.
-            requested_authorities=contract["requested_authorities"],
-            allowed_write_paths=contract.get("allowed_write_paths"),
-            validation_commands=contract.get("validation_commands"),
-            command_id=command_id,
-            provenance=_provenance(intent, fingerprint),
-        )
+        if intent["schema"] == INTENT_SCHEMA_V2:
+            job = runtime.jobs.create_v2_orchestration_root(
+                intent,
+                fingerprint=fingerprint,
+                command_id=command_id,
+                workspace_root=workspace_root,
+            )
+        else:
+            job = runtime.jobs.create_job(
+                intent["objective"],
+                department=intent["department"],
+                priority=intent["priority"],
+                authority_level=contract.get("authority_level", "A0"),
+                branch=contract.get("branch"),
+                worktree=contract.get("worktree"),
+                constraints=contract.get("constraints"),
+                attempt_limit=contract.get("attempt_limit", 10),
+                # The REQUEST's authorities travel unchanged; the policy inside
+                # create_job is the adjudicator.
+                requested_authorities=contract["requested_authorities"],
+                allowed_write_paths=contract.get("allowed_write_paths"),
+                validation_commands=contract.get("validation_commands"),
+                command_id=command_id,
+                provenance=_provenance(intent, fingerprint),
+            )
     except StateConflict as exc:
         # ``RuntimeStore.transaction`` converts the UNIQUE-index rejection into
         # StateConflict, so a lost concurrency race and an authority denial
@@ -873,8 +959,10 @@ __all__ = [
     "FORBIDDEN_PROGRAMS",
     "INTENT_ID_RE",
     "INTENT_SCHEMA",
+    "INTENT_SCHEMA_V2",
     "MAX_ENVELOPE_BYTES",
     "RECEIPT_SCHEMA",
+    "RECEIPT_SCHEMA_V2",
     "SHA_RE",
     "build_receipt",
     "canonical_bytes",

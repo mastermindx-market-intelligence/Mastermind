@@ -1,10 +1,13 @@
 # Executive OS Phase 1F — hierarchical orchestration contract
 
-**Status:** Phase 1F-A deliverable plus the Phase 1F-B implementation contract.
-The durable 1F-B runtime and inbox-v2 projection are implemented on the current
-branch; the bounded COO cycle in 1F-C remains DESIGNED HERE, NOT BUILT. Written by
-the COO seat (Fable) against Mastermind `origin/master`
-`9603b408d0b8d3c806a76764f6a5e12454d140a1`.
+**Status:** Phase 1F-A/1F-B accepted baseline plus Phase 1F-C inert implementation
+on a HOLD-FOR-SOL branch. The additive schema-v4/runtime/result/cycle surfaces
+are built and deterministically tested, but are not merged, deployed, armed, or
+accepted as live capability. The governing 1F-C source law is
+`research/EXECUTIVE_OS_PHASE1FC_CEO_POLICY_AND_IMPLEMENTATION_COMMISSION_2026-08-20.md`
+as accepted by merge `a49ac647fff64d034cc965cf54ac48968d6c15be`; this older design memo is
+subordinate where the accepted commission repaired it. The implementation base is
+Mastermind protected `master` `90db9baf5bcc5f2221e3c9870c2aa09a95293c99`.
 **Shipped alongside:** `control_plane/executive_inbox.py` + `scripts/executive_inbox.py`
 + `docs/EXECUTIVE_INBOX.md` (the `mastermind.executive_inbox.v2` read-only projection)
 + `control_plane/executive_runtime.py` schema migration 2.
@@ -26,12 +29,13 @@ writing first (CEO ruling), never silently.
 ## §0 What 1F is, in one paragraph
 
 The Executive OS runtime (Phase 1A–1E) can durably hold jobs, lease them to isolated
-workers, and accept bounded CEO intents. What it cannot yet do is *organize* work:
+workers, and accept bounded CEO intents. Phase 1F adds the governed organization:
 hundreds of worker/job events have no compression into executive attention (fixed by
 1F-A's inbox), jobs have no parent/child structure and no independent-review shape
-(implemented in §3, with runtime acceptance evidence), and there is no bounded COO cycle that turns an
-accepted parent objective into dispatched children, collected results, independent
-reviews, and an aggregated outcome (designed in §4, built in 1F-C). The CEO must
+(implemented in §3, with runtime acceptance evidence), and the inert 1F-C branch
+adds the bounded COO cycle that turns one accepted parent objective into deterministic
+child, review, repair, and aggregation-handoff transitions. It remains fixture/local
+implementation evidence until the later live gates are separately accepted. The CEO must
 eventually operate by exception. Everything below serves that, under one constraint
 repeated until it is boring: **the existing SQLite runtime remains the only lifecycle
 authority, and nothing in 1F creates a second control plane.**
@@ -297,14 +301,14 @@ conformance-tested home as `executive_worker_policy`):
 ```yaml
 coo_cycle_policy:
   schema_version: 1
-  max_fan_out_per_parent: 8      # children per parent — planning, repair, AND review jobs all count
-  max_depth: 2                   # parent → children; grandchildren need a ruling
+  max_fan_out_per_parent: 8
+  max_depth: 1
   max_repair_rounds: 2
-  max_review_attempts_per_job: 2 # review finding 12: void-review replacement has its own ceiling —
-                                 # with one eligible worker every replacement is VOID forever, and
-                                 # "the children cap eventually stops it" is an accident, not a bound
-  max_children_total: 16         # absolute per root tree, reviews included
-  allowed_child_cost_classes: [default, small]   # child ⊆ parent ∩ this list
+  max_review_attempts_per_job: 2
+  max_children_total: 16
+  max_attempts_per_orchestration_job: 2
+  review_job_attempt_limit: 1
+  allowed_child_cost_classes: [default, small]
 ```
 
 Hard rules enforced in the cycle (and, where cheap, as runtime refusals):
@@ -382,26 +386,22 @@ Schema stays v1 through additive kinds; field additions to items bump to v2.
 
 ---
 
-## §6 Open questions requiring a CEO ruling (do not build past these)
+## §6 Closed Phase 1F-C rulings and remaining live boundary
 
-1. **Bounds home + numbers** (§4.3): `authority_map.yml` `coo_cycle_policy` as
-   proposed? Ceilings acceptable?
-2. **Verdict vocabulary** (§3.2): is binary approve/reject enough for v1, or is
-   `request_changes` (reject-with-repair-intent) worth a third value from day one?
-3. **Seat registry** (§2): confirm the standing rule (defer; smallest form in
-   `authority_map.yml` when the CEO-wake phase needs it) or order it earlier.
-4. **Independence bar** (§3.3): is different-`worker_id` sufficient, or must
-   independence require different `provider`/`account_label` where capacity allows?
-5. **Sequencing:** 1F-B (schema + refusals + the §5 inbox kinds, in that PR) then
-   1F-C (cycle) as separate reviewed PRs is the recommendation; a combined build
-   risks the §3.4 refusals landing untested under cycle pressure, and 1F-C's
-   escalation path is a no-op until the §5 kinds exist (finding 11), so they ship
-   WITH 1F-B, not after 1F-C.
-6. **Review-independence starvation:** with `max_review_attempts_per_job`
-   exhausted on a one-worker host (every replacement VOID), does the parent
-   escalate as `review_not_independent`, or may the CEO waive independence for
-   `routine` impact by recorded decision? (Recommendation: escalate; no waiver
-   vocabulary in v1.)
+The accepted Phase 1F-C commission closes the former open questions for inert v1:
+policy lives in `config/authority_map.yml` with the exact ceilings in §4.3; review
+verdicts are exactly `approve|reject`; live independence requires distinct
+completing worker, OS principal/UID, provider home, and account; two VOID reviews
+block with `review_not_independent`; there is no waiver. Phase 1F-B remains the
+accepted baseline and Phase 1F-C is a separate additive schema-v4 build.
+
+The branch stops before every live G0-G7 claim. It registers no workers or
+providers, installs or migrates no host database, creates no scheduling service,
+invokes no external model, and grants no Wake, MCP-B, Slack, Agent OS, Linear, PR,
+merge, deploy, production, or capital authority. The explicit CLI is one
+caller-selected `run-once --parent` mutation against an existing v4 fixture or
+operator-selected root; it never polls or selects a parent. Production exact-ID
+dispatch and arming require their separately reviewed later gates.
 
 ## §7 Architecture contradictions surfaced (for the return handoff)
 

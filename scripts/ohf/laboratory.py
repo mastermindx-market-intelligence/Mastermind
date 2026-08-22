@@ -44,6 +44,9 @@ FORBIDDEN_WRITE_NAMES = (
     "strategic_state.yml",
 )
 
+APP_SERVER_MAX_FRAME_BYTES = 67_108_864
+_TRANSPORT_FAILURE = {"_transport_failure": "app-server transport compromised"}
+
 
 def _strip_toml_table(text: str, header: str) -> str:
     lines: list[str] = []
@@ -255,6 +258,28 @@ class JsonRpcError(RuntimeError):
         self.payload = dict(payload or {})
 
 
+class PrivateRawTurnPage:
+    """One-shot raw response wrapper whose display never reveals provider bytes."""
+
+    __slots__ = ("_payload", "frame_byte_length")
+
+    def __init__(self, payload: dict[str, Any], frame_byte_length: int) -> None:
+        self._payload: dict[str, Any] | None = payload
+        self.frame_byte_length = frame_byte_length
+
+    def __repr__(self) -> str:
+        return "<private-raw-turn-page>"
+
+    __str__ = __repr__
+
+    def consume(self) -> dict[str, Any]:
+        payload = self._payload
+        self._payload = None
+        if payload is None:
+            raise JsonRpcError("private raw turn page was already consumed")
+        return payload
+
+
 @dataclass(frozen=True)
 class AppServerStopProof:
     """Typed containment result for a locally-owned App Server process group."""
@@ -289,6 +314,9 @@ class AppServerClient:
         self._err_reader: threading.Thread | None = None
         self.notifications: list[dict[str, Any]] = []
         self._responses: dict[int, queue.Queue[dict[str, Any] | None]] = {}
+        self._raw_responses: dict[
+            int, queue.Queue[PrivateRawTurnPage | dict[str, str] | None]
+        ] = {}
         self._transport_lock = threading.Lock()
         self._notification_condition = threading.Condition(self._transport_lock)
         self._write_lock = threading.Lock()
@@ -325,19 +353,61 @@ class AppServerClient:
 
     def _read_stdout(self) -> None:
         assert self.proc is not None and self.proc.stdout is not None
-        for raw in self.proc.stdout:
-            line = raw.decode("utf-8", errors="replace").strip()
+        while True:
+            raw = self.proc.stdout.readline(APP_SERVER_MAX_FRAME_BYTES + 2)
+            if not raw:
+                break
+            if len(raw) > APP_SERVER_MAX_FRAME_BYTES or not raw.endswith(b"\n"):
+                self._compromise_transport()
+                return
+            try:
+                line = raw.decode("utf-8", errors="strict").strip()
+            except UnicodeDecodeError:
+                self._compromise_transport()
+                return
             if not line:
                 continue
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
+                with self._notification_condition:
+                    raw_pending = bool(self._raw_responses)
+                if raw_pending:
+                    self._compromise_transport()
+                    return
                 self._stdout.put({"_malformed": True, "raw": redact_text(line)})
                 continue
             if isinstance(payload, dict):
-                observed = redact_evidence(payload)
                 with self._notification_condition:
-                    response_id = observed.get("id")
+                    response_id = payload.get("id")
+                    raw_target = (
+                        self._raw_responses.get(response_id)
+                        if isinstance(response_id, int)
+                        else None
+                    )
+                    if raw_target is not None:
+                        if "error" in payload:
+                            raw_target.put(
+                                {
+                                    "_transport_failure": redact_text(
+                                        str(
+                                            (payload.get("error") or {}).get("message")
+                                            if isinstance(payload.get("error"), Mapping)
+                                            else "raw request failed"
+                                        )
+                                    )
+                                }
+                            )
+                        else:
+                            result = payload.get("result")
+                            if not isinstance(result, dict):
+                                raw_target.put(
+                                    {"_transport_failure": "raw response is malformed"}
+                                )
+                            else:
+                                raw_target.put(PrivateRawTurnPage(result, len(raw)))
+                        continue
+                    observed = redact_evidence(payload)
                     target = (
                         self._responses.get(response_id)
                         if isinstance(response_id, int)
@@ -352,6 +422,25 @@ class AppServerClient:
             self._transport_closed = True
             for target in self._responses.values():
                 target.put(None)
+            for target in self._raw_responses.values():
+                target.put(None)
+            self._notification_condition.notify_all()
+
+    def _compromise_transport(self) -> None:
+        """Fail every waiter without retaining or echoing a compromised frame."""
+
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.kill()
+                self.proc.wait(timeout=1)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        with self._notification_condition:
+            self._transport_closed = True
+            for target in self._responses.values():
+                target.put(dict(_TRANSPORT_FAILURE))
+            for target in self._raw_responses.values():
+                target.put(dict(_TRANSPORT_FAILURE))
             self._notification_condition.notify_all()
 
     def _read_stderr(self) -> None:
@@ -409,6 +498,8 @@ class AppServerClient:
                 raise JsonRpcError(f"timeout waiting for {method}") from exc
             if payload is None:
                 raise JsonRpcError(f"app-server exited before answering {method}")
+            if payload.get("_transport_failure"):
+                raise JsonRpcError("app-server transport compromised")
             if "error" in payload:
                 raise JsonRpcError(
                     redact_text(
@@ -424,6 +515,61 @@ class AppServerClient:
         finally:
             with self._notification_condition:
                 self._responses.pop(request_id, None)
+
+    def request_raw_turn_page(
+        self,
+        *,
+        thread_id: str,
+        native_turn_id: str,
+        cursor: str | None = None,
+        timeout: float = 15.0,
+    ) -> PrivateRawTurnPage:
+        """Issue only the reviewed one-page full turn-list request."""
+
+        if (
+            not isinstance(thread_id, str)
+            or not thread_id
+            or not isinstance(native_turn_id, str)
+            or not native_turn_id
+            or (cursor is not None and (not isinstance(cursor, str) or not cursor))
+        ):
+            raise JsonRpcError("raw turn request identity is invalid")
+        response_queue: queue.Queue[
+            PrivateRawTurnPage | dict[str, str] | None
+        ] = queue.Queue(maxsize=1)
+        with self._notification_condition:
+            if self._transport_closed:
+                raise JsonRpcError("app-server exited before raw turn response")
+            request_id = self._next_id
+            self._next_id += 1
+            self._raw_responses[request_id] = response_queue
+        params: dict[str, Any] = {
+            "threadId": thread_id,
+            "turnId": native_turn_id,
+            "itemsView": "full",
+            "limit": 1,
+            "sortDirection": "desc",
+        }
+        if cursor is not None:
+            params["cursor"] = cursor
+        try:
+            self._send(
+                {"method": "thread/turns/list", "id": request_id, "params": params}
+            )
+            try:
+                page = response_queue.get(timeout=timeout)
+            except queue.Empty as exc:
+                raise JsonRpcError("timeout waiting for raw turn response") from exc
+            if page is None:
+                raise JsonRpcError("app-server exited before raw turn response")
+            if isinstance(page, dict):
+                raise JsonRpcError(
+                    redact_text(page.get("_transport_failure") or "raw request failed")
+                )
+            return page
+        finally:
+            with self._notification_condition:
+                self._raw_responses.pop(request_id, None)
 
     def wait_notification(
         self, method: str, *, timeout: float = 15.0

@@ -61,6 +61,22 @@ executive_worker_policy:
     RUN_TESTS: declared_argv_commands
 
 # ───────────────────────────────────────────────────────────────────────────────
+# PHASE 1F-C COO RUN-ONCE POLICY
+# --------------------------------
+# Closed, reviewed operational bounds for the inert deterministic COO cycle.
+# Runtime code accepts this exact block only. There is no environment, CLI, or
+# database override, and changing any value requires a new policy review.
+coo_cycle_policy:
+  schema_version: 1
+  max_fan_out_per_parent: 8
+  max_depth: 1
+  max_repair_rounds: 2
+  max_review_attempts_per_job: 2
+  max_children_total: 16
+  max_attempts_per_orchestration_job: 2
+  review_job_attempt_limit: 1
+  allowed_child_cost_classes: [default, small]
+
 # FLAGS
 # ───────────────────────────────────────────────────────────────────────────────
 flags:

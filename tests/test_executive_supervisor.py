@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
 from control_plane.codex_worker import (
     BinaryAttestation,
     CollectionReceipt,
@@ -22,6 +23,7 @@ from control_plane.codex_worker import (
     WorkerRunStatus,
 )
 from control_plane.executive_runtime import (
+    AttemptLease,
     AttemptStatus,
     JobPayload,
     JobStatus,
@@ -419,6 +421,68 @@ def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> Execu
         require_complete_launch_attestation=True,
         instance_id="supervisor-fixture",
     )
+
+
+def test_start_cycle_job_claims_only_exact_command_bound_job_before_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-cycle",
+        provider="codex",
+        account_label="worker-cycle@company",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "capabilities": ["read"],
+                "cost_class": "small",
+            }
+        },
+    )
+    admitted = submit_intent(
+        runtime,
+        {
+            "schema": INTENT_SCHEMA_V2,
+            "intent_id": "CEO-SUPERVISOR-EXACT-DISPATCH",
+            "actor": "ceo-sol",
+            "objective": "Prove the accepted exact-job supervisor boundary.",
+            "department": "executive-infrastructure",
+            "priority": 9,
+            "grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+            "execution_contract": {
+                "requested_authorities": ["READ"],
+                "attempt_limit": 2,
+            },
+            "intent_kind": "executive_coo_cycle",
+            "business_impact": "material",
+        },
+    )
+    root = runtime.jobs.get_job(admitted["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    unrelated = runtime.jobs.create_job("Unrelated queued sentinel")
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+    captured: list[AttemptLease] = []
+
+    async def stop_before_provider(_job_id: str, lease: AttemptLease):
+        captured.append(lease)
+        return lease
+
+    monkeypatch.setattr(supervisor, "_start_claimed_job", stop_before_provider)
+    command = f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1"
+
+    result = asyncio.run(supervisor.start_cycle_job(planner.job_id, command_id=command))
+
+    assert isinstance(result, AttemptLease)
+    assert result.attempt.job_id == planner.job_id
+    assert captured == [result]
+    assert runtime.attempts.list_attempts(unrelated.job_id) == []
+    assert runtime.jobs.get_job(unrelated.job_id).status is JobStatus.QUEUED
 
 
 def test_run_once_persists_process_checkpoint_result_receipt_and_reopens(tmp_path: Path):

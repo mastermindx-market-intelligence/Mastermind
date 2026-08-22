@@ -1,9 +1,9 @@
 # Executive worker routing — stage 1
 
-**Status:** R1 shadow evidence accepted and Phase 1F-B durable parent/child
-runtime implemented on the current branch; fixture/local execution only by
-explicit operator action; **no new production arming** and Phase 1F-C remains
-unstarted.
+**Status:** R1 shadow evidence and Phase 1F-B are accepted. Phase 1F-C schema-v4
+and the explicit bounded COO `run-once` path are implemented on a HOLD-FOR-SOL
+branch with deterministic fixture evidence only. They are not merged, deployed,
+scheduled, production-armed, or accepted as live capability.
 
 This stage makes economical-worker-first execution real without creating a
 second queue, teaching Chris tmux, or widening Executive OS or MCP authority.
@@ -39,7 +39,7 @@ process, poll, retry, or mark work complete.
 | worker launch | `CodexWorkerAdapter` already enforces exact-SHA workspaces, bounded authorities, no network, no MCP, structured output, artifact hashing, and supervisor-owned validation. | Keep it as the first adapter implementation. Generalize the supervisor type boundary, not its safety policy. |
 | Codex delegation | `.codex/config.toml` enables bounded native agents; read-only supporting profiles use Terra, while the deep reasoning profile keeps Sol. | Preserve those portfolio-analysis fences. Write-capable implementation remains an Executive Job in its own worktree. |
 | `config/agents.yml` | Portfolio reasoning roles still resolve to Sol/xhigh on the Codex production path. | Do not silently downgrade portfolio judgment. Point Executive worker labor to the separate routing policy. |
-| Phase 1F | Phase 1F-B now adds durable parent/root/depth metadata, bounded child creation, independent review verdicts, aggregation refusals, and inbox evidence on this branch. The explicit run-once COO cycle remains unimplemented. | Keep the runtime as the only lifecycle authority; accept Phase 1F-B independently before any Phase 1F-C work. |
+| Phase 1F | Phase 1F-B supplies the accepted hierarchy baseline. The 1F-C branch additively supplies immutable orchestration placement/principal/grant lineage, closed role results, result seals, deterministic run-once transitions, TX-9 continuity, and schema-v4 migration tooling. | Keep SQLite Runtime as the sole lifecycle authority. Hold the PR for Sol; no live G0-G7 claim follows from fixture acceptance. |
 | EXEC-MCP-A | Exactly five tools exist. READONLY refuses the modifying tool; FIXTURE writes only to a temporary service and refuses production paths. No production-write server mode exists. | Make no MCP surface, mode, identity, socket, or peer-UID change. |
 
 ## 2. Policy and aliases
@@ -173,6 +173,19 @@ adapter. It does not open or attach a tmux session. Production Phase 1C-A remain
 proof-job-only in this stage, so none of the commands above arms the installed
 service.
 
+The Phase 1F-C caller is separate and names one already-created strict-v2 root:
+
+```bash
+python -m scripts.executive_os_coo_cycle --root /absolute/fixture-root \
+  run-once --parent JOB-nnn
+```
+
+One invocation recomputes canonical runtime state, commits at most one top-level
+cycle action under a deterministic command ID, and exits. Import and help are
+read-only. The command does not create or migrate a database, select a parent,
+loop, schedule, contact a provider, install a host service, or arm production.
+The separate offline v3-to-v4 migration CLI is the only supported upgrade path.
+
 ## 6. Migration and rollout
 
 ### Wave R0 — merged policy seam (this change)
@@ -192,14 +205,22 @@ service.
   `research/EXECUTIVE_OS_R1_SHADOW_EVIDENCE_2026-08-16.md`.
 - No provider, MCP, live worker slot, or write-capable adapter is invoked.
 
-### Wave Phase 1F-B — durable hierarchy — accepted on this branch
+### Wave Phase 1F-B — durable hierarchy — accepted
 
 - Durable parent/child schema, immutable hierarchy, bounded depth, seat/impact
   fields, fail-closed verdicts, independent-review evidence, aggregation
   refusals, and inbox v2 projection are implemented and tested.
-- Phase 1F-C is deliberately not implemented. It requires its own review and
-  acceptance after this phase; it must remain a separate run-once COO cycle and
-  cannot introduce another queue or state store.
+- Phase 1F-C remains a separate run-once COO cycle and introduces no queue or
+  state store.
+
+### Wave Phase 1F-C — inert COO cycle — HOLD-FOR-SOL
+
+- Schema v4, closed typed orchestration evidence, command-aware exact-ID cycle
+  transitions, offline migration, and deterministic acceptance are implemented.
+- No provider capacity, host database, service, scheduler, external adapter,
+  credential, or production flag is changed.
+- Independent implementation review and Sol acceptance are required before merge;
+  G0-G7 remain distinct later proof/arming gates.
 
 ### Wave R3 — reviewed Codex capacity composition
 

@@ -15,8 +15,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pwd
 import stat
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -51,6 +53,16 @@ from control_plane.operator_harness_contract import (
     TurnRef,
     TurnStartObservation,
     WorkspaceIdentity,
+)
+from control_plane.executive_orchestration_principal import (
+    OSProcessCredentialObservation,
+    ProviderHomeIdentityObservation,
+)
+from control_plane.executive_orchestration_result import (
+    MAX_CANONICAL_RESULT_BYTES,
+    RawRoleResultObservation,
+    canonical_digest as orchestration_result_digest,
+    parse_canonical_json,
 )
 from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, JsonRpcError
 from scripts.ohf.redaction import redact_evidence_text
@@ -90,6 +102,10 @@ ClientFactory = Callable[[list[str], Mapping[str, str], Path], AppServerClient]
 TurnInputLoader = Callable[[TurnRef], str]
 ProcessIdentityObserver = Callable[[int], ProcessIdentityObservation]
 BaseShaResolver = Callable[[Path], str]
+
+MAX_RAW_TURN_PAGES = 128
+MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES = 134_217_728
+RAW_TURN_TOTAL_TIMEOUT_SECONDS = 120.0
 
 
 def _default_client_factory(
@@ -246,6 +262,7 @@ class _GenerationState:
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
     turns: dict[str, str] = field(default_factory=dict)
+    candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
 
 
 class CodexOperatorAdapter:
@@ -778,6 +795,81 @@ class CodexOperatorAdapter:
     ) -> ObservedHarnessAttestation:
         return self._state(generation).attestation
 
+    def observe_process_credentials(
+        self, generation: ProcessGenerationRef
+    ) -> OSProcessCredentialObservation:
+        """Observe the exact launched PID's effective host identity."""
+
+        state = self._state(generation)
+        process = self.process_identity_observer(int(state.process.pid or 0))
+        if process != state.process:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process identity changed before admission",
+                effect_unknown=True,
+            )
+        try:
+            completed = subprocess.run(
+                ["ps", "-o", "uid=", "-p", str(process.pid)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            uid_text = completed.stdout.strip()
+            uid = int(uid_text)
+            principal_name = pwd.getpwuid(uid).pw_name
+        except (KeyError, OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "launched process credentials are not observable",
+                effect_unknown=True,
+            ) from exc
+        return OSProcessCredentialObservation(
+            process_identity={
+                "pid": process.pid,
+                "pgid": process.pgid,
+                "process_start_identity": process.process_start_identity,
+                "boot_id": process.boot_id,
+            },
+            os_principal_name=principal_name,
+            os_principal_uid=uid,
+        )
+
+    def observe_provider_home_identity(
+        self, generation: ProcessGenerationRef
+    ) -> ProviderHomeIdentityObservation:
+        """Fresh lstat of the explicit, already symlink-vetted CODEX_HOME."""
+
+        self._state(generation)
+        _reject_symlink_components(
+            self.codex_home, failure=AdapterFailureClass.AUTH_FAILURE
+        )
+        try:
+            observed = self.codex_home.lstat()
+        except OSError as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.AUTH_FAILURE,
+                "dedicated provider home is not observable",
+                effect_unknown=True,
+            ) from exc
+        if not stat.S_ISDIR(observed.st_mode):
+            raise CodexAdapterError(
+                AdapterFailureClass.AUTH_FAILURE,
+                "dedicated provider home is not a directory",
+                effect_unknown=True,
+            )
+        return ProviderHomeIdentityObservation(
+            provider_home_identity={
+                "path": str(self.codex_home),
+                "device": int(observed.st_dev),
+                "inode": int(observed.st_ino),
+                "uid": int(observed.st_uid),
+                "gid": int(observed.st_gid),
+                "mode": stat.S_IMODE(observed.st_mode),
+            }
+        )
+
     def _state(self, generation: ProcessGenerationRef) -> _GenerationState:
         state = self._generations.get(generation.process_generation_id)
         if state is None or state.generation != generation:
@@ -990,13 +1082,188 @@ class CodexOperatorAdapter:
             )
         texts = turn_texts(matching)
         summary = redact_evidence_text(texts[-1][:4000]) if texts else None
+        artifact_digest = _canonical_digest(matching)
+        state.candidate_artifact_digests[turn.turn_id] = artifact_digest
         return CandidateResult(
             attempt_id=turn.attempt_id,
             session_epoch_id=turn.session_epoch_id,
             process_generation_id=turn.process_generation_id,
-            artifact_digest=_canonical_digest(matching),
+            artifact_digest=artifact_digest,
             summary=summary,
             complete_job_permitted=False,
+        )
+
+    def observe_raw_role_result(self, turn: TurnRef) -> RawRoleResultObservation:
+        """Consume the exact completed native turn through the private raw seam."""
+
+        state = self._generations.get(turn.process_generation_id)
+        if state is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.SESSION_MISSING, "turn generation is missing"
+            )
+        self._assert_turn(state, turn)
+        native_turn = state.turns.get(turn.turn_id)
+        if not native_turn:
+            raise CodexAdapterError(
+                AdapterFailureClass.SESSION_MISSING, "native turn is missing"
+            )
+        deadline = time.monotonic() + RAW_TURN_TOTAL_TIMEOUT_SECONDS
+        cursor: str | None = None
+        cumulative = 0
+        matches: list[Mapping[str, Any]] = []
+        seen_cursors: set[str] = set()
+        reached_end = False
+        for _page in range(MAX_RAW_TURN_PAGES):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CodexAdapterError(
+                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                    "raw turn pagination did not terminate within the deadline",
+                )
+            try:
+                page = state.client.request_raw_turn_page(
+                    thread_id=state.provider_session_id,
+                    native_turn_id=native_turn,
+                    cursor=cursor,
+                    timeout=remaining,
+                )
+                cumulative += page.frame_byte_length
+                if cumulative > MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES:
+                    raise ValueError("raw turn cumulative frame bound exceeded")
+                raw = page.consume()
+            except Exception as exc:
+                raise _rpc_failure(exc, effect_unknown=False) from exc
+            data = raw.get("data")
+            if not isinstance(data, list):
+                raise CodexAdapterError(
+                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                    "raw turn page data is malformed",
+                )
+            matches.extend(
+                row
+                for row in data
+                if isinstance(row, Mapping) and str(row.get("id") or "") == native_turn
+            )
+            next_cursor = raw.get("nextCursor")
+            if next_cursor is None:
+                reached_end = True
+                break
+            if (
+                not isinstance(next_cursor, str)
+                or not next_cursor
+                or next_cursor != next_cursor.strip()
+                or next_cursor in seen_cursors
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                    "raw turn pagination cursor is malformed or repeated",
+                )
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        if not reached_end:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw turn pagination exceeded the closed page bound",
+            )
+        if len(matches) != 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw native turn result is missing or ambiguous",
+            )
+        selected = matches[0]
+        messages = [
+            item
+            for item in selected.get("items", [])
+            if isinstance(item, Mapping)
+            and str(item.get("type") or "") in {"agent_message", "agentMessage"}
+        ]
+        phased = [item for item in messages if item.get("phase") is not None]
+        if phased and len(phased) != len(messages):
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result mixes phased and unphased agent messages",
+            )
+        if phased:
+            if any(item.get("phase") not in {"commentary", "final_answer"} for item in phased):
+                selected_messages: list[Mapping[str, Any]] = []
+            else:
+                selected_messages = [item for item in phased if item.get("phase") == "final_answer"]
+        else:
+            selected_messages = messages if len(messages) == 1 else []
+        if len(selected_messages) != 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result has no unique logical final agent message",
+            )
+        message = selected_messages[0]
+        direct = message.get("text")
+        content = message.get("content")
+        blocks: list[str] = []
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, Mapping) or block.get("type") not in {"text", "output_text"}:
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "raw result contains non-text final content",
+                    )
+                value = block.get("text")
+                if not isinstance(value, str):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "raw result text block is malformed",
+                    )
+                blocks.append(value)
+        joined = "".join(blocks) if blocks else None
+        if direct is not None and not isinstance(direct, str):
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result direct text is malformed",
+            )
+        if isinstance(direct, str) and joined is not None and direct != joined:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result text representations conflict",
+            )
+        result_text = direct if isinstance(direct, str) else joined
+        if not result_text or result_text.startswith("\ufeff"):
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result text is absent or noncanonical",
+            )
+        try:
+            parse_canonical_json(result_text)
+        except Exception:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result canonical validation failed",
+            ) from None
+        encoded = result_text.encode("utf-8")
+        if not 1 <= len(encoded) <= MAX_CANONICAL_RESULT_BYTES:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result byte length is outside the closed bound",
+            )
+        artifact_digest = _canonical_digest(matches)
+        candidate_artifact_digest = state.candidate_artifact_digests.get(turn.turn_id)
+        if (
+            candidate_artifact_digest is None
+            or artifact_digest != candidate_artifact_digest
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "raw result differs from the recorded candidate artifact",
+            )
+        return RawRoleResultObservation(
+            attempt_id=turn.attempt_id,
+            session_epoch_id=turn.session_epoch_id,
+            process_generation_id=turn.process_generation_id,
+            turn_id=turn.turn_id,
+            provider_session_id=state.provider_session_id,
+            provider_native_turn_id=native_turn,
+            provider_turn_artifact_digest=artifact_digest,
+            canonical_result_json=result_text,
+            canonical_result_digest=hashlib.sha256(encoded).hexdigest(),
+            canonical_result_byte_length=len(encoded),
         )
 
     def _observation(
