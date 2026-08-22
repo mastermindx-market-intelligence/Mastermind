@@ -57,14 +57,42 @@ P0 never dispatches, wakes, messages, types prompts, decides completion, ranks t
 roadmap, or creates work. Deleting the local binding file removes Open buttons and
 changes no canonical fact.
 
-## Planned surfaces (per the accepted freeze §8.1)
+## Shipped surfaces (per the accepted freeze §8.1)
 
 ```text
-control_plane/chairman_control_room.py       # pure read-only compositor
-integrations/chairman_surfaces/              # provider navigation adapters
+control_plane/surface_bindings.py            # mastermind.surface_bindings.v1 store (0600 atomic)
+control_plane/chairman_control_room.py       # mastermind.chairman_control_room.v1 pure compositor
+integrations/chairman_surfaces/              # provider navigation adapters (zero-message)
 scripts/chairman_control_room.py             # local CLI / ephemeral loopback server
-app/static/chairman_control/                 # private-local UI assets
-tests/                                       # dedicated CCR tests
+app/static/chairman_control/                 # private-local UI (ink-and-brass, light+dark)
+tests/test_surface_bindings.py               # + test_chairman_control_room.py,
+                                             #   test_chairman_surfaces.py,
+                                             #   test_chairman_control_room_server.py
 ```
 
-Launch/run instructions land here when the implementation exists.
+## Running it
+
+```text
+python3 scripts/chairman_control_room.py [--port 8787] [--macro-root PATH] \
+    [--bindings-path PATH] [--repo-root PATH] [--open]
+```
+
+- Binds 127.0.0.1 only; there is no host flag. `--check` prints a one-shot
+  composition summary (no URLs/session ids) and exits.
+- State recomposes fresh on every page load/poll. "Refresh builds from GitHub"
+  invokes Macro's `build_project_active_build_map.py --json-stdout` seam
+  (requires the seam to be merged at the macro root, and `gh` auth); the live
+  document lives in process memory only and is forgotten on restart.
+- The macro root resolves flag → `MASTERMIND_MACRO_ROOT` → sibling
+  `Macro Dashboard` → `vendor/macro`. Composition latency is dominated by
+  Macro's `agentos.py brief` (~2.5 s on a normal checkout; tens of seconds on
+  a sparse/blobless scratch checkout — prefer a maintained full checkout).
+- Bindings live at
+  `~/Library/Application Support/Mastermind/control-room/surface_bindings.json`
+  (mode 0600, parent 0700, atomic writes). Deleting the file removes Open
+  buttons and changes no canonical fact.
+- ChatGPT tab focus/enumeration requires a one-time macOS Automation grant
+  (osascript → Google Chrome). Profile-targeted opens
+  (`open -na "Google Chrome" --args --profile-directory=…`) need no grant.
+  Terminal-launched resumes (claude/cursor-agent/codex) use the
+  osascript → Terminal grant.
