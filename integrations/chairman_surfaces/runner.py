@@ -30,24 +30,30 @@ def _validate_argv(argv: object) -> list[str]:
     return argv
 
 
-def _cap(text: str | bytes | None) -> str:
+def _cap(text: str | bytes | None, max_bytes: int | None = None) -> str:
+    limit = _MAX_BYTES if max_bytes is None else max_bytes
     if text is None:
         return ""
     if isinstance(text, bytes):
         text = text.decode("utf-8", errors="replace")
     encoded = text.encode("utf-8", errors="replace")
-    if len(encoded) > _MAX_BYTES:
-        return encoded[:_MAX_BYTES].decode("utf-8", errors="ignore")
+    if len(encoded) > limit:
+        return encoded[:limit].decode("utf-8", errors="ignore")
     return text
 
 
-def run_argv(argv: list[str], *, timeout: float = 20.0) -> dict:
+def run_argv(argv: list[str], *, timeout: float = 20.0, max_bytes: int | None = None) -> dict:
     """Run ``argv`` directly (never through a shell) and return a bounded result.
 
     Returns ``{"code": int | None, "stdout": str, "stderr": str, "timed_out":
     bool}``. ``code`` is ``None`` only when ``timed_out`` is ``True`` or the
     executable could not be found/started (in which case ``stderr`` carries
-    the OS error text). stdout/stderr are each capped at 64 KiB.
+    the OS error text). stdout/stderr are each capped at 64 KiB unless the
+    caller passes an explicit ``max_bytes`` — a caller whose probe output is
+    legitimately larger (e.g. a full process-table snapshot) must say so on
+    purpose, because a silent truncation reads as a smaller, healthy result
+    (this exact cap silently hid every running managed-browser process from
+    the chatgpt running-state probe, measured live 2026-08-22).
 
     Raises :class:`ValueError` if ``argv`` is not a non-empty list of plain
     strings, or any element carries a NUL or newline byte.
@@ -64,21 +70,21 @@ def run_argv(argv: list[str], *, timeout: float = 20.0) -> dict:
     except subprocess.TimeoutExpired as exc:
         return {
             "code": None,
-            "stdout": _cap(exc.stdout),
-            "stderr": _cap(exc.stderr),
+            "stdout": _cap(exc.stdout, max_bytes),
+            "stderr": _cap(exc.stderr, max_bytes),
             "timed_out": True,
         }
     except OSError as exc:
         return {
             "code": None,
             "stdout": "",
-            "stderr": _cap(str(exc)),
+            "stderr": _cap(str(exc), max_bytes),
             "timed_out": False,
         }
 
     return {
         "code": completed.returncode,
-        "stdout": _cap(completed.stdout),
-        "stderr": _cap(completed.stderr),
+        "stdout": _cap(completed.stdout, max_bytes),
+        "stderr": _cap(completed.stderr, max_bytes),
         "timed_out": False,
     }

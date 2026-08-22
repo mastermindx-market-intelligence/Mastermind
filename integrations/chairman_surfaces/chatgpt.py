@@ -103,6 +103,14 @@ _USER_DATA_DIR_RE = re.compile(r"--user-data-dir=(\S+)")
 # process observation (read-only; never the outcome `runner`)
 # ---------------------------------------------------------------------------
 
+#: Explicit stdout cap for the full process-table snapshot.  The runner's
+#: 64 KiB default silently DROPPED every managed-browser line on the real
+#: machine (each Mimic/Orbita argv is kilobytes long and the host's table
+#: exceeds 64 KiB), so a running seat read as stopped — measured live
+#: 2026-08-22.  4 MiB comfortably holds any real process table.
+_PS_SNAPSHOT_MAX_BYTES = 4 * 1024 * 1024
+
+
 def _default_process_args_reader() -> list[str]:
     """Best-effort local process command-line snapshot via ``/bin/ps``.
 
@@ -116,7 +124,9 @@ def _default_process_args_reader() -> list[str]:
 
     Never raises; a failed/timed-out probe degrades to ``[]``.
     """
-    result = _runner_module.run_argv(["/bin/ps", "-axo", "args="], timeout=5.0)
+    result = _runner_module.run_argv(
+        ["/bin/ps", "-axo", "args="], timeout=5.0, max_bytes=_PS_SNAPSHOT_MAX_BYTES
+    )
     if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
         return []
     stdout = result.get("stdout") or ""

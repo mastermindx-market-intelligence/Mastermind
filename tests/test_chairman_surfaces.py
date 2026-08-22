@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import sys
 from pathlib import Path
 
 import pytest
@@ -377,6 +378,46 @@ def test_falsifier_run_argv_rejects_newline():
 def test_falsifier_run_argv_rejects_non_str_element():
     with pytest.raises(ValueError):
         runner_module.run_argv(["osascript", 5])
+
+
+# ---------------------------------------------------------------------------
+# falsifier 7b: the runner's 64 KiB cap must be overridable on purpose —
+# a silent truncation of the ps snapshot hid every running managed browser
+# (running seat read as stopped, measured live 2026-08-22)
+# ---------------------------------------------------------------------------
+
+
+def test_run_argv_default_cap_still_64k():
+    big = str(200_000)
+    result = runner_module.run_argv(
+        [sys.executable, "-c", f"print('x' * {big})"]
+    )
+    assert result["code"] == 0
+    assert len(result["stdout"].encode()) <= 64 * 1024
+
+
+def test_run_argv_max_bytes_override_preserves_large_output():
+    result = runner_module.run_argv(
+        [sys.executable, "-c", "print('x' * 200_000)"],
+        max_bytes=4 * 1024 * 1024,
+    )
+    assert result["code"] == 0
+    assert len(result["stdout"]) >= 200_000
+
+
+def test_default_ps_reader_requests_large_cap(monkeypatch):
+    seen = {}
+
+    def fake_run_argv(argv, *, timeout=20.0, max_bytes=None):
+        seen["argv"] = argv
+        seen["max_bytes"] = max_bytes
+        return {"code": 0, "stdout": "line-one\nline-two\n", "stderr": "", "timed_out": False}
+
+    monkeypatch.setattr(runner_module, "run_argv", fake_run_argv)
+    lines = chatgpt._default_process_args_reader()
+    assert lines == ["line-one", "line-two"]
+    assert seen["argv"] == ["/bin/ps", "-axo", "args="]
+    assert seen["max_bytes"] is not None and seen["max_bytes"] >= 1024 * 1024
 
 
 def test_falsifier_subprocess_isolated_to_runner():
