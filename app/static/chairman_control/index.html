@@ -4,112 +4,195 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="ccr-token" content="__CCR_TOKEN__">
+<meta name="color-scheme" content="light dark">
 <title>Chairman Control Room</title>
 <link rel="stylesheet" href="/static/control_room.css">
 </head>
 <body>
+
+<a class="ccr-skip" href="#needs-you">Skip to what needs you</a>
+
 <header id="ccr-header">
-  <h1>Chairman Control Room</h1>
-  <p class="ccr-subtitle">
-    Local, read-only, loopback-only. No canonical state is changed by looking at
-    or navigating this page.
-  </p>
+  <div class="ccr-headline">
+    <div class="ccr-headline-id">
+      <p class="ccr-eyebrow">Local &middot; loopback only &middot; read-only</p>
+      <h1>Chairman Control Room</h1>
+      <p class="ccr-subtitle">
+        Reading this page and opening a surface from it changes no canonical
+        state. Every fact below is attributed to the source that reported it.
+      </p>
+    </div>
+    <button type="button" id="ccr-theme" class="ccr-ghost">Theme: System</button>
+  </div>
   <dl id="ccr-sources" class="ccr-stamps"></dl>
 </header>
 
-<main>
+<div class="ccr-shell">
 
-  <section id="needs-you" aria-labelledby="needs-you-heading">
-    <h2 id="needs-you-heading">Needs You</h2>
-    <p class="ccr-hint">Canonical target=chairman attention items.</p>
-    <ul class="ccr-attention-list"></ul>
-  </section>
+  <nav id="ccr-ladder" aria-label="Attention ladder">
+    <p class="ccr-ladder-title">Who owes the next move</p>
+    <ol class="ccr-rungs">
+      <li><a href="#needs-you"><span class="ccr-rung-name">You</span><span class="ccr-rung-count" data-rung="chairman">&mdash;</span></a></li>
+      <li><a href="#sol-attention"><span class="ccr-rung-name">Sol</span><span class="ccr-rung-count" data-rung="ceo">&mdash;</span></a></li>
+      <li><a href="#coo"><span class="ccr-rung-name">Ops</span><span class="ccr-rung-count" data-rung="coo">&mdash;</span></a></li>
+      <li><a href="#work"><span class="ccr-rung-name">Work</span><span class="ccr-rung-count" data-rung="work">&mdash;</span></a></li>
+      <li><a href="#loose-ends"><span class="ccr-rung-name">Loose ends</span><span class="ccr-rung-count" data-rung="loose">&mdash;</span></a></li>
+      <li><a href="#tools"><span class="ccr-rung-name">Tools</span><span class="ccr-rung-count ccr-rung-blank">&nbsp;</span></a></li>
+    </ol>
+  </nav>
 
-  <section id="sol-attention" aria-labelledby="sol-attention-heading">
-    <h2 id="sol-attention-heading">Sol Needs Attention</h2>
-    <p class="ccr-hint">Canonical target=ceo attention items.</p>
-    <ul class="ccr-attention-list"></ul>
-  </section>
+  <main>
 
-  <details id="coo">
-    <summary>COO / Ops</summary>
-    <p class="ccr-hint">Canonical target=coo attention items, collapsed by default.</p>
-    <ul class="ccr-attention-list"></ul>
-  </details>
+    <section id="degraded" aria-labelledby="degraded-heading" class="ccr-alarm is-empty">
+      <h2 id="degraded-heading">Sources reporting degraded</h2>
+      <p class="ccr-hint">These are named exactly as the source reported them. Anything below may be missing or partial because of these.</p>
+      <ul></ul>
+    </section>
 
-  <section id="degraded" aria-labelledby="degraded-heading">
-    <h2 id="degraded-heading">Degraded Sources</h2>
-    <ul></ul>
-  </section>
+    <section id="needs-you" aria-labelledby="needs-you-heading" class="ccr-tier ccr-tier-you">
+      <div class="ccr-tier-head">
+        <h2 id="needs-you-heading">Needs you</h2>
+        <span class="ccr-tally" data-tally="chairman">&mdash;</span>
+      </div>
+      <p class="ccr-hint">Executive Inbox items addressed to the Chairman.</p>
+      <ul class="ccr-attention-list"></ul>
+    </section>
 
-  <section id="work" aria-labelledby="work-heading">
-    <h2 id="work-heading">Active Work</h2>
-    <div class="ccr-work-cards"></div>
-  </section>
+    <section id="sol-attention" aria-labelledby="sol-attention-heading" class="ccr-tier ccr-tier-sol">
+      <div class="ccr-tier-head">
+        <h2 id="sol-attention-heading">Sol needs attention</h2>
+        <span class="ccr-tally" data-tally="ceo">&mdash;</span>
+      </div>
+      <p class="ccr-hint">Executive Inbox items addressed to the CEO seat.</p>
+      <ul class="ccr-attention-list"></ul>
+    </section>
 
-  <details id="unjoined-prs">
-    <summary>Unjoined Open PRs</summary>
-    <ul></ul>
-  </details>
+    <details id="coo" class="ccr-fold">
+      <summary>
+        <span class="ccr-fold-name">COO and ops</span>
+        <span class="ccr-tally" data-tally="coo">&mdash;</span>
+      </summary>
+      <p class="ccr-hint">Executive Inbox items addressed to the COO seat.</p>
+      <ul class="ccr-attention-list"></ul>
+    </details>
 
-  <section id="unbound-surfaces" aria-labelledby="unbound-surfaces-heading">
-    <h2 id="unbound-surfaces-heading">Unbound Surfaces</h2>
-    <ul></ul>
-  </section>
+    <section id="work" aria-labelledby="work-heading">
+      <div class="ccr-tier-head">
+        <h2 id="work-heading">Active work</h2>
+        <span class="ccr-tally" data-tally="work">&mdash;</span>
+      </div>
+      <p class="ccr-hint">
+        One card per work reference. Each card keeps its three sources apart:
+        Agent OS, Executive, GitHub. A source with nothing to say says so.
+        Cards carrying attention or a source disagreement are listed first;
+        the rest stay in the order the sources were read.
+      </p>
 
-  <section id="binding-conflicts" aria-labelledby="binding-conflicts-heading">
-    <h2 id="binding-conflicts-heading">Binding Conflicts</h2>
-    <ul></ul>
-  </section>
+      <section id="refresh-builds-section" aria-labelledby="refresh-builds-heading" class="ccr-sourcebar">
+        <h2 id="refresh-builds-heading">Source freshness</h2>
+        <dl class="ccr-stamps ccr-stamps-inline" id="ccr-work-stamps"></dl>
+        <div class="ccr-sourcebar-act">
+          <button type="button" id="refresh-builds" class="ccr-ghost">Refresh builds from GitHub</button>
+          <div id="refresh-builds-result" role="status"></div>
+        </div>
+      </section>
 
-  <section id="discover" aria-labelledby="discover-heading">
-    <h2 id="discover-heading">Discover Candidate Surfaces</h2>
-    <p class="ccr-hint">Discovery confers zero ownership. Nothing here is bound until you explicitly bind it below.</p>
-    <button type="button" id="discover-run">Discover</button>
-    <div id="discover-results"></div>
-  </section>
+      <div class="ccr-work-cards"></div>
+    </section>
 
-  <section id="bind-surface" aria-labelledby="bind-surface-heading">
-    <h2 id="bind-surface-heading">Bind a Surface</h2>
-    <form id="bind-form">
-      <label for="bind-work-ref">work_ref (WS:/JOB:/PR:...)</label>
-      <input type="text" id="bind-work-ref" name="work_ref" required>
+    <section id="loose-ends" aria-labelledby="loose-ends-heading">
+      <div class="ccr-tier-head">
+        <h2 id="loose-ends-heading">Loose ends</h2>
+        <span class="ccr-tally" data-tally="loose">&mdash;</span>
+      </div>
+      <p class="ccr-hint">Things no work card claims, and bindings that contradict each other.</p>
 
-      <label for="bind-role">role</label>
-      <select id="bind-role" name="role" required>
-        <option value="chairman">chairman</option>
-        <option value="ceo">ceo</option>
-        <option value="coo">coo</option>
-        <option value="worker" selected>worker</option>
-      </select>
+      <div class="ccr-loose-grid">
+        <details id="unjoined-prs" class="ccr-fold">
+          <summary>
+            <span class="ccr-fold-name">Open PRs that no card claims</span>
+            <span class="ccr-tally" data-tally="unjoined">&mdash;</span>
+          </summary>
+          <ul></ul>
+        </details>
 
-      <label for="bind-provider">provider</label>
-      <select id="bind-provider" name="provider" required>
-        <option value="chatgpt">chatgpt</option>
-        <option value="claude_code">claude_code</option>
-        <option value="claude_desktop">claude_desktop</option>
-        <option value="cursor_agent">cursor_agent</option>
-        <option value="codex">codex</option>
-      </select>
+        <section id="unbound-surfaces" aria-labelledby="unbound-surfaces-heading" class="ccr-subpanel">
+          <h3 id="unbound-surfaces-heading">Bound to nothing on this page</h3>
+          <ul></ul>
+        </section>
 
-      <label for="bind-seat-ref">seat_ref (required for chatgpt)</label>
-      <input type="text" id="bind-seat-ref" name="seat_ref">
+        <section id="binding-conflicts" aria-labelledby="binding-conflicts-heading" class="ccr-subpanel">
+          <h3 id="binding-conflicts-heading">Binding conflicts</h3>
+          <p class="ccr-hint">More than one surface claims the same work and role. Nothing here picks a winner.</p>
+          <ul></ul>
+        </section>
+      </div>
+    </section>
 
-      <label for="bind-locator">locator (JSON object)</label>
-      <textarea id="bind-locator" name="locator" rows="3" required>{}</textarea>
+    <section id="tools" aria-labelledby="tools-heading">
+      <div class="ccr-tier-head">
+        <h2 id="tools-heading">Tools</h2>
+      </div>
 
-      <button type="submit">Bind</button>
-    </form>
-    <div id="bind-result" role="status"></div>
-  </section>
+      <details id="discover" class="ccr-fold">
+        <summary><span class="ccr-fold-name">Discover candidate surfaces</span></summary>
+        <p class="ccr-hint">Discovery confers zero ownership. Nothing found here is bound until you bind it below.</p>
+        <button type="button" id="discover-run" class="ccr-ghost">Discover</button>
+        <div id="discover-results"></div>
+      </details>
 
-  <section id="refresh-builds-section" aria-labelledby="refresh-builds-heading">
-    <h2 id="refresh-builds-heading">Active Builds</h2>
-    <button type="button" id="refresh-builds">Refresh from GitHub</button>
-    <div id="refresh-builds-result" role="status"></div>
-  </section>
+      <details id="bind-surface" class="ccr-fold">
+        <summary><span class="ccr-fold-name">Bind a surface</span></summary>
+        <form id="bind-form">
+          <div class="ccr-field">
+            <label for="bind-work-ref">Work reference</label>
+            <input type="text" id="bind-work-ref" name="work_ref" required placeholder="WS:KEY">
+            <p class="ccr-field-note">Accepts WS:, JOB:, or PR: references.</p>
+          </div>
 
-</main>
+          <div class="ccr-field">
+            <label for="bind-role">Role</label>
+            <select id="bind-role" name="role" required>
+              <option value="chairman">chairman</option>
+              <option value="ceo">ceo</option>
+              <option value="coo">coo</option>
+              <option value="worker" selected>worker</option>
+            </select>
+          </div>
+
+          <div class="ccr-field">
+            <label for="bind-provider">Provider</label>
+            <select id="bind-provider" name="provider" required>
+              <option value="chatgpt">chatgpt</option>
+              <option value="claude_code">claude_code</option>
+              <option value="claude_desktop">claude_desktop</option>
+              <option value="cursor_agent">cursor_agent</option>
+              <option value="codex">codex</option>
+            </select>
+          </div>
+
+          <div class="ccr-field">
+            <label for="bind-seat-ref">Seat reference</label>
+            <input type="text" id="bind-seat-ref" name="seat_ref">
+            <p class="ccr-field-note">Required when the provider is chatgpt.</p>
+          </div>
+
+          <div class="ccr-field ccr-field-wide">
+            <label for="bind-locator">Locator</label>
+            <textarea id="bind-locator" name="locator" rows="3" required spellcheck="false">{}</textarea>
+            <p class="ccr-field-note">A JSON object. Its allowed keys depend on the provider.</p>
+          </div>
+
+          <div class="ccr-field ccr-field-wide ccr-field-actions">
+            <button type="submit" class="ccr-solid">Bind surface</button>
+          </div>
+        </form>
+        <div id="bind-result" role="status"></div>
+      </details>
+    </section>
+
+  </main>
+</div>
 
 <script src="/static/control_room.js"></script>
 </body>
