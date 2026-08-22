@@ -1,0 +1,73 @@
+{
+  "schema": "mastermind.executive_inbox.v2",
+  "generated_at": "2026-08-21T00:05:00Z",
+  "grounding": {
+    "mastermind": {
+      "root": "/fixture/mastermind",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "branch": "fable/chairman-control-room-p0"
+    },
+    "macro": {
+      "root": "/fixture/macro",
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+    "runtime_db": {
+      "path": "/fixture/mastermind/data/control_plane/executive.sqlite3",
+      "present": true
+    }
+  },
+  "attention": [
+    {
+      "attention_id": "eia-aaaaaaaaaaaa",
+      "target": "coo",
+      "kind": "job_failed",
+      "source": "runtime",
+      "job_id": "job-alpha-001",
+      "workstream": "WS:ALPHA-ONE",
+      "status": "failed",
+      "reason": "job-alpha-001 is FAILED after 3 of 3 attempt(s)",
+      "evidence": [
+        {"ref": "job:job-alpha-001", "field": "status", "value": "failed"},
+        {"ref": "job:job-alpha-001", "field": "attempt_count", "value": "3"},
+        {"ref": "job:job-alpha-001", "field": "attempt_limit", "value": "3"},
+        {"ref": "job:job-alpha-001", "field": "updated_at", "value": "2026-08-21T00:04:00Z"}
+      ],
+      "existing_next_actions": [],
+      "parent_job_id": null,
+      "root_job_id": "job-alpha-001",
+      "depth": 0,
+      "owner_seat": "coo",
+      "escalation_target": null,
+      "business_impact": null,
+      "review_required": false,
+      "reviews_job_id": null
+    },
+    {
+      "attention_id": "eia-bbbbbbbbbbbb",
+      "target": "ceo",
+      "kind": "ceo_decision_pending",
+      "source": "agent_os",
+      "job_id": null,
+      "workstream": "ALPHA-ONE",
+      "status": null,
+      "reason": "Ship or hold the Alpha One rollout?",
+      "evidence": [
+        {"ref": "agentos:needs_ceo", "field": "workstream", "value": "ALPHA-ONE"},
+        {"ref": "boot_packet", "field": "schema", "value": "mastermind.ceo_boot_packet.v1"}
+      ],
+      "existing_next_actions": []
+    }
+  ],
+  "runtime_counts": {
+    "total": 1,
+    "by_status": {
+      "queued": 0, "running": 0, "checkpointed": 0, "completed": 0,
+      "failed": 1, "lost": 0, "rate_limited": 0, "cancel_requested": 0, "cancelled": 0
+    }
+  },
+  "suppressed": {
+    "clean_completed": 0, "queued": 0, "running": 0, "checkpointed": 0, "cancelled": 0
+  },
+  "degraded": []
+}

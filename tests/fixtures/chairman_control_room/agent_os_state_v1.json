@@ -1,0 +1,28 @@
+{
+  "schema": "agent_os_state.v1",
+  "generator": "scripts/agentos.py status",
+  "generated_at": "2026-08-21T00:04:00Z",
+  "workstreams": [
+    {
+      "key": "ALPHA-ONE",
+      "title": "Alpha One Rollout",
+      "status": "active",
+      "program": "EXEC-OS",
+      "next_action": "Get the CEO ruling on ship vs hold"
+    },
+    {
+      "key": "BETA-TWO",
+      "title": "Beta Two Ship",
+      "status": "done",
+      "program": "EXEC-OS",
+      "next_action": ""
+    },
+    {
+      "key": "DELTA-FOUR",
+      "title": "Delta Four (artifact-only workstream)",
+      "status": "proposed",
+      "program": "EXEC-OS",
+      "next_action": "Kickoff wave 1"
+    }
+  ]
+}

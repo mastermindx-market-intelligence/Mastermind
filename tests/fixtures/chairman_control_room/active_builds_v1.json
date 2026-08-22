@@ -1,0 +1,88 @@
+{
+  "schema": "project_active_builds.v1",
+  "advisory_only": true,
+  "gates": [],
+  "collected_at": "2026-08-21T00:05:00Z",
+  "merged_days": 14,
+  "repositories": [
+    {
+      "key": "mastermind",
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "base_branch": "main",
+      "base_sha": "cccccccccccccccccccccccccccccccccccccc",
+      "open_prs_truncated": false,
+      "recently_merged_truncated": false,
+      "open_prs": [
+        {
+          "repo": "mastermindx-market-intelligence/Mastermind",
+          "number": 110,
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/110",
+          "title": "feat(exec-os): WS:BETA-TWO reopen for hotfix",
+          "branch": "fable/beta-two-hotfix",
+          "updated_at": "2026-08-21T01:00:00Z",
+          "draft": false,
+          "merge_state": "CLEAN",
+          "conflict": false,
+          "files_count": 2,
+          "files_truncated": false,
+          "files": ["control_plane/foo.py", "tests/test_foo.py"],
+          "protected_paths": [],
+          "dependencies": []
+        },
+        {
+          "repo": "mastermindx-market-intelligence/Mastermind",
+          "number": 111,
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/111",
+          "title": "chore: unrelated cleanup, no workstream cited",
+          "branch": "chore/cleanup",
+          "updated_at": "2026-08-21T00:30:00Z",
+          "draft": true,
+          "merge_state": "CLEAN",
+          "conflict": false,
+          "files_count": 1,
+          "files_truncated": false,
+          "files": ["README.md"],
+          "protected_paths": [],
+          "dependencies": []
+        },
+        {
+          "repo": "mastermindx-market-intelligence/Mastermind",
+          "number": 112,
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/112",
+          "title": "feat: touches WS:ALPHA-ONEX, a different workstream",
+          "branch": "fable/alpha-onex",
+          "updated_at": "2026-08-21T00:45:00Z",
+          "draft": false,
+          "merge_state": "CLEAN",
+          "conflict": false,
+          "files_count": 1,
+          "files_truncated": false,
+          "files": ["control_plane/bar.py"],
+          "protected_paths": [],
+          "dependencies": []
+        }
+      ],
+      "recently_merged": []
+    }
+  ],
+  "file_collisions": [],
+  "summary": {
+    "repository_count": 1,
+    "open_prs": 3,
+    "conflicts": 0,
+    "file_collisions": 0,
+    "recently_merged": 0,
+    "repositories": [
+      {
+        "repo": "mastermindx-market-intelligence/Mastermind",
+        "base_branch": "main",
+        "open_prs": 3,
+        "conflicts": 0,
+        "protected_prs": 0,
+        "dependency_edges": 0,
+        "file_collisions": 0,
+        "recently_merged": 0
+      }
+    ]
+  }
+}
