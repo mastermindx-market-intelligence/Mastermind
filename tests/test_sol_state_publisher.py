@@ -3,7 +3,9 @@ from __future__ import annotations
 import ast
 import asyncio
 import functools
+import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -73,6 +75,29 @@ def _document(text: str):
     return json.loads(payload)
 
 
+def _expected_wrapper_state_hash(document: dict) -> str:
+    semantic = dict(document)
+    semantic.pop("generated_at")
+    semantic.pop("relay_checked_at")
+    semantic.pop("state_hash")
+    return hashlib.sha256(
+        json.dumps(
+            semantic,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _assert_outer_wrapper_hash(document: dict) -> None:
+    state_hash = document["state_hash"]
+    assert isinstance(state_hash, str)
+    assert re.fullmatch(r"[0-9a-f]{64}", state_hash) is not None
+    assert state_hash == _expected_wrapper_state_hash(document)
+
+
 class _FakeClient:
     def __init__(self, messages=(), *, complete: bool = True):
         self.messages = list(messages)
@@ -104,7 +129,7 @@ class _FakeClient:
 
 
 @_sync_test
-async def test_zero_history_creates_exactly_one_state_message():
+async def test_zero_history_creates_one_state_message_and_receipt_exposes_outer_wrapper_hash():
     client = _FakeClient()
     executive = _executive()
     publisher = sol_state.SolStatePublisher(
@@ -113,14 +138,15 @@ async def test_zero_history_creates_exactly_one_state_message():
     receipt = await publisher.publish(executive, relay_checked_at=_at())
     assert receipt.action == "created"
     assert receipt.message_ts == "1"
-    assert receipt.state_hash == executive["snapshot_hash"]
     assert receipt.byte_count <= sol_state.MAX_MESSAGE_BYTES
     assert len(client.messages) == 1
     assert len(client.creates) == 1
     assert client.updates == []
     document = _document(client.messages[0].text)
     assert document["status"] == "OK"
-    assert document["state_hash"] == executive["snapshot_hash"]
+    _assert_outer_wrapper_hash(document)
+    assert receipt.state_hash == document["state_hash"]
+    assert receipt.state_hash != executive["snapshot_hash"]
     assert document["relay"] == {
         "state_publisher": "READY",
         "command_transport": "NOT_INSTALLED",
@@ -146,7 +172,9 @@ async def test_one_exact_message_recovers_and_updates_without_duplicate():
     assert len(client.messages) == 1
     assert client.creates == []
     assert len(client.updates) == 1
-    assert _document(client.messages[0].text)["state_hash"] == changed["snapshot_hash"]
+    document = _document(client.messages[0].text)
+    _assert_outer_wrapper_hash(document)
+    assert document["state_hash"] != changed["snapshot_hash"]
 
 
 @_sync_test
@@ -220,7 +248,7 @@ async def test_incomplete_history_fails_closed_before_create_or_update():
     assert client.updates == []
 
 
-def test_heartbeat_changes_only_wrapper_freshness_not_state_hash_or_executive():
+def test_clock_only_wrapper_change_keeps_outer_hash_and_executive():
     executive = _executive()
     first = _document(
         sol_state.render_sol_state(executive, relay_checked_at=_at(0, 30))
@@ -229,7 +257,9 @@ def test_heartbeat_changes_only_wrapper_freshness_not_state_hash_or_executive():
         sol_state.render_sol_state(executive, relay_checked_at=_at(1, 30))
     )
     assert first["relay_checked_at"] != heartbeat["relay_checked_at"]
-    assert first["state_hash"] == heartbeat["state_hash"] == executive["snapshot_hash"]
+    _assert_outer_wrapper_hash(first)
+    _assert_outer_wrapper_hash(heartbeat)
+    assert first["state_hash"] == heartbeat["state_hash"]
     assert first["generated_at"] == heartbeat["generated_at"]
     assert first["executive"] == heartbeat["executive"]
     first_without_clock = {k: v for k, v in first.items() if k != "relay_checked_at"}
@@ -239,13 +269,69 @@ def test_heartbeat_changes_only_wrapper_freshness_not_state_hash_or_executive():
     assert first_without_clock == heartbeat_without_clock
 
 
-def test_semantic_change_updates_state_and_hash():
-    first = _document(sol_state.render_sol_state(_executive(), relay_checked_at=_at()))
-    changed = _document(
-        sol_state.render_sol_state(_executive(marker="b"), relay_checked_at=_at())
+def test_outer_generated_at_is_excluded_from_wrapper_hash():
+    document = _document(
+        sol_state.render_sol_state(_executive(), relay_checked_at=_at())
     )
+    changed_generated_at = dict(document)
+    changed_generated_at["generated_at"] = "2026-08-21T12:59:59Z"
+    assert _expected_wrapper_state_hash(document) == _expected_wrapper_state_hash(
+        changed_generated_at
+    )
+    assert document["state_hash"] == sol_state.semantic_sol_state_hash(
+        changed_generated_at
+    )
+
+
+def test_nested_executive_generated_at_change_updates_outer_hash():
+    first_executive = _executive(generated_at="2026-08-21T11:59:58Z")
+    changed_executive = _executive(generated_at="2026-08-21T11:59:59Z")
+    assert hot_contract.validate_hot_state_document(first_executive)
+    assert hot_contract.validate_hot_state_document(changed_executive)
+    assert first_executive["snapshot_hash"] == changed_executive["snapshot_hash"]
+
+    first = _document(sol_state.render_sol_state(first_executive, relay_checked_at=_at()))
+    changed = _document(
+        sol_state.render_sol_state(changed_executive, relay_checked_at=_at())
+    )
+    _assert_outer_wrapper_hash(first)
+    _assert_outer_wrapper_hash(changed)
+    assert first["generated_at"] != changed["generated_at"]
+    assert first["executive"]["generated_at"] != changed["executive"]["generated_at"]
+    assert first["state_hash"] != changed["state_hash"]
+
+
+def test_valid_rehashed_executive_semantic_change_updates_outer_hash():
+    first_executive = _executive()
+    changed_executive = _executive(marker="b")
+    assert hot_contract.validate_hot_state_document(first_executive)
+    assert hot_contract.validate_hot_state_document(changed_executive)
+    assert first_executive["snapshot_hash"] != changed_executive["snapshot_hash"]
+    first = _document(sol_state.render_sol_state(first_executive, relay_checked_at=_at()))
+    changed = _document(
+        sol_state.render_sol_state(changed_executive, relay_checked_at=_at())
+    )
+    _assert_outer_wrapper_hash(first)
+    _assert_outer_wrapper_hash(changed)
     assert first["state_hash"] != changed["state_hash"]
     assert first["executive"] != changed["executive"]
+
+
+def test_same_executive_relay_version_change_updates_outer_hash():
+    executive = _executive()
+    first = _document(sol_state.render_sol_state(executive, relay_checked_at=_at()))
+    changed = _document(
+        sol_state.render_sol_state(
+            executive,
+            relay_checked_at=_at(),
+            relay_version="mas-108-b1-development-next",
+        )
+    )
+    _assert_outer_wrapper_hash(first)
+    _assert_outer_wrapper_hash(changed)
+    assert first["executive"] == changed["executive"] == executive
+    assert first["relay"]["version"] != changed["relay"]["version"]
+    assert first["state_hash"] != changed["state_hash"]
 
 
 def test_semantic_change_with_stale_claimed_hash_fails_closed_invalid():
@@ -256,7 +342,7 @@ def test_semantic_change_with_stale_claimed_hash_fails_closed_invalid():
     )
     assert document["status"] == "DEGRADED"
     assert document["executive"] is None
-    assert document["state_hash"] is None
+    _assert_outer_wrapper_hash(document)
     assert document["relay_degraded"] == ["EXECUTIVE_STATE_INVALID"]
 
 
@@ -290,7 +376,7 @@ def test_self_hashed_but_contract_invalid_state_fails_closed(mutate):
 
     assert document["status"] == "DEGRADED"
     assert document["executive"] is None
-    assert document["state_hash"] is None
+    _assert_outer_wrapper_hash(document)
     assert document["relay_degraded"] == ["EXECUTIVE_STATE_INVALID"]
     assert document["do_not_submit"] is True
 
@@ -312,9 +398,19 @@ def test_unavailable_stale_or_invalid_state_replaces_old_green_values(
     )
     assert document["status"] == "DEGRADED"
     assert document["executive"] is None
-    assert document["state_hash"] is None
+    _assert_outer_wrapper_hash(document)
     assert document["relay_degraded"] == [code]
     assert document["do_not_submit"] is True
+
+
+def test_degraded_null_executive_has_deterministic_non_null_outer_hash():
+    first = _document(sol_state.render_sol_state(None, relay_checked_at=_at()))
+    heartbeat = _document(sol_state.render_sol_state(None, relay_checked_at=_at(1)))
+    assert first["status"] == heartbeat["status"] == "DEGRADED"
+    assert first["executive"] is heartbeat["executive"] is None
+    _assert_outer_wrapper_hash(first)
+    _assert_outer_wrapper_hash(heartbeat)
+    assert first["state_hash"] == heartbeat["state_hash"]
 
 
 def test_4500_byte_ceiling_refuses_without_truncation():
@@ -323,6 +419,37 @@ def test_4500_byte_ceiling_refuses_without_truncation():
             _executive(),
             relay_checked_at=_at(),
             relay_version="界" * sol_state.MAX_MESSAGE_BYTES,
+        )
+    assert caught.value.code == "SOL_STATE_TOO_LARGE"
+
+
+def test_ascii_relay_version_accepts_exact_4500_bytes_and_refuses_4501():
+    single_character_text = sol_state.render_sol_state(
+        None,
+        relay_checked_at=_at(),
+        relay_version="a",
+    )
+    relay_version = "a" * (
+        sol_state.MAX_MESSAGE_BYTES - len(single_character_text.encode("utf-8")) + 1
+    )
+    fixed_message_bytes = len(single_character_text.encode("utf-8")) - 1
+    assert fixed_message_bytes + len(relay_version) == sol_state.MAX_MESSAGE_BYTES
+    assert fixed_message_bytes + len(relay_version) + 1 == (
+        sol_state.MAX_MESSAGE_BYTES + 1
+    )
+
+    accepted = sol_state.render_sol_state(
+        None,
+        relay_checked_at=_at(),
+        relay_version=relay_version,
+    )
+    assert len(accepted.encode("utf-8")) == sol_state.MAX_MESSAGE_BYTES
+
+    with pytest.raises(sol_state.SolStateError) as caught:
+        sol_state.render_sol_state(
+            None,
+            relay_checked_at=_at(),
+            relay_version=f"{relay_version}a",
         )
     assert caught.value.code == "SOL_STATE_TOO_LARGE"
 
