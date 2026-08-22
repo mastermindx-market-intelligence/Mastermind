@@ -1,12 +1,30 @@
 """integrations.chairman_surfaces.chatgpt — ChatGPT (Chrome, named profile).
 
-Navigation strategy: try to focus an already-open tab whose URL exactly
-matches the bound URL, in whichever Chrome profile it happens to be open
-in; only if Chrome is not running or no matching tab exists do we open the
-URL in the specific bound profile with ``open -na ... --profile-directory=``
-(never letting AppleScript's ``activate`` launch a default-profile Chrome
-window first — see :data:`APPLESCRIPT_FOCUS`, which returns before ever
-telling Chrome to do anything when it is not already running).
+Seat-exact navigation law (Sol review 5000169412, blocker 1)
+--------------------------------------------------------------
+The installed Chrome AppleScript automation surface enumerates tabs/windows
+by URL only — it has no way to prove which browser PROFILE an already-open
+tab belongs to. Focusing "whichever Chrome profile [the URL] happens to be
+open in" (the pre-review behavior) can therefore cross the bound seat: the
+same exact chat URL open in the WRONG profile, or duplicated across two
+profiles, would satisfy the URL match and get treated as the bound seat's
+tab regardless of whose profile it actually is.
+
+Because this surface cannot prove tab-level profile identity,
+:func:`open_surface` NEVER attempts to focus an existing tab. It always
+opens the bound URL through the exact bound Chrome profile via ``open -na
+"Google Chrome" --args --profile-directory=<bound profile>`` — the one
+navigation primitive this surface CAN prove targets the right seat. macOS's
+``open -na`` either raises the existing window for that profile (if Chrome/
+that profile is already running) or launches it fresh, so Chrome-running and
+Chrome-not-running are the same code path; there is no separate "focus
+first, fall back to open" branch to take.
+
+:data:`APPLESCRIPT_FOCUS` and :func:`focus_exact_tab` remain in this module
+as the seam a FUTURE surface that CAN prove per-tab profile identity (e.g. a
+Chrome extension bridge) would use. :func:`open_surface` never references
+either of them; :func:`focus_exact_tab` itself refuses closed today because
+no such profile-identity prover exists yet on the installed surface.
 """
 from __future__ import annotations
 
@@ -135,11 +153,21 @@ def open_in_profile(profile_dir: str, url: str, runner, *, profiles: dict | None
     if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
         return contract.refused("chatgpt", binding_id, "runner_error", "opening the bound URL in the bound profile failed")
 
-    return contract.succeeded("chatgpt", binding_id, "opened", "opened the bound URL in the bound Chrome profile")
+    return contract.succeeded(
+        "chatgpt", binding_id, "opened",
+        "opened via the exact bound profile; focus-by-URL is disabled: the "
+        "installed automation surface cannot prove a tab's profile identity",
+        verified=False,
+    )
 
 
 def open_surface(binding: dict, runner, *, profiles: dict | None = None) -> dict:
-    """Focus the bound URL's tab if one is open; otherwise open it fresh.
+    """Open the bound URL through the exact bound Chrome profile.
+
+    Never attempts to focus an existing tab (see the module docstring's
+    seat-exact navigation law) — always dispatches straight to
+    :func:`open_in_profile`, whether Chrome (or that profile) is already
+    running or not, so the same one primitive covers both cases.
 
     ``profiles`` is accepted (and passed through to :func:`open_in_profile`)
     purely so tests can inject a fixed profile enumeration instead of
@@ -163,24 +191,58 @@ def open_surface(binding: dict, runner, *, profiles: dict | None = None) -> dict
     if not isinstance(url, str) or not url:
         return contract.refused("chatgpt", binding_id, "invalid_binding", "the bound URL is missing")
 
+    return open_in_profile(profile_dir, url, runner, profiles=known_profiles, binding_id=binding_id)
+
+
+def focus_exact_tab(binding: dict, runner, *, profile_prover) -> dict:
+    """Focus the bound URL's existing tab — ONLY when its profile is proven.
+
+    ``profile_prover`` is a REQUIRED keyword argument: a callable that, given
+    the raw focus-probe result, proves the focused tab belongs to the bound
+    ``browser_profile`` — or ``None`` when no such prover exists on the
+    installed surface (the current P0 state, always). When
+    ``profile_prover`` is ``None`` this refuses closed WITHOUT ever invoking
+    ``runner``: focusing an unproven tab is exactly the cross-seat failure
+    Sol's review blocked, so the capability is gated off entirely rather than
+    left to a caller's discretion. :func:`open_surface` never calls this
+    function.
+    """
+    locator = binding.get("locator") if isinstance(binding, dict) else None
+    locator = locator if isinstance(locator, dict) else {}
+    binding_id = binding.get("binding_id") if isinstance(binding, dict) else None
+    binding_id = binding_id if isinstance(binding_id, str) else None
+
+    if profile_prover is None:
+        return contract.refused(
+            "chatgpt", binding_id, "refused",
+            "focusing an existing tab requires a profile-identity prover "
+            "the installed automation surface does not offer",
+        )
+
+    profile_dir = locator.get("browser_profile")
+    url = locator.get("url")
+
+    if not isinstance(profile_dir, str) or not contract.SAFE_PROFILE_RE.match(profile_dir):
+        return contract.refused("chatgpt", binding_id, "unsafe_token", "the bound profile directory failed the safety check")
+    if not isinstance(url, str) or not url:
+        return contract.refused("chatgpt", binding_id, "invalid_binding", "the bound URL is missing")
+
     result = runner(_focus_argv(url))
-    if not isinstance(result, dict):
-        return contract.refused("chatgpt", binding_id, "runner_error", "the focus check returned an unexpected result")
-    if result.get("timed_out"):
-        return contract.refused("chatgpt", binding_id, "runner_error", "the focus check timed out")
+    if not isinstance(result, dict) or result.get("timed_out"):
+        return contract.refused("chatgpt", binding_id, "runner_error", "the focus check failed")
 
     output = (result.get("stdout") or "").strip()
+    if not output.startswith("FOCUSED"):
+        return contract.refused("chatgpt", binding_id, "not_found", "no matching tab was found to focus")
 
-    if output == "NOT_RUNNING" or output == "NOT_FOUND":
-        return open_in_profile(profile_dir, url, runner, profiles=known_profiles, binding_id=binding_id)
+    if not profile_prover(result):
+        return contract.refused(
+            "chatgpt", binding_id, "disallowed_target",
+            "the focused tab's profile identity could not be proven to match the bound profile",
+        )
 
-    if output.startswith("FOCUSED"):
-        parts = output.split()
-        count = parts[1] if len(parts) > 1 and parts[1].isdigit() else "1"
-        if count != "1":
-            detail = f"focused first of {count} duplicate tabs"
-        else:
-            detail = "focused the bound URL's tab"
-        return contract.succeeded("chatgpt", binding_id, "focused", detail)
-
-    return contract.refused("chatgpt", binding_id, "runner_error", "the focus check returned an unexpected result")
+    return contract.succeeded(
+        "chatgpt", binding_id, "focused",
+        "focused the bound URL's tab in the proven bound profile",
+        verified=True,
+    )

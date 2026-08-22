@@ -5,6 +5,13 @@ Resumes a ``cursor_agent`` thread by launching ``cursor-agent --resume
 workspace first. Same shell-string discipline as ``claude.py``'s
 ``claude_code`` path: every token is charset-gated before it is
 ``shlex.quote``-d into the one command string this module ever builds.
+
+Unlike ``claude_code``/``codex`` (see those modules' native existence
+gates, Sol review 5000169412 blocker 2), Cursor has no proven local
+session/thread store this surface can read — so a launch here can only ever
+report ``verified=False`` (``BOUND_UNVERIFIED``): the Terminal launch is
+still attempted, but existence of the underlying thread is not provable on
+the installed surface.
 """
 from __future__ import annotations
 
@@ -39,4 +46,8 @@ def open_surface(binding: dict, runner) -> dict:
     if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
         return contract.refused("cursor_agent", binding_id, "runner_error", "the terminal launch failed")
 
-    return contract.succeeded("cursor_agent", binding_id, "launched", "launched a Terminal session for the bound chat")
+    return contract.succeeded(
+        "cursor_agent", binding_id, "launched",
+        "launched a Terminal session for the bound chat; existence of the underlying session is not provable on the installed surface",
+        verified=False,
+    )

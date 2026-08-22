@@ -96,3 +96,12 @@ python3 scripts/chairman_control_room.py [--port 8787] [--macro-root PATH] \
   (`open -na "Google Chrome" --args --profile-directory=…`) need no grant.
   Terminal-launched resumes (claude/cursor-agent/codex) use the
   osascript → Terminal grant.
+- `Open Sol` (and every ChatGPT binding) always opens via the exact bound
+  Chrome profile; focus-by-URL on an already-open tab is disabled, because
+  the installed automation surface cannot prove which profile a matching
+  tab actually belongs to (Sol review 5000169412).
+- `last_verified_at` / VERIFIED_OPENABLE advances ONLY on an open that
+  proved the provider-native session actually exists (`claude_code`/`codex`,
+  via their local session-store read). `chatgpt`/`claude_desktop`/
+  `cursor_agent` opens are launch-ACK only and remain BOUND_UNVERIFIED —
+  they never advance the stamp.

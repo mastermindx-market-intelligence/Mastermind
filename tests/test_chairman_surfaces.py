@@ -15,7 +15,6 @@ capability tests, which only ever return booleans and never open a file).
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
 import pytest
@@ -138,6 +137,25 @@ def _codex_binding(*, session_id="codex-session-delta", cwd=None, **overrides):
 
 
 _FIXTURE_PROFILES = {"Default": "Personal", "Profile 2": "Work Ops"}
+
+
+# ---------------------------------------------------------------------------
+# native-existence-gate fixture helpers (claude_code / codex session stores)
+# ---------------------------------------------------------------------------
+
+
+def _write_claude_transcript(claude_projects_dir: Path, project_dir: str, session_id: str) -> None:
+    """Create a fixture Claude Code transcript so the existence gate passes."""
+    slug = claude._slugify_project_dir(project_dir)
+    project_slug_dir = claude_projects_dir / slug
+    project_slug_dir.mkdir(parents=True, exist_ok=True)
+    (project_slug_dir / f"{session_id}.jsonl").write_text("", encoding="utf-8")
+
+
+def _write_codex_transcript(codex_sessions_dir: Path, session_id: str) -> None:
+    """Create a fixture Codex transcript so the existence gate passes."""
+    codex_sessions_dir.mkdir(parents=True, exist_ok=True)
+    (codex_sessions_dir / f"{session_id}.jsonl").write_text("", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -371,63 +389,111 @@ def test_falsifier_zero_message_law_no_gui_scripting_vocabulary():
 
 
 # ---------------------------------------------------------------------------
-# falsifier 9: Chrome not running -> straight to open_in_profile, no re-focus
+# falsifier 9: open_surface ALWAYS opens via the exact bound profile — no
+# probe, no focus, whether Chrome is running or not (Sol review 5000169412,
+# blocker 1 repair)
 # ---------------------------------------------------------------------------
 
 
-def test_falsifier_chrome_not_running_goes_straight_to_open_in_profile():
-    fake = FakeRunner(responses=[
-        {"code": 0, "stdout": "NOT_RUNNING", "stderr": "", "timed_out": False},
-        {"code": 0, "stdout": "", "stderr": "", "timed_out": False},
-    ])
+def test_falsifier_chatgpt_open_surface_opens_via_exact_profile_one_call():
+    fake = FakeRunner()
     binding = _chatgpt_binding(profile="Default", url="https://chatgpt.com/c/session-alpha")
     outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
 
     assert outcome["ok"] is True
     assert outcome["action"] == "opened"
-    assert len(fake.calls) == 2
+    assert outcome["verified"] is False
+    assert len(fake.calls) == 1
 
-    focus_argv, _ = fake.calls[0]
-    assert focus_argv[0] == "osascript"
-
-    open_argv, _ = fake.calls[1]
+    open_argv, _ = fake.calls[0]
     assert open_argv == [
         "/usr/bin/open", "-na", "Google Chrome", "--args",
         "--profile-directory=Default", "https://chatgpt.com/c/session-alpha",
     ]
+    # never probes Chrome via osascript for this path
+    assert all(call[0][0] != "osascript" for call in fake.calls)
 
 
-def test_falsifier_chatgpt_not_found_also_falls_back_to_open_in_profile():
-    fake = FakeRunner(responses=[
-        {"code": 0, "stdout": "NOT_FOUND", "stderr": "", "timed_out": False},
-        {"code": 0, "stdout": "", "stderr": "", "timed_out": False},
-    ])
+def test_falsifier_chatgpt_open_surface_outcome_key_set_includes_verified():
+    fake = FakeRunner()
     binding = _chatgpt_binding(profile="Default")
     outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+    assert outcome["ok"] is True
+    assert set(outcome.keys()) == {"ok", "action", "provider", "binding_id", "detail", "failure_kind", "verified"}
+
+
+# ---------------------------------------------------------------------------
+# Sol regression R1/R2 (blocker 1): a matching URL open in the WRONG profile,
+# or duplicated across TWO profiles, must never be treated as the bound
+# seat's tab — open_surface never even asks Chrome what is open, so a fake
+# runner primed with a "FOCUSED" response that WOULD have matched the old
+# behavior is never given the chance to.
+# ---------------------------------------------------------------------------
+
+
+def test_sol_r1_exact_url_open_in_different_profile_never_focused():
+    # Primed as though the exact bound URL were already open and focusable
+    # in a DIFFERENT profile — open_surface must never see this, because it
+    # never probes Chrome at all.
+    fake = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 1", "stderr": "", "timed_out": False}])
+    binding = _chatgpt_binding(profile="Default", url="https://chatgpt.com/c/session-alpha")
+    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+
     assert outcome["ok"] is True
     assert outcome["action"] == "opened"
-    assert len(fake.calls) == 2
+    for argv, _timeout in fake.calls:
+        assert argv[0] != "osascript", f"open_surface must never call osascript/focus, got {argv!r}"
 
 
-# ---------------------------------------------------------------------------
-# falsifier 10: FOCUSED n>1 outcome carries no tab/window id
-# ---------------------------------------------------------------------------
-
-
-def test_falsifier_focused_duplicate_tabs_outcome_has_no_id_leak():
-    fake = FakeRunner(responses=[
-        {"code": 0, "stdout": "FOCUSED 3", "stderr": "", "timed_out": False},
-    ])
-    binding = _chatgpt_binding(profile="Default")
+def test_sol_r2_exact_url_open_in_two_profiles_no_first_winner_focus():
+    # Primed as though the exact bound URL were duplicated across TWO open
+    # profiles (the old code's "first match wins" hazard) — same invariant:
+    # open_surface never asks, so there is no first winner to pick.
+    fake = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 2", "stderr": "", "timed_out": False}])
+    binding = _chatgpt_binding(profile="Profile 2", url="https://chatgpt.com/c/session-alpha")
     outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
 
     assert outcome["ok"] is True
-    assert outcome["action"] == "focused"
-    assert "first of 3" in outcome["detail"]
-    assert set(outcome.keys()) == {"ok", "action", "provider", "binding_id", "detail", "failure_kind"}
-    digits = re.findall(r"\d+", outcome["detail"])
-    assert digits == ["3"]
-    assert len(fake.calls) == 1
+    assert outcome["action"] == "opened"
+    for argv, _timeout in fake.calls:
+        assert argv[0] != "osascript", f"open_surface must never call osascript/focus, got {argv!r}"
+
+
+# ---------------------------------------------------------------------------
+# Sol regression R3 (blocker 1): focus_exact_tab is capability-gated off —
+# with no profile_prover, it refuses closed and never invokes the runner.
+# ---------------------------------------------------------------------------
+
+
+def test_sol_r3_focus_exact_tab_without_prover_refused_runner_never_called():
+    fake = FakeRunner()
+    binding = _chatgpt_binding(profile="Default", url="https://chatgpt.com/c/session-alpha")
+    outcome = chatgpt.focus_exact_tab(binding, fake, profile_prover=None)
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "refused"
+    assert outcome["verified"] is False
+    assert len(fake.calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Sol regression R4 (blocker 1): wrong/unknown bound profile refuses, and no
+# subsequent runner call ever carries any OTHER --profile-directory value —
+# no cross-seat failover.
+# ---------------------------------------------------------------------------
+
+
+def test_sol_r4_unknown_bound_profile_refused_no_cross_seat_failover():
+    fake = FakeRunner()
+    binding = _chatgpt_binding(profile="Ghost Profile", url="https://chatgpt.com/c/session-alpha")
+    outcome = chatgpt.open_surface(binding, fake, profiles=_FIXTURE_PROFILES)
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "disallowed_target"
+    assert outcome["verified"] is False
+    assert fake.calls == []
+    for argv, _timeout in fake.calls:
+        assert not any(str(a).startswith("--profile-directory=") and a != "--profile-directory=Ghost Profile" for a in argv)
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +515,7 @@ def _assert_no_leak(outcome, *secrets):
 
 
 def test_falsifier_privacy_chatgpt_success_and_failure(tmp_path):
-    fake_ok = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 1", "stderr": "", "timed_out": False}])
+    fake_ok = FakeRunner()
     binding = _chatgpt_binding(url=_SECRET_URL, profile="Default")
     ok_outcome = chatgpt.open_surface(binding, fake_ok, profiles=_FIXTURE_PROFILES)
     _assert_no_leak(ok_outcome, _SECRET_URL)
@@ -462,8 +528,11 @@ def test_falsifier_privacy_chatgpt_success_and_failure(tmp_path):
 
 def test_falsifier_privacy_claude_code(tmp_path):
     fake = FakeRunner()
-    binding = _claude_code_binding(project_dir=str(tmp_path), session_id=_SECRET_SESSION_UUID)
-    outcome = claude.open_claude_code(binding, fake)
+    project_dir = str(tmp_path)
+    claude_projects_dir = tmp_path / "claude_store"
+    _write_claude_transcript(claude_projects_dir, project_dir, _SECRET_SESSION_UUID)
+    binding = _claude_code_binding(project_dir=project_dir, session_id=_SECRET_SESSION_UUID)
+    outcome = claude.open_claude_code(binding, fake, claude_projects_dir=str(claude_projects_dir))
     assert outcome["ok"] is True
     _assert_no_leak(outcome, _SECRET_SESSION_UUID, str(tmp_path))
 
@@ -486,10 +555,14 @@ def test_falsifier_privacy_cursor(tmp_path):
 
 def test_falsifier_privacy_codex(tmp_path):
     fake = FakeRunner()
-    binding = _codex_binding(session_id=_SECRET_CODEX_ID, cwd=str(tmp_path))
-    outcome = codex.open_surface(binding, fake)
+    codex_sessions_dir = tmp_path / "codex_store"
+    _write_codex_transcript(codex_sessions_dir, _SECRET_CODEX_ID)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    binding = _codex_binding(session_id=_SECRET_CODEX_ID, cwd=str(workdir))
+    outcome = codex.open_surface(binding, fake, codex_sessions_dir=str(codex_sessions_dir))
     assert outcome["ok"] is True
-    _assert_no_leak(outcome, _SECRET_CODEX_ID, str(tmp_path))
+    _assert_no_leak(outcome, _SECRET_CODEX_ID, str(workdir))
 
 
 def test_falsifier_privacy_refusals_carry_no_locator(tmp_path):
@@ -559,8 +632,10 @@ def test_claude_code_command_composition_exact_string(tmp_path):
     fake = FakeRunner()
     session_id = "88888888-8888-4888-8888-888888888888"
     project_dir = str(tmp_path)
+    claude_projects_dir = tmp_path / "claude_store"
+    _write_claude_transcript(claude_projects_dir, project_dir, session_id)
     binding = _claude_code_binding(project_dir=project_dir, session_id=session_id)
-    claude.open_claude_code(binding, fake)
+    claude.open_claude_code(binding, fake, claude_projects_dir=str(claude_projects_dir))
 
     assert len(fake.calls) == 1
     argv, _ = fake.calls[0]
@@ -574,8 +649,10 @@ def test_claude_code_command_composition_quotes_space_in_path(tmp_path):
     spaced_dir.mkdir()
     fake = FakeRunner()
     session_id = "99999999-9999-4999-9999-999999999999"
+    claude_projects_dir = tmp_path / "claude_store"
+    _write_claude_transcript(claude_projects_dir, str(spaced_dir), session_id)
     binding = _claude_code_binding(project_dir=str(spaced_dir), session_id=session_id)
-    claude.open_claude_code(binding, fake)
+    claude.open_claude_code(binding, fake, claude_projects_dir=str(claude_projects_dir))
 
     argv, _ = fake.calls[0]
     command = argv[-1]
@@ -606,10 +683,12 @@ def test_cursor_command_composition_with_workspace_quotes_space(tmp_path):
     assert "'" in argv[-1]
 
 
-def test_codex_command_composition_exact_string_no_cwd():
+def test_codex_command_composition_exact_string_no_cwd(tmp_path):
     fake = FakeRunner()
+    codex_sessions_dir = tmp_path / "codex_store"
+    _write_codex_transcript(codex_sessions_dir, "session-xyz")
     binding = _codex_binding(session_id="session-xyz", cwd=None)
-    codex.open_surface(binding, fake)
+    codex.open_surface(binding, fake, codex_sessions_dir=str(codex_sessions_dir))
     argv, _ = fake.calls[0]
     assert argv[-1] == "codex resume session-xyz"
 
@@ -618,8 +697,10 @@ def test_codex_command_composition_with_cwd_quotes_space(tmp_path):
     spaced_dir = tmp_path / "Codex Dir"
     spaced_dir.mkdir()
     fake = FakeRunner()
+    codex_sessions_dir = tmp_path / "codex_store"
+    _write_codex_transcript(codex_sessions_dir, "session-xyz")
     binding = _codex_binding(session_id="session-xyz", cwd=str(spaced_dir))
-    codex.open_surface(binding, fake)
+    codex.open_surface(binding, fake, codex_sessions_dir=str(codex_sessions_dir))
     argv, _ = fake.calls[0]
     import shlex as _shlex
     expected = "cd " + _shlex.quote(str(spaced_dir)) + " && codex resume session-xyz"
@@ -660,6 +741,140 @@ def test_codex_missing_cwd_not_found():
 
 
 # ---------------------------------------------------------------------------
+# Sol regressions C.R1-R3 (blocker 2): claude_code/codex must prove the
+# bound session actually exists in the local session store BEFORE ever
+# launching Terminal. A syntactically valid but nonexistent session id must
+# refuse not_found with the runner never invoked, even when the runner is
+# primed to ACK the Terminal launch ("osascript success + provider resume
+# failure" read as an existence-gate case — the launch that would produce
+# that ACK must never be attempted in the first place). Only a session
+# PRESENT in the local store, with a launch ACK, may report verified=True.
+# ---------------------------------------------------------------------------
+
+
+def test_sol_c_r1_claude_code_nonexistent_session_refused_not_found_no_launch(tmp_path):
+    fake = FakeRunner()
+    project_dir = str(tmp_path)
+    session_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    claude_projects_dir = tmp_path / "claude_store"
+    claude_projects_dir.mkdir()  # store exists, but no transcript for this session
+    binding = _claude_code_binding(project_dir=project_dir, session_id=session_id)
+    outcome = claude.open_claude_code(binding, fake, claude_projects_dir=str(claude_projects_dir))
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert outcome["verified"] is False
+    assert fake.calls == []
+
+
+def test_sol_c_r1_codex_nonexistent_session_refused_not_found_no_launch(tmp_path):
+    fake = FakeRunner()
+    session_id = "definitely-not-a-real-session"
+    codex_sessions_dir = tmp_path / "codex_store"
+    codex_sessions_dir.mkdir()  # store exists, but no transcript for this session
+    binding = _codex_binding(session_id=session_id, cwd=None)
+    outcome = codex.open_surface(binding, fake, codex_sessions_dir=str(codex_sessions_dir))
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert outcome["verified"] is False
+    assert fake.calls == []
+
+
+def test_sol_c_r2_claude_code_terminal_would_ack_but_session_absent_never_launches(tmp_path):
+    # Prime the fake runner to ACK the Terminal launch -- the existence gate
+    # must still refuse BEFORE that ACK is ever produced.
+    fake = FakeRunner(responses=[{"code": 0, "stdout": "", "stderr": "", "timed_out": False}])
+    project_dir = str(tmp_path)
+    session_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    claude_projects_dir = tmp_path / "claude_store"
+    claude_projects_dir.mkdir()
+    binding = _claude_code_binding(project_dir=project_dir, session_id=session_id)
+    outcome = claude.open_claude_code(binding, fake, claude_projects_dir=str(claude_projects_dir))
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert fake.calls == [], "a Terminal-ACK-primed runner must never be invoked when the session is absent"
+
+
+def test_sol_c_r2_codex_terminal_would_ack_but_session_absent_never_launches(tmp_path):
+    fake = FakeRunner(responses=[{"code": 0, "stdout": "", "stderr": "", "timed_out": False}])
+    codex_sessions_dir = tmp_path / "codex_store"
+    codex_sessions_dir.mkdir()
+    binding = _codex_binding(session_id="absent-session", cwd=None)
+    outcome = codex.open_surface(binding, fake, codex_sessions_dir=str(codex_sessions_dir))
+
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert fake.calls == [], "a Terminal-ACK-primed runner must never be invoked when the session is absent"
+
+
+def test_sol_c_r3_claude_code_session_present_and_launch_acked_is_verified(tmp_path):
+    fake = FakeRunner()
+    project_dir = str(tmp_path)
+    session_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    claude_projects_dir = tmp_path / "claude_store"
+    _write_claude_transcript(claude_projects_dir, project_dir, session_id)
+    binding = _claude_code_binding(project_dir=project_dir, session_id=session_id)
+    outcome = claude.open_claude_code(binding, fake, claude_projects_dir=str(claude_projects_dir))
+
+    assert outcome["ok"] is True
+    assert outcome["verified"] is True
+    assert len(fake.calls) == 1
+
+
+def test_sol_c_r3_codex_session_present_and_launch_acked_is_verified(tmp_path):
+    fake = FakeRunner()
+    codex_sessions_dir = tmp_path / "codex_store"
+    _write_codex_transcript(codex_sessions_dir, "present-session")
+    binding = _codex_binding(session_id="present-session", cwd=None)
+    outcome = codex.open_surface(binding, fake, codex_sessions_dir=str(codex_sessions_dir))
+
+    assert outcome["ok"] is True
+    assert outcome["verified"] is True
+    assert len(fake.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# slug-rule receipt: the empirically pinned Claude Code project-dir slug
+# mapping (see claude._slugify_project_dir's docstring for the source
+# listing) against the exact real-path/slug pairs observed
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_slug_rule_matches_observed_real_store_entries():
+    cases = [
+        (
+            "/Users/chriswong/Documents/Cluade/macro-main",
+            "-Users-chriswong-Documents-Cluade-macro-main",
+        ),
+        (
+            "/Users/chriswong/Documents/Cluade/Macro Dashboard/.claude/worktrees/13f-census-cadence-af87e7",
+            "-Users-chriswong-Documents-Cluade-Macro-Dashboard--claude-worktrees-13f-census-cadence-af87e7",
+        ),
+        (
+            "/Users/chriswong/.openclaw-crestodian-workspace",
+            "-Users-chriswong--openclaw-crestodian-workspace",
+        ),
+    ]
+    for real_path, expected_slug in cases:
+        assert claude._slugify_project_dir(real_path) == expected_slug
+
+
+# ---------------------------------------------------------------------------
+# cursor_agent / codex existence-unprovable / verified=False law
+# ---------------------------------------------------------------------------
+
+
+def test_cursor_launch_success_is_never_verified():
+    fake = FakeRunner()
+    binding = _cursor_binding(chat_id="chat-123", workspace_dir=None)
+    outcome = cursor.open_surface(binding, fake)
+    assert outcome["ok"] is True
+    assert outcome["verified"] is False
+
+
+# ---------------------------------------------------------------------------
 # claude_desktop happy path
 # ---------------------------------------------------------------------------
 
@@ -670,6 +885,7 @@ def test_claude_desktop_open_success():
     outcome = claude.open_claude_desktop(binding, fake)
     assert outcome["ok"] is True
     assert outcome["action"] == "opened"
+    assert outcome["verified"] is False
     argv, _ = fake.calls[0]
     assert argv == ["/usr/bin/open", "claude://open/session-xyz"]
 
@@ -711,10 +927,15 @@ def test_open_binding_dispatches_claude_desktop():
 
 def test_open_binding_dispatches_claude_code(tmp_path):
     fake = FakeRunner()
-    binding = _claude_code_binding(project_dir=str(tmp_path))
-    outcome = contract.open_binding(binding, fake)
+    project_dir = str(tmp_path)
+    session_id = "22222222-2222-4222-8222-222222222222"
+    claude_projects_dir = tmp_path / "claude_store"
+    _write_claude_transcript(claude_projects_dir, project_dir, session_id)
+    binding = _claude_code_binding(project_dir=project_dir, session_id=session_id)
+    outcome = contract.open_binding(binding, fake, claude_projects_dir=str(claude_projects_dir))
     assert outcome["ok"] is True
     assert outcome["provider"] == "claude_code"
+    assert outcome["verified"] is True
 
 
 def test_open_binding_dispatches_cursor_agent():
@@ -723,14 +944,18 @@ def test_open_binding_dispatches_cursor_agent():
     outcome = contract.open_binding(binding, fake)
     assert outcome["ok"] is True
     assert outcome["provider"] == "cursor_agent"
+    assert outcome["verified"] is False
 
 
-def test_open_binding_dispatches_codex():
+def test_open_binding_dispatches_codex(tmp_path):
     fake = FakeRunner()
+    codex_sessions_dir = tmp_path / "codex_store"
+    _write_codex_transcript(codex_sessions_dir, "codex-session-delta")
     binding = _codex_binding()
-    outcome = contract.open_binding(binding, fake)
+    outcome = contract.open_binding(binding, fake, codex_sessions_dir=str(codex_sessions_dir))
     assert outcome["ok"] is True
     assert outcome["provider"] == "codex"
+    assert outcome["verified"] is True
 
 
 def test_open_binding_dispatches_chatgpt(monkeypatch):
@@ -739,9 +964,10 @@ def test_open_binding_dispatches_chatgpt(monkeypatch):
     # Local State file. Monkeypatch that function so this stays hermetic and
     # deterministic instead of depending on developer-machine Chrome state.
     monkeypatch.setattr(chatgpt, "list_profiles", lambda *a, **k: dict(_FIXTURE_PROFILES))
-    fake = FakeRunner(responses=[{"code": 0, "stdout": "FOCUSED 1", "stderr": "", "timed_out": False}])
+    fake = FakeRunner()
     binding = _chatgpt_binding(profile="Default")
     outcome = contract.open_binding(binding, fake)
     assert outcome["ok"] is True
+    assert outcome["action"] == "opened"
+    assert outcome["verified"] is False
     assert outcome["provider"] == "chatgpt"
-    assert outcome["action"] == "focused"

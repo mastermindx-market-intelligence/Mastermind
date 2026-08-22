@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import claude as claude_surface
 from scripts import chairman_control_room as server_mod
 
 
@@ -60,7 +61,15 @@ def _fixed_now(value: str):
 # ---------------------------------------------------------------------------
 
 
-def _make_config(tmp_path: Path, *, runner=None, now_value: str = "2026-08-22T00:00:00Z", live_cache=None) -> "server_mod.ServerConfig":
+def _make_config(
+    tmp_path: Path,
+    *,
+    runner=None,
+    now_value: str = "2026-08-22T00:00:00Z",
+    live_cache=None,
+    claude_projects_dir=None,
+    codex_sessions_dir=None,
+) -> "server_mod.ServerConfig":
     repo_root = tmp_path / "mastermind_repo"
     repo_root.mkdir(exist_ok=True)
     macro_root = tmp_path / "macro_repo"
@@ -86,6 +95,8 @@ def _make_config(tmp_path: Path, *, runner=None, now_value: str = "2026-08-22T00
         runner=runner or FakeRunner(),
         now_fn=_fixed_now(now_value),
         live_cache=live_cache if live_cache is not None else {},
+        claude_projects_dir=claude_projects_dir,
+        codex_sessions_dir=codex_sessions_dir,
     )
 
 
@@ -741,11 +752,15 @@ def test_discover_url_filter_is_server_side_not_in_the_script():
 
 
 # ---------------------------------------------------------------------------
-# 11. successful /api/open updates ONLY last_verified_at
+# 11. last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
+#     blocker 2): the stamp advances ONLY on ok=True AND verified=True.
 # ---------------------------------------------------------------------------
 
 
-def test_successful_open_updates_only_last_verified_at(tmp_path):
+def test_open_ok_but_unverified_leaves_bindings_file_byte_unchanged(tmp_path):
+    """(a) ok=True, verified=False (cursor_agent — no proven local store) ->
+    the bindings file on disk is byte-for-byte unchanged; last_verified_at
+    stays None."""
     binding_id = "22222222-2222-4222-8222-222222222222"
     doc = {
         "schema": sb.SCHEMA,
@@ -753,9 +768,9 @@ def test_successful_open_updates_only_last_verified_at(tmp_path):
             sb.new_binding(
                 work_ref="WS:OPEN-TEST",
                 role="worker",
-                provider="claude_desktop",
-                locator_kind="claude_desktop_url",
-                locator={"url": "https://claude.ai/chat/abc123"},
+                provider="cursor_agent",
+                locator_kind="cursor_agent_thread",
+                locator={"chat_id": "chat-abc123", "workspace_dir": None},
                 observed_at="2026-08-22T00:00:00Z",
                 last_verified_at=None,
                 binding_id=binding_id,
@@ -763,6 +778,57 @@ def test_successful_open_updates_only_last_verified_at(tmp_path):
         ],
     }
     config = _make_config(tmp_path, now_value="2026-08-22T05:00:00Z")
+    sb.save_bindings(doc, config.bindings_path)
+    before_bytes = config.bindings_path.read_bytes()
+
+    runner = FakeRunner(responses=[{"code": 0, "stdout": "", "stderr": "", "timed_out": False}])
+    config.runner = runner
+
+    with _running_server(config) as (_httpd, port):
+        status, _headers, body = _post(port, "/api/open", {"binding_id": binding_id}, headers=_auth_headers(config))
+    assert status == 200
+    outcome = json.loads(body)
+    assert outcome["ok"] is True
+    assert outcome["verified"] is False
+
+    after_bytes = config.bindings_path.read_bytes()
+    assert after_bytes == before_bytes, "an unverified open must never write the bindings file"
+
+    after_doc, _problems = sb.load_bindings(config.bindings_path)
+    assert after_doc["bindings"][0]["last_verified_at"] is None
+
+
+def test_open_ok_and_verified_advances_last_verified_at(tmp_path):
+    """(b) ok=True, verified=True (claude_code with a fixture transcript
+    present in a tmp claude_projects_dir) -> the stamp advances to the
+    injected now_fn value; every other field is unchanged."""
+    binding_id = "33333333-3333-4333-8333-333333333333"
+    project_dir = str(tmp_path / "project")
+    Path(project_dir).mkdir()
+    session_id = "44444444-4444-4444-8444-444444444444"
+    claude_projects_dir = tmp_path / "claude_store"
+    project_slug = claude_surface._slugify_project_dir(project_dir)
+    (claude_projects_dir / project_slug).mkdir(parents=True)
+    (claude_projects_dir / project_slug / f"{session_id}.jsonl").write_text("", encoding="utf-8")
+
+    doc = {
+        "schema": sb.SCHEMA,
+        "bindings": [
+            sb.new_binding(
+                work_ref="WS:OPEN-TEST",
+                role="worker",
+                provider="claude_code",
+                locator_kind="claude_code_session",
+                locator={"project_dir": project_dir, "session_id": session_id},
+                observed_at="2026-08-22T00:00:00Z",
+                last_verified_at=None,
+                binding_id=binding_id,
+            )
+        ],
+    }
+    config = _make_config(
+        tmp_path, now_value="2026-08-22T05:00:00Z", claude_projects_dir=str(claude_projects_dir),
+    )
     sb.save_bindings(doc, config.bindings_path)
     before_doc, _problems = sb.load_bindings(config.bindings_path)
     before_binding = before_doc["bindings"][0]
@@ -775,6 +841,7 @@ def test_successful_open_updates_only_last_verified_at(tmp_path):
     assert status == 200
     outcome = json.loads(body)
     assert outcome["ok"] is True
+    assert outcome["verified"] is True
 
     after_doc, _problems2 = sb.load_bindings(config.bindings_path)
     after_binding = after_doc["bindings"][0]
@@ -784,6 +851,49 @@ def test_successful_open_updates_only_last_verified_at(tmp_path):
         if key == "last_verified_at":
             continue
         assert after_binding[key] == before_binding[key], key
+
+
+def test_open_valid_shaped_nonexistent_codex_session_not_found_file_unchanged(tmp_path):
+    """(c) a valid-shaped but nonexistent codex session id -> 200,
+    ok:false, failure_kind not_found; the bindings file is byte-unchanged."""
+    binding_id = "55555555-5555-4555-8555-555555555555"
+    doc = {
+        "schema": sb.SCHEMA,
+        "bindings": [
+            sb.new_binding(
+                work_ref="WS:OPEN-TEST",
+                role="worker",
+                provider="codex",
+                locator_kind="codex_session",
+                locator={"session_id": "well-formed-but-absent", "cwd": None},
+                observed_at="2026-08-22T00:00:00Z",
+                last_verified_at=None,
+                binding_id=binding_id,
+            )
+        ],
+    }
+    codex_sessions_dir = tmp_path / "codex_store"
+    codex_sessions_dir.mkdir()  # store exists, but no matching transcript
+    config = _make_config(
+        tmp_path, now_value="2026-08-22T05:00:00Z", codex_sessions_dir=str(codex_sessions_dir),
+    )
+    sb.save_bindings(doc, config.bindings_path)
+    before_bytes = config.bindings_path.read_bytes()
+
+    # Even a runner primed to ACK the Terminal launch must never be reached.
+    runner = FakeRunner(responses=[{"code": 0, "stdout": "", "stderr": "", "timed_out": False}])
+    config.runner = runner
+
+    with _running_server(config) as (_httpd, port):
+        status, _headers, body = _post(port, "/api/open", {"binding_id": binding_id}, headers=_auth_headers(config))
+    assert status == 200
+    outcome = json.loads(body)
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "not_found"
+    assert runner.calls == []
+
+    after_bytes = config.bindings_path.read_bytes()
+    assert after_bytes == before_bytes
 
 
 # ---------------------------------------------------------------------------

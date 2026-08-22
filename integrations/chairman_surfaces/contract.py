@@ -18,6 +18,20 @@ session id, or chat id. Refer to them only as "the bound URL" / "the bound
 session" / "the bound chat". This module and every adapter built on it
 follow that law; ``tests/test_chairman_surfaces.py`` asserts it against
 every outcome the suite produces.
+
+``verified`` law (Sol review 5000169412, blocker 2)
+----------------------------------------------------
+Every :class:`OpenOutcome` carries a required ``verified`` boolean.
+``verified=True`` means, and ONLY means: the provider-native identity (a
+session/thread that actually exists in that provider's own local store) was
+proven to exist via a local read surface, AND the navigation action was
+accepted. It is NEVER a liveness or ownership claim — it does not mean the
+provider process is currently running, that the conversation is still
+reachable, or that the Chairman's account still owns it (P0 non-promise). A
+refusal is always ``verified=False`` (:func:`refused` sets this
+unconditionally); a success may be either, which is why :func:`succeeded`
+takes ``verified`` as an explicit required argument rather than defaulting
+it — every call site must say, on purpose, whether it proved existence.
 """
 from __future__ import annotations
 
@@ -106,6 +120,7 @@ def _outcome(
     binding_id: str | None,
     detail: str,
     failure_kind: str | None,
+    verified: bool,
 ) -> dict:
     if failure_kind is not None and failure_kind not in FAILURE_KINDS:
         raise ValueError(f"unknown failure_kind: {failure_kind!r}")
@@ -113,6 +128,8 @@ def _outcome(
         raise ValueError("a successful outcome must not carry a failure_kind")
     if not ok and action is not None:
         raise ValueError("a refused/failed outcome must not carry an action")
+    if verified and not ok:
+        raise ValueError("verified=True requires ok=True — verified is never a claim on its own")
     return {
         "ok": ok,
         "action": action,
@@ -120,22 +137,33 @@ def _outcome(
         "binding_id": binding_id,
         "detail": detail,
         "failure_kind": failure_kind,
+        "verified": verified,
     }
 
 
 def refused(provider: str, binding_id: str | None, failure_kind: str, detail: str) -> dict:
-    """Build a refusal :class:`OpenOutcome`. Never invokes the runner."""
+    """Build a refusal :class:`OpenOutcome`. Never invokes the runner.
+
+    Always ``verified=False`` — a refusal never proves anything.
+    """
     return _outcome(
         ok=False, action=None, provider=provider, binding_id=binding_id,
-        detail=detail, failure_kind=failure_kind,
+        detail=detail, failure_kind=failure_kind, verified=False,
     )
 
 
-def succeeded(provider: str, binding_id: str | None, action: str, detail: str) -> dict:
-    """Build a successful :class:`OpenOutcome`."""
+def succeeded(provider: str, binding_id: str | None, action: str, detail: str, *, verified: bool) -> dict:
+    """Build a successful :class:`OpenOutcome`.
+
+    ``verified`` is a required keyword argument (see the module docstring's
+    "verified law") — every call site must state, on purpose, whether this
+    success proved the provider-native session/tab actually exists, or is
+    merely a dispatched navigation action (``ok=True, verified=False``,
+    i.e. ``BOUND_UNVERIFIED``).
+    """
     return _outcome(
         ok=True, action=action, provider=provider, binding_id=binding_id,
-        detail=detail, failure_kind=None,
+        detail=detail, failure_kind=None, verified=verified,
     )
 
 
@@ -199,12 +227,26 @@ def _revalidate(binding: dict) -> list[str]:
     return _surface_bindings.validate_bindings_document(doc)
 
 
-def open_binding(binding: dict, runner) -> dict:
+def open_binding(
+    binding: dict,
+    runner,
+    *,
+    claude_projects_dir: str | None = None,
+    codex_sessions_dir: str | None = None,
+) -> dict:
     """Re-validate ``binding`` then dispatch to the owning provider adapter.
 
     ``runner`` is any callable matching :func:`integrations.chairman_
     surfaces.runner.run_argv`'s signature — always inject a fake in tests,
     never the real one.
+
+    ``claude_projects_dir``/``codex_sessions_dir`` are optional overrides for
+    the local session-store roots the ``claude_code``/``codex`` adapters read
+    to prove a bound session actually exists before ever launching Terminal
+    (Sol review 5000169412 blocker 2). ``None`` (the default) means "use the
+    adapter's own real default" (``~/.claude/projects`` /
+    ``~/.codex/sessions``); tests always inject a ``tmp_path`` here instead.
+    They are ignored by the other three providers.
 
     Dispatch order (every step refuses closed, never touching ``runner``,
     before the one that follows it runs):
@@ -247,13 +289,13 @@ def open_binding(binding: dict, runner) -> dict:
     if provider == "chatgpt":
         return _chatgpt.open_surface(binding, runner)
     if provider == "claude_code":
-        return _claude.open_claude_code(binding, runner)
+        return _claude.open_claude_code(binding, runner, claude_projects_dir=claude_projects_dir)
     if provider == "claude_desktop":
         return _claude.open_claude_desktop(binding, runner)
     if provider == "cursor_agent":
         return _cursor.open_surface(binding, runner)
     if provider == "codex":
-        return _codex.open_surface(binding, runner)
+        return _codex.open_surface(binding, runner, codex_sessions_dir=codex_sessions_dir)
 
     # Unreachable: _EXPECTED_LOCATOR_KIND only contains these five keys, so
     # the `expected_kind is None` check above already caught anything else.

@@ -249,7 +249,14 @@ class ServerConfig:
     static_dir: Path = DEFAULT_STATIC_DIR
     runner: Callable[..., dict] = default_runner
     now_fn: Callable[[], str] = _utc_now_z
-    open_binding_fn: Callable[[dict, Callable], dict] = contract.open_binding
+    open_binding_fn: Callable[..., dict] = contract.open_binding
+    #: Overrides for the ``claude_code``/``codex`` native-existence-gate
+    #: session-store roots (Sol review 5000169412 blocker 2) — ``None`` (the
+    #: production default) means each adapter uses its own real default
+    #: (``~/.claude/projects`` / ``~/.codex/sessions``). Tests inject a
+    #: ``tmp_path`` here instead.
+    claude_projects_dir: str | None = None
+    codex_sessions_dir: str | None = None
     #: Process-memory-only live active-builds cache — see module docstring.
     #: A fresh ``ServerConfig`` (i.e. a process restart) always starts empty.
     live_cache: dict[str, Any] = field(default_factory=dict)
@@ -757,8 +764,19 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
             return self._send_json(200, outcome, no_store=True)
 
-        outcome = config.open_binding_fn(binding, config.runner)
-        if outcome.get("ok"):
+        outcome = config.open_binding_fn(
+            binding, config.runner,
+            claude_projects_dir=config.claude_projects_dir,
+            codex_sessions_dir=config.codex_sessions_dir,
+        )
+        # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
+        # blocker 2): a mere Terminal-launch ACK must never advance this —
+        # only an outcome that PROVED the provider-native session/tab exists
+        # (contract.OpenOutcome.verified=True) may. `ok=True, verified=False`
+        # (chatgpt / claude_desktop / cursor_agent — no proven local read
+        # surface) stays BOUND_UNVERIFIED and leaves the bindings file
+        # byte-unchanged.
+        if outcome.get("ok") and outcome.get("verified"):
             now = config.now_fn()
             for row in doc["bindings"]:
                 if isinstance(row, dict) and row.get("binding_id") == binding_id:
