@@ -1,0 +1,123 @@
+{
+  "schema": "mastermind.ceo_boot_packet.v1",
+  "generated_at": "2026-08-21T00:00:00Z",
+  "mastermind": {
+    "root": "/fixture/mastermind",
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branch": "fable/chairman-control-room-p0"
+  },
+  "macro": {
+    "root": "/fixture/macro",
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "resolved_via": "sibling",
+    "candidates_tried": [
+      {"via": "sibling", "path": "/fixture/macro", "usable": true, "reason": null}
+    ]
+  },
+  "strategic_state": null,
+  "brief": {
+    "schema": "ceo_brief.v1",
+    "generated_at": "2026-08-21T00:00:00Z",
+    "since": "2026-08-14T00:00:00Z",
+    "since_label": "7d",
+    "counts": {
+      "total": 3,
+      "active": 1,
+      "awaiting_ci": 0,
+      "blocked": 1,
+      "done_in_window": 1
+    },
+    "inputs": {
+      "active_builds_age_hours": 2.0,
+      "worktrees": 4,
+      "degraded": []
+    },
+    "needs_ceo": [
+      {
+        "workstream": "ALPHA-ONE",
+        "question": "Ship or hold the Alpha One rollout?",
+        "options": ["ship", "hold"],
+        "recommendation": "ship",
+        "by_when": "2026-08-25",
+        "blocks_waves": 1,
+        "source": "agentos/workstreams/ALPHA-ONE.yml"
+      }
+    ],
+    "blocked": [
+      {
+        "workstream": "ALPHA-ONE",
+        "title": "Alpha One Rollout",
+        "blocked_by": ["waiting on vendor signoff"],
+        "record_stale_days": 3,
+        "source": "agentos/workstreams/ALPHA-ONE.yml"
+      }
+    ],
+    "finished": [
+      {
+        "workstream": "BETA-TWO",
+        "wave": "W1",
+        "title": "Beta Two Ship",
+        "prs": [42],
+        "done_at": "2026-08-20T10:00:00Z",
+        "source": "agentos/workstreams/BETA-TWO.yml"
+      }
+    ],
+    "running": {
+      "active": 1,
+      "awaiting_ci": 0,
+      "awaiting_review": 0,
+      "proposed": 1,
+      "open_prs": 1,
+      "stale_claims": 0,
+      "claims_without_worktree": 0
+    },
+    "readiness": {
+      "items": [
+        {
+          "workstream": "ALPHA-ONE",
+          "wave": null,
+          "state": "in_progress",
+          "reason_code": "status_in_progress",
+          "reason": "Authored workstream status is active.",
+          "depends_on": [],
+          "unmet_dependencies": [],
+          "source": "agentos/workstreams/ALPHA-ONE.yml"
+        },
+        {
+          "workstream": "ALPHA-ONE",
+          "wave": "W1",
+          "state": "in_progress",
+          "reason_code": "status_in_progress",
+          "reason": "Authored wave status is in_progress.",
+          "depends_on": [],
+          "unmet_dependencies": [],
+          "source": "agentos/workstreams/ALPHA-ONE.yml"
+        },
+        {
+          "workstream": "BETA-TWO",
+          "wave": null,
+          "state": "done",
+          "reason_code": "status_done",
+          "reason": "Authored workstream status is done.",
+          "depends_on": [],
+          "unmet_dependencies": [],
+          "source": "agentos/workstreams/BETA-TWO.yml"
+        },
+        {
+          "workstream": "GAMMA-THREE",
+          "wave": null,
+          "state": "ready",
+          "reason_code": "dependencies_satisfied",
+          "reason": "All declared dependencies are done.",
+          "depends_on": [],
+          "unmet_dependencies": [],
+          "source": "agentos/workstreams/GAMMA-THREE.yml"
+        }
+      ]
+    },
+    "warnings": []
+  },
+  "handoffs": [],
+  "degraded": [],
+  "next_recommended_act": "Rule on 1 pending CEO decision(s). First: WS:ALPHA-ONE — Ship or hold the Alpha One rollout?"
+}
