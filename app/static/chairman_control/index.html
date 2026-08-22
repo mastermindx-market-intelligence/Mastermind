@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ccr-token" content="__CCR_TOKEN__">
+<title>Chairman Control Room</title>
+<link rel="stylesheet" href="/static/control_room.css">
+</head>
+<body>
+<header id="ccr-header">
+  <h1>Chairman Control Room</h1>
+  <p class="ccr-subtitle">
+    Local, read-only, loopback-only. No canonical state is changed by looking at
+    or navigating this page.
+  </p>
+  <dl id="ccr-sources" class="ccr-stamps"></dl>
+</header>
+
+<main>
+
+  <section id="needs-you" aria-labelledby="needs-you-heading">
+    <h2 id="needs-you-heading">Needs You</h2>
+    <p class="ccr-hint">Canonical target=chairman attention items.</p>
+    <ul class="ccr-attention-list"></ul>
+  </section>
+
+  <section id="sol-attention" aria-labelledby="sol-attention-heading">
+    <h2 id="sol-attention-heading">Sol Needs Attention</h2>
+    <p class="ccr-hint">Canonical target=ceo attention items.</p>
+    <ul class="ccr-attention-list"></ul>
+  </section>
+
+  <details id="coo">
+    <summary>COO / Ops</summary>
+    <p class="ccr-hint">Canonical target=coo attention items, collapsed by default.</p>
+    <ul class="ccr-attention-list"></ul>
+  </details>
+
+  <section id="degraded" aria-labelledby="degraded-heading">
+    <h2 id="degraded-heading">Degraded Sources</h2>
+    <ul></ul>
+  </section>
+
+  <section id="work" aria-labelledby="work-heading">
+    <h2 id="work-heading">Active Work</h2>
+    <div class="ccr-work-cards"></div>
+  </section>
+
+  <details id="unjoined-prs">
+    <summary>Unjoined Open PRs</summary>
+    <ul></ul>
+  </details>
+
+  <section id="unbound-surfaces" aria-labelledby="unbound-surfaces-heading">
+    <h2 id="unbound-surfaces-heading">Unbound Surfaces</h2>
+    <ul></ul>
+  </section>
+
+  <section id="binding-conflicts" aria-labelledby="binding-conflicts-heading">
+    <h2 id="binding-conflicts-heading">Binding Conflicts</h2>
+    <ul></ul>
+  </section>
+
+  <section id="discover" aria-labelledby="discover-heading">
+    <h2 id="discover-heading">Discover Candidate Surfaces</h2>
+    <p class="ccr-hint">Discovery confers zero ownership. Nothing here is bound until you explicitly bind it below.</p>
+    <button type="button" id="discover-run">Discover</button>
+    <div id="discover-results"></div>
+  </section>
+
+  <section id="bind-surface" aria-labelledby="bind-surface-heading">
+    <h2 id="bind-surface-heading">Bind a Surface</h2>
+    <form id="bind-form">
+      <label for="bind-work-ref">work_ref (WS:/JOB:/PR:...)</label>
+      <input type="text" id="bind-work-ref" name="work_ref" required>
+
+      <label for="bind-role">role</label>
+      <select id="bind-role" name="role" required>
+        <option value="chairman">chairman</option>
+        <option value="ceo">ceo</option>
+        <option value="coo">coo</option>
+        <option value="worker" selected>worker</option>
+      </select>
+
+      <label for="bind-provider">provider</label>
+      <select id="bind-provider" name="provider" required>
+        <option value="chatgpt">chatgpt</option>
+        <option value="claude_code">claude_code</option>
+        <option value="claude_desktop">claude_desktop</option>
+        <option value="cursor_agent">cursor_agent</option>
+        <option value="codex">codex</option>
+      </select>
+
+      <label for="bind-seat-ref">seat_ref (required for chatgpt)</label>
+      <input type="text" id="bind-seat-ref" name="seat_ref">
+
+      <label for="bind-locator">locator (JSON object)</label>
+      <textarea id="bind-locator" name="locator" rows="3" required>{}</textarea>
+
+      <button type="submit">Bind</button>
+    </form>
+    <div id="bind-result" role="status"></div>
+  </section>
+
+  <section id="refresh-builds-section" aria-labelledby="refresh-builds-heading">
+    <h2 id="refresh-builds-heading">Active Builds</h2>
+    <button type="button" id="refresh-builds">Refresh from GitHub</button>
+    <div id="refresh-builds-result" role="status"></div>
+  </section>
+
+</main>
+
+<script src="/static/control_room.js"></script>
+</body>
+</html>
