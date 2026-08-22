@@ -40,7 +40,7 @@
         "recommendation": "ship",
         "by_when": "2026-08-25",
         "blocks_waves": 1,
-        "source": "agentos/workstreams/ALPHA-ONE.yml"
+        "source": "agentos/workstreams/WS-ALPHA-ONE.md"
       }
     ],
     "blocked": [
@@ -49,7 +49,7 @@
         "title": "Alpha One Rollout",
         "blocked_by": ["waiting on vendor signoff"],
         "record_stale_days": 3,
-        "source": "agentos/workstreams/ALPHA-ONE.yml"
+        "source": "agentos/workstreams/WS-ALPHA-ONE.md"
       }
     ],
     "finished": [
@@ -59,7 +59,7 @@
         "title": "Beta Two Ship",
         "prs": [42],
         "done_at": "2026-08-20T10:00:00Z",
-        "source": "agentos/workstreams/BETA-TWO.yml"
+        "source": "agentos/workstreams/WS-BETA-TWO.md"
       }
     ],
     "running": {
@@ -72,7 +72,9 @@
       "claims_without_worktree": 0
     },
     "readiness": {
-      "items": [
+      "schema": "agentos.readiness.v1",
+      "degraded": [],
+      "records": [
         {
           "workstream": "ALPHA-ONE",
           "wave": null,
@@ -81,7 +83,7 @@
           "reason": "Authored workstream status is active.",
           "depends_on": [],
           "unmet_dependencies": [],
-          "source": "agentos/workstreams/ALPHA-ONE.yml"
+          "source": "agentos/workstreams/WS-ALPHA-ONE.md"
         },
         {
           "workstream": "ALPHA-ONE",
@@ -91,7 +93,7 @@
           "reason": "Authored wave status is in_progress.",
           "depends_on": [],
           "unmet_dependencies": [],
-          "source": "agentos/workstreams/ALPHA-ONE.yml"
+          "source": "agentos/workstreams/WS-ALPHA-ONE.md"
         },
         {
           "workstream": "BETA-TWO",
@@ -101,7 +103,7 @@
           "reason": "Authored workstream status is done.",
           "depends_on": [],
           "unmet_dependencies": [],
-          "source": "agentos/workstreams/BETA-TWO.yml"
+          "source": "agentos/workstreams/WS-BETA-TWO.md"
         },
         {
           "workstream": "GAMMA-THREE",
@@ -111,7 +113,7 @@
           "reason": "All declared dependencies are done.",
           "depends_on": [],
           "unmet_dependencies": [],
-          "source": "agentos/workstreams/GAMMA-THREE.yml"
+          "source": "agentos/workstreams/WS-GAMMA-THREE.md"
         }
       ]
     },

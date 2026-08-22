@@ -229,30 +229,58 @@ def _binding_summary(binding: Mapping[str, Any]) -> dict[str, Any]:
 def _agent_os_workstreams(brief: Any) -> dict[str, dict[str, Any]]:
     """Every workstream the ``ceo_brief.v1`` document names, keyed by its bare key.
 
-    The emitted JSON brief (``scripts/agentos.py`` ``build_brief``, pinned SHA
-    ``5ad347240a1a744746e01a472f80d6698e73b413`` lines 2101-2124) does NOT
-    carry a flat ``key/title/status`` directory of every workstream — that
-    shape exists only in the ``--full`` TEXT render, built from
-    ``state["workstreams"]``, which is never part of the JSON the CLI emits.
-    What IS present for every workstream is ``readiness.items`` (lines
-    1648-1657: one entry per workstream, ``wave: null``, carrying
-    ``workstream``/``state``/``reason_code``/``reason``/``source``/
-    ``depends_on``/``unmet_dependencies`` — all source-owned field names,
-    unchanged here) plus a ``title`` for whichever workstreams also appear in
-    ``blocked`` (line 2075-2076) or ``finished`` (lines 2063-2066).  This is
-    the honest exact reading of what the brief actually emits; a workstream
+    The emitted JSON brief does NOT carry a flat ``key/title/status``
+    directory of every workstream — that shape exists only in the
+    ``--full`` TEXT render, built from ``state["workstreams"]``, which is
+    never part of the JSON the CLI emits.  What IS present for every
+    workstream is ``readiness.records`` — LIVE-VERIFIED (Wave D production
+    defect fix, 2026-08-22): running ``python3 scripts/agentos.py brief
+    --json --no-remember`` against a fresh ``origin/main`` Macro checkout
+    emits ``doc["readiness"] == {"schema": "agentos.readiness.v1",
+    "degraded": [...], "records": [...341 rows live...]}`` — the container
+    key is ``records``, NEVER ``items``.  ``items`` was
+    ``compute_readiness()``'s internal Python variable name in
+    ``scripts/agentos.py``, read off the SOURCE rather than the emitted
+    document; the original Wave A fixture encoded that same wrong key, so
+    every test passed while production silently composed zero brief
+    workstreams (cards minted from ``agent_os_state`` alone; e.g.
+    ``WS:CHAIRMAN-CONTROL-ROOM`` never appeared).  Each record — live
+    receipt, a real workstream-level row — is exactly ``{"workstream":
+    "ACCOUNT-IDENTITY-HARDENING", "wave": null, "state": "blocked",
+    "reason_code": "workstream_blocked", "reason": "Authored workstream
+    status is blocked.", "depends_on": [], "unmet_dependencies": [],
+    "source": "agentos/workstreams/WS-ACCOUNT-IDENTITY-HARDENING.md"}`` —
+    one entry per workstream, ``wave: null``, carrying ``workstream``/
+    ``state``/``reason_code``/``reason``/``source``/``depends_on``/
+    ``unmet_dependencies`` (all source-owned field names, unchanged here)
+    plus a ``title`` for whichever workstreams also appear in ``blocked``
+    or ``finished`` — both ALSO re-verified live in the same emission
+    (unchanged from the original guess, but confirmed against the real
+    document rather than source code): a real ``blocked[]`` row is
+    ``{"workstream": "CUSTOMER-DATA-BACKUP", "title": "Customer-data backup
+    and restore (MMX-001 / GATE-1)", "blocked_by": [...], "record_stale_days":
+    7, "source": "agentos/workstreams/WS-CUSTOMER-DATA-BACKUP.md"}`` and a
+    real ``finished[]`` row is ``{"workstream": "DEFENSE-PROCUREMENT-V3",
+    "wave": "D4", "title": "Company financial truth bridge", "prs": [6123,
+    6173, 6192], "done_at": "2026-08-21T12:36:09Z", "source":
+    "agentos/workstreams/WS-DEFENSE-PROCUREMENT-V3.md"}`` — ``workstream``/
+    ``title`` land exactly where this function already reads them.  A
+    real ``needs_ceo[]`` row (consumed elsewhere, by
+    :mod:`control_plane.executive_inbox`'s own ``project_needs_ceo``, not
+    here) is ``{"workstream": ..., "question": ..., "options": [...],
+    "recommendation": ..., "by_when": ..., "blocks_waves": ..., "source":
+    ...}`` — also unchanged from what was already assumed.  A workstream
     that is neither blocked nor finished in the window carries ``title:
-    None`` here rather than an invented one.  See DEVIATIONS in the Wave A
-    build packet for the full explanation.
+    None`` here rather than an invented one.
     """
     if not isinstance(brief, Mapping):
         return {}
 
     readiness = brief.get("readiness")
-    items = readiness.get("items") if isinstance(readiness, Mapping) else None
+    records = readiness.get("records") if isinstance(readiness, Mapping) else None
     result: dict[str, dict[str, Any]] = {}
-    if isinstance(items, Sequence) and not isinstance(items, (str, bytes)):
-        for item in items:
+    if isinstance(records, Sequence) and not isinstance(records, (str, bytes)):
+        for item in records:
             if not isinstance(item, Mapping):
                 continue
             if item.get("wave") is not None:

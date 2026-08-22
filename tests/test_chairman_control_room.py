@@ -159,6 +159,90 @@ def test_no_overall_or_combined_status_field_anywhere(boot_packet, inbox, active
 
 
 # ---------------------------------------------------------------------------
+# regression — readiness container key is "records", NEVER "items"
+# (Wave D production defect, 2026-08-22: "items" was compute_readiness()'s
+# INTERNAL Python variable name in scripts/agentos.py, not the emitted JSON
+# key. `python3 scripts/agentos.py brief --json --no-remember` against a
+# fresh origin/main Macro checkout emits `readiness == {"schema":
+# "agentos.readiness.v1", "degraded": [...], "records": [...341 rows
+# live...]}`. The Wave A fixture encoded the wrong key too, so every test
+# passed while production composed zero brief workstreams. These two tests
+# pin the PUBLISHED contract, not the legacy guess, in both directions.)
+# ---------------------------------------------------------------------------
+
+
+def _minimal_boot_packet_with_readiness(readiness: dict) -> dict:
+    return {
+        "schema": ccr.BOOT_PACKET_SCHEMA,
+        "mastermind": {"root": "/x", "sha": "a" * 40, "branch": "main"},
+        "macro": {"root": "/y", "sha": "b" * 40},
+        "degraded": [],
+        "brief": {
+            "schema": ccr.AGENT_OS_BRIEF_SCHEMA,
+            "readiness": readiness,
+            "blocked": [], "finished": [], "needs_ceo": [],
+        },
+    }
+
+
+_LIVE_SHAPE_RECORD = {
+    "workstream": "LIVE-KEY", "wave": None, "state": "blocked",
+    "reason_code": "workstream_blocked",
+    "reason": "Authored workstream status is blocked.",
+    "depends_on": [], "unmet_dependencies": [],
+    "source": "agentos/workstreams/WS-LIVE-KEY.md",
+}
+
+
+def test_readiness_records_is_the_published_contract():
+    """A fixture whose readiness carries ONLY ``records`` (no ``items`` key
+    anywhere) yields a non-empty brief-sourced workstream set — the real,
+    live-verified shape.
+    """
+    boot_packet = _minimal_boot_packet_with_readiness({
+        "schema": "agentos.readiness.v1",
+        "degraded": [],
+        "records": [_LIVE_SHAPE_RECORD],
+    })
+    assert "items" not in boot_packet["brief"]["readiness"]
+
+    doc = ccr.compose_control_room(
+        inbox=None, boot_packet=boot_packet, active_builds=None,
+        agent_os_state=None, runtime_jobs=None, bindings=None,
+        generated_at="2026-08-21T00:00:00Z",
+    )
+    refs = {c["work_ref"] for c in doc["work"]}
+    assert refs == {"WS:LIVE-KEY"}
+    card = _card(doc, "WS:LIVE-KEY")
+    assert card["agent_os"]["state"] == "blocked"
+
+
+def test_readiness_items_alone_yields_zero_brief_workstreams():
+    """The inverse falsifier: a document carrying ONLY the legacy ``items``
+    key (no ``records`` anywhere) must NOT be read — pinning that this
+    module follows the published contract, not the source-code guess that
+    caused the Wave D defect.
+    """
+    boot_packet = _minimal_boot_packet_with_readiness({
+        "schema": "agentos.readiness.v1",
+        "degraded": [],
+        "items": [_LIVE_SHAPE_RECORD],
+    })
+    assert "records" not in boot_packet["brief"]["readiness"]
+
+    doc = ccr.compose_control_room(
+        inbox=None, boot_packet=boot_packet, active_builds=None,
+        agent_os_state=None, runtime_jobs=None, bindings=None,
+        generated_at="2026-08-21T00:00:00Z",
+    )
+    # The brief itself was present and schema-valid (no "unavailable"/schema
+    # mismatch degraded entry) — it just legitimately named zero
+    # workstreams, because this module correctly did not read "items".
+    assert not any(entry.startswith("boot_packet:") for entry in doc["degraded"])
+    assert doc["work"] == []
+
+
+# ---------------------------------------------------------------------------
 # baseline shape (sanity for the richer falsifiers below)
 # ---------------------------------------------------------------------------
 
@@ -732,13 +816,17 @@ def test_falsifier_artifact_vs_brief_disagreement_preservation():
         "degraded": [],
         "brief": {
             "schema": ccr.AGENT_OS_BRIEF_SCHEMA,
-            "readiness": {"items": [{
-                "workstream": "ZETA-SIX", "wave": None, "state": "in_progress",
-                "reason_code": "status_in_progress",
-                "reason": "Authored workstream status is active.",
-                "depends_on": [], "unmet_dependencies": [],
-                "source": "agentos/workstreams/ZETA-SIX.yml",
-            }]},
+            "readiness": {
+                "schema": "agentos.readiness.v1",
+                "degraded": [],
+                "records": [{
+                    "workstream": "ZETA-SIX", "wave": None, "state": "in_progress",
+                    "reason_code": "status_in_progress",
+                    "reason": "Authored workstream status is active.",
+                    "depends_on": [], "unmet_dependencies": [],
+                    "source": "agentos/workstreams/WS-ZETA-SIX.md",
+                }],
+            },
             "blocked": [], "finished": [], "needs_ceo": [],
         },
     }
