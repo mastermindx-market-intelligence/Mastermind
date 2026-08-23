@@ -1,27 +1,34 @@
-<!--
-Mastermind-X tracked-work PR template for the Executive OS repository.
-
-This file is an authoring aid, not execution authority. Replace every placeholder,
-delete inapplicable guidance, and link the current canonical records. A PR may not
-self-authorize a successor phase, production arming, Wake, or worker execution.
--->
-
-Workstream: WS:<KEY> | NONE
-Linear: MAS-### | NONE
-Portfolio-Mode: tracked | maintenance_exception | workstream_creation | architecture_candidate
-Wave: <bounded wave ID or maintenance label>
-Authority: runtime | records | research | architecture | maintenance | production-proof
-Completion: merge-is-done | built-not-proven | production-proof-required | acceptance-required
+Workstream: REQUIRED
+Linear: REQUIRED
+Portfolio-Mode: REQUIRED
+Wave: REQUIRED
+Authority: REQUIRED
+Completion: REQUIRED
 
 <!--
-Use an exact canonical WS key—never fuzzy-match by title. Executive OS architecture
-may legitimately use Workstream: NONE while no accepted organizational workstream
-exists; in that case use architecture_candidate or a typed maintenance exception and
-state the boundary explicitly.
+MAS-28 V1 canonical authoring grammar. The six contiguous lines above are the strict
+header zone: replace every REQUIRED token with one concrete allowed value before a
+report can be interpreted. This template is an authoring aid, not execution authority.
 
-`Fixes/Closes MAS-###` is allowed only when Completion is `merge-is-done`.
-For every other completion class, use `Refs MAS-###` or the issue URL so merge
-cannot erase production, independent-review, natural-time, or CEO acceptance gates.
+Allowed values:
+- Workstream: WS:<KEY> | NONE
+- Linear: MAS-### | NONE
+- Portfolio-Mode: tracked | maintenance_exception | creates_workstream | architecture_candidate
+- Wave: a non-empty bounded identifier
+- Authority: implementation | records | research | maintenance | proof | deploy | architecture_candidate
+- Completion: merge-is-done | built-not-proven | proof-required | acceptance-required | records-only
+
+Use an exact canonical WS key—never fuzzy-match by title. Workstream: NONE is valid
+only for an explicitly typed maintenance or architecture-candidate change. A PR may
+not self-authorize a successor phase, production arming, Wake, or worker execution.
+
+MAS28-V1-CONTRACT-SHA256: e78cbf00a952f7283a7e0f1e83eb4070c9049c1a445c9a035f9da8652dc6838c
+MAS28-V1-RULESET-SHA256: 41d5634a6ca6d4bbd993e728b73d839260452b24c891e556c59da52a184a1859
+
+Native relationship law: `Fixes`/`Closes MAS-###` is permitted only when
+`Completion: merge-is-done`. For every other completion class, use `Refs MAS-###`
+or the issue URL; merge must not erase proof, natural-time, independent-review, or
+acceptance obligations.
 -->
 
 ## Observable mission
@@ -102,6 +109,9 @@ why production proof is explicitly not owed. Green CI alone is not acceptance.
 
 - [ ] Exact `WS:<KEY>` / `MAS-###` / portfolio mode / wave / authority / completion fields are resolved.
 - [ ] Current default branch, open PRs, worktrees, and path/semantic collisions were checked before editing.
+- [ ] Relevant tests pass and `git diff --check` passes.
+- [ ] No secrets, environment files, runtime state, logs, caches, or backups are included.
+- [ ] This branch was created from current `origin/master` in an isolated worktree.
 - [ ] One independently useful capability is delivered; infrastructure names its real caller and canonical consumer.
 - [ ] Scope and non-goals preserve accepted architecture and no-duplicate-control-plane boundaries.
 - [ ] CEO admission, worker execution, provider readiness, Wake, installation, and production arming remain separate unless explicitly commissioned together.
@@ -112,3 +122,4 @@ why production proof is explicitly not owed. Green CI alone is not acceptance.
 - [ ] Real production proof is attached where `Completion` requires it—or the PR states why none is owed.
 - [ ] Merge is not represented as proof, readiness, execution, or acceptance when another gate remains.
 - [ ] Durable architecture/Agent OS/Linear state is reconciled with one exact lawful next action.
+- [ ] After merge, deploy the exact `origin/master` merge SHA with `scripts/deploy_from_git.sh` and verify the VPS `/health` endpoint returns HTTP 200.
