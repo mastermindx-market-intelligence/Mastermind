@@ -55,6 +55,9 @@ class ExactServiceAuthorityPolicy:
             return "WITHIN_COMMISSION"
         return "CHAIRMAN_REQUIRED"
 
+    def allows_continuation(self, *, request, reply) -> bool:
+        return False
+
 
 def run(coro):
     return asyncio.run(coro)
@@ -199,14 +202,38 @@ def test_real_unix_status_and_one_shot_cleanup(tmp_path: Path) -> None:
     async def scenario() -> None:
         srv, _client = service(tmp_path)
         task = asyncio.create_task(srv.serve_one())
-        while not srv.config.socket_path.exists():
-            await asyncio.sleep(0)
+        async def wait_until_ready() -> None:
+            while not srv.config.socket_path.exists():
+                if task.done():
+                    await task
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_until_ready(), timeout=1)
         response = await call_service(
             srv.config.socket_path, request_envelope("status", {})
         )
         assert response["ok"] is True
         assert response["result"]["status"] == "DEVELOPMENT_UNARMED"
         await task
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_overlong_unix_socket_path_fails_opaque_and_bounded(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        engine, _client = engine_and_client()
+        srv = AgentDialogueService(
+            ServiceConfig(
+                socket_path=tmp_path / ("deep" * 30) / "dialogue.sock",
+                allowed_peer_uids=(os.geteuid(),),
+                request_timeout_seconds=1,
+            ),
+            engine,
+        )
+        with pytest.raises(DialogueServiceError) as exc:
+            await asyncio.wait_for(srv.start(), timeout=1)
+        assert exc.value.code == "SERVICE_UNAVAILABLE"
         assert not srv.config.socket_path.exists()
 
     run(scenario())

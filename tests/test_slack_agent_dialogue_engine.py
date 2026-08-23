@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 
 import pytest
 
 from integrations.slack_agent_dialogue.contract import (
+    MESSAGE_DISCRIMINATOR,
     MESSAGE_SCHEMA,
     PARENT_SCHEMA,
     build_message,
@@ -21,6 +23,7 @@ from integrations.slack_agent_dialogue.engine import (
     DialoguePolicy,
     HistoryPage,
     SlackMessage,
+    SlackEffectUnknown,
 )
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 
@@ -62,6 +65,14 @@ class ExactA1AuthorityPolicy:
         ):
             return "WITHIN_COMMISSION"
         return "CHAIRMAN_REQUIRED"
+
+    def allows_continuation(self, *, request, reply) -> bool:
+        return (
+            request["message_type"] == "PROGRESS"
+            and request["body"]["stage"] == "build"
+            and reply["body"]["instruction"] == "Continue the bounded A1 proof."
+            and reply["body"]["stop_condition"] == "Stop on any scope change."
+        )
 
 
 def run(coro):
@@ -266,6 +277,34 @@ def test_exact_parent_binding_and_zero_multiple_refusal() -> None:
     assert code(exc) == "THREAD_BINDING_AMBIGUOUS"
 
 
+@pytest.mark.parametrize("mutation", ["edit", "delete"])
+def test_mutated_parent_recovers_after_fresh_engine_restart(mutation: str) -> None:
+    client = setup_client()
+    first = run(make_engine(client).bind_or_verify_thread(context()))
+    client.mutate_parent(
+        message_ts=THREAD_TS,
+        text="edited parent transport" if mutation == "edit" else None,
+        edited=mutation == "edit",
+        deleted=mutation == "delete",
+    )
+    recovered = run(make_engine(client).bind_or_verify_thread(context()))
+    assert recovered == first
+
+
+def test_mutated_parent_without_created_text_refuses_reconciliation() -> None:
+    client = setup_client()
+    original = client.channel_messages[0]
+    client.channel_messages[0] = SlackMessage(
+        ts=original.ts,
+        author_user_id=original.author_user_id,
+        text="edited parent transport",
+        edited=True,
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).bind_or_verify_thread(context()))
+    assert code(exc) == "THREAD_RECONCILIATION_INCOMPLETE"
+
+
 def test_incomplete_channel_or_thread_history_refuses() -> None:
     client = setup_client()
     client.channel_history_complete = False
@@ -355,19 +394,125 @@ def test_second_unknown_remains_effect_unknown() -> None:
 
 
 @pytest.mark.parametrize("behavior", ["wrong_author", "wrong_text"])
-def test_write_result_is_post_write_reconciled(behavior: str) -> None:
+def test_committed_malformed_write_result_recovers_from_history(behavior: str) -> None:
     client = setup_client()
     client.post_behaviors = [behavior]
     key = f"asd-ack-{behavior.replace('_', '-')}"
+    receipt = run(
+        make_engine(client).send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=fable_message(key=key),
+        )
+    )
+    assert receipt.action == "RECOVERED"
+    assert client.post_call_count == 1
+
+
+@pytest.mark.parametrize("failure", ["incomplete", "unavailable"])
+def test_committed_unknown_with_failed_reconciliation_stays_effect_unknown(
+    failure: str,
+) -> None:
+    class ReconciliationFailureClient(InMemorySlackClient):
+        fail_reconciliation = False
+
+        async def post_reply(self, *, channel_id: str, thread_ts: str, text: str):
+            try:
+                return await super().post_reply(
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    text=text,
+                )
+            except SlackEffectUnknown:
+                self.fail_reconciliation = True
+                if failure == "incomplete":
+                    self.thread_history_complete = False
+                raise
+
+        async def fetch_thread(self, *, channel_id: str, thread_ts: str, limit: int):
+            if failure == "unavailable" and self.fail_reconciliation:
+                raise RuntimeError("transport detail must remain opaque")
+            return await super().fetch_thread(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                limit=limit,
+            )
+
+    client = ReconciliationFailureClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message())
+    client.post_behaviors = ["commit_unknown"]
     with pytest.raises(DialogueEngineError) as exc:
         run(
             make_engine(client).send_message(
                 thread_ts=THREAD_TS,
                 context=context(),
-                message=fable_message(key=key),
+                message=fable_message(key=f"asd-ack-{failure}-reconcile"),
             )
         )
-    assert code(exc) == "WRITE_RESULT_INVALID"
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert client.post_call_count == 1
+
+
+def _secret_probe(kind: str) -> dict[str, object]:
+    secret = "xoxb-abcdefghij"
+    value = copy.deepcopy(
+        fable_message(
+            "DECISION_REQUEST" if kind == "option" else "PROGRESS",
+            key=f"asd-secret-{kind}-probe",
+        )
+    )
+    if kind == "stage":
+        value["body"]["stage"] = secret
+    elif kind == "path":
+        value["commission_ref"]["path"] = f"research/{secret}"
+    elif kind == "url":
+        value["evidence_refs"] = [f"https://github.com/{secret}/repo/pull/125"]
+    else:
+        option_id = f"opt-{secret}"
+        value["body"]["options"][0]["id"] = option_id
+        value["body"]["recommendation"] = option_id
+    value["fingerprint"] = semantic_fingerprint(value)
+    return value
+
+
+@pytest.mark.parametrize("kind", ["stage", "path", "url", "option"])
+def test_outbound_structured_secret_refuses_before_post(kind: str) -> None:
+    client = setup_client()
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=_secret_probe(kind),
+            )
+        )
+    assert code(exc) == "THREAD_MESSAGE_INVALID"
+    assert client.post_call_count == 0
+    assert client.thread_messages[THREAD_TS] == []
+
+
+@pytest.mark.parametrize("kind", ["stage", "path", "url", "option"])
+def test_inbound_structured_secret_never_reaches_caller(kind: str) -> None:
+    client = setup_client()
+    value = _secret_probe(kind)
+    raw_frame = MESSAGE_DISCRIMINATOR + "\n" + json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    client.add_reply(
+        SlackMessage(
+            ts="1787471000.000039",
+            author_user_id=BOT,
+            text=raw_frame,
+            thread_ts=THREAD_TS,
+        )
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+    assert code(exc) == "THREAD_MESSAGE_INVALID"
 
 
 def test_wrong_sender_is_ineligible_but_eligible_malformed_protocol_refuses() -> None:

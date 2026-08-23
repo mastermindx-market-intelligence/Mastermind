@@ -22,6 +22,7 @@ class InMemorySlackClient:
     channel_mutation_evidence_complete: bool = True
     thread_mutation_evidence_complete: bool = True
     post_behaviors: list[str] = field(default_factory=list)
+    post_call_count: int = 0
     next_timestamp: Decimal = Decimal("1787472000.000001")
 
     async def fetch_channel_history(
@@ -51,6 +52,7 @@ class InMemorySlackClient:
     async def post_reply(
         self, *, channel_id: str, thread_ts: str, text: str
     ) -> SlackMessage:
+        self.post_call_count += 1
         behavior = self.post_behaviors.pop(0) if self.post_behaviors else "success"
         if behavior == "definitive_error":
             raise SlackTransportUnavailable("definitive failure")
@@ -95,6 +97,36 @@ class InMemorySlackClient:
         if message.thread_ts is None:
             raise ValueError("reply must have thread_ts")
         self.thread_messages.setdefault(message.thread_ts, []).append(message)
+
+    def mutate_parent(
+        self,
+        *,
+        message_ts: str,
+        text: str | None = None,
+        edited: bool | None = None,
+        deleted: bool | None = None,
+    ) -> None:
+        for index, message in enumerate(self.channel_messages):
+            if message.ts != message_ts:
+                continue
+            next_edited = message.edited if edited is None else edited
+            next_deleted = message.deleted if deleted is None else deleted
+            if text is not None and text != message.text and edited is None:
+                next_edited = True
+            created_text = message.created_text
+            if (next_edited or next_deleted) and created_text is None:
+                created_text = message.text
+            self.channel_messages[index] = SlackMessage(
+                ts=message.ts,
+                author_user_id=message.author_user_id,
+                text=message.text if text is None else text,
+                thread_ts=message.thread_ts,
+                edited=next_edited,
+                deleted=next_deleted,
+                created_text=created_text,
+            )
+            return
+        raise KeyError(message_ts)
 
     def mutate_reply(
         self,

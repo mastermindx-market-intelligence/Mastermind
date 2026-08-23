@@ -302,14 +302,19 @@ class DialogueEngine:
         matches: list[tuple[SlackMessage, Mapping[str, Any]]] = []
         for transport in page.messages:
             is_top_level = transport.thread_ts in {None, transport.ts}
-            if not is_top_level or transport.deleted or transport.edited:
-                continue
-            if not transport.text.startswith(PARENT_DISCRIMINATOR):
+            if not is_top_level:
                 continue
             if transport.author_user_id not in self.policy.allowed_parent_user_ids:
                 continue
+            raw_text = transport.text
+            if transport.deleted or transport.edited:
+                if transport.created_text is None:
+                    raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+                raw_text = transport.created_text
+            if not raw_text.startswith(PARENT_DISCRIMINATOR):
+                continue
             try:
-                parent = parse_parent_frame(transport.text)
+                parent = parse_parent_frame(raw_text)
             except DialogueContractError:
                 raise DialogueEngineError("PARENT_MESSAGE_INVALID") from None
             if (
@@ -447,7 +452,10 @@ class DialogueEngine:
     def _validate_outbound(
         self, message: Mapping[str, Any], *, context: DialogueContext
     ) -> dict[str, Any]:
-        validated = validate_message(dict(message))
+        try:
+            validated = validate_message(dict(message))
+        except DialogueContractError:
+            raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
         if validated["message_type"] not in FABLE_MESSAGE_TYPES:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         if not _context_matches(validated, context.normalized()):
@@ -473,6 +481,24 @@ class DialogueEngine:
             raise DialogueEngineError("WRITE_RESULT_INVALID")
         return result
 
+    async def _reconcile_post_effect(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContext,
+        message_key: str,
+        fingerprint: str,
+    ) -> ReadMessage | None:
+        try:
+            read = await self._history(thread_ts=thread_ts, context=context)
+            return self._find_key(
+                read,
+                message_key=message_key,
+                fingerprint=fingerprint,
+            )
+        except DialogueEngineError:
+            raise DialogueEngineError("SEND_EFFECT_UNKNOWN") from None
+
     async def send_message(
         self,
         *,
@@ -497,6 +523,8 @@ class DialogueEngine:
             )
 
         for attempt in range(2):
+            invalid_receipt = False
+            transport: SlackMessage | None = None
             try:
                 result = await asyncio.wait_for(
                     self.client.post_reply(
@@ -507,48 +535,46 @@ class DialogueEngine:
                     timeout=self.policy.method_timeout_seconds,
                 )
             except (SlackEffectUnknown, asyncio.TimeoutError):
-                read = await self._history(thread_ts=thread_ts, context=context)
-                recovered = self._find_key(
-                    read,
-                    message_key=validated["message_key"],
-                    fingerprint=validated["fingerprint"],
-                )
-                if recovered is not None:
-                    return MessageReceipt(
-                        action="RECOVERED",
-                        message_key=validated["message_key"],
-                        fingerprint=validated["fingerprint"],
-                        message_ts=recovered.primary_ts,
-                        duplicate_timestamps=recovered.duplicate_timestamps,
-                    )
-                if attempt == 0:
-                    continue
-                raise DialogueEngineError("SEND_EFFECT_UNKNOWN") from None
+                pass
             except Exception:
                 raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
-            transport = self._validate_write_result(
-                result,
+            else:
+                try:
+                    transport = self._validate_write_result(
+                        result,
+                        thread_ts=thread_ts,
+                        expected_text=text,
+                        expected_author_user_id=self.policy.relay_bot_user_id,
+                    )
+                except DialogueEngineError:
+                    invalid_receipt = True
+
+            recovered = await self._reconcile_post_effect(
                 thread_ts=thread_ts,
-                expected_text=text,
-                expected_author_user_id=self.policy.relay_bot_user_id,
-            )
-            confirmed = self._find_key(
-                await self._history(thread_ts=thread_ts, context=context),
+                context=context,
                 message_key=validated["message_key"],
                 fingerprint=validated["fingerprint"],
             )
-            if confirmed is None or transport.ts not in {
-                confirmed.primary_ts,
-                *confirmed.duplicate_timestamps,
-            }:
+            if recovered is not None:
+                action = (
+                    "POSTED"
+                    if transport is not None
+                    and transport.ts
+                    in {recovered.primary_ts, *recovered.duplicate_timestamps}
+                    else "RECOVERED"
+                )
+                return MessageReceipt(
+                    action=action,
+                    message_key=validated["message_key"],
+                    fingerprint=validated["fingerprint"],
+                    message_ts=recovered.primary_ts,
+                    duplicate_timestamps=recovered.duplicate_timestamps,
+                )
+            if attempt == 0:
+                continue
+            if invalid_receipt:
                 raise DialogueEngineError("WRITE_RESULT_INVALID")
-            return MessageReceipt(
-                action="POSTED",
-                message_key=validated["message_key"],
-                fingerprint=validated["fingerprint"],
-                message_ts=confirmed.primary_ts,
-                duplicate_timestamps=confirmed.duplicate_timestamps,
-            )
+            raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
         raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
 
     async def wait_for_reply(

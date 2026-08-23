@@ -122,6 +122,13 @@ class TrustedAuthorityPolicy(Protocol):
         option: Mapping[str, Any],
     ) -> str: ...
 
+    def allows_continuation(
+        self,
+        *,
+        request: Mapping[str, Any],
+        reply: Mapping[str, Any],
+    ) -> bool: ...
+
 
 def _canonical_json(value: Any) -> str:
     try:
@@ -166,6 +173,22 @@ def _require_exact_keys(value: Any, keys: frozenset[str], code: str) -> dict[str
     if not isinstance(value, dict) or set(value) != keys:
         raise DialogueContractError(code)
     return value
+
+
+def _reject_secret_shaped_leaves(value: Any, *, code: str) -> None:
+    """Refuse credential-shaped text anywhere in a structured contract value."""
+
+    if isinstance(value, str):
+        if _SECRET_SHAPED_RE.search(value) is not None:
+            raise DialogueContractError(code)
+        return
+    if isinstance(value, Mapping):
+        for nested in value.values():
+            _reject_secret_shaped_leaves(nested, code=code)
+        return
+    if isinstance(value, (list, tuple)):
+        for nested in value:
+            _reject_secret_shaped_leaves(nested, code=code)
 
 
 def _require_string(value: Any, *, min_chars: int = 1, max_chars: int = MAX_TEXT_CHARS) -> str:
@@ -453,6 +476,7 @@ def semantic_fingerprint(document: Mapping[str, Any]) -> str:
 
 
 def validate_message(value: Any) -> dict[str, Any]:
+    _reject_secret_shaped_leaves(value, code="MESSAGE_INVALID")
     item = _require_exact_keys(value, MESSAGE_KEYS, "MESSAGE_INVALID")
     if item["schema"] != MESSAGE_SCHEMA:
         raise DialogueContractError("MESSAGE_INVALID")
@@ -518,6 +542,7 @@ def build_message(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_parent(value: Any) -> dict[str, Any]:
+    _reject_secret_shaped_leaves(value, code="PARENT_INVALID")
     item = _require_exact_keys(value, PARENT_KEYS, "PARENT_INVALID")
     if item["schema"] != PARENT_SCHEMA:
         raise DialogueContractError("PARENT_INVALID")
@@ -716,6 +741,15 @@ def adjudicate_reply(
             request_message["message_type"] == "BLOCKED"
             and request_message["body"]["needed_from"] != "sol"
         ):
+            raise DialogueContractError("AUTHORITY_REFUSED")
+        try:
+            allowed = authority_policy.allows_continuation(
+                request=request_message,
+                reply=reply_message,
+            )
+        except Exception:
+            raise DialogueContractError("AUTHORITY_REFUSED") from None
+        if allowed is not True:
             raise DialogueContractError("AUTHORITY_REFUSED")
         return {
             "disposition": "CONTINUE",

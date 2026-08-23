@@ -291,7 +291,8 @@ def verify_metadata(
         "bot_id": bot_id,
         "bot_user_id": bot_user_id,
         "schema": RECEIPT_SCHEMA,
-        "scopes": list(observed_scopes),
+        # Emit the closed expected set after exact equality, never header-derived text.
+        "scopes": list(expected.scopes),
         "status": "PASS",
         "team_id": team_id,
     }

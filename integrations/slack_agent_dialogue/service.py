@@ -219,8 +219,10 @@ class AgentDialogueService:
     async def start(self) -> None:
         if self._server is not None:
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
-        self._prepare_socket()
+        path_prepared = False
         try:
+            self._prepare_socket()
+            path_prepared = True
             self._server = await asyncio.start_unix_server(
                 self._handle_connection,
                 path=str(self.config.socket_path),
@@ -229,9 +231,14 @@ class AgentDialogueService:
             self.config.socket_path.chmod(0o600)
             if stat.S_IMODE(self.config.socket_path.lstat().st_mode) != 0o600:
                 raise DialogueServiceError("SERVICE_UNAVAILABLE")
-        except Exception:
-            await self.close()
+        except DialogueServiceError:
+            if path_prepared:
+                await self.close()
             raise
+        except Exception:
+            if path_prepared:
+                await self.close()
+            raise DialogueServiceError("SERVICE_UNAVAILABLE") from None
 
     async def close(self) -> None:
         if self._server is not None:
@@ -240,7 +247,7 @@ class AgentDialogueService:
             self._server = None
         try:
             info = self.config.socket_path.lstat()
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
             return
         if stat.S_ISSOCK(info.st_mode) and info.st_uid == os.geteuid():
             self.config.socket_path.unlink()

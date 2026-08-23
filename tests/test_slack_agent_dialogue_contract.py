@@ -27,11 +27,34 @@ REPO = "mastermindx-market-intelligence/Mastermind"
 
 
 class FixedAuthorityPolicy:
-    def __init__(self, minimum: str) -> None:
+    def __init__(self, minimum: str, *, continuation: bool = True) -> None:
         self.minimum = minimum
+        self.continuation = continuation
 
     def minimum_authority(self, *, request, option) -> str:
         return self.minimum
+
+    def allows_continuation(self, *, request, reply) -> bool:
+        return self.continuation
+
+
+class ExactContinuationPolicy(FixedAuthorityPolicy):
+    def allows_continuation(self, *, request, reply) -> bool:
+        return (
+            request["message_type"] == "PROGRESS"
+            and request["body"]
+            == {
+                "stage": "contract",
+                "completed": "Contract vectors are complete.",
+                "next": "Run the hostile matrix.",
+            }
+            and reply["body"]
+            == {
+                "instruction": "Continue within the frozen scope.",
+                "stop_condition": "Stop if commission or head changes.",
+                "scope_change": False,
+            }
+        )
 
 
 def commission() -> dict[str, str]:
@@ -249,6 +272,33 @@ def test_secret_shaped_and_control_text_refuse() -> None:
             build_message(value)
 
 
+@pytest.mark.parametrize("location", ["stage", "path", "url", "option"])
+def test_secret_shaped_structured_string_leaves_refuse(location: str) -> None:
+    secret = "xoxb-abcdefghij"
+    value = raw("DECISION_REQUEST" if location == "option" else "PROGRESS")
+    if location == "stage":
+        value["body"]["stage"] = secret
+    elif location == "path":
+        value["commission_ref"]["path"] = f"research/{secret}"
+    elif location == "url":
+        value["evidence_refs"] = [
+            f"https://github.com/{secret}/repo/pull/125"
+        ]
+    else:
+        value["body"]["options"][0]["id"] = f"opt-{secret}"
+        value["body"]["recommendation"] = f"opt-{secret}"
+    with pytest.raises(DialogueContractError) as exc:
+        build_message(value)
+    assert exc.value.code == "MESSAGE_INVALID"
+
+
+def test_hash_and_sha_identifiers_remain_valid_under_recursive_secret_guard() -> None:
+    value = message("PROGRESS")
+    assert value["commission_ref"]["commit"] == "a" * 40
+    assert value["commission_ref"]["content_sha256"] == "b" * 64
+    assert value["applies_to"]["head_sha"] == "c" * 40
+
+
 def request_with_effect(effect: str) -> dict[str, object]:
     request = message("DECISION_REQUEST")
     request["body"]["options"][0]["authority_effect"] = effect
@@ -379,6 +429,49 @@ def test_sol_cannot_continue_chairman_owned_blocker() -> None:
             blocked,
             reply,
             authority_policy=FixedAuthorityPolicy("WITHIN_COMMISSION"),
+        )
+    assert exc.value.code == "AUTHORITY_REFUSED"
+
+
+def test_positive_continue_requires_exact_trusted_commission_semantics() -> None:
+    request = message("PROGRESS")
+    reply = raw("CONTINUE")
+    reply["reply_to_message_key"] = request["message_key"]
+    reply = build_message(reply)
+    result = adjudicate_reply(
+        request,
+        reply,
+        authority_policy=ExactContinuationPolicy("WITHIN_COMMISSION"),
+    )
+    assert result == {
+        "disposition": "CONTINUE",
+        "executable": True,
+        "selected_option": None,
+        "canonical_ref": None,
+    }
+
+
+@pytest.mark.parametrize("failure", ["widened", "policy_raises"])
+def test_positive_continue_fails_closed_on_widening_or_policy_error(
+    failure: str,
+) -> None:
+    request = message("PROGRESS")
+    reply = raw("CONTINUE")
+    reply["reply_to_message_key"] = request["message_key"]
+    reply["body"]["instruction"] = "Merge, deploy, and widen the commission."
+    reply = build_message(reply)
+    authority_policy = ExactContinuationPolicy("WITHIN_COMMISSION")
+    if failure == "policy_raises":
+        class RaisingPolicy(ExactContinuationPolicy):
+            def allows_continuation(self, *, request, reply) -> bool:
+                raise RuntimeError("untrusted policy failure detail")
+
+        authority_policy = RaisingPolicy("WITHIN_COMMISSION")
+    with pytest.raises(DialogueContractError) as exc:
+        adjudicate_reply(
+            request,
+            reply,
+            authority_policy=authority_policy,
         )
     assert exc.value.code == "AUTHORITY_REFUSED"
 
