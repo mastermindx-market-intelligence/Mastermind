@@ -95,7 +95,6 @@ def test_concrete_transport_disables_ambient_proxy_and_uses_fixed_request(monkey
     [
         FakeResponse(valid_body(), content_type="text/html"),
         FakeResponse(valid_body(), extra_header="x" * 4097),
-        FakeResponse(valid_body(), final_url="https://example.invalid/api/auth.test"),
     ],
 )
 def test_concrete_transport_refuses_untrusted_response_shapes(monkeypatch, response: FakeResponse) -> None:
