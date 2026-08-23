@@ -61,8 +61,8 @@ class MetadataVerificationError(RuntimeError):
 class MetadataExpectation:
     team_id: str
     bot_user_id: str
-    bot_id: str
     scopes: tuple[str, ...]
+    bot_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -201,13 +201,13 @@ def validate_expectation(expectation: MetadataExpectation) -> MetadataExpectatio
         raise MetadataVerificationError("METADATA_EXPECTATION_REFUSED")
     if _USER_ID_RE.fullmatch(expectation.bot_user_id) is None:
         raise MetadataVerificationError("METADATA_EXPECTATION_REFUSED")
-    if _BOT_ID_RE.fullmatch(expectation.bot_id) is None:
+    if expectation.bot_id is not None and _BOT_ID_RE.fullmatch(expectation.bot_id) is None:
         raise MetadataVerificationError("METADATA_EXPECTATION_REFUSED")
     return MetadataExpectation(
         team_id=expectation.team_id,
         bot_user_id=expectation.bot_user_id,
-        bot_id=expectation.bot_id,
         scopes=_normalize_scopes(expectation.scopes),
+        bot_id=expectation.bot_id,
     )
 
 
@@ -255,12 +255,14 @@ def verify_metadata(
     bot_id = payload.get("bot_id")
     if not all(isinstance(value, str) for value in (team_id, bot_user_id, bot_id)):
         raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
+    if _BOT_ID_RE.fullmatch(bot_id) is None:
+        raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
     observed_scopes = _parse_scope_header(result.headers)
 
     if (
         team_id != expected.team_id
         or bot_user_id != expected.bot_user_id
-        or bot_id != expected.bot_id
+        or (expected.bot_id is not None and bot_id != expected.bot_id)
     ):
         raise MetadataVerificationError("METADATA_IDENTITY_MISMATCH")
     if observed_scopes != expected.scopes:
@@ -285,7 +287,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = _OpaqueArgumentParser(add_help=True)
     parser.add_argument("--expected-team-id", required=True)
     parser.add_argument("--expected-bot-user-id", required=True)
-    parser.add_argument("--expected-bot-id", required=True)
+    parser.add_argument("--expected-bot-id")
     parser.add_argument("--expected-scope", action="append", required=True)
     return parser
 
@@ -304,8 +306,8 @@ def run(
         expectation = MetadataExpectation(
             team_id=namespace.expected_team_id,
             bot_user_id=namespace.expected_bot_user_id,
-            bot_id=namespace.expected_bot_id,
             scopes=tuple(namespace.expected_scope),
+            bot_id=namespace.expected_bot_id,
         )
         token = read_token_from_stdin(stdin)
         receipt = verify_metadata(
