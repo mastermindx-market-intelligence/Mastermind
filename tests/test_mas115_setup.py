@@ -2,13 +2,40 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import nonseat_canary as canary
 from scripts import mas115_setup as setup
+
+
+def test_documented_direct_status_command_bootstraps_repository_imports(tmp_path):
+    repo_root = Path(setup.__file__).resolve().parents[1]
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env["HOME"] = os.fspath(tmp_path)
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/mas115_setup.py", "status"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    status = json.loads(completed.stdout)
+    assert status["bindings_healthy"] is True
+    assert status["chairman_seats_enrolled"] == 0
+    assert status["disposable_provision_code"] == "PROVISION_MISSING"
 
 
 def _mlx(index: int, *, running: bool = True) -> dict:

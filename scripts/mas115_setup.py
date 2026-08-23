@@ -28,6 +28,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Direct operator invocation sets ``sys.path[0]`` to ``scripts/`` rather than
+# the repository root.  Bootstrap the root before importing Mastermind
+# packages so the documented ``python3 scripts/mas115_setup.py ...`` commands
+# work without a hidden PYTHONPATH requirement.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_REPO_ROOT))
+
 from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import chatgpt
 from integrations.chairman_surfaces import nonseat_canary as canary
