@@ -16,6 +16,7 @@ from control_plane.executive_authority import (
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
 )
+from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyError
 
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -71,6 +72,78 @@ def test_checked_in_policy_has_exact_phase1b_allow_set_and_mandatory_denies():
     assert PHASE1B_REQUIRED_DENIES == _EXPECTED_REQUIRED_DENIES
     assert _EXPECTED_REQUIRED_DENIES.issubset(policy.denied)
     assert policy.allowed.isdisjoint(policy.denied)
+
+
+def test_checked_in_coo_policy_is_the_exact_closed_nine_field_contract():
+    policy = CooCyclePolicy.load(_POLICY_PATH)
+
+    assert policy.to_dict() == {
+        "schema_version": 1,
+        "max_fan_out_per_parent": 8,
+        "max_depth": 1,
+        "max_repair_rounds": 2,
+        "max_review_attempts_per_job": 2,
+        "max_children_total": 16,
+        "max_attempts_per_orchestration_job": 2,
+        "review_job_attempt_limit": 1,
+        "allowed_child_cost_classes": ["default", "small"],
+    }
+    assert policy.reserved_step_slots(review_required=False) == 1
+    assert policy.reserved_step_slots(review_required=True) == 9
+    assert policy.reserved_children_total((False,) * 8) == 9
+    assert policy.reserved_children_total((True,)) == 10
+    with pytest.raises(CooCyclePolicyError, match="capacity"):
+        policy.reserved_children_total((True, True))
+
+
+def test_coo_policy_hashes_closed_value_and_complete_reviewed_source():
+    policy = CooCyclePolicy.load(_POLICY_PATH)
+
+    assert len(policy.policy_sha256) == 64
+    assert policy.source_sha256 == hashlib.sha256(_POLICY_PATH.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "  max_depth: 2",
+        "  max_children_total: 17",
+        "  allowed_child_cost_classes: [small, default]",
+        "  allowed_child_cost_classes: [default, small, frontier]",
+        "  unknown_bound: 1",
+        "  max_depth: 1\n  max_depth: 1",
+    ],
+)
+def test_coo_policy_drift_duplicate_and_unknown_field_fail_closed(tmp_path, replacement):
+    raw = _POLICY_PATH.read_text(encoding="utf-8")
+    if replacement.startswith("  max_depth:"):
+        raw = raw.replace("  max_depth: 1", replacement, 1)
+    elif replacement.startswith("  max_children_total:"):
+        raw = raw.replace("  max_children_total: 16", replacement, 1)
+    elif replacement.startswith("  allowed_child_cost_classes:"):
+        raw = raw.replace(
+            "  allowed_child_cost_classes: [default, small]", replacement, 1
+        )
+    else:
+        raw = raw.replace("  review_job_attempt_limit: 1", replacement, 1)
+    path = tmp_path / "authority_map.yml"
+    path.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(CooCyclePolicyError):
+        CooCyclePolicy.load(path)
+
+
+def test_coo_policy_missing_or_multiple_block_fails_closed(tmp_path):
+    raw = _POLICY_PATH.read_text(encoding="utf-8")
+    without = raw.replace("coo_cycle_policy:", "coo_cycle_policy_missing:", 1)
+    path = tmp_path / "authority_map.yml"
+    path.write_text(without, encoding="utf-8")
+    with pytest.raises(CooCyclePolicyError, match="one coo_cycle_policy"):
+        CooCyclePolicy.load(path)
+
+    path.write_text(raw + "\ncoo_cycle_policy:\n  schema_version: 1\n", encoding="utf-8")
+    with pytest.raises(CooCyclePolicyError, match="one coo_cycle_policy"):
+        CooCyclePolicy.load(path)
 
 
 def test_runtime_authority_reader_has_no_mutable_yaml_package_dependency():

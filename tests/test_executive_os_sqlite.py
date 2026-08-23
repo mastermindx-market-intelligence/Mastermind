@@ -83,6 +83,7 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
         (1, "executive_runtime_core"),
         (2, "durable_parent_child_review_contract"),
         (3, "ohf_session_epochs_and_process_generations"),
+        (4, "executive_phase1fc_orchestration_contract"),
     ]
     assert all(len(row[2]) == 64 for row in migrations)
 
@@ -154,9 +155,9 @@ def test_claim_reauthorizes_and_fails_closed_without_partial_assignment(
 def test_quota_pool_matches_provider_model_effort_cost_class_and_caps(tmp_path):
     runtime = _runtime(tmp_path)
     runtime.workers.register_worker(
-        "shared-account",
-        provider="account-provider",
-        account_label="shared",
+        "fable-account",
+        provider="fable",
+        account_label="fable",
         worker_type="mock",
         capabilities=["research"],
         quota_classes={
@@ -165,7 +166,16 @@ def test_quota_pool_matches_provider_model_effort_cost_class_and_caps(tmp_path):
                 "model": "Fable-Research",
                 "effort": "Deep",
                 "cost_class": "Premium",
-            },
+            }
+        },
+    )
+    runtime.workers.register_worker(
+        "claude-account",
+        provider="claude",
+        account_label="claude",
+        worker_type="mock",
+        capabilities=["research", "code"],
+        quota_classes={
             "claude-native": {
                 "provider": "claude",
                 "model": "Opus",
@@ -190,10 +200,10 @@ def test_quota_pool_matches_provider_model_effort_cost_class_and_caps(tmp_path):
     selected = runtime.broker.select_worker(job)
     lease = runtime.attempts.claim_job(job.job_id)
 
-    assert selected is not None and selected.worker_id == "shared-account"
+    assert selected is not None and selected.worker_id == "claude-account"
     assert lease is not None
     assert lease.attempt.quota_class == "claude-native"
-    quota = runtime.workers.get_quota_class("shared-account", "claude-native")
+    quota = runtime.workers.get_quota_class("claude-account", "claude-native")
     assert quota is not None
     assert (quota.provider, quota.model, quota.effort, quota.cost_class) == (
         "claude",
@@ -201,7 +211,7 @@ def test_quota_pool_matches_provider_model_effort_cost_class_and_caps(tmp_path):
         "deep",
         "premium",
     )
-    inherited = runtime.workers.get_quota_class("shared-account", "fable-eligible")
+    inherited = runtime.workers.get_quota_class("fable-account", "fable-eligible")
     assert inherited is not None and inherited.capabilities == ["research"]
 
 
@@ -660,7 +670,7 @@ def test_migration_checksum_tampering_fails_closed(tmp_path):
         _runtime(tmp_path)
 
 
-def test_failed_v2_to_v3_foreign_key_check_rolls_back_all_v3_artifacts(
+def test_v4_runtime_normal_open_refuses_existing_v2_without_v3_artifacts(
     tmp_path, monkeypatch
 ):
     migrations = executive_runtime._MIGRATIONS
@@ -668,18 +678,11 @@ def test_failed_v2_to_v3_foreign_key_check_rolls_back_all_v3_artifacts(
     v2 = _runtime(tmp_path)
     database = v2.store.path
 
-    deferred_violation = (
-        "CREATE TABLE migration_fk_parent(id TEXT PRIMARY KEY)",
-        "CREATE TABLE migration_fk_child(parent_id TEXT REFERENCES migration_fk_parent(id) DEFERRABLE INITIALLY DEFERRED)",
-        "INSERT INTO migration_fk_child(parent_id) VALUES('missing')",
-    )
-    broken_v3 = (*migrations[2][2], *deferred_violation)
-    monkeypatch.setattr(
-        executive_runtime,
-        "_MIGRATIONS",
-        (*migrations[:2], (3, migrations[2][1], broken_v3)),
-    )
-    with pytest.raises(PersistenceError, match="foreign-key check"):
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations)
+    with pytest.raises(
+        executive_runtime.ExecutiveSchemaUpgradeRequired,
+        match="explicit offline",
+    ):
         _runtime(tmp_path)
 
     connection = sqlite3.connect(database)
@@ -698,5 +701,4 @@ def test_failed_v2_to_v3_foreign_key_check_rolls_back_all_v3_artifacts(
         connection.close()
     assert "harness_session_epochs" not in tables
     assert "process_generations" not in tables
-    assert "migration_fk_child" not in tables
     assert "execution_mode" not in columns

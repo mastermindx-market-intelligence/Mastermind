@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from control_plane.executive_runtime import AttemptLease, Runtime, StateConflict
+from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
+from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.operator_harness_contract import (
     CandidateResult,
     EventCursor,
@@ -116,6 +118,7 @@ class ExecutiveOperatorHarnessPort:
         generation: ProcessGenerationRef,
         observed: ObservedHarnessAttestation,
         launch: LaunchComparison,
+        principal: OperatorPrincipalObservation | None = None,
     ) -> None:
         self._require_attempt(attempt_id)
         derived = compare_launch(launch.requested, observed)
@@ -127,7 +130,21 @@ class ExecutiveOperatorHarnessPort:
             lease_token=self.lease_token,
             requested=launch.requested,
             attestation=observed,
+            principal_observation=principal,
         )
+
+    def operator_principal_required(self, attempt_id: str) -> bool:
+        self._require_attempt(attempt_id)
+        job = self.runtime.jobs.get_job(self.lease.attempt.job_id)
+        if job is None:
+            raise StateConflict("Attempt lost its Job")
+        return job.orchestration_role is not None
+
+    def existing_operator_principal(
+        self, attempt_id: str, generation: ProcessGenerationRef
+    ) -> OperatorPrincipalObservation | None:
+        self._require_attempt(attempt_id)
+        return self.runtime.operator_harness.admitted_principal_observation(generation)
 
     def begin_operator_turn(
         self,
@@ -207,6 +224,20 @@ class ExecutiveOperatorHarnessPort:
             candidate=candidate,
             events=events,
             cursor=cursor,
+            fence_generation=self.fence_generation,
+            lease_token=self.lease_token,
+        )
+
+    def seal_operator_role_result(
+        self,
+        attempt_id: str,
+        turn: TurnRef,
+        observation: RawRoleResultObservation,
+    ) -> None:
+        self._require_attempt(attempt_id)
+        self.runtime.operator_harness.seal_orchestration_role_result(
+            turn=turn,
+            observation=observation,
             fence_generation=self.fence_generation,
             lease_token=self.lease_token,
         )

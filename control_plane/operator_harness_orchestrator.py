@@ -13,6 +13,7 @@ or a scheduler.  Importing it performs no I/O and starts no process.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Callable, Protocol, Sequence
 
@@ -35,6 +36,15 @@ from control_plane.operator_harness_contract import (
     TurnRef,
     TurnStartObservation,
     compare_launch,
+)
+from control_plane.executive_orchestration_principal import (
+    OSProcessCredentialObservation,
+    OperatorPrincipalObservation,
+    ProviderHomeIdentityObservation,
+)
+from control_plane.executive_orchestration_result import (
+    RawRoleResultAdapter,
+    RawRoleResultObservation,
 )
 
 
@@ -88,7 +98,14 @@ class RuntimePort(Protocol):
         generation: ProcessGenerationRef,
         observed: ObservedHarnessAttestation,
         launch: LaunchComparison,
+        principal: OperatorPrincipalObservation | None = None,
     ) -> None: ...
+
+    def operator_principal_required(self, attempt_id: str) -> bool: ...
+
+    def existing_operator_principal(
+        self, attempt_id: str, generation: ProcessGenerationRef
+    ) -> OperatorPrincipalObservation | None: ...
 
     def begin_operator_turn(
         self,
@@ -119,6 +136,13 @@ class RuntimePort(Protocol):
         candidate: CandidateResult,
         events: Sequence[NormalizedEvent],
         cursor: EventCursor,
+    ) -> None: ...
+
+    def seal_operator_role_result(
+        self,
+        attempt_id: str,
+        turn: TurnRef,
+        observation: RawRoleResultObservation,
     ) -> None: ...
 
     def begin_operator_generation_operation(
@@ -351,9 +375,79 @@ class OperatorHarnessOrchestrator:
         try:
             observed = self.attestation_reader(self.adapter, generation)
             launch = compare_launch(requested, observed)
-            self.runtime.seal_operator_attestation(
-                attempt_id, generation, observed, launch
+            principal: OperatorPrincipalObservation | None = None
+            principal_required = bool(
+                getattr(self.runtime, "operator_principal_required", lambda _value: False)(
+                    attempt_id
+                )
             )
+            if principal_required:
+                existing_principal = getattr(
+                    self.runtime,
+                    "existing_operator_principal",
+                    lambda _attempt_id, _generation: None,
+                )(attempt_id, generation)
+                if existing_principal is not None and not isinstance(
+                    existing_principal, OperatorPrincipalObservation
+                ):
+                    raise OperatorHarnessOrchestrationError(
+                        "runtime returned untyped principal replay evidence"
+                    )
+                credential_reader = getattr(
+                    self.adapter, "observe_process_credentials", None
+                )
+                home_reader = getattr(
+                    self.adapter, "observe_provider_home_identity", None
+                )
+                if existing_principal is None and (
+                    not callable(credential_reader) or not callable(home_reader)
+                ):
+                    raise OperatorHarnessOrchestrationError(
+                        "orchestration adapter lacks typed principal observations"
+                    )
+                if existing_principal is not None:
+                    principal = existing_principal
+                else:
+                    credentials = credential_reader(generation)
+                    home = home_reader(generation)
+                    if not isinstance(credentials, OSProcessCredentialObservation) or not isinstance(
+                        home, ProviderHomeIdentityObservation
+                    ):
+                        raise OperatorHarnessOrchestrationError(
+                            "orchestration adapter returned untyped principal evidence"
+                        )
+                    process = observation.process
+                    expected_process = {
+                        "pid": process.pid,
+                        "pgid": process.pgid,
+                        "process_start_identity": process.process_start_identity,
+                        "boot_id": process.boot_id,
+                    }
+                    if credentials.process_identity != expected_process:
+                        raise OperatorHarnessOrchestrationError(
+                            "principal process credentials do not match TX-3 observation"
+                        )
+                    principal = OperatorPrincipalObservation.from_dict(
+                        {
+                            "schema_version": "mastermind.operator_principal_observation/v1",
+                            "attempt_id": attempt_id,
+                            "worker_id": generation.worker_id,
+                            "process_generation_id": generation.process_generation_id,
+                            "provider_session_id": observation.provider_session_id,
+                            "process_identity": credentials.process_identity,
+                            "os_principal_name": credentials.os_principal_name,
+                            "os_principal_uid": credentials.os_principal_uid,
+                            "provider_home_identity": home.provider_home_identity,
+                            "observed_at_ms": int(time.time() * 1000),
+                        }
+                    )
+                self.runtime.seal_operator_attestation(
+                    attempt_id, generation, observed, launch, principal
+                )
+            else:
+                self.runtime.seal_operator_attestation(
+                    attempt_id, generation, observed, launch
+                )
         except Exception as exc:
             raise OperatorStartRefused(
                 "started session requires cleanup after attestation error", handle
@@ -474,6 +568,24 @@ class OperatorHarnessOrchestrator:
                 error=exc,
             )
             raise OperatorEffectUnknown("turn result effect is unknown") from exc
+        if bool(
+            getattr(self.runtime, "operator_principal_required", lambda _value: False)(
+                session.attempt_id
+            )
+        ):
+            if not isinstance(self.adapter, RawRoleResultAdapter):
+                raise OperatorHarnessOrchestrationError(
+                    "orchestration adapter lacks the raw role-result extension"
+                )
+            try:
+                raw_observation = self.adapter.observe_raw_role_result(turn)
+                self.runtime.seal_operator_role_result(
+                    session.attempt_id, turn, raw_observation
+                )
+            except Exception as exc:
+                raise OperatorHarnessOrchestrationError(
+                    "orchestration role result could not be sealed"
+                ) from exc
         return OperatorTurnReceipt(
             attempt_id=session.attempt_id,
             turn=turn,

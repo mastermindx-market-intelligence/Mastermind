@@ -10,6 +10,7 @@ import pytest
 import control_plane.executive_runtime as executive_runtime
 from control_plane.executive_backup import BackupVerificationError, verify_backup
 from control_plane.executive_runtime import (
+    ExecutiveSchemaUpgradeRequired,
     JobPayload,
     JobStatus,
     Runtime,
@@ -126,10 +127,10 @@ def test_parent_child_fields_migrate_preserve_and_derive_root_depth(tmp_path):
     with Runtime.at(tmp_path).store.read() as connection:
         assert connection.execute(
             "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
-        ).fetchone()[0] == 3
+        ).fetchone()[0] == 4
 
 
-def test_v1_populated_store_upgrades_to_v2_and_preserves_legacy_rows(tmp_path):
+def test_v1_populated_store_normal_open_refuses_without_mutation(tmp_path):
     db_path = _seed_v1_database(tmp_path)
     with sqlite3.connect(db_path) as connection:
         versions = [
@@ -142,23 +143,22 @@ def test_v1_populated_store_upgrades_to_v2_and_preserves_legacy_rows(tmp_path):
         }
     assert versions == [1]
     assert "parent_job_id" not in columns
-
-    runtime = Runtime.at(tmp_path)
-    job = runtime.jobs.get_job("JOB-001")
-    assert job is not None
-    assert job.objective == "Legacy childless job"
-    assert job.parent_job_id is None
-    assert job.root_job_id == "JOB-001"
-    assert job.depth == 0
-    assert job.owner_seat == "coo"
-    assert job.escalation_target == "coo"
-    assert job.review_required is False
-    assert SCHEMA_VERSION == 3
-    with runtime.store.read() as connection:
-        assert [
-            int(row[0])
-            for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2, 3]
+    before = {
+        "bytes": db_path.read_bytes(),
+        "mode": db_path.stat().st_mode,
+        "mtime_ns": db_path.stat().st_mtime_ns,
+        "inventory": sorted(path.name for path in db_path.parent.iterdir()),
+    }
+    with pytest.raises(ExecutiveSchemaUpgradeRequired):
+        Runtime.at(tmp_path)
+    after = {
+        "bytes": db_path.read_bytes(),
+        "mode": db_path.stat().st_mode,
+        "mtime_ns": db_path.stat().st_mtime_ns,
+        "inventory": sorted(path.name for path in db_path.parent.iterdir()),
+    }
+    assert after == before
+    assert SCHEMA_VERSION == 4
 
 
 def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
@@ -170,29 +170,15 @@ def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
         assert [
             int(row[0])
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2, 3]
+        ] == [1, 2, 3, 4]
 
 
-def test_v1_database_restored_into_new_code_keeps_legacy_childless_completion(tmp_path):
-    _seed_v1_database(tmp_path)
-    runtime = Runtime.at(tmp_path)
-    _register(runtime, "worker-a")
-    job = runtime.jobs.get_job("JOB-001")
-    assert job is not None
-    assert runtime.broker.select_worker(job) is not None
-    lease = runtime.attempts.claim_job(job.job_id, worker_id="worker-a")
-    assert lease is not None
-    completed = runtime.jobs.complete_job(
-        job.job_id, JobPayload(summary="legacy complete", current_state="complete")
-    )
-    assert completed.status is JobStatus.COMPLETED
-    with runtime.store.read() as connection:
-        payload = json.loads(
-            connection.execute(
-                "SELECT result_json FROM jobs WHERE job_id=?", (job.job_id,)
-            ).fetchone()[0]
-        )
-    assert "verdict" not in payload
+def test_v1_restored_database_stays_inert_under_v4_code(tmp_path):
+    db_path = _seed_v1_database(tmp_path)
+    before = hashlib.sha256(db_path.read_bytes()).hexdigest()
+    with pytest.raises(ExecutiveSchemaUpgradeRequired):
+        Runtime.at(tmp_path)
+    assert hashlib.sha256(db_path.read_bytes()).hexdigest() == before
 
 
 def test_v1_backup_manifest_is_refused_by_v2_code(tmp_path):

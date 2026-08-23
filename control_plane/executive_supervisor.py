@@ -53,6 +53,7 @@ from control_plane.executive_runtime import (
     Job,
     JobPayload,
     JobStatus,
+    OrchestrationDispatchOutcome,
     Runtime,
     RuntimeProofError,
     StateConflict,
@@ -278,6 +279,16 @@ class ActiveRun:
     lease: AttemptLease = dataclasses.field(repr=False)
     process_ref: ProcessRef
     launch_spec: LaunchSpec
+    effective_grant: Mapping[str, Any] | None = dataclasses.field(
+        default=None, repr=False
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class OrchestrationLaunchSpec(LaunchSpec):
+    """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
+
+    effective_grant_digest: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -318,11 +329,36 @@ class ReconcileReceipt:
         return value
 
 
-def worker_result_schema(*, job_id: str, run_id: str, worker_id: str) -> dict[str, Any]:
+def worker_result_schema(
+    *,
+    job_id: str,
+    run_id: str,
+    worker_id: str,
+    effective_grant_digest: str | None = None,
+    orchestration_role: str | None = None,
+    root_job_id: str | None = None,
+) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
+    if orchestration_role is not None:
+        if effective_grant_digest is None:
+            raise SupervisorError("orchestration result schema requires an effective grant")
+        from control_plane.executive_orchestration_result import (
+            orchestration_result_schema,
+        )
+
+        result = orchestration_result_schema(
+            orchestration_role,
+            job_id=job_id,
+            run_id=run_id,
+            worker_id=worker_id,
+            root_job_id=root_job_id,
+        )
+        result["x-mastermind-effective-grant-digest"] = effective_grant_digest
+        return result
+
     string_list = {"type": "array", "items": {"type": "string"}}
-    return {
+    result = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": False,
@@ -379,6 +415,9 @@ def worker_result_schema(*, job_id: str, run_id: str, worker_id: str) -> dict[st
             },
         },
     }
+    if effective_grant_digest is not None:
+        result["x-mastermind-effective-grant-digest"] = effective_grant_digest
+    return result
 
 
 def _jsonable(value: Any) -> Any:
@@ -547,6 +586,54 @@ class ExecutiveSupervisor:
         if decision.policy_sha256 != attempt.authority_policy_hash:
             raise SupervisorError("authority policy changed after claim; result is rejected")
 
+    @staticmethod
+    def _effective_grant(job: Job, attempt: Attempt) -> dict[str, Any] | None:
+        """Return the exact orchestration grant, leaving legacy Jobs byte-stable."""
+
+        ExecutiveSupervisor._revalidate_authority(job, attempt)
+        if job.orchestration_role is None:
+            if attempt.effective_grant is not None or attempt.effective_grant_digest is not None:
+                raise SupervisorError("role-null Attempt carries orchestration grant evidence")
+            return None
+        value = attempt.effective_grant
+        keys = {
+            "schema_version",
+            "authorities",
+            "write_paths",
+            "validation_argv",
+            "policy_sha",
+            "job_id",
+            "role",
+        }
+        if (
+            not isinstance(value, dict)
+            or set(value) != keys
+            or value.get("schema_version")
+            != "mastermind.executive_effective_grant/v1"
+            or value.get("job_id") != job.job_id
+            or value.get("role") != job.orchestration_role
+            or value.get("policy_sha") != attempt.authority_policy_hash
+            or not isinstance(value.get("authorities"), list)
+            or not isinstance(value.get("write_paths"), list)
+            or not isinstance(value.get("validation_argv"), list)
+            or any(item not in job.requested_authorities for item in value["authorities"])
+            or any(item not in job.allowed_write_paths for item in value["write_paths"])
+            or any(item not in job.validation_commands for item in value["validation_argv"])
+        ):
+            raise SupervisorError("orchestration Attempt effective grant is malformed or widened")
+        digest = hashlib.sha256(
+            json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        if digest != attempt.effective_grant_digest:
+            raise SupervisorError("orchestration Attempt effective grant digest drifted")
+        return dict(value)
+
     def _run_dir(self, attempt_id: str) -> Path:
         return self.runs_root / attempt_id
 
@@ -663,7 +750,14 @@ class ExecutiveSupervisor:
         os.chmod(directory, 0o700)
         return directory / name
 
-    def _write_schema(self, run_dir: Path, *, job: Job, attempt: Attempt) -> Path:
+    def _write_schema(
+        self,
+        run_dir: Path,
+        *,
+        job: Job,
+        attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None = None,
+    ) -> Path:
         run_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
         os.chmod(run_dir, 0o770 if self.shared_run_gid is not None else 0o700)
         input_dir = run_dir / "input"
@@ -675,6 +769,13 @@ class ExecutiveSupervisor:
                 job_id=job.job_id,
                 run_id=attempt.attempt_id,
                 worker_id=attempt.worker_id,
+                effective_grant_digest=(
+                    attempt.effective_grant_digest
+                    if effective_grant is not None
+                    else None
+                ),
+                orchestration_role=job.orchestration_role,
+                root_job_id=(job.root_job_id if job.orchestration_role else None),
             ),
         )
         if self.shared_run_gid is not None:
@@ -687,8 +788,27 @@ class ExecutiveSupervisor:
                 os.chmod(path, mode)
         return schema_path
 
-    @staticmethod
-    def _prompt(job: Job, attempt: Attempt) -> str:
+    def _prompt(
+        self,
+        job: Job,
+        attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None = None,
+    ) -> str:
+        authorities = (
+            list(effective_grant["authorities"])
+            if effective_grant is not None
+            else job.requested_authorities
+        )
+        write_paths = (
+            list(effective_grant["write_paths"])
+            if effective_grant is not None
+            else job.allowed_write_paths
+        )
+        validations = (
+            list(effective_grant["validation_argv"])
+            if effective_grant is not None
+            else job.validation_commands
+        )
         packet = {
             "schema_version": "mastermind.executive_job_packet/v1",
             "job_id": job.job_id,
@@ -696,9 +816,9 @@ class ExecutiveSupervisor:
             "worker_id": attempt.worker_id,
             "objective": job.objective,
             "department": job.department,
-            "authorities": job.requested_authorities,
-            "allowed_write_paths": job.allowed_write_paths,
-            "validation_commands": job.validation_commands,
+            "authorities": authorities,
+            "allowed_write_paths": write_paths,
+            "validation_commands": validations,
             "base_sha": job.constraints.get("base_sha"),
             "provider": job.constraints.get("provider"),
             "model": job.constraints.get("model"),
@@ -716,6 +836,23 @@ class ExecutiveSupervisor:
             "assigned_quota_class": attempt.quota_class,
             "checkpoint": job.checkpoint,
         }
+        if effective_grant is not None:
+            packet["effective_grant_digest"] = attempt.effective_grant_digest
+            packet["orchestration"] = {
+                "role": job.orchestration_role,
+                "root_job_id": job.root_job_id,
+                "plan_attempt_id": job.plan_attempt_id,
+                "plan_digest": job.plan_digest,
+                "plan_step_id": job.plan_step_id,
+                "repair_round": job.repair_round,
+                "supersedes_job_id": job.supersedes_job_id,
+                "reviews_job_id": job.reviews_job_id,
+                "creation_provenance": job.orchestration_provenance,
+            }
+            if job.orchestration_role == "aggregation":
+                packet["orchestration"]["aggregation_handoff"] = (
+                    self.runtime.jobs.get_cycle_handoff(job.job_id)
+                )
         return (
             "You are the one-shot Mastermind Executive worker for the JSON job packet below.\n"
             "Treat every authority and path as an exact allow-list. Do not push, open a PR, "
@@ -724,12 +861,24 @@ class ExecutiveSupervisor:
             "needed to write the declared paths. Do not execute or self-attest validation "
             "commands; set validations=[] exactly. The supervisor will run every persisted "
             "argv directly after your process exits. "
-            "Return only one JSON object matching the provided output schema; use status FAILED "
-            "and explain errors if the bounded task cannot be completed safely.\n\n"
+            "Return only one JSON object matching the provided output schema. "
+            + (
+                "For this orchestration role, only the closed COMPLETED typed envelope is "
+                "accepted; process or protocol failure must terminate through the supervisor, "
+                "never through invented result fields.\n\n"
+                if effective_grant is not None
+                else "Use status FAILED and explain errors if the bounded task cannot be completed safely.\n\n"
+            )
             + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
         )
 
-    def _launch_spec(self, job: Job, lease: AttemptLease, schema_path: Path) -> LaunchSpec:
+    def _launch_spec(
+        self,
+        job: Job,
+        lease: AttemptLease,
+        schema_path: Path,
+        effective_grant: Mapping[str, Any] | None = None,
+    ) -> LaunchSpec:
         attempt = lease.attempt
         quota = self.runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
         if quota is None:
@@ -749,21 +898,33 @@ class ExecutiveSupervisor:
             workspace=workspace,
             run_dir=run_dir,
         )
-        return LaunchSpec(
+        spec_type = OrchestrationLaunchSpec if effective_grant is not None else LaunchSpec
+        spec_kwargs: dict[str, Any] = {
+            "effective_grant_digest": attempt.effective_grant_digest
+        } if effective_grant is not None else {}
+        return spec_type(
             run_id=attempt.attempt_id,
             job_id=job.job_id,
             worker_id=attempt.worker_id,
             workspace_path=workspace,
             run_dir=run_dir,
-            prompt=self._prompt(job, attempt),
+            prompt=self._prompt(job, attempt, effective_grant),
             result_schema_path=schema_path,
             codex_home=self.codex_home,
-            authorities=tuple(job.requested_authorities),
+            authorities=tuple(
+                effective_grant["authorities"]
+                if effective_grant is not None
+                else job.requested_authorities
+            ),
             model=model,
             reasoning_effort=effort,
             worker_user=self.worker_user,
             expected_base_sha=str(job.constraints.get("base_sha") or "") or None,
-            allowed_artifact_paths=tuple(job.allowed_write_paths),
+            allowed_artifact_paths=tuple(
+                effective_grant["write_paths"]
+                if effective_grant is not None
+                else job.allowed_write_paths
+            ),
             isolation_roots=self.isolation_roots,
             isolation_denied_paths=isolation_denied,
             isolation_manifest=isolation_manifest,
@@ -774,6 +935,7 @@ class ExecutiveSupervisor:
             shared_run_gid=self.shared_run_gid,
             secret_canary_verdict=self.secret_canary_verdict,
             require_secret_canary=self.require_complete_launch_attestation,
+            **spec_kwargs,
         )
 
     def _launch_metadata(
@@ -783,6 +945,7 @@ class ExecutiveSupervisor:
         lease: AttemptLease,
         spec: LaunchSpec,
         process_ref: ProcessRef,
+        effective_grant: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         quota = self.runtime.workers.get_quota_class(
             lease.attempt.worker_id, lease.attempt.quota_class
@@ -809,11 +972,18 @@ class ExecutiveSupervisor:
                     "boot_id": process_ref.boot_session_id,
                 },
             }
-        if self.require_complete_launch_attestation and (
+        if (self.require_complete_launch_attestation or effective_grant is not None) and (
             not isinstance(attestation, dict)
             or attestation.get("schema_version") != LAUNCH_ATTESTATION_SCHEMA_VERSION
         ):
             raise SupervisorError("worker adapter did not provide a complete launch attestation")
+        if effective_grant is not None:
+            if "effective_grant_digest" in attestation:
+                raise SupervisorError("worker launch attestation preempted supervisor grant binding")
+            attestation = {
+                **attestation,
+                "effective_grant_digest": lease.attempt.effective_grant_digest,
+            }
         payload = (
             json.dumps(attestation, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
             .encode("utf-8")
@@ -824,13 +994,17 @@ class ExecutiveSupervisor:
             legacy=spec.run_dir / "input" / "launch-attestation.json",
         )
         _write_private_json(receipt_path, attestation)
-        return {
+        result = {
             "schema_version": "mastermind.executive_process_launch/v1",
             "launch_attestation": attestation,
             "launch_attestation_sha256": hashlib.sha256(payload).hexdigest(),
             "launch_attestation_path": str(receipt_path),
             "authority_policy_hash": lease.attempt.authority_policy_hash,
-            "authorities": job.requested_authorities,
+            "authorities": (
+                list(effective_grant["authorities"])
+                if effective_grant is not None
+                else job.requested_authorities
+            ),
             "quota_class": lease.attempt.quota_class,
             "routing": {
                 "policy_version": job.constraints.get("routing_policy_version"),
@@ -842,6 +1016,11 @@ class ExecutiveSupervisor:
                 "adapter_id": quota_metadata.get("adapter_id"),
             },
         }
+        if effective_grant is not None:
+            result["effective_grant_digest"] = lease.attempt.effective_grant_digest
+            result["write_paths"] = list(effective_grant["write_paths"])
+            result["validation_argv"] = list(effective_grant["validation_argv"])
+        return result
 
     def _fail_claim(self, lease: AttemptLease, message: str) -> Job:
         return self.runtime.attempts.fail_attempt(
@@ -856,19 +1035,58 @@ class ExecutiveSupervisor:
         )
 
     async def start_job(self, job_id: str) -> ActiveRun:
-        """Claim and launch one job, persisting ProcessRef before RUNNING."""
+        """Claim and launch one legacy role-null Job."""
 
         lease = self.runtime.broker.claim(job_id, lease_owner=self.instance_id)
         if lease is None:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
+        return await self._start_claimed_job(job_id, lease)
+
+    async def start_cycle_job(
+        self, job_id: str, *, command_id: str
+    ) -> ActiveRun | OrchestrationDispatchOutcome:
+        """Claim exactly ``job_id`` under ``command_id`` and launch it once.
+
+        Replaying an already active/terminal dispatch returns the immutable
+        command-bound outcome.  It never scans or claims another queued Job.
+        """
+
+        outcome = self.runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            lease_owner=self.instance_id,
+        )
+        if outcome is None:
+            raise SupervisorError(f"no eligible worker capacity for {job_id}")
+        if outcome.outcome == "TERMINAL" or outcome.attempt.status is not AttemptStatus.CLAIMED:
+            return outcome
+        if outcome.lease_token is None:  # pragma: no cover - dataclass invariant
+            raise SupervisorError("active cycle dispatch lost its lease token")
+        return await self._start_claimed_job(
+            job_id,
+            AttemptLease(
+                attempt=outcome.attempt,
+                lease_token=outcome.lease_token,
+            ),
+        )
+
+    async def _start_claimed_job(
+        self, job_id: str, lease: AttemptLease
+    ) -> ActiveRun:
+        """Launch one already claimed exact Job and persist its principal."""
+
         job = self._job(job_id)
+        effective_grant = self._effective_grant(job, lease.attempt)
         process_ref: ProcessRef | None = None
         start_invoked = False
         try:
             schema_path = self._write_schema(
-                self._run_dir(lease.attempt.attempt_id), job=job, attempt=lease.attempt
+                self._run_dir(lease.attempt.attempt_id),
+                job=job,
+                attempt=lease.attempt,
+                effective_grant=effective_grant,
             )
-            spec = self._launch_spec(job, lease, schema_path)
+            spec = self._launch_spec(job, lease, schema_path, effective_grant)
             start_invoked = True
             process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(
@@ -876,6 +1094,7 @@ class ExecutiveSupervisor:
                 lease=lease,
                 spec=spec,
                 process_ref=process_ref,
+                effective_grant=effective_grant,
             )
             self.runtime.attempts.record_process(
                 lease.attempt.attempt_id,
@@ -921,7 +1140,12 @@ class ExecutiveSupervisor:
                     ],
                 ),
             )
-            return ActiveRun(lease=lease, process_ref=process_ref, launch_spec=spec)
+            return ActiveRun(
+                lease=lease,
+                process_ref=process_ref,
+                launch_spec=spec,
+                effective_grant=effective_grant,
+            )
         except Exception as exc:
             if process_ref is not None:
                 try:
@@ -1018,6 +1242,10 @@ class ExecutiveSupervisor:
                 "collection": collection,
                 "uid_sweep": uid_sweep,
             }
+            if active.effective_grant is not None:
+                payload["effective_grant_digest"] = (
+                    active.lease.attempt.effective_grant_digest
+                )
         else:
             if self.require_complete_launch_attestation:
                 raise SupervisorError(
@@ -1026,6 +1254,99 @@ class ExecutiveSupervisor:
             payload = collection
         _write_private_json(path, payload)
         return path
+
+    @staticmethod
+    def _read_private_receipt(path: Path, *, name: str) -> dict[str, Any]:
+        """Re-read one supervisor receipt through a closed local-file fence."""
+
+        try:
+            info = path.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) & 0o077
+            ):
+                raise SupervisorError(f"{name} is not a private control-owned file")
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            raise SupervisorError(f"{name} cannot be revalidated") from exc
+        if not isinstance(value, dict):
+            raise SupervisorError(f"{name} is not a JSON object")
+        return value
+
+    def _orchestration_terminal_payload(
+        self,
+        *,
+        active: ActiveRun,
+        job: Job,
+        output: Mapping[str, Any],
+        collection_path: Path,
+        validation_path: Path,
+        assignment_path: Path,
+    ) -> dict[str, Any]:
+        """Build the closed SEALED_WORKER terminal receipt from owned evidence."""
+
+        if active.effective_grant is None or job.orchestration_role is None:
+            raise SupervisorError("orchestration terminal receipt requires a typed grant")
+        from control_plane.executive_orchestration_result import (
+            canonical_digest,
+            validate_envelope,
+        )
+
+        try:
+            envelope = validate_envelope(
+                output,
+                expected_job_id=job.job_id,
+                expected_run_id=active.lease.attempt.attempt_id,
+                expected_worker_id=active.lease.attempt.worker_id,
+                expected_role=job.orchestration_role,
+                expected_root_job_id=job.root_job_id,
+            )
+        except Exception as exc:
+            raise SupervisorError(f"orchestration result protocol refused: {exc}") from exc
+        collection = self._read_private_receipt(
+            collection_path, name="orchestration collection receipt"
+        )
+        validations = self._read_private_receipt(
+            validation_path, name="orchestration validation receipt"
+        )
+        assignment = self._read_private_receipt(
+            assignment_path, name="orchestration assignment seal receipt"
+        )
+        result = collection.get("collection", {}).get("result")
+        if not isinstance(result, dict) or not isinstance(
+            result.get("artifact_manifest"), list
+        ):
+            raise SupervisorError("orchestration collection lost its artifact manifest")
+        evidence = {
+            "schema_version": "mastermind.sealed_worker_result_evidence/v1",
+            "collection_receipt": collection,
+            "collection_receipt_digest": canonical_digest(collection),
+            "validation_receipts": validations,
+            "validation_receipts_digest": canonical_digest(validations),
+            "assignment_seal_receipt": assignment,
+            "assignment_seal_receipt_digest": canonical_digest(assignment),
+        }
+        payload: dict[str, Any] = {
+            "schema_version": "mastermind.orchestration_terminal_receipt/v1",
+            "status": JobStatus.COMPLETED.value,
+            "job_id": job.job_id,
+            "attempt_id": active.lease.attempt.attempt_id,
+            "orchestration_role": job.orchestration_role,
+            "execution_mode": "SEALED_WORKER",
+            "result_seal_command_id": (
+                f"sealed-worker-result:{active.lease.attempt.attempt_id}"
+            ),
+            "result_evidence": evidence,
+            "result_envelope": envelope,
+            "result_envelope_digest": canonical_digest(envelope),
+            "artifact_receipt_digest": canonical_digest(result["artifact_manifest"]),
+            "validation_receipt_digest": evidence["validation_receipts_digest"],
+            "effective_grant_digest": active.lease.attempt.effective_grant_digest,
+        }
+        payload["terminal_evidence_digest"] = canonical_digest(payload)
+        return payload
 
     def _terminal_assignment_receipt_path(self, attempt_id: str) -> Path:
         return self._receipt_path(
@@ -1057,6 +1378,7 @@ class ExecutiveSupervisor:
         workspace: str | Path,
         run_dir: str | Path,
         uid_sweep: Mapping[str, Any] | None,
+        effective_grant_digest: str | None = None,
         require_uid_sweep: bool | None = None,
     ) -> Path:
         """Persist revocation evidence before any durable terminal transition."""
@@ -1085,6 +1407,8 @@ class ExecutiveSupervisor:
             "job_id": job_id,
             "uid_sweep": _jsonable(verified_sweep),
         }
+        if effective_grant_digest is not None:
+            payload["effective_grant_digest"] = effective_grant_digest
         path = self._terminal_assignment_receipt_path(attempt_id)
         try:
             _write_private_json(path, payload)
@@ -1106,6 +1430,11 @@ class ExecutiveSupervisor:
                 or existing.get("passed") is not True
                 or existing.get("attempt_id") != attempt_id
                 or existing.get("job_id") != job_id
+                or (
+                    effective_grant_digest is not None
+                    and existing.get("effective_grant_digest")
+                    != effective_grant_digest
+                )
                 or not stat.S_ISREG(info.st_mode)
                 or stat.S_ISLNK(info.st_mode)
                 or info.st_uid != os.geteuid()
@@ -1209,6 +1538,10 @@ class ExecutiveSupervisor:
             "job_id": active.lease.attempt.job_id,
             "commands": _jsonable(receipts),
         }
+        if active.effective_grant is not None:
+            payload["effective_grant_digest"] = (
+                active.lease.attempt.effective_grant_digest
+            )
         sweep_reader = getattr(self.adapter, "uid_sweep_receipt", None)
         if callable(sweep_reader):
             payload["uid_sweep"] = _jsonable(sweep_reader(active.process_ref))
@@ -1225,7 +1558,12 @@ class ExecutiveSupervisor:
         job: Job,
     ) -> tuple[tuple[ValidationReceipt, ...], Path, str | None]:
         receipts: list[ValidationReceipt] = []
-        for argv in job.validation_commands:
+        validation_commands = (
+            list(active.effective_grant["validation_argv"])
+            if active.effective_grant is not None
+            else job.validation_commands
+        )
+        for argv in validation_commands:
             receipt = await self._collect_validation_with_heartbeats(active, argv)
             receipts.append(receipt)
             if (
@@ -1236,7 +1574,7 @@ class ExecutiveSupervisor:
                 break
         persisted = tuple(receipts)
         path = self._persist_validations(active, persisted)
-        if len(persisted) != len(job.validation_commands):
+        if len(persisted) != len(validation_commands):
             return (
                 persisted,
                 path,
@@ -1276,6 +1614,11 @@ class ExecutiveSupervisor:
                     workspace=active.launch_spec.workspace_path,
                     run_dir=active.launch_spec.run_dir,
                     uid_sweep=self._active_terminal_uid_sweep(active),
+                    effective_grant_digest=(
+                        active.lease.attempt.effective_grant_digest
+                        if active.effective_grant is not None
+                        else None
+                    ),
                 )
             return seal_path
 
@@ -1302,8 +1645,15 @@ class ExecutiveSupervisor:
             validation_path: Path | None = None
             try:
                 self._revalidate_authority(job, self.runtime.attempts.get_attempt(attempt.attempt_id) or attempt)
-                _validate_output_scope(job, output)
-                payload = _payload_from_output(output)
+                if job.orchestration_role is None:
+                    _validate_output_scope(job, output)
+                    payload: JobPayload | dict[str, Any] = _payload_from_output(output)
+                else:
+                    if str(output.get("status")) != "COMPLETED":
+                        raise SupervisorError(
+                            "orchestration worker result must use the closed COMPLETED envelope"
+                        )
+                    payload = {}
                 if str(output.get("status")) == "COMPLETED":
                     (
                         validation_receipts,
@@ -1328,14 +1678,28 @@ class ExecutiveSupervisor:
                             validation_path,
                             ensure_sealed(),
                         )
-                self.runtime.attempts.checkpoint_attempt(
-                    attempt.attempt_id,
-                    fence_generation=fence,
-                    lease_token=token,
-                    payload=payload,
-                )
+                if job.orchestration_role is None:
+                    self.runtime.attempts.checkpoint_attempt(
+                        attempt.attempt_id,
+                        fence_generation=fence,
+                        lease_token=token,
+                        payload=payload,
+                    )
                 if str(output.get("status")) == "COMPLETED":
-                    ensure_sealed()
+                    assignment_path = ensure_sealed()
+                    if job.orchestration_role is not None:
+                        if validation_path is None:  # pragma: no cover - helper invariant
+                            raise SupervisorError(
+                                "orchestration completion lost its validation receipt"
+                            )
+                        payload = self._orchestration_terminal_payload(
+                            active=active,
+                            job=job,
+                            output=output,
+                            collection_path=receipt_path,
+                            validation_path=validation_path,
+                            assignment_path=assignment_path,
+                        )
                     completed = self.runtime.attempts.complete_attempt(
                         attempt.attempt_id,
                         fence_generation=fence,
@@ -1456,6 +1820,16 @@ class ExecutiveSupervisor:
         """Claim, execute, validate, and terminalize exactly one queued job."""
 
         return await self.finish_job(await self.start_job(job_id))
+
+    async def run_cycle_once(
+        self, job_id: str, *, command_id: str
+    ) -> SupervisorReceipt | OrchestrationDispatchOutcome:
+        """Execute one command-bound orchestration Job without fleet fallback."""
+
+        started = await self.start_cycle_job(job_id, command_id=command_id)
+        if isinstance(started, OrchestrationDispatchOutcome):
+            return started
+        return await self.finish_job(started)
 
     def _maybe_requeue(self, job_id: str) -> bool:
         job = self._job(job_id)

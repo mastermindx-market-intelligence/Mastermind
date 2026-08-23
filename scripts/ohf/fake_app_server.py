@@ -223,7 +223,11 @@ class FakeAppServer:
                     text_in += str(item.get("text") or "")
                 if isinstance(item, dict) and item.get("type") == "skill":
                     text_in += str(item.get("name") or "")
-            if OHF_PROBE_SKILL_NAME in text_in or "$ohf-probe" in text_in:
+            fixture_reply = os.environ.get("OHF_FAKE_TURN_REPLY")
+            if fixture_reply is not None:
+                reply = fixture_reply
+                item_type = "agent_message"
+            elif OHF_PROBE_SKILL_NAME in text_in or "$ohf-probe" in text_in:
                 reply = OHF_PROBE_SKILL_ACK
                 item_type = "skill"
             elif text_in.endswith("-P"):
