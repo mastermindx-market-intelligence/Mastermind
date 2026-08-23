@@ -27,7 +27,7 @@ REPO = "mastermindx-market-intelligence/Mastermind"
 
 
 class FixedAuthorityPolicy:
-    def __init__(self, minimum: str, *, continuation: bool = True) -> None:
+    def __init__(self, minimum: str, *, continuation: bool = False) -> None:
         self.minimum = minimum
         self.continuation = continuation
 
@@ -42,6 +42,7 @@ class ExactContinuationPolicy(FixedAuthorityPolicy):
     def allows_continuation(self, *, request, reply) -> bool:
         return (
             request["message_type"] == "PROGRESS"
+            and request["commission_ref"] == commission()
             and request["body"]
             == {
                 "stage": "contract",
@@ -292,11 +293,49 @@ def test_secret_shaped_structured_string_leaves_refuse(location: str) -> None:
     assert exc.value.code == "MESSAGE_INVALID"
 
 
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "xapp-123456789012-abcdefghijklmnopqrstuvwxyz",
+        "sk-ant-" + "c" * 30,
+        "sk-proj-" + "d" * 30,
+    ],
+)
+@pytest.mark.parametrize("location", ["stage", "path", "url"])
+def test_additional_secret_families_refuse_in_structured_leaves(
+    secret: str,
+    location: str,
+) -> None:
+    value = raw("PROGRESS")
+    if location == "stage":
+        value["body"]["stage"] = secret
+    elif location == "path":
+        value["commission_ref"]["path"] = f"research/{secret}.md"
+    else:
+        value["evidence_refs"] = [
+            f"https://github.com/{REPO}/blob/{'d' * 40}/research/{secret}.md"
+        ]
+    with pytest.raises(DialogueContractError) as exc:
+        build_message(value)
+    assert exc.value.code == "MESSAGE_INVALID"
+    assert secret not in str(exc.value)
+
+    value["fingerprint"] = semantic_fingerprint(value)
+    with pytest.raises(DialogueContractError) as exc:
+        validate_message(value)
+    assert exc.value.code == "MESSAGE_INVALID"
+    assert secret not in str(exc.value)
+
+
 def test_hash_and_sha_identifiers_remain_valid_under_recursive_secret_guard() -> None:
-    value = message("PROGRESS")
-    assert value["commission_ref"]["commit"] == "a" * 40
-    assert value["commission_ref"]["content_sha256"] == "b" * 64
-    assert value["applies_to"]["head_sha"] == "c" * 40
+    value = raw("PROGRESS")
+    value["commission_ref"]["commit"] = "d" * 40
+    value["commission_ref"]["content_sha256"] = "e" * 64
+    value["applies_to"]["head_sha"] = "f" * 40
+    validated = build_message(value)
+    assert validated["commission_ref"]["commit"] == "d" * 40
+    assert validated["commission_ref"]["content_sha256"] == "e" * 64
+    assert validated["applies_to"]["head_sha"] == "f" * 40
 
 
 def request_with_effect(effect: str) -> dict[str, object]:
@@ -451,7 +490,41 @@ def test_positive_continue_requires_exact_trusted_commission_semantics() -> None
     }
 
 
-@pytest.mark.parametrize("failure", ["widened", "policy_raises"])
+def test_positive_continue_refuses_alternate_consistently_refingerprinted_commission() -> None:
+    alternate_commission = {
+        "repository": REPO,
+        "commit": "d" * 40,
+        "path": "research/alternate-commission.md",
+        "content_sha256": "e" * 64,
+    }
+    request = message("PROGRESS")
+    request["commission_ref"] = copy.deepcopy(alternate_commission)
+    request["fingerprint"] = semantic_fingerprint(request)
+    request = validate_message(request)
+    reply = raw("CONTINUE")
+    reply["commission_ref"] = copy.deepcopy(alternate_commission)
+    reply["reply_to_message_key"] = request["message_key"]
+    reply = build_message(reply)
+
+    with pytest.raises(DialogueContractError) as exc:
+        adjudicate_reply(
+            request,
+            reply,
+            authority_policy=ExactContinuationPolicy("WITHIN_COMMISSION"),
+        )
+    assert exc.value.code == "AUTHORITY_REFUSED"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "widened",
+        "policy_false",
+        "policy_non_boolean",
+        "policy_raises",
+        "missing_hook",
+    ],
+)
 def test_positive_continue_fails_closed_on_widening_or_policy_error(
     failure: str,
 ) -> None:
@@ -461,12 +534,29 @@ def test_positive_continue_fails_closed_on_widening_or_policy_error(
     reply["body"]["instruction"] = "Merge, deploy, and widen the commission."
     reply = build_message(reply)
     authority_policy = ExactContinuationPolicy("WITHIN_COMMISSION")
-    if failure == "policy_raises":
+    if failure == "policy_false":
+        authority_policy = FixedAuthorityPolicy(
+            "WITHIN_COMMISSION",
+            continuation=False,
+        )
+    elif failure == "policy_non_boolean":
+        class NonBooleanPolicy(ExactContinuationPolicy):
+            def allows_continuation(self, *, request, reply):
+                return "yes"
+
+        authority_policy = NonBooleanPolicy("WITHIN_COMMISSION")
+    elif failure == "policy_raises":
         class RaisingPolicy(ExactContinuationPolicy):
             def allows_continuation(self, *, request, reply) -> bool:
                 raise RuntimeError("untrusted policy failure detail")
 
         authority_policy = RaisingPolicy("WITHIN_COMMISSION")
+    elif failure == "missing_hook":
+        class RulingOnlyPolicy:
+            def minimum_authority(self, *, request, option) -> str:
+                return "WITHIN_COMMISSION"
+
+        authority_policy = RulingOnlyPolicy()
     with pytest.raises(DialogueContractError) as exc:
         adjudicate_reply(
             request,

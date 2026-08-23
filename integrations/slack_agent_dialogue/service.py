@@ -44,6 +44,11 @@ ERROR_CODES = frozenset(
 )
 _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
+# Filesystem AF_UNIX addresses must leave one byte for the terminating NUL in
+# the target kernel's ``sockaddr_un.sun_path`` buffer. Validate the encoded
+# path that Python passes to the kernel, not its character count.
+AF_UNIX_PATH_MAX_BYTES = 107 if sys.platform.startswith("linux") else 103
+
 
 class DialogueServiceError(RuntimeError):
     """One closed service/client refusal code."""
@@ -53,6 +58,14 @@ class DialogueServiceError(RuntimeError):
             raise ValueError("unknown dialogue service error code")
         super().__init__(code)
         self.code = code
+
+
+def _socket_path_is_target_valid(path: Path) -> bool:
+    try:
+        encoded = os.fsencode(path)
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return False
+    return b"\x00" not in encoded and len(encoded) <= AF_UNIX_PATH_MAX_BYTES
 
 
 @dataclass(frozen=True)
@@ -67,7 +80,15 @@ class ServiceConfig:
         path = Path(self.socket_path)
         if not path.is_absolute():
             raise ValueError("socket_path must be absolute")
-        object.__setattr__(self, "socket_path", path.resolve(strict=False))
+        if not _socket_path_is_target_valid(path):
+            raise DialogueServiceError("SERVICE_UNAVAILABLE")
+        try:
+            path = path.resolve(strict=False)
+        except (OSError, ValueError):
+            raise DialogueServiceError("SERVICE_UNAVAILABLE") from None
+        if not _socket_path_is_target_valid(path):
+            raise DialogueServiceError("SERVICE_UNAVAILABLE")
+        object.__setattr__(self, "socket_path", path)
         if (
             not isinstance(self.allowed_peer_uids, tuple)
             or not self.allowed_peer_uids
@@ -422,6 +443,8 @@ async def call_service(
         or not 0.1 <= timeout_seconds <= 120
     ):
         raise DialogueServiceError("REQUEST_INVALID")
+    if not _socket_path_is_target_valid(path):
+        raise DialogueServiceError("SERVICE_UNAVAILABLE")
     payload = _canonical_json(request)
     if len(payload) > DEFAULT_MAX_REQUEST_BYTES:
         raise DialogueServiceError("REQUEST_TOO_LARGE")
@@ -502,6 +525,7 @@ def client_main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
+    "AF_UNIX_PATH_MAX_BYTES",
     "AgentDialogueService",
     "CONTROL_VERSION",
     "DialogueServiceError",

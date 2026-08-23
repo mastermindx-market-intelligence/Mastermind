@@ -4,6 +4,9 @@ import asyncio
 import json
 import os
 import socket
+import stat
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -24,6 +27,7 @@ from integrations.slack_agent_dialogue.engine import (
 )
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 from integrations.slack_agent_dialogue.service import (
+    AF_UNIX_PATH_MAX_BYTES,
     AgentDialogueService,
     CONTROL_VERSION,
     DialogueServiceError,
@@ -61,6 +65,63 @@ class ExactServiceAuthorityPolicy:
 
 def run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture
+def socket_root() -> Iterator[Path]:
+    """Use a real, owner-only root short enough for Darwin ``sun_path``."""
+
+    with tempfile.TemporaryDirectory(prefix="mmx-asd-", dir="/tmp") as raw:
+        root = Path(raw).resolve()
+        assert root.lstat().st_uid == os.geteuid()
+        assert stat.S_IMODE(root.lstat().st_mode) == 0o700
+        assert len(os.fsencode(root / "dialogue.sock")) <= AF_UNIX_PATH_MAX_BYTES
+        yield root
+
+
+def encoded_socket_path(root: Path, encoded_length: int) -> Path:
+    prefix_length = len(os.fsencode(root.resolve())) + 1
+    assert prefix_length < encoded_length
+    path = root.resolve() / ("s" * (encoded_length - prefix_length))
+    assert len(os.fsencode(path)) == encoded_length
+    return path
+
+
+def multibyte_oversize_socket_path(root: Path) -> Path:
+    prefix_length = len(os.fsencode(root.resolve())) + 1
+    available = AF_UNIX_PATH_MAX_BYTES - prefix_length
+    path = root.resolve() / ("é" * (available // 2 + 1))
+    assert len(os.fsencode(path)) > AF_UNIX_PATH_MAX_BYTES
+    assert len(str(path)) <= AF_UNIX_PATH_MAX_BYTES
+    return path
+
+
+async def wait_for_service_start(
+    task: asyncio.Task[None], socket_path: Path, *, timeout_seconds: float = 1.0
+) -> None:
+    """Observe startup success, task failure, or a bounded timeout."""
+
+    async def observe() -> None:
+        while True:
+            if task.done():
+                await task
+                raise AssertionError("service exited before creating its socket")
+            try:
+                info = socket_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if stat.S_ISSOCK(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600:
+                    return
+            await asyncio.sleep(0)
+
+    try:
+        await asyncio.wait_for(observe(), timeout=timeout_seconds)
+    except BaseException:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
 
 
 def commission() -> dict[str, str]:
@@ -179,12 +240,14 @@ def engine_and_client() -> tuple[DialogueEngine, InMemorySlackClient]:
     return engine, client
 
 
-def service(tmp_path: Path) -> tuple[AgentDialogueService, InMemorySlackClient]:
+def service(
+    socket_root: Path, *, socket_path: Path | None = None
+) -> tuple[AgentDialogueService, InMemorySlackClient]:
     engine, client = engine_and_client()
     return (
         AgentDialogueService(
             ServiceConfig(
-                socket_path=tmp_path / "dialogue.sock",
+                socket_path=socket_path or socket_root / "dialogue.sock",
                 allowed_peer_uids=(os.geteuid(),),
                 request_timeout_seconds=1,
             ),
@@ -198,17 +261,11 @@ def request_envelope(operation: str, args: dict[str, object]) -> dict[str, objec
     return {"version": CONTROL_VERSION, "operation": operation, "args": args}
 
 
-def test_real_unix_status_and_one_shot_cleanup(tmp_path: Path) -> None:
+def test_real_unix_status_and_one_shot_cleanup(socket_root: Path) -> None:
     async def scenario() -> None:
-        srv, _client = service(tmp_path)
+        srv, _client = service(socket_root)
         task = asyncio.create_task(srv.serve_one())
-        async def wait_until_ready() -> None:
-            while not srv.config.socket_path.exists():
-                if task.done():
-                    await task
-                await asyncio.sleep(0)
-
-        await asyncio.wait_for(wait_until_ready(), timeout=1)
+        await wait_for_service_start(task, srv.config.socket_path)
         response = await call_service(
             srv.config.socket_path, request_envelope("status", {})
         )
@@ -220,28 +277,87 @@ def test_real_unix_status_and_one_shot_cleanup(tmp_path: Path) -> None:
     run(scenario())
 
 
-def test_overlong_unix_socket_path_fails_opaque_and_bounded(tmp_path: Path) -> None:
+def test_service_start_wait_propagates_failure_without_spin(
+    monkeypatch, socket_root: Path
+) -> None:
     async def scenario() -> None:
-        engine, _client = engine_and_client()
-        srv = AgentDialogueService(
-            ServiceConfig(
-                socket_path=tmp_path / ("deep" * 30) / "dialogue.sock",
-                allowed_peer_uids=(os.geteuid(),),
-                request_timeout_seconds=1,
-            ),
-            engine,
-        )
+        srv, _client = service(socket_root)
+
+        def failed_prepare() -> None:
+            raise OSError("raw filesystem detail must not escape")
+
+        monkeypatch.setattr(srv, "_prepare_socket", failed_prepare)
+        task = asyncio.create_task(srv.serve_one())
         with pytest.raises(DialogueServiceError) as exc:
-            await asyncio.wait_for(srv.start(), timeout=1)
+            await wait_for_service_start(task, srv.config.socket_path)
         assert exc.value.code == "SERVICE_UNAVAILABLE"
-        assert not srv.config.socket_path.exists()
+        assert str(exc.value) == "SERVICE_UNAVAILABLE"
 
     run(scenario())
 
 
-def test_peer_is_checked_before_body(monkeypatch, tmp_path: Path) -> None:
+def test_target_max_encoded_path_real_bind_connect_and_cleanup(
+    socket_root: Path,
+) -> None:
     async def scenario() -> None:
-        srv, _client = service(tmp_path)
+        path = encoded_socket_path(socket_root, AF_UNIX_PATH_MAX_BYTES)
+        srv, _client = service(socket_root, socket_path=path)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, path)
+
+        info = path.lstat()
+        assert stat.S_ISSOCK(info.st_mode)
+        assert info.st_uid == os.geteuid()
+        assert stat.S_IMODE(info.st_mode) == 0o600
+        assert path.parent.lstat().st_uid == os.geteuid()
+        assert stat.S_IMODE(path.parent.lstat().st_mode) == 0o700
+
+        response = await call_service(path, request_envelope("status", {}))
+        assert response["ok"] is True
+        await task
+        assert not path.exists()
+
+    run(scenario())
+
+
+def test_oversize_encoded_paths_refuse_opaquely_before_bind(
+    socket_root: Path,
+) -> None:
+    paths = (
+        encoded_socket_path(socket_root, AF_UNIX_PATH_MAX_BYTES + 1),
+        multibyte_oversize_socket_path(socket_root),
+    )
+    for path in paths:
+        with pytest.raises(DialogueServiceError) as exc:
+            ServiceConfig(socket_path=path, allowed_peer_uids=(os.geteuid(),))
+        assert exc.value.code == "SERVICE_UNAVAILABLE"
+        assert str(exc.value) == "SERVICE_UNAVAILABLE"
+
+        with pytest.raises(DialogueServiceError) as exc:
+            run(call_service(path, request_envelope("status", {})))
+        assert exc.value.code == "SERVICE_UNAVAILABLE"
+        assert str(exc.value) == "SERVICE_UNAVAILABLE"
+        assert not path.exists()
+
+
+def test_embedded_nul_path_refuses_opaquely_on_server_and_client(
+    socket_root: Path,
+) -> None:
+    path = socket_root / "dialogue\x00.sock"
+    with pytest.raises(DialogueServiceError) as exc:
+        ServiceConfig(socket_path=path, allowed_peer_uids=(os.geteuid(),))
+    assert exc.value.code == "SERVICE_UNAVAILABLE"
+    assert str(exc.value) == "SERVICE_UNAVAILABLE"
+
+    with pytest.raises(DialogueServiceError) as exc:
+        run(call_service(path, request_envelope("status", {})))
+    assert exc.value.code == "SERVICE_UNAVAILABLE"
+    assert str(exc.value) == "SERVICE_UNAVAILABLE"
+
+
+def test_peer_is_checked_before_body(monkeypatch, socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, _client = service(socket_root)
         monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 999999)
         await srv.start()
         try:
@@ -259,9 +375,9 @@ def test_peer_is_checked_before_body(monkeypatch, tmp_path: Path) -> None:
     run(scenario())
 
 
-def test_service_round_trips_fake_decision_and_ruling(tmp_path: Path) -> None:
+def test_service_round_trips_fake_decision_and_ruling(socket_root: Path) -> None:
     async def scenario() -> None:
-        srv, client = service(tmp_path)
+        srv, client = service(socket_root)
         req = request()
         client.add_reply(
             SlackMessage(
@@ -312,10 +428,10 @@ def test_service_round_trips_fake_decision_and_ruling(tmp_path: Path) -> None:
     ],
 )
 def test_duplicate_nonfinite_or_invalid_json_refuses(
-    raw: bytes, tmp_path: Path
+    raw: bytes, socket_root: Path
 ) -> None:
     async def scenario() -> None:
-        srv, _client = service(tmp_path)
+        srv, _client = service(socket_root)
         await srv.start()
         try:
             reader, writer = await asyncio.open_unix_connection(
@@ -336,9 +452,9 @@ def test_duplicate_nonfinite_or_invalid_json_refuses(
     run(scenario())
 
 
-def test_bool_max_attempts_refuses_at_external_boundary(tmp_path: Path) -> None:
+def test_bool_max_attempts_refuses_at_external_boundary(socket_root: Path) -> None:
     async def scenario() -> None:
-        srv, _client = service(tmp_path)
+        srv, _client = service(socket_root)
         await srv.start()
         try:
             response = await call_service(
@@ -365,11 +481,11 @@ def test_bool_max_attempts_refuses_at_external_boundary(tmp_path: Path) -> None:
 
 
 def test_existing_nonsocket_or_running_socket_is_not_unlinked(
-    tmp_path: Path,
+    socket_root: Path,
 ) -> None:
-    path = tmp_path / "dialogue.sock"
+    path = socket_root / "dialogue.sock"
     path.write_text("owned file", encoding="utf-8")
-    srv, _client = service(tmp_path)
+    srv, _client = service(socket_root)
     with pytest.raises(DialogueServiceError) as exc:
         run(srv.start())
     assert exc.value.code == "SERVICE_UNAVAILABLE"
@@ -380,7 +496,7 @@ def test_existing_nonsocket_or_running_socket_is_not_unlinked(
     listener.bind(str(path))
     listener.listen(1)
     try:
-        srv, _client = service(tmp_path)
+        srv, _client = service(socket_root)
         with pytest.raises(DialogueServiceError):
             run(srv.start())
         assert path.exists()

@@ -7,9 +7,11 @@ import json
 import pytest
 
 from integrations.slack_agent_dialogue.contract import (
+    DialogueContractError,
     MESSAGE_DISCRIMINATOR,
     MESSAGE_SCHEMA,
     PARENT_SCHEMA,
+    adjudicate_reply,
     build_message,
     build_parent,
     render_message,
@@ -45,6 +47,7 @@ class ExactA1AuthorityPolicy:
         }
         if (
             request["message_type"] == "DECISION_REQUEST"
+            and request["commission_ref"] == commission()
             and request["body"]["question"]
             == "Which bounded option should be selected?"
             and semantic_option
@@ -69,6 +72,7 @@ class ExactA1AuthorityPolicy:
     def allows_continuation(self, *, request, reply) -> bool:
         return (
             request["message_type"] == "PROGRESS"
+            and request["commission_ref"] == commission()
             and request["body"]["stage"] == "build"
             and reply["body"]["instruction"] == "Continue the bounded A1 proof."
             and reply["body"]["stop_condition"] == "Stop on any scope change."
@@ -223,6 +227,35 @@ def ruling(
                 "decision": "Continue.",
                 "rationale": "It preserves scope.",
                 "canonical_ref": None,
+            },
+            "evidence_refs": [],
+            "requires_response": False,
+            "created_at": "2026-08-23T08:01:00Z",
+        }
+    )
+
+
+def continuation(
+    request: dict[str, object],
+    *,
+    commission_ref: dict[str, str] | None = None,
+) -> dict[str, object]:
+    return build_message(
+        {
+            "schema": MESSAGE_SCHEMA,
+            "message_key": "asd-continue-0001",
+            "message_type": "CONTINUE",
+            "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+            "commission_ref": commission() if commission_ref is None else commission_ref,
+            "session_ref": "asd-session-fable0001",
+            "seat_ref": "sol",
+            "reply_to_message_key": request["message_key"],
+            "applies_to": applies(),
+            "summary": "Bounded Sol continuation.",
+            "body": {
+                "instruction": "Continue the bounded A1 proof.",
+                "stop_condition": "Stop on any scope change.",
+                "scope_change": False,
             },
             "evidence_refs": [],
             "requires_response": False,
@@ -453,8 +486,10 @@ def test_committed_unknown_with_failed_reconciliation_stays_effect_unknown(
     assert client.post_call_count == 1
 
 
-def _secret_probe(kind: str) -> dict[str, object]:
-    secret = "xoxb-abcdefghij"
+def _secret_probe(
+    kind: str,
+    secret: str = "xoxb-abcdefghij",
+) -> dict[str, object]:
     value = copy.deepcopy(
         fable_message(
             "DECISION_REQUEST" if kind == "option" else "PROGRESS",
@@ -513,6 +548,64 @@ def test_inbound_structured_secret_never_reaches_caller(kind: str) -> None:
     with pytest.raises(DialogueEngineError) as exc:
         run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
     assert code(exc) == "THREAD_MESSAGE_INVALID"
+    assert client.post_call_count == 0
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "xapp-123456789012-abcdefghijklmnopqrstuvwxyz",
+        "sk-ant-" + "c" * 30,
+        "sk-proj-" + "d" * 30,
+    ],
+)
+def test_additional_secret_families_refuse_before_outbound_post(secret: str) -> None:
+    client = setup_client()
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=_secret_probe("stage", secret),
+            )
+        )
+    assert code(exc) == "THREAD_MESSAGE_INVALID"
+    assert secret not in str(exc.value)
+    assert client.post_call_count == 0
+    assert client.thread_messages[THREAD_TS] == []
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "xapp-123456789012-abcdefghijklmnopqrstuvwxyz",
+        "sk-ant-" + "c" * 30,
+        "sk-proj-" + "d" * 30,
+    ],
+)
+def test_additional_secret_families_never_reach_inbound_caller(secret: str) -> None:
+    client = setup_client()
+    value = _secret_probe("stage", secret)
+    raw_frame = MESSAGE_DISCRIMINATOR + "\n" + json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    client.add_reply(
+        SlackMessage(
+            ts="1787471000.000040",
+            author_user_id=BOT,
+            text=raw_frame,
+            thread_ts=THREAD_TS,
+        )
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
+    assert code(exc) == "THREAD_MESSAGE_INVALID"
+    assert secret not in str(exc.value)
+    assert client.post_call_count == 0
 
 
 def test_wrong_sender_is_ineligible_but_eligible_malformed_protocol_refuses() -> None:
@@ -632,6 +725,32 @@ def test_fake_decision_request_to_sol_ruling_round_trip() -> None:
         "selected_option": "opt-continue",
         "canonical_ref": None,
     }
+
+
+def test_exact_a1_continuation_policy_is_bound_to_immutable_commission() -> None:
+    authority_policy = ExactA1AuthorityPolicy()
+    request = fable_message("PROGRESS", key="asd-progress-exact-continue")
+    assert adjudicate_reply(
+        request,
+        continuation(request),
+        authority_policy=authority_policy,
+    )["executable"] is True
+
+    alternate_commission = {
+        "repository": REPO,
+        "commit": "d" * 40,
+        "path": "research/alternate-commission.md",
+        "content_sha256": "e" * 64,
+    }
+    request["commission_ref"] = copy.deepcopy(alternate_commission)
+    request["fingerprint"] = semantic_fingerprint(request)
+    with pytest.raises(DialogueContractError) as exc:
+        adjudicate_reply(
+            request,
+            continuation(request, commission_ref=alternate_commission),
+            authority_policy=authority_policy,
+        )
+    assert exc.value.code == "AUTHORITY_REFUSED"
 
 
 def test_architecture_change_labeled_none_is_not_executable() -> None:

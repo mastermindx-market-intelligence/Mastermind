@@ -66,7 +66,7 @@ _LINEAR_RE = re.compile(
     r"\Ahttps://linear\.app/mastermindx/issue/(MAS-[1-9][0-9]*)(?:/[A-Za-z0-9-]+)?\Z"
 )
 _SECRET_SHAPED_RE = re.compile(
-    r"(?i)(?:xox[abprs]-[A-Za-z0-9-]{10,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})"
+    r"(?i)(?:xox[a-z]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,})"
 )
 A0_PROVEN_CHATGPT_TRAILER = "*Sent using* <@U0BRGTF1H26|ChatGPT>"
 
