@@ -90,6 +90,67 @@ python3 scripts/chairman_control_room.py --check
   stale `GET /api/state` kicks a background recompose. See "Operational
   model (H0)" below.
 
+## MAS-115 guided setup and disposable proof
+
+PR #126 adds an operator-guided setup utility for P0B. It is inert until the
+PR is accepted and merged: repository tests never read Keychain, call a vendor,
+or start a browser profile. The utility matches a profile ID copied from the
+vendor's own profile list and discovers its folder locally, so the Chairman
+never edits JSON or has to interpret a vendor folder ID.
+
+```text
+python3 scripts/mas115_setup.py status
+python3 scripts/mas115_setup.py enroll-seats
+python3 scripts/mas115_setup.py prepare-disposable
+python3 scripts/mas115_setup.py credential --vendor multilogin
+python3 scripts/mas115_setup.py run-canary --vendor multilogin
+```
+
+The ordered journey is:
+
+1. `enroll-seats` asks the Chairman to use the vendor UI's **Copy profile ID**
+   action for ChatGPT Seat 1, Seat 2, then Seat 3. It accepts each ID and
+   private conversation URL with terminal echo disabled, resolves the
+   Multilogin folder locally, and atomically writes all three rows through the
+   canonical `surface_bindings` writer. It never starts or stops a profile.
+2. `prepare-disposable` accepts a copied non-Chairman profile ID, requires
+   that profile to be positively stopped, proves it does not collide with any
+   enrolled seat, detects the Multilogin browser
+   core from directory shape without reading profile content, and writes the
+   existing private `mas115_nonseat_canary` provision as mode 0600.
+3. `credential` replaces the setup process with the native macOS Keychain
+   prompt (`security add-generic-password ... -w`, with the bare `-w` last).
+   The token never enters Python, argv, environment, shell substitution,
+   stdout, a temporary file, or the repository.
+4. `run-canary` reaches the existing narrow secret-owning helper. Every
+   provision/binding/non-seat preflight completes before Keychain is read or
+   any network/browser object is constructed.
+
+The supported Multilogin path is the documented v2 exact-profile launcher
+with `automation_type=selenium`, followed by a closed W3C WebDriver subset:
+create session, navigate, enumerate/switch window handles, and read current
+URL. The provision positively binds `mimic` (Chrome) or `stealthfox`
+(Firefox); a missing/mismatched/renamed core refuses before launch. This is
+based on Multilogin's current official
+["Start a profile with Postman"](https://multilogin.com/help/en_US/starting-a-profile-with-postman)
+(updated 2026-07-27),
+["Selenium automation example"](https://multilogin.com/help/en_US/puppeteer-selenium-and-playwright/selenium-automation-example)
+(updated 2026-07-02), and
+["How to use Mimic and legacy Stealthfox"](https://multilogin.com/help/en_US/profile-behavior-identity/how-to-use-mimic-and-stealthfox)
+(updated 2026-07-20) contracts.
+There is no click/type/fill/send/evaluate/cookie/profile-update/unlock surface.
+
+GoLogin stays `BUILT_NOT_PROVEN / UNSUPPORTED_SURFACE` in this carrier. Its
+documented local lifecycle is SDK-owned, but no exact SDK/version and secure
+local wrapper has yet passed the separately required disposable review. The
+setup utility therefore refuses to store a GoLogin canary credential rather
+than improvising a REST or cloud-browser route.
+
+A disposable C0-C10 PASS proves only the automation-owned non-seat substrate.
+It does not authorize a real seat, waive the unresolved supported foreground
+gate, send a message, or complete MAS-115/MAS-113. The separately authorized
+real-seat proof remains after Sol accepts the disposable receipts.
+
 ## Operational model (H0)
 
 - Startup pre-composes the `/api/state` document ONCE, synchronously,
