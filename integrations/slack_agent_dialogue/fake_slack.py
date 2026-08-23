@@ -19,6 +19,8 @@ class InMemorySlackClient:
     thread_messages: dict[str, list[SlackMessage]] = field(default_factory=dict)
     channel_history_complete: bool = True
     thread_history_complete: bool = True
+    channel_mutation_evidence_complete: bool = True
+    thread_mutation_evidence_complete: bool = True
     post_behaviors: list[str] = field(default_factory=list)
     next_timestamp: Decimal = Decimal("1787472000.000001")
 
@@ -26,7 +28,11 @@ class InMemorySlackClient:
         self, *, channel_id: str, limit: int
     ) -> HistoryPage:
         messages = tuple(reversed(self.channel_messages[-limit:]))
-        return HistoryPage(messages=messages, complete=self.channel_history_complete)
+        return HistoryPage(
+            messages=messages,
+            complete=self.channel_history_complete,
+            mutation_evidence_complete=self.channel_mutation_evidence_complete,
+        )
 
     async def fetch_thread(
         self, *, channel_id: str, thread_ts: str, limit: int
@@ -36,7 +42,11 @@ class InMemorySlackClient:
         ]
         replies = self.thread_messages.get(thread_ts, [])
         messages = tuple((parent + replies)[-limit:])
-        return HistoryPage(messages=messages, complete=self.thread_history_complete)
+        return HistoryPage(
+            messages=messages,
+            complete=self.thread_history_complete,
+            mutation_evidence_complete=self.thread_mutation_evidence_complete,
+        )
 
     async def post_reply(
         self, *, channel_id: str, thread_ts: str, text: str
@@ -99,13 +109,21 @@ class InMemorySlackClient:
         for index, message in enumerate(messages):
             if message.ts != message_ts:
                 continue
+            next_edited = message.edited if edited is None else edited
+            next_deleted = message.deleted if deleted is None else deleted
+            if text is not None and text != message.text and edited is None:
+                next_edited = True
+            created_text = message.created_text
+            if (next_edited or next_deleted) and created_text is None:
+                created_text = message.text
             messages[index] = SlackMessage(
                 ts=message.ts,
                 author_user_id=message.author_user_id,
                 text=message.text if text is None else text,
                 thread_ts=message.thread_ts,
-                edited=message.edited if edited is None else edited,
-                deleted=message.deleted if deleted is None else deleted,
+                edited=next_edited,
+                deleted=next_deleted,
+                created_text=created_text,
             )
             return
         raise KeyError(message_ts)

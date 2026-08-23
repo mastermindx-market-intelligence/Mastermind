@@ -6,6 +6,7 @@ import json
 import pytest
 
 from integrations.slack_agent_dialogue.contract import (
+    A0_PROVEN_CHATGPT_TRAILER,
     DialogueContractError,
     MAX_FRAME_BYTES,
     MESSAGE_DISCRIMINATOR,
@@ -23,6 +24,14 @@ from integrations.slack_agent_dialogue.contract import (
 )
 
 REPO = "mastermindx-market-intelligence/Mastermind"
+
+
+class FixedAuthorityPolicy:
+    def __init__(self, minimum: str) -> None:
+        self.minimum = minimum
+
+    def minimum_authority(self, *, request, option) -> str:
+        return self.minimum
 
 
 def commission() -> dict[str, str]:
@@ -157,7 +166,7 @@ def test_closed_types_round_trip(kind: str) -> None:
 
 def test_parent_and_known_hosted_trailer_round_trip() -> None:
     assert parse_parent_frame(render_parent(parent())) == parent()
-    framed = render_message(message()) + "\n*Sent using* <@U0BRGTF1H26|ChatGPT>"
+    framed = render_message(message()) + "\n" + A0_PROVEN_CHATGPT_TRAILER
     assert parse_message_frame(framed) == message()
 
 
@@ -172,6 +181,15 @@ def test_parent_and_known_hosted_trailer_round_trip() -> None:
 def test_unknown_trailer_refuses(suffix: str) -> None:
     with pytest.raises(DialogueContractError):
         parse_message_frame(render_message(message()) + suffix)
+
+
+def test_unproven_chatgpt_identity_trailer_refuses() -> None:
+    with pytest.raises(DialogueContractError) as exc:
+        parse_message_frame(
+            render_message(message())
+            + "\n*Sent using* <@U0BRETDUAS2|ChatGPT>"
+        )
+    assert exc.value.code == "TRAILER_REFUSED"
 
 
 def test_literal_ack_vector_and_fingerprint_exclusion() -> None:
@@ -254,20 +272,52 @@ def ruling_for(
 
 
 @pytest.mark.parametrize(
-    ("effect", "authority", "disposition", "executable"),
+    ("trusted", "effect", "authority", "disposition", "executable"),
     [
-        ("NONE", "WITHIN_COMMISSION", "CONTINUE", True),
+        ("WITHIN_COMMISSION", "NONE", "WITHIN_COMMISSION", "CONTINUE", True),
         (
+            "WITHIN_COMMISSION",
+            "NONE",
+            "CANONICAL_REF_REQUIRED",
+            "CANONICAL_REF_REQUIRED",
+            False,
+        ),
+        (
+            "WITHIN_COMMISSION",
+            "NONE",
+            "CHAIRMAN_REQUIRED",
+            "CHAIRMAN_REQUIRED",
+            False,
+        ),
+        (
+            "CANONICAL_REF_REQUIRED",
+            "NONE",
+            "CANONICAL_REF_REQUIRED",
+            "CANONICAL_REF_REQUIRED",
+            False,
+        ),
+        (
+            "WITHIN_COMMISSION",
             "CANONICAL_REF_REQUIRED",
             "CANONICAL_REF_REQUIRED",
             "CANONICAL_REF_REQUIRED",
             False,
         ),
-        ("CHAIRMAN_REQUIRED", "CHAIRMAN_REQUIRED", "CHAIRMAN_REQUIRED", False),
+        (
+            "CHAIRMAN_REQUIRED",
+            "NONE",
+            "CHAIRMAN_REQUIRED",
+            "CHAIRMAN_REQUIRED",
+            False,
+        ),
     ],
 )
-def test_declared_authority_effect_controls_reply(
-    effect: str, authority: str, disposition: str, executable: bool
+def test_trusted_floor_and_model_escalation_allow_sol_to_escalate(
+    trusted: str,
+    effect: str,
+    authority: str,
+    disposition: str,
+    executable: bool,
 ) -> None:
     request = request_with_effect(effect)
     canonical_ref = (
@@ -275,15 +325,45 @@ def test_declared_authority_effect_controls_reply(
         if authority == "CANONICAL_REF_REQUIRED"
         else None
     )
-    result = adjudicate_reply(request, ruling_for(request, authority, canonical_ref))
+    result = adjudicate_reply(
+        request,
+        ruling_for(request, authority, canonical_ref),
+        authority_policy=FixedAuthorityPolicy(trusted),
+    )
     assert result["disposition"] == disposition
     assert result["executable"] is executable
 
 
-def test_architecture_effect_cannot_be_laundered_as_within_commission() -> None:
-    request = request_with_effect("CANONICAL_REF_REQUIRED")
+@pytest.mark.parametrize(
+    ("trusted", "effect"),
+    [
+        ("CANONICAL_REF_REQUIRED", "NONE"),
+        ("CHAIRMAN_REQUIRED", "NONE"),
+        ("WITHIN_COMMISSION", "CANONICAL_REF_REQUIRED"),
+    ],
+)
+def test_model_authored_authority_cannot_launder_or_downgrade(
+    trusted: str, effect: str
+) -> None:
+    request = request_with_effect(effect)
     with pytest.raises(DialogueContractError) as exc:
-        adjudicate_reply(request, ruling_for(request, "WITHIN_COMMISSION"))
+        adjudicate_reply(
+            request,
+            ruling_for(request, "WITHIN_COMMISSION"),
+            authority_policy=FixedAuthorityPolicy(trusted),
+        )
+    assert exc.value.code == "AUTHORITY_REFUSED"
+
+
+@pytest.mark.parametrize("invalid", ["NONE", "", "within_commission"])
+def test_invalid_trusted_authority_policy_refuses(invalid: str) -> None:
+    request = request_with_effect("NONE")
+    with pytest.raises(DialogueContractError) as exc:
+        adjudicate_reply(
+            request,
+            ruling_for(request, "WITHIN_COMMISSION"),
+            authority_policy=FixedAuthorityPolicy(invalid),
+        )
     assert exc.value.code == "AUTHORITY_REFUSED"
 
 
@@ -295,7 +375,11 @@ def test_sol_cannot_continue_chairman_owned_blocker() -> None:
     reply["reply_to_message_key"] = blocked["message_key"]
     reply = build_message(reply)
     with pytest.raises(DialogueContractError) as exc:
-        adjudicate_reply(blocked, reply)
+        adjudicate_reply(
+            blocked,
+            reply,
+            authority_policy=FixedAuthorityPolicy("WITHIN_COMMISSION"),
+        )
     assert exc.value.code == "AUTHORITY_REFUSED"
 
 

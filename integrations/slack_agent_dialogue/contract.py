@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 from urllib.parse import urlsplit
 
 MESSAGE_SCHEMA = "mastermind.agent_dialogue.v1"
@@ -68,7 +68,7 @@ _LINEAR_RE = re.compile(
 _SECRET_SHAPED_RE = re.compile(
     r"(?i)(?:xox[abprs]-[A-Za-z0-9-]{10,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})"
 )
-_CHATGPT_TRAILER_RE = re.compile(r"\A\*Sent using\* <@U[A-Z0-9]{8,31}\|ChatGPT>\Z")
+A0_PROVEN_CHATGPT_TRAILER = "*Sent using* <@U0BRGTF1H26|ChatGPT>"
 
 MESSAGE_KEYS = frozenset(
     {
@@ -110,6 +110,17 @@ class DialogueContractError(RuntimeError):
             raise ValueError("unknown dialogue contract error code")
         super().__init__(code)
         self.code = code
+
+
+class TrustedAuthorityPolicy(Protocol):
+    """Canonical commission/policy classification injected outside model text."""
+
+    def minimum_authority(
+        self,
+        *,
+        request: Mapping[str, Any],
+        option: Mapping[str, Any],
+    ) -> str: ...
 
 
 def _canonical_json(value: Any) -> str:
@@ -588,7 +599,7 @@ def _parse_frame(
         raise DialogueContractError("FRAME_INVALID")
     if lines[0] != discriminator or not lines[1]:
         raise DialogueContractError("FRAME_INVALID")
-    if len(lines) == 3 and _CHATGPT_TRAILER_RE.fullmatch(lines[2]) is None:
+    if len(lines) == 3 and lines[2] != A0_PROVEN_CHATGPT_TRAILER:
         raise DialogueContractError("TRAILER_REFUSED")
     canonical_span = f"{lines[0]}\n{lines[1]}"
     if len(canonical_span.encode("utf-8")) > MAX_FRAME_BYTES:
@@ -627,7 +638,12 @@ def same_context(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     )
 
 
-def adjudicate_reply(request: Mapping[str, Any], reply: Mapping[str, Any]) -> dict[str, Any]:
+def adjudicate_reply(
+    request: Mapping[str, Any],
+    reply: Mapping[str, Any],
+    *,
+    authority_policy: TrustedAuthorityPolicy,
+) -> dict[str, Any]:
     request_message = validate_message(dict(request))
     reply_message = validate_message(dict(reply))
     if request_message["seat_ref"] != "fable" or reply_message["seat_ref"] != "sol":
@@ -648,12 +664,30 @@ def adjudicate_reply(request: Mapping[str, Any], reply: Mapping[str, Any]) -> di
         if selected not in options:
             raise DialogueContractError("AUTHORITY_REFUSED")
         option = options[selected]
-        expected_authority = {
+        model_escalation_floor = {
             "NONE": "WITHIN_COMMISSION",
             "CANONICAL_REF_REQUIRED": "CANONICAL_REF_REQUIRED",
             "CHAIRMAN_REQUIRED": "CHAIRMAN_REQUIRED",
         }[option["authority_effect"]]
-        if authority_class != expected_authority:
+        try:
+            trusted_floor = authority_policy.minimum_authority(
+                request=request_message,
+                option=option,
+            )
+        except Exception:
+            raise DialogueContractError("AUTHORITY_REFUSED") from None
+        if trusted_floor not in AUTHORITY_CLASSES:
+            raise DialogueContractError("AUTHORITY_REFUSED")
+        authority_rank = {
+            "WITHIN_COMMISSION": 0,
+            "CANONICAL_REF_REQUIRED": 1,
+            "CHAIRMAN_REQUIRED": 2,
+        }
+        minimum_rank = max(
+            authority_rank[trusted_floor],
+            authority_rank[model_escalation_floor],
+        )
+        if authority_rank[authority_class] < minimum_rank:
             raise DialogueContractError("AUTHORITY_REFUSED")
         if authority_class == "WITHIN_COMMISSION":
             return {
@@ -707,6 +741,7 @@ def adjudicate_reply(request: Mapping[str, Any], reply: Mapping[str, Any]) -> di
 
 
 __all__ = [
+    "A0_PROVEN_CHATGPT_TRAILER",
     "AUTHORITY_CLASSES",
     "DialogueContractError",
     "ERROR_CODES",
@@ -718,6 +753,7 @@ __all__ = [
     "PARENT_DISCRIMINATOR",
     "PARENT_SCHEMA",
     "SOL_MESSAGE_TYPES",
+    "TrustedAuthorityPolicy",
     "adjudicate_reply",
     "build_message",
     "build_parent",

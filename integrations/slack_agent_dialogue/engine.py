@@ -14,6 +14,7 @@ from integrations.slack_agent_dialogue.contract import (
     PARENT_DISCRIMINATOR,
     SOL_MESSAGE_TYPES,
     DialogueContractError,
+    TrustedAuthorityPolicy,
     adjudicate_reply,
     parse_message_frame,
     parse_parent_frame,
@@ -32,6 +33,7 @@ ERROR_CODES = frozenset(
         "THREAD_CONTEXT_MISMATCH",
         "THREAD_HISTORY_INCOMPLETE",
         "THREAD_MESSAGE_INVALID",
+        "THREAD_RECONCILIATION_INCOMPLETE",
         "TRANSPORT_UNAVAILABLE",
         "WAIT_TIMEOUT",
         "WRITE_RESULT_INVALID",
@@ -70,6 +72,7 @@ class SlackMessage:
     thread_ts: str | None = None
     edited: bool = False
     deleted: bool = False
+    created_text: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.ts, str) or _TS_RE.fullmatch(self.ts) is None:
@@ -87,16 +90,23 @@ class SlackMessage:
             raise ValueError("invalid Slack thread timestamp")
         if type(self.edited) is not bool or type(self.deleted) is not bool:
             raise ValueError("edited/deleted flags must be booleans")
+        if self.created_text is not None and not isinstance(self.created_text, str):
+            raise ValueError("created_text must be a string or None")
+        if not (self.edited or self.deleted) and self.created_text not in {None, self.text}:
+            raise ValueError("unmutated message cannot carry different created_text")
 
 
 @dataclass(frozen=True)
 class HistoryPage:
     messages: tuple[SlackMessage, ...]
     complete: bool
+    mutation_evidence_complete: bool
 
     def __post_init__(self) -> None:
         if type(self.complete) is not bool:
             raise ValueError("complete must be boolean")
+        if type(self.mutation_evidence_complete) is not bool:
+            raise ValueError("mutation_evidence_complete must be boolean")
         if not isinstance(self.messages, tuple) or any(
             not isinstance(message, SlackMessage) for message in self.messages
         ):
@@ -224,6 +234,7 @@ class ReadMessage:
 class ThreadRead:
     thread_ts: str
     messages: tuple[ReadMessage, ...]
+    historical_messages: tuple[ReadMessage, ...]
     ineligible_count: int
     mutated_count: int
 
@@ -244,6 +255,16 @@ def _context_matches(message: Mapping[str, Any], context: Mapping[str, Any]) -> 
     )
 
 
+def _thread_identity_matches(
+    message: Mapping[str, Any], context: Mapping[str, Any]
+) -> bool:
+    return (
+        message.get("work_ref") == context["work_ref"]
+        and message.get("commission_ref") == context["commission_ref"]
+        and message.get("session_ref") == context["session_ref"]
+    )
+
+
 class DialogueEngine:
     """One stateless engine over one fixed Slack workspace/channel policy."""
 
@@ -252,10 +273,12 @@ class DialogueEngine:
         policy: DialoguePolicy,
         client: SlackDialogueClient,
         *,
+        authority_policy: TrustedAuthorityPolicy,
         sleep: Any = asyncio.sleep,
     ) -> None:
         self.policy = policy
         self.client = client
+        self.authority_policy = authority_policy
         self._sleep = sleep
 
     async def bind_or_verify_thread(self, context: DialogueContext) -> BoundThread:
@@ -274,6 +297,8 @@ class DialogueEngine:
             raise DialogueEngineError("THREAD_HISTORY_INCOMPLETE")
         if not page.complete:
             raise DialogueEngineError("THREAD_HISTORY_INCOMPLETE")
+        if not page.mutation_evidence_complete:
+            raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
         matches: list[tuple[SlackMessage, Mapping[str, Any]]] = []
         for transport in page.messages:
             is_top_level = transport.thread_ts in {None, transport.ts}
@@ -325,6 +350,8 @@ class DialogueEngine:
             raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
         if not isinstance(page, HistoryPage) or not page.complete:
             raise DialogueEngineError("THREAD_HISTORY_INCOMPLETE")
+        if not page.mutation_evidence_complete:
+            raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
 
         normalized_context = context.normalized()
         eligible: dict[str, list[tuple[SlackMessage, Mapping[str, Any]]]] = {}
@@ -333,23 +360,30 @@ class DialogueEngine:
         for transport in page.messages:
             if transport.ts == thread_ts or transport.thread_ts != thread_ts:
                 continue
+            sender_is_known = (
+                transport.author_user_id == self.policy.relay_bot_user_id
+                or transport.author_user_id in self.policy.allowed_sol_user_ids
+            )
+            if not sender_is_known:
+                if transport.text.startswith(MESSAGE_DISCRIMINATOR) or (
+                    transport.created_text is not None
+                    and transport.created_text.startswith(MESSAGE_DISCRIMINATOR)
+                ):
+                    ineligible_count += 1
+                continue
+            raw_text = transport.text
             if transport.deleted or transport.edited:
-                if transport.text.startswith(MESSAGE_DISCRIMINATOR):
-                    mutated_count += 1
-                continue
-            if not transport.text.startswith(MESSAGE_DISCRIMINATOR):
-                continue
-            if (
-                transport.author_user_id != self.policy.relay_bot_user_id
-                and transport.author_user_id not in self.policy.allowed_sol_user_ids
-            ):
-                ineligible_count += 1
+                mutated_count += 1
+                if transport.created_text is None:
+                    raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+                raw_text = transport.created_text
+            if not raw_text.startswith(MESSAGE_DISCRIMINATOR):
                 continue
             try:
-                message = parse_message_frame(transport.text)
+                message = parse_message_frame(raw_text)
             except DialogueContractError:
                 raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
-            if not _context_matches(message, normalized_context):
+            if not _thread_identity_matches(message, normalized_context):
                 raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
             is_fable = message["message_type"] in FABLE_MESSAGE_TYPES
             sender_eligible = (
@@ -363,25 +397,30 @@ class DialogueEngine:
             eligible.setdefault(message["message_key"], []).append((transport, message))
 
         output: list[ReadMessage] = []
+        historical_output: list[ReadMessage] = []
         for entries in eligible.values():
             fingerprints = {entry[1]["fingerprint"] for entry in entries}
             if len(fingerprints) != 1:
                 raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
             entries.sort(key=lambda entry: _ts_order(entry[0].ts))
             primary_transport, primary_message = entries[0]
-            output.append(
-                ReadMessage(
-                    message=primary_message,
-                    primary_ts=primary_transport.ts,
-                    duplicate_timestamps=tuple(
-                        transport.ts for transport, _message in entries[1:]
-                    ),
-                )
+            read_message = ReadMessage(
+                message=primary_message,
+                primary_ts=primary_transport.ts,
+                duplicate_timestamps=tuple(
+                    transport.ts for transport, _message in entries[1:]
+                ),
             )
+            if _context_matches(primary_message, normalized_context):
+                output.append(read_message)
+            else:
+                historical_output.append(read_message)
         output.sort(key=lambda item: _ts_order(item.primary_ts))
+        historical_output.sort(key=lambda item: _ts_order(item.primary_ts))
         return ThreadRead(
             thread_ts=thread_ts,
             messages=tuple(output),
+            historical_messages=tuple(historical_output),
             ineligible_count=ineligible_count,
             mutated_count=mutated_count,
         )
@@ -555,7 +594,11 @@ class DialogueEngine:
             if len(replies) == 1:
                 reply = replies[0]
                 try:
-                    authority = adjudicate_reply(request, reply.message)
+                    authority = adjudicate_reply(
+                        request,
+                        reply.message,
+                        authority_policy=self.authority_policy,
+                    )
                 except DialogueContractError:
                     raise DialogueEngineError("THREAD_CONTEXT_MISMATCH") from None
                 return {

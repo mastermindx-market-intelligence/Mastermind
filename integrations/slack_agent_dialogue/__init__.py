@@ -1,6 +1,7 @@
 """Active-Session Dialogue integration boundaries."""
 
 from integrations.slack_agent_dialogue.contract import (
+    A0_PROVEN_CHATGPT_TRAILER,
     AUTHORITY_CLASSES,
     ERROR_CODES as CONTRACT_ERROR_CODES,
     FABLE_MESSAGE_TYPES,
@@ -12,6 +13,7 @@ from integrations.slack_agent_dialogue.contract import (
     PARENT_SCHEMA,
     SOL_MESSAGE_TYPES,
     DialogueContractError,
+    TrustedAuthorityPolicy,
     adjudicate_reply,
     build_message,
     build_parent,
@@ -67,6 +69,7 @@ from integrations.slack_agent_dialogue.service import (
 ERROR_CODES = METADATA_ERROR_CODES
 
 __all__ = [
+    "A0_PROVEN_CHATGPT_TRAILER",
     "AUTHORITY_CLASSES",
     "AgentDialogueService",
     "BoundThread",
@@ -105,6 +108,7 @@ __all__ = [
     "SlackMessage",
     "SlackTransportUnavailable",
     "ThreadRead",
+    "TrustedAuthorityPolicy",
     "UrllibSlackAuthTestTransport",
     "adjudicate_reply",
     "assert_secret_surfaces_clean",

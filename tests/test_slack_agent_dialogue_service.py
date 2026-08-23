@@ -37,6 +37,25 @@ SOL = "U0BRETDUAS2"
 THREAD_TS = "1787471000.000001"
 
 
+class ExactServiceAuthorityPolicy:
+    def minimum_authority(self, *, request, option) -> str:
+        semantic_option = {
+            key: value for key, value in option.items() if key != "authority_effect"
+        }
+        if (
+            request["message_key"] == "asd-request-service"
+            and semantic_option
+            == {
+                "id": "opt-continue",
+                "summary": "Continue.",
+                "consequence": "Work continues.",
+                "disposition": "CONTINUE",
+            }
+        ):
+            return "WITHIN_COMMISSION"
+        return "CHAIRMAN_REQUIRED"
+
+
 def run(coro):
     return asyncio.run(coro)
 
@@ -152,6 +171,7 @@ def engine_and_client() -> tuple[DialogueEngine, InMemorySlackClient]:
             poll_interval_seconds=0,
         ),
         client,
+        authority_policy=ExactServiceAuthorityPolicy(),
     )
     return engine, client
 
