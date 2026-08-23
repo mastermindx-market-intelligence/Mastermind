@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import ast
 import copy
+import inspect
 import io
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -29,6 +31,8 @@ CORE_PATH = Path(core.__file__)
 VENDORS_PATH = Path(vendors.__file__)
 
 VENDORS = ("gologin", "multilogin")
+_NOW = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
+_OBSERVED_AT = "2026-08-23T11:00:00Z"
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +71,45 @@ def _write_provision(tmp_path: Path, doc) -> Path:
     return path
 
 
+def _binding_doc(*, colliding_profile_id=None) -> dict:
+    profile_ids = [
+        colliding_profile_id or "111111111111111111111111",
+        "222222222222222222222222",
+        "333333333333333333333333",
+    ]
+    bindings = []
+    for index, profile_id in enumerate(profile_ids, start=1):
+        is_multilogin = "-" in profile_id
+        locator = {
+            "env_manager": "multilogin" if is_multilogin else "gologin",
+            "profile_id": profile_id,
+            # Schema-valid but non-private: no conversation URL is needed to
+            # prove the managed-profile collision census.
+            "url": "https://chatgpt.com/",
+        }
+        if is_multilogin:
+            locator["folder_id"] = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        bindings.append(sb.new_binding(
+            work_ref="WS:CCR",
+            role="chairman" if index == 1 else "ceo",
+            provider="chatgpt",
+            locator_kind="chatgpt_managed_env",
+            locator=locator,
+            observed_at=_OBSERVED_AT,
+            seat_ref=f"chatgpt{index}",
+            # Current ChatGPT open is unsupported, so this can lawfully remain
+            # null while the fresh observation proves the profile census.
+            last_verified_at=None,
+        ))
+    return {"schema": sb.SCHEMA, "bindings": bindings}
+
+
 def _no_collision_loader():
-    return None, []
+    return _binding_doc(), []
+
+
+def _load_provision(path, *, bindings_loader):
+    return core.load_provision(path, bindings_loader=bindings_loader, now=_NOW)
 
 
 class _CountingNavigator:
@@ -415,30 +456,118 @@ def test_hostile_full_matrix_receipts_never_leak_secret(vendor):
     assert _SECRET not in dumped
 
 
-def test_hostile_keychain_reader_argv_excludes_secret():
-    captured = {}
+def test_mutation_keychain_capture_path_is_structurally_absent():
+    source = CORE_PATH.read_text(encoding="utf-8") + VENDORS_PATH.read_text(encoding="utf-8")
+    assert "run_argv" not in source
+    assert '.get("stdout")' not in source
+    assert "capture_output" not in source
+    assert ".communicate(" not in source
+    assert ".stdout.read(" not in source
+    assert "keychain_reader" not in inspect.signature(core.resolve_credential).parameters
 
-    def _fake_run(argv, *, timeout=20.0):
-        captured["argv"] = list(argv)
-        captured["timeout"] = timeout
-        return {"code": 0, "stdout": _SECRET, "stderr": "", "timed_out": False}
 
-    reader = vendors.keychain_credential_reader("gologin", run=_fake_run)
-    value = reader()
-    assert value == _SECRET
-    assert _SECRET not in captured["argv"]
-    assert captured["argv"] == [
-        core.SECURITY_BIN, "find-generic-password", "-w",
-        "-s", core.KEYCHAIN_SERVICE_TEMPLATE.format(vendor="gologin"),
-        "-a", core.KEYCHAIN_ACCOUNT,
+def test_hostile_keychain_producer_is_fixed_direct_fd_pipe_not_captured_stdout():
+    calls = []
+
+    def _spawn(path, argv, env, *, file_actions):
+        calls.append((path, list(argv), dict(env), list(file_actions)))
+        dup_stdout = next(
+            action for action in file_actions
+            if action[0] == vendors.os.POSIX_SPAWN_DUP2 and action[2] == 1
+        )
+        vendors.os.write(dup_stdout[1], (_SECRET + "\n").encode("utf-8"))
+        return 4242
+
+    def _waitpid(pid, options):
+        assert pid == 4242
+        assert options == vendors.os.WNOHANG
+        return pid, 0
+
+    def _kill(*args):
+        raise AssertionError("completed Keychain producer must not be signalled")
+
+    pipe = vendors._open_keychain_credential_pipe(
+        spawn=_spawn, waitpid=_waitpid, kill=_kill,
+    )
+    try:
+        credential = vendors._read_direct_pipe_credential(pipe)
+    finally:
+        pipe.close()
+    assert credential.present is True
+    assert _SECRET not in repr(credential)
+    assert len(calls) == 1
+    path, argv, env, actions = calls[0]
+    assert path == vendors._SECURITY_BIN
+    assert argv == [
+        vendors._SECURITY_BIN, "find-generic-password", "-w",
+        "-s", vendors._KEYCHAIN_SERVICE, "-a", vendors._KEYCHAIN_ACCOUNT,
     ]
+    assert env == {}
+    assert [action[0] for action in actions] == [
+        vendors.os.POSIX_SPAWN_OPEN,
+        vendors.os.POSIX_SPAWN_DUP2,
+        vendors.os.POSIX_SPAWN_OPEN,
+        vendors.os.POSIX_SPAWN_CLOSE,
+        vendors.os.POSIX_SPAWN_CLOSE,
+    ]
+    assert actions[0][1:] == (0, vendors.os.devnull, vendors.os.O_RDONLY, 0)
+    assert actions[1][2] == 1
+    assert actions[2][1:] == (2, vendors.os.devnull, vendors.os.O_WRONLY, 0)
 
 
-def test_hostile_resolve_credential_keychain_exception_degrades_to_absent():
-    def _boom():
-        raise RuntimeError("keychain exploded")
+def test_hostile_posix_spawn_file_actions_connect_direct_anonymous_pipe():
+    def _benign_spawn(_path, _argv, env, *, file_actions):
+        return vendors.os.posix_spawn(
+            "/usr/bin/printf",
+            ["/usr/bin/printf", "synthetic-direct-pipe"],
+            env,
+            file_actions=file_actions,
+        )
 
-    cred = core.resolve_credential(vendor="gologin", stdin_text=None, keychain_reader=_boom)
+    pipe = vendors._open_keychain_credential_pipe(spawn=_benign_spawn)
+    try:
+        credential = vendors._read_direct_pipe_credential(pipe)
+    finally:
+        pipe.close()
+    assert credential.present is True
+    assert "synthetic-direct-pipe" not in repr(credential)
+
+
+def test_hostile_direct_pipe_credential_is_bounded_and_redacting():
+    cred = vendors._read_direct_pipe_credential(io.StringIO(_SECRET + "\n"))
+    assert cred.present is True
+    assert cred.source == "stdin"
+    assert _SECRET not in repr(cred)
+    assert _SECRET not in str(cred)
+
+    oversized = vendors._read_direct_pipe_credential(io.StringIO("x" * (vendors._MAX_STDIN_BYTES + 1)))
+    assert oversized.present is False
+
+
+def test_mutation_keychain_child_cleanup_is_bounded_to_own_pid(monkeypatch):
+    monkeypatch.setattr(vendors, "_KEYCHAIN_WAIT_TIMEOUT_SECONDS", 0.0)
+    read_fd, write_fd = vendors.os.pipe()
+    vendors.os.close(write_fd)
+    signals = []
+
+    def _waitpid(pid, options):
+        assert pid == 4242
+        assert options == vendors.os.WNOHANG
+        return 0, 0
+
+    def _kill(pid, signal_number):
+        assert pid == 4242
+        signals.append(signal_number)
+
+    pipe = vendors._KeychainCredentialPipe(
+        read_fd, 4242, waitpid=_waitpid, kill=_kill,
+    )
+    pipe.close()
+    assert signals == [vendors.signal.SIGTERM, vendors.signal.SIGKILL]
+
+
+def test_hostile_resolve_credential_missing_direct_stdin_is_absent():
+    cred = core.resolve_credential(vendor="gologin", stdin_text=None)
     assert cred.present is False
     assert cred.source == "absent"
 
@@ -622,14 +751,14 @@ def test_hostile_ack_only_success_impossible_no_pages(vendor):
 
 @pytest.mark.parametrize("vendor", VENDORS)
 def test_hostile_provision_gate_missing_file(tmp_path, vendor):
-    doc, code = core.load_provision(str(tmp_path / "nope.json"), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(tmp_path / "nope.json"), bindings_loader=_no_collision_loader)
     assert doc is None
     assert code == "PROVISION_MISSING"
 
 
 def test_hostile_provision_gate_bad_json(tmp_path):
     path = _write_provision(tmp_path, "{not json")
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "PROVISION_MISSING"
 
 
@@ -637,7 +766,7 @@ def test_hostile_provision_gate_bad_schema(tmp_path):
     bad = _valid_provision("gologin")
     bad["schema"] = "wrong.schema.v1"
     path = _write_provision(tmp_path, bad)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "PROVISION_MISSING"
 
 
@@ -645,14 +774,14 @@ def test_hostile_provision_gate_unknown_key(tmp_path):
     bad = _valid_provision("gologin")
     bad["extra_key"] = "smuggled"
     path = _write_provision(tmp_path, bad)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "PROVISION_MISSING"
 
 
 def test_hostile_provision_gate_bad_ack(tmp_path):
     bad = _valid_provision("gologin", disposable_ack="not-the-required-ack")
     path = _write_provision(tmp_path, bad)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "PROVISION_MISSING"
 
 
@@ -667,7 +796,7 @@ def test_hostile_provision_gate_bad_ack(tmp_path):
 def test_hostile_provision_gate_disallowed_origin(tmp_path, origin):
     bad = _valid_provision("gologin", benign_origin=origin)
     path = _write_provision(tmp_path, bad)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "DISALLOWED_TARGET"
 
 
@@ -675,7 +804,7 @@ def test_hostile_provision_gate_gologin_with_folder_id(tmp_path):
     bad = _valid_provision("gologin")
     bad["folder_id"] = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
     path = _write_provision(tmp_path, bad)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "PROVISION_MISSING"
 
 
@@ -683,7 +812,7 @@ def test_hostile_provision_gate_multilogin_without_folder_id(tmp_path):
     bad = _valid_provision("multilogin")
     del bad["folder_id"]
     path = _write_provision(tmp_path, bad)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "PROVISION_MISSING"
 
 
@@ -691,29 +820,20 @@ def test_hostile_provision_gate_multilogin_without_folder_id(tmp_path):
 def test_hostile_provision_gate_valid_ok(tmp_path, vendor):
     good = _valid_provision(vendor)
     path = _write_provision(tmp_path, good)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert code is None
     assert doc == good
 
 
 def _chatgpt_binding_doc(profile_id: str) -> dict:
-    binding = sb.new_binding(
-        work_ref="WS:CCR",
-        role="chairman",
-        provider="chatgpt",
-        locator_kind="chatgpt_managed_env",
-        locator={"env_manager": "gologin", "profile_id": profile_id, "url": "https://chatgpt.com/c/session-alpha"},
-        observed_at="2026-08-22T00:00:00Z",
-        seat_ref="chatgpt-seat-1",
-    )
-    return {"schema": sb.SCHEMA, "bindings": [binding]}
+    return _binding_doc(colliding_profile_id=profile_id)
 
 
 def test_hostile_provision_gate_seat_collision_same_profile_id(tmp_path):
     good = _valid_provision("gologin")
     path = _write_provision(tmp_path, good)
     colliding_doc = _chatgpt_binding_doc(good["profile_id"])
-    doc, code = core.load_provision(str(path), bindings_loader=lambda: (colliding_doc, []))
+    doc, code = _load_provision(str(path), bindings_loader=lambda: (colliding_doc, []))
     assert doc is None and code == "DISALLOWED_TARGET"
 
 
@@ -721,7 +841,7 @@ def test_hostile_provision_gate_seat_collision_different_profile_id(tmp_path):
     good = _valid_provision("gologin")
     path = _write_provision(tmp_path, good)
     other_doc = _chatgpt_binding_doc("bbbbbbbbbbbbbbbbbbbbbbbb")
-    doc, code = core.load_provision(str(path), bindings_loader=lambda: (other_doc, []))
+    doc, code = _load_provision(str(path), bindings_loader=lambda: (other_doc, []))
     assert code is None
     assert doc == good
 
@@ -729,16 +849,16 @@ def test_hostile_provision_gate_seat_collision_different_profile_id(tmp_path):
 def test_hostile_provision_gate_bindings_problems_fails_closed(tmp_path):
     good = _valid_provision("gologin")
     path = _write_provision(tmp_path, good)
-    doc, code = core.load_provision(str(path), bindings_loader=lambda: (None, ["some problem"]))
-    assert doc is None and code == "DISALLOWED_TARGET"
+    doc, code = _load_provision(str(path), bindings_loader=lambda: (None, ["some problem"]))
+    assert doc is None and code == "BINDINGS_UNAVAILABLE"
 
 
-def test_hostile_provision_gate_bindings_absent_is_ok(tmp_path):
+def test_hostile_provision_gate_bindings_absent_refuses(tmp_path):
     good = _valid_provision("gologin")
     path = _write_provision(tmp_path, good)
-    doc, code = core.load_provision(str(path), bindings_loader=lambda: (None, []))
-    assert code is None
-    assert doc == good
+    doc, code = _load_provision(str(path), bindings_loader=lambda: (None, []))
+    assert doc is None
+    assert code == "BINDINGS_UNAVAILABLE"
 
 
 # ---------------------------------------------------------------------------
@@ -914,7 +1034,7 @@ def test_hostile_provision_load_canonicalizes_multilogin_ids_to_lowercase(tmp_pa
     good["profile_id"] = good["profile_id"].upper()
     good["folder_id"] = good["folder_id"].upper()
     path = _write_provision(tmp_path, good)
-    doc, code = core.load_provision(str(path), bindings_loader=_no_collision_loader)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert code is None
     assert doc["profile_id"] == good["profile_id"].lower()
     assert doc["folder_id"] == good["folder_id"].lower()
@@ -926,7 +1046,7 @@ def test_hostile_provision_gate_seat_collision_case_insensitive(tmp_path):
     good["profile_id"] = lower_profile_id.upper()
     path = _write_provision(tmp_path, good)
     colliding_doc = _chatgpt_binding_doc(lower_profile_id)
-    doc, code = core.load_provision(str(path), bindings_loader=lambda: (colliding_doc, []))
+    doc, code = _load_provision(str(path), bindings_loader=lambda: (colliding_doc, []))
     assert doc is None and code == "DISALLOWED_TARGET"
 
 
@@ -935,32 +1055,80 @@ def test_hostile_provision_gate_seat_collision_case_insensitive(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_hostile_multilogin_repeat_start_guard_before_http(monkeypatch):
-    calls = {"n": 0}
+def _success(data, message=""):
+    return vendors._BoundedResponse(200, {
+        "status": {"error_code": "", "http_code": 200, "message": message},
+        "data": data,
+    })
 
-    class _Resp:
-        status_code = 200
 
-        def json(self):
-            return {"port": 9222}
+class _ExactMultiloginTransport:
+    def __init__(self):
+        self.calls = []
+        self.state = "stopped"
+        self.status_response = None
 
-    def _fake_get(url, **kwargs):
-        calls["n"] += 1
-        return _Resp()
+    def _mlx_profile_search(self, credential, folder_id, *, offset):
+        self.calls.append(("search", folder_id, offset))
+        return _success({
+            "profiles": [{
+                "id": "p1", "folder_id": folder_id, "name": "synthetic",
+                "browser_type": "mimic", "in_use_by": "", "locked_by": "",
+            }],
+            "total_count": 1,
+        }, "Search profile successfully result")
 
-    monkeypatch.setattr(vendors.httpx, "get", _fake_get)
-    client = vendors.MultiloginClient(core.Credential("cred", "stdin"))
+    def _mlx_profile_status(self, credential, profile_id):
+        self.calls.append(("status", profile_id))
+        if self.status_response is not None:
+            return self.status_response
+        return _success({
+            "profile_id": profile_id,
+            "folder_id": "f1",
+            "status": self.state,
+            "browser_type": "mimic",
+            "core_version": 132,
+            "in_use_by": "synthetic-owner" if self.state == "browser_running" else "",
+            "is_quick": False,
+            "last_launched_at": "2026-08-23T00:00:00Z",
+            "last_launched_by": "synthetic-operator",
+            "last_launched_on": "synthetic-machine",
+            "message": "",
+            "name": "synthetic",
+            "timestamp": 1787472000000,
+            "workspace_id": "synthetic-workspace",
+        })
+
+    def _mlx_profile_start(self, credential, folder_id, profile_id):
+        self.calls.append(("start", folder_id, profile_id))
+        self.state = "browser_running"
+        return _success({
+            "id": profile_id, "port": "9222", "browser_type": "mimic",
+            "core_version": 132, "is_quick": False,
+        }, "Profile started successfully")
+
+    def _mlx_profile_stop(self, credential, profile_id):
+        self.calls.append(("stop", profile_id))
+        self.state = "stopped"
+        return vendors._BoundedResponse(200, {
+            "status": {"error_code": "", "http_code": 200, "message": ""},
+        })
+
+
+def test_hostile_multilogin_repeat_start_guard_before_http():
+    transport = _ExactMultiloginTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
     ref = {"profile_id": "p1", "folder_id": "f1"}
 
     result = client.start(ref)
     assert result == {"profile_id": "p1", "port": 9222}
-    assert calls["n"] == 1
+    assert [call[0] for call in transport.calls] == ["search", "status", "start"]
 
+    calls_before = list(transport.calls)
     with pytest.raises(core.CanaryRefusal) as exc_info:
         client.start(ref)
     assert exc_info.value.code == "BUSY_PROFILE"
-    # The second call must never reach HTTP at all.
-    assert calls["n"] == 1
+    assert transport.calls == calls_before
 
 
 def test_hostile_gologin_forget_ownership_is_noop():
@@ -1022,27 +1190,19 @@ def test_hostile_drop_ownership_getattr_guard_survives_missing_forget_ownership(
     assert actuator.owned is False
 
 
-def test_hostile_multilogin_is_running_externally_profile_scoped(monkeypatch):
-    client = vendors.MultiloginClient(core.Credential("cred", "stdin"))
+def test_hostile_multilogin_is_running_externally_profile_scoped():
+    transport = _ExactMultiloginTransport()
+    transport.state = "browser_running"
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
 
-    class _Resp:
-        def __init__(self, status_code, payload):
-            self.status_code = status_code
-            self._payload = payload
-
-        def json(self):
-            return self._payload
-
-    monkeypatch.setattr(client, "_status", lambda profile_ref: _Resp(200, {"active": True}))
-
-    ref_p = {"profile_id": "P", "folder_id": "F"}
-    ref_q = {"profile_id": "Q", "folder_id": "F"}
+    ref_p = {"profile_id": "p1", "folder_id": "f1"}
+    ref_q = {"profile_id": "q1", "folder_id": "f1"}
 
     # Before we've started anything, the vendor's "active" is externally owned.
     assert client.is_running_externally(ref_p) is True
 
     # Simulate having started P (no network — set the profile-scoped state directly).
-    client._started_profile_id = "P"
+    client._started_profile_id = "p1"
     assert client.is_running_externally(ref_p) is False
     assert client.is_running_externally(ref_q) is True
 
@@ -1108,23 +1268,24 @@ def test_hostile_c7_expired_probed_false_when_no_lever(vendor):
 # ---------------------------------------------------------------------------
 
 
-def test_hostile_main_vendor_provision_mismatch_refuses_before_keychain(tmp_path, monkeypatch):
+def test_hostile_helper_vendor_provision_mismatch_refuses_before_keychain_or_client(tmp_path):
     gologin_doc = _valid_provision("gologin")
     path = _write_provision(tmp_path, gologin_doc)
 
-    def _boom_reader(vendor, run=None):
-        raise AssertionError("keychain reader must never be constructed on a vendor mismatch")
+    def _boom_credential_factory():
+        raise AssertionError("Keychain must not start on a vendor mismatch")
 
     class _BoomClient:
         def __init__(self, *a, **kw):
             raise AssertionError("client must never be constructed on a vendor mismatch")
 
-    monkeypatch.setattr(vendors, "keychain_credential_reader", _boom_reader)
-    monkeypatch.setattr(vendors, "MultiloginClient", _BoomClient)
-    monkeypatch.setattr(vendors, "GoLoginClient", _BoomClient)
-
     buf = io.StringIO()
-    code = core.main(["--vendor", "multilogin", "--provision-path", str(path)], stdout=buf)
+    code = vendors.main(
+        ["--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=buf, bindings_loader=_no_collision_loader,
+        credential_stream_factory=_boom_credential_factory,
+        client_factory=_BoomClient, now=_NOW,
+    )
     assert code == 2
     payload = json.loads(buf.getvalue())
     assert payload["verdict"] == "REFUSED"
@@ -1153,12 +1314,12 @@ def test_hostile_c1_requires_url_membership_in_list_pages(vendor):
 # ---------------------------------------------------------------------------
 
 
-def test_hostile_multilogin_start_refuses_closed_on_non_http_error(monkeypatch):
-    def _boom(*a, **kw):
-        raise RuntimeError("dns failure — not an httpx.HTTPError subclass")
+def test_hostile_multilogin_start_refuses_closed_on_non_http_error():
+    class _BoomTransport:
+        def _mlx_profile_search(self, *args, **kwargs):
+            raise RuntimeError("dynamic transport failure carrying private data")
 
-    monkeypatch.setattr(vendors.httpx, "get", _boom)
-    client = vendors.MultiloginClient(core.Credential("cred", "stdin"))
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), _BoomTransport())
     with pytest.raises(core.CanaryRefusal) as exc_info:
         client.start({"profile_id": "p", "folder_id": "f"})
     assert exc_info.value.code == "VENDOR_ERROR"
@@ -1166,15 +1327,11 @@ def test_hostile_multilogin_start_refuses_closed_on_non_http_error(monkeypatch):
     assert exc_info.value.__context__ is None
 
 
-def test_hostile_gologin_profile_exists_refuses_closed_on_non_http_error(monkeypatch):
-    def _boom(*a, **kw):
-        raise RuntimeError("dns failure — not an httpx.HTTPError subclass")
-
-    monkeypatch.setattr(vendors.httpx, "get", _boom)
+def test_hostile_gologin_profile_exists_is_unsupported_without_http():
     client = vendors.GoLoginClient(core.Credential("cred", "stdin"))
     with pytest.raises(core.CanaryRefusal) as exc_info:
         client.profile_exists({"profile_id": "aaaaaaaaaaaaaaaaaaaaaaaa"})
-    assert exc_info.value.code == "VENDOR_ERROR"
+    assert exc_info.value.code == "UNSUPPORTED_SURFACE"
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
@@ -1223,3 +1380,486 @@ def test_hostile_build_row_rejects_reserved_extra_key():
     row = core._build_row("C0", "OK", True, "ts-value", provision_digest="abc")
     assert row["provision_digest"] == "abc"
     assert row["row"] == "C0"
+
+
+# ---------------------------------------------------------------------------
+# 29. SOL blocker 1 — split secret boundary and pre-secret refusals
+# ---------------------------------------------------------------------------
+
+
+def test_hostile_model_visible_coordinator_live_mode_never_preflights_or_reads_secret(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise AssertionError("model-visible live coordinator must not load a provision")
+
+    monkeypatch.setattr(core, "load_provision", _boom)
+    buf = io.StringIO()
+    code = core.main(["--vendor", "multilogin", "--provision-path", "/private/path"], stdout=buf)
+    assert code == 2
+    payload = json.loads(buf.getvalue())
+    assert payload["code"] == "UNSUPPORTED_SURFACE"
+
+
+def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(tmp_path):
+    path = _write_provision(tmp_path, _valid_provision("multilogin"))
+    calls = {"keychain_spawn": 0, "client": 0, "origin": 0}
+
+    def _credential_stream_factory():
+        calls["keychain_spawn"] += 1
+        raise AssertionError("binding refusal must precede Keychain spawn")
+
+    def _client_factory():
+        calls["client"] += 1
+        raise AssertionError("binding refusal must precede HTTP construction")
+
+    def _origin_factory(*args, **kwargs):
+        calls["origin"] += 1
+        raise AssertionError("binding refusal must precede origin/browser construction")
+
+    buf = io.StringIO()
+    code = vendors.main(
+        ["--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=buf, bindings_loader=lambda: (None, []),
+        credential_stream_factory=_credential_stream_factory,
+        client_factory=_client_factory, origin_factory=_origin_factory, now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(buf.getvalue())["code"] == "BINDINGS_UNAVAILABLE"
+    assert calls == {"keychain_spawn": 0, "client": 0, "origin": 0}
+
+
+def test_hostile_gologin_helper_refuses_before_any_io():
+    buf = io.StringIO()
+    code = vendors.main(
+        ["--vendor", "gologin", "--provision-path", "/definitely/not/read"],
+        stdout=buf,
+        bindings_loader=lambda: (_ for _ in ()).throw(AssertionError("must not load bindings")),
+        credential_stream_factory=lambda: (_ for _ in ()).throw(AssertionError("must not spawn Keychain")),
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("must not make HTTP")),
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(buf.getvalue())["code"] == "UNSUPPORTED_SURFACE"
+
+
+# ---------------------------------------------------------------------------
+# 30. SOL blocker 2 — one hostile-environment-proof HTTP boundary
+# ---------------------------------------------------------------------------
+
+
+def test_mutation_bounded_client_disables_ambient_proxy_and_redirects(monkeypatch):
+    captured = {}
+    proxy_recorder = []
+    direct_recorder = []
+
+    class _Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        @staticmethod
+        def iter_bytes():
+            return (b"{}",)
+
+    class _ConstructedClient:
+        def __init__(self, trust_env):
+            self._trust_env = trust_env
+
+        def stream(self, method, url, *, headers=None, **kwargs):
+            target = direct_recorder if self._trust_env is False else proxy_recorder
+            target.append({"method": method, "url": url, "headers": dict(headers or {})})
+            return _Response()
+
+        def close(self):
+            return None
+
+    def _factory(**kwargs):
+        captured.update(kwargs)
+        return _ConstructedClient(kwargs.get("trust_env"))
+
+    poison = "http://127.0.0.1:1/poison-recorder"
+    monkeypatch.setenv("HTTPS_PROXY", poison)
+    monkeypatch.setenv("HTTP_PROXY", poison)
+    monkeypatch.setenv("ALL_PROXY", poison)
+    monkeypatch.setattr(vendors.httpx, "Client", _factory)
+    client = vendors.BoundedHttpClient()
+    try:
+        response = client._mlx_profile_status(
+            core.Credential("synthetic-proxy-falsifier", "stdin"), "profile",
+        )
+        assert response is not None
+        assert captured["trust_env"] is False
+        assert captured["follow_redirects"] is False
+        assert isinstance(captured["timeout"], httpx.Timeout)
+        assert captured["limits"].max_connections == 1
+    finally:
+        client.close()
+    assert proxy_recorder == []
+    assert len(direct_recorder) == 1
+    assert direct_recorder[0]["headers"]["Authorization"] == "Bearer synthetic-proxy-falsifier"
+
+
+def test_hostile_bounded_client_only_emits_frozen_methods_origins_and_paths():
+    seen = []
+
+    def _handler(request):
+        seen.append((
+            request.method,
+            str(request.url.copy_with(query=None)),
+            request.read(),
+        ))
+        return httpx.Response(200, json={})
+
+    inner = httpx.Client(
+        transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False,
+    )
+    client = vendors.BoundedHttpClient(client=inner)
+    credential = core.Credential("synthetic-credential", "stdin")
+    try:
+        client._mlx_profile_search(credential, "folder", offset=0)
+        client._mlx_profile_status(credential, "profile")
+        client._mlx_profile_start(credential, "folder", "profile")
+        client._mlx_profile_stop(credential, "profile")
+        client._devtools_list(9222)
+        client._devtools_new(9222, "http://127.0.0.1:7777/a")
+        # A port-shaped authority injection must refuse before URL parsing;
+        # otherwise ``127.0.0.1:9222@evil`` would resolve to a non-loopback host.
+        assert client._devtools_list("9222@evil.example") is None
+    finally:
+        client.close()
+
+    assert [(method, url) for method, url, _body in seen] == [
+        ("POST", "https://api.multilogin.com/profile/search"),
+        ("GET", "https://launcher.mlx.yt:45001/api/v1/profile/status/p/profile"),
+        ("GET", "https://launcher.mlx.yt:45001/api/v2/profile/f/folder/p/profile/start"),
+        ("GET", "https://launcher.mlx.yt:45001/api/v1/profile/stop/p/profile"),
+        ("GET", "http://127.0.0.1:9222/json/list"),
+        ("PUT", "http://127.0.0.1:9222/json/new"),
+    ]
+    assert json.loads(seen[0][2]) == {
+        "folder_id": "folder",
+        "is_removed": False,
+        "limit": vendors._PROFILE_PAGE_SIZE,
+        "offset": 0,
+        "order_by": "created_at",
+        "search_text": "",
+        "sort": "asc",
+        "storage_type": "all",
+    }
+    public = {
+        name for name in dir(vendors.BoundedHttpClient)
+        if not name.startswith("_") and callable(getattr(vendors.BoundedHttpClient, name))
+    }
+    assert public == {"close"}
+
+    source = VENDORS_PATH.read_text(encoding="utf-8")
+    assert re.search(r"\bhttpx\.(get|put|post|patch|delete|request|stream)\s*\(", source) is None
+
+
+def test_hostile_bounded_client_caps_body_and_launders_transport_errors():
+    oversized = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"x" * (vendors._MAX_RESPONSE_BYTES + 1)),
+        ),
+        trust_env=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=oversized)
+    try:
+        assert bounded._devtools_list(9222) is None
+    finally:
+        bounded.close()
+
+    def _boom(request):
+        raise RuntimeError("private response or proxy recorder payload")
+
+    failing = httpx.Client(transport=httpx.MockTransport(_boom), trust_env=False)
+    bounded = vendors.BoundedHttpClient(client=failing)
+    try:
+        result = bounded._devtools_list(9222)
+    finally:
+        bounded.close()
+    assert result is None
+    assert "private response" not in repr(result)
+
+
+def test_hostile_devtools_rejects_external_url_before_transport():
+    class _Recorder:
+        def __init__(self):
+            self.calls = []
+
+        def _devtools_new(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return vendors._BoundedResponse(200, {})
+
+    transport = _Recorder()
+    provision = _valid_provision("multilogin")
+    navigator = vendors.DevToolsNavigator(transport, provision)
+    assert navigator.open_url(9222, "https://chatgpt.com/") is False
+    assert navigator.open_url(70000, provision["benign_origin"] + "/a") is False
+    assert transport.calls == []
+
+
+# ---------------------------------------------------------------------------
+# 31. SOL blocker 3 — exact Multilogin response/state contract
+# ---------------------------------------------------------------------------
+
+
+_MLX_TRANSITIONAL_OR_ERROR_STATES = (
+    "download_browser_profile_metadata",
+    "download_browser_profile_data",
+    "download_browser_core",
+    "download_finished",
+    "download_meta_error",
+    "download_data_error",
+    "download_core_error",
+    "download_meta_finished",
+    "download_data_finished",
+    "download_core_finished",
+    "validate_proxy",
+    "validate_proxy_error",
+    "start_browser",
+    "start_browser_error",
+    "closed",
+    "running",
+    "already stopped",
+    "already running with changed wording",
+)
+
+
+@pytest.mark.parametrize("mutated_state", _MLX_TRANSITIONAL_OR_ERROR_STATES)
+def test_mutation_multilogin_nonterminal_or_renamed_state_refuses_before_start(mutated_state):
+    transport = _ExactMultiloginTransport()
+    transport.status_response = _success({
+        "profile_id": "p1", "folder_id": "f1", "status": mutated_state,
+    })
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+    assert not any(call[0] == "start" for call in transport.calls)
+
+
+@pytest.mark.parametrize(
+    "payload,status_code",
+    [
+        ({"status": {"error_code": "", "http_code": 200, "message": ""},
+          "data": {"profile_id": "p1", "folder_id": "f1", "active": False}}, 200),
+        ({"status": {"error_code": "", "http_code": 200, "message": ""},
+          "data": {"profile_id": "p1", "folder_id": "f1", "profile_status": "stopped"}}, 200),
+        ({"status": {"error_code": "", "http_code": 200, "message": ""},
+          "data": {"profile_id": "wrong", "folder_id": "f1", "status": "stopped"}}, 200),
+        ({"status": {"error_code": "", "http_code": 200, "message": ""},
+          "data": {"profile_id": "p1", "folder_id": "wrong", "status": "stopped"}}, 200),
+        ({"result": {"profile_id": "p1", "folder_id": "f1", "status": "stopped"}}, 200),
+        ({"status": {"error_code": "", "http_code": 200, "message": "", "renamed": True},
+          "data": {"profile_id": "p1", "folder_id": "f1", "status": "stopped"}}, 200),
+        ({"status": {"error_code": "", "http_code": 200, "message": ""},
+          "data": {"profile_id": "p1", "folder_id": "f1", "status": "stopped",
+                   "unexpected_state_alias": "closed"}}, 200),
+        ({"status": {"error_code": "ERR", "http_code": 200, "message": ""},
+          "data": {"profile_id": "p1", "folder_id": "f1", "status": "stopped"}}, 200),
+        ({"status": {"error_code": "", "http_code": 200, "message": ""},
+          "data": {"profile_id": "p1", "folder_id": "f1", "status": "stopped"}}, 404),
+    ],
+)
+def test_mutation_multilogin_missing_malformed_renamed_or_agent_lost_status_refuses(payload, status_code):
+    transport = _ExactMultiloginTransport()
+    transport.status_response = vendors._BoundedResponse(status_code, payload)
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+    assert not any(call[0] == "start" for call in transport.calls)
+
+
+def test_hostile_multilogin_exact_running_refuses_busy_before_start():
+    transport = _ExactMultiloginTransport()
+    transport.state = "browser_running"
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "BUSY_PROFILE"
+    assert not any(call[0] == "start" for call in transport.calls)
+
+
+def test_mutation_multilogin_stealthfox_refuses_before_puppeteer_start():
+    transport = _ExactMultiloginTransport()
+    payload = transport._mlx_profile_status(None, "p1").payload
+    payload["data"]["browser_type"] = "stealthfox"
+    transport.calls.clear()
+    transport.status_response = vendors._BoundedResponse(200, payload)
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+    assert not any(call[0] == "start" for call in transport.calls)
+
+
+def test_mutation_multilogin_cloud_stealthfox_refuses_before_status_or_start():
+    class _CloudStealthfoxTransport(_ExactMultiloginTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            self.calls.append(("search", folder_id, offset))
+            return _success({
+                "profiles": [{
+                    "id": "p1", "folder_id": folder_id, "name": "synthetic",
+                    "browser_type": "stealthfox", "in_use_by": "", "locked_by": "",
+                }],
+                "total_count": 1,
+            }, "Search profile successfully result")
+
+    transport = _CloudStealthfoxTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+    assert [call[0] for call in transport.calls] == ["search"]
+
+
+def test_mutation_multilogin_start_prose_cannot_replace_exact_success_contract():
+    class _AlreadyTransport(_ExactMultiloginTransport):
+        def _mlx_profile_start(self, credential, folder_id, profile_id):
+            self.calls.append(("start", folder_id, profile_id))
+            return _success({
+                "id": profile_id, "port": "9222", "browser_type": "mimic",
+                "core_version": 132, "is_quick": False,
+            }, "Profile launch accepted")
+
+    transport = _AlreadyTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+
+
+@pytest.mark.parametrize(
+    "ownership_field,ownership_value,expected_code",
+    [
+        ("in_use_by", None, "VENDOR_ERROR"),
+        ("in_use_by", "other-agent-session", "BUSY_PROFILE"),
+        ("locked_by", "other-agent-session", "BUSY_PROFILE"),
+    ],
+)
+def test_mutation_multilogin_ownership_uncertainty_or_conflict_refuses_before_start(
+    ownership_field, ownership_value, expected_code,
+):
+    class _OwnershipTransport(_ExactMultiloginTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            item = {
+                "id": "p1", "folder_id": folder_id, "name": "synthetic",
+                "browser_type": "mimic", "in_use_by": "", "locked_by": "",
+            }
+            if ownership_value is None:
+                item.pop(ownership_field)
+            else:
+                item[ownership_field] = ownership_value
+            self.calls.append(("search", folder_id, offset))
+            return _success(
+                {"profiles": [item], "total_count": 1},
+                "Search profile successfully result",
+            )
+
+    transport = _OwnershipTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == expected_code
+    assert not any(call[0] in ("status", "start") for call in transport.calls)
+
+
+def test_hostile_multilogin_absent_profile_requires_complete_bounded_census():
+    class _PagingTransport:
+        def __init__(self):
+            self.offsets = []
+
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            self.offsets.append(offset)
+            page = {
+                0: [
+                    {"id": "one", "folder_id": folder_id, "in_use_by": ""},
+                    {"id": "two", "folder_id": folder_id, "in_use_by": ""},
+                ],
+                2: [{"id": "three", "folder_id": folder_id, "in_use_by": ""}],
+            }[offset]
+            return _success(
+                {"profiles": page, "total_count": 3},
+                "Search profile successfully result",
+            )
+
+    transport = _PagingTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    assert client.profile_exists({"profile_id": "absent", "folder_id": "f1"}) is False
+    assert transport.offsets == [0, 2]
+
+
+def test_mutation_multilogin_truncated_census_refuses_not_absent():
+    class _TruncatedTransport:
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            return _success(
+                {"profiles": [], "total_count": 1},
+                "Search profile successfully result",
+            )
+
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), _TruncatedTransport())
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.profile_exists({"profile_id": "absent", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# 32. SOL blocker 4 — affirmative current three-seat collision census
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mutation", ("one-seat", "stale", "future", "missing-observed", "renamed-seat", "four-seats", "conflict"))
+def test_mutation_incomplete_stale_or_conflicting_binding_census_refuses(tmp_path, mutation):
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    doc = _binding_doc()
+    if mutation == "one-seat":
+        doc["bindings"] = doc["bindings"][:1]
+    elif mutation == "stale":
+        for binding in doc["bindings"]:
+            binding["observed_at"] = "2026-08-21T00:00:00Z"
+    elif mutation == "future":
+        doc["bindings"][0]["observed_at"] = "2026-08-24T00:00:00Z"
+    elif mutation == "missing-observed":
+        doc["bindings"][0]["observed_at"] = "not-a-timestamp"
+    elif mutation == "renamed-seat":
+        doc["bindings"][0]["seat_ref"] = "chatgpt-seat-1"
+    elif mutation == "four-seats":
+        extra = copy.deepcopy(doc["bindings"][0])
+        extra["binding_id"] = "synthetic-extra-binding"
+        extra["seat_ref"] = "chatgpt4"
+        extra["locator"]["profile_id"] = "444444444444444444444444"
+        doc["bindings"].append(extra)
+    elif mutation == "conflict":
+        conflict = copy.deepcopy(doc["bindings"][0])
+        conflict["binding_id"] = "synthetic-conflicting-binding"
+        conflict["locator"]["profile_id"] = "999999999999999999999999"
+        doc["bindings"].append(conflict)
+
+    loaded, code = _load_provision(str(path), bindings_loader=lambda: (doc, []))
+    assert loaded is None
+    assert code == "BINDINGS_UNAVAILABLE"
+
+
+def test_hostile_binding_census_safety_window_boundary_is_inclusive(tmp_path):
+    path = _write_provision(tmp_path, _valid_provision("multilogin"))
+    doc = _binding_doc()
+    boundary = "2026-08-22T12:00:00Z"
+    for binding in doc["bindings"]:
+        binding["observed_at"] = boundary
+    loaded, code = _load_provision(str(path), bindings_loader=lambda: (doc, []))
+    assert code is None
+    assert loaded is not None
+
+
+def test_falsifier_binding_result_code_is_closed_and_receipt_safe():
+    assert "BINDINGS_UNAVAILABLE" in core.RESULT_CODES
+    assert set(core.DETAILS) == set(core.RESULT_CODES)
+    detail = core.DETAILS["BINDINGS_UNAVAILABLE"]
+    assert "://" not in detail
+    assert "profile_id" not in detail

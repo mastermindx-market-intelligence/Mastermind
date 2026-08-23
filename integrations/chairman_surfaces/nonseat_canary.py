@@ -15,12 +15,15 @@ any known ``chatgpt`` seat binding in :mod:`control_plane.surface_bindings`.
 
 Credential law
 --------------
-A credential's raw value is never placed in argv, an environment variable, a
-log line, a receipt, or an exception message. :class:`Credential` exposes it
-only via :meth:`Credential.expose`; every other surface of this module —
-``repr``/``str``, :class:`CanaryRefusal`, and every receipt row emitted by
-:func:`run_matrix` — carries only fixed static detail sentences plus
-digests, booleans, counts, and timestamps.
+This model-visible coordinator never reads macOS Keychain and never receives a
+live vendor credential.  The live boundary is the deliberately narrow helper
+in :mod:`integrations.chairman_surfaces.nonseat_canary_vendors`: after every
+non-secret preflight passes, an operator invocation wires fixed Keychain
+stdout directly into that helper through an anonymous OS pipe.  Only that
+helper may construct a live :class:`Credential`.  A credential's raw value is never
+placed in argv, an environment variable, captured subprocess output, a log
+line, a receipt, or an exception message.  Hermetic tests may construct
+synthetic credentials in-process.
 
 Receipt law
 -----------
@@ -36,13 +39,10 @@ OBSERVATION_ONLY. It is recorded for visibility and never contributes to any
 row's ``ok`` value or to the overall verdict.
 
 Determinism law
-----------------
+---------------
 This module performs no network I/O, imports no ``subprocess``, and reads no
-clock inside any library function — only the CLI :func:`main` at the bottom
-of this file reads the clock (to build the ``clock`` callable passed into
-:func:`run_matrix` for a live run) or touches the network (indirectly, via
-:mod:`integrations.chairman_surfaces.nonseat_canary_vendors`, imported lazily
-inside ``main`` so this module stays import-clean).
+clock.  Callers provide the reference time used by the binding-census safety
+gate and the ``clock`` callable used by :func:`run_matrix`.
 """
 from __future__ import annotations
 
@@ -50,8 +50,7 @@ import argparse
 import hashlib
 import json
 import sys
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -64,6 +63,7 @@ from control_plane import surface_bindings as _surface_bindings
 RESULT_CODES = frozenset({
     "OK",
     "PROVISION_MISSING",
+    "BINDINGS_UNAVAILABLE",
     "DISALLOWED_TARGET",
     "PROFILE_NOT_FOUND",
     "AUTH_MISSING",
@@ -84,10 +84,6 @@ DEFAULT_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/
 REQUIRED_ACK = "disposable-non-chairman-profile"
 RECEIPTS_SCHEMA = "mastermind.mas115_nonseat_canary_receipts.v1"
 
-KEYCHAIN_SERVICE_TEMPLATE = "mastermind.mas115.{vendor}.disposable"
-KEYCHAIN_ACCOUNT = "mastermind-mas115-canary"
-SECURITY_BIN = "/usr/bin/security"
-
 #: The ONLY navigable paths, appended to the provisioned loopback origin.
 ALLOWED_PATHS = ("/a", "/b", "/state/set", "/state/check", "/auth")
 
@@ -104,6 +100,7 @@ UNKNOWN_PROFILE_IDS = {
 DETAILS = {
     "OK": "the canary step completed as expected.",
     "PROVISION_MISSING": "no valid disposable non-seat canary provision was found.",
+    "BINDINGS_UNAVAILABLE": "a current affirmative Chairman-seat binding census is unavailable.",
     "DISALLOWED_TARGET": "the requested target is not an allowed loopback benign-origin path.",
     "PROFILE_NOT_FOUND": "the vendor reports no such disposable profile.",
     "AUTH_MISSING": "no disposable canary credential is available.",
@@ -144,13 +141,15 @@ class CanaryRefusal(Exception):
 class Credential:
     """A credential holder that never leaks its value via repr/str.
 
-    ``source`` is one of ``"stdin"``, ``"keychain"``, ``"absent"``.
+    ``source`` is one of ``"stdin"`` or ``"absent"``.  ``"stdin"`` means
+    either a synthetic hermetic value or the narrow live helper's direct
+    stdin boundary; this coordinator never creates a live instance.
     """
 
     __slots__ = ("_value", "source")
 
     def __init__(self, value, source: str):
-        if source not in ("stdin", "keychain", "absent"):
+        if source not in ("stdin", "absent"):
             raise ValueError(f"unknown credential source: {source!r}")
         self._value = value if isinstance(value, str) and value else None
         self.source = source
@@ -169,26 +168,19 @@ class Credential:
     __str__ = __repr__
 
 
-def resolve_credential(*, vendor: str, stdin_text=None, keychain_reader=None) -> Credential:
-    """Resolve a disposable canary credential. Never raises.
+def resolve_credential(*, vendor: str, stdin_text=None) -> Credential:
+    """Build a synthetic/direct-stdin credential or an absent credential.
 
-    Stripped nonempty ``stdin_text`` wins (source ``"stdin"``); else
-    ``keychain_reader()`` (a zero-arg callable returning ``str | None``,
-    whose exceptions degrade to ``None`` and are never logged) as source
-    ``"keychain"``; else an absent :class:`Credential`.
+    This function has no Keychain reader and no subprocess path.  The live
+    helper performs its own bounded anonymous-pipe read only after all non-seat
+    preflights pass; the model-visible coordinator never calls this function
+    with live input.
     """
-    del vendor  # scoping is baked into the injected keychain_reader by the caller
+    del vendor
     if isinstance(stdin_text, str):
         stripped = stdin_text.strip()
         if stripped:
             return Credential(stripped, "stdin")
-    if keychain_reader is not None:
-        try:
-            value = keychain_reader()
-        except Exception:  # noqa: BLE001 — a keychain probe failure must never propagate
-            value = None
-        if isinstance(value, str) and value:
-            return Credential(value, "keychain")
     return Credential(None, "absent")
 
 
@@ -200,13 +192,90 @@ _PROVISION_ALLOWED_KEYS = frozenset({"schema", "vendor", "profile_id", "folder_i
 _PROVISION_REQUIRED_KEYS_BASE = frozenset({"schema", "vendor", "profile_id", "benign_origin", "disposable_ack"})
 _MAX_PROVISION_BYTES = 64 * 1024
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+CHAIRMAN_SEAT_REFS = frozenset({"chatgpt1", "chatgpt2", "chatgpt3"})
+BINDINGS_CENSUS_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
-def load_provision(path=None, *, bindings_loader=None):
+def _parse_utc(value):
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _current_chairman_profile_census(doc, *, now, candidate_profile_id: str):
+    """Return ``"clear"``, ``"collision"``, or ``"unavailable"``.
+
+    ``surface_bindings`` remains a navigation cache, not a new authority
+    plane.  For this one hazardous live preflight, however, absence or an
+    incomplete/stale cache cannot prove non-collision.  We therefore require
+    the three named Personal-Pro seat references to have one consistent
+    managed-environment identity and at least one observation inside the fixed
+    safety window.  ``last_verified_at`` is deliberately not used: current
+    ChatGPT opens are unsupported and therefore cannot advance it.  Duplicate
+    workstream bindings for the same seat are allowed only when they agree on
+    that identity.
+    """
+    if not isinstance(doc, dict) or doc.get("schema") != _surface_bindings.SCHEMA:
+        return "unavailable"
+    if _surface_bindings.validate_bindings_document(doc):
+        return "unavailable"
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        return "unavailable"
+
+    identities: dict[str, tuple] = {}
+    observed: dict[str, datetime] = {}
+    candidate_lower = candidate_profile_id.lower()
+    collision = False
+
+    for binding in doc.get("bindings") or []:
+        if not isinstance(binding, dict) or binding.get("provider") != "chatgpt":
+            continue
+        locator = binding.get("locator")
+        if not isinstance(locator, dict):
+            return "unavailable"
+        bound_profile_id = locator.get("profile_id")
+        if isinstance(bound_profile_id, str) and bound_profile_id.lower() == candidate_lower:
+            collision = True
+
+        seat_ref = binding.get("seat_ref")
+        manager = locator.get("env_manager")
+        folder_id = locator.get("folder_id")
+        if seat_ref not in CHAIRMAN_SEAT_REFS:
+            return "unavailable"
+        if manager not in ("gologin", "multilogin") or not isinstance(bound_profile_id, str):
+            return "unavailable"
+        identity = (manager, folder_id if manager == "multilogin" else None, bound_profile_id.lower())
+        prior = identities.get(seat_ref)
+        if prior is not None and prior != identity:
+            return "unavailable"
+        identities[seat_ref] = identity
+
+        observed_at = _parse_utc(binding.get("observed_at"))
+        if observed_at is None:
+            return "unavailable"
+        prior_observed = observed.get(seat_ref)
+        if prior_observed is None or observed_at > prior_observed:
+            observed[seat_ref] = observed_at
+
+    if set(identities) != CHAIRMAN_SEAT_REFS or set(observed) != CHAIRMAN_SEAT_REFS:
+        return "unavailable"
+    for observed_at in observed.values():
+        age = (now - observed_at).total_seconds()
+        if age < 0 or age > BINDINGS_CENSUS_MAX_AGE_SECONDS:
+            return "unavailable"
+    return "collision" if collision else "clear"
+
+
+def load_provision(path=None, *, bindings_loader=None, now=None):
     """Load and validate the disposable canary provision file.
 
     Returns ``(provision_dict, None)`` on success, or ``(None, code)`` where
-    ``code`` is one of ``"PROVISION_MISSING"`` / ``"DISALLOWED_TARGET"``.
+    ``code`` is one of ``"PROVISION_MISSING"`` / ``"DISALLOWED_TARGET"`` /
+    ``"BINDINGS_UNAVAILABLE"``.
     Never raises.
     """
     loader = bindings_loader if bindings_loader is not None else _surface_bindings.load_bindings
@@ -278,28 +347,23 @@ def load_provision(path=None, *, bindings_loader=None):
     if (parsed.hostname or "") not in _LOOPBACK_HOSTS:
         return None, "DISALLOWED_TARGET"
 
-    # Seat-collision guard: fail closed if we cannot prove non-collision.
+    # Seat-collision guard: only a present, valid, fresh affirmative census
+    # can prove non-collision.  Missing navigation state is never evidence
+    # that no Chairman seat exists.
     try:
         collision_doc, problems = loader()
     except Exception:  # noqa: BLE001 — cannot prove non-collision, fail closed
-        return None, "DISALLOWED_TARGET"
+        return None, "BINDINGS_UNAVAILABLE"
 
-    if collision_doc is None:
-        if problems:
-            return None, "DISALLOWED_TARGET"
-        # (None, []) — bindings file absent -> no collision possible.
-    else:
-        for binding in (collision_doc.get("bindings") or []):
-            if not isinstance(binding, dict):
-                continue
-            if binding.get("provider") != "chatgpt":
-                continue
-            locator = binding.get("locator")
-            if not isinstance(locator, dict):
-                continue
-            bound_profile_id = locator.get("profile_id")
-            if isinstance(bound_profile_id, str) and bound_profile_id.lower() == str(profile_id).lower():
-                return None, "DISALLOWED_TARGET"
+    if problems:
+        return None, "BINDINGS_UNAVAILABLE"
+    census = _current_chairman_profile_census(
+        collision_doc, now=now, candidate_profile_id=str(profile_id),
+    )
+    if census == "collision":
+        return None, "DISALLOWED_TARGET"
+    if census != "clear":
+        return None, "BINDINGS_UNAVAILABLE"
 
     return doc, None
 
@@ -987,65 +1051,13 @@ def main(argv=None, *, stdout=None) -> int:
         print(json.dumps(receipts, indent=2, sort_keys=True), file=out)
         return 0 if receipts["verdict"] == "PASS" else 1
 
-    provision, code = load_provision(args.provision_path)
-    if provision is None:
-        print(json.dumps(_refused_payload(args.vendor, code), indent=2, sort_keys=True), file=out)
-        return 2
-
-    if provision.get("vendor") != args.vendor:
-        # A provision file for one vendor must never be run against another
-        # vendor's client — refuse BEFORE importing the live vendor shells,
-        # constructing any client, or touching the keychain.
-        print(
-            json.dumps(_refused_payload(args.vendor, "PROVISION_MISSING"), indent=2, sort_keys=True),
-            file=out,
-        )
-        return 2
-
-    # Deferred import: keeps this module import-clean of the live network shells.
-    from . import nonseat_canary_vendors as _vendors
-
-    credential = resolve_credential(
-        vendor=args.vendor, stdin_text=None,
-        keychain_reader=_vendors.keychain_credential_reader(args.vendor),
-    )
-    if not credential.present:
-        print(json.dumps(_refused_payload(args.vendor, "AUTH_MISSING"), indent=2, sort_keys=True), file=out)
-        return 2
-
-    if args.vendor == "multilogin":
-        vendor_client = _vendors.MultiloginClient(credential)
-    else:
-        vendor_client = _vendors.GoLoginClient(credential)
-
-    canary_token = f"mas115-live-{uuid.uuid4().hex}"
-    navigator = _vendors.DevToolsNavigator()
-    origin_server = _vendors.LoopbackBenignOrigin(token=canary_token)
-    try:
-        # The provisioned benign_origin only proves loopback SHAPE at
-        # load_provision time — the actual origin this run serves is the
-        # freshly bound loopback port above, so navigation targets it.
-        live_provision = dict(provision)
-        live_provision["benign_origin"] = origin_server.base_url
-
-        def _clock() -> str:
-            return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
-        receipts = run_matrix(
-            vendor_client=vendor_client,
-            navigator=navigator,
-            provision=live_provision,
-            credential=credential,
-            process_probe=_vendors.live_process_probe(live_provision),
-            origin_probe=origin_server,
-            clock=_clock,
-            canary_token=canary_token,
-        )
-    finally:
-        origin_server.close()
-
-    print(json.dumps(receipts, indent=2, sort_keys=True), file=out)
-    return 0 if receipts["verdict"] == "PASS" else 1
+    # Live credentials must never cross this model-visible coordinator.  The
+    # operator-only helper performs provision/binding preflights, then wires
+    # fixed Keychain stdout directly to its secret-owning input through an
+    # anonymous pipe.  Refuse here even if this process has readable stdin.
+    del args.provision_path
+    print(json.dumps(_refused_payload(args.vendor, "UNSUPPORTED_SURFACE"), indent=2, sort_keys=True), file=out)
+    return 2
 
 
 if __name__ == "__main__":
