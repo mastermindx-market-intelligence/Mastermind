@@ -108,7 +108,9 @@ class UrllibSlackAuthTestTransport:
             },
         )
         opener = urllib.request.build_opener(
-            _NoRedirectHandler(), urllib.request.HTTPSHandler(context=self._ssl_context)
+            urllib.request.ProxyHandler({}),
+            _NoRedirectHandler(),
+            urllib.request.HTTPSHandler(context=self._ssl_context),
         )
         try:
             with opener.open(request, timeout=self._timeout_seconds) as response:
@@ -116,6 +118,11 @@ class UrllibSlackAuthTestTransport:
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
                 headers = {str(k).lower(): str(v) for k, v in response.headers.items()}
+                content_type = headers.get("content-type", "")
+                if not content_type.lower().startswith("application/json"):
+                    raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
+                if any(len(value.encode("utf-8")) > 4096 for value in headers.values()):
+                    raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
                 return HttpResult(
                     status_code=int(response.status),
                     final_url=str(response.geturl()),
@@ -234,7 +241,6 @@ def verify_metadata(
         or len(result.body) > MAX_RESPONSE_BYTES
     ):
         raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
-
     try:
         payload = json.loads(result.body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
