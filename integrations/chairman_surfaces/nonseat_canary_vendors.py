@@ -16,10 +16,10 @@ an operator provisions a disposable credential and profile and runs this
 against them for real — no test in this repository ever calls a real vendor
 endpoint.
 
-The ONLY DevTools verbs used anywhere in this module are the version/list/new
-endpoints (and here, only list/new — :class:`DevToolsNavigator` never even
-calls ``/json/version``): there is structurally no pointer, keyboard, or
-script evaluation surface reachable through this module.
+The ONLY WebDriver operations used anywhere in this module are create a
+session, navigate the selected page, enumerate/switch window handles, and
+read the current URL.  There is structurally no pointer, keyboard, form,
+script-evaluation, cookie, storage, download, or arbitrary-command surface.
 """
 from __future__ import annotations
 
@@ -62,6 +62,8 @@ _MLX_STATUS_DATA_KEYS = frozenset({
 })
 
 _USER_DATA_DIR_RE = re.compile(r"--user-data-dir=(\S+)")
+_WEBDRIVER_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+_WEBDRIVER_MISSING = object()
 
 
 # ---------------------------------------------------------------------------
@@ -153,56 +155,179 @@ class BoundedHttpClient:
         return self._request(
             "GET", _MLX_LAUNCHER_ORIGIN, path,
             headers=self._bearer(credential),
-            params={"automation_type": "puppeteer", "headless_mode": "false"},
+            params={"automation_type": "selenium", "headless_mode": "false"},
         )
 
     def _mlx_profile_stop(self, credential, profile_id: str):
         path = "/api/v1/profile/stop/p/" + quote(profile_id, safe="")
         return self._request("GET", _MLX_LAUNCHER_ORIGIN, path, headers=self._bearer(credential))
 
-    def _devtools_list(self, port: int):
+    @staticmethod
+    def _webdriver_origin(port: int):
         if not isinstance(port, int) or isinstance(port, bool) or not 0 < port <= 65535:
             return None
-        return self._request("GET", f"http://127.0.0.1:{port}", "/json/list")
+        return f"http://127.0.0.1:{port}"
 
-    def _devtools_new(self, port: int, url: str):
-        if not isinstance(port, int) or isinstance(port, bool) or not 0 < port <= 65535:
+    def _webdriver_create_session(self, port: int, browser_type: str):
+        origin = self._webdriver_origin(port)
+        browser_name = {"mimic": "chrome", "stealthfox": "firefox"}.get(browser_type)
+        if origin is None or browser_name is None:
             return None
-        return self._request("PUT", f"http://127.0.0.1:{port}", "/json/new", params={"url": url})
+        always_match = {
+            "acceptInsecureCerts": False,
+            "browserName": browser_name,
+            "pageLoadStrategy": "normal",
+            "unhandledPromptBehavior": "dismiss and notify",
+        }
+        if browser_type == "mimic":
+            always_match["goog:chromeOptions"] = {}
+        else:
+            always_match["moz:firefoxOptions"] = {}
+        return self._request(
+            "POST", origin, "/session",
+            json_body={"capabilities": {"alwaysMatch": always_match, "firstMatch": [{}]}},
+        )
+
+    def _webdriver_session_address(self, port: int, session_id: str):
+        origin = self._webdriver_origin(port)
+        if origin is None or not isinstance(session_id, str) or not _WEBDRIVER_ID_RE.fullmatch(session_id):
+            return None
+        return origin, "/session/" + quote(session_id, safe="")
+
+    def _webdriver_navigate(self, port: int, session_id: str, url: str):
+        address = self._webdriver_session_address(port, session_id)
+        if address is None or not isinstance(url, str):
+            return None
+        origin, path = address
+        return self._request("POST", origin, path + "/url", json_body={"url": url})
+
+    def _webdriver_current_url(self, port: int, session_id: str):
+        address = self._webdriver_session_address(port, session_id)
+        if address is None:
+            return None
+        origin, path = address
+        return self._request("GET", origin, path + "/url")
+
+    def _webdriver_current_window(self, port: int, session_id: str):
+        address = self._webdriver_session_address(port, session_id)
+        if address is None:
+            return None
+        origin, path = address
+        return self._request("GET", origin, path + "/window")
+
+    def _webdriver_window_handles(self, port: int, session_id: str):
+        address = self._webdriver_session_address(port, session_id)
+        if address is None:
+            return None
+        origin, path = address
+        return self._request("GET", origin, path + "/window/handles")
+
+    def _webdriver_switch_window(self, port: int, session_id: str, handle: str):
+        address = self._webdriver_session_address(port, session_id)
+        if address is None or not isinstance(handle, str) or not _WEBDRIVER_ID_RE.fullmatch(handle):
+            return None
+        origin, path = address
+        return self._request("POST", origin, path + "/window", json_body={"handle": handle})
 
 
 # ---------------------------------------------------------------------------
-# DevTools navigator — list/new only
+# W3C WebDriver navigator — navigation and URL observation only
 # ---------------------------------------------------------------------------
 
 
-class DevToolsNavigator:
+class WebDriverNavigator:
     """Public surface: list_pages, open_url. No other methods."""
 
     def __init__(self, client: BoundedHttpClient, provision: dict):
         self._client = client
         self._provision = provision
+        self._sessions: dict[int, str] = {}
 
     @staticmethod
     def _valid_port(port) -> bool:
         return isinstance(port, int) and not isinstance(port, bool) and 0 < port <= 65535
 
+    @staticmethod
+    def _value(resp):
+        if resp is None or resp.status_code != 200 or not isinstance(resp.payload, dict):
+            return _WEBDRIVER_MISSING
+        if set(resp.payload) != {"value"}:
+            return _WEBDRIVER_MISSING
+        return resp.payload.get("value")
+
+    def _session_for(self, port: int):
+        existing = self._sessions.get(port)
+        if existing is not None:
+            return existing
+        resp = self._client._webdriver_create_session(port, self._provision.get("browser_type"))
+        value = self._value(resp)
+        if not isinstance(value, dict) or not {"sessionId", "capabilities"}.issubset(value):
+            return None
+        session_id = value.get("sessionId")
+        capabilities = value.get("capabilities")
+        expected = {"mimic": "chrome", "stealthfox": "firefox"}.get(
+            self._provision.get("browser_type")
+        )
+        if (
+            not isinstance(session_id, str)
+            or not _WEBDRIVER_ID_RE.fullmatch(session_id)
+            or not isinstance(capabilities, dict)
+            or capabilities.get("browserName") != expected
+        ):
+            return None
+        self._sessions[port] = session_id
+        return session_id
+
+    def _forget(self, port) -> None:
+        if self._valid_port(port):
+            self._sessions.pop(port, None)
+
     def list_pages(self, port) -> list:
         if not self._valid_port(port):
             return []
-        resp = self._client._devtools_list(port)
-        if resp is None or resp.status_code != 200 or not isinstance(resp.payload, list):
+        session_id = self._sessions.get(port)
+        if session_id is None:
             return []
-        return [
-            item.get("url") for item in resp.payload
-            if isinstance(item, dict) and item.get("type") == "page" and isinstance(item.get("url"), str)
-        ]
+        handles = self._value(
+            self._client._webdriver_window_handles(port, session_id)
+        )
+        current = self._value(self._client._webdriver_current_window(port, session_id))
+        if (
+            not isinstance(handles, list)
+            or not handles
+            or not all(isinstance(handle, str) and _WEBDRIVER_ID_RE.fullmatch(handle) for handle in handles)
+            or not isinstance(current, str)
+            or current not in handles
+        ):
+            return []
+        urls = []
+        for handle in handles:
+            switched = self._value(
+                self._client._webdriver_switch_window(port, session_id, handle)
+            )
+            if switched is not None:
+                return []
+            current_url = self._value(
+                self._client._webdriver_current_url(port, session_id)
+            )
+            if not isinstance(current_url, str):
+                return []
+            urls.append(current_url)
+        restored = self._value(
+            self._client._webdriver_switch_window(port, session_id, current)
+        )
+        return urls if restored is None else []
 
     def open_url(self, port, url: str) -> bool:
         if not self._valid_port(port) or not _core.allowed_url(self._provision, url):
             return False
-        resp = self._client._devtools_new(port, url)
-        return resp is not None and resp.status_code == 200
+        session_id = self._session_for(port)
+        if session_id is None:
+            return False
+        value = self._value(
+            self._client._webdriver_navigate(port, session_id, url)
+        )
+        return value is None
 
 
 # ---------------------------------------------------------------------------
@@ -213,9 +338,12 @@ class DevToolsNavigator:
 class MultiloginClient:
     """Frozen Multilogin cloud/launcher contract; no prose inference."""
 
-    def __init__(self, credential, client: BoundedHttpClient):
+    def __init__(self, credential, client: BoundedHttpClient, *, browser_type: str = "mimic"):
         self._credential = credential
         self._client = client
+        if browser_type not in ("mimic", "stealthfox"):
+            raise _core.CanaryRefusal("PROVISION_MISSING")
+        self._browser_type = browser_type
         #: profile_id we last started and have not since stopped/forgotten —
         #: profile-SCOPED ownership, not a client-wide boolean. ``None`` when
         #: we hold no profile.
@@ -290,11 +418,7 @@ class MultiloginClient:
         if (
             data is None
             or set(data) != _MLX_STATUS_DATA_KEYS
-            # This helper pins automation_type=puppeteer, which the supported
-            # launcher contract pairs with Mimic.  A Stealthfox profile may
-            # have a valid lifecycle response, but it is not this actuator's
-            # supported automation surface.
-            or data.get("browser_type") != "mimic"
+            or data.get("browser_type") != self._browser_type
             or not isinstance(data.get("core_version"), int)
             or isinstance(data.get("core_version"), bool)
             or data.get("core_version") <= 0
@@ -334,7 +458,7 @@ class MultiloginClient:
         profile = self._profile_inventory_item(profile_ref)
         if profile is None:
             raise _core.CanaryRefusal("PROFILE_NOT_FOUND")
-        if profile.get("browser_type") != "mimic":
+        if profile.get("browser_type") != self._browser_type:
             raise _core.CanaryRefusal("VENDOR_ERROR")
         # The cloud census must positively say that no other vendor session
         # owns or locks this profile.  Missing or renamed ownership fields are
@@ -369,7 +493,7 @@ class MultiloginClient:
             data is None
             or set(data) != {"browser_type", "core_version", "id", "is_quick", "port"}
             or data.get("id") != profile_id
-            or data.get("browser_type") != "mimic"
+            or data.get("browser_type") != self._browser_type
             or not isinstance(data.get("core_version"), int)
             or isinstance(data.get("core_version"), bool)
             or data.get("core_version") <= 0
@@ -571,8 +695,8 @@ class _CanaryRequestHandler(http.server.BaseHTTPRequestHandler):
             return
         self._respond(404, b"not found")
 
-    # PUT is unused by the benign origin itself, but present so a stray
-    # DevTools-shaped PUT never falls through to the base class's 501.
+    # PUT is unused by the benign origin itself. Preserve a closed response
+    # if an old inert harness sends the former DevTools-shaped method.
     do_PUT = do_GET  # noqa: N815
 
 
@@ -883,8 +1007,10 @@ def main(
         origin = origin_factory(token=token)
         live_provision = dict(provision)
         live_provision["benign_origin"] = origin.base_url
-        vendor_client = MultiloginClient(credential, client)
-        navigator = DevToolsNavigator(client, live_provision)
+        vendor_client = MultiloginClient(
+            credential, client, browser_type=live_provision["browser_type"],
+        )
+        navigator = WebDriverNavigator(client, live_provision)
 
         def _clock() -> str:
             return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"

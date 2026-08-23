@@ -55,6 +55,7 @@ def _valid_provision(vendor: str, **overrides) -> dict:
             "vendor": "multilogin",
             "profile_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "folder_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "browser_type": "mimic",
             "benign_origin": "http://127.0.0.1:7777",
             "disposable_ack": core.REQUIRED_ACK,
         }
@@ -678,8 +679,11 @@ def test_falsifier_no_click_fill_send_surface():
     public = {a for a in dir(actuator) if not a.startswith("_")}
     assert public == {"acquire", "navigate", "release", "drop_ownership", "owned"}
 
-    dev_nav_public = {a for a in dir(vendors.DevToolsNavigator) if not a.startswith("_") and callable(getattr(vendors.DevToolsNavigator, a))}
-    assert dev_nav_public == {"list_pages", "open_url"}
+    webdriver_public = {
+        a for a in dir(vendors.WebDriverNavigator)
+        if not a.startswith("_") and callable(getattr(vendors.WebDriverNavigator, a))
+    }
+    assert webdriver_public == {"list_pages", "open_url"}
 
     hermetic_nav_public = {
         a for a in dir(core.HermeticNavigatorFake)
@@ -704,10 +708,106 @@ def test_falsifier_no_profile_config_mutation_surface():
             assert phrase not in lowered, f"{path.name} contains forbidden mutation phrase {phrase!r}"
 
 
-def test_falsifier_devtools_endpoint_allowlist():
+def test_falsifier_webdriver_endpoint_allowlist():
     vendors_source = VENDORS_PATH.read_text(encoding="utf-8")
     found = set(re.findall(r"/json/\w+", vendors_source))
-    assert found <= {"/json/list", "/json/new", "/json/version"}
+    assert found == set()
+    for exact_path in ('path + "/url"', 'path + "/window"', 'path + "/window/handles"'):
+        assert exact_path in vendors_source
+    assert "def _webdriver_call" not in vendors_source
+
+
+@pytest.mark.parametrize(
+    "browser_type,browser_name,options_key",
+    [("mimic", "chrome", "goog:chromeOptions"), ("stealthfox", "firefox", "moz:firefoxOptions")],
+)
+def test_webdriver_session_capabilities_are_exact_and_core_aware(browser_type, browser_name, options_key):
+    seen = []
+
+    def _handler(request):
+        seen.append(json.loads(request.read()))
+        return httpx.Response(200, json={"value": {
+            "sessionId": "session-1", "capabilities": {"browserName": browser_name},
+        }})
+
+    inner = httpx.Client(transport=httpx.MockTransport(_handler), trust_env=False)
+    client = vendors.BoundedHttpClient(client=inner)
+    try:
+        response = client._webdriver_create_session(9222, browser_type)
+    finally:
+        client.close()
+    assert response.status_code == 200
+    always = seen[0]["capabilities"]["alwaysMatch"]
+    assert always == {
+        "acceptInsecureCerts": False,
+        "browserName": browser_name,
+        "pageLoadStrategy": "normal",
+        "unhandledPromptBehavior": "dismiss and notify",
+        options_key: {},
+    }
+    assert seen[0]["capabilities"]["firstMatch"] == [{}]
+
+
+class _ExactWebDriverTransport:
+    def __init__(self, browser_name="chrome"):
+        self.browser_name = browser_name
+        self.current_url = "about:blank"
+        self.calls = []
+
+    def _webdriver_create_session(self, port, browser_type):
+        self.calls.append(("create", port, browser_type))
+        return vendors._BoundedResponse(200, {"value": {
+            "sessionId": "session-1", "capabilities": {"browserName": self.browser_name},
+        }})
+
+    def _webdriver_window_handles(self, port, session_id):
+        self.calls.append(("handles", port, session_id))
+        return vendors._BoundedResponse(200, {"value": ["window-1"]})
+
+    def _webdriver_current_window(self, port, session_id):
+        self.calls.append(("current-window", port, session_id))
+        return vendors._BoundedResponse(200, {"value": "window-1"})
+
+    def _webdriver_switch_window(self, port, session_id, handle):
+        self.calls.append(("switch-window", port, session_id, handle))
+        return vendors._BoundedResponse(200, {"value": None})
+
+    def _webdriver_navigate(self, port, session_id, url):
+        self.calls.append(("navigate", port, session_id, url))
+        self.current_url = url
+        return vendors._BoundedResponse(200, {"value": None})
+
+    def _webdriver_current_url(self, port, session_id):
+        self.calls.append(("current-url", port, session_id))
+        return vendors._BoundedResponse(200, {"value": self.current_url})
+
+
+@pytest.mark.parametrize(
+    "browser_type,browser_name",
+    [("mimic", "chrome"), ("stealthfox", "firefox")],
+)
+def test_webdriver_navigator_supports_exact_navigation_for_both_multilogin_cores(browser_type, browser_name):
+    provision = _valid_provision("multilogin", browser_type=browser_type)
+    transport = _ExactWebDriverTransport(browser_name)
+    navigator = vendors.WebDriverNavigator(transport, provision)
+    target = provision["benign_origin"] + "/a"
+    assert navigator.open_url(9222, target) is True
+    assert navigator.list_pages(9222) == [target]
+    assert [call[0] for call in transport.calls].count("create") == 1
+    navigator._forget(9222)
+    assert navigator.list_pages(9222) == []
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"value": None}, {"value": {"sessionId": "bad/id", "capabilities": {"browserName": "chrome"}}}])
+def test_webdriver_navigator_refuses_malformed_or_changed_session_contract(payload):
+    class _BadSessionTransport(_ExactWebDriverTransport):
+        def _webdriver_create_session(self, port, browser_type):
+            return None if payload is None else vendors._BoundedResponse(200, payload)
+
+    provision = _valid_provision("multilogin")
+    navigator = vendors.WebDriverNavigator(_BadSessionTransport(), provision)
+    assert navigator.open_url(9222, provision["benign_origin"] + "/a") is False
+    assert navigator.list_pages(9222) == []
 
 
 @pytest.mark.parametrize("vendor", VENDORS)
@@ -811,6 +911,25 @@ def test_hostile_provision_gate_gologin_with_folder_id(tmp_path):
 def test_hostile_provision_gate_multilogin_without_folder_id(tmp_path):
     bad = _valid_provision("multilogin")
     del bad["folder_id"]
+    path = _write_provision(tmp_path, bad)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
+    assert doc is None and code == "PROVISION_MISSING"
+
+
+@pytest.mark.parametrize("browser_type", [None, "", "chromium", "firefox", "Mimic"])
+def test_hostile_provision_gate_multilogin_requires_exact_browser_core(tmp_path, browser_type):
+    bad = _valid_provision("multilogin")
+    if browser_type is None:
+        bad.pop("browser_type")
+    else:
+        bad["browser_type"] = browser_type
+    path = _write_provision(tmp_path, bad)
+    doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
+    assert doc is None and code == "PROVISION_MISSING"
+
+
+def test_hostile_provision_gate_gologin_cannot_smuggle_browser_core(tmp_path):
+    bad = _valid_provision("gologin", browser_type="mimic")
     path = _write_provision(tmp_path, bad)
     doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert doc is None and code == "PROVISION_MISSING"
@@ -997,6 +1116,21 @@ def test_hostile_assert_disposable_blocks_actuator_construction(vendor):
     assert fake.calls == []
 
 
+def test_hostile_assert_disposable_requires_exact_multilogin_browser_core():
+    provision = _valid_provision("multilogin")
+    provision.pop("browser_type")
+    fake = _RecordingVendorFake("multilogin", provision["profile_id"], provision["folder_id"])
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        core.NonSeatCanaryActuator(
+            vendor_client=fake,
+            navigator=core.HermeticNavigatorFake(fake, core.HermeticOriginFake("token")),
+            provision=provision,
+            credential=core.Credential("cred", "stdin"),
+        )
+    assert exc_info.value.code == "DISALLOWED_TARGET"
+    assert fake.calls == []
+
+
 @pytest.mark.parametrize("vendor", VENDORS)
 def test_hostile_assert_disposable_gates_run_matrix(vendor):
     harness = _harness(vendor, vendor_cls=_RecordingVendorFake)
@@ -1063,17 +1197,18 @@ def _success(data, message=""):
 
 
 class _ExactMultiloginTransport:
-    def __init__(self):
+    def __init__(self, browser_type="mimic"):
         self.calls = []
         self.state = "stopped"
         self.status_response = None
+        self.browser_type = browser_type
 
     def _mlx_profile_search(self, credential, folder_id, *, offset):
         self.calls.append(("search", folder_id, offset))
         return _success({
             "profiles": [{
                 "id": "p1", "folder_id": folder_id, "name": "synthetic",
-                "browser_type": "mimic", "in_use_by": "", "locked_by": "",
+                "browser_type": self.browser_type, "in_use_by": "", "locked_by": "",
             }],
             "total_count": 1,
         }, "Search profile successfully result")
@@ -1086,7 +1221,7 @@ class _ExactMultiloginTransport:
             "profile_id": profile_id,
             "folder_id": "f1",
             "status": self.state,
-            "browser_type": "mimic",
+            "browser_type": self.browser_type,
             "core_version": 132,
             "in_use_by": "synthetic-owner" if self.state == "browser_running" else "",
             "is_quick": False,
@@ -1103,7 +1238,7 @@ class _ExactMultiloginTransport:
         self.calls.append(("start", folder_id, profile_id))
         self.state = "browser_running"
         return _success({
-            "id": profile_id, "port": "9222", "browser_type": "mimic",
+            "id": profile_id, "port": "9222", "browser_type": self.browser_type,
             "core_version": 132, "is_quick": False,
         }, "Profile started successfully")
 
@@ -1129,6 +1264,18 @@ def test_hostile_multilogin_repeat_start_guard_before_http():
         client.start(ref)
     assert exc_info.value.code == "BUSY_PROFILE"
     assert transport.calls == calls_before
+
+
+@pytest.mark.parametrize("browser_type", ["mimic", "stealthfox"])
+def test_multilogin_exact_core_selenium_launch_contract_accepts_both_documented_cores(browser_type):
+    transport = _ExactMultiloginTransport(browser_type)
+    client = vendors.MultiloginClient(
+        core.Credential("cred", "stdin"), transport, browser_type=browser_type,
+    )
+    assert client.start({"profile_id": "p1", "folder_id": "f1"}) == {
+        "profile_id": "p1", "port": 9222,
+    }
+    assert [call[0] for call in transport.calls] == ["search", "status", "start"]
 
 
 def test_hostile_gologin_forget_ownership_is_noop():
@@ -1523,11 +1670,15 @@ def test_hostile_bounded_client_only_emits_frozen_methods_origins_and_paths():
         client._mlx_profile_status(credential, "profile")
         client._mlx_profile_start(credential, "folder", "profile")
         client._mlx_profile_stop(credential, "profile")
-        client._devtools_list(9222)
-        client._devtools_new(9222, "http://127.0.0.1:7777/a")
+        client._webdriver_create_session(9222, "mimic")
+        client._webdriver_window_handles(9222, "session-1")
+        client._webdriver_current_window(9222, "session-1")
+        client._webdriver_switch_window(9222, "session-1", "window-1")
+        client._webdriver_navigate(9222, "session-1", "http://127.0.0.1:7777/a")
+        client._webdriver_current_url(9222, "session-1")
         # A port-shaped authority injection must refuse before URL parsing;
         # otherwise ``127.0.0.1:9222@evil`` would resolve to a non-loopback host.
-        assert client._devtools_list("9222@evil.example") is None
+        assert client._webdriver_create_session("9222@evil.example", "mimic") is None
     finally:
         client.close()
 
@@ -1536,8 +1687,12 @@ def test_hostile_bounded_client_only_emits_frozen_methods_origins_and_paths():
         ("GET", "https://launcher.mlx.yt:45001/api/v1/profile/status/p/profile"),
         ("GET", "https://launcher.mlx.yt:45001/api/v2/profile/f/folder/p/profile/start"),
         ("GET", "https://launcher.mlx.yt:45001/api/v1/profile/stop/p/profile"),
-        ("GET", "http://127.0.0.1:9222/json/list"),
-        ("PUT", "http://127.0.0.1:9222/json/new"),
+        ("POST", "http://127.0.0.1:9222/session"),
+        ("GET", "http://127.0.0.1:9222/session/session-1/window/handles"),
+        ("GET", "http://127.0.0.1:9222/session/session-1/window"),
+        ("POST", "http://127.0.0.1:9222/session/session-1/window"),
+        ("POST", "http://127.0.0.1:9222/session/session-1/url"),
+        ("GET", "http://127.0.0.1:9222/session/session-1/url"),
     ]
     assert json.loads(seen[0][2]) == {
         "folder_id": "folder",
@@ -1568,7 +1723,7 @@ def test_hostile_bounded_client_caps_body_and_launders_transport_errors():
     )
     bounded = vendors.BoundedHttpClient(client=oversized)
     try:
-        assert bounded._devtools_list(9222) is None
+        assert bounded._webdriver_create_session(9222, "mimic") is None
     finally:
         bounded.close()
 
@@ -1578,25 +1733,29 @@ def test_hostile_bounded_client_caps_body_and_launders_transport_errors():
     failing = httpx.Client(transport=httpx.MockTransport(_boom), trust_env=False)
     bounded = vendors.BoundedHttpClient(client=failing)
     try:
-        result = bounded._devtools_list(9222)
+        result = bounded._webdriver_create_session(9222, "mimic")
     finally:
         bounded.close()
     assert result is None
     assert "private response" not in repr(result)
 
 
-def test_hostile_devtools_rejects_external_url_before_transport():
+def test_hostile_webdriver_rejects_external_url_before_transport():
     class _Recorder:
         def __init__(self):
             self.calls = []
 
-        def _devtools_new(self, *args, **kwargs):
+        def _webdriver_create_session(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return vendors._BoundedResponse(200, {})
+
+        def _webdriver_navigate(self, *args, **kwargs):
             self.calls.append((args, kwargs))
             return vendors._BoundedResponse(200, {})
 
     transport = _Recorder()
     provision = _valid_provision("multilogin")
-    navigator = vendors.DevToolsNavigator(transport, provision)
+    navigator = vendors.WebDriverNavigator(transport, provision)
     assert navigator.open_url(9222, "https://chatgpt.com/") is False
     assert navigator.open_url(70000, provision["benign_origin"] + "/a") is False
     assert transport.calls == []
@@ -1685,7 +1844,7 @@ def test_hostile_multilogin_exact_running_refuses_busy_before_start():
     assert not any(call[0] == "start" for call in transport.calls)
 
 
-def test_mutation_multilogin_stealthfox_refuses_before_puppeteer_start():
+def test_mutation_multilogin_mismatched_stealthfox_refuses_before_selenium_start():
     transport = _ExactMultiloginTransport()
     payload = transport._mlx_profile_status(None, "p1").payload
     payload["data"]["browser_type"] = "stealthfox"

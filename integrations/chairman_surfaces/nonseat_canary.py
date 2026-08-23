@@ -79,7 +79,7 @@ RESULT_CODES = frozenset({
     "VENDOR_ERROR",
 })
 
-PROVISION_SCHEMA = "mastermind.mas115_nonseat_canary_provision.v1"
+PROVISION_SCHEMA = "mastermind.mas115_nonseat_canary_provision.v2"
 DEFAULT_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_canary.json"
 REQUIRED_ACK = "disposable-non-chairman-profile"
 RECEIPTS_SCHEMA = "mastermind.mas115_nonseat_canary_receipts.v1"
@@ -188,7 +188,10 @@ def resolve_credential(*, vendor: str, stdin_text=None) -> Credential:
 # provision
 # ---------------------------------------------------------------------------
 
-_PROVISION_ALLOWED_KEYS = frozenset({"schema", "vendor", "profile_id", "folder_id", "benign_origin", "disposable_ack"})
+_PROVISION_ALLOWED_KEYS = frozenset({
+    "schema", "vendor", "profile_id", "folder_id", "browser_type",
+    "benign_origin", "disposable_ack",
+})
 _PROVISION_REQUIRED_KEYS_BASE = frozenset({"schema", "vendor", "profile_id", "benign_origin", "disposable_ack"})
 _MAX_PROVISION_BYTES = 64 * 1024
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -307,11 +310,15 @@ def load_provision(path=None, *, bindings_loader=None, now=None):
     if vendor not in ("gologin", "multilogin"):
         return None, "PROVISION_MISSING"
 
-    required = _PROVISION_REQUIRED_KEYS_BASE | ({"folder_id"} if vendor == "multilogin" else set())
+    required = _PROVISION_REQUIRED_KEYS_BASE | (
+        {"folder_id", "browser_type"} if vendor == "multilogin" else set()
+    )
     if not required.issubset(doc.keys()):
         return None, "PROVISION_MISSING"
 
     if vendor == "multilogin":
+        if doc.get("browser_type") not in ("mimic", "stealthfox"):
+            return None, "PROVISION_MISSING"
         folder_id = doc.get("folder_id")
         if not isinstance(folder_id, str) or not _surface_bindings.UUID_RE.match(folder_id):
             return None, "PROVISION_MISSING"
@@ -325,7 +332,7 @@ def load_provision(path=None, *, bindings_loader=None, now=None):
         doc["profile_id"] = profile_id
         doc["folder_id"] = folder_id
     else:  # gologin
-        if "folder_id" in doc:
+        if "folder_id" in doc or "browser_type" in doc:
             return None, "PROVISION_MISSING"
         profile_id = doc.get("profile_id")
         if not isinstance(profile_id, str) or not _surface_bindings.GOLOGIN_PROFILE_ID_RE.match(profile_id):
@@ -386,6 +393,13 @@ def assert_disposable(provision) -> None:
     if not isinstance(provision, dict):
         raise CanaryRefusal("DISALLOWED_TARGET")
     if provision.get("disposable_ack") != REQUIRED_ACK:
+        raise CanaryRefusal("DISALLOWED_TARGET")
+    vendor = provision.get("vendor")
+    if vendor not in ("gologin", "multilogin"):
+        raise CanaryRefusal("DISALLOWED_TARGET")
+    if vendor == "multilogin" and provision.get("browser_type") not in ("mimic", "stealthfox"):
+        raise CanaryRefusal("DISALLOWED_TARGET")
+    if vendor == "gologin" and "browser_type" in provision:
         raise CanaryRefusal("DISALLOWED_TARGET")
     origin = provision.get("benign_origin")
     if not isinstance(origin, str) or not origin:
@@ -538,6 +552,7 @@ class NonSeatCanaryActuator:
     def release(self) -> None:
         if self._owned is None:
             raise CanaryRefusal("UNSUPPORTED_SURFACE")
+        owned_port = self._owned["port"]
         vendor_error = False
         try:
             self._vendor_client.stop(self._profile_ref)
@@ -547,6 +562,16 @@ class NonSeatCanaryActuator:
             vendor_error = True
         if vendor_error:
             raise CanaryRefusal("VENDOR_ERROR") from None  # see acquire(): context severed by construction
+        # A supported vendor stop invalidates the WebDriver session. Forget
+        # only this actuator-owned loopback session so a same-port allocation
+        # after the persistence restart can create a fresh W3C session. This
+        # is local bookkeeping only; it sends no browser/vendor command.
+        forget = getattr(self._navigator, "_forget", None)
+        if forget is not None:
+            try:
+                forget(owned_port)
+            except Exception:  # noqa: BLE001 — stop already succeeded; cleanup cannot widen the result
+                pass
         self._owned = None
 
     def drop_ownership(self) -> None:
@@ -944,7 +969,7 @@ class HermeticOriginFake:
 
 
 class HermeticNavigatorFake:
-    """Public surface: list_pages, open_url — mirrors DevToolsNavigator."""
+    """Public surface: list_pages, open_url — mirrors WebDriverNavigator."""
 
     def __init__(self, vendor_fake: HermeticVendorFake, origin_fake: HermeticOriginFake):
         self._vendor_fake = vendor_fake
@@ -995,6 +1020,7 @@ def build_hermetic_harness(vendor: str) -> dict:
             "vendor": "multilogin",
             "profile_id": profile_id,
             "folder_id": folder_id,
+            "browser_type": "mimic",
             "benign_origin": "http://127.0.0.1:7777",
             "disposable_ack": REQUIRED_ACK,
         }
