@@ -627,6 +627,11 @@ def test_default_upgrade_census_requires_positive_process_and_lock_sentinels(
     assert material["open_files"][0]["path"] == str(lock)
 
 
+def test_census_command_missing_binary_fails_closed(tmp_path):
+    with pytest.raises(RestoreSafetyError, match="census tool is unavailable"):
+        executive_backup._run_census_command([str(tmp_path / "missing-lsof")])
+
+
 @pytest.mark.parametrize("uid_position", [0, 1, 2])
 def test_default_upgrade_census_uses_saved_real_and_effective_uid_union(
     tmp_path, monkeypatch, uid_position

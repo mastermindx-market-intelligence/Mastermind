@@ -1668,15 +1668,18 @@ def _checkpoint_quiesced_wal(database: Path) -> None:
 
 
 def _run_census_command(argv: list[str]) -> tuple[int, str, str, int]:
-    process = subprocess.Popen(
-        argv,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="strict",
-    )
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+        )
+    except FileNotFoundError as exc:
+        raise RestoreSafetyError("independent census tool is unavailable") from exc
     try:
         stdout, stderr = process.communicate(timeout=10)
     except BaseException:
@@ -1741,8 +1744,6 @@ def _default_upgrade_census(
     ]
     existing = [path for path in inspected if os.path.lexists(path)]
     lsof = Path("/usr/sbin/lsof")
-    if not lsof.is_file():
-        raise RestoreSafetyError("independent file census tool is unavailable")
     status, output, error, _lsof_pid = _run_census_command(
         [str(lsof), "-nP", "-F", "pufn", "--", *existing]
     )

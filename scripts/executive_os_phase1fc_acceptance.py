@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import hashlib
 import json
-import os
 import sys
 import tempfile
 import uuid
@@ -66,6 +65,12 @@ VOID_PATH_ACCEPTANCE_ID = "P1FC-VOID-REPLACEMENT-INDEPENDENCE-V1"
 DISPATCH_REPLAY_ACCEPTANCE_ID = "P1FC-SUPERVISOR-CLAIM-CRASH-REPLAY-V1"
 DISPATCH_BOUNDARY_ACCEPTANCE_ID = "P1FC-EXACT-DISPATCH-BOUNDARY-V1"
 TX9_ACCEPTANCE_ID = "P1FC-TX9-QUARANTINE-V1"
+
+# Acceptance evidence must be byte-identical across the macOS control host and
+# Linux hosted CI.  These are inert fixture identities, not observations of the
+# process running the harness and not live execution-principal evidence.
+_FIXTURE_WORKSPACE_UID = 501
+_FIXTURE_WORKSPACE_GID = 20
 
 
 def _digest(value: Any) -> str:
@@ -241,7 +246,12 @@ def _orchestration_profile(
         harness_binary_digest="a" * 64,
         harness_version="1",
         workspace=WorkspaceIdentity(
-            "/tmp/phase1fc-work", "b" * 40, 1, 2, os.getuid(), os.getgid()
+            "/tmp/phase1fc-work",
+            "b" * 40,
+            1,
+            2,
+            _FIXTURE_WORKSPACE_UID,
+            _FIXTURE_WORKSPACE_GID,
         ),
         sandbox_policy="read-only",
         approval_policy="never",
