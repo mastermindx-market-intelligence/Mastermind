@@ -145,6 +145,19 @@ def _canonical_json(value: object) -> str:
     )
 
 
+def _closed_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
+        document[key] = value
+    return document
+
+
+def _reject_json_constant(value: str) -> object:
+    raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
+
+
 def _fixed_error_document(code: str) -> dict[str, object]:
     if code not in ERROR_CODES:
         raise ValueError("unknown metadata-verification error code")
@@ -235,6 +248,8 @@ def verify_metadata(
         raise MetadataVerificationError("METADATA_INPUT_REFUSED")
 
     result = transport.request(token=token)
+    if not isinstance(result, HttpResult):
+        raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
     if (
         result.status_code != 200
         or result.final_url != SLACK_AUTH_TEST_URL
@@ -242,7 +257,11 @@ def verify_metadata(
     ):
         raise MetadataVerificationError("METADATA_RESPONSE_REFUSED")
     try:
-        payload = json.loads(result.body.decode("utf-8"))
+        payload = json.loads(
+            result.body.decode("utf-8"),
+            object_pairs_hook=_closed_json_object,
+            parse_constant=_reject_json_constant,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise MetadataVerificationError("METADATA_RESPONSE_REFUSED") from None
     if not isinstance(payload, dict):
@@ -306,8 +325,8 @@ def run(
         expectation = MetadataExpectation(
             team_id=namespace.expected_team_id,
             bot_user_id=namespace.expected_bot_user_id,
-            scopes=tuple(namespace.expected_scope),
             bot_id=namespace.expected_bot_id,
+            scopes=tuple(namespace.expected_scope),
         )
         token = read_token_from_stdin(stdin)
         receipt = verify_metadata(
