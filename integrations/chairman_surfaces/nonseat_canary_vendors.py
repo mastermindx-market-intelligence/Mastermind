@@ -24,6 +24,7 @@ script-evaluation, cookie, storage, download, or arbitrary-command surface.
 from __future__ import annotations
 
 import argparse
+import http.client
 import http.server
 import importlib.util
 import json
@@ -41,6 +42,7 @@ from urllib.parse import quote
 import httpx
 
 from . import nonseat_canary as _core
+from . import mas115_multilogin_port_policy as _port_policy
 #: Frozen official Multilogin X surfaces.  Launcher profile status/stop are
 #: v1; profile start is v2; existence is proven by a bounded cloud folder
 #: census rather than by launcher 404 (which is ambiguous after Agent restart).
@@ -754,7 +756,12 @@ class LoopbackBenignOrigin:
         self._seen_paths: set = set()
         self._cookie_seen = False
         self._lock = threading.Lock()
-        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _CanaryRequestHandler)
+        self._server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", _port_policy.CANARY_PORT), _CanaryRequestHandler,
+        )
+        if self._server.server_address[:2] != ("127.0.0.1", _port_policy.CANARY_PORT):
+            self._server.server_close()
+            raise _core.CanaryRefusal("CANARY_PORT_UNAVAILABLE")
         self._server.canary_origin = self  # type: ignore[attr-defined]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -769,7 +776,30 @@ class LoopbackBenignOrigin:
 
     @property
     def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._server.server_address[1]}"
+        return _port_policy.CANARY_ORIGIN
+
+    def self_test(self) -> bool:
+        """Prove the fixed loopback listener and clear the probe observation."""
+
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", _port_policy.CANARY_PORT, timeout=2.0,
+        )
+        try:
+            connection.request("GET", "/auth")
+            response = connection.getresponse()
+            body = response.read(64)
+            healthy = (
+                response.status == 401
+                and response.getheader("WWW-Authenticate") == 'Basic realm="mas115-canary"'
+                and body == b"unauthorized"
+            )
+        except Exception:  # noqa: BLE001 — local self-test has one closed result
+            healthy = False
+        finally:
+            connection.close()
+            with self._lock:
+                self._seen_paths.discard("/auth")
+        return healthy
 
     def saw(self, path: str) -> bool:
         with self._lock:
@@ -1045,18 +1075,35 @@ def main(
     if provision.get("vendor") != args.vendor:
         return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
 
-    # This is intentionally after every provision and non-seat-collision
-    # preflight.  A refusal above cannot spawn/read Keychain or construct any
-    # live HTTP/browser/origin object.  Production has no external-stdin path:
-    # that would let an eager ``security | helper`` producer run too early.
+    # Bind and self-test the one fixed loopback origin before any secret or
+    # vendor transport exists. There is no fallback port.
+    token = "mas115-live-" + secrets.token_hex(16)
+    origin = None
+    try:
+        origin = origin_factory(token=token)
+        if origin.base_url != _port_policy.CANARY_ORIGIN or origin.self_test() is not True:
+            raise _core.CanaryRefusal("CANARY_PORT_UNAVAILABLE")
+    except Exception:  # noqa: BLE001 — bind/self-test failures have one static refusal
+        if origin is not None:
+            try:
+                origin.close()
+            except Exception:  # noqa: BLE001 — closed result cannot expand
+                pass
+        return _emit_refusal(out, args.vendor, "CANARY_PORT_UNAVAILABLE")
+
+    # This is intentionally after every provision, collision, bind, and local
+    # self-test preflight. Production has no external-stdin path: that would
+    # let an eager ``security | helper`` producer run too early.
     credential_stream = None
     try:
         factory = credential_stream_factory or _open_keychain_credential_pipe
         credential_stream = factory()
         credential = _read_direct_pipe_credential(credential_stream)
     except _core.CanaryRefusal as refusal:
+        origin.close()
         return _emit_refusal(out, args.vendor, refusal.code)
     except Exception:  # noqa: BLE001 — fixed absence result only
+        origin.close()
         return _emit_refusal(out, args.vendor, "AUTH_MISSING")
     finally:
         if credential_stream is not None:
@@ -1065,16 +1112,14 @@ def main(
             except Exception:  # noqa: BLE001 — fixed cleanup boundary
                 pass
     if not credential.present:
+        origin.close()
         return _emit_refusal(out, args.vendor, "AUTH_MISSING")
 
     client = None
-    origin = None
     try:
         client = client_factory()
-        token = "mas115-live-" + secrets.token_hex(16)
-        origin = origin_factory(token=token)
         live_provision = dict(provision)
-        live_provision["benign_origin"] = origin.base_url
+        live_provision["benign_origin"] = _port_policy.CANARY_ORIGIN
         vendor_client = MultiloginClient(
             credential, client, browser_type=live_provision["browser_type"],
         )

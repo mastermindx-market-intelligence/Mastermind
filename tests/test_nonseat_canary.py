@@ -1094,7 +1094,10 @@ def test_hostile_loopback_benign_origin_integration():
     origin = vendors.LoopbackBenignOrigin(token="integration-token")
     try:
         base = origin.base_url
-        assert base.startswith("http://127.0.0.1:")
+        assert base == port_policy.CANARY_ORIGIN
+        assert origin.self_test() is True
+        assert origin.saw("/a") is False
+        assert origin.saw("/auth") is False
 
         with httpx.Client(base_url=base) as client:
             resp_a = client.get("/a")
@@ -1116,6 +1119,11 @@ def test_hostile_loopback_benign_origin_integration():
             assert resp_missing.status_code == 404
     finally:
         origin.close()
+
+
+def test_loopback_origin_constructor_has_no_port_parameter():
+    """Catches reintroducing caller-selected or fallback port behavior."""
+    assert tuple(inspect.signature(vendors.LoopbackBenignOrigin).parameters) == ("token",)
 
 
 # ---------------------------------------------------------------------------
@@ -1735,6 +1743,30 @@ def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(t
     assert code == 2
     assert json.loads(buf.getvalue())["code"] == "BINDINGS_UNAVAILABLE"
     assert calls == {"keychain_spawn": 0, "client": 0, "origin": 0}
+
+
+def test_busy_fixed_port_refuses_before_keychain_or_http(tmp_path):
+    """Catches secret/vendor access before the fixed loopback port is proven."""
+    path = _write_provision(tmp_path, _valid_provision("multilogin"))
+    calls = []
+
+    def busy_origin(*, token):
+        calls.append("origin")
+        raise OSError("synthetic busy port")
+
+    buf = io.StringIO()
+    code = vendors.main(
+        ["--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=buf,
+        bindings_loader=_no_collision_loader,
+        origin_factory=busy_origin,
+        credential_stream_factory=lambda: calls.append("keychain"),
+        client_factory=lambda: calls.append("client"),
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(buf.getvalue())["code"] == "CANARY_PORT_UNAVAILABLE"
+    assert calls == ["origin"]
 
 
 def test_hostile_gologin_helper_refuses_before_any_io():
