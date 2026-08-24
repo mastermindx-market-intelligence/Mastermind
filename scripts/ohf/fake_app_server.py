@@ -32,6 +32,13 @@ class FakeAppServer:
         self.include_mcp = os.environ.get("OHF_FAKE_MCP_GONE") != "1"
         self.leak = os.environ.get("OHF_FAKE_LEAK") == "1"
         self.flat_skills = os.environ.get("OHF_FAKE_FLAT_SKILLS") == "1"
+        self.native_helper = os.environ.get("OHF_FAKE_NATIVE_HELPER") == "1"
+        self.native_helper_depth = int(
+            os.environ.get("OHF_FAKE_NATIVE_HELPER_DEPTH") or "1"
+        )
+        self.native_helper_model_override = (
+            os.environ.get("OHF_FAKE_NATIVE_HELPER_MODEL_OVERRIDE") == "1"
+        )
         self.die_after = int(os.environ.get("OHF_FAKE_DIE_AFTER") or "0")
         self.requests_seen = 0
         self.initialized = False
@@ -81,7 +88,11 @@ class FakeAppServer:
             "id": thread["id"],
             "sessionId": thread.get("session_id") or thread["id"],
             "forkedFromId": thread.get("forked_from"),
-            "status": "ready",
+            "parentThreadId": thread.get("parent_thread_id"),
+            "agentRole": thread.get("agent_role"),
+            "agentNickname": thread.get("agent_nickname"),
+            "source": thread.get("source") or "appServer",
+            "status": thread.get("status") or {"type": "idle"},
             "model": thread.get("model") or self.model,
             "cwd": thread.get("cwd") or str(self.workspace),
             "turns": list(thread.get("turns") or []),
@@ -190,6 +201,18 @@ class FakeAppServer:
                 return
             self._ok(request_id, {"thread": self._thread_view(thread)})
             return
+        if method == "thread/list":
+            parent_id = params.get("parentThreadId")
+            rows = [
+                self._thread_view(thread)
+                for thread in self.threads.values()
+                if thread.get("parent_thread_id") == parent_id
+            ]
+            self._ok(
+                request_id,
+                {"data": rows, "nextCursor": None, "backwardsCursor": None},
+            )
+            return
         if method == "thread/turns/list":
             thread = self._require_thread(str(params.get("threadId") or ""))
             if thread is None:
@@ -252,6 +275,97 @@ class FakeAppServer:
             turn = {"id": turn_id, "status": "completed", "threadId": thread_id}
             self._ok(request_id, {"turn": turn})
             self._notify("turn/started", {"turn": {"id": turn_id}})
+            if self.native_helper:
+                child_id = f"thr_{uuid.uuid4().hex[:10]}"
+                child = {
+                    "id": child_id,
+                    "session_id": thread.get("session_id") or thread_id,
+                    "parent_thread_id": thread_id,
+                    "agent_role": None,
+                    "agent_nickname": None,
+                    "source": {
+                        "subAgent": {
+                            "thread_spawn": {
+                                "agent_nickname": None,
+                                "agent_path": f"/root/{child_id}",
+                                "agent_role": None,
+                                "depth": self.native_helper_depth,
+                                "parent_thread_id": thread_id,
+                            }
+                        }
+                    },
+                    "status": {"type": "idle"},
+                    "model": thread.get("model") or self.model,
+                    "cwd": thread.get("cwd"),
+                    "turns": [],
+                }
+                self.threads[child_id] = child
+                self._save()
+                collab_id = f"collab_{turn_id}"
+                self._notify(
+                    "item/started",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "item": {
+                            "agentsStates": {
+                                child_id: {"message": None, "status": "running"}
+                            },
+                            "id": collab_id,
+                            "model": (
+                                self.model
+                                if self.native_helper_model_override
+                                else None
+                            ),
+                            "prompt": "fixture prompt is never persisted",
+                            "reasoningEffort": None,
+                            "receiverThreadIds": [child_id],
+                            "senderThreadId": thread_id,
+                            "status": "inProgress",
+                            "tool": "spawnAgent",
+                            "type": "collabAgentToolCall",
+                        },
+                    },
+                )
+                self._notify(
+                    "item/completed",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "item": {
+                            "agentsStates": {
+                                child_id: {"message": None, "status": "completed"}
+                            },
+                            "id": collab_id,
+                            "model": (
+                                self.model
+                                if self.native_helper_model_override
+                                else None
+                            ),
+                            "prompt": "fixture prompt is never persisted",
+                            "reasoningEffort": None,
+                            "receiverThreadIds": [child_id],
+                            "senderThreadId": thread_id,
+                            "status": "completed",
+                            "tool": "spawnAgent",
+                            "type": "collabAgentToolCall",
+                        },
+                    },
+                )
+                self._notify(
+                    "item/completed",
+                    {
+                        "threadId": thread_id,
+                        "turnId": turn_id,
+                        "item": {
+                            "agentPath": f"/root/{child_id}",
+                            "agentThreadId": child_id,
+                            "id": f"activity_{turn_id}",
+                            "kind": "interacted",
+                            "type": "subAgentActivity",
+                        },
+                    },
+                )
             self._notify(
                 "item/completed",
                 {
@@ -314,6 +428,34 @@ class FakeAppServer:
             return
         if method == "config/read":
             mcp = [OHF_PROBE_MCP_SERVER] if self.include_mcp else []
+            agents: dict[str, Any] = {"enabled": False}
+            features: dict[str, Any] = {
+                "apps": False,
+                "auth_elicitation": False,
+                "enable_mcp_apps": False,
+                "mcp_2026_07_28": False,
+                "multi_agent": False,
+                "multi_agent_v2": False,
+                "plugins": False,
+                "remote_plugin": False,
+                "tool_call_mcp_elicitation": False,
+            }
+            if self.native_helper:
+                agents = {
+                    "default_subagent_model": self.model,
+                    "default_subagent_reasoning_effort": "xhigh",
+                    "enabled": True,
+                    "interrupt_message": None,
+                    "job_max_runtime_seconds": 60,
+                    "max_concurrent_threads_per_session": 1,
+                    "max_depth": 1,
+                }
+                features["multi_agent_v2"] = {
+                    "enabled": True,
+                    "hide_spawn_agent_metadata": True,
+                    "max_concurrent_threads_per_session": 2,
+                    "non_code_mode_only": False,
+                }
             self._ok(
                 request_id,
                 {
@@ -321,6 +463,8 @@ class FakeAppServer:
                         "model": self.model,
                         "approval_policy": "never",
                         "sandbox_mode": "read-only",
+                        "agents": agents,
+                        "features": features,
                         "mcp_servers": {name: {"command": "python3"} for name in mcp},
                         "plugins": {},
                     }

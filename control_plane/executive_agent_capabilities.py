@@ -28,7 +28,7 @@ from control_plane.operator_harness_contract import (
 )
 
 
-CAPABILITY_POLICY_SCHEMA = "mastermind.executive_agent_capabilities/v2"
+CAPABILITY_POLICY_SCHEMA = "mastermind.executive_agent_capabilities/v3"
 DEFAULT_CAPABILITY_POLICY_PATH = (
     Path(__file__).resolve().parent.parent
     / "config"
@@ -48,6 +48,10 @@ _MCP_AUTH_STATUSES = frozenset(
     {"unsupported", "notLoggedIn", "bearerToken", "oAuth"}
 )
 _MCP_APPROVAL_MODES = frozenset({"approve"})
+_NATIVE_HELPER_MECHANISMS = frozenset({"codex-multi-agent-v2-inherit-parent"})
+_REASONING_EFFORTS = frozenset(
+    {"low", "medium", "high", "xhigh", "max", "ultra"}
+)
 _MCP_KEYS = frozenset(
     {
         "config_name",
@@ -72,10 +76,23 @@ _PROFILE_KEYS = frozenset(
         "network_policy",
         "write_capable",
         "native_helper_policy",
+        "native_helper",
         "skills",
         "mcp_servers",
         "plugins",
         "forbidden",
+    }
+)
+_NATIVE_HELPER_KEYS = frozenset(
+    {
+        "mechanism",
+        "default_model",
+        "default_reasoning_effort",
+        "inherit_parent_capabilities",
+        "hide_spawn_agent_metadata",
+        "max_concurrent_helpers",
+        "max_depth",
+        "max_runtime_seconds",
     }
 )
 
@@ -245,12 +262,21 @@ _FEATURE_PROJECTION_KEYS = (
     "tool_call_mcp_elicitation",
 )
 
+_AGENT_SECURITY_KEYS = (
+    "default_subagent_model",
+    "default_subagent_reasoning_effort",
+    "enabled",
+    "interrupt_message",
+    "job_max_runtime_seconds",
+    "max_concurrent_threads_per_session",
+    "max_depth",
+)
+
 
 def app_server_security_config_projection(
     config: Mapping[str, Any] | None,
 ) -> dict[str, object]:
-    """Project only the fields that can widen this G3 process.
-
+    """Project only the fields that can widen this G4 process.
     Credential values, account metadata and unrelated UI settings are never
     copied into the projection. Malformed shapes remain distinguishable from
     the expected closed shape and therefore produce a different digest.
@@ -294,10 +320,23 @@ def app_server_security_config_projection(
         plugin_projection = {"__invalid__": True}
 
     skill_config = skills.get("config") if isinstance(skills, Mapping) else None
-    return {
-        "agents": {
+    if isinstance(agents, Mapping) and agents.get("enabled") is True:
+        agent_projection: dict[str, object] = {
+            key: agents.get(key) for key in _AGENT_SECURITY_KEYS
+        }
+        for key, value in sorted(agents.items(), key=lambda item: str(item[0])):
+            name = str(key)
+            if name not in agent_projection:
+                agent_projection[name] = (
+                    dict(value) if isinstance(value, Mapping) else value
+                )
+    else:
+        agent_projection = {
             "enabled": agents.get("enabled") if isinstance(agents, Mapping) else None
-        },
+        }
+
+    return {
+        "agents": agent_projection,
         "features": {
             key: features.get(key) if isinstance(features, Mapping) else None
             for key in _FEATURE_PROJECTION_KEYS
@@ -362,6 +401,7 @@ class ExecutionCapabilityProfile:
     network_policy: str
     write_capable: bool
     native_helper_policy: NativeHelperPolicy
+    native_helper: "NativeHelperGrant | None"
     skills: tuple[str, ...]
     mcp_server_grants: tuple[McpServerGrant, ...]
     plugins: tuple[str, ...]
@@ -389,15 +429,45 @@ class ExecutionCapabilityProfile:
     def app_server_config_projection(self) -> dict[str, object]:
         """Security-relevant config expected back from ``config/read``."""
 
+        agents: dict[str, object]
+        multi_agent: object = False
+        multi_agent_v2: object = False
+        if self.native_helper is None:
+            agents = {"enabled": False}
+        else:
+            helper = self.native_helper
+            agents = {
+                "default_subagent_model": helper.default_model,
+                "default_subagent_reasoning_effort": (
+                    helper.default_reasoning_effort
+                ),
+                "enabled": True,
+                "interrupt_message": None,
+                "job_max_runtime_seconds": helper.max_runtime_seconds,
+                "max_concurrent_threads_per_session": (
+                    helper.max_concurrent_helpers
+                ),
+                "max_depth": helper.max_depth,
+            }
+            multi_agent_v2 = {
+                "enabled": True,
+                "hide_spawn_agent_metadata": helper.hide_spawn_agent_metadata,
+                # V2 counts the root; the public agents setting above counts
+                # only spawned helpers.  Pin both interpretations.
+                "max_concurrent_threads_per_session": (
+                    helper.max_concurrent_helpers + 1
+                ),
+                "non_code_mode_only": False,
+            }
         return {
-            "agents": {"enabled": False},
+            "agents": agents,
             "features": {
                 "apps": False,
                 "auth_elicitation": False,
                 "enable_mcp_apps": False,
                 "mcp_2026_07_28": False,
-                "multi_agent": False,
-                "multi_agent_v2": False,
+                "multi_agent": multi_agent,
+                "multi_agent_v2": multi_agent_v2,
                 "plugins": False,
                 "remote_plugin": False,
                 "tool_call_mcp_elicitation": False,
@@ -423,6 +493,48 @@ class ExecutionCapabilityProfile:
                 f"profile {self.profile_id!r} is not an App Server profile"
             )
         values = list(_BASE_APP_SERVER_OVERRIDES)
+        if self.native_helper is not None:
+            helper = self.native_helper
+            values = [
+                value
+                for value in values
+                if value
+                not in {
+                    "agents.enabled=false",
+                    "features.multi_agent=false",
+                    "features.multi_agent_v2=false",
+                }
+            ]
+            values.extend(
+                (
+                    "features.multi_agent=false",
+                    (
+                        "features.multi_agent_v2={enabled=true,"
+                        "hide_spawn_agent_metadata=true,"
+                        "max_concurrent_threads_per_session="
+                        f"{helper.max_concurrent_helpers + 1},"
+                        "non_code_mode_only=false}"
+                    ),
+                    "agents.enabled=true",
+                    (
+                        "agents.max_concurrent_threads_per_session="
+                        f"{helper.max_concurrent_helpers}"
+                    ),
+                    f"agents.max_depth={helper.max_depth}",
+                    (
+                        "agents.job_max_runtime_seconds="
+                        f"{helper.max_runtime_seconds}"
+                    ),
+                    (
+                        "agents.default_subagent_model="
+                        f"{_toml_string(helper.default_model)}"
+                    ),
+                    (
+                        "agents.default_subagent_reasoning_effort="
+                        f"{_toml_string(helper.default_reasoning_effort)}"
+                    ),
+                )
+            )
         for grant in self.mcp_server_grants:
             values.extend(grant.config_overrides())
         return tuple(values)
@@ -479,6 +591,21 @@ class ExecutionCapabilityProfile:
 
 
 @dataclasses.dataclass(frozen=True)
+class NativeHelperGrant:
+    """Machine-enforced, shrink-only native helper limits for one profile."""
+
+    mechanism: str
+    default_model: str
+    default_reasoning_effort: str
+    inherit_parent_capabilities: bool
+    hide_spawn_agent_metadata: bool
+    max_concurrent_helpers: int
+    max_depth: int
+    max_runtime_seconds: int
+    grant_digest: str
+
+
+@dataclasses.dataclass(frozen=True)
 class ExecutionCapabilityRegistry:
     policy_version: str
     lifecycle_authority: str
@@ -517,13 +644,13 @@ class ExecutionCapabilityRegistry:
             )
         if raw.get("production_armed") is not False:
             raise CapabilityPolicyError(
-                "G0 capability policy must remain production_armed=false"
+                "capability policy must remain production_armed=false"
             )
         policy_version = _identifier(raw.get("policy_version"), field="policy_version")
         plugins_raw = raw.get("plugins")
         if plugins_raw != {}:
             raise CapabilityPolicyError(
-                "G3 plugin grants remain unavailable until exact installed-bundle "
+                "plugin grants remain unavailable until exact installed-bundle "
                 "attestation exists; plugins must be empty"
             )
         mcp_raw = raw.get("mcp_servers")
@@ -668,6 +795,86 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} native_helper_policy is unsupported"
                 ) from exc
+            native_helper_raw = value.get("native_helper")
+            native_helper: NativeHelperGrant | None = None
+            if native_helper_raw is not None:
+                if (
+                    not isinstance(native_helper_raw, dict)
+                    or set(native_helper_raw) != _NATIVE_HELPER_KEYS
+                ):
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} native_helper fields drifted"
+                    )
+                mechanism = _closed_choice(
+                    native_helper_raw.get("mechanism"),
+                    field=f"profiles.{profile_id}.native_helper.mechanism",
+                    choices=_NATIVE_HELPER_MECHANISMS,
+                )
+                default_model = str(
+                    native_helper_raw.get("default_model") or ""
+                ).strip()
+                if _ID_RE.fullmatch(default_model) is None:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} native helper model is invalid"
+                    )
+                default_effort = _closed_choice(
+                    native_helper_raw.get("default_reasoning_effort"),
+                    field=(
+                        f"profiles.{profile_id}.native_helper."
+                        "default_reasoning_effort"
+                    ),
+                    choices=_REASONING_EFFORTS,
+                )
+                if native_helper_raw.get("inherit_parent_capabilities") is not True:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} native helper must inherit the "
+                        "parent capability ceiling"
+                    )
+                if native_helper_raw.get("hide_spawn_agent_metadata") is not True:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} native helper must hide per-spawn "
+                        "role/model/effort overrides"
+                    )
+                max_helpers = native_helper_raw.get("max_concurrent_helpers")
+                max_depth = native_helper_raw.get("max_depth")
+                max_runtime = native_helper_raw.get("max_runtime_seconds")
+                if type(max_helpers) is not int or max_helpers != 1:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} native helper ceiling must be one"
+                    )
+                if type(max_depth) is not int or max_depth != 1:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} native helper depth must be one"
+                    )
+                if (
+                    type(max_runtime) is not int
+                    or max_runtime < 30
+                    or max_runtime > 300
+                ):
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} native helper runtime is unbounded"
+                    )
+                native_helper_normalized = {
+                    "mechanism": mechanism,
+                    "default_model": default_model,
+                    "default_reasoning_effort": default_effort,
+                    "inherit_parent_capabilities": True,
+                    "hide_spawn_agent_metadata": True,
+                    "max_concurrent_helpers": max_helpers,
+                    "max_depth": max_depth,
+                    "max_runtime_seconds": max_runtime,
+                }
+                native_helper = NativeHelperGrant(
+                    mechanism=mechanism,
+                    default_model=default_model,
+                    default_reasoning_effort=default_effort,
+                    inherit_parent_capabilities=True,
+                    hide_spawn_agent_metadata=True,
+                    max_concurrent_helpers=max_helpers,
+                    max_depth=max_depth,
+                    max_runtime_seconds=max_runtime,
+                    grant_digest=_digest(native_helper_normalized),
+                )
             skills = _identities(value.get("skills"), field=f"profiles.{profile_id}.skills")
             mcp_server_ids = _identities(
                 value.get("mcp_servers"), field=f"profiles.{profile_id}.mcp_servers"
@@ -716,9 +923,28 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} read-only capability requires read-only sandbox"
                 )
-            if native_helper_policy is not NativeHelperPolicy.DISABLED:
+            if (
+                native_helper_policy is NativeHelperPolicy.DISABLED
+                and native_helper is not None
+            ):
                 raise CapabilityPolicyError(
-                    f"profile {profile_id!r} cannot enable native helpers before a proven ceiling"
+                    f"profile {profile_id!r} has a native helper grant while helpers are disabled"
+                )
+            if (
+                native_helper_policy
+                is NativeHelperPolicy.PARENT_READ_ONLY_CEILING
+                and native_helper is None
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} enables native helpers without an exact ceiling"
+                )
+            if (
+                native_helper_policy
+                is NativeHelperPolicy.REQUIRES_SUBAGENT_CAPABILITY_CEILING
+                or (native_helper is not None and write_capable)
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} write-capable native helpers remain unavailable"
                 )
             normalized = {
                 "profile_id": profile_id,
@@ -730,6 +956,9 @@ class ExecutionCapabilityRegistry:
                 "network_policy": network_policy,
                 "write_capable": write_capable,
                 "native_helper_policy": native_helper_policy.value,
+                "native_helper_grant_digest": (
+                    native_helper.grant_digest if native_helper is not None else None
+                ),
                 "skills": list(skills),
                 "mcp_servers": [
                     {
@@ -751,6 +980,7 @@ class ExecutionCapabilityRegistry:
                 network_policy=network_policy,
                 write_capable=write_capable,
                 native_helper_policy=native_helper_policy,
+                native_helper=native_helper,
                 skills=skills,
                 mcp_server_grants=resolved_mcp,
                 plugins=plugins,
@@ -803,6 +1033,7 @@ __all__ = [
     "ExecutionCapabilityProfile",
     "ExecutionCapabilityRegistry",
     "McpServerGrant",
+    "NativeHelperGrant",
     "app_server_security_config_digest",
     "app_server_security_config_projection",
     "observed_mcp_tool_schema_digest",

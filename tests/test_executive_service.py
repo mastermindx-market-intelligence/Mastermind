@@ -458,7 +458,7 @@ def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
             root_id = submitted["result"]["job_id"]
             root = service.runtime.jobs.get_job(root_id)
             assert root is not None
-            assert root.constraints["routing_policy_version"] == "2026-08-24.stage3"
+            assert root.constraints["routing_policy_version"] == "2026-08-24.stage4"
             assert root.constraints["execution_profile_id"] == (
                 "sealed.worker.write.no-extensions.v1"
             )
@@ -591,7 +591,7 @@ def test_armed_operator_lane_binds_read_only_planner_and_not_sealed_worker(
             planner = service.runtime.jobs.get_job(planner_id)
             assert planner is not None
             assert planner.constraints["execution_profile_id"] == (
-                "operator.appserver.readonly.docs-mcp.v1"
+                "operator.appserver.readonly.docs-mcp.native-helper.v1"
             )
             assert planner.constraints["eligible_quota_classes"] == [
                 "codex-coo-operator"

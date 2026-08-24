@@ -138,7 +138,12 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
         effective_config_digest=profile.expected_config_digest or "d" * 64,
         auth=AuthRealmFact(worker_id=profile.worker_id, provider=profile.provider),
         workspace=profile.workspace,
-        supports_subagent_capability_ceiling=ObservedTriState.FALSE,
+        supports_subagent_capability_ceiling=(
+            ObservedTriState.VERIFIED
+            if profile.native_helper_policy
+            is NativeHelperPolicy.PARENT_READ_ONLY_CEILING
+            else ObservedTriState.FALSE
+        ),
     )
 
 

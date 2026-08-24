@@ -643,11 +643,35 @@ def test_capability_classes_and_helpers():
     assert classify_capability(
         "mystery", required=["ohf-probe"], allowed_ambient=[], forbidden=[]
     ) is CapabilityClass.UNCLASSIFIED
-    assert native_helpers_allowed(
+    assert not native_helpers_allowed(
         write_capable=False,
         native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING,
         supports_subagent_capability_ceiling=ObservedTriState.UNKNOWN,
     )
+    assert native_helpers_allowed(
+        write_capable=False,
+        native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING,
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+    )
+    read_only_unknown = compare_launch(
+        _requested(
+            native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING,
+        ),
+        _observed(),
+    )
+    assert (
+        read_only_unknown.decision
+        is LaunchDecision.REFUSE_HELPER_CEILING_MISSING
+    )
+    read_only_verified = compare_launch(
+        _requested(
+            native_helper_policy=NativeHelperPolicy.PARENT_READ_ONLY_CEILING,
+        ),
+        _observed(
+            supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+        ),
+    )
+    assert read_only_verified.decision is LaunchDecision.ALLOW
     assert not native_helpers_allowed(
         write_capable=True,
         native_helper_policy=NativeHelperPolicy.REQUIRES_SUBAGENT_CAPABILITY_CEILING,
@@ -1746,4 +1770,3 @@ def test_process_generations_identity_checks_match_executive_law():
                 row,
             )
     connection.close()
-

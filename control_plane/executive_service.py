@@ -585,16 +585,18 @@ class ExecutiveControlService:
             or operator_profile.sandbox_policy != "read-only"
             or operator_profile.approval_policy != "never"
             or operator_profile.network_policy != "disabled"
-            or operator_profile.native_helper_policy.value != "DISABLED"
+            or operator_profile.native_helper_policy.value
+            != "PARENT_READ_ONLY_CEILING"
+            or operator_profile.native_helper is None
             or operator_profile.skills
             or operator_profile.profile_id
-            != "operator.appserver.readonly.docs-mcp.v1"
+            != "operator.appserver.readonly.docs-mcp.native-helper.v1"
             or operator_profile.mcp_servers != ("openai-developer-docs-v1",)
             or operator_profile.plugins
         ):
             raise ValueError(
-                "configured COO operator alias must be read-only, helper-free, "
-                "and use the reviewed docs-MCP Codex App Server profile"
+                "configured COO operator alias must be read-only and use the "
+                "reviewed depth-one docs-MCP native-helper App Server profile"
             )
         binding = {
             "eligible_quota_classes": sorted(

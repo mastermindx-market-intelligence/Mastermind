@@ -1,12 +1,13 @@
-# Executive worker routing — stage 3
+# Executive worker routing — stage 4
 
 **Status:** R1 shadow evidence and Phase 1F-B are accepted. Phase 1F-C schema-v4
 and the explicit bounded COO `run-once` path merged in `db0bac5`. G0 capability
 identity merged in `ceebc82`; G1 exact-root service composition merged in
-`8602686`; G2 read-only planner composition merged in `c76d55b`. All remain
-undeployed, unscheduled, production-unarmed, and unaccepted as live capability.
-G3 composes one exact read-only OpenAI Docs MCP grant into that existing planner
-lane. It does not arm an App Server, MCP server, plugin, subagent or production
+`8602686`; G2 read-only planner composition merged in `c76d55b`; and G3 exact
+OpenAI Docs MCP composition merged in `5f58907`. All remain undeployed,
+unscheduled, production-unarmed, and unaccepted as live capability. G4 adds one
+shrink-only read-only native-helper ceiling to that same planner lane. It does
+not arm an App Server, MCP server, plugin, helper, OAuth login or production
 worker merely by merging.
 
 This stage makes economical-worker-first execution real without creating a
@@ -332,9 +333,52 @@ The separate offline v3-to-v4 migration CLI is the only supported upgrade path.
   service acceptance.
 - Plugin grants remain empty. App Server plugin install/uninstall RPCs are not a
   production dependency. OAuth enrollment and native helpers/subagents remain
-  later, separately reviewed gates. Checked-in arming remains false, so G3 is
+  separately reviewed gates. Checked-in arming remains false, so G3 is
   `BUILT_NOT_PROVEN / SERVICE_COMPOSED_UNARMED` until host install, dedicated
   worker authentication and a real attributed planner/tool-call receipt pass.
+
+### Wave G4 — shrink-only native helper composition — production-unarmed
+
+- Only `coo.operator.readonly` moves to
+  `operator.appserver.readonly.docs-mcp.native-helper.v1`. The parent remains
+  `gpt-5.6-sol` / `xhigh`, read-only, approval `never`, shell/tool network
+  disabled, and limited to the exact OpenAI Docs MCP grant. Every sealed CLI
+  worker and every write-capable profile keeps native helpers disabled.
+- Codex Multi-Agent V2 is pinned with hidden per-spawn role/model/effort
+  metadata, one spawned helper per session, total root-plus-helper concurrency
+  two, depth one, and a 60-second helper runtime. The child inherits the
+  parent's model, reasoning effort, sandbox, network, skills, MCP and plugin
+  surface; the model cannot select a broader role or model at spawn time.
+- The security-config digest is
+  `89612a1d7a64a77b9b42fab1522cab3465a7a763ba5be696f8a952ba7eaa366f`;
+  the capability-policy digest is
+  `b8fbfd9065764206b03f835f7fbc09910326f806584a8185229474aff59008b7`;
+  and the exact profile digest is
+  `536853fb01d69ae8deca9a028b55c90aea0d1529f1fc80d83bb20d5d54f2cc44`.
+- Work cannot begin unless `config/read` matches the sealed helper ceiling and
+  the adapter reports `VERIFIED`, not `UNKNOWN` or a constructor assertion.
+  Turn completion is insufficient: before candidate collection the adapter
+  reconciles redacted `collabAgentToolCall` / `subAgentActivity` events against
+  a bounded `thread/list` census and exact `thread/read` parent, session-tree,
+  workspace, depth, role and source lineage. Missing, duplicate, hidden,
+  over-depth, per-spawn-override or extra children become effect-unknown config
+  drift.
+- A native helper is a subordinate handle inside the same Attempt and OHF
+  epoch. Its output never satisfies independent review, never creates an
+  Executive child Job, and never owns retry/failover. A different worker,
+  account, model, auth realm, authority profile or independent reviewer remains
+  a new Executive Attempt.
+- Authentication is not performed by a Job. The broker may select only a
+  dedicated worker realm already covered by the current composite
+  provider-readiness receipt. Login, service-token enrollment, rotation and
+  device authorization remain native administrator actions outside Job/model
+  content, and the Chairman's default provider home is never imported.
+- Plugin grants remain exactly empty until installed-bundle identity and tool
+  attestation exist. Dynamic plugin install/uninstall RPCs remain outside the
+  production path. G4 therefore remains
+  `BUILT_NOT_PROVEN / SERVICE_COMPOSED_UNARMED` until exact-master host install,
+  worker readiness, formal acceptance and one real attributed parent/helper
+  turn pass.
 
 ### Wave R3 — reviewed Codex capacity composition
 

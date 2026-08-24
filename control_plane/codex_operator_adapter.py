@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from control_plane.executive_agent_capabilities import (
+    NativeHelperGrant,
     app_server_security_config_digest,
     observed_mcp_tool_schema_digest,
 )
@@ -39,6 +40,7 @@ from control_plane.operator_harness_contract import (
     HarnessAdapterCapabilities,
     LaunchComparison,
     LaunchDecision,
+    NativeHelperPolicy,
     NormalizedEvent,
     ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
@@ -262,11 +264,14 @@ class _GenerationState:
     requested: RequestedExecutionProfile
     client: AppServerClient
     provider_session_id: str
+    provider_session_tree_id: str
     process: ProcessIdentityObservation
     attestation: ObservedHarnessAttestation
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
     turns: dict[str, str] = field(default_factory=dict)
+    turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
+    audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
 
 
@@ -286,6 +291,7 @@ class CodexOperatorAdapter:
         app_server_config_overrides: Sequence[str] = (),
         expected_harness_version: str,
         expected_config_digest: str | None = None,
+        native_helper_grant: NativeHelperGrant | None = None,
         network_policy: str = "disabled",
         turn_input_loader: TurnInputLoader | None = None,
         base_sha_resolver: BaseShaResolver = _default_base_sha,
@@ -339,6 +345,7 @@ class CodexOperatorAdapter:
             if expected_config_digest is not None
             else None
         )
+        self.native_helper_grant = native_helper_grant
         self.argv = list(app_server_argv or (str(self.binary_path), "app-server"))
         if self.app_server_config_overrides:
             if "--strict-config" not in self.argv:
@@ -506,7 +513,7 @@ class CodexOperatorAdapter:
             supports_approval_response=False,
             supports_checkpoint=False,
             supports_config_staging=False,
-            supports_subagent_capability_ceiling=False,
+            supports_subagent_capability_ceiling=self.native_helper_grant is not None,
             supports_structured_events=True,
             supports_provider_native_idempotency=False,
             provider_capability_ids=("codex-app-server-stdio",),
@@ -536,6 +543,19 @@ class CodexOperatorAdapter:
             reasons.append("network_policy_mismatch")
         if requested.write_capable or requested.allowed_write_paths:
             reasons.append("write_capable_ohf_not_armed")
+        expected_helper_policy = (
+            NativeHelperPolicy.PARENT_READ_ONLY_CEILING
+            if self.native_helper_grant is not None
+            else NativeHelperPolicy.DISABLED
+        )
+        if requested.native_helper_policy is not expected_helper_policy:
+            reasons.append("native_helper_policy_mismatch")
+        if (
+            self.native_helper_grant is not None
+            and requested.requested_model
+            != self.native_helper_grant.default_model
+        ):
+            reasons.append("native_helper_parent_model_mismatch")
         if (
             self.expected_config_digest is not None
             and requested.expected_config_digest != self.expected_config_digest
@@ -624,6 +644,20 @@ class CodexOperatorAdapter:
         for name in plugins:
             capabilities.append(ObservedCapabilityIdentity(kind="plugin", name=name))
 
+        observed_config_digest = app_server_security_config_digest(config)
+        helper_ceiling = ObservedTriState.FALSE
+        if self.native_helper_grant is not None:
+            if (
+                requested.native_helper_policy
+                is NativeHelperPolicy.PARENT_READ_ONLY_CEILING
+                and requested.sandbox_policy == "read-only"
+                and requested.approval_policy == "never"
+                and observed_config_digest == requested.expected_config_digest
+            ):
+                helper_ceiling = ObservedTriState.VERIFIED
+            else:
+                helper_ceiling = ObservedTriState.FALSE
+
         return ObservedHarnessAttestation(
             served_model=str(config.get("model") or "").strip() or None,
             harness_version=actual_version or None,
@@ -641,7 +675,7 @@ class CodexOperatorAdapter:
             ).strip()
             or None,
             network_state=_observed_network_state(config),
-            effective_config_digest=app_server_security_config_digest(config),
+            effective_config_digest=observed_config_digest,
             auth=AuthRealmFact(
                 worker_id=self.worker_id,
                 provider="openai-codex",
@@ -651,7 +685,7 @@ class CodexOperatorAdapter:
                 attestation_status=ACCOUNT_REALM_STATUS,
             ),
             workspace=self._workspace_identity(),
-            supports_subagent_capability_ceiling=ObservedTriState.FALSE,
+            supports_subagent_capability_ceiling=helper_ceiling,
         )
 
     def _assert_refs(
@@ -748,6 +782,25 @@ class CodexOperatorAdapter:
                     "App Server returned no provider session identity",
                     effect_unknown=True,
                 )
+            result_thread = (
+                result.get("thread")
+                if isinstance(result.get("thread"), Mapping)
+                else {}
+            )
+            provider_session_tree_id = str(
+                result_thread.get("sessionId") or ""
+            ).strip()
+            if (
+                not provider_session_tree_id
+                or str(result_thread.get("cwd") or "")
+                != str(self.workspace_root)
+                or result_thread.get("parentThreadId") is not None
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.SESSION_MISSING,
+                    "thread/start did not return an exact root session identity",
+                    effect_unknown=True,
+                )
             if (
                 resume_session_id is not None
                 and provider_session_id != resume_session_id
@@ -783,6 +836,7 @@ class CodexOperatorAdapter:
             requested=requested,
             client=client,
             provider_session_id=provider_session_id,
+            provider_session_tree_id=provider_session_tree_id,
             process=process,
             attestation=attestation,
         )
@@ -959,23 +1013,166 @@ class CodexOperatorAdapter:
                 "turn is outside the bound generation",
             )
 
-    @staticmethod
     def _ingest_turn_notifications(
+        self,
         state: _GenerationState,
         turn: TurnRef,
         notifications: Sequence[Mapping[str, Any]],
     ) -> None:
+        subordinate_ids = state.turn_subordinates.setdefault(turn.turn_id, set())
+
+        def register_subordinate(value: Any) -> str:
+            native_id = str(value or "").strip()
+            if not native_id or len(native_id) > 256:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "native helper identity is missing or unbounded",
+                    effect_unknown=True,
+                )
+            if self.native_helper_grant is None:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "native helper activity appeared in a helper-disabled profile",
+                    effect_unknown=True,
+                )
+            subordinate_ids.add(native_id)
+            if len(subordinate_ids) > self.native_helper_grant.max_concurrent_helpers:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "native helper concurrency exceeded the sealed ceiling",
+                    effect_unknown=True,
+                )
+            return native_id
+
         for item in notifications:
             method = str(item.get("method") or "unknown")
             params = (
                 item.get("params") if isinstance(item.get("params"), Mapping) else {}
             )
-            nested = params.get("item") or params.get("turn") or {}
+            nested = params.get("item") or params.get("turn") or params.get("thread") or {}
             provider_event_id = (
                 str(nested.get("id") or "").strip()
                 if isinstance(nested, Mapping)
                 else ""
             )
+            native_subordinate_id: str | None = None
+            safe_payload: dict[str, object] = {"method": method}
+
+            nested_type = (
+                str(nested.get("type") or "").strip()
+                if isinstance(nested, Mapping)
+                else ""
+            )
+            if nested_type == "collabAgentToolCall":
+                if self.native_helper_grant is None:
+                    register_subordinate("forbidden")
+                tool = str(nested.get("tool") or "").strip()
+                status = str(nested.get("status") or "").strip()
+                receiver_ids_raw = nested.get("receiverThreadIds")
+                sender = str(nested.get("senderThreadId") or "").strip()
+                if (
+                    tool
+                    not in {"spawnAgent", "sendInput", "resumeAgent", "wait", "closeAgent"}
+                    or status not in {"inProgress", "completed", "failed"}
+                    or not isinstance(receiver_ids_raw, list)
+                    or len(receiver_ids_raw)
+                    > self.native_helper_grant.max_concurrent_helpers
+                    or sender != state.provider_session_id
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CONFIG_DRIFT,
+                        "native helper collaboration event exceeded the sealed protocol",
+                        effect_unknown=True,
+                    )
+                receiver_ids = [str(value or "").strip() for value in receiver_ids_raw]
+                if tool == "spawnAgent":
+                    if (
+                        len(receiver_ids) != 1
+                        or nested.get("model") is not None
+                        or nested.get("reasoningEffort") is not None
+                    ):
+                        raise CodexAdapterError(
+                            AdapterFailureClass.CONFIG_DRIFT,
+                            "native helper spawn attempted a hidden identity override",
+                            effect_unknown=True,
+                        )
+                    native_subordinate_id = register_subordinate(receiver_ids[0])
+                else:
+                    if any(value not in subordinate_ids for value in receiver_ids):
+                        raise CodexAdapterError(
+                            AdapterFailureClass.CONFIG_DRIFT,
+                            "native helper operation referenced an unknown child",
+                            effect_unknown=True,
+                        )
+                    native_subordinate_id = receiver_ids[0] if receiver_ids else None
+                agent_states = nested.get("agentsStates")
+                if not isinstance(agent_states, Mapping):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CONFIG_DRIFT,
+                        "native helper state map is missing",
+                        effect_unknown=True,
+                    )
+                for raw_id, raw_state in agent_states.items():
+                    if (
+                        str(raw_id) not in subordinate_ids
+                        or not isinstance(raw_state, Mapping)
+                        or raw_state.get("status")
+                        not in {
+                            "pendingInit",
+                            "running",
+                            "interrupted",
+                            "completed",
+                            "errored",
+                            "shutdown",
+                            "notFound",
+                        }
+                    ):
+                        raise CodexAdapterError(
+                            AdapterFailureClass.CONFIG_DRIFT,
+                            "native helper reported an unbound child state",
+                            effect_unknown=True,
+                        )
+                safe_payload.update(
+                    {
+                        "item_type": nested_type,
+                        "tool": tool,
+                        "status": status,
+                        "receiver_count": len(receiver_ids),
+                    }
+                )
+            elif nested_type == "subAgentActivity":
+                agent_path = str(nested.get("agentPath") or "").strip()
+                activity_kind = str(nested.get("kind") or "").strip()
+                if (
+                    not agent_path
+                    or len(agent_path) > 512
+                    or activity_kind not in {"started", "interacted", "interrupted"}
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.CONFIG_DRIFT,
+                        "native helper activity metadata is malformed",
+                        effect_unknown=True,
+                    )
+                native_subordinate_id = register_subordinate(
+                    nested.get("agentThreadId")
+                )
+                safe_payload.update(
+                    {"item_type": nested_type, "activity_kind": activity_kind}
+                )
+            elif (
+                isinstance(nested, Mapping)
+                and nested.get("parentThreadId") == state.provider_session_id
+            ):
+                native_subordinate_id = register_subordinate(nested.get("id"))
+                safe_payload["native_thread_started"] = True
+
+            notification_thread = str(params.get("threadId") or "").strip()
+            if (
+                notification_thread
+                and notification_thread != state.provider_session_id
+            ):
+                native_subordinate_id = register_subordinate(notification_thread)
+
             state.events.append(
                 NormalizedEvent(
                     attempt_id=turn.attempt_id,
@@ -984,9 +1181,129 @@ class CodexOperatorAdapter:
                     turn_id=turn.turn_id,
                     kind=method,
                     provider_event_id=provider_event_id or None,
-                    payload_redacted={"method": method},
+                    native_subordinate_id=native_subordinate_id,
+                    payload_redacted=safe_payload,
                 )
             )
+
+    def _audit_native_helper_tree(
+        self, state: _GenerationState, turn: TurnRef
+    ) -> None:
+        if turn.turn_id in state.audited_native_helper_turns:
+            return
+        try:
+            listed = state.client.request(
+                "thread/list",
+                {
+                    "parentThreadId": state.provider_session_id,
+                    "cwd": str(self.workspace_root),
+                    "limit": 2,
+                    "sortDirection": "asc",
+                },
+                timeout=30.0,
+            )
+        except Exception as exc:
+            raise _rpc_failure(exc, effect_unknown=True) from exc
+        rows = listed.get("data") if isinstance(listed, Mapping) else None
+        if (
+            not isinstance(rows, list)
+            or any(not isinstance(row, Mapping) for row in rows)
+            or listed.get("nextCursor") is not None
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "native helper child census is incomplete",
+                effect_unknown=True,
+            )
+        child_ids = {str(row.get("id") or "").strip() for row in rows}
+        if "" in child_ids or len(child_ids) != len(rows):
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "native helper child census contains a missing or duplicate identity",
+                effect_unknown=True,
+            )
+        observed_this_turn = state.turn_subordinates.get(turn.turn_id, set())
+        observed_lifetime = set().union(*state.turn_subordinates.values())
+        if self.native_helper_grant is None:
+            if child_ids or observed_lifetime:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "a helper-disabled parent acquired a native child",
+                    effect_unknown=True,
+                )
+            state.audited_native_helper_turns.add(turn.turn_id)
+            return
+        if (
+            len(child_ids) > self.native_helper_grant.max_concurrent_helpers
+            or len(observed_this_turn)
+            > self.native_helper_grant.max_concurrent_helpers
+            or child_ids != observed_lifetime
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "native helper event/tree identities do not reconcile",
+                effect_unknown=True,
+            )
+        for child_id in sorted(child_ids):
+            try:
+                read = state.client.request(
+                    "thread/read",
+                    {"threadId": child_id, "includeTurns": False},
+                    timeout=30.0,
+                )
+            except Exception as exc:
+                raise _rpc_failure(exc, effect_unknown=True) from exc
+            child = read.get("thread") if isinstance(read, Mapping) else None
+            if not isinstance(child, Mapping):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "native helper thread is unreadable",
+                    effect_unknown=True,
+                )
+            status = child.get("status")
+            status_type = (
+                str(status.get("type") or "")
+                if isinstance(status, Mapping)
+                else ""
+            )
+            source = child.get("source")
+            subagent = (
+                source.get("subAgent") if isinstance(source, Mapping) else None
+            )
+            spawn = (
+                subagent.get("thread_spawn")
+                if isinstance(subagent, Mapping)
+                else None
+            )
+            if (
+                str(child.get("id") or "") != child_id
+                or child.get("parentThreadId") != state.provider_session_id
+                or child.get("sessionId") != state.provider_session_tree_id
+                or str(child.get("cwd") or "") != str(self.workspace_root)
+                or child.get("agentRole") is not None
+                or status_type not in {"idle", "notLoaded"}
+                or not isinstance(spawn, Mapping)
+                or spawn.get("parent_thread_id") != state.provider_session_id
+                or spawn.get("depth") != self.native_helper_grant.max_depth
+                or spawn.get("agent_role") not in {None, ""}
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "native helper thread escaped its parent ceiling",
+                    effect_unknown=True,
+                )
+            agent_path = spawn.get("agent_path")
+            if agent_path is not None and (
+                not isinstance(agent_path, str)
+                or not agent_path.strip()
+                or len(agent_path) > 512
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "native helper lineage path is malformed",
+                    effect_unknown=True,
+                )
+        state.audited_native_helper_turns.add(turn.turn_id)
 
     def begin_turn(
         self,
@@ -1092,6 +1409,7 @@ class CodexOperatorAdapter:
                     raise _rpc_failure(exc, effect_unknown=True) from exc
                 notifications = [*state.client.drain_notifications(), completed]
                 self._ingest_turn_notifications(state, turn, notifications)
+            self._audit_native_helper_tree(state, turn)
         events = tuple(state.events[cursor.local_sequence :])
         return events, EventCursor(
             attempt_id=cursor.attempt_id,
@@ -1133,6 +1451,15 @@ class CodexOperatorAdapter:
         if not native_turn:
             raise CodexAdapterError(
                 AdapterFailureClass.SESSION_MISSING, "native turn is missing"
+            )
+        if (
+            self.native_helper_grant is not None
+            and turn.turn_id not in state.audited_native_helper_turns
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "native helper tree was not reconciled before candidate collection",
+                effect_unknown=True,
             )
         try:
             result = state.client.request(

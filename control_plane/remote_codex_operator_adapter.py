@@ -102,7 +102,7 @@ class RemoteCodexOperatorAdapter:
             supports_approval_response=False,
             supports_checkpoint=False,
             supports_config_staging=False,
-            supports_subagent_capability_ceiling=False,
+            supports_subagent_capability_ceiling=True,
             supports_structured_events=True,
             supports_provider_native_idempotency=False,
             provider_capability_ids=("codex-app-server-stdio",),

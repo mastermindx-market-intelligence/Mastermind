@@ -29,7 +29,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-08-24.g3"
+    assert registry.policy_version == "2026-08-24.g4"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -49,6 +49,17 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert docs.mcp_servers == ("openai-developer-docs-v1",)
     assert len(docs.expected_config_digest) == 64
     assert docs.plugins == ()
+
+    helper = registry.resolve(
+        "operator.appserver.readonly.docs-mcp.native-helper.v1"
+    )
+    assert helper.native_helper_policy is NativeHelperPolicy.PARENT_READ_ONLY_CEILING
+    assert helper.native_helper is not None
+    assert helper.native_helper.max_concurrent_helpers == 1
+    assert helper.native_helper.max_depth == 1
+    assert helper.native_helper.max_runtime_seconds == 60
+    assert helper.native_helper.hide_spawn_agent_metadata is True
+    assert helper.mcp_servers == ("openai-developer-docs-v1",)
 
 
 def test_profile_compiles_exact_mcp_manifest_and_secret_free_config():
@@ -153,6 +164,45 @@ def test_docs_mcp_schema_and_security_projection_are_exact_and_drift_sensitive()
     )
 
 
+def test_native_helper_profile_compiles_a_hidden_depth_one_parent_ceiling():
+    profile = ExecutionCapabilityRegistry.load().resolve(
+        "operator.appserver.readonly.docs-mcp.native-helper.v1"
+    )
+    helper = profile.native_helper
+    assert helper is not None
+    projection = profile.app_server_config_projection()
+    assert projection["agents"] == {
+        "default_subagent_model": "gpt-5.6-sol",
+        "default_subagent_reasoning_effort": "xhigh",
+        "enabled": True,
+        "interrupt_message": None,
+        "job_max_runtime_seconds": 60,
+        "max_concurrent_threads_per_session": 1,
+        "max_depth": 1,
+    }
+    assert projection["features"]["multi_agent"] is False
+    assert projection["features"]["multi_agent_v2"] == {
+        "enabled": True,
+        "hide_spawn_agent_metadata": True,
+        "max_concurrent_threads_per_session": 2,
+        "non_code_mode_only": False,
+    }
+    overrides = "\n".join(profile.app_server_config_overrides())
+    assert "hide_spawn_agent_metadata=true" in overrides
+    assert "agents.max_depth=1" in overrides
+    assert "agents.job_max_runtime_seconds=60" in overrides
+    assert "agents.max_concurrent_threads_per_session=1" in overrides
+    assert "features.plugins=false" in overrides
+    assert "openaiDeveloperDocs.enabled_tools" in overrides
+
+    widened = json.loads(json.dumps(projection))
+    widened["agents"]["max_depth"] = 2
+    assert app_server_security_config_digest(widened) != profile.expected_config_digest
+    widened = json.loads(json.dumps(projection))
+    widened["features"]["multi_agent_v2"]["hide_spawn_agent_metadata"] = False
+    assert app_server_security_config_digest(widened) != profile.expected_config_digest
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -167,7 +217,7 @@ def test_docs_mcp_schema_and_security_projection_are_exact_and_drift_sensitive()
             lambda raw: raw["profiles"]["operator.appserver.readonly.v1"].update(
                 native_helper_policy="parent_read_only_ceiling"
             ),
-            "cannot enable native helpers",
+            "without an exact ceiling",
         ),
         (
             lambda raw: raw["profiles"]["operator.appserver.readonly.v1"].update(
