@@ -80,7 +80,8 @@ def test_x1_client_stays_on_existing_local_control_room_contract() -> None:
     ):
         assert endpoint in source
 
-    assert "innerHTML" not in source
+    assert ".innerHTML" not in source
+    assert "innerHTML =" not in source
     assert "document.write" not in source
     assert "eval(" not in source
     assert '"X-CCR-Token"' in source
@@ -101,7 +102,7 @@ def test_x1_focus_is_a_closed_deterministic_view_not_an_ai_priority_score() -> N
         assert forbidden not in focus
 
 
-def test_x1_coordination_chain_does_not_claim_provider_presence_is_cognition() -> None:
+def test_x1_coordination_chain_is_attention_and_addressability_only() -> None:
     source = JS.read_text(encoding="utf-8")
     start = source.index("function renderChain(card)")
     end = source.index("function renderMissionRow(card)", start)
@@ -109,9 +110,36 @@ def test_x1_coordination_chain_does_not_claim_provider_presence_is_cognition() -
 
     assert "cardAttentionTargets(card)" in chain
     assert "card.bindings" in chain
-    assert "card.executive" in chain
-    for forbidden in ("capabilities", "running", "process", "installed"):
+    for forbidden in (
+        "capabilities",
+        "running",
+        "process",
+        "installed",
+        "card.executive",
+        "cardFailedJobs",
+    ):
         assert forbidden not in chain
+
+
+def test_x1_source_pulse_displays_clocks_without_inventing_freshness_sla() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function sourcePulsePill")
+    end = source.index("function renderDegraded", start)
+    pulse = source[start:end]
+
+    assert "6 * 60" not in pulse
+    assert "DB present" in pulse
+    assert '"connected"' not in pulse
+
+
+def test_x1_quick_open_sol_requires_one_unambiguous_destination() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function uniqueBinding")
+    end = source.index("function renderNeedsYou", start)
+    binding = source[start:end]
+
+    assert "rows.length === 1" in binding
+    assert "return rows[0]" in binding
 
 
 def test_x1_keeps_mastermind_semantic_palette_and_responsive_breakpoints() -> None:
@@ -120,5 +148,6 @@ def test_x1_keeps_mastermind_semantic_palette_and_responsive_breakpoints() -> No
         assert token in source
     assert ".ccr-detail-rail" in source
     assert ".ccr-chain-node.is-attention" in source
+    assert ".ccr-layout.ccr-dock-collapsed" in source
     assert "@media (max-width: 760px)" in source
     assert "@media (prefers-reduced-motion: reduce)" in source
