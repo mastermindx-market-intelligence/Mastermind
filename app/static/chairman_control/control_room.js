@@ -44,6 +44,9 @@
     paletteIndex: 0,
   };
 
+  var LAST_DRAWER_OPENER = null;
+  var LAST_PALETTE_OPENER = null;
+
   // DOM -------------------------------------------------------------------
   function el(tag, opts) {
     var node = document.createElement(tag);
@@ -112,6 +115,48 @@
     node.type = "button";
     if (onClick) node.addEventListener("click", onClick);
     return node;
+  }
+
+  function openerCandidate(candidate) {
+    if (candidate && typeof candidate.focus === "function" && document.contains(candidate)) return candidate;
+    var active = document.activeElement;
+    if (active && typeof active.focus === "function" && document.contains(active)) return active;
+    return null;
+  }
+
+  function restoreFocus(candidate) {
+    if (!candidate || typeof candidate.focus !== "function" || !document.contains(candidate)) return;
+    try { candidate.focus({ preventScroll: true }); }
+    catch (_e) { candidate.focus(); }
+  }
+
+  function focusableNodes(container) {
+    if (!container) return [];
+    var nodes = container.querySelectorAll(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    return Array.prototype.slice.call(nodes).filter(function (node) {
+      return !node.hidden && node.getClientRects().length > 0;
+    });
+  }
+
+  function trapFocus(event, container) {
+    if (event.key !== "Tab") return false;
+    var nodes = focusableNodes(container);
+    if (!nodes.length) return false;
+    var first = nodes[0];
+    var last = nodes[nodes.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+      return true;
+    }
+    if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+      return true;
+    }
+    return false;
   }
 
   // transport -------------------------------------------------------------
@@ -186,8 +231,7 @@
   function renderSourcePulse(body, sources) {
     var node = document.getElementById("ccr-source-pulse");
     clear(node);
-    // Ages are shown exactly as clocks, not interpreted against a UI-invented
-    // freshness SLA. Source-owned degraded state is rendered separately.
+    // Ages are clocks only. Source-owned degraded state is rendered separately.
     var aoAge = ageWords(sources.agent_os_state_generated_at) || "unknown age";
     var ghAge = ageWords(sources.active_builds_collected_at) || "unknown age";
     node.appendChild(sourcePulsePill("Agent OS", aoAge, parseStamp(sources.agent_os_state_generated_at) === null));
@@ -324,12 +368,13 @@
     if (card) {
       var workSection = el("section", { className: "ccr-detail-section" });
       workSection.appendChild(el("h3", { text: "Joined work" }));
-      workSection.appendChild(button("Open work", "ccr-open-button", function () { openDetail(card); }));
+      workSection.appendChild(button("Open work", "ccr-open-button", function () { openDetail(card, LAST_DRAWER_OPENER); }));
       body.appendChild(workSection);
     }
   }
 
-  function openAttentionDetail(item, target) {
+  function openAttentionDetail(item, target, opener) {
+    LAST_DRAWER_OPENER = openerCandidate(opener);
     STATE.selectedWork = null;
     renderAttentionDetail(item, target);
     var drawer = document.getElementById("ccr-detail-drawer");
@@ -366,16 +411,20 @@
 
       var actions = el("div", { className: "ccr-attention-actions" });
       var card = findCardForAttention(item);
-      actions.appendChild(button("Inspect", "ccr-open-button", function (event) {
+      var inspectBtn = button("Inspect", "ccr-open-button", function (event) {
         event.stopPropagation();
-        openAttentionDetail(item, "chairman");
-      }));
-      if (card) actions.appendChild(button("Open work", "ccr-open-button", function (event) {
-        event.stopPropagation();
-        openDetail(card);
-      }));
+        openAttentionDetail(item, "chairman", inspectBtn);
+      });
+      actions.appendChild(inspectBtn);
+      if (card) {
+        var workBtn = button("Open work", "ccr-open-button", function (event) {
+          event.stopPropagation();
+          openDetail(card, workBtn);
+        });
+        actions.appendChild(workBtn);
+      }
       var sol = uniqueBinding(card, "ceo");
-      if (sol) actions.appendChild(openBindingButton(sol, "Open Sol"));
+      if (sol && bindingConfidence(sol).openable) actions.appendChild(openBindingButton(sol, "Open Sol"));
       li.appendChild(actions);
       list.appendChild(li);
     });
@@ -398,8 +447,8 @@
       li.appendChild(el("span", { text: safeText(work, "unjoined"), className: "ccr-mini-work" }));
       li.tabIndex = 0;
       li.role = "button";
-      li.addEventListener("click", function () { openAttentionDetail(item, target); });
-      li.addEventListener("keydown", function (event) { if (event.key === "Enter") openAttentionDetail(item, target); });
+      li.addEventListener("click", function () { openAttentionDetail(item, target, li); });
+      li.addEventListener("keydown", function (event) { if (event.key === "Enter") openAttentionDetail(item, target, li); });
       container.appendChild(li);
     });
     if (rows.length > 5) container.appendChild(el("li", { text: "+" + (rows.length - 5) + " more", className: "ccr-empty-line" }));
@@ -412,6 +461,30 @@
     if (!expected || binding.locator_kind !== expected) {
       return { state: "UNSUPPORTED", variant: "is-dim", openable: false, note: "Locator is not supported by this Control Room." };
     }
+
+    // Current protected chatgpt.py deliberately refuses every managed-seat
+    // navigation path until P0B has a supported real-seat actuator. A valid
+    // address remains useful as a binding, but it must never render as an
+    // openable action merely because its locator shape is valid.
+    if (binding.provider === "chatgpt") {
+      return {
+        state: "UNSUPPORTED",
+        variant: "is-dim",
+        openable: false,
+        note: "Bound managed-browser seat; current P0B navigation actuator is not supported.",
+      };
+    }
+
+    var capability = (STATE.capabilities || {})[binding.provider] || null;
+    if (capability && (capability.state === "UNSUPPORTED" || capability.state === "NOT_INSTALLED")) {
+      return {
+        state: capability.state,
+        variant: "is-dim",
+        openable: false,
+        note: safeText(capability.detail, "Provider navigation is unavailable on this machine."),
+      };
+    }
+
     if (isBlank(binding.last_verified_at)) {
       return { state: "BOUND", variant: "is-slate", openable: true, note: "Bound; no verified open stamp." };
     }
@@ -429,11 +502,9 @@
     return postJSON("/api/open", { binding_id: binding.binding_id }).then(function (outcome) {
       if (outcome && outcome.ok) {
         if (statusNode) statusNode.textContent = "Opened · " + safeText(outcome.action, "provider action");
-      } else {
-        if (statusNode) {
-          statusNode.textContent = "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
-          statusNode.className = "ccr-binding-meta ccr-problem";
-        }
+      } else if (statusNode) {
+        statusNode.textContent = "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
+        statusNode.className = "ccr-binding-meta ccr-problem";
       }
       return outcome;
     }).catch(function () {
@@ -671,8 +742,13 @@
     if (reasons.indexOf("authored blocked state") !== -1) evidence.appendChild(chip("BLOCKED", "is-danger"));
     row.appendChild(evidence);
 
-    row.addEventListener("click", function () { openDetail(card); });
-    row.addEventListener("keydown", function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDetail(card); } });
+    row.addEventListener("click", function () { openDetail(card, row); });
+    row.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDetail(card, row);
+      }
+    });
     return row;
   }
 
@@ -704,7 +780,7 @@
     if (STATE.workMode === "focus") {
       var focusSet = {};
       focus.forEach(function (card, index) { focusSet[card.work_ref] = index; });
-      rows.sort(function (a, b) { return (focusSet[a.work_ref] || 0) - (focusSet[b.work_ref] || 0); });
+      rows.sort(function (a, b) { return focusSet[a.work_ref] - focusSet[b.work_ref]; });
     }
     renderMissionList(document.getElementById("ccr-work-list"), rows);
     setTally("work", STATE.work.length);
@@ -838,7 +914,8 @@
     body.appendChild(surfaceSection);
   }
 
-  function openDetail(card) {
+  function openDetail(card, opener) {
+    LAST_DRAWER_OPENER = openerCandidate(opener);
     STATE.selectedWork = card;
     renderDetail(card);
     var drawer = document.getElementById("ccr-detail-drawer");
@@ -850,10 +927,16 @@
 
   function closeDetail() {
     var drawer = document.getElementById("ccr-detail-drawer");
+    var wasOpen = drawer.classList.contains("is-open");
     drawer.classList.remove("is-open");
     drawer.setAttribute("aria-hidden", "true");
     document.getElementById("ccr-drawer-scrim").hidden = true;
     STATE.selectedWork = null;
+    if (wasOpen) {
+      var opener = LAST_DRAWER_OPENER;
+      LAST_DRAWER_OPENER = null;
+      restoreFocus(opener);
+    }
   }
 
   // loose ends ------------------------------------------------------------
@@ -882,7 +965,12 @@
 
     var conflicts = renderLooseRows("#binding-conflicts", doc.binding_conflicts, function (row) {
       var li = el("li", { className: "ccr-row" });
-      li.appendChild(el("span", { text: safeText(row.work_ref) + " · " + safeText(row.role) + " · " + (row.binding_ids || []).length + " claims", className: "ccr-row-title ccr-row-id" }));
+      var claimantIds = (row.binding_ids || []).map(function (id) { return String(id); });
+      var claimantText = claimantIds.length ? claimantIds.join(", ") : "claimants unknown";
+      li.appendChild(el("span", {
+        text: safeText(row.work_ref) + " · " + safeText(row.role) + " · " + claimantIds.length + " claims · " + claimantText,
+        className: "ccr-row-title ccr-row-id",
+      }));
       li.appendChild(chip("CONFLICT", "is-danger"));
       return li;
     }, "No work/role navigation slot has competing claims.");
@@ -905,7 +993,11 @@
         sub: safeText(card.work_ref) + (ao.program ? " · " + ao.program : ""),
         search: [card.work_ref, ao.title, ao.program, ao.next_action].map(normalizedSearchText).join(" "),
         actionLabel: "Inspect",
-        action: function () { closePalette(); openDetail(card); },
+        action: function () {
+          var opener = LAST_PALETTE_OPENER;
+          closePalette(false);
+          openDetail(card, opener);
+        },
       });
       (((card.github || {}).prs) || []).forEach(function (pr) {
         items.push({
@@ -914,7 +1006,10 @@
           sub: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + safeText(card.work_ref),
           search: [pr.title, pr.repo, pr.number, card.work_ref].map(normalizedSearchText).join(" "),
           actionLabel: "Open",
-          action: function () { closePalette(); if (pr.url) window.open(pr.url, "_blank", "noopener"); },
+          action: function () {
+            closePalette();
+            if (pr.url) window.open(pr.url, "_blank", "noopener");
+          },
         });
       });
     });
@@ -928,14 +1023,16 @@
         search: [binding.seat_ref, binding.provider, binding.role, binding.work_ref, workTitle(binding.work_ref)].map(normalizedSearchText).join(" "),
         actionLabel: confidence.openable ? "Open" : "Inspect",
         action: function () {
-          closePalette();
+          var opener = LAST_PALETTE_OPENER;
+          closePalette(false);
           if (confidence.openable) {
-            openBinding(binding, null, null).then(function () { loadState(); });
+            openBinding(binding, null, null).then(function () { loadState(); restoreFocus(opener); });
           } else if (relatedCard) {
-            openDetail(relatedCard);
+            openDetail(relatedCard, opener);
           } else {
             document.getElementById("system").scrollIntoView({ behavior: "smooth", block: "start" });
             setActiveNav("system");
+            restoreFocus(opener);
           }
         },
       });
@@ -973,7 +1070,8 @@
     });
   }
 
-  function openPalette() {
+  function openPalette(opener) {
+    LAST_PALETTE_OPENER = openerCandidate(opener);
     var wrap = document.getElementById("ccr-palette");
     wrap.hidden = false;
     STATE.paletteIndex = 0;
@@ -983,7 +1081,16 @@
     input.focus();
   }
 
-  function closePalette() { document.getElementById("ccr-palette").hidden = true; }
+  function closePalette(restore) {
+    var wrap = document.getElementById("ccr-palette");
+    var wasOpen = !wrap.hidden;
+    wrap.hidden = true;
+    if (wasOpen && restore !== false) {
+      var opener = LAST_PALETTE_OPENER;
+      LAST_PALETTE_OPENER = null;
+      restoreFocus(opener);
+    }
+  }
 
   // discovery / bind ------------------------------------------------------
   function discoverGroup(container, heading, rows, toText, emptyLine, runningChip) {
@@ -1008,6 +1115,13 @@
     discoverGroup(container, "ChatGPT · GoLogin", envs.gologin, function (row) { return "profile " + safeText(row.profile_id); }, "No local GoLogin environment found.", true);
     discoverGroup(container, "Claude Code", doc.claude_code_sessions, function (row) { return safeText(row.project_dir) + " / " + safeText(row.session_id); }, "No Claude Code session found.", false);
     discoverGroup(container, "Codex", doc.codex_sessions, function (row) { return safeText(row.date) + " / " + safeText(row.session_id); }, "No Codex session found.", false);
+
+    var cursor = doc.cursor || {};
+    container.appendChild(el("h3", { text: "Cursor" }));
+    container.appendChild(el("p", {
+      text: safeText(cursor.note, cursor.supported === false ? "Cursor native thread discovery is unsupported." : "Cursor discovery state is unknown."),
+      className: "ccr-empty-line",
+    }));
   }
 
   function updateBindFieldVisibility() {
@@ -1140,20 +1254,74 @@
     applyTheme(readTheme());
     loadState();
 
+    var dock = document.getElementById("ccr-surface-dock");
+    var layout = document.querySelector(".ccr-layout");
+    var collapsed = false;
+
+    function desktopDockVisible() {
+      return !(window.matchMedia && window.matchMedia("(max-width: 1050px)").matches);
+    }
+
+    function applyDockState() {
+      // Below the dock breakpoint the dock is replaced by the responsive
+      // Surfaces section. A remembered desktop collapse preference must not
+      // reserve a phantom 42px grid column when the dock itself is hidden.
+      var activeCollapsed = collapsed && desktopDockVisible();
+      dock.classList.toggle("is-collapsed", activeCollapsed);
+      if (layout) layout.classList.toggle("ccr-dock-collapsed", activeCollapsed);
+      var toggle = document.getElementById("ccr-dock-collapse");
+      toggle.textContent = collapsed ? "›" : "‹";
+      toggle.setAttribute("aria-label", collapsed ? "Expand surfaces" : "Collapse surfaces");
+      toggle.setAttribute("aria-expanded", activeCollapsed ? "false" : "true");
+    }
+
+    try { collapsed = window.localStorage.getItem(DOCK_KEY) === "1"; } catch (_e) { collapsed = false; }
+    applyDockState();
+    window.addEventListener("resize", applyDockState);
+
     document.getElementById("ccr-theme").addEventListener("click", cycleTheme);
-    document.getElementById("ccr-command").addEventListener("click", openPalette);
-    document.getElementById("ccr-palette-backdrop").addEventListener("click", closePalette);
+    document.getElementById("ccr-command").addEventListener("click", function () { openPalette(this); });
+    document.getElementById("ccr-palette-backdrop").addEventListener("click", function () { closePalette(); });
     document.getElementById("ccr-palette-input").addEventListener("input", function () { STATE.paletteIndex = 0; renderPaletteResults(); });
     document.getElementById("ccr-palette-input").addEventListener("keydown", function (event) {
-      if (event.key === "ArrowDown") { event.preventDefault(); if (STATE.paletteResults.length) STATE.paletteIndex = (STATE.paletteIndex + 1) % STATE.paletteResults.length; renderPaletteResults(); }
-      else if (event.key === "ArrowUp") { event.preventDefault(); if (STATE.paletteResults.length) STATE.paletteIndex = (STATE.paletteIndex - 1 + STATE.paletteResults.length) % STATE.paletteResults.length; renderPaletteResults(); }
-      else if (event.key === "Enter") { event.preventDefault(); if (STATE.paletteResults[STATE.paletteIndex]) STATE.paletteResults[STATE.paletteIndex].action(); }
-      else if (event.key === "Escape") { closePalette(); }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (STATE.paletteResults.length) STATE.paletteIndex = (STATE.paletteIndex + 1) % STATE.paletteResults.length;
+        renderPaletteResults();
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (STATE.paletteResults.length) STATE.paletteIndex = (STATE.paletteIndex - 1 + STATE.paletteResults.length) % STATE.paletteResults.length;
+        renderPaletteResults();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        if (STATE.paletteResults[STATE.paletteIndex]) STATE.paletteResults[STATE.paletteIndex].action();
+      } else if (event.key === "Escape") {
+        event.stopPropagation();
+        closePalette();
+      }
     });
 
     document.addEventListener("keydown", function (event) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openPalette(); }
-      if (event.key === "Escape") { if (!document.getElementById("ccr-palette").hidden) closePalette(); else closeDetail(); }
+      var palette = document.getElementById("ccr-palette");
+      var drawer = document.getElementById("ccr-detail-drawer");
+      if (event.key === "Tab") {
+        if (!palette.hidden) {
+          trapFocus(event, palette);
+          return;
+        }
+        if (drawer.classList.contains("is-open")) {
+          trapFocus(event, drawer);
+          return;
+        }
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        openPalette(document.activeElement);
+      }
+      if (event.key === "Escape") {
+        if (!palette.hidden) closePalette();
+        else closeDetail();
+      }
     });
 
     document.getElementById("ccr-drawer-close").addEventListener("click", closeDetail);
@@ -1168,41 +1336,47 @@
     document.getElementById("ccr-work-filter").addEventListener("input", function () { STATE.workQuery = this.value.trim(); renderWork(); });
     var workModeButtons = document.querySelectorAll("[data-work-mode]");
     for (var i = 0; i < workModeButtons.length; i++) {
-      workModeButtons[i].addEventListener("click", function () { STATE.workMode = this.getAttribute("data-work-mode") || "focus"; renderWork(); });
+      workModeButtons[i].addEventListener("click", function () {
+        STATE.workMode = this.getAttribute("data-work-mode") || "focus";
+        renderWork();
+      });
     }
 
     var navLinks = document.querySelectorAll("[data-nav]");
-    for (var n = 0; n < navLinks.length; n++) navLinks[n].addEventListener("click", function () { setActiveNav(this.getAttribute("data-nav")); });
-
-    var dock = document.getElementById("ccr-surface-dock");
-    var layout = document.querySelector(".ccr-layout");
-    var collapsed = false;
-    function applyDockState() {
-      // Below the dock breakpoint the dock is replaced by the responsive
-      // Surfaces section. A remembered desktop collapse preference must not
-      // reserve a phantom 42px grid column when the dock itself is hidden.
-      var desktopDockVisible = !(window.matchMedia && window.matchMedia("(max-width: 1050px)").matches);
-      var activeCollapsed = collapsed && desktopDockVisible;
-      dock.classList.toggle("is-collapsed", activeCollapsed);
-      if (layout) layout.classList.toggle("ccr-dock-collapsed", activeCollapsed);
-      var toggle = document.getElementById("ccr-dock-collapse");
-      toggle.textContent = collapsed ? "›" : "‹";
-      toggle.setAttribute("aria-label", collapsed ? "Expand surfaces" : "Collapse surfaces");
+    for (var n = 0; n < navLinks.length; n++) {
+      navLinks[n].addEventListener("click", function (event) {
+        var name = this.getAttribute("data-nav");
+        if (name === "surfaces" && desktopDockVisible()) {
+          event.preventDefault();
+          collapsed = false;
+          applyDockState();
+          try { window.localStorage.setItem(DOCK_KEY, "0"); } catch (_e) { /* no-op */ }
+          try { dock.focus({ preventScroll: true }); }
+          catch (_e) { dock.focus(); }
+        }
+        setActiveNav(name);
+      });
     }
-    try { collapsed = window.localStorage.getItem(DOCK_KEY) === "1"; } catch (_e) { collapsed = false; }
-    applyDockState();
-    window.addEventListener("resize", applyDockState);
+
     document.getElementById("ccr-dock-collapse").addEventListener("click", function () {
       collapsed = !collapsed;
       applyDockState();
       try { window.localStorage.setItem(DOCK_KEY, collapsed ? "1" : "0"); } catch (_e) { /* no-op */ }
     });
 
-    document.getElementById("discover-run").addEventListener("click", function () { getJSON("/api/discover").then(renderDiscoverResults); });
+    document.getElementById("discover-run").addEventListener("click", function () {
+      getJSON("/api/discover").then(renderDiscoverResults).catch(function () {
+        var results = document.getElementById("discover-results");
+        clear(results);
+        results.appendChild(el("p", { text: "Discovery unavailable — local server request failed.", className: "ccr-problem" }));
+      });
+    });
+
     document.getElementById("refresh-builds").addEventListener("click", function () {
       var btn = this;
       var result = document.getElementById("refresh-builds-result");
       btn.disabled = true;
+      result.className = "";
       result.textContent = "Reading GitHub…";
       postJSON("/api/refresh-builds", {}).then(function (outcome) {
         if (outcome && outcome.ok) {
@@ -1212,6 +1386,9 @@
         result.textContent = "Did not refresh · " + safeText(outcome && outcome.detail, "no detail");
         result.className = "ccr-problem";
         return null;
+      }).catch(function () {
+        result.textContent = "Did not refresh · local server unavailable";
+        result.className = "ccr-problem";
       }).finally(function () { btn.disabled = false; });
     });
 
@@ -1251,8 +1428,13 @@
           result.appendChild(el("div", { text: "Bound · " + safeText(outcome.binding_id) }));
           loadState();
         } else {
-          ((outcome && outcome.problems) || ["The server refused the binding."]).forEach(function (problem) { result.appendChild(el("div", { text: problem, className: "ccr-problem" })); });
+          ((outcome && outcome.problems) || ["The server refused the binding."]).forEach(function (problem) {
+            result.appendChild(el("div", { text: problem, className: "ccr-problem" }));
+          });
         }
+      }).catch(function () {
+        clear(result);
+        result.appendChild(el("div", { text: "Binding request failed · local server unavailable", className: "ccr-problem" }));
       });
     });
   });
