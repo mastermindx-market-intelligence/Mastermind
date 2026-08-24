@@ -121,6 +121,17 @@ def test_x1_coordination_chain_is_attention_and_addressability_only() -> None:
         assert forbidden not in chain
 
 
+def test_x1_human_attention_keeps_visual_precedence_over_machine_danger() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function renderMissionRow(card)")
+    end = source.index("function workMatches(card, query)", start)
+    row = source[start:end]
+
+    assert "hasHumanAttention" in row
+    assert "targets.chairman || targets.ceo || targets.coo" in row
+    assert "(failed || disagreements) && !hasHumanAttention" in row
+
+
 def test_x1_source_pulse_displays_clocks_without_inventing_freshness_sla() -> None:
     source = JS.read_text(encoding="utf-8")
     start = source.index("function sourcePulsePill")
@@ -140,6 +151,30 @@ def test_x1_quick_open_sol_requires_one_unambiguous_destination() -> None:
 
     assert "rows.length === 1" in binding
     assert "return rows[0]" in binding
+
+
+def test_x1_palette_never_attempts_an_unsupported_surface_open() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function rebuildPaletteIndex()")
+    end = source.index("function paletteSearch(query)", start)
+    palette = source[start:end]
+
+    assert "var confidence = bindingConfidence(binding)" in palette
+    assert 'actionLabel: confidence.openable ? "Open" : "Inspect"' in palette
+    assert "if (confidence.openable)" in palette
+    assert "else if (relatedCard)" in palette
+
+
+def test_x1_remembered_dock_collapse_cannot_reserve_hidden_responsive_space() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function applyDockState()")
+    end = source.index('document.getElementById("discover-run")', start)
+    dock = source[start:end]
+
+    assert 'matchMedia("(max-width: 1050px)")' in dock
+    assert "var activeCollapsed = collapsed && desktopDockVisible" in dock
+    assert 'classList.toggle("ccr-dock-collapsed", activeCollapsed)' in dock
+    assert 'window.addEventListener("resize", applyDockState)' in dock
 
 
 def test_x1_keeps_mastermind_semantic_palette_and_responsive_breakpoints() -> None:
