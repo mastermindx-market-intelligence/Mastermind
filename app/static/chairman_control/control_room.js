@@ -1230,7 +1230,11 @@
     var resolved = mode === "system" ? resolvedSystemTheme() : mode;
     document.documentElement.setAttribute("data-theme", resolved);
     var btn = document.getElementById("ccr-theme");
-    if (btn) btn.textContent = mode === "system" ? "Theme · System" : "Theme · " + mode.charAt(0).toUpperCase() + mode.slice(1);
+    if (btn) {
+      btn.textContent = mode === "system" ? "Theme · System" : "Theme · " + mode.charAt(0).toUpperCase() + mode.slice(1);
+      btn.setAttribute("aria-label", btn.textContent);
+      btn.setAttribute("title", btn.textContent);
+    }
   }
 
   function cycleTheme() {

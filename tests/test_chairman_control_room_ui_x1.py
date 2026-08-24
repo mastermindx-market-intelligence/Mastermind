@@ -257,9 +257,11 @@ def test_x1_desktop_surfaces_nav_targets_the_real_dock() -> None:
 def test_x1_drawer_and_palette_are_modal_focus_scopes_with_return() -> None:
     source = JS.read_text(encoding="utf-8")
     markup = INDEX.read_text(encoding="utf-8")
+    styles = CSS.read_text(encoding="utf-8")
 
     assert 'id="ccr-detail-drawer" class="ccr-detail-drawer" role="dialog" aria-modal="true"' in markup
     assert 'id="ccr-palette" class="ccr-palette-wrap" role="dialog" aria-modal="true"' in markup
+    assert "[hidden] { display: none !important; }" in styles
     assert "function trapFocus(event, container)" in source
     assert "LAST_DRAWER_OPENER" in source
     assert "LAST_PALETTE_OPENER" in source
@@ -274,7 +276,13 @@ def test_x1_keeps_mastermind_semantic_palette_and_responsive_breakpoints() -> No
     assert ".ccr-detail-rail" in source
     assert ".ccr-chain-node.is-attention" in source
     assert ".ccr-layout.ccr-dock-collapsed" in source
-    assert "@media (max-width: 760px)" in source
+    compact_desktop = source[source.index("@media (max-width: 1280px)") : source.index("@media (max-width: 1050px)")]
+    assert ".ccr-source-pulse { display: none; }" in compact_desktop
+    mobile = source[source.index("@media (max-width: 760px)") :]
+    assert "grid-template-columns: minmax(0,1fr) auto auto" in mobile
+    assert ".ccr-refresh-banner { position: static; }" in mobile
+    assert ".ccr-view-section { scroll-margin-top: calc(var(--topbar) + 50px); }" in mobile
+    assert '#ccr-theme::before { content: "◐"' in mobile
     assert "@media (prefers-reduced-motion: reduce)" in source
 
 
