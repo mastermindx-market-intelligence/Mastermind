@@ -1,6 +1,7 @@
 """MAS-115 operator setup — hermetic privacy and fail-closed tests."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -12,6 +13,7 @@ import pytest
 
 from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import nonseat_canary as canary
+from scripts import mas115_keychain_store as keychain_store
 from scripts import mas115_setup as setup
 
 
@@ -213,18 +215,123 @@ def test_browser_core_detection_reads_shape_not_profile_content(tmp_path, marker
     assert setup._detect_multilogin_browser_type(row, mlx_profiles_root=str(tmp_path)) == expected
 
 
-def test_credential_setup_is_fixed_native_prompt_with_no_secret_carrier():
+def test_credential_setup_execs_fixed_secret_owner_with_no_secret_carrier():
     argv = setup.credential_setup_argv("multilogin")
-    assert argv[0] == "/usr/bin/security"
-    assert argv[-1] == "-w"
-    assert argv == [
-        "/usr/bin/security", "add-generic-password", "-U",
-        "-a", "mastermind-mas115-canary",
-        "-s", "mastermind.mas115.multilogin.disposable", "-w",
-    ]
+    assert argv == [sys.executable, str(Path(keychain_store.__file__).resolve())]
     assert not any("token" in value.lower() or "password=" in value.lower() for value in argv)
     with pytest.raises(setup.SetupRefusal, match="GoLogin live lifecycle remains unsupported"):
         setup.credential_setup_argv("gologin")
+
+
+def _synthetic_long_jwt() -> str:
+    return ".".join(("a" * 200, "b" * 200, "c" * 333))
+
+
+def test_long_multilogin_jwt_reaches_only_fixed_keychain_writer():
+    token = _synthetic_long_jwt()
+    assert len(token) == 735
+
+    class _FakeApi:
+        def __init__(self):
+            self.added = None
+
+        def find_item(self):
+            return None
+
+        def add_item(self, secret):
+            self.added = secret
+
+    api = _FakeApi()
+    out = io.StringIO()
+    err = io.StringIO()
+    code = keychain_store.main(
+        prompt_fn=lambda _prompt: token,
+        api_factory=lambda: api,
+        stdout=out,
+        stderr=err,
+    )
+    assert code == 0
+    assert api.added == token.encode("ascii")
+    assert token not in out.getvalue()
+    assert token not in err.getvalue()
+    assert err.getvalue() == ""
+
+
+def test_keychain_writer_coordinates_match_the_fixed_canary_reader():
+    assert keychain_store._KEYCHAIN_SERVICE.decode("ascii") == setup.vendors._KEYCHAIN_SERVICE
+    assert keychain_store._KEYCHAIN_ACCOUNT.decode("ascii") == setup.vendors._KEYCHAIN_ACCOUNT
+
+
+def test_keychain_writer_launders_dynamic_framework_errors_without_echo():
+    token = _synthetic_long_jwt()
+    out = io.StringIO()
+    err = io.StringIO()
+    code = keychain_store.main(
+        prompt_fn=lambda _prompt: token,
+        api_factory=lambda: (_ for _ in ()).throw(RuntimeError(token)),
+        stdout=out,
+        stderr=err,
+    )
+    assert code == 2
+    assert token not in out.getvalue()
+    assert token not in err.getvalue()
+    assert out.getvalue() == ""
+    assert err.getvalue() == "REFUSED: Multilogin credential was not stored.\n"
+
+
+def test_keychain_writer_updates_and_releases_only_existing_fixed_item():
+    token = _synthetic_long_jwt()
+
+    class _FakeApi:
+        def __init__(self):
+            self.calls = []
+
+        def find_item(self):
+            self.calls.append(("find",))
+            return "fixed-item-ref"
+
+        def add_item(self, secret):
+            self.calls.append(("add", secret))
+
+        def modify_item(self, item, secret):
+            self.calls.append(("modify", item, secret))
+
+        def release_item(self, item):
+            self.calls.append(("release", item))
+
+    api = _FakeApi()
+    keychain_store._store_secret(token.encode("ascii"), api)
+    assert api.calls == [
+        ("find",),
+        ("modify", "fixed-item-ref", token.encode("ascii")),
+        ("release", "fixed-item-ref"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "a" * 126 + ".b",
+        "a" * 40 + "." + "b" * 40 + "." + "c" * 40,
+        " " + _synthetic_long_jwt(),
+        _synthetic_long_jwt() + "\n",
+        "a" * (keychain_store._MAX_SECRET_BYTES + 1) + ".b.c",
+    ],
+)
+def test_keychain_writer_rejects_truncated_malformed_or_oversized_values_without_echo(value):
+    out = io.StringIO()
+    err = io.StringIO()
+    code = keychain_store.main(
+        prompt_fn=lambda _prompt: value,
+        api_factory=lambda: (_ for _ in ()).throw(AssertionError("must not open Keychain")),
+        stdout=out,
+        stderr=err,
+    )
+    assert code == 2
+    assert value not in out.getvalue()
+    assert value not in err.getvalue()
+    assert out.getvalue() == ""
+    assert err.getvalue() == "REFUSED: Multilogin credential was not stored.\n"
 
 
 def test_live_provision_loader_supplies_current_utc_to_fail_closed_census(monkeypatch):

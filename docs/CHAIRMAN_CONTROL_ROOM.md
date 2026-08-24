@@ -123,13 +123,23 @@ The ordered journey is:
    enrolled seat, detects the Multilogin browser
    core from directory shape without reading profile content, and writes the
    existing private `mas115_nonseat_canary` provision as mode 0600.
-3. `credential` replaces the setup process with the native macOS Keychain
-   prompt (`security add-generic-password ... -w`, with the bare `-w` last).
-   The token never enters Python, argv, environment, shell substitution,
-   stdout, a temporary file, or the repository.
+3. `credential` replaces the setup coordinator with a dedicated MAS-115
+   secret-owning helper. Its echo-disabled terminal prompt accepts the full
+   current Multilogin JWT and writes the fixed generic-password item directly
+   through macOS Security.framework. This avoids the 128-byte input ceiling of
+   `security add-generic-password ... -w` observed on the Chairman host. The
+   token exists only in the dedicated helper and Keychain; it never enters the
+   coordinator, argv, environment, shell substitution, stdout, a temporary
+   file, a log, a receipt, or the repository.
 4. `run-canary` reaches the existing narrow secret-owning helper. Every
    provision/binding/non-seat preflight completes before Keychain is read or
-   any network/browser object is constructed.
+   any network/browser object is constructed. A private exact-profile cleanup
+   lease is minted when the one preflighted start request is dispatched,
+   survives ambiguous responses and the C5 owner-loss simulation, and performs
+   one fail-safe stop on every later exit.
+   The v2 receipt includes a separate cleanup proof: stop acknowledged (or no
+   start needed), exact-profile process count returned to zero, and all other
+   managed-profile process counts unchanged.
 
 The supported Multilogin path is the documented v2 exact-profile launcher
 with `automation_type=selenium`, followed by a closed W3C WebDriver subset:
@@ -151,7 +161,8 @@ local wrapper has yet passed the separately required disposable review. The
 setup utility therefore refuses to store a GoLogin canary credential rather
 than improvising a REST or cloud-browser route.
 
-A disposable C0-C10 PASS proves only the automation-owned non-seat substrate.
+A disposable C0-C10 PASS with a successful v2 cleanup proof proves only the
+automation-owned non-seat substrate.
 It does not authorize a real seat, waive the unresolved supported foreground
 gate, send a message, or complete MAS-115/MAS-113. The separately authorized
 real-seat proof remains after Sol accepts the disposable receipts.

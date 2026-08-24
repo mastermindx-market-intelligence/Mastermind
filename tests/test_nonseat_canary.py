@@ -596,7 +596,11 @@ _ALLOWED_ROW_KEYS = {
     "row", "code", "ok", "detail", "ts",
     "url_digest", "process_counts", "provision_digest", "profile_digest",
     "start_calls_delta", "focus_observed", "observation_only",
-    "expired_probed", "expired_ok",
+    "expired_probed", "expired_ok", "predicates",
+}
+
+_ALLOWED_CLEANUP_KEYS = {
+    "code", "detail", "ok", "attempted", "vendor_code", "process_counts", "predicates",
 }
 
 
@@ -608,6 +612,8 @@ def test_hostile_hermetic_receipts_pass_hygiene_and_closed_keys(vendor):
     for row in receipts["rows"]:
         assert set(row.keys()) <= _ALLOWED_ROW_KEYS
         assert row["detail"] == core.DETAILS[row["code"]]
+    assert set(receipts["cleanup"]) == _ALLOWED_CLEANUP_KEYS
+    assert receipts["cleanup"]["detail"] == core.DETAILS[receipts["cleanup"]["code"]]
 
 
 # ---------------------------------------------------------------------------
@@ -1033,7 +1039,10 @@ def test_hostile_c5_exact_evidence(vendor):
     receipts = core.run_matrix(**harness)
     assert receipts["verdict"] == "PASS"
     assert fake.start_calls == 2  # C1 + C4 reopen
-    assert fake.stop_calls == 1  # C4 release
+    assert fake.stop_calls == 2  # C4 release + fail-safe teardown after C5
+    assert receipts["cleanup"]["attempted"] is True
+    assert receipts["cleanup"]["ok"] is True
+    assert receipts["cleanup"]["process_counts"]["after"]["this_profile"] == 0
 
 
 @pytest.mark.parametrize("vendor", VENDORS)
@@ -1266,6 +1275,38 @@ def test_hostile_multilogin_repeat_start_guard_before_http():
     assert transport.calls == calls_before
 
 
+def test_hostile_multilogin_cleanup_lease_survives_owner_loss_and_stops_exact_profile_once():
+    transport = _ExactMultiloginTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    ref = {"profile_id": "p1", "folder_id": "f1"}
+    client.start(ref)
+    client.forget_ownership()
+
+    calls_before = list(transport.calls)
+    assert client._cleanup_started_profile() is True
+    assert transport.calls == calls_before + [("stop", "p1")]
+    assert transport.state == "stopped"
+    assert client._cleanup_started_profile() is False
+    assert transport.calls == calls_before + [("stop", "p1")]
+
+
+def test_hostile_multilogin_ambiguous_start_response_retains_exact_cleanup_lease():
+    class _AmbiguousStartTransport(_ExactMultiloginTransport):
+        def _mlx_profile_start(self, credential, folder_id, profile_id):
+            self.calls.append(("start", folder_id, profile_id))
+            self.state = "browser_running"
+            return None
+
+    transport = _AmbiguousStartTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.start({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+    assert client._cleanup_started_profile() is True
+    assert transport.calls[-1] == ("stop", "p1")
+    assert transport.state == "stopped"
+
+
 @pytest.mark.parametrize("browser_type", ["mimic", "stealthfox"])
 def test_multilogin_exact_core_selenium_launch_contract_accepts_both_documented_cores(browser_type):
     transport = _ExactMultiloginTransport(browser_type)
@@ -1369,7 +1410,111 @@ def test_hostile_c1_requires_real_launch_evidence(vendor):
     receipts = core.run_matrix(**harness)
     c1 = next(r for r in receipts["rows"] if r["row"] == "C1")
     assert c1["ok"] is False
+    assert c1["code"] == "LAUNCH_FAILED"
+    assert c1["predicates"]["exact_profile_process_group_started"] is False
     assert receipts["verdict"] == "FAIL"
+
+
+@pytest.mark.parametrize("vendor", VENDORS)
+def test_hostile_c1_accepts_exact_profile_process_group_and_emits_split_predicates(vendor):
+    harness = core.build_hermetic_harness(vendor)
+    fake = harness["vendor_client"]
+
+    def _process_group_counts():
+        return {"this_profile": 6 if fake._running else 0, "other_profiles": 39}
+
+    harness["process_probe"] = _process_group_counts
+    receipts = core.run_matrix(**harness)
+    c1 = next(r for r in receipts["rows"] if r["row"] == "C1")
+    assert receipts["verdict"] == "PASS"
+    assert c1["process_counts"]["before"] == {"this_profile": 0, "other_profiles": 39}
+    assert c1["process_counts"]["after"] == {"this_profile": 6, "other_profiles": 39}
+    assert c1["predicates"] == {
+        "baseline_closed": True,
+        "exact_profile_process_group_started": True,
+        "other_profiles_unchanged": True,
+        "benign_origin_observed": True,
+        "navigated_page_membership": True,
+    }
+    assert receipts["cleanup"]["process_counts"]["after"] == {
+        "this_profile": 0,
+        "other_profiles": 39,
+    }
+
+
+@pytest.mark.parametrize("vendor", VENDORS)
+def test_hostile_c1_navigation_failure_is_distinct_and_still_cleans_up(vendor):
+    harness = core.build_hermetic_harness(vendor)
+    harness["origin_probe"].saw = lambda _path: False
+    receipts = core.run_matrix(**harness)
+    c1 = next(r for r in receipts["rows"] if r["row"] == "C1")
+    assert c1["code"] == "NAVIGATION_FAILED"
+    assert c1["predicates"]["exact_profile_process_group_started"] is True
+    assert c1["predicates"]["benign_origin_observed"] is False
+    assert receipts["cleanup"]["attempted"] is True
+    assert receipts["cleanup"]["ok"] is True
+    assert harness["vendor_client"]._running is False
+
+
+@pytest.mark.parametrize("vendor", VENDORS)
+def test_hostile_cleanup_failure_vetoes_otherwise_complete_matrix(vendor):
+    class _CleanupFailVendor(core.HermeticVendorFake):
+        def _cleanup_started_profile(self):
+            raise core.CanaryRefusal("VENDOR_ERROR")
+
+    harness = _harness(vendor, vendor_cls=_CleanupFailVendor)
+    receipts = core.run_matrix(**harness)
+    assert all(row["ok"] is True for row in receipts["rows"])
+    assert receipts["cleanup"]["code"] == "CLEANUP_FAILED"
+    assert receipts["cleanup"]["vendor_code"] == "VENDOR_ERROR"
+    assert receipts["cleanup"]["ok"] is False
+    assert receipts["verdict"] == "FAIL"
+
+
+@pytest.mark.parametrize("vendor", VENDORS)
+def test_hostile_unexpected_post_start_exception_still_invokes_cleanup(vendor):
+    harness = core.build_hermetic_harness(vendor)
+    fake = harness["vendor_client"]
+    calls = {"clock": 0}
+
+    def _clock():
+        calls["clock"] += 1
+        if calls["clock"] == 2:
+            raise RuntimeError("synthetic post-start matrix failure")
+        return f"2026-01-01T00:00:{calls['clock']:02d}.000000Z"
+
+    harness["clock"] = _clock
+    with pytest.raises(RuntimeError, match="synthetic post-start matrix failure"):
+        core.run_matrix(**harness)
+    assert fake.start_calls == 1
+    assert fake.stop_calls == 1
+    assert fake._running is False
+
+
+def test_hostile_live_cleanup_probe_waits_boundedly_for_exact_process_group_exit():
+    observations = iter((
+        {"this_profile": 6, "other_profiles": 39},
+        {"this_profile": 2, "other_profiles": 39},
+        {"this_profile": 0, "other_profiles": 39},
+    ))
+    now = {"value": 0.0}
+    sleeps = []
+
+    def _monotonic():
+        now["value"] += 0.1
+        return now["value"]
+
+    probe = vendors._settled_cleanup_probe(
+        lambda: next(observations),
+        monotonic=_monotonic,
+        sleep=lambda seconds: sleeps.append(seconds),
+        timeout_seconds=1.0,
+    )
+    assert probe() == {"this_profile": 0, "other_profiles": 39}
+    assert sleeps == [
+        vendors._CLEANUP_PROCESS_POLL_SECONDS,
+        vendors._CLEANUP_PROCESS_POLL_SECONDS,
+    ]
 
 
 # ---------------------------------------------------------------------------

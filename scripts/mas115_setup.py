@@ -6,11 +6,11 @@ flags, then matches the profile ID copied from the vendor's own profile list. Pr
 profile IDs and ChatGPT URLs are entered with terminal echo disabled and are
 written only to the existing local provision/navigation files.
 
-No vendor credential is accepted by this Python process. ``credential``
-replaces the process with macOS ``security ... -w`` where ``-w`` is the last
-argument, causing Keychain itself to prompt securely.  The value therefore
-never appears in Python memory, argv, environment, stdout, a shell variable,
-or a repository file.
+No vendor credential is accepted by this coordinator process. ``credential``
+replaces it with the dedicated MAS-115 secret-owning helper, which uses an
+echo-disabled terminal prompt and macOS Security.framework to store long
+tokens without putting the value in argv, environment, stdout, a temporary
+file, a shell variable, or a repository file.
 
 The utility never starts or stops a browser profile. Seat lifecycle is not
 touched at all; the accepted canary helper later owns only the already-stopped
@@ -245,12 +245,8 @@ def _atomic_private_json(doc: dict, path: str | Path) -> None:
 def credential_setup_argv(vendor: str) -> list[str]:
     if vendor != "multilogin":
         raise SetupRefusal("GoLogin live lifecycle remains unsupported; no GoLogin credential will be stored")
-    # Per `security help add-generic-password`, a final bare -w prompts rather
-    # than placing the password in argv. Do not append anything after it.
-    return [
-        vendors._SECURITY_BIN, "add-generic-password", "-U",
-        "-a", vendors._KEYCHAIN_ACCOUNT, "-s", vendors._KEYCHAIN_SERVICE, "-w",
-    ]
+    helper = _REPO_ROOT / "scripts" / "mas115_keychain_store.py"
+    return [sys.executable, os.fspath(helper)]
 
 
 def _load_current_provision():
