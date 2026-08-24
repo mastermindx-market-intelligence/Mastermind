@@ -162,6 +162,15 @@ def test_x1_source_pulse_displays_clocks_without_inventing_freshness_sla() -> No
     assert '"connected"' not in pulse
 
 
+def test_x1_topbar_names_source_clocks_and_canonical_read_only_boundary() -> None:
+    source = INDEX.read_text(encoding="utf-8")
+
+    assert 'aria-label="Source clocks"' in source
+    assert "Local · canonical read-only" in source
+    assert 'aria-label="Source freshness"' not in source
+    assert "Local · read only" not in source
+
+
 def test_x1_quick_open_sol_requires_one_unambiguous_destination() -> None:
     source = JS.read_text(encoding="utf-8")
     start = source.index("function uniqueBinding")
@@ -169,7 +178,7 @@ def test_x1_quick_open_sol_requires_one_unambiguous_destination() -> None:
     binding = source[start:end]
 
     assert "rows.length === 1" in binding
-    assert "return rows[0]" in binding
+    assert "return rows.length === 1 ? rows[0] : null;" in binding
 
 
 def test_x1_palette_never_attempts_an_unsupported_surface_open() -> None:
