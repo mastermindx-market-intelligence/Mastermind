@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_worker_routes/v1",
-  "policy_version": "2026-08-24.stage3",
+  "policy_version": "2026-08-24.stage4",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {
@@ -46,7 +46,7 @@
     },
     "coo.operator.readonly": {
       "provider_alias": "codex",
-      "execution_profile_id": "operator.appserver.readonly.docs-mcp.v1",
+      "execution_profile_id": "operator.appserver.readonly.docs-mcp.native-helper.v1",
       "model": "gpt-5.6-sol",
       "effort": "xhigh",
       "cost_class": "small",

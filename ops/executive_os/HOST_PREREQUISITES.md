@@ -298,6 +298,41 @@ stopped; the readiness probe then uses the exact installed, attested binary.
 Formal acceptance validates the composite receipt against the current auth
 lstat and installed Codex identity before it creates a Job or starts services.
 
+The readiness boundary is also the OAuth/CLI automation boundary. Executive
+Jobs, planner prompts, native helpers, MCP tools and plugins never invoke
+`codex login`, device authorization, service-token enrollment, credential
+rotation or account switching. They may select only the already-ready dedicated
+`_mastermind_worker` realm named by the current composite receipt. Credential
+expiry or a non-passing/stale receipt removes that slot from readiness; it does
+not authorize an interactive login, copy of the operator's provider home, model
+request for a secret, or automatic failover to another account.
+
+The G4 planner profile does not create another worker or lifecycle. One Codex
+App Server process is still one Executive process generation and its one native
+helper is a subordinate thread inside the same Attempt and session tree. The
+installed launch must attest the exact
+`operator.appserver.readonly.docs-mcp.native-helper.v1` profile: read-only,
+approval `never`, shell/tool network disabled, only the reviewed OpenAI Docs MCP
+server and two tools, empty plugins and configured skills, hidden per-spawn
+role/model/effort, one helper, depth one, and a 60-second helper runtime. Before
+the parent candidate is accepted, the worker must reconcile redacted
+collaboration events against bounded `thread/list` and exact `thread/read`
+lineage. Any unknown or wider state is effect-unknown config drift. A native
+helper result is never an independent-review receipt; review remains a separate
+Executive Job/Attempt on an excluded worker.
+
+Formal Phase 1C-A acceptance proves the installed lifecycle, principals,
+provider readiness and service containment. It does not by itself prove that a
+model actually chose the G4 helper. After acceptance and before any general
+production claim, run exactly one bounded strict-v2 Chairman intent whose
+read-only planner is explicitly instructed to delegate one documentation lookup
+to its native helper. Record only non-secret Job/Attempt/epoch/generation/parent
+thread/child thread IDs, exact capability/config digests, MCP tool identity,
+terminal statuses and receipt hashes. Do not record prompt text, model output,
+credential values or provider-home contents. If no child appears, the honest
+state is `SERVICE_COMPOSED_UNARMED`/capability unused—not a successful G4 live
+proof.
+
 Provider readiness is not Git handoff Gate B. With both LaunchDaemons still
 disabled and stopped, run the installed distinct-UID Git preflight exactly once:
 

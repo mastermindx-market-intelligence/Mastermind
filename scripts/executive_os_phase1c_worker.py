@@ -212,6 +212,7 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
             expected_harness_version=binary_attestation.version,
             expected_config_digest=profile.expected_config_digest,
             app_server_config_overrides=profile.app_server_config_overrides(),
+            native_helper_grant=profile.native_helper,
             network_policy="disabled",
             turn_input_loader=turn_input_loader,
         )

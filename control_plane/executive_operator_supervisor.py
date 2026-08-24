@@ -217,10 +217,12 @@ class ExecutiveOperatorSupervisor:
             or profile.approval_policy != "never"
             or profile.network_policy != "disabled"
             or profile.write_capable
-            or profile.native_helper_policy.value != "DISABLED"
+            or profile.native_helper_policy.value
+            != "PARENT_READ_ONLY_CEILING"
+            or profile.native_helper is None
             or profile.skills
             or profile.profile_id
-            != "operator.appserver.readonly.docs-mcp.v1"
+            != "operator.appserver.readonly.docs-mcp.native-helper.v1"
             or profile.mcp_servers != ("openai-developer-docs-v1",)
             or profile.plugins
         ):

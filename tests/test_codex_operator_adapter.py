@@ -16,12 +16,17 @@ from control_plane.codex_operator_adapter import (
     CodexAdapterError,
     CodexOperatorAdapter,
 )
+from control_plane.executive_agent_capabilities import (
+    NativeHelperGrant,
+    app_server_security_config_digest,
+)
 from control_plane.operator_harness_contract import (
     AdapterFailureClass,
     CapabilityManifest,
     EventCursor,
     LaunchDecision,
     NativeHelperPolicy,
+    ObservedTriState,
     OperationId,
     OperatorHarnessAdapter,
     ProcessGenerationRef,
@@ -38,6 +43,7 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_orchestrator import OperatorHarnessOrchestrator
+from scripts.ohf.fixtures import OHF_PROBE_MCP_SERVER
 from scripts.ohf.laboratory import AppServerClient, PrivateRawTurnPage
 from scripts.ohf.redaction import REDACTED
 
@@ -71,6 +77,7 @@ def _make_harness(
     turn_input: str = "Reply with the probe acknowledgement.",
     harness_version: str = "ohf-fake-app-server/p0b",
     network_policy: str = "disabled",
+    native_helper: bool = False,
 ) -> Harness:
     codex_home = tmp_path / "codex-home"
     workspace = tmp_path / "workspace"
@@ -94,8 +101,60 @@ def _make_harness(
         "OHF_FAKE_WORKSPACE": str(workspace),
         "OHF_FAKE_SKILL_ROOT": str(workspace / ".agents" / "skills"),
         "OHF_FAKE_MODEL": "gpt-5.6-sol",
+        **({"OHF_FAKE_NATIVE_HELPER": "1"} if native_helper else {}),
         **(extra_env or {}),
     }
+    native_helper_grant = (
+        NativeHelperGrant(
+            mechanism="codex-multi-agent-v2-inherit-parent",
+            default_model="gpt-5.6-sol",
+            default_reasoning_effort="xhigh",
+            inherit_parent_capabilities=True,
+            hide_spawn_agent_metadata=True,
+            max_concurrent_helpers=1,
+            max_depth=1,
+            max_runtime_seconds=60,
+            grant_digest="d" * 64,
+        )
+        if native_helper
+        else None
+    )
+    expected_config_digest = None
+    if native_helper:
+        expected_config_digest = app_server_security_config_digest(
+            {
+                "model": "gpt-5.6-sol",
+                "approval_policy": "never",
+                "sandbox_mode": "read-only",
+                "agents": {
+                    "default_subagent_model": "gpt-5.6-sol",
+                    "default_subagent_reasoning_effort": "xhigh",
+                    "enabled": True,
+                    "interrupt_message": None,
+                    "job_max_runtime_seconds": 60,
+                    "max_concurrent_threads_per_session": 1,
+                    "max_depth": 1,
+                },
+                "features": {
+                    "apps": False,
+                    "auth_elicitation": False,
+                    "enable_mcp_apps": False,
+                    "mcp_2026_07_28": False,
+                    "multi_agent": False,
+                    "multi_agent_v2": {
+                        "enabled": True,
+                        "hide_spawn_agent_metadata": True,
+                        "max_concurrent_threads_per_session": 2,
+                        "non_code_mode_only": False,
+                    },
+                    "plugins": False,
+                    "remote_plugin": False,
+                    "tool_call_mcp_elicitation": False,
+                },
+                "mcp_servers": {OHF_PROBE_MCP_SERVER: {"command": "python3"}},
+                "plugins": {},
+            }
+        )
     kwargs = {}
     if client_factory is not None:
         kwargs["client_factory"] = client_factory
@@ -106,6 +165,8 @@ def _make_harness(
         worker_id="slot-a",
         app_server_argv=argv,
         expected_harness_version=harness_version,
+        expected_config_digest=expected_config_digest,
+        native_helper_grant=native_helper_grant,
         network_policy=network_policy,
         turn_input_loader=lambda turn: turn_input,
         base_sha_resolver=lambda path: "b" * 40,
@@ -135,7 +196,12 @@ def _make_harness(
         capabilities=CapabilityManifest(
             unclassified_policy="lab_allow_unclassified_readonly"
         ),
-        native_helper_policy=NativeHelperPolicy.DISABLED,
+        native_helper_policy=(
+            NativeHelperPolicy.PARENT_READ_ONLY_CEILING
+            if native_helper
+            else NativeHelperPolicy.DISABLED
+        ),
+        expected_config_digest=expected_config_digest,
         authority_policy_hash="c" * 64,
     )
     _CREATED_ADAPTERS.append(adapter)
@@ -295,6 +361,101 @@ def test_fake_app_server_end_to_end_through_provider_neutral_orchestrator(
         "graceful_stop_intent",
         "stop_bind",
     ]
+
+
+def test_native_helper_is_exactly_attested_audited_and_redacted(
+    tmp_path: Path,
+) -> None:
+    harness = _make_harness(tmp_path, native_helper=True)
+    _, observed, launch = _start(harness)
+    assert launch.decision is LaunchDecision.ALLOW
+    assert (
+        observed.supports_subagent_capability_ceiling
+        is ObservedTriState.VERIFIED
+    )
+
+    turn = TurnRef("turn-helper", "epoch-1", "gen-1", "attempt-1")
+    harness.adapter.begin_turn(
+        operation_id=_op("native-helper-turn"),
+        turn=turn,
+        generation=harness.generation,
+        launch=launch,
+    )
+    events, _ = harness.adapter.read_events(
+        EventCursor("attempt-1", "epoch-1", "gen-1", turn_id=turn.turn_id)
+    )
+    candidate = harness.adapter.collect_candidate_result(turn)
+
+    subordinate_ids = {
+        event.native_subordinate_id
+        for event in events
+        if event.native_subordinate_id is not None
+    }
+    assert len(subordinate_ids) == 1
+    assert any(
+        event.payload_redacted.get("item_type") == "collabAgentToolCall"
+        and event.payload_redacted.get("tool") == "spawnAgent"
+        and event.payload_redacted.get("receiver_count") == 1
+        for event in events
+    )
+    assert "fixture prompt" not in json.dumps(
+        [event.payload_redacted for event in events], sort_keys=True
+    )
+    assert candidate.complete_job_permitted is False
+    state = harness.adapter._generations[turn.process_generation_id]
+    assert turn.turn_id in state.audited_native_helper_turns
+
+
+def test_native_helper_hidden_model_override_fails_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    harness = _make_harness(
+        tmp_path,
+        native_helper=True,
+        extra_env={"OHF_FAKE_NATIVE_HELPER_MODEL_OVERRIDE": "1"},
+    )
+    _, _, launch = _start(harness)
+    turn = TurnRef("turn-helper-drift", "epoch-1", "gen-1", "attempt-1")
+
+    with pytest.raises(CodexAdapterError, match="hidden identity override") as excinfo:
+        harness.adapter.begin_turn(
+            operation_id=_op("native-helper-model-drift"),
+            turn=turn,
+            generation=harness.generation,
+            launch=launch,
+        )
+        harness.adapter.read_events(
+            EventCursor("attempt-1", "epoch-1", "gen-1", turn_id=turn.turn_id)
+        )
+
+    assert excinfo.value.failure_class is AdapterFailureClass.CONFIG_DRIFT
+    assert excinfo.value.effect_unknown is True
+
+
+def test_native_helper_depth_drift_fails_tree_reconciliation(
+    tmp_path: Path,
+) -> None:
+    harness = _make_harness(
+        tmp_path,
+        native_helper=True,
+        extra_env={"OHF_FAKE_NATIVE_HELPER_DEPTH": "2"},
+    )
+    _, _, launch = _start(harness)
+    turn = TurnRef("turn-helper-depth", "epoch-1", "gen-1", "attempt-1")
+    harness.adapter.begin_turn(
+        operation_id=_op("native-helper-depth-drift"),
+        turn=turn,
+        generation=harness.generation,
+        launch=launch,
+    )
+
+    with pytest.raises(CodexAdapterError, match="escaped its parent ceiling") as excinfo:
+        harness.adapter.read_events(
+            EventCursor("attempt-1", "epoch-1", "gen-1", turn_id=turn.turn_id)
+        )
+
+    assert excinfo.value.failure_class is AdapterFailureClass.CONFIG_DRIFT
+    assert excinfo.value.effect_unknown is True
 
 
 def test_requested_and_observed_profiles_remain_separate_and_drift_refuses(

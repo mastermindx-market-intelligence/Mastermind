@@ -500,7 +500,11 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
         )
     if (
         result.get("routing_policy_version")
-        in {"2026-08-24.stage2", "2026-08-24.stage3"}
+        in {
+            "2026-08-24.stage2",
+            "2026-08-24.stage3",
+            "2026-08-24.stage4",
+        }
         and present_capability_keys != capability_keys
     ):
         raise StateConflict(

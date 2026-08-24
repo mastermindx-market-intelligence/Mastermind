@@ -2655,19 +2655,13 @@ def compare_launch(
 
     if decision is LaunchDecision.ALLOW:
         helpers_requested = requested.native_helper_policy is not NativeHelperPolicy.DISABLED
-        if requested.write_capable and helpers_requested:
+        if helpers_requested:
             if (
                 observed.supports_subagent_capability_ceiling
                 is not ObservedTriState.VERIFIED
             ):
                 decision = LaunchDecision.REFUSE_HELPER_CEILING_MISSING
                 reasons.append("helper_ceiling_missing")
-        elif (
-            requested.write_capable
-            and requested.native_helper_policy is NativeHelperPolicy.PARENT_READ_ONLY_CEILING
-        ):
-            decision = LaunchDecision.REFUSE_HELPER_CEILING_MISSING
-            reasons.append("prompt_only_helper_policy")
 
     return LaunchComparison(
         requested=requested,
@@ -2693,9 +2687,17 @@ def native_helpers_allowed(
 ) -> bool:
     if native_helper_policy is NativeHelperPolicy.DISABLED:
         return False
+    if (
+        supports_subagent_capability_ceiling
+        is not ObservedTriState.VERIFIED
+    ):
+        return False
     if not write_capable:
         return native_helper_policy is NativeHelperPolicy.PARENT_READ_ONLY_CEILING
-    return supports_subagent_capability_ceiling is ObservedTriState.VERIFIED
+    return (
+        native_helper_policy
+        is NativeHelperPolicy.REQUIRES_SUBAGENT_CAPABILITY_CEILING
+    )
 
 
 def compare_launch_parameter_names() -> tuple[str, ...]:
