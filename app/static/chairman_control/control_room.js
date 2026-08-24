@@ -63,11 +63,6 @@
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
-  function append(parent, child) {
-    if (parent && child) parent.appendChild(child);
-    return child;
-  }
-
   function isBlank(value) {
     return value === null || value === undefined || value === "";
   }
@@ -268,6 +263,82 @@
     return rows.length === 1 ? rows[0] : null;
   }
 
+  function attentionEvidenceFold(item) {
+    var rows = (item && item.evidence) || [];
+    if (!rows.length) return null;
+    var fold = el("details", { className: "ccr-fold" });
+    var summary = el("summary");
+    summary.appendChild(el("span", { text: "Source evidence" }));
+    summary.appendChild(el("span", { text: String(rows.length), className: "ccr-count" }));
+    fold.appendChild(summary);
+    var list = el("ul");
+    rows.forEach(function (entry) {
+      if (entry === null || typeof entry !== "object") {
+        list.appendChild(el("li", { text: String(entry), className: "ccr-row ccr-row-id" }));
+        return;
+      }
+      Object.keys(entry).forEach(function (key) {
+        list.appendChild(el("li", { text: key + ": " + String(entry[key]), className: "ccr-row ccr-row-id" }));
+      });
+    });
+    fold.appendChild(list);
+    return fold;
+  }
+
+  function renderAttentionDetail(item, target) {
+    document.getElementById("ccr-detail-ref").textContent = "ATTENTION · " + safeText(target, "unknown").toUpperCase();
+    document.getElementById("ccr-detail-title").textContent = safeText(item.reason, "Attention item");
+    var body = document.getElementById("ccr-detail-body");
+    clear(body);
+
+    var summary = el("section", { className: "ccr-detail-summary" });
+    var meta = [
+      ["id", item.attention_id],
+      ["kind", item.kind],
+      ["work", item.workstream],
+      ["status", item.status],
+      ["job", item.job_id],
+      ["reported by", item.source],
+    ].filter(function (pair) { return !isBlank(pair[1]); });
+    summary.appendChild(el("span", { text: "Source-owned attention", className: "ccr-detail-next-label" }));
+    summary.appendChild(el("p", { text: meta.map(function (pair) { return pair[0] + " " + pair[1]; }).join(" · "), className: "ccr-detail-next" }));
+    body.appendChild(summary);
+
+    var next = item.existing_next_actions || [];
+    if (next.length) {
+      var nextSection = el("section", { className: "ccr-detail-section" });
+      nextSection.appendChild(el("h3", { text: "Recorded next action" }));
+      next.forEach(function (line) { nextSection.appendChild(el("p", { text: line, className: "ccr-detail-line" })); });
+      body.appendChild(nextSection);
+    }
+
+    var evidence = attentionEvidenceFold(item);
+    if (evidence) {
+      var evidenceSection = el("section", { className: "ccr-detail-section" });
+      evidenceSection.appendChild(el("h3", { text: "Evidence" }));
+      evidenceSection.appendChild(evidence);
+      body.appendChild(evidenceSection);
+    }
+
+    var card = findCardForAttention(item);
+    if (card) {
+      var workSection = el("section", { className: "ccr-detail-section" });
+      workSection.appendChild(el("h3", { text: "Joined work" }));
+      workSection.appendChild(button("Open work", "ccr-open-button", function () { openDetail(card); }));
+      body.appendChild(workSection);
+    }
+  }
+
+  function openAttentionDetail(item, target) {
+    STATE.selectedWork = null;
+    renderAttentionDetail(item, target);
+    var drawer = document.getElementById("ccr-detail-drawer");
+    drawer.classList.add("is-open");
+    drawer.setAttribute("aria-hidden", "false");
+    document.getElementById("ccr-drawer-scrim").hidden = false;
+    document.getElementById("ccr-drawer-close").focus();
+  }
+
   function renderNeedsYou(items) {
     var section = document.getElementById("needs-you");
     var list = section.querySelector(".ccr-attention-list");
@@ -295,6 +366,10 @@
 
       var actions = el("div", { className: "ccr-attention-actions" });
       var card = findCardForAttention(item);
+      actions.appendChild(button("Inspect", "ccr-open-button", function (event) {
+        event.stopPropagation();
+        openAttentionDetail(item, "chairman");
+      }));
       if (card) actions.appendChild(button("Open work", "ccr-open-button", function (event) {
         event.stopPropagation();
         openDetail(card);
@@ -310,6 +385,7 @@
     var container = document.querySelector("#" + containerId + " .ccr-mini-list");
     clear(container);
     var rows = items || [];
+    var target = containerId === "sol-attention" ? "ceo" : "coo";
     if (!rows.length) {
       container.appendChild(el("li", { text: "Clear", className: "ccr-empty-line" }));
       return;
@@ -320,12 +396,10 @@
       var card = findCardForAttention(item);
       var work = card ? card.work_ref : item.workstream;
       li.appendChild(el("span", { text: safeText(work, "unjoined"), className: "ccr-mini-work" }));
-      if (card) {
-        li.tabIndex = 0;
-        li.role = "button";
-        li.addEventListener("click", function () { openDetail(card); });
-        li.addEventListener("keydown", function (event) { if (event.key === "Enter") openDetail(card); });
-      }
+      li.tabIndex = 0;
+      li.role = "button";
+      li.addEventListener("click", function () { openAttentionDetail(item, target); });
+      li.addEventListener("keydown", function (event) { if (event.key === "Enter") openAttentionDetail(item, target); });
       container.appendChild(li);
     });
     if (rows.length > 5) container.appendChild(el("li", { text: "+" + (rows.length - 5) + " more", className: "ccr-empty-line" }));
@@ -719,6 +793,8 @@
         line.appendChild(copy);
         line.appendChild(chip(entry.target.toUpperCase(), "is-brass"));
         attSection.appendChild(line);
+        var evidence = attentionEvidenceFold(entry.item);
+        if (evidence) attSection.appendChild(evidence);
       });
       body.appendChild(attSection);
     }
