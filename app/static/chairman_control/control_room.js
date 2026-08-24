@@ -1,43 +1,21 @@
 "use strict";
 
 /**
- * Chairman Control Room — client.
+ * Chairman Control Room X1 — Chairman Command Deck.
  *
- * Security posture (unchanged from P0, and load-bearing):
- *   * No external resources. The page is served under
- *     `default-src 'self'; script-src 'self'; style-src 'self'`.
- *   * Every element carrying a source-owned string is populated via
- *     textContent and built with createElement — this file never assigns
- *     innerHTML, never builds markup from a template string, and never puts
- *     source-owned text into an attribute that is parsed as code. No source
- *     value can inject markup into this page.
- *   * Every request this file makes — every POST, and every GET against
- *     /api/state or /api/discover (H0 hardening, 2026-08-22: those two read
- *     endpoints expose full org state and are token-gated like a POST) —
- *     attaches the X-CCR-Token minted server-side and injected once into
- *     <meta name="ccr-token">. No other credential or secret ever appears
- *     in this file or in any DOM node it creates.
- *
- * Presentation law (see control_room.css for the full statement):
- *   * The three sources are never blended. Every work card renders all three
- *     provenance rails — Agent OS, Executive, GitHub — in fixed order, and a
- *     source with nothing to say says so rather than vanishing.
- *   * disagreements[] is printed verbatim, per card, never summarised.
- *   * There is no aggregate status anywhere: no score, no percentage, no
- *     combined health state. The sources disagree by design.
- *   * A field that is null renders as an explicit "unknown", never as a blank.
+ * Presentation-only law:
+ * - no aggregate lifecycle / health score;
+ * - no model ranking, ownership inference or process-presence -> cognition claim;
+ * - canonical attention altitude is preserved exactly from control_room.attention;
+ * - navigation bindings are address-book facts only;
+ * - source-owned text is rendered through textContent / DOM construction, never innerHTML.
  */
-
 (function () {
   var TOKEN = (function () {
     var meta = document.querySelector('meta[name="ccr-token"]');
     return meta ? meta.getAttribute("content") : "";
   })();
 
-  /** Mirrors control_plane.surface_bindings._PROVIDER_LOCATOR_KIND. A pair
-   *  outside this map is exactly what integrations.chairman_surfaces.contract
-   *  .open_binding refuses before it ever reaches an adapter, so the page can
-   *  honestly show UNSUPPORTED without asking the server first. */
   var PROVIDER_LOCATOR_KIND = {
     chatgpt: "chatgpt_managed_env",
     claude_code: "claude_code_session",
@@ -45,55 +23,59 @@
     cursor_agent: "cursor_agent_thread",
     codex: "codex_session",
   };
-
-  /** A verified-open older than this reads as STALE rather than openable. */
+  var ROLE_NAME = { chairman: "You", ceo: "Sol", coo: "Fable", worker: "Worker" };
+  var OPEN_LABEL = { chairman: "Open", ceo: "Open Sol", coo: "Open Fable", worker: "Open worker" };
   var STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+  var THEME_KEY = "ccr-x1-theme";
+  var DOCK_KEY = "ccr-x1-dock-collapsed";
 
-  /** Seat names as the Chairman refers to them, not as the store keys them. */
-  var ROLE_NAME = { chairman: "Your seat", ceo: "Sol", coo: "Fable", worker: "Worker" };
-  var OPEN_LABEL = { chairman: "Open your seat", ceo: "Open Sol", coo: "Open Fable", worker: "Open worker" };
+  var STATE = {
+    body: null,
+    doc: null,
+    work: [],
+    capabilities: {},
+    attentionTargetById: {},
+    workByRef: {},
+    workMode: "focus",
+    workQuery: "",
+    selectedWork: null,
+    paletteItems: [],
+    paletteResults: [],
+    paletteIndex: 0,
+  };
 
-  // -- tiny DOM helpers ----------------------------------------------------
+  var LAST_DRAWER_OPENER = null;
+  var LAST_PALETTE_OPENER = null;
 
+  // DOM -------------------------------------------------------------------
   function el(tag, opts) {
     var node = document.createElement(tag);
     opts = opts || {};
-    if (opts.text !== undefined) node.textContent = opts.text;
+    if (opts.text !== undefined) node.textContent = String(opts.text);
     if (opts.className) node.className = opts.className;
     if (opts.attrs) {
-      for (var key in opts.attrs) {
-        if (Object.prototype.hasOwnProperty.call(opts.attrs, key)) {
-          node.setAttribute(key, opts.attrs[key]);
-        }
-      }
+      Object.keys(opts.attrs).forEach(function (key) {
+        node.setAttribute(key, String(opts.attrs[key]));
+      });
     }
     return node;
   }
 
   function clear(node) {
+    if (!node) return;
     while (node.firstChild) node.removeChild(node.firstChild);
   }
-
-  function append(parent, child) {
-    parent.appendChild(child);
-    return child;
-  }
-
-  // -- honest value formatting ---------------------------------------------
 
   function isBlank(value) {
     return value === null || value === undefined || value === "";
   }
 
-  /** A value, or an explicitly-marked unknown — never an empty slot. */
-  function valueNode(value, unknownWord) {
-    if (isBlank(value)) return el("span", { text: unknownWord || "unknown", className: "ccr-unknown" });
-    return el("span", { text: String(value) });
+  function safeText(value, fallback) {
+    return isBlank(value) ? (fallback || "unknown") : String(value);
   }
 
   function shortSha(value) {
-    if (typeof value !== "string" || value.length < 7) return value;
-    return value.slice(0, 7);
+    return typeof value === "string" && value.length >= 7 ? value.slice(0, 7) : safeText(value);
   }
 
   function parseStamp(value) {
@@ -102,33 +84,82 @@
     return isNaN(ms) ? null : ms;
   }
 
-  /** Relative age of an ISO stamp, or null when it cannot be parsed. */
   function ageWords(value) {
     var ms = parseStamp(value);
     if (ms === null) return null;
     var delta = Date.now() - ms;
-    if (delta < 0) return "ahead of this clock";
+    if (delta < 0) return "ahead";
     var mins = Math.floor(delta / 60000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return mins + "m ago";
+    if (mins < 1) return "now";
+    if (mins < 60) return mins + "m";
     var hours = Math.floor(mins / 60);
-    if (hours < 48) return hours + "h ago";
-    return Math.floor(hours / 24) + "d ago";
+    if (hours < 48) return hours + "h";
+    return Math.floor(hours / 24) + "d";
   }
 
-  function metaPair(label, value) {
-    var span = el("span");
-    span.appendChild(el("span", { text: label + " ", className: "ccr-meta-k" }));
-    span.appendChild(valueNode(value));
-    return span;
+  function normalizedSearchText(value) {
+    return safeText(value, "").toLowerCase();
   }
 
   function chip(text, variant) {
-    return el("span", { text: text, className: "ccr-chip " + variant });
+    return el("span", { text: text, className: "ccr-chip " + (variant || "is-dim") });
   }
 
-  // -- transport -----------------------------------------------------------
+  function setTally(name, count) {
+    var nodes = document.querySelectorAll('[data-tally="' + name + '"]');
+    for (var i = 0; i < nodes.length; i++) nodes[i].textContent = String(count);
+  }
 
+  function button(text, className, onClick) {
+    var node = el("button", { text: text, className: className || "ccr-open-button" });
+    node.type = "button";
+    if (onClick) node.addEventListener("click", onClick);
+    return node;
+  }
+
+  function openerCandidate(candidate) {
+    if (candidate && typeof candidate.focus === "function" && document.contains(candidate)) return candidate;
+    var active = document.activeElement;
+    if (active && typeof active.focus === "function" && document.contains(active)) return active;
+    return null;
+  }
+
+  function restoreFocus(candidate) {
+    if (!candidate || typeof candidate.focus !== "function" || !document.contains(candidate)) return;
+    try { candidate.focus({ preventScroll: true }); }
+    catch (_e) { candidate.focus(); }
+  }
+
+  function focusableNodes(container) {
+    if (!container) return [];
+    var nodes = container.querySelectorAll(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    return Array.prototype.slice.call(nodes).filter(function (node) {
+      return !node.hidden && node.getClientRects().length > 0;
+    });
+  }
+
+  function trapFocus(event, container) {
+    if (event.key !== "Tab") return false;
+    var nodes = focusableNodes(container);
+    if (!nodes.length) return false;
+    var first = nodes[0];
+    var last = nodes[nodes.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+      return true;
+    }
+    if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+      return true;
+    }
+    return false;
+  }
+
+  // transport -------------------------------------------------------------
   function getJSON(path) {
     return fetch(path, {
       method: "GET",
@@ -143,25 +174,21 @@
     return fetch(path, {
       method: "POST",
       credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CCR-Token": TOKEN,
-      },
+      headers: { "Content-Type": "application/json", "X-CCR-Token": TOKEN },
       body: JSON.stringify(body || {}),
     }).then(function (resp) {
       return resp.json();
     });
   }
 
-  // -- source stamps -------------------------------------------------------
-
+  // source pulse / system -------------------------------------------------
   var SOURCE_STAMPS = [
     { key: "mastermind_sha", label: "Mastermind", sha: true, extra: "mastermind_branch" },
     { key: "macro_sha", label: "Macro", sha: true },
     { key: "composed_at", label: "State composed", age: true },
-    { key: "agent_os_state_generated_at", label: "Agent OS state generated", age: true },
-    { key: "active_builds_collected_at", label: "Active builds collected", age: true },
-    { key: "runtime_db_present", label: "Runtime database", bool: true },
+    { key: "agent_os_state_generated_at", label: "Agent OS generated", age: true },
+    { key: "active_builds_collected_at", label: "GitHub evidence collected", age: true },
+    { key: "runtime_db_present", label: "Executive runtime DB", bool: true },
     { key: "bindings_path_present", label: "Bindings file", bool: true },
     { key: "macro_root", label: "Macro root" },
     { key: "executive_inbox_schema", label: "Executive inbox schema" },
@@ -170,687 +197,912 @@
     { key: "active_builds_schema", label: "Active builds schema" },
   ];
 
-  function stampValueNode(spec, sources) {
+  function stampValue(spec, sources) {
     var raw = sources[spec.key];
     if (spec.bool) {
-      if (raw === true) return el("span", { text: "present" });
-      if (raw === false) return el("span", { text: "absent" });
-      return el("span", { text: "unknown", className: "ccr-unknown" });
+      if (raw === true) return "present";
+      if (raw === false) return "absent";
+      return "unknown";
     }
-    if (isBlank(raw)) return el("span", { text: "unknown", className: "ccr-unknown" });
-
-    var wrap = el("span");
-    wrap.appendChild(el("span", { text: spec.sha ? shortSha(String(raw)) : String(raw) }));
-    if (spec.extra && !isBlank(sources[spec.extra])) {
-      wrap.appendChild(el("span", { text: " · " + String(sources[spec.extra]) }));
-    }
-    if (spec.age) {
-      var words = ageWords(raw);
-      if (words) wrap.appendChild(el("span", { text: words, className: "ccr-age" }));
-    }
-    return wrap;
+    if (isBlank(raw)) return "unknown";
+    var value = spec.sha ? shortSha(String(raw)) : String(raw);
+    if (spec.extra && !isBlank(sources[spec.extra])) value += " · " + String(sources[spec.extra]);
+    if (spec.age && ageWords(raw)) value += " · " + ageWords(raw);
+    return value;
   }
 
-  function renderStampList(dl, sources, specs) {
+  function renderSystemSources(sources) {
+    var dl = document.getElementById("ccr-sources");
     clear(dl);
-    specs.forEach(function (spec) {
-      // dt/dd are wrapped as a pair: a bare dt+dd sequence in a multi-column
-      // grid lets a value land under a different label.
+    SOURCE_STAMPS.forEach(function (spec) {
       var pair = el("div");
       pair.appendChild(el("dt", { text: spec.label }));
-      var dd = el("dd");
-      dd.appendChild(stampValueNode(spec, sources));
-      pair.appendChild(dd);
+      pair.appendChild(el("dd", { text: stampValue(spec, sources) }));
       dl.appendChild(pair);
     });
   }
 
-  function renderSources(sources) {
-    renderStampList(document.getElementById("ccr-sources"), sources, SOURCE_STAMPS);
-    // The same three stamps repeated where the data they qualify actually is.
-    renderStampList(document.getElementById("ccr-work-stamps"), sources, [
-      { key: "agent_os_state_generated_at", label: "Agent OS state generated", age: true },
-      { key: "active_builds_collected_at", label: "Active builds collected", age: true },
-      { key: "macro_sha", label: "Macro", sha: true },
-    ]);
+  function sourcePulsePill(label, value, absent) {
+    var cls = "ccr-pulse-pill";
+    if (absent) cls += " is-absent";
+    return el("span", { text: label + " · " + value, className: cls });
   }
 
-  // -- degraded ------------------------------------------------------------
+  function renderSourcePulse(body, sources) {
+    var node = document.getElementById("ccr-source-pulse");
+    clear(node);
+    // Ages are clocks only. Source-owned degraded state is rendered separately.
+    var aoAge = ageWords(sources.agent_os_state_generated_at) || "unknown age";
+    var ghAge = ageWords(sources.active_builds_collected_at) || "unknown age";
+    node.appendChild(sourcePulsePill("Agent OS", aoAge, parseStamp(sources.agent_os_state_generated_at) === null));
+    node.appendChild(sourcePulsePill(
+      "Executive",
+      sources.runtime_db_present === true ? "DB present" : sources.runtime_db_present === false ? "DB absent" : "DB unknown",
+      sources.runtime_db_present !== true
+    ));
+    node.appendChild(sourcePulsePill(
+      "GitHub",
+      (body && body.live_builds_active ? "live cache · " : "snapshot · ") + ghAge,
+      parseStamp(sources.active_builds_collected_at) === null
+    ));
+
+    var age = ageWords(body && body.composed_at);
+    document.getElementById("ccr-composed-age").textContent = "State " + (age || "unknown");
+    document.getElementById("ccr-live-builds-label").textContent = body && body.live_builds_active ? "GitHub live cache" : "GitHub snapshot";
+
+    var banner = document.getElementById("ccr-refresh-banner");
+    if (body && body.refresh_in_flight) {
+      banner.hidden = false;
+      document.getElementById("ccr-refresh-banner-text").textContent = "Refreshing canonical state in the background — showing last good composition";
+    } else {
+      banner.hidden = true;
+    }
+  }
 
   function renderDegraded(items) {
     var section = document.getElementById("degraded");
-    var listNode = section.querySelector("ul");
-    clear(listNode);
+    var list = section.querySelector("ul");
+    clear(list);
     var rows = items || [];
-    rows.forEach(function (entry) {
-      listNode.appendChild(el("li", { text: String(entry) }));
-    });
-    // Hidden only when genuinely empty. Never hidden while a source is
-    // degraded, and never replaced by a reassuring summary when it is not.
+    rows.forEach(function (entry) { list.appendChild(el("li", { text: entry })); });
     section.className = rows.length ? "ccr-alarm" : "ccr-alarm is-empty";
+    document.getElementById("nav-system-count").textContent = rows.length ? String(rows.length) : "";
   }
 
-  // -- attention -----------------------------------------------------------
+  function renderCapabilities(capabilities) {
+    var container = document.getElementById("ccr-capabilities");
+    clear(container);
+    var keys = Object.keys(capabilities || {}).sort();
+    if (!keys.length) {
+      container.appendChild(el("p", { text: "Capability census unavailable.", className: "ccr-empty-line" }));
+      return;
+    }
+    keys.forEach(function (key) {
+      var row = capabilities[key] || {};
+      var card = el("div", { className: "ccr-capability" });
+      var head = el("div", { className: "ccr-capability-name" });
+      head.appendChild(el("span", { text: key }));
+      var state = safeText(row.state);
+      var variant = state === "PROVEN" ? "is-ok" : state === "UNSUPPORTED" || state === "NOT_INSTALLED" ? "is-dim" : "is-slate";
+      head.appendChild(chip(state, variant));
+      card.appendChild(head);
+      card.appendChild(el("p", { text: safeText(row.detail, "No detail."), className: "ccr-capability-detail" }));
+      container.appendChild(card);
+    });
+  }
 
-  function renderEvidence(item) {
-    var rows = item.evidence || [];
+  // attention -------------------------------------------------------------
+  function findCardForAttention(item) {
+    var attentionId = item && item.attention_id;
+    if (!attentionId) return null;
+    for (var i = 0; i < STATE.work.length; i++) {
+      if ((STATE.work[i].attention_ids || []).indexOf(attentionId) !== -1) return STATE.work[i];
+    }
+    return null;
+  }
+
+  function uniqueBinding(card, role) {
+    var rows = ((card && card.bindings) || []).filter(function (binding) { return binding.role === role; });
+    // Never silently pick a winner when more than one destination serves the same role.
+    return rows.length === 1 ? rows[0] : null;
+  }
+
+  function attentionEvidenceFold(item) {
+    var rows = (item && item.evidence) || [];
     if (!rows.length) return null;
-    var fold = el("details", { className: "ccr-fold ccr-evidence" });
+    var fold = el("details", { className: "ccr-fold" });
     var summary = el("summary");
-    summary.appendChild(el("span", { text: "Evidence", className: "ccr-fold-name" }));
-    summary.appendChild(el("span", { text: String(rows.length), className: "ccr-tally" }));
+    summary.appendChild(el("span", { text: "Source evidence" }));
+    summary.appendChild(el("span", { text: String(rows.length), className: "ccr-count" }));
     fold.appendChild(summary);
     var list = el("ul");
     rows.forEach(function (entry) {
       if (entry === null || typeof entry !== "object") {
-        list.appendChild(el("li", { text: String(entry) }));
+        list.appendChild(el("li", { text: String(entry), className: "ccr-row ccr-row-id" }));
         return;
       }
       Object.keys(entry).forEach(function (key) {
-        list.appendChild(el("li", { text: key + ": " + String(entry[key]) }));
+        list.appendChild(el("li", { text: key + ": " + String(entry[key]), className: "ccr-row ccr-row-id" }));
       });
     });
     fold.appendChild(list);
     return fold;
   }
 
-  function renderAttentionItem(item) {
-    var li = el("li", { className: "ccr-item" });
+  function renderAttentionDetail(item, target) {
+    document.getElementById("ccr-detail-ref").textContent = "ATTENTION · " + safeText(target, "unknown").toUpperCase();
+    document.getElementById("ccr-detail-title").textContent = safeText(item.reason, "Attention item");
+    var body = document.getElementById("ccr-detail-body");
+    clear(body);
 
-    var reason = isBlank(item.reason) ? null : String(item.reason);
-    li.appendChild(el("p", {
-      text: reason || "This item carries no reason text.",
-      className: reason ? "ccr-item-reason" : "ccr-item-reason ccr-unknown",
-    }));
-
-    var meta = el("div", { className: "ccr-item-meta" });
-    meta.appendChild(metaPair("kind", item.kind));
-    meta.appendChild(metaPair("work", item.workstream));
-    meta.appendChild(metaPair("status", item.status));
-    meta.appendChild(metaPair("job", item.job_id));
-    meta.appendChild(metaPair("reported by", item.source));
-    meta.appendChild(metaPair("id", item.attention_id));
-    li.appendChild(meta);
+    var summary = el("section", { className: "ccr-detail-summary" });
+    var meta = [
+      ["id", item.attention_id],
+      ["kind", item.kind],
+      ["work", item.workstream],
+      ["status", item.status],
+      ["job", item.job_id],
+      ["reported by", item.source],
+    ].filter(function (pair) { return !isBlank(pair[1]); });
+    summary.appendChild(el("span", { text: "Source-owned attention", className: "ccr-detail-next-label" }));
+    summary.appendChild(el("p", { text: meta.map(function (pair) { return pair[0] + " " + pair[1]; }).join(" · "), className: "ccr-detail-next" }));
+    body.appendChild(summary);
 
     var next = item.existing_next_actions || [];
     if (next.length) {
-      var box = el("div", { className: "ccr-item-next" });
-      box.appendChild(el("span", { text: "Next action already on record", className: "ccr-next-label" }));
-      next.forEach(function (line) {
-        box.appendChild(el("div", { text: String(line) }));
-      });
-      li.appendChild(box);
+      var nextSection = el("section", { className: "ccr-detail-section" });
+      nextSection.appendChild(el("h3", { text: "Recorded next action" }));
+      next.forEach(function (line) { nextSection.appendChild(el("p", { text: line, className: "ccr-detail-line" })); });
+      body.appendChild(nextSection);
     }
 
-    var evidence = renderEvidence(item);
-    if (evidence) li.appendChild(evidence);
+    var evidence = attentionEvidenceFold(item);
+    if (evidence) {
+      var evidenceSection = el("section", { className: "ccr-detail-section" });
+      evidenceSection.appendChild(el("h3", { text: "Evidence" }));
+      evidenceSection.appendChild(evidence);
+      body.appendChild(evidenceSection);
+    }
 
-    return li;
+    var card = findCardForAttention(item);
+    if (card) {
+      var workSection = el("section", { className: "ccr-detail-section" });
+      workSection.appendChild(el("h3", { text: "Joined work" }));
+      workSection.appendChild(button("Open work", "ccr-open-button", function () { openDetail(card, LAST_DRAWER_OPENER); }));
+      body.appendChild(workSection);
+    }
   }
 
-  function renderAttentionList(listNode, items, emptyLine) {
-    clear(listNode);
+  function openAttentionDetail(item, target, opener) {
+    LAST_DRAWER_OPENER = openerCandidate(opener);
+    STATE.selectedWork = null;
+    renderAttentionDetail(item, target);
+    var drawer = document.getElementById("ccr-detail-drawer");
+    drawer.classList.add("is-open");
+    drawer.setAttribute("aria-hidden", "false");
+    document.getElementById("ccr-drawer-scrim").hidden = false;
+    document.getElementById("ccr-drawer-close").focus();
+  }
+
+  function renderNeedsYou(items) {
+    var section = document.getElementById("needs-you");
+    var list = section.querySelector(".ccr-attention-list");
+    clear(list);
     var rows = items || [];
-    rows.forEach(function (item) {
-      listNode.appendChild(renderAttentionItem(item));
-    });
+    section.className = rows.length ? "ccr-needs ccr-has-items" : "ccr-needs";
     if (!rows.length) {
-      listNode.appendChild(el("li", { text: emptyLine, className: "ccr-empty" }));
+      list.appendChild(el("li", { text: "Nothing is waiting on you.", className: "ccr-empty-line" }));
+      return;
     }
-    return rows.length;
+    rows.forEach(function (item) {
+      var li = el("li", { className: "ccr-attention-item" });
+      var body = el("div");
+      body.appendChild(el("p", { text: safeText(item.reason, "This item carries no reason text."), className: "ccr-attention-reason" }));
+      var meta = el("div", { className: "ccr-attention-meta" });
+      [
+        ["work", item.workstream], ["kind", item.kind], ["status", item.status], ["reported by", item.source]
+      ].forEach(function (pair) {
+        if (!isBlank(pair[1])) meta.appendChild(el("span", { text: pair[0] + " " + pair[1] }));
+      });
+      body.appendChild(meta);
+      var next = item.existing_next_actions || [];
+      if (next.length) body.appendChild(el("p", { text: next.join(" · "), className: "ccr-attention-next" }));
+      li.appendChild(body);
+
+      var actions = el("div", { className: "ccr-attention-actions" });
+      var card = findCardForAttention(item);
+      var inspectBtn = button("Inspect", "ccr-open-button", function (event) {
+        event.stopPropagation();
+        openAttentionDetail(item, "chairman", inspectBtn);
+      });
+      actions.appendChild(inspectBtn);
+      if (card) {
+        var workBtn = button("Open work", "ccr-open-button", function (event) {
+          event.stopPropagation();
+          openDetail(card, workBtn);
+        });
+        actions.appendChild(workBtn);
+      }
+      var sol = uniqueBinding(card, "ceo");
+      if (sol && bindingConfidence(sol).openable) actions.appendChild(openBindingButton(sol, "Open Sol"));
+      li.appendChild(actions);
+      list.appendChild(li);
+    });
   }
 
-  // -- bindings ------------------------------------------------------------
+  function renderMiniAttention(containerId, items) {
+    var container = document.querySelector("#" + containerId + " .ccr-mini-list");
+    clear(container);
+    var rows = items || [];
+    var target = containerId === "sol-attention" ? "ceo" : "coo";
+    if (!rows.length) {
+      container.appendChild(el("li", { text: "Clear", className: "ccr-empty-line" }));
+      return;
+    }
+    rows.slice(0, 5).forEach(function (item) {
+      var li = el("li", { className: "ccr-mini-item" });
+      li.appendChild(el("span", { text: safeText(item.reason, "Attention item") }));
+      var card = findCardForAttention(item);
+      var work = card ? card.work_ref : item.workstream;
+      li.appendChild(el("span", { text: safeText(work, "unjoined"), className: "ccr-mini-work" }));
+      li.tabIndex = 0;
+      li.role = "button";
+      li.addEventListener("click", function () { openAttentionDetail(item, target, li); });
+      li.addEventListener("keydown", function (event) { if (event.key === "Enter") openAttentionDetail(item, target, li); });
+      container.appendChild(li);
+    });
+    if (rows.length > 5) container.appendChild(el("li", { text: "+" + (rows.length - 5) + " more", className: "ccr-empty-line" }));
+  }
 
-  /** One of UNBOUND / UNSUPPORTED / BOUND_UNVERIFIED / STALE / VERIFIED_OPENABLE.
-   *  Every branch is derivable from the binding summary the server already
-   *  sent; nothing here asks the server to guess on the page's behalf. */
+  // bindings --------------------------------------------------------------
   function bindingConfidence(binding) {
-    if (!binding) return { state: "UNBOUND", variant: "ccr-chip-unbound", note: "No surface is bound to this work.", openable: false };
-
+    if (!binding) return { state: "UNBOUND", variant: "is-dim", openable: false, note: "No bound destination." };
     var expected = PROVIDER_LOCATOR_KIND[binding.provider];
     if (!expected || binding.locator_kind !== expected) {
+      return { state: "UNSUPPORTED", variant: "is-dim", openable: false, note: "Locator is not supported by this Control Room." };
+    }
+
+    // Current protected chatgpt.py deliberately refuses every managed-seat
+    // navigation path until P0B has a supported real-seat actuator. A valid
+    // address remains useful as a binding, but it must never render as an
+    // openable action merely because its locator shape is valid.
+    if (binding.provider === "chatgpt") {
       return {
         state: "UNSUPPORTED",
-        variant: "ccr-chip-unsupported",
-        note: "carries locator " + String(binding.locator_kind) + ", which this machine cannot open for it.",
+        variant: "is-dim",
         openable: false,
+        note: "Bound managed-browser seat; current P0B navigation actuator is not supported.",
+      };
+    }
+
+    var capability = (STATE.capabilities || {})[binding.provider] || null;
+    if (capability && (capability.state === "UNSUPPORTED" || capability.state === "NOT_INSTALLED")) {
+      return {
+        state: capability.state,
+        variant: "is-dim",
+        openable: false,
+        note: safeText(capability.detail, "Provider navigation is unavailable on this machine."),
       };
     }
 
     if (isBlank(binding.last_verified_at)) {
-      return {
-        state: "BOUND_UNVERIFIED",
-        variant: "ccr-chip-unverified",
-        note: "Bound, never opened from here. Recorded " + (ageWords(binding.observed_at) || "at an unknown time") + ".",
-        openable: true,
-      };
+      return { state: "BOUND", variant: "is-slate", openable: true, note: "Bound; no verified open stamp." };
     }
-
     var ms = parseStamp(binding.last_verified_at);
-    if (ms === null) {
-      return {
-        state: "VERIFIED_OPENABLE",
-        variant: "ccr-chip-verified",
-        note: "Opened before, at an unreadable timestamp: " + String(binding.last_verified_at) + ".",
-        openable: true,
-      };
+    if (ms !== null && Date.now() - ms > STALE_AFTER_MS) {
+      return { state: "STALE", variant: "is-dim", openable: true, note: "Last verified " + ageWords(binding.last_verified_at) + " ago." };
     }
-    if (Date.now() - ms > STALE_AFTER_MS) {
-      return {
-        state: "STALE",
-        variant: "ccr-chip-stale",
-        note: "Last opened " + ageWords(binding.last_verified_at) + ". It may no longer be there.",
-        openable: true,
-      };
-    }
-    return {
-      state: "VERIFIED_OPENABLE",
-      variant: "ccr-chip-verified",
-      note: "Last opened " + ageWords(binding.last_verified_at) + ".",
-      openable: true,
-    };
+    return { state: "VERIFIED", variant: "is-ok", openable: true, note: "Last verified " + (ageWords(binding.last_verified_at) || "at an unreadable time") + "." };
   }
 
-  function renderBindingRow(binding) {
+  function openBinding(binding, statusNode, trigger) {
+    if (!binding || !binding.binding_id) return Promise.resolve();
+    if (trigger) trigger.disabled = true;
+    if (statusNode) statusNode.textContent = "Opening…";
+    return postJSON("/api/open", { binding_id: binding.binding_id }).then(function (outcome) {
+      if (outcome && outcome.ok) {
+        if (statusNode) statusNode.textContent = "Opened · " + safeText(outcome.action, "provider action");
+      } else if (statusNode) {
+        statusNode.textContent = "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
+        statusNode.className = "ccr-binding-meta ccr-problem";
+      }
+      return outcome;
+    }).catch(function () {
+      if (statusNode) {
+        statusNode.textContent = "Did not open · local server unavailable";
+        statusNode.className = "ccr-binding-meta ccr-problem";
+      }
+      return null;
+    }).finally(function () {
+      if (trigger) trigger.disabled = false;
+    });
+  }
+
+  function openBindingButton(binding, label) {
     var confidence = bindingConfidence(binding);
-    var row = el("div", { className: "ccr-binding-row" });
-    var seatSuffix = "";
-    if (binding.provider === "chatgpt" && !isBlank(binding.seat_ref)) {
-      var match = /^chatgpt([1-3])$/.exec(String(binding.seat_ref));
-      seatSuffix = match ? " · Seat " + match[1] : " · " + String(binding.seat_ref);
-    }
-
-    row.appendChild(el("span", {
-      text: (ROLE_NAME[binding.role] || String(binding.role)) + seatSuffix,
-      className: "ccr-binding-who",
-    }));
-    row.appendChild(chip(confidence.state, confidence.variant));
-    row.appendChild(el("span", { className: "ccr-binding-spacer" }));
-
-    var openBtn = el("button", {
-      text: (OPEN_LABEL[binding.role] || "Open surface") + seatSuffix,
-      className: "ccr-open",
+    var btn = button(label || OPEN_LABEL[binding.role] || "Open", "ccr-open-button", function (event) {
+      event.stopPropagation();
+      openBinding(binding, null, btn).then(function () { loadState(); });
     });
-    openBtn.type = "button";
-    openBtn.disabled = !confidence.openable;
+    btn.disabled = !confidence.openable;
+    return btn;
+  }
 
-    var note = el("div", {
-      text: String(binding.provider) + " · " + confidence.note,
-      className: "ccr-binding-note",
-    });
-
-    if (confidence.openable) {
-      openBtn.addEventListener("click", function () {
-        openBtn.disabled = true;
-        note.className = "ccr-binding-note";
-        note.textContent = "Opening …";
-        postJSON("/api/open", { binding_id: binding.binding_id })
-          .then(function (outcome) {
-            if (outcome && outcome.ok) {
-              note.className = "ccr-binding-note";
-              note.textContent = "Opened · " + String(outcome.action || "") +
-                (outcome.detail ? " · " + String(outcome.detail) : "");
-            } else {
-              note.className = "ccr-binding-note is-bad";
-              note.textContent = "Did not open · " + String((outcome && outcome.failure_kind) || "unknown reason") +
-                ((outcome && outcome.detail) ? " · " + String(outcome.detail) : "");
-            }
-          })
-          .catch(function () {
-            note.className = "ccr-binding-note is-bad";
-            note.textContent = "Did not open · this page could not reach the local server.";
-          })
-          .finally(function () {
-            openBtn.disabled = false;
-          });
-      });
-    }
-    row.appendChild(openBtn);
-
-    var unbindBtn = el("button", { text: "Unbind", className: "ccr-unbind" });
-    unbindBtn.type = "button";
-    unbindBtn.addEventListener("click", function () {
-      unbindBtn.disabled = true;
-      postJSON("/api/unbind", { binding_id: binding.binding_id }).then(function () {
-        loadState();
+  function allBindings() {
+    var byId = {};
+    STATE.work.forEach(function (card) {
+      (card.bindings || []).forEach(function (binding) {
+        if (binding && binding.binding_id) byId[binding.binding_id] = binding;
       });
     });
+    ((STATE.doc && STATE.doc.unbound_surfaces) || []).forEach(function (binding) {
+      if (binding && binding.binding_id) byId[binding.binding_id] = binding;
+    });
+    return Object.keys(byId).map(function (key) { return byId[key]; });
+  }
 
-    var foot = el("div", { className: "ccr-binding-foot" });
-    foot.appendChild(note);
-    foot.appendChild(unbindBtn);
-    row.appendChild(foot);
+  function workTitle(ref) {
+    var card = STATE.workByRef[ref];
+    return card && card.agent_os && card.agent_os.title ? String(card.agent_os.title) : safeText(ref, "Unjoined binding");
+  }
+
+  function seatLabel(binding) {
+    var seat = safeText(binding.seat_ref, "");
+    if (/^chatgpt\d+$/i.test(seat)) return "ChatGPT " + seat.replace(/\D/g, "");
+    if (seat) return seat;
+    if (binding.provider === "claude_code" || binding.provider === "claude_desktop") return "Claude";
+    if (binding.provider === "cursor_agent") return "Cursor";
+    if (binding.provider === "codex") return "Codex";
+    return binding.provider || "Surface";
+  }
+
+  function renderSurfaceGroup(parent, title, bindings) {
+    if (!bindings.length) return;
+    var group = el("section", { className: "ccr-surface-group" });
+    var head = el("div", { className: "ccr-surface-group-head" });
+    head.appendChild(el("span", { text: title }));
+    head.appendChild(el("span", { text: bindings.length + " destinations" }));
+    group.appendChild(head);
+
+    var buckets = {};
+    bindings.forEach(function (binding) {
+      var key = [binding.provider || "unknown", binding.seat_ref || ""].join("::");
+      if (!buckets[key]) buckets[key] = [];
+      buckets[key].push(binding);
+    });
+
+    Object.keys(buckets).sort().forEach(function (key) {
+      var rows = buckets[key];
+      var details = el("details", { className: "ccr-seat-block" });
+      if (rows.length <= 2) details.open = true;
+      var summary = el("summary", { className: "ccr-seat-summary" });
+      summary.appendChild(el("span", { text: seatLabel(rows[0]), className: "ccr-seat-name" }));
+      summary.appendChild(el("span", { text: rows.length + (rows.length === 1 ? " destination" : " destinations"), className: "ccr-seat-count" }));
+      details.appendChild(summary);
+      var list = el("div", { className: "ccr-destination-list" });
+      rows.sort(function (a, b) { return safeText(a.work_ref).localeCompare(safeText(b.work_ref)); }).forEach(function (binding) {
+        var row = el("div", { className: "ccr-destination" });
+        var copy = el("div");
+        copy.appendChild(el("div", { text: workTitle(binding.work_ref), className: "ccr-destination-title" }));
+        copy.appendChild(el("div", { text: safeText(binding.work_ref) + " · " + bindingConfidence(binding).state, className: "ccr-destination-sub" }));
+        row.appendChild(copy);
+        row.appendChild(openBindingButton(binding, "Open"));
+        list.appendChild(row);
+      });
+      details.appendChild(list);
+      group.appendChild(details);
+    });
+    parent.appendChild(group);
+  }
+
+  function buildSurfaceContent() {
+    var root = el("div");
+    var rows = allBindings();
+    var sol = rows.filter(function (b) { return b.role === "ceo"; });
+    var ops = rows.filter(function (b) { return b.role === "coo"; });
+    var workers = rows.filter(function (b) { return b.role === "worker"; });
+    var chairman = rows.filter(function (b) { return b.role === "chairman"; });
+    renderSurfaceGroup(root, "Sol", sol);
+    renderSurfaceGroup(root, "Fable / Ops", ops);
+    renderSurfaceGroup(root, "Workers", workers);
+    renderSurfaceGroup(root, "Chairman", chairman);
+    if (!rows.length) root.appendChild(el("p", { text: "No navigation surfaces are bound.", className: "ccr-empty-line" }));
+    return { node: root, count: rows.length };
+  }
+
+  function renderSurfaces() {
+    var dock = document.getElementById("ccr-surface-dock-content");
+    var mobile = document.getElementById("ccr-surfaces-mobile-content");
+    clear(dock);
+    clear(mobile);
+    var a = buildSurfaceContent();
+    var b = buildSurfaceContent();
+    while (a.node.firstChild) dock.appendChild(a.node.firstChild);
+    while (b.node.firstChild) mobile.appendChild(b.node.firstChild);
+    document.getElementById("nav-surface-count").textContent = String(a.count);
+  }
+
+  // work ------------------------------------------------------------------
+  function cardAttentionTargets(card) {
+    var found = {};
+    (card.attention_ids || []).forEach(function (id) {
+      var target = STATE.attentionTargetById[id];
+      if (target) found[target] = true;
+    });
+    return found;
+  }
+
+  function cardFailedJobs(card) {
+    return (((card.executive || {}).jobs) || []).filter(function (job) { return String(job.status).toLowerCase() === "failed"; });
+  }
+
+  function focusReasons(card) {
+    var reasons = [];
+    if ((card.attention_ids || []).length) reasons.push("attention");
+    if ((card.disagreements || []).length) reasons.push("source disagreement");
+    var ao = card.agent_os || {};
+    if (String(ao.status).toLowerCase() === "blocked" || String(ao.state).toLowerCase() === "blocked") reasons.push("authored blocked state");
+    if ((ao.unmet_dependencies || []).length) reasons.push("unmet dependencies");
+    if (cardFailedJobs(card).length) reasons.push("failed executive job");
+    return reasons;
+  }
+
+  function isFocus(card) { return focusReasons(card).length > 0; }
+
+  function cardSortKey(card, index) {
+    var targets = cardAttentionTargets(card);
+    var altitude = targets.chairman ? 0 : targets.ceo ? 1 : targets.coo ? 2 : 3;
+    var danger = cardFailedJobs(card).length || (card.disagreements || []).length ? 0 : 1;
+    var blocked = String((card.agent_os || {}).status).toLowerCase() === "blocked" ? 0 : 1;
+    return [altitude, danger, blocked, index];
+  }
+
+  function compareKeys(a, b) {
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] < b[i]) return -1;
+      if (a[i] > b[i]) return 1;
+    }
+    return 0;
+  }
+
+  function sortedFocusCards() {
+    return STATE.work.map(function (card, index) { return { card: card, key: cardSortKey(card, index) }; })
+      .filter(function (row) { return isFocus(row.card); })
+      .sort(function (a, b) { return compareKeys(a.key, b.key); })
+      .map(function (row) { return row.card; });
+  }
+
+  function renderChain(card) {
+    var container = el("div", { className: "ccr-chain" });
+    var track = el("div", { className: "ccr-chain-track" });
+    var targets = cardAttentionTargets(card);
+    var bindings = card.bindings || [];
+
+    [
+      { role: "chairman", target: "chairman", label: "You" },
+      { role: "ceo", target: "ceo", label: "Sol" },
+      { role: "coo", target: "coo", label: "Fable" },
+      // Executive Inbox has no worker attention bucket. Worker nodes therefore
+      // express navigation addressability only, never inferred runtime state.
+      { role: "worker", target: null, label: "Workers" },
+    ].forEach(function (spec) {
+      var roleBindings = bindings.filter(function (b) { return b.role === spec.role; });
+      var cls = "ccr-chain-node";
+      if (roleBindings.length) cls += " is-bound";
+      if (spec.target && targets[spec.target]) cls += " is-attention";
+      var node = el("div", { className: cls });
+      node.appendChild(el("span", { text: spec.label, className: "ccr-chain-name" }));
+      var sub = roleBindings.length ? roleBindings.length + " bound" : "";
+      if (spec.target && targets[spec.target]) sub = "attention";
+      node.appendChild(el("span", { text: sub, className: "ccr-chain-sub" }));
+      track.appendChild(node);
+    });
+    container.appendChild(track);
+    return container;
+  }
+
+  function renderMissionRow(card) {
+    var targets = cardAttentionTargets(card);
+    var failed = cardFailedJobs(card).length > 0;
+    var disagreements = (card.disagreements || []).length;
+    var cls = "ccr-mission-row";
+    var hasHumanAttention = targets.chairman || targets.ceo || targets.coo;
+    if (targets.chairman) cls += " ccr-has-chairman-attention";
+    else if (targets.ceo || targets.coo) cls += " ccr-has-role-attention";
+    // Human attention owns the row's brass stripe. Machine/runtime danger is
+    // still explicit in vermilion evidence chips but must never visually
+    // overwrite the fact that a person owes the canonical next move.
+    if ((failed || disagreements) && !hasHumanAttention) cls += " ccr-has-danger";
+    var row = el("article", { className: cls, attrs: { tabindex: "0" } });
+
+    var ao = card.agent_os || {};
+    var id = el("div", { className: "ccr-mission-id" });
+    id.appendChild(el("div", { text: safeText(ao.title, "Untitled work reference"), className: "ccr-mission-title" }));
+    id.appendChild(el("div", { text: safeText(card.work_ref), className: "ccr-mission-ref" }));
+    id.appendChild(el("div", { text: [ao.program, ao.status].filter(function (x) { return !isBlank(x); }).join(" · ") || "No authored program/status", className: "ccr-mission-program" }));
+    row.appendChild(id);
+
+    var frontier = el("div", { className: "ccr-mission-frontier" });
+    frontier.appendChild(el("span", { text: "Recorded frontier", className: "ccr-frontier-label" }));
+    frontier.appendChild(el("p", { text: safeText(ao.next_action, "No next action from Agent OS."), className: isBlank(ao.next_action) ? "ccr-frontier-text is-unknown" : "ccr-frontier-text" }));
+    row.appendChild(frontier);
+    row.appendChild(renderChain(card));
+
+    var evidence = el("div", { className: "ccr-mission-evidence" });
+    if ((card.attention_ids || []).length) evidence.appendChild(chip((card.attention_ids || []).length + " attention", "is-brass"));
+    var jobs = ((card.executive || {}).jobs) || [];
+    if (jobs.length) {
+      if (failed) evidence.appendChild(chip("JOB FAILED", "is-danger"));
+      else evidence.appendChild(chip(jobs.length + " job" + (jobs.length === 1 ? "" : "s"), "is-slate"));
+    }
+    var prs = ((card.github || {}).prs) || [];
+    evidence.appendChild(chip(prs.length ? "PR " + prs.length : "NO OPEN PR", prs.length ? "is-slate" : "is-dim"));
+    if (disagreements) evidence.appendChild(chip("SOURCE DRIFT", "is-danger"));
+    var reasons = focusReasons(card);
+    if (reasons.indexOf("authored blocked state") !== -1) evidence.appendChild(chip("BLOCKED", "is-danger"));
+    row.appendChild(evidence);
+
+    row.addEventListener("click", function () { openDetail(card, row); });
+    row.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDetail(card, row);
+      }
+    });
     return row;
   }
 
-  function renderBindings(card) {
-    var wrap = el("div", { className: "ccr-bindings" });
-    wrap.appendChild(el("p", { text: "Surfaces", className: "ccr-bindings-label" }));
+  function workMatches(card, query) {
+    if (!query) return true;
+    var ao = card.agent_os || {};
+    var hay = [card.work_ref, ao.title, ao.program, ao.status, ao.next_action]
+      .concat((((card.github || {}).prs) || []).map(function (pr) { return pr.title; }))
+      .join(" ").toLowerCase();
+    return hay.indexOf(query.toLowerCase()) !== -1;
+  }
+
+  function renderMissionList(container, cards) {
+    clear(container);
+    if (!cards.length) {
+      container.appendChild(el("p", { text: "No work matches this view.", className: "ccr-mission-list-empty" }));
+      return;
+    }
+    cards.forEach(function (card) { container.appendChild(renderMissionRow(card)); });
+  }
+
+  function renderWork() {
+    var focus = sortedFocusCards();
+    renderMissionList(document.getElementById("ccr-focus-list"), focus);
+
+    var rows = STATE.work.filter(function (card) {
+      return (STATE.workMode === "all" || isFocus(card)) && workMatches(card, STATE.workQuery);
+    });
+    if (STATE.workMode === "focus") {
+      var focusSet = {};
+      focus.forEach(function (card, index) { focusSet[card.work_ref] = index; });
+      rows.sort(function (a, b) { return focusSet[a.work_ref] - focusSet[b.work_ref]; });
+    }
+    renderMissionList(document.getElementById("ccr-work-list"), rows);
+    setTally("work", STATE.work.length);
+    document.getElementById("nav-work-count").textContent = String(STATE.work.length);
+    document.getElementById("ccr-work-filter-note").textContent = STATE.workMode === "focus" ? "Showing deterministic focus · " + rows.length : "Showing all loaded work · " + rows.length;
+
+    var buttons = document.querySelectorAll("[data-work-mode]");
+    for (var i = 0; i < buttons.length; i++) buttons[i].className = buttons[i].getAttribute("data-work-mode") === STATE.workMode ? "is-active" : "";
+  }
+
+  // detail drawer ---------------------------------------------------------
+  function detailLine(parent, text, mono) {
+    parent.appendChild(el("p", { text: text, className: "ccr-detail-line" + (mono ? " mono" : "") }));
+  }
+
+  function detailRail(rails, name, builder) {
+    var rail = el("section", { className: "ccr-detail-rail" });
+    rail.appendChild(el("div", { text: name, className: "ccr-detail-rail-name" }));
+    var body = el("div", { className: "ccr-detail-rail-body" });
+    builder(body);
+    rail.appendChild(body);
+    rails.appendChild(rail);
+  }
+
+  function renderDetail(card) {
+    var ao = card.agent_os || {};
+    document.getElementById("ccr-detail-ref").textContent = safeText(card.work_ref);
+    document.getElementById("ccr-detail-title").textContent = safeText(ao.title, "Untitled work reference");
+    var body = document.getElementById("ccr-detail-body");
+    clear(body);
+
+    var summary = el("section", { className: "ccr-detail-summary" });
+    summary.appendChild(el("span", { text: "Recorded next action", className: "ccr-detail-next-label" }));
+    summary.appendChild(el("p", { text: safeText(ao.next_action, "No next action from Agent OS."), className: "ccr-detail-next" }));
+    body.appendChild(summary);
+
+    var rails = el("div", { className: "ccr-detail-rails" });
+    detailRail(rails, "Agent OS", function (node) {
+      var facts = [];
+      if (!isBlank(ao.status)) facts.push("status " + ao.status);
+      if (!isBlank(ao.state)) facts.push("readiness " + ao.state);
+      if (!isBlank(ao.program)) facts.push("program " + ao.program);
+      if (facts.length) detailLine(node, facts.join(" · "), true);
+      if (!isBlank(ao.reason)) detailLine(node, ao.reason, false);
+      if ((ao.unmet_dependencies || []).length) detailLine(node, "waiting on " + ao.unmet_dependencies.join(", "), true);
+      if (!facts.length && isBlank(ao.reason) && !(ao.unmet_dependencies || []).length) detailLine(node, "silent — no Agent OS facts for this reference", true);
+    });
+    detailRail(rails, "Executive", function (node) {
+      var jobs = ((card.executive || {}).jobs) || [];
+      if (!jobs.length) { detailLine(node, "silent — no Executive job cites this reference", true); return; }
+      jobs.forEach(function (job) { detailLine(node, safeText(job.job_id) + " · " + safeText(job.status, "status unknown"), true); });
+      if (!isBlank((card.executive || {}).joined_by)) detailLine(node, "joined by " + card.executive.joined_by, true);
+    });
+    detailRail(rails, "GitHub", function (node) {
+      var prs = ((card.github || {}).prs) || [];
+      if (!prs.length) { detailLine(node, "silent — no open PR cites this reference", true); return; }
+      prs.forEach(function (pr) {
+        var row = el("div", { className: "ccr-detail-pr" });
+        var left = el("div");
+        left.appendChild(el("div", { text: safeText(pr.title, "Untitled PR"), className: "ccr-detail-pr-title" }));
+        left.appendChild(el("div", { text: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + (pr.draft === true ? "draft" : pr.draft === false ? "ready" : "draft unknown") + " · merge " + safeText(pr.merge_state), className: "ccr-detail-pr-meta" }));
+        row.appendChild(left);
+        var link = el("a", { text: "Open PR", className: "ccr-open-button", attrs: { href: pr.url || "#", target: "_blank", rel: "noopener" } });
+        row.appendChild(link);
+        node.appendChild(row);
+      });
+    });
+    body.appendChild(rails);
+
+    var attentionRows = [];
+    (card.attention_ids || []).forEach(function (id) {
+      ["chairman", "ceo", "coo"].forEach(function (target) {
+        (((STATE.doc || {}).attention || {})[target] || []).forEach(function (item) {
+          if (item.attention_id === id) attentionRows.push({ target: target, item: item });
+        });
+      });
+    });
+    if (attentionRows.length) {
+      var attSection = el("section", { className: "ccr-detail-section" });
+      attSection.appendChild(el("h3", { text: "Attention" }));
+      attentionRows.forEach(function (entry) {
+        var line = el("div", { className: "ccr-binding-card" });
+        var copy = el("div");
+        copy.appendChild(el("div", { text: ROLE_NAME[entry.target] + " · " + safeText(entry.item.reason, "Attention item"), className: "ccr-binding-title" }));
+        copy.appendChild(el("div", { text: safeText(entry.item.attention_id), className: "ccr-binding-meta" }));
+        line.appendChild(copy);
+        line.appendChild(chip(entry.target.toUpperCase(), "is-brass"));
+        attSection.appendChild(line);
+        var evidence = attentionEvidenceFold(entry.item);
+        if (evidence) attSection.appendChild(evidence);
+      });
+      body.appendChild(attSection);
+    }
+
+    if ((card.disagreements || []).length) {
+      var drift = el("section", { className: "ccr-detail-section" });
+      drift.appendChild(el("h3", { text: "Source drift — unresolved" }));
+      card.disagreements.forEach(function (entry) { drift.appendChild(el("div", { text: entry, className: "ccr-disagreement" })); });
+      body.appendChild(drift);
+    }
 
     var bindings = card.bindings || [];
-    if (!bindings.length) {
-      var confidence = bindingConfidence(null);
-      var row = el("div", { className: "ccr-binding-row" });
-      row.appendChild(el("span", { text: "Worker", className: "ccr-binding-who" }));
-      row.appendChild(chip(confidence.state, confidence.variant));
-      row.appendChild(el("span", { className: "ccr-binding-spacer" }));
-      var dead = el("button", { text: "Open worker", className: "ccr-open" });
-      dead.type = "button";
-      dead.disabled = true;
-      row.appendChild(dead);
-      var deadFoot = el("div", { className: "ccr-binding-foot" });
-      deadFoot.appendChild(el("div", {
-        text: confidence.note + " Bind one below to open it from here.",
-        className: "ccr-binding-note",
-      }));
-      row.appendChild(deadFoot);
-      wrap.appendChild(row);
-      return wrap;
-    }
-
+    var surfaceSection = el("section", { className: "ccr-detail-section" });
+    surfaceSection.appendChild(el("h3", { text: "Navigation surfaces" }));
+    if (!bindings.length) surfaceSection.appendChild(el("p", { text: "No surface is bound to this work reference.", className: "ccr-empty-line" }));
     bindings.forEach(function (binding) {
-      wrap.appendChild(renderBindingRow(binding));
-    });
-    return wrap;
-  }
-
-  // -- work cards ----------------------------------------------------------
-
-  function provRow(grid, name, silent, build) {
-    var nameNode = el("p", { text: name, className: "ccr-prov-name" });
-    var valNode = el("div", { className: "ccr-prov-val" });
-    if (silent) {
-      nameNode.className = "ccr-prov-name is-dim";
-      valNode.className = "ccr-prov-val is-dim";
-    }
-    build(valNode);
-    // display:contents on a wrapper would break the grid rails, so the two
-    // cells are placed directly and the silent styling is carried per cell.
-    grid.appendChild(nameNode);
-    grid.appendChild(valNode);
-  }
-
-  function line(parent, text, className) {
-    parent.appendChild(el("span", { text: text, className: className || "ccr-prov-line" }));
-  }
-
-  function renderAgentOsRail(grid, card) {
-    var ao = card.agent_os;
-    var known = ao && (!isBlank(ao.status) || !isBlank(ao.state) || !isBlank(ao.next_action) ||
-      !isBlank(ao.program) || !isBlank(ao.reason));
-    provRow(grid, "Agent OS", !known, function (val) {
-      if (!known) {
-        line(val, "silent — no Agent OS record for this reference");
-        return;
-      }
-      var head = el("span", { className: "ccr-prov-line" });
-      head.appendChild(el("span", { text: "status " }));
-      head.appendChild(valueNode(ao.status));
-      head.appendChild(el("span", { text: " · readiness " }));
-      head.appendChild(valueNode(ao.state));
-      val.appendChild(head);
-
-      if (!isBlank(ao.program)) line(val, "program " + String(ao.program), "ccr-prov-line ccr-prov-sub");
-      if (!isBlank(ao.reason)) line(val, String(ao.reason), "ccr-prov-line");
-      if (!isBlank(ao.next_action)) line(val, "next — " + String(ao.next_action), "ccr-prov-line");
-      var unmet = (ao.unmet_dependencies || []);
-      if (unmet.length) {
-        line(val, "waiting on " + unmet.join(", "), "ccr-prov-line ccr-prov-sub");
-      }
-    });
-  }
-
-  function renderExecutiveRail(grid, card) {
-    var jobs = (card.executive && card.executive.jobs) || [];
-    provRow(grid, "Executive", !jobs.length, function (val) {
-      if (!jobs.length) {
-        line(val, "silent — no Executive job cites this reference");
-        return;
-      }
-      jobs.forEach(function (job) {
-        var row = el("span", { className: "ccr-prov-line" });
-        row.appendChild(el("span", { text: String(job.job_id) + " ", className: "ccr-mono" }));
-        row.appendChild(valueNode(job.status, "status unknown"));
-        val.appendChild(row);
+      var confidence = bindingConfidence(binding);
+      var row = el("div", { className: "ccr-binding-card" });
+      var copy = el("div");
+      copy.appendChild(el("div", { text: (ROLE_NAME[binding.role] || binding.role) + " · " + seatLabel(binding), className: "ccr-binding-title" }));
+      var status = el("div", { text: safeText(binding.provider) + " · " + confidence.note, className: "ccr-binding-meta" });
+      copy.appendChild(status);
+      row.appendChild(copy);
+      var controls = el("div");
+      controls.appendChild(chip(confidence.state, confidence.variant));
+      var open = openBindingButton(binding, "Open");
+      open.classList.add("ccr-binding-open");
+      controls.appendChild(open);
+      var unbind = button("Unbind", "ccr-open-button ccr-unbind-button", function (event) {
+        event.stopPropagation();
+        unbind.disabled = true;
+        postJSON("/api/unbind", { binding_id: binding.binding_id }).then(function () {
+          closeDetail();
+          return loadState();
+        }).finally(function () { unbind.disabled = false; });
       });
-      var joinedBy = card.executive && card.executive.joined_by;
-      if (!isBlank(joinedBy)) {
-        line(val, "joined by " + String(joinedBy), "ccr-prov-line ccr-prov-sub");
-      }
+      controls.appendChild(unbind);
+      row.appendChild(controls);
+      surfaceSection.appendChild(row);
     });
+    body.appendChild(surfaceSection);
   }
 
-  function prLink(pr, label) {
-    var link = el("a", { text: label, className: "ccr-open" });
-    link.href = pr.url || "#";
-    link.target = "_blank";
-    link.rel = "noopener";
-    return link;
+  function openDetail(card, opener) {
+    LAST_DRAWER_OPENER = openerCandidate(opener);
+    STATE.selectedWork = card;
+    renderDetail(card);
+    var drawer = document.getElementById("ccr-detail-drawer");
+    drawer.classList.add("is-open");
+    drawer.setAttribute("aria-hidden", "false");
+    document.getElementById("ccr-drawer-scrim").hidden = false;
+    document.getElementById("ccr-drawer-close").focus();
   }
 
-  function renderGithubRail(grid, card) {
-    var prs = (card.github && card.github.prs) || [];
-    provRow(grid, "GitHub", !prs.length, function (val) {
-      if (!prs.length) {
-        line(val, "silent — no open PR cites this reference");
-        return;
-      }
-      prs.forEach(function (pr) {
-        var row = el("div", { className: "ccr-prov-line ccr-prov-pr" });
-        var left = el("span");
-        left.appendChild(el("span", {
-          text: String(pr.repo || "unknown repo") + " #" + String(pr.number || "?") + " ",
-          className: "ccr-mono",
-        }));
-        left.appendChild(el("span", { text: String(pr.title || "no title") }));
-        row.appendChild(left);
+  function closeDetail() {
+    var drawer = document.getElementById("ccr-detail-drawer");
+    var wasOpen = drawer.classList.contains("is-open");
+    drawer.classList.remove("is-open");
+    drawer.setAttribute("aria-hidden", "true");
+    document.getElementById("ccr-drawer-scrim").hidden = true;
+    STATE.selectedWork = null;
+    if (wasOpen) {
+      var opener = LAST_DRAWER_OPENER;
+      LAST_DRAWER_OPENER = null;
+      restoreFocus(opener);
+    }
+  }
 
-        var facts = el("span", { className: "ccr-prov-sub" });
-        facts.textContent = (pr.draft === true ? "draft · " : pr.draft === false ? "ready · " : "") +
-          "merge state " + (isBlank(pr.merge_state) ? "unknown" : String(pr.merge_state));
-        row.appendChild(facts);
-        row.appendChild(prLink(pr, "Open PR"));
-        val.appendChild(row);
+  // loose ends ------------------------------------------------------------
+  function renderLooseRows(selector, rows, rowBuilder, emptyLine) {
+    var list = document.querySelector(selector + " ul");
+    clear(list);
+    (rows || []).forEach(function (row) { list.appendChild(rowBuilder(row)); });
+    if (!rows || !rows.length) list.appendChild(el("li", { text: emptyLine, className: "ccr-empty-line" }));
+    return (rows || []).length;
+  }
+
+  function renderLooseEnds(doc) {
+    var unjoined = renderLooseRows("#unjoined-prs", doc.unjoined_open_prs, function (pr) {
+      var li = el("li", { className: "ccr-row" });
+      li.appendChild(el("span", { text: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + safeText(pr.title, "Untitled PR"), className: "ccr-row-title" }));
+      li.appendChild(el("a", { text: "Open PR", className: "ccr-open-button", attrs: { href: pr.url || "#", target: "_blank", rel: "noopener" } }));
+      return li;
+    }, "Every loaded open PR is claimed by a work card.");
+
+    var unbound = renderLooseRows("#unbound-surfaces", doc.unbound_surfaces, function (binding) {
+      var li = el("li", { className: "ccr-row" });
+      li.appendChild(el("span", { text: safeText(binding.work_ref) + " · " + safeText(binding.role) + " · " + safeText(binding.provider), className: "ccr-row-title ccr-row-id" }));
+      li.appendChild(chip("UNJOINED", "is-dim"));
+      return li;
+    }, "Every binding points at loaded work.");
+
+    var conflicts = renderLooseRows("#binding-conflicts", doc.binding_conflicts, function (row) {
+      var li = el("li", { className: "ccr-row" });
+      var claimantIds = (row.binding_ids || []).map(function (id) { return String(id); });
+      var claimantText = claimantIds.length ? claimantIds.join(", ") : "claimants unknown";
+      li.appendChild(el("span", {
+        text: safeText(row.work_ref) + " · " + safeText(row.role) + " · " + claimantIds.length + " claims · " + claimantText,
+        className: "ccr-row-title ccr-row-id",
+      }));
+      li.appendChild(chip("CONFLICT", "is-danger"));
+      return li;
+    }, "No work/role navigation slot has competing claims.");
+
+    setTally("unjoined", unjoined);
+    setTally("unbound", unbound);
+    setTally("conflicts", conflicts);
+    setTally("loose", unjoined + unbound + conflicts);
+    return unjoined + unbound + conflicts;
+  }
+
+  // command palette -------------------------------------------------------
+  function rebuildPaletteIndex() {
+    var items = [];
+    STATE.work.forEach(function (card) {
+      var ao = card.agent_os || {};
+      items.push({
+        kind: "work",
+        title: safeText(ao.title, card.work_ref),
+        sub: safeText(card.work_ref) + (ao.program ? " · " + ao.program : ""),
+        search: [card.work_ref, ao.title, ao.program, ao.next_action].map(normalizedSearchText).join(" "),
+        actionLabel: "Inspect",
+        action: function () {
+          var opener = LAST_PALETTE_OPENER;
+          closePalette(false);
+          openDetail(card, opener);
+        },
+      });
+      (((card.github || {}).prs) || []).forEach(function (pr) {
+        items.push({
+          kind: "PR",
+          title: safeText(pr.title, "Untitled PR"),
+          sub: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + safeText(card.work_ref),
+          search: [pr.title, pr.repo, pr.number, card.work_ref].map(normalizedSearchText).join(" "),
+          actionLabel: "Open",
+          action: function () {
+            closePalette();
+            if (pr.url) window.open(pr.url, "_blank", "noopener");
+          },
+        });
       });
     });
-  }
-
-  function renderWorkCard(card) {
-    var attentionCount = (card.attention_ids || []).length;
-    var disagreements = card.disagreements || [];
-
-    var classes = ["ccr-work-card"];
-    if (attentionCount) classes.push("ccr-card-wanted");
-    if (disagreements.length) classes.push("ccr-card-disputed");
-    var wrap = el("article", { className: classes.join(" ") });
-
-    var head = el("div", { className: "ccr-card-head" });
-    head.appendChild(el("h3", { text: String(card.work_ref) }));
-
-    var title = card.agent_os && card.agent_os.title;
-    head.appendChild(el("p", {
-      text: isBlank(title) ? "no title from any source" : String(title),
-      className: isBlank(title) ? "ccr-card-title ccr-untitled" : "ccr-card-title",
-    }));
-
-    if (attentionCount || disagreements.length) {
-      var flags = el("div", { className: "ccr-card-flags" });
-      if (attentionCount) {
-        flags.appendChild(chip(
-          attentionCount === 1 ? "1 attention item" : attentionCount + " attention items",
-          "ccr-chip-flag"
-        ));
-      }
-      if (disagreements.length) {
-        flags.appendChild(chip("sources disagree", "ccr-chip-flag"));
-      }
-      head.appendChild(flags);
-    }
-    wrap.appendChild(head);
-
-    var grid = el("div", { className: "ccr-prov" });
-    renderAgentOsRail(grid, card);
-    renderExecutiveRail(grid, card);
-    renderGithubRail(grid, card);
-    wrap.appendChild(grid);
-
-    if (disagreements.length) {
-      var box = el("ul", { className: "ccr-disagreements" });
-      box.appendChild(el("li", { text: "Reported as written, unresolved", className: "ccr-disagree-label" }));
-      disagreements.forEach(function (entry) {
-        box.appendChild(el("li", { text: String(entry) }));
+    allBindings().forEach(function (binding) {
+      var confidence = bindingConfidence(binding);
+      var relatedCard = STATE.workByRef[binding.work_ref] || null;
+      items.push({
+        kind: "surface",
+        title: seatLabel(binding) + " · " + workTitle(binding.work_ref),
+        sub: safeText(binding.provider) + " · " + safeText(binding.work_ref) + " · " + confidence.state,
+        search: [binding.seat_ref, binding.provider, binding.role, binding.work_ref, workTitle(binding.work_ref)].map(normalizedSearchText).join(" "),
+        actionLabel: confidence.openable ? "Open" : "Inspect",
+        action: function () {
+          var opener = LAST_PALETTE_OPENER;
+          closePalette(false);
+          if (confidence.openable) {
+            openBinding(binding, null, null).then(function () { loadState(); restoreFocus(opener); });
+          } else if (relatedCard) {
+            openDetail(relatedCard, opener);
+          } else {
+            document.getElementById("system").scrollIntoView({ behavior: "smooth", block: "start" });
+            setActiveNav("system");
+            restoreFocus(opener);
+          }
+        },
       });
-      wrap.appendChild(box);
-    }
-
-    wrap.appendChild(renderBindings(card));
-    return wrap;
-  }
-
-  /** Cards the Chairman is being asked about come first; the rest stay in the
-   *  server's own reference order. The rule is printed in the section hint so
-   *  the ordering is never a silent editorial act. */
-  function workOrder(cards) {
-    return cards.map(function (card, index) {
-      return { card: card, index: index };
-    }).sort(function (a, b) {
-      var aw = (a.card.attention_ids || []).length ? 1 : 0;
-      var bw = (b.card.attention_ids || []).length ? 1 : 0;
-      if (aw !== bw) return bw - aw;
-      var ad = (a.card.disagreements || []).length ? 1 : 0;
-      var bd = (b.card.disagreements || []).length ? 1 : 0;
-      if (ad !== bd) return bd - ad;
-      return a.index - b.index;
-    }).map(function (entry) {
-      return entry.card;
     });
+    STATE.paletteItems = items;
   }
 
-  function renderWork(cards) {
-    var container = document.querySelector("#work .ccr-work-cards");
+  function paletteSearch(query) {
+    var q = normalizedSearchText(query).trim();
+    var rows = STATE.paletteItems.filter(function (item) { return !q || item.search.indexOf(q) !== -1; });
+    return rows.slice(0, 30);
+  }
+
+  function renderPaletteResults() {
+    var container = document.getElementById("ccr-palette-results");
     clear(container);
-    var rows = cards || [];
-    workOrder(rows).forEach(function (card) {
-      container.appendChild(renderWorkCard(card));
-    });
-    if (!rows.length) {
-      container.appendChild(el("p", {
-        text: "No work card exists. No source named a work reference in this collection.",
-        className: "ccr-empty",
-      }));
+    var query = document.getElementById("ccr-palette-input").value;
+    STATE.paletteResults = paletteSearch(query);
+    if (STATE.paletteIndex >= STATE.paletteResults.length) STATE.paletteIndex = 0;
+    if (!STATE.paletteResults.length) {
+      container.appendChild(el("div", { text: "No loaded work, surface or PR matches that search.", className: "ccr-palette-empty" }));
+      return;
     }
-    return rows.length;
+    STATE.paletteResults.forEach(function (item, index) {
+      var row = el("button", { className: "ccr-palette-result" + (index === STATE.paletteIndex ? " is-active" : "") });
+      row.type = "button";
+      row.appendChild(el("span", { text: item.kind, className: "ccr-palette-kind" }));
+      var copy = el("span");
+      copy.appendChild(el("div", { text: item.title, className: "ccr-palette-title" }));
+      copy.appendChild(el("div", { text: item.sub, className: "ccr-palette-sub" }));
+      row.appendChild(copy);
+      row.appendChild(el("span", { text: item.actionLabel || (item.kind === "work" ? "Inspect" : "Open"), className: "ccr-palette-action" }));
+      row.addEventListener("click", item.action);
+      container.appendChild(row);
+    });
   }
 
-  // -- loose ends ----------------------------------------------------------
+  function openPalette(opener) {
+    LAST_PALETTE_OPENER = openerCandidate(opener);
+    var wrap = document.getElementById("ccr-palette");
+    wrap.hidden = false;
+    STATE.paletteIndex = 0;
+    var input = document.getElementById("ccr-palette-input");
+    input.value = "";
+    renderPaletteResults();
+    input.focus();
+  }
 
-  function renderUnjoinedPRs(prs) {
-    var listNode = document.querySelector("#unjoined-prs ul");
-    clear(listNode);
-    var rows = prs || [];
-    rows.forEach(function (pr) {
-      var li = el("li", { className: "ccr-row" });
-      var left = el("span", { className: "ccr-row-title" });
-      left.appendChild(el("span", {
-        text: String(pr.repo || "unknown repo") + " #" + String(pr.number || "?") + " ",
-        className: "ccr-row-id",
-      }));
-      left.appendChild(el("span", { text: String(pr.title || "no title") }));
-      li.appendChild(left);
-      li.appendChild(prLink(pr, "Open PR"));
-      listNode.appendChild(li);
-    });
-    if (!rows.length) {
-      listNode.appendChild(el("li", { text: "Every open PR is claimed by a card above.", className: "ccr-empty" }));
+  function closePalette(restore) {
+    var wrap = document.getElementById("ccr-palette");
+    var wasOpen = !wrap.hidden;
+    wrap.hidden = true;
+    if (wasOpen && restore !== false) {
+      var opener = LAST_PALETTE_OPENER;
+      LAST_PALETTE_OPENER = null;
+      restoreFocus(opener);
     }
-    return rows.length;
   }
 
-  function renderUnboundSurfaces(rows) {
-    var listNode = document.querySelector("#unbound-surfaces ul");
-    clear(listNode);
-    var items = rows || [];
-    items.forEach(function (row) {
-      var li = el("li", { className: "ccr-row" });
-      var left = el("span", { className: "ccr-row-title" });
-      left.appendChild(el("span", { text: String(row.work_ref || "no work reference") + " ", className: "ccr-row-id" }));
-      left.appendChild(el("span", { text: (ROLE_NAME[row.role] || String(row.role)) + " · " + String(row.provider) }));
-      li.appendChild(left);
-      li.appendChild(chip("UNBOUND", "ccr-chip-unbound"));
-      listNode.appendChild(li);
-    });
-    if (!items.length) {
-      listNode.appendChild(el("li", { text: "Every bound surface points at work shown above.", className: "ccr-empty" }));
-    }
-    return items.length;
-  }
-
-  function renderBindingConflicts(rows) {
-    var listNode = document.querySelector("#binding-conflicts ul");
-    clear(listNode);
-    var items = rows || [];
-    items.forEach(function (row) {
-      var li = el("li", { className: "ccr-row" });
-      var left = el("span", { className: "ccr-row-title" });
-      left.appendChild(el("span", { text: String(row.work_ref) + " · " + (ROLE_NAME[row.role] || String(row.role)), className: "ccr-row-id" }));
-      // one claimant per line: run together, ids break mid-token and read wrong
-      (row.binding_ids || []).forEach(function (id) {
-        left.appendChild(el("span", { text: String(id), className: "ccr-row-id ccr-row-claim" }));
-      });
-      li.appendChild(left);
-      li.appendChild(chip(String((row.binding_ids || []).length) + " CLAIMS", "ccr-chip-unsupported"));
-      listNode.appendChild(li);
-    });
-    if (!items.length) {
-      listNode.appendChild(el("li", { text: "No work and role is claimed twice.", className: "ccr-empty" }));
-    }
-    return items.length;
-  }
-
-  // -- the ladder ----------------------------------------------------------
-
-  function setTally(name, count) {
-    var nodes = document.querySelectorAll('[data-tally="' + name + '"]');
-    for (var i = 0; i < nodes.length; i++) nodes[i].textContent = String(count);
-  }
-
-  function renderLadder(counts) {
-    var order = ["chairman", "ceo", "coo", "work", "loose"];
-    var leadFound = false;
-    order.forEach(function (name) {
-      var node = document.querySelector('[data-rung="' + name + '"]');
-      if (!node) return;
-      node.textContent = String(counts[name]);
-      var li = node.closest ? node.closest("li") : null;
-      if (!li) return;
-      var classes = [];
-      if (!counts[name]) classes.push("is-zero");
-      // Brass marks the topmost SEAT that owes a move — work and loose ends
-      // are not people, so they never take it.
-      if (!leadFound && counts[name] > 0 && (name === "chairman" || name === "ceo" || name === "coo")) {
-        classes.push("is-lead");
-        leadFound = true;
-      }
-      li.className = classes.join(" ");
-    });
-  }
-
-  // -- state ---------------------------------------------------------------
-
-  /** Freshness + degraded surfacing for the H0 hardening envelope fields
-   *  (composed_at / refresh_in_flight / state_refresh_error — cached,
-   *  single-flight background composition, 2026-08-22). None of this is
-   *  part of the pure control_room document itself; it describes the
-   *  cache serving it. */
-  function renderStateFreshness(body) {
-    var docSources = (body && body.control_room && body.control_room.sources) || {};
-    var sources = {};
-    for (var key in docSources) {
-      sources[key] = docSources[key];
-    }
-    sources.composed_at = body && body.composed_at;
-
-    var refreshingEl = document.getElementById("ccr-refreshing");
-    if (refreshingEl) refreshingEl.hidden = !(body && body.refresh_in_flight);
-
-    return sources;
-  }
-
-  function loadState() {
-    return getJSON("/api/state").then(function (body) {
-      var doc = (body && body.control_room) || {};
-      renderSources(renderStateFreshness(body));
-
-      // state_refresh_error describes the CACHE (a background recompose
-      // that failed, last good doc still served), never the document
-      // itself — folded into the same degraded list/rendering so it reads
-      // with the same honesty law (never hidden, never summarised away)
-      // without inventing a second alarm surface.
-      var degradedRows = (doc.degraded || []).slice();
-      if (body && body.state_refresh_error) degradedRows.push(body.state_refresh_error);
-      renderDegraded(degradedRows);
-
-      var attention = doc.attention || {};
-      var chairmanCount = renderAttentionList(
-        document.querySelector("#needs-you .ccr-attention-list"),
-        attention.chairman,
-        "Nothing is waiting on you."
-      );
-      var ceoCount = renderAttentionList(
-        document.querySelector("#sol-attention .ccr-attention-list"),
-        attention.ceo,
-        "Nothing is waiting on Sol."
-      );
-      var cooCount = renderAttentionList(
-        document.querySelector("#coo .ccr-attention-list"),
-        attention.coo,
-        "Nothing is waiting on ops."
-      );
-
-      var needsYou = document.getElementById("needs-you");
-      needsYou.className = chairmanCount ? "ccr-tier ccr-tier-you ccr-has-items" : "ccr-tier ccr-tier-you";
-      var solSection = document.getElementById("sol-attention");
-      solSection.className = ceoCount ? "ccr-tier ccr-tier-sol ccr-has-items" : "ccr-tier ccr-tier-sol";
-
-      var workCount = renderWork(doc.work);
-      var unjoined = renderUnjoinedPRs(doc.unjoined_open_prs);
-      var unbound = renderUnboundSurfaces(doc.unbound_surfaces);
-      var conflicts = renderBindingConflicts(doc.binding_conflicts);
-
-      setTally("chairman", chairmanCount);
-      setTally("ceo", ceoCount);
-      setTally("coo", cooCount);
-      setTally("work", workCount);
-      setTally("unjoined", unjoined);
-      setTally("loose", unjoined + unbound + conflicts);
-
-      renderLadder({
-        chairman: chairmanCount,
-        ceo: ceoCount,
-        coo: cooCount,
-        work: workCount,
-        loose: unjoined + unbound + conflicts,
-      });
-    });
-  }
-
-  // -- discover ------------------------------------------------------------
-
-  function discoverGroup(container, heading, rows, toText, emptyLine) {
+  // discovery / bind ------------------------------------------------------
+  function discoverGroup(container, heading, rows, toText, emptyLine, runningChip) {
     container.appendChild(el("h3", { text: heading }));
     var list = el("ul");
     (rows || []).forEach(function (row) {
-      list.appendChild(el("li", { text: toText(row) }));
-    });
-    if (!rows || !rows.length) {
-      list.appendChild(el("li", { text: emptyLine, className: "ccr-empty" }));
-    }
-    container.appendChild(list);
-  }
-
-  /** ChatGPT discovery groups: read-only local environment identities.
-   *  Rendered with the existing chip style (ccr-chip-verified for a running
-   *  environment, ccr-chip-unbound for a stopped one) rather than plain
-   *  text, so "running" reads the same way it does on a bound surface row.
-   *  A plain list — like the existing Claude Code / Codex discovery groups,
-   *  there is no click-to-prefill wiring in this codebase to mirror.
-   *  Discovery confers zero ownership by itself; nothing is bound until the
-   *  Bind form below is filled in and submitted by hand. */
-  function discoverEnvGroup(container, heading, rows, buildLine, emptyLine) {
-    container.appendChild(el("h3", { text: heading }));
-    var list = el("ul");
-    (rows || []).forEach(function (row) {
-      var li = el("li", { className: "ccr-row" });
-      var left = el("span", { className: "ccr-row-title ccr-mono" });
-      buildLine(left, row);
-      li.appendChild(left);
-      li.appendChild(chip(row.running ? "running" : "not running", row.running ? "ccr-chip-verified" : "ccr-chip-unbound"));
+      var li = el("li", { className: runningChip ? "ccr-row" : "" });
+      li.appendChild(el("span", { text: toText(row), className: runningChip ? "ccr-row-title ccr-row-id" : "" }));
+      if (runningChip) li.appendChild(chip(row.running ? "running profile" : "not running", row.running ? "is-slate" : "is-dim"));
       list.appendChild(li);
     });
-    if (!rows || !rows.length) {
-      list.appendChild(el("li", { text: emptyLine, className: "ccr-empty" }));
-    }
+    if (!rows || !rows.length) list.appendChild(el("li", { text: emptyLine, className: "ccr-empty-line" }));
     container.appendChild(list);
   }
 
@@ -859,174 +1111,334 @@
     clear(container);
     doc = doc || {};
     var envs = doc.chatgpt_environments || {};
+    discoverGroup(container, "ChatGPT · Multilogin", envs.multilogin, function (row) { return "folder " + safeText(row.folder_id) + " · profile " + safeText(row.profile_id); }, "No local Multilogin environment found.", true);
+    discoverGroup(container, "ChatGPT · GoLogin", envs.gologin, function (row) { return "profile " + safeText(row.profile_id); }, "No local GoLogin environment found.", true);
+    discoverGroup(container, "Claude Code", doc.claude_code_sessions, function (row) { return safeText(row.project_dir) + " / " + safeText(row.session_id); }, "No Claude Code session found.", false);
+    discoverGroup(container, "Codex", doc.codex_sessions, function (row) { return safeText(row.date) + " / " + safeText(row.session_id); }, "No Codex session found.", false);
 
-    discoverEnvGroup(container, "ChatGPT — Multilogin environments", envs.multilogin, function (left, row) {
-      left.appendChild(el("span", { text: "f:" + String(row.folder_id) + " p:" + String(row.profile_id) }));
-    }, "No local Multilogin environment was found.");
-
-    discoverEnvGroup(container, "ChatGPT — GoLogin environments", envs.gologin, function (left, row) {
-      left.appendChild(el("span", { text: "p:" + String(row.profile_id) }));
-    }, "No local GoLogin environment was found.");
-
-    discoverGroup(container, "Claude Code sessions", doc.claude_code_sessions, function (s) {
-      return String(s.project_dir) + " / " + String(s.session_id);
-    }, "No Claude Code session was found.");
-
-    discoverGroup(container, "Codex sessions", doc.codex_sessions, function (s) {
-      return String(s.date) + " / " + String(s.session_id);
-    }, "No Codex session was found.");
+    var cursor = doc.cursor || {};
+    container.appendChild(el("h3", { text: "Cursor" }));
+    container.appendChild(el("p", {
+      text: safeText(cursor.note, cursor.supported === false ? "Cursor native thread discovery is unsupported." : "Cursor discovery state is unknown."),
+      className: "ccr-empty-line",
+    }));
   }
 
-  // -- theme ---------------------------------------------------------------
+  function updateBindFieldVisibility() {
+    var provider = document.getElementById("bind-provider").value;
+    var isChatgpt = provider === "chatgpt";
+    document.getElementById("bind-chatgpt-fields").hidden = !isChatgpt;
+    document.getElementById("bind-locator-field").hidden = isChatgpt;
+    document.getElementById("bind-locator").required = !isChatgpt;
+    var manager = document.getElementById("bind-chatgpt-manager").value;
+    document.getElementById("bind-chatgpt-folder-field").hidden = !isChatgpt || manager !== "multilogin";
+  }
 
-  var THEME_KEY = "ccr-theme";
-  var THEME_CYCLE = ["system", "light", "dark"];
+  function buildChatgptLocator() {
+    var manager = document.getElementById("bind-chatgpt-manager").value;
+    var profileId = document.getElementById("bind-chatgpt-profile-id").value.trim();
+    var url = document.getElementById("bind-chatgpt-url").value.trim();
+    if (!profileId || !url) return null;
+    var locator = { env_manager: manager, profile_id: profileId, url: url };
+    if (manager === "multilogin") {
+      var folderId = document.getElementById("bind-chatgpt-folder-id").value.trim();
+      if (!folderId) return null;
+      locator.folder_id = folderId;
+    }
+    return locator;
+  }
 
+  // state -----------------------------------------------------------------
+  function indexState(doc) {
+    STATE.work = doc.work || [];
+    STATE.workByRef = {};
+    STATE.work.forEach(function (card) { STATE.workByRef[card.work_ref] = card; });
+    STATE.attentionTargetById = {};
+    var attention = doc.attention || {};
+    ["chairman", "ceo", "coo"].forEach(function (target) {
+      (attention[target] || []).forEach(function (item) {
+        if (item.attention_id) STATE.attentionTargetById[item.attention_id] = target;
+      });
+    });
+  }
+
+  function renderEverything(body) {
+    var doc = (body && body.control_room) || {};
+    STATE.body = body || {};
+    STATE.doc = doc;
+    STATE.capabilities = (body && body.capabilities) || {};
+    indexState(doc);
+
+    var sources = {};
+    Object.keys(doc.sources || {}).forEach(function (key) { sources[key] = doc.sources[key]; });
+    sources.composed_at = body && body.composed_at;
+    renderSourcePulse(body, sources);
+    renderSystemSources(sources);
+
+    var degraded = (doc.degraded || []).slice();
+    if (body && body.state_refresh_error) degraded.push(body.state_refresh_error);
+    renderDegraded(degraded);
+
+    var attention = doc.attention || {};
+    var chairman = attention.chairman || [];
+    var ceo = attention.ceo || [];
+    var coo = attention.coo || [];
+    renderNeedsYou(chairman);
+    renderMiniAttention("sol-attention", ceo);
+    renderMiniAttention("coo", coo);
+    setTally("chairman", chairman.length);
+    setTally("ceo", ceo.length);
+    setTally("coo", coo.length);
+    document.getElementById("nav-today-count").textContent = String(chairman.length);
+
+    renderWork();
+    renderSurfaces();
+    var loose = renderLooseEnds(doc);
+    renderCapabilities(STATE.capabilities);
+    rebuildPaletteIndex();
+
+    if (STATE.selectedWork && STATE.workByRef[STATE.selectedWork.work_ref]) {
+      STATE.selectedWork = STATE.workByRef[STATE.selectedWork.work_ref];
+      renderDetail(STATE.selectedWork);
+    }
+    document.getElementById("nav-system-count").textContent = degraded.length || loose ? String(degraded.length + loose) : "";
+  }
+
+  function loadState() {
+    return getJSON("/api/state").then(function (body) {
+      renderEverything(body);
+      return body;
+    }).catch(function () {
+      renderDegraded(["control_room_api: unavailable — this page could not reach the local state endpoint"]);
+      return null;
+    });
+  }
+
+  // theme -----------------------------------------------------------------
   function readTheme() {
     try {
-      var stored = window.localStorage.getItem(THEME_KEY);
-      return THEME_CYCLE.indexOf(stored) === -1 ? "system" : stored;
-    } catch (e) {
-      return "system";
-    }
+      var mode = window.localStorage.getItem(THEME_KEY);
+      return mode === "light" || mode === "dark" || mode === "system" ? mode : "dark";
+    } catch (_e) { return "dark"; }
+  }
+
+  function resolvedSystemTheme() {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   }
 
   function applyTheme(mode) {
-    if (mode === "system") {
-      document.documentElement.removeAttribute("data-theme");
-    } else {
-      document.documentElement.setAttribute("data-theme", mode);
+    var resolved = mode === "system" ? resolvedSystemTheme() : mode;
+    document.documentElement.setAttribute("data-theme", resolved);
+    var btn = document.getElementById("ccr-theme");
+    if (btn) {
+      btn.textContent = mode === "system" ? "Theme · System" : "Theme · " + mode.charAt(0).toUpperCase() + mode.slice(1);
+      btn.setAttribute("aria-label", btn.textContent);
+      btn.setAttribute("title", btn.textContent);
     }
-    var button = document.getElementById("ccr-theme");
-    if (button) button.textContent = "Theme: " + mode.charAt(0).toUpperCase() + mode.slice(1);
   }
 
-  applyTheme(readTheme());
+  function cycleTheme() {
+    var modes = ["dark", "light", "system"];
+    var current = readTheme();
+    var next = modes[(modes.indexOf(current) + 1) % modes.length];
+    try { window.localStorage.setItem(THEME_KEY, next); } catch (_e) { /* no-op */ }
+    applyTheme(next);
+  }
 
-  // -- wiring --------------------------------------------------------------
+  // nav -------------------------------------------------------------------
+  function setActiveNav(name) {
+    var links = document.querySelectorAll("[data-nav]");
+    for (var i = 0; i < links.length; i++) {
+      links[i].classList.toggle("is-active", links[i].getAttribute("data-nav") === name);
+    }
+  }
 
+  // wiring ----------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", function () {
     applyTheme(readTheme());
     loadState();
 
-    document.getElementById("ccr-theme").addEventListener("click", function () {
-      var next = THEME_CYCLE[(THEME_CYCLE.indexOf(readTheme()) + 1) % THEME_CYCLE.length];
-      try {
-        window.localStorage.setItem(THEME_KEY, next);
-      } catch (e) { /* a private-mode failure must not break the toggle */ }
-      applyTheme(next);
+    var dock = document.getElementById("ccr-surface-dock");
+    var layout = document.querySelector(".ccr-layout");
+    var collapsed = false;
+
+    function desktopDockVisible() {
+      return !(window.matchMedia && window.matchMedia("(max-width: 1050px)").matches);
+    }
+
+    function applyDockState() {
+      // Below the dock breakpoint the dock is replaced by the responsive
+      // Surfaces section. A remembered desktop collapse preference must not
+      // reserve a phantom 42px grid column when the dock itself is hidden.
+      var activeCollapsed = collapsed && desktopDockVisible();
+      dock.classList.toggle("is-collapsed", activeCollapsed);
+      if (layout) layout.classList.toggle("ccr-dock-collapsed", activeCollapsed);
+      var toggle = document.getElementById("ccr-dock-collapse");
+      toggle.textContent = collapsed ? "›" : "‹";
+      toggle.setAttribute("aria-label", collapsed ? "Expand surfaces" : "Collapse surfaces");
+      toggle.setAttribute("aria-expanded", activeCollapsed ? "false" : "true");
+    }
+
+    try { collapsed = window.localStorage.getItem(DOCK_KEY) === "1"; } catch (_e) { collapsed = false; }
+    applyDockState();
+    window.addEventListener("resize", applyDockState);
+
+    document.getElementById("ccr-theme").addEventListener("click", cycleTheme);
+    document.getElementById("ccr-command").addEventListener("click", function () { openPalette(this); });
+    document.getElementById("ccr-palette-backdrop").addEventListener("click", function () { closePalette(); });
+    document.getElementById("ccr-palette-input").addEventListener("input", function () { STATE.paletteIndex = 0; renderPaletteResults(); });
+    document.getElementById("ccr-palette-input").addEventListener("keydown", function (event) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (STATE.paletteResults.length) STATE.paletteIndex = (STATE.paletteIndex + 1) % STATE.paletteResults.length;
+        renderPaletteResults();
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (STATE.paletteResults.length) STATE.paletteIndex = (STATE.paletteIndex - 1 + STATE.paletteResults.length) % STATE.paletteResults.length;
+        renderPaletteResults();
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        if (STATE.paletteResults[STATE.paletteIndex]) STATE.paletteResults[STATE.paletteIndex].action();
+      } else if (event.key === "Escape") {
+        event.stopPropagation();
+        closePalette();
+      }
+    });
+
+    document.addEventListener("keydown", function (event) {
+      var palette = document.getElementById("ccr-palette");
+      var drawer = document.getElementById("ccr-detail-drawer");
+      if (event.key === "Tab") {
+        if (!palette.hidden) {
+          trapFocus(event, palette);
+          return;
+        }
+        if (drawer.classList.contains("is-open")) {
+          trapFocus(event, drawer);
+          return;
+        }
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        openPalette(document.activeElement);
+      }
+      if (event.key === "Escape") {
+        if (!palette.hidden) closePalette();
+        else closeDetail();
+      }
+    });
+
+    document.getElementById("ccr-drawer-close").addEventListener("click", closeDetail);
+    document.getElementById("ccr-drawer-scrim").addEventListener("click", closeDetail);
+
+    document.getElementById("show-all-work").addEventListener("click", function () {
+      STATE.workMode = "all";
+      renderWork();
+      document.getElementById("work").scrollIntoView({ behavior: "smooth", block: "start" });
+      setActiveNav("work");
+    });
+    document.getElementById("ccr-work-filter").addEventListener("input", function () { STATE.workQuery = this.value.trim(); renderWork(); });
+    var workModeButtons = document.querySelectorAll("[data-work-mode]");
+    for (var i = 0; i < workModeButtons.length; i++) {
+      workModeButtons[i].addEventListener("click", function () {
+        STATE.workMode = this.getAttribute("data-work-mode") || "focus";
+        renderWork();
+      });
+    }
+
+    var navLinks = document.querySelectorAll("[data-nav]");
+    for (var n = 0; n < navLinks.length; n++) {
+      navLinks[n].addEventListener("click", function (event) {
+        var name = this.getAttribute("data-nav");
+        if (name === "surfaces" && desktopDockVisible()) {
+          event.preventDefault();
+          collapsed = false;
+          applyDockState();
+          try { window.localStorage.setItem(DOCK_KEY, "0"); } catch (_e) { /* no-op */ }
+          try { dock.focus({ preventScroll: true }); }
+          catch (_e) { dock.focus(); }
+        }
+        setActiveNav(name);
+      });
+    }
+
+    document.getElementById("ccr-dock-collapse").addEventListener("click", function () {
+      collapsed = !collapsed;
+      applyDockState();
+      try { window.localStorage.setItem(DOCK_KEY, collapsed ? "1" : "0"); } catch (_e) { /* no-op */ }
     });
 
     document.getElementById("discover-run").addEventListener("click", function () {
-      getJSON("/api/discover").then(renderDiscoverResults);
-    });
-
-    document.getElementById("refresh-builds").addEventListener("click", function () {
-      var button = this;
-      var resultNode = document.getElementById("refresh-builds-result");
-      button.disabled = true;
-      resultNode.textContent = "Asking GitHub …";
-      postJSON("/api/refresh-builds", {}).then(function (outcome) {
-        clear(resultNode);
-        if (outcome && outcome.ok) {
-          resultNode.appendChild(el("span", { text: "Refreshed · collected " + String(outcome.collected_at) }));
-          loadState();
-        } else {
-          resultNode.appendChild(el("span", {
-            text: "Did not refresh · " + String((outcome && outcome.detail) || "no detail given"),
-            className: "ccr-problem",
-          }));
-        }
-      }).finally(function () {
-        button.disabled = false;
+      getJSON("/api/discover").then(renderDiscoverResults).catch(function () {
+        var results = document.getElementById("discover-results");
+        clear(results);
+        results.appendChild(el("p", { text: "Discovery unavailable — local server request failed.", className: "ccr-problem" }));
       });
     });
 
-    // -- chatgpt bind fields: managed-environment identity, never a Chrome
-    //    profile (Sol architecture correction, MAS-113, 2026-08-22). ------
-
-    function updateBindFieldVisibility() {
-      var provider = document.getElementById("bind-provider").value;
-      var isChatgpt = provider === "chatgpt";
-      document.getElementById("bind-chatgpt-fields").hidden = !isChatgpt;
-      document.getElementById("bind-locator-field").hidden = isChatgpt;
-      document.getElementById("bind-locator").required = !isChatgpt;
-
-      var manager = document.getElementById("bind-chatgpt-manager").value;
-      var folderField = document.getElementById("bind-chatgpt-folder-field");
-      folderField.hidden = !isChatgpt || manager !== "multilogin";
-    }
+    document.getElementById("refresh-builds").addEventListener("click", function () {
+      var btn = this;
+      var result = document.getElementById("refresh-builds-result");
+      btn.disabled = true;
+      result.className = "";
+      result.textContent = "Reading GitHub…";
+      postJSON("/api/refresh-builds", {}).then(function (outcome) {
+        if (outcome && outcome.ok) {
+          result.textContent = "Refreshed · " + safeText(outcome.collected_at);
+          return loadState();
+        }
+        result.textContent = "Did not refresh · " + safeText(outcome && outcome.detail, "no detail");
+        result.className = "ccr-problem";
+        return null;
+      }).catch(function () {
+        result.textContent = "Did not refresh · local server unavailable";
+        result.className = "ccr-problem";
+      }).finally(function () { btn.disabled = false; });
+    });
 
     document.getElementById("bind-provider").addEventListener("change", updateBindFieldVisibility);
     document.getElementById("bind-chatgpt-manager").addEventListener("change", updateBindFieldVisibility);
     updateBindFieldVisibility();
-
-    /** Builds the chatgpt locator from the dedicated fields — never from the
-     *  generic JSON textarea, which is hidden for this provider. Returns
-     *  ``null`` (never throws) when a required field is blank; the caller
-     *  reports that as a problem instead of posting an incomplete locator. */
-    function buildChatgptLocator() {
-      var manager = document.getElementById("bind-chatgpt-manager").value;
-      var profileId = document.getElementById("bind-chatgpt-profile-id").value.trim();
-      var url = document.getElementById("bind-chatgpt-url").value.trim();
-      if (!profileId || !url) return null;
-      var locator = { env_manager: manager, profile_id: profileId, url: url };
-      if (manager === "multilogin") {
-        var folderId = document.getElementById("bind-chatgpt-folder-id").value.trim();
-        if (!folderId) return null;
-        locator.folder_id = folderId;
-      }
-      return locator;
-    }
-
     document.getElementById("bind-form").addEventListener("submit", function (event) {
       event.preventDefault();
-      var resultNode = document.getElementById("bind-result");
+      var result = document.getElementById("bind-result");
+      clear(result);
       var provider = document.getElementById("bind-provider").value;
       var locator;
       if (provider === "chatgpt") {
         locator = buildChatgptLocator();
-        if (locator === null) {
-          clear(resultNode);
-          resultNode.appendChild(el("div", {
-            text: "Fill in the environment manager, profile ID (and folder ID for multilogin), and conversation URL.",
-            className: "ccr-problem",
-          }));
+        if (!locator) {
+          result.appendChild(el("div", { text: "Fill the exact manager/profile/folder (when required) and conversation URL.", className: "ccr-problem" }));
           return;
         }
       } else {
-        var locatorText = document.getElementById("bind-locator").value;
-        try {
-          locator = JSON.parse(locatorText || "{}");
-        } catch (e) {
-          clear(resultNode);
-          resultNode.appendChild(el("div", {
-            text: "The locator is not valid JSON. Fix it and bind again.",
-            className: "ccr-problem",
-          }));
+        try { locator = JSON.parse(document.getElementById("bind-locator").value || "{}"); }
+        catch (_e) {
+          result.appendChild(el("div", { text: "Locator JSON is invalid.", className: "ccr-problem" }));
           return;
         }
       }
-      var body = {
+      var request = {
         work_ref: document.getElementById("bind-work-ref").value,
         role: document.getElementById("bind-role").value,
         provider: provider,
         locator: locator,
       };
-      var seatRef = document.getElementById("bind-seat-ref").value;
-      if (seatRef) body.seat_ref = seatRef;
-
-      postJSON("/api/bind", body).then(function (outcome) {
-        clear(resultNode);
+      var seat = document.getElementById("bind-seat-ref").value.trim();
+      if (seat) request.seat_ref = seat;
+      postJSON("/api/bind", request).then(function (outcome) {
+        clear(result);
         if (outcome && outcome.ok) {
-          resultNode.appendChild(el("div", { text: "Bound · " + String(outcome.binding_id) }));
+          result.appendChild(el("div", { text: "Bound · " + safeText(outcome.binding_id) }));
           loadState();
         } else {
-          var problems = (outcome && outcome.problems) || ["The server refused the binding and gave no detail."];
-          problems.forEach(function (p) {
-            resultNode.appendChild(el("div", { text: String(p), className: "ccr-problem" }));
+          ((outcome && outcome.problems) || ["The server refused the binding."]).forEach(function (problem) {
+            result.appendChild(el("div", { text: problem, className: "ccr-problem" }));
           });
         }
+      }).catch(function () {
+        clear(result);
+        result.appendChild(el("div", { text: "Binding request failed · local server unavailable", className: "ccr-problem" }));
       });
     });
   });
