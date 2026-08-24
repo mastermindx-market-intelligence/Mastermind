@@ -132,6 +132,25 @@ def test_x1_human_attention_keeps_visual_precedence_over_machine_danger() -> Non
     assert "(failed || disagreements) && !hasHumanAttention" in row
 
 
+def test_x1_attention_receipts_remain_forensically_reachable() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function attentionEvidenceFold(item)")
+    end = source.index("// bindings", start)
+    attention = source[start:end]
+
+    assert "item.evidence" in attention
+    assert "Object.keys(entry)" in attention
+    assert "function renderAttentionDetail(item, target)" in attention
+    assert "function openAttentionDetail(item, target)" in attention
+    assert 'button("Inspect"' in attention
+    assert "openAttentionDetail(item, target)" in attention
+
+    detail_start = source.index("function renderDetail(card)")
+    detail_end = source.index("function openDetail(card)", detail_start)
+    detail = source[detail_start:detail_end]
+    assert "attentionEvidenceFold(entry.item)" in detail
+
+
 def test_x1_source_pulse_displays_clocks_without_inventing_freshness_sla() -> None:
     source = JS.read_text(encoding="utf-8")
     start = source.index("function sourcePulsePill")
@@ -146,7 +165,7 @@ def test_x1_source_pulse_displays_clocks_without_inventing_freshness_sla() -> No
 def test_x1_quick_open_sol_requires_one_unambiguous_destination() -> None:
     source = JS.read_text(encoding="utf-8")
     start = source.index("function uniqueBinding")
-    end = source.index("function renderNeedsYou", start)
+    end = source.index("function attentionEvidenceFold", start)
     binding = source[start:end]
 
     assert "rows.length === 1" in binding
