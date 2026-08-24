@@ -301,6 +301,79 @@ class OperatorHarnessOrchestrator:
             f"operation {operation_id.command_id} was durably applied before local failure"
         ) from error
 
+    def _observe_required_principal(
+        self,
+        *,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        observation: SessionStartObservation,
+    ) -> OperatorPrincipalObservation | None:
+        """Collect the same typed execution principal for start and resume."""
+
+        principal_required = bool(
+            getattr(
+                self.runtime,
+                "operator_principal_required",
+                lambda _value: False,
+            )(attempt_id)
+        )
+        if not principal_required:
+            return None
+        existing = getattr(
+            self.runtime,
+            "existing_operator_principal",
+            lambda _attempt_id, _generation: None,
+        )(attempt_id, generation)
+        if existing is not None:
+            if not isinstance(existing, OperatorPrincipalObservation):
+                raise OperatorHarnessOrchestrationError(
+                    "runtime returned untyped principal replay evidence"
+                )
+            return existing
+        credential_reader = getattr(
+            self.adapter, "observe_process_credentials", None
+        )
+        home_reader = getattr(
+            self.adapter, "observe_provider_home_identity", None
+        )
+        if not callable(credential_reader) or not callable(home_reader):
+            raise OperatorHarnessOrchestrationError(
+                "orchestration adapter lacks typed principal observations"
+            )
+        credentials = credential_reader(generation)
+        home = home_reader(generation)
+        if not isinstance(
+            credentials, OSProcessCredentialObservation
+        ) or not isinstance(home, ProviderHomeIdentityObservation):
+            raise OperatorHarnessOrchestrationError(
+                "orchestration adapter returned untyped principal evidence"
+            )
+        process = observation.process
+        expected_process = {
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        }
+        if credentials.process_identity != expected_process:
+            raise OperatorHarnessOrchestrationError(
+                "principal process credentials do not match session observation"
+            )
+        return OperatorPrincipalObservation.from_dict(
+            {
+                "schema_version": "mastermind.operator_principal_observation/v1",
+                "attempt_id": attempt_id,
+                "worker_id": generation.worker_id,
+                "process_generation_id": generation.process_generation_id,
+                "provider_session_id": observation.provider_session_id,
+                "process_identity": credentials.process_identity,
+                "os_principal_name": credentials.os_principal_name,
+                "os_principal_uid": credentials.os_principal_uid,
+                "provider_home_identity": home.provider_home_identity,
+                "observed_at_ms": int(time.time() * 1000),
+            }
+        )
+
     def start_attempt(
         self,
         *,
@@ -778,8 +851,13 @@ class OperatorHarnessOrchestrator:
         try:
             observed = self.attestation_reader(self.adapter, generation)
             launch = compare_launch(session.launch.requested, observed)
+            principal = self._observe_required_principal(
+                attempt_id=session.attempt_id,
+                generation=generation,
+                observation=observation,
+            )
             self.runtime.seal_operator_attestation(
-                session.attempt_id, generation, observed, launch
+                session.attempt_id, generation, observed, launch, principal
             )
         except Exception as exc:
             self._mark_effect_unknown(

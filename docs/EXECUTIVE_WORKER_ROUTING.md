@@ -1,11 +1,13 @@
 # Executive worker routing — stage 1
 
 **Status:** R1 shadow evidence and Phase 1F-B are accepted. Phase 1F-C schema-v4
-and the explicit bounded COO `run-once` path merged in `db0bac5`, but remain
-undeployed, unscheduled, production-unarmed, and unaccepted as live capability.
-The 2026-08-24 G0 capability-grant seam binds an exact extension/profile digest
-through new routed Jobs, worker capacity and atomic claim receipts; it does not
-arm an App Server, MCP server, plugin, subagent or production worker.
+and the explicit bounded COO `run-once` path merged in `db0bac5`. G0 capability
+identity merged in `ceebc82`; G1 exact-root service composition merged in
+`8602686`. All remain undeployed, unscheduled, production-unarmed, and
+unaccepted as live capability. This G2 source carrier composes one read-only
+Codex App Server planner inside the existing dedicated worker broker. It does
+not arm an App Server, MCP server, plugin, subagent or production worker merely
+by merging.
 
 This stage makes economical-worker-first execution real without creating a
 second queue, teaching Chris tmux, or widening Executive OS or MCP authority.
@@ -22,9 +24,11 @@ deterministic model router (no LLM, no durable state)
           |
           v
 Executive OS Job -> atomic worker/quota claim -> existing supervisor
-          |
-          v
-Codex CLI adapter -> Luna or Terra -> isolated worktree -> validation
+          |                                      |
+          v                                      v
+read-only planner                       work / review / repair
+Codex App Server                        sealed `codex exec --json`
+same broker + worker UID                isolated worktree + validation
 ```
 
 Executive OS SQLite remains the only owner of Jobs, Attempts, Workers, leases,
@@ -71,6 +75,7 @@ Current logical aliases:
 | Alias | Initial binding | Use |
 |---|---|---|
 | `frontier.orchestrator` | Sol / xhigh | planning, judgment, escalation; never worker-claimable |
+| `coo.operator.readonly` | Sol / xhigh | one bounded read-only COO planner through App Server; worker-claimable only under the exact operator profile and dedicated quota |
 | `fast.engineering` | Luna / high | routine bounded implementation, mechanical edits, tests |
 | `standard.engineering` | Terra / high | elevated implementation and Luna fallback |
 | `fast.research` | Luna / medium | bounded extraction and research |
@@ -255,6 +260,47 @@ The separate offline v3-to-v4 migration CLI is the only supported upgrade path.
   registry or second lifecycle authority.
 - Checked-in host configuration keeps `coo_autonomy_armed=false`; merge is not
   host install, provider readiness, service activation or production proof.
+
+### Wave G2 — read-only semi-headless planner composition — production-unarmed
+
+- One `plan` role may select only `coo.operator.readonly`, whose exact profile
+  is `operator.appserver.readonly.v1`: read-only sandbox, approval `never`,
+  network disabled, and no skills, MCP servers, plugins/apps, native helper or
+  subagent ceiling.
+- App Server is not a daemon beside Executive OS. The worker broker starts it
+  as one generation under the existing dedicated worker UID, while Executive
+  Runtime remains sole owner of Job, Attempt, lease, Worker, epoch, generation,
+  operation and terminal-result truth.
+- Control startup attests the broker's exact installed Codex binary digest,
+  version and arm state before an armed service can become ready. Claim again
+  binds the exact capability-policy/profile digest, model, effort, cost class,
+  harness digest and harness version.
+- A normal planner Attempt starts one provider session, starts and collects one
+  turn, seals the typed role result, proves the entire worker generation dead
+  and its provider writer released, abandons the epoch, and only then completes
+  the Attempt and releases quota.
+- On control restart, a still-live G1 is reconnected without a second
+  generation; if its first turn was not yet issued, that same G1 may issue it.
+  A G1 proven dead and writer-released may resume the same provider session as
+  exactly G2 only from the frozen pre-candidate state with one exact
+  acknowledged G1 turn. No G3 and no cross-Attempt session reuse are allowed.
+  A dead pre-turn G1 and all ambiguous identity/effect evidence remain fenced
+  and quarantined rather than widening the frozen recovery predicate.
+- If the typed role result was already durably sealed before the crash,
+  recovery never recollects or resumes provider work. It stops a live writer or
+  accepts an exact dead/released observation, abandons the epoch, and completes
+  from the hash-checked existing seal.
+- Durable cancellation wins recovery. Before-session cancellation releases
+  without constructing an adapter; a live generation is cancelled; an absent
+  generation is accepted only with `PROVEN_DEAD / RELEASED`; in all cases the
+  epoch is abandoned before Runtime marks the Job cancelled and releases its
+  slot. Cancellation never collects or resumes work.
+- Checked-in control and worker configs keep both COO autonomy and Operator
+  Harness arming false. Unit/integration proof is therefore
+  `BUILT_NOT_PROVEN / SERVICE_COMPOSED_UNARMED`, not host installation, provider
+  readiness, service activation, or live planner proof.
+- MCP/plugin grants, native helpers, subagents, dynamic plugin installation and
+  OAuth enrollment remain later, separately reviewed capability waves.
 
 ### Wave R3 — reviewed Codex capacity composition
 

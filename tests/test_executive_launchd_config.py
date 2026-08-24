@@ -584,7 +584,7 @@ def test_worker_config_requires_sorted_exact_ambient_group_allowlist(
     from scripts.executive_os_phase1c_worker import WorkerConfigError, _load_config
 
     value = {
-        "schema_version": "mastermind.executive_worker_broker_config/v3",
+        "schema_version": "mastermind.executive_worker_broker_config/v4",
         "control_uid": 450,
         "worker_uid": 451,
         "worker_gid": 451,
@@ -601,6 +601,7 @@ def test_worker_config_requires_sorted_exact_ambient_group_allowlist(
         "launchd_socket_name": "WorkerBroker",
         "uid_sweep_receipt": "/private/state/uid-sweep.json",
         "require_secret_canary": True,
+        "operator_harness_armed": False,
     }
     path = tmp_path / "worker.json"
     path.write_text(json.dumps(value), encoding="utf-8")

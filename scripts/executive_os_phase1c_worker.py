@@ -25,6 +25,7 @@ from control_plane.codex_worker import (
     CodexWorkerAdapter,
     load_codex_attestation_receipt,
 )
+from control_plane.codex_operator_adapter import CodexOperatorAdapter
 from control_plane.executive_worker_broker import (
     BrokerPolicy,
     DedicatedUIDSweeper,
@@ -35,7 +36,7 @@ from control_plane.executive_worker_broker import (
 from control_plane.executive_ambient_process import DarwinDistnotedClassifier
 
 
-CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v3"
+CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
 _OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
 _REVIEWED_AMBIENT_GID_SETS = (
     frozenset({12, 61, 100}),
@@ -60,6 +61,7 @@ _CONFIG_FIELDS = frozenset(
         "launchd_socket_name",
         "uid_sweep_receipt",
         "require_secret_canary",
+        "operator_harness_armed",
     }
 )
 
@@ -111,6 +113,8 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
     if value.get("require_secret_canary") is not True:
         raise WorkerConfigError("production worker config must require the secret canary")
+    if not isinstance(value.get("operator_harness_armed"), bool):
+        raise WorkerConfigError("operator_harness_armed must be boolean")
     allowed_groups = value.get("allowed_supplementary_gids")
     if (
         not isinstance(allowed_groups, list)
@@ -164,7 +168,25 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
         receipt_path=Path(config["uid_sweep_receipt"]),
         ambient_classifier=DarwinDistnotedClassifier(),
     )
-    return ExecutiveWorkerBroker(adapter, policy, sweeper)
+
+    def operator_adapter_factory(workspace: Path, turn_input_loader):
+        return CodexOperatorAdapter(
+            binary_path=Path(config["codex_binary"]),
+            codex_home=Path(config["provider_home"]),
+            workspace_root=workspace,
+            worker_id=policy.worker_id,
+            expected_harness_version=binary_attestation.version,
+            network_policy="disabled",
+            turn_input_loader=turn_input_loader,
+        )
+
+    return ExecutiveWorkerBroker(
+        adapter,
+        policy,
+        sweeper,
+        operator_adapter_factory=operator_adapter_factory,
+        operator_harness_armed=bool(config["operator_harness_armed"]),
+    )
 
 
 async def _serve(config: dict[str, Any]) -> None:
