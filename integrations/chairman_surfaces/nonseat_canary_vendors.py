@@ -24,6 +24,7 @@ script-evaluation, cookie, storage, download, or arbitrary-command surface.
 from __future__ import annotations
 
 import argparse
+import http.client
 import http.server
 import importlib.util
 import json
@@ -41,6 +42,7 @@ from urllib.parse import quote
 import httpx
 
 from . import nonseat_canary as _core
+from . import mas115_multilogin_port_policy as _port_policy
 #: Frozen official Multilogin X surfaces.  Launcher profile status/stop are
 #: v1; profile start is v2; existence is proven by a bounded cloud folder
 #: census rather than by launcher 404 (which is ambiguous after Agent restart).
@@ -152,6 +154,29 @@ class BoundedHttpClient:
     def _mlx_profile_status(self, credential, profile_id: str):
         path = "/api/v1/profile/status/p/" + quote(profile_id, safe="")
         return self._request("GET", _MLX_LAUNCHER_ORIGIN, path, headers=self._bearer(credential))
+
+    def _mlx_profile_metas(self, credential, profile_id: str):
+        return self._request(
+            "POST", _MLX_CLOUD_ORIGIN, "/profile/metas",
+            headers=self._bearer(credential), json_body={"ids": [profile_id]},
+        )
+
+    def _mlx_configure_canary_port(self, credential, profile_id: str, snapshot):
+        body = _port_policy.build_partial_update_body(profile_id, snapshot)
+        expected = {
+            "profile_id": profile_id,
+            "auto_update_core": snapshot.auto_update_core,
+            "parameters": {
+                "flags": {"ports_masking": "mask"},
+                "fingerprint": {"ports": [_port_policy.CANARY_PORT]},
+            },
+        }
+        if body != expected:
+            return None
+        return self._request(
+            "POST", _MLX_CLOUD_ORIGIN, "/profile/partial_update",
+            headers=self._bearer(credential), json_body=body,
+        )
 
     def _mlx_profile_start(self, credential, folder_id: str, profile_id: str):
         path = (
@@ -339,6 +364,41 @@ class WebDriverNavigator:
 # ---------------------------------------------------------------------------
 # Multilogin
 # ---------------------------------------------------------------------------
+
+
+def _is_exact_partial_update_success(response) -> bool:
+    return (
+        response is not None
+        and response.status_code == 200
+        and response.payload == {
+            "status": {
+                "error_code": "",
+                "http_code": 200,
+                "message": "Profile successfully updated",
+            },
+            "data": None,
+        }
+    )
+
+
+def _is_explicit_partial_update_rejection(response) -> bool:
+    if response is None or response.status_code in (401, 403):
+        return False
+    if not isinstance(response.status_code, int) or not 400 <= response.status_code <= 599:
+        return False
+    payload = response.payload
+    if not isinstance(payload, dict) or set(payload) != {"status", "data"}:
+        return False
+    status = payload.get("status")
+    return (
+        payload.get("data") is None
+        and isinstance(status, dict)
+        and set(status) == {"error_code", "http_code", "message"}
+        and isinstance(status.get("error_code"), str)
+        and bool(status.get("error_code"))
+        and status.get("http_code") == response.status_code
+        and isinstance(status.get("message"), str)
+    )
 
 
 class MultiloginClient:
@@ -651,6 +711,147 @@ class MultiloginClient:
             return False
         return self._started_profile_id != profile_ref.get("profile_id")
 
+    def port_policy_snapshot(self, profile_ref: dict):
+        """Read and classify the exact stopped disposable profile policy."""
+
+        self._require_credential()
+        if not self._valid_ref(profile_ref):
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        profile = self._profile_inventory_item(profile_ref)
+        if profile is None:
+            raise _core.CanaryRefusal("PROFILE_NOT_FOUND")
+        if profile.get("browser_type") != "mimic":
+            raise _core.CanaryRefusal("UNSUPPORTED_PORT_STATE")
+        if profile.get("in_use_by") != "":
+            if isinstance(profile.get("in_use_by"), str) and profile.get("in_use_by"):
+                raise _core.CanaryRefusal("BUSY_PROFILE")
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        if "locked_by" in profile and profile.get("locked_by") != "":
+            if isinstance(profile.get("locked_by"), str) and profile.get("locked_by"):
+                raise _core.CanaryRefusal("BUSY_PROFILE")
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        if self._profile_state(profile_ref) != "stopped":
+            raise _core.CanaryRefusal("BUSY_PROFILE")
+
+        response = self._safe_call(
+            lambda: self._client._mlx_profile_metas(
+                self._credential, profile_ref["profile_id"],
+            ),
+        )
+        if response is None:
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        if response.status_code in (401, 403):
+            raise _core.CanaryRefusal("AUTH_EXPIRED")
+        if response.status_code != 200:
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        try:
+            return _port_policy.classify_profile_metas(
+                response.payload,
+                profile_id=profile_ref["profile_id"],
+                folder_id=profile_ref["folder_id"],
+            )
+        except _port_policy.PortPolicyRefusal as refusal:
+            code = (
+                "UNSUPPORTED_PORT_STATE"
+                if refusal.code == _port_policy.UNSUPPORTED_PORT_STATE
+                else "VENDOR_ERROR"
+            )
+            raise _core.CanaryRefusal(code) from None
+
+    @staticmethod
+    def _config_receipt(code: str, **flags) -> dict:
+        return _port_policy.configuration_receipt(code, **flags)
+
+    def _post_configuration_receipt(
+        self, before, profile_ref: dict, *, response_was_ambiguous: bool,
+    ) -> dict:
+        try:
+            after = self.port_policy_snapshot(profile_ref)
+        except _core.CanaryRefusal:
+            return self._config_receipt(
+                "EFFECT_UNKNOWN", updated=False, reconciled=response_was_ambiguous,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=False,
+            )
+        preservation_unchanged = after.preservation_digest == before.preservation_digest
+        auto_update_unchanged = after.auto_update_core == before.auto_update_core
+        if not preservation_unchanged or not auto_update_unchanged:
+            return self._config_receipt(
+                "PRESERVATION_DRIFT", updated=False, reconciled=response_was_ambiguous,
+                preservation_unchanged=preservation_unchanged,
+                auto_update_unchanged=auto_update_unchanged,
+                exact_profile_stopped=True,
+            )
+        if after.state != _port_policy.EXACT_CONFIGURED:
+            return self._config_receipt(
+                "EFFECT_UNKNOWN" if response_was_ambiguous else "VENDOR_ERROR",
+                updated=False, reconciled=response_was_ambiguous,
+                preservation_unchanged=True, auto_update_unchanged=True,
+                exact_profile_stopped=True,
+            )
+        return self._config_receipt(
+            "CONFIGURED_AFTER_RECONCILIATION" if response_was_ambiguous else "CONFIGURED",
+            updated=True, reconciled=response_was_ambiguous,
+            preservation_unchanged=True, auto_update_unchanged=True,
+            exact_profile_stopped=True,
+        )
+
+    def configure_canary_port(self, profile_ref: dict) -> dict:
+        """Perform at most one exact update, followed only by read-back."""
+
+        try:
+            before = self.port_policy_snapshot(profile_ref)
+        except _core.CanaryRefusal as refusal:
+            code = (
+                "UNSUPPORTED_PORT_STATE"
+                if refusal.code == "UNSUPPORTED_PORT_STATE"
+                else "AUTH_EXPIRED_NO_PROOF"
+                if refusal.code == "AUTH_EXPIRED"
+                else "VENDOR_ERROR"
+            )
+            return self._config_receipt(
+                code, updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=False,
+            )
+        if before.state == _port_policy.EXACT_CONFIGURED:
+            return self._config_receipt(
+                "ALREADY_CONFIGURED", updated=False, reconciled=False,
+                preservation_unchanged=True, auto_update_unchanged=True,
+                exact_profile_stopped=True,
+            )
+        if before.state != _port_policy.DEFAULT_MASKED:
+            return self._config_receipt(
+                "UNSUPPORTED_PORT_STATE", updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=True,
+            )
+        try:
+            response = self._client._mlx_configure_canary_port(
+                self._credential, profile_ref["profile_id"], before,
+            )
+        except Exception:  # noqa: BLE001 — reconcile read-only after ambiguous write
+            response = None
+        if response is not None and response.status_code in (401, 403):
+            return self._config_receipt(
+                "AUTH_EXPIRED_NO_PROOF", updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=True,
+            )
+        if _is_exact_partial_update_success(response):
+            return self._post_configuration_receipt(
+                before, profile_ref, response_was_ambiguous=False,
+            )
+        if _is_explicit_partial_update_rejection(response):
+            return self._config_receipt(
+                "REJECTED_NO_PROOF", updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=True,
+            )
+        return self._post_configuration_receipt(
+            before, profile_ref, response_was_ambiguous=True,
+        )
+
 
 # ---------------------------------------------------------------------------
 # GoLogin
@@ -754,7 +955,12 @@ class LoopbackBenignOrigin:
         self._seen_paths: set = set()
         self._cookie_seen = False
         self._lock = threading.Lock()
-        self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _CanaryRequestHandler)
+        self._server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", _port_policy.CANARY_PORT), _CanaryRequestHandler,
+        )
+        if self._server.server_address[:2] != ("127.0.0.1", _port_policy.CANARY_PORT):
+            self._server.server_close()
+            raise _core.CanaryRefusal("CANARY_PORT_UNAVAILABLE")
         self._server.canary_origin = self  # type: ignore[attr-defined]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -769,7 +975,30 @@ class LoopbackBenignOrigin:
 
     @property
     def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._server.server_address[1]}"
+        return _port_policy.CANARY_ORIGIN
+
+    def self_test(self) -> bool:
+        """Prove the fixed loopback listener and clear the probe observation."""
+
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", _port_policy.CANARY_PORT, timeout=2.0,
+        )
+        try:
+            connection.request("GET", "/auth")
+            response = connection.getresponse()
+            body = response.read(64)
+            healthy = (
+                response.status == 401
+                and response.getheader("WWW-Authenticate") == 'Basic realm="mas115-canary"'
+                and body == b"unauthorized"
+            )
+        except Exception:  # noqa: BLE001 — local self-test has one closed result
+            healthy = False
+        finally:
+            connection.close()
+            with self._lock:
+                self._seen_paths.discard("/auth")
+        return healthy
 
     def saw(self, path: str) -> bool:
         with self._lock:
@@ -1013,10 +1242,42 @@ def _emit_refusal(out, vendor: str, code: str) -> int:
     return 2
 
 
+def _local_disposable_preflight(provision: dict, environment_loader=None):
+    """Require one exact locally stopped Multilogin profile before secrets."""
+
+    if environment_loader is None:
+        from integrations.chairman_surfaces import chatgpt as _chatgpt
+
+        environment_loader = _chatgpt.list_local_environments
+    try:
+        census = environment_loader()
+    except Exception:  # noqa: BLE001 — local uncertainty has one fixed result
+        return "VENDOR_ERROR"
+    if not isinstance(census, dict) or not isinstance(census.get("multilogin"), list):
+        return "VENDOR_ERROR"
+    profile_id = provision["profile_id"]
+    folder_id = provision["folder_id"]
+    matches = []
+    for row in census["multilogin"]:
+        if not isinstance(row, dict):
+            return "VENDOR_ERROR"
+        row_profile = row.get("profile_id")
+        row_folder = row.get("folder_id")
+        if isinstance(row_profile, str) and row_profile.lower() == profile_id:
+            if not isinstance(row_folder, str) or row_folder.lower() != folder_id:
+                return "VENDOR_ERROR"
+            matches.append(row)
+    if not matches:
+        return "PROFILE_NOT_FOUND"
+    if len(matches) != 1 or type(matches[0].get("running")) is not bool:
+        return "VENDOR_ERROR"
+    return "BUSY_PROFILE" if matches[0]["running"] else None
+
+
 def main(
     argv=None, *, stdout=None, bindings_loader=None, credential_stream_factory=None,
     client_factory=BoundedHttpClient, origin_factory=LoopbackBenignOrigin,
-    now=None,
+    environment_loader=None, now=None,
 ) -> int:
     """Run the operator-only helper.
 
@@ -1025,6 +1286,10 @@ def main(
     No repository test calls a real credential store or vendor endpoint.
     """
     parser = argparse.ArgumentParser(prog="nonseat_canary_vendors")
+    parser.add_argument(
+        "operation", nargs="?", default="run",
+        choices=("run", "configure-canary-port"),
+    )
     parser.add_argument("--vendor", required=True, choices=("gologin", "multilogin"))
     parser.add_argument("--provision-path", required=True)
     args = parser.parse_args(argv)
@@ -1044,19 +1309,41 @@ def main(
         return _emit_refusal(out, args.vendor, code)
     if provision.get("vendor") != args.vendor:
         return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
+    if provision.get("browser_type") != "mimic":
+        return _emit_refusal(out, args.vendor, "UNSUPPORTED_PORT_STATE")
+    local_code = _local_disposable_preflight(provision, environment_loader)
+    if local_code is not None:
+        return _emit_refusal(out, args.vendor, local_code)
 
-    # This is intentionally after every provision and non-seat-collision
-    # preflight.  A refusal above cannot spawn/read Keychain or construct any
-    # live HTTP/browser/origin object.  Production has no external-stdin path:
-    # that would let an eager ``security | helper`` producer run too early.
+    # Bind and self-test the one fixed loopback origin before any secret or
+    # vendor transport exists. There is no fallback port.
+    token = "mas115-live-" + secrets.token_hex(16)
+    origin = None
+    try:
+        origin = origin_factory(token=token)
+        if origin.base_url != _port_policy.CANARY_ORIGIN or origin.self_test() is not True:
+            raise _core.CanaryRefusal("CANARY_PORT_UNAVAILABLE")
+    except Exception:  # noqa: BLE001 — bind/self-test failures have one static refusal
+        if origin is not None:
+            try:
+                origin.close()
+            except Exception:  # noqa: BLE001 — closed result cannot expand
+                pass
+        return _emit_refusal(out, args.vendor, "CANARY_PORT_UNAVAILABLE")
+
+    # This is intentionally after every provision, collision, bind, and local
+    # self-test preflight. Production has no external-stdin path: that would
+    # let an eager ``security | helper`` producer run too early.
     credential_stream = None
     try:
         factory = credential_stream_factory or _open_keychain_credential_pipe
         credential_stream = factory()
         credential = _read_direct_pipe_credential(credential_stream)
     except _core.CanaryRefusal as refusal:
+        origin.close()
         return _emit_refusal(out, args.vendor, refusal.code)
     except Exception:  # noqa: BLE001 — fixed absence result only
+        origin.close()
         return _emit_refusal(out, args.vendor, "AUTH_MISSING")
     finally:
         if credential_stream is not None:
@@ -1065,19 +1352,31 @@ def main(
             except Exception:  # noqa: BLE001 — fixed cleanup boundary
                 pass
     if not credential.present:
+        origin.close()
         return _emit_refusal(out, args.vendor, "AUTH_MISSING")
 
     client = None
-    origin = None
     try:
         client = client_factory()
-        token = "mas115-live-" + secrets.token_hex(16)
-        origin = origin_factory(token=token)
         live_provision = dict(provision)
-        live_provision["benign_origin"] = origin.base_url
+        live_provision["benign_origin"] = _port_policy.CANARY_ORIGIN
         vendor_client = MultiloginClient(
             credential, client, browser_type=live_provision["browser_type"],
         )
+        profile_ref = {
+            "profile_id": provision["profile_id"],
+            "folder_id": provision["folder_id"],
+        }
+        if args.operation == "configure-canary-port":
+            receipt = vendor_client.configure_canary_port(profile_ref)
+            print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
+            if receipt.get("verdict") == "PASS":
+                return 0
+            return 3 if receipt.get("verdict") == "HOLD" else 2
+
+        before_policy = vendor_client.port_policy_snapshot(profile_ref)
+        if before_policy.state != _port_policy.EXACT_CONFIGURED:
+            raise _core.CanaryRefusal("UNSUPPORTED_PORT_STATE")
         navigator = WebDriverNavigator(client, live_provision)
 
         def _clock() -> str:
@@ -1095,6 +1394,29 @@ def main(
             canary_token=token,
             cleanup_probe=_settled_cleanup_probe(process_probe),
         )
+        postflight_ok = False
+        try:
+            after_policy = vendor_client.port_policy_snapshot(profile_ref)
+            postflight_ok = (
+                after_policy.state == _port_policy.EXACT_CONFIGURED
+                and after_policy.auto_update_core == before_policy.auto_update_core
+                and after_policy.preservation_digest == before_policy.preservation_digest
+            )
+        except _core.CanaryRefusal:
+            postflight_ok = False
+        if not postflight_ok:
+            c10 = next(
+                (row for row in receipts.get("rows", []) if row.get("row") == "C10"),
+                None,
+            )
+            if c10 is None:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            c10.update({
+                "code": "UNSUPPORTED_PORT_STATE",
+                "detail": _core.DETAILS["UNSUPPORTED_PORT_STATE"],
+                "ok": False,
+            })
+            receipts["verdict"] = "FAIL"
     except _core.CanaryRefusal as refusal:
         return _emit_refusal(out, args.vendor, refusal.code)
     except Exception:  # noqa: BLE001 — never echo a dynamic error or payload

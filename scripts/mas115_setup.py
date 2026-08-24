@@ -40,6 +40,7 @@ from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import chatgpt
 from integrations.chairman_surfaces import nonseat_canary as canary
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
+from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 
 
 WORK_REF = "WS:CHAIRMAN-CONTROL-ROOM"
@@ -192,7 +193,7 @@ def build_provision(row: dict, *, browser_type: str | None) -> dict:
         "schema": canary.PROVISION_SCHEMA,
         "vendor": manager,
         "profile_id": profile_id,
-        "benign_origin": "http://127.0.0.1:7777",
+        "origin_policy": port_policy.ORIGIN_POLICY,
         "disposable_ack": canary.REQUIRED_ACK,
     }
     if manager == "multilogin":
@@ -240,6 +241,23 @@ def _atomic_private_json(doc: dict, path: str | Path) -> None:
         except OSError:
             pass
         raise
+
+
+def _migrate_legacy_provision(
+    path=canary.DEFAULT_PROVISION_PATH, *, bindings_loader=None, now=None,
+):
+    """Atomically migrate only the exact validated historical provision."""
+
+    migrated, code = canary.load_legacy_provision_for_migration(
+        path, bindings_loader=bindings_loader, now=now,
+    )
+    if migrated is None:
+        return None, code
+    _atomic_private_json(migrated, path)
+    loaded, code = canary.load_provision(
+        path, bindings_loader=bindings_loader, now=now,
+    )
+    return (loaded, None) if loaded is not None else (None, code)
 
 
 def credential_setup_argv(vendor: str) -> list[str]:
@@ -376,6 +394,12 @@ def main(argv=None) -> int:
     sub.add_parser("prepare-disposable", help="prepare one stopped non-Chairman profile")
     credential_parser = sub.add_parser("credential", help="open the native Keychain password prompt")
     credential_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
+    configure_parser = sub.add_parser(
+        "configure-canary-port", help="apply the one exact disposable Multilogin port policy",
+    )
+    configure_parser.add_argument(
+        "--vendor", default="multilogin", choices=("multilogin", "gologin"),
+    )
     run_parser = sub.add_parser("run-canary", help="run the accepted disposable canary")
     run_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
     args = parser.parse_args(argv)
@@ -390,8 +414,27 @@ def main(argv=None) -> int:
         if args.command == "credential":
             argv = credential_setup_argv(args.vendor)
             os.execve(argv[0], argv, {})
+        if args.command == "configure-canary-port":
+            if args.vendor != "multilogin":
+                raise SetupRefusal("fixed-port configuration is supported only for Multilogin")
+            provision, code = _load_current_provision()
+            if provision is None:
+                provision, code = _migrate_legacy_provision(
+                    canary.DEFAULT_PROVISION_PATH,
+                    now=datetime.now(timezone.utc),
+                )
+            if provision is None or provision.get("vendor") != "multilogin":
+                raise SetupRefusal(
+                    f"the exact disposable Multilogin provision is unavailable ({code})"
+                )
+            return vendors.main([
+                "configure-canary-port",
+                "--vendor", args.vendor,
+                "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+            ])
         if args.command == "run-canary":
             return vendors.main([
+                "run",
                 "--vendor", args.vendor,
                 "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
             ])

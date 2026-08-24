@@ -103,6 +103,7 @@ python3 scripts/mas115_setup.py status
 python3 scripts/mas115_setup.py enroll-seats
 python3 scripts/mas115_setup.py prepare-disposable
 python3 scripts/mas115_setup.py credential --vendor multilogin
+python3 scripts/mas115_setup.py configure-canary-port --vendor multilogin
 python3 scripts/mas115_setup.py run-canary --vendor multilogin
 ```
 
@@ -122,7 +123,9 @@ The ordered journey is:
    that profile to be positively stopped, proves it does not collide with any
    enrolled seat, detects the Multilogin browser
    core from directory shape without reading profile content, and writes the
-   existing private `mas115_nonseat_canary` provision as mode 0600.
+   existing private `mas115_nonseat_canary` provision as mode 0600. Provision
+   v3 stores only the fixed-origin policy name; it stores no URL or caller-
+   selected port.
 3. `credential` replaces the setup coordinator with a dedicated MAS-115
    secret-owning helper. Its echo-disabled terminal prompt accepts the full
    current Multilogin JWT and writes the fixed generic-password item directly
@@ -131,21 +134,40 @@ The ordered journey is:
    token exists only in the dedicated helper and Keychain; it never enters the
    coordinator, argv, environment, shell substitution, stdout, a temporary
    file, a log, a receipt, or the repository.
-4. `run-canary` reaches the existing narrow secret-owning helper. Every
-   provision/binding/non-seat preflight completes before Keychain is read or
-   any network/browser object is constructed. A private exact-profile cleanup
-   lease is minted when the one preflighted start request is dispatched,
-   survives ambiguous responses and the C5 owner-loss simulation, and performs
-   one fail-safe stop on every later exit.
+4. `configure-canary-port` first accepts an exact historical v2 provision only
+   for an atomic v3 migration, then reaches the narrow secret-owning helper. It
+   first requires the local reduced environment census to identify exactly one
+   matching Mimic profile and report it stopped. It then binds and self-tests
+   `http://127.0.0.1:65535` before reading Keychain or constructing vendor
+   HTTP. After Keychain, it proves the disposable profile is still the exact
+   stopped, unowned, unlocked non-seat profile; reads Profile Metas;
+   preserves the existing browser-core auto-update boolean; and, only from the
+   default masked state, submits one exact partial update containing
+   `ports_masking=mask` and `ports=[65535]`. An already exact profile is an
+   idempotent PASS with no update. An ambiguous response receives one read-only
+   reconciliation and is never retried. The redacted receipt contains no
+   profile/folder identity, URL, vendor payload, credential, proxy, name, or
+   note.
+5. `run-canary` reaches the same narrow secret-owning helper but contains no
+   configuration call. Every provision/binding/non-seat/fixed-port preflight
+   completes before Keychain is read or vendor HTTP is constructed. It requires
+   the exact `[65535]` policy before launch and proves the same policy,
+   auto-update value, unrelated Profile Metas digest, and stopped state again
+   after cleanup. A private exact-profile cleanup lease is minted when the one
+   preflighted start request is dispatched, survives ambiguous responses and
+   the C5 owner-loss simulation, and performs one fail-safe stop on every later
+   exit.
    The v2 receipt includes a separate cleanup proof: stop acknowledged (or no
    start needed), exact-profile process count returned to zero, and all other
    managed-profile process counts unchanged.
 
-The supported Multilogin path is the documented v2 exact-profile launcher
+The supported Multilogin run path is the documented v2 exact-profile launcher
 with `automation_type=selenium`, followed by a closed W3C WebDriver subset:
 create session, navigate, enumerate/switch window handles, and read current
-URL. The provision positively binds `mimic` (Chrome) or `stealthfox`
-(Firefox); a missing/mismatched/renamed core refuses before launch. This is
+URL. The fixed-port configuration path positively requires `mimic` (Chrome);
+the existing legacy `stealthfox` provision shape remains recognized but cannot
+receive this configuration or run through this fixed-port lane. A missing,
+mismatched, or renamed core refuses before update or launch. This is
 based on Multilogin's current official
 ["Start a profile with Postman"](https://multilogin.com/help/en_US/starting-a-profile-with-postman)
 (updated 2026-07-27),
@@ -153,7 +175,9 @@ based on Multilogin's current official
 (updated 2026-07-02), and
 ["How to use Mimic and legacy Stealthfox"](https://multilogin.com/help/en_US/profile-behavior-identity/how-to-use-mimic-and-stealthfox)
 (updated 2026-07-20) contracts.
-There is no click/type/fill/send/evaluate/cookie/profile-update/unlock surface.
+There is no click/type/fill/send/evaluate/cookie-read/unlock surface. The only
+profile-update surface is the private fixed-body `configure-canary-port`
+transaction; ordinary `run-canary` cannot reach it.
 
 GoLogin stays `BUILT_NOT_PROVEN / UNSUPPORTED_SURFACE` in this carrier. Its
 documented local lifecycle is SDK-owned, but no exact SDK/version and secure
@@ -161,8 +185,8 @@ local wrapper has yet passed the separately required disposable review. The
 setup utility therefore refuses to store a GoLogin canary credential rather
 than improvising a REST or cloud-browser route.
 
-A disposable C0-C10 PASS with a successful v2 cleanup proof proves only the
-automation-owned non-seat substrate.
+A disposable C0-C10 PASS with a successful v2 cleanup proof and exact
+fixed-port postflight proves only the automation-owned non-seat substrate.
 It does not authorize a real seat, waive the unresolved supported foreground
 gate, send a message, or complete MAS-115/MAS-113. The separately authorized
 real-seat proof remains after Sol accepts the disposable receipts.

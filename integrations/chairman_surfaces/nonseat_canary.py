@@ -53,9 +53,8 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlsplit
-
 from control_plane import surface_bindings as _surface_bindings
+from . import mas115_multilogin_port_policy as _port_policy
 
 # ---------------------------------------------------------------------------
 # constants
@@ -69,6 +68,8 @@ RESULT_CODES = frozenset({
     "PROFILE_NOT_FOUND",
     "AUTH_MISSING",
     "AUTH_EXPIRED",
+    "CANARY_PORT_UNAVAILABLE",
+    "UNSUPPORTED_PORT_STATE",
     "BUSY_PROFILE",
     "UNOWNED_RUNNING_PROFILE",
     "UNSUPPORTED_SURFACE",
@@ -81,7 +82,7 @@ RESULT_CODES = frozenset({
     "VENDOR_ERROR",
 })
 
-PROVISION_SCHEMA = "mastermind.mas115_nonseat_canary_provision.v2"
+PROVISION_SCHEMA = "mastermind.mas115_nonseat_canary_provision.v3"
 DEFAULT_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_canary.json"
 REQUIRED_ACK = "disposable-non-chairman-profile"
 RECEIPTS_SCHEMA = "mastermind.mas115_nonseat_canary_receipts.v2"
@@ -107,6 +108,8 @@ DETAILS = {
     "PROFILE_NOT_FOUND": "the vendor reports no such disposable profile.",
     "AUTH_MISSING": "no disposable canary credential is available.",
     "AUTH_EXPIRED": "the disposable canary credential was rejected as expired or invalid.",
+    "CANARY_PORT_UNAVAILABLE": "the fixed loopback canary port is unavailable or failed its self-test.",
+    "UNSUPPORTED_PORT_STATE": "the disposable profile port policy is not an approved mutable state.",
     "BUSY_PROFILE": "the disposable profile is already owned or already running.",
     "UNOWNED_RUNNING_PROFILE": "a running profile exists that this actuator does not own.",
     "UNSUPPORTED_SURFACE": "no supported vendor surface exists for this operation.",
@@ -193,11 +196,12 @@ def resolve_credential(*, vendor: str, stdin_text=None) -> Credential:
 
 _PROVISION_ALLOWED_KEYS = frozenset({
     "schema", "vendor", "profile_id", "folder_id", "browser_type",
-    "benign_origin", "disposable_ack",
+    "origin_policy", "disposable_ack",
 })
-_PROVISION_REQUIRED_KEYS_BASE = frozenset({"schema", "vendor", "profile_id", "benign_origin", "disposable_ack"})
+_PROVISION_REQUIRED_KEYS_BASE = frozenset({
+    "schema", "vendor", "profile_id", "origin_policy", "disposable_ack",
+})
 _MAX_PROVISION_BYTES = 64 * 1024
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 CHAIRMAN_SEAT_REFS = frozenset({"chatgpt1", "chatgpt2", "chatgpt3"})
 BINDINGS_CENSUS_MAX_AGE_SECONDS = 24 * 60 * 60
 
@@ -276,31 +280,25 @@ def _current_chairman_profile_census(doc, *, now, candidate_profile_id: str):
     return "collision" if collision else "clear"
 
 
-def load_provision(path=None, *, bindings_loader=None, now=None):
-    """Load and validate the disposable canary provision file.
-
-    Returns ``(provision_dict, None)`` on success, or ``(None, code)`` where
-    ``code`` is one of ``"PROVISION_MISSING"`` / ``"DISALLOWED_TARGET"`` /
-    ``"BINDINGS_UNAVAILABLE"``.
-    Never raises.
-    """
-    loader = bindings_loader if bindings_loader is not None else _surface_bindings.load_bindings
-
-    target = Path(path).expanduser() if path else Path(DEFAULT_PROVISION_PATH).expanduser()
-
+def _read_provision_document(target: Path):
     try:
         if not target.is_file():
-            return None, "PROVISION_MISSING"
+            return None
         if target.stat().st_size > _MAX_PROVISION_BYTES:
-            return None, "PROVISION_MISSING"
+            return None
         raw = target.read_text(encoding="utf-8")
     except OSError:
-        return None, "PROVISION_MISSING"
+        return None
 
     try:
         doc = json.loads(raw)
     except ValueError:
-        return None, "PROVISION_MISSING"
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _validate_provision_document(doc, *, bindings_loader=None, now=None):
+    loader = bindings_loader if bindings_loader is not None else _surface_bindings.load_bindings
 
     if not isinstance(doc, dict):
         return None, "PROVISION_MISSING"
@@ -308,6 +306,8 @@ def load_provision(path=None, *, bindings_loader=None, now=None):
         return None, "PROVISION_MISSING"
     if doc.get("schema") != PROVISION_SCHEMA:
         return None, "PROVISION_MISSING"
+
+    doc = dict(doc)
 
     vendor = doc.get("vendor")
     if vendor not in ("gologin", "multilogin"):
@@ -343,18 +343,7 @@ def load_provision(path=None, *, bindings_loader=None, now=None):
 
     if doc.get("disposable_ack") != REQUIRED_ACK:
         return None, "PROVISION_MISSING"
-
-    benign_origin = doc.get("benign_origin")
-    if not isinstance(benign_origin, str) or not benign_origin:
-        return None, "DISALLOWED_TARGET"
-    parsed = urlsplit(benign_origin)
-    if parsed.scheme not in ("http", "https"):
-        return None, "DISALLOWED_TARGET"
-    if parsed.username or parsed.password:
-        return None, "DISALLOWED_TARGET"
-    if parsed.path or parsed.query or parsed.fragment:
-        return None, "DISALLOWED_TARGET"
-    if (parsed.hostname or "") not in _LOOPBACK_HOSTS:
+    if doc.get("origin_policy") != _port_policy.ORIGIN_POLICY:
         return None, "DISALLOWED_TARGET"
 
     # Seat-collision guard: only a present, valid, fresh affirmative census
@@ -378,6 +367,53 @@ def load_provision(path=None, *, bindings_loader=None, now=None):
     return doc, None
 
 
+def load_provision(path=None, *, bindings_loader=None, now=None):
+    """Load and validate the fixed-policy disposable canary provision.
+
+    Returns ``(provision_dict, None)`` on success, or ``(None, code)`` where
+    ``code`` is one of ``"PROVISION_MISSING"`` / ``"DISALLOWED_TARGET"`` /
+    ``"BINDINGS_UNAVAILABLE"``. Never raises and never migrates.
+    """
+    target = Path(path).expanduser() if path else Path(DEFAULT_PROVISION_PATH).expanduser()
+    doc = _read_provision_document(target)
+    if doc is None:
+        return None, "PROVISION_MISSING"
+    return _validate_provision_document(
+        doc, bindings_loader=bindings_loader, now=now,
+    )
+
+
+def load_legacy_provision_for_migration(
+    path=None, *, bindings_loader=None, now=None,
+):
+    """Validate and transform only the exact historical v2 provision."""
+
+    target = Path(path).expanduser() if path else Path(DEFAULT_PROVISION_PATH).expanduser()
+    doc = _read_provision_document(target)
+    if doc is None:
+        return None, "PROVISION_MISSING"
+    vendor = doc.get("vendor")
+    if vendor != "multilogin" or doc.get("browser_type") != "mimic":
+        return None, "DISALLOWED_TARGET"
+    expected_keys = set(_PROVISION_REQUIRED_KEYS_BASE)
+    expected_keys.remove("origin_policy")
+    expected_keys.add("benign_origin")
+    expected_keys.update({"folder_id", "browser_type"})
+    if set(doc) != expected_keys:
+        return None, "PROVISION_MISSING"
+    if (
+        doc.get("schema") != _port_policy.LEGACY_PROVISION_SCHEMA
+        or doc.get("benign_origin") != _port_policy.LEGACY_BENIGN_ORIGIN
+    ):
+        return None, "DISALLOWED_TARGET"
+    candidate = {key: value for key, value in doc.items() if key != "benign_origin"}
+    candidate["schema"] = PROVISION_SCHEMA
+    candidate["origin_policy"] = _port_policy.ORIGIN_POLICY
+    return _validate_provision_document(
+        candidate, bindings_loader=bindings_loader, now=now,
+    )
+
+
 # ---------------------------------------------------------------------------
 # small helpers
 # ---------------------------------------------------------------------------
@@ -390,9 +426,8 @@ def sha256_hex(text: str) -> str:
 def assert_disposable(provision) -> None:
     """Defense-in-depth gate: never trust a caller-supplied ``provision``
     dict at face value. Raises :class:`CanaryRefusal` (``DISALLOWED_TARGET``)
-    unless ``provision`` is a dict carrying the exact disposable ack AND a
-    benign loopback-only origin (http/https, no credentials, no path/query/
-    fragment, hostname in :data:`_LOOPBACK_HOSTS`)."""
+    unless ``provision`` is a dict carrying the exact disposable ack, the
+    fixed origin policy, and its runtime-derived exact loopback origin."""
     if not isinstance(provision, dict):
         raise CanaryRefusal("DISALLOWED_TARGET")
     if provision.get("disposable_ack") != REQUIRED_ACK:
@@ -404,29 +439,22 @@ def assert_disposable(provision) -> None:
         raise CanaryRefusal("DISALLOWED_TARGET")
     if vendor == "gologin" and "browser_type" in provision:
         raise CanaryRefusal("DISALLOWED_TARGET")
-    origin = provision.get("benign_origin")
-    if not isinstance(origin, str) or not origin:
+    if provision.get("origin_policy") != _port_policy.ORIGIN_POLICY:
         raise CanaryRefusal("DISALLOWED_TARGET")
-    parsed = urlsplit(origin)
-    if parsed.scheme not in ("http", "https"):
-        raise CanaryRefusal("DISALLOWED_TARGET")
-    if parsed.username or parsed.password:
-        raise CanaryRefusal("DISALLOWED_TARGET")
-    if parsed.path or parsed.query or parsed.fragment:
-        raise CanaryRefusal("DISALLOWED_TARGET")
-    if (parsed.hostname or "") not in _LOOPBACK_HOSTS:
+    if provision.get("benign_origin") != _port_policy.CANARY_ORIGIN:
         raise CanaryRefusal("DISALLOWED_TARGET")
 
 
 def allowed_url(provision: dict, url) -> bool:
     """True iff ``url`` is exactly the provisioned benign origin plus one of
     :data:`ALLOWED_PATHS`, AND that origin's hostname is loopback."""
-    origin = provision.get("benign_origin") if isinstance(provision, dict) else None
-    if not isinstance(origin, str) or not isinstance(url, str):
+    if not isinstance(provision, dict) or not isinstance(url, str):
         return False
-    if (urlsplit(origin).hostname or "") not in _LOOPBACK_HOSTS:
+    if provision.get("origin_policy") != _port_policy.ORIGIN_POLICY:
         return False
-    return any(url == origin + suffix for suffix in ALLOWED_PATHS)
+    if provision.get("benign_origin") != _port_policy.CANARY_ORIGIN:
+        return False
+    return any(url == _port_policy.CANARY_ORIGIN + suffix for suffix in ALLOWED_PATHS)
 
 
 def audit_receipts(rows, forbidden_values) -> bool:
@@ -1169,7 +1197,8 @@ def build_hermetic_harness(vendor: str) -> dict:
             "schema": PROVISION_SCHEMA,
             "vendor": "gologin",
             "profile_id": profile_id,
-            "benign_origin": "http://127.0.0.1:7777",
+            "origin_policy": _port_policy.ORIGIN_POLICY,
+            "benign_origin": _port_policy.CANARY_ORIGIN,
             "disposable_ack": REQUIRED_ACK,
         }
     elif vendor == "multilogin":
@@ -1181,7 +1210,8 @@ def build_hermetic_harness(vendor: str) -> dict:
             "profile_id": profile_id,
             "folder_id": folder_id,
             "browser_type": "mimic",
-            "benign_origin": "http://127.0.0.1:7777",
+            "origin_policy": _port_policy.ORIGIN_POLICY,
+            "benign_origin": _port_policy.CANARY_ORIGIN,
             "disposable_ack": REQUIRED_ACK,
         }
     else:

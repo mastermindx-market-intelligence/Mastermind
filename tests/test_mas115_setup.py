@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 from integrations.chairman_surfaces import nonseat_canary as canary
 from scripts import mas115_keychain_store as keychain_store
 from scripts import mas115_setup as setup
@@ -194,9 +195,103 @@ def test_build_provision_requires_stopped_profile_and_exact_multilogin_core():
         "profile_id": stopped["profile_id"],
         "folder_id": stopped["folder_id"],
         "browser_type": "stealthfox",
-        "benign_origin": "http://127.0.0.1:7777",
+        "origin_policy": port_policy.ORIGIN_POLICY,
         "disposable_ack": canary.REQUIRED_ACK,
     }
+
+
+def _legacy_v2_provision() -> dict:
+    stopped = _mlx(4, running=False)
+    return {
+        "schema": port_policy.LEGACY_PROVISION_SCHEMA,
+        "vendor": "multilogin",
+        "profile_id": stopped["profile_id"],
+        "folder_id": stopped["folder_id"],
+        "browser_type": "mimic",
+        "benign_origin": port_policy.LEGACY_BENIGN_ORIGIN,
+        "disposable_ack": canary.REQUIRED_ACK,
+    }
+
+
+def _migration_bindings_loader():
+    return setup.build_enrollment_document(
+        None, _selections(), observed_at="2026-08-23T12:00:00Z",
+    ), []
+
+
+def test_legacy_migration_accepts_only_exact_v2_origin_and_preserves_identity(tmp_path):
+    """Catches migration loss, loose origin acceptance, or non-atomic permissions."""
+    path = tmp_path / "provision.json"
+    legacy = _legacy_v2_provision()
+    setup._atomic_private_json(legacy, path)
+    migrated, code = setup._migrate_legacy_provision(
+        path,
+        bindings_loader=_migration_bindings_loader,
+        now=datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+    )
+    assert code is None
+    assert migrated == {
+        "schema": "mastermind.mas115_nonseat_canary_provision.v3",
+        "vendor": "multilogin",
+        "profile_id": legacy["profile_id"],
+        "folder_id": legacy["folder_id"],
+        "browser_type": "mimic",
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "disposable_ack": canary.REQUIRED_ACK,
+    }
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text(encoding="utf-8")) == migrated
+
+
+@pytest.mark.parametrize(
+    "origin",
+    (
+        "http://127.0.0.1:65535",
+        "http://localhost:7777",
+        "https://127.0.0.1:7777",
+        "http://evil.example:7777",
+    ),
+)
+def test_legacy_migration_refuses_every_nonhistorical_origin(tmp_path, origin):
+    """Catches broad migration of an unrecognized or already-edited target."""
+    legacy = _legacy_v2_provision()
+    legacy["benign_origin"] = origin
+    path = tmp_path / "provision.json"
+    setup._atomic_private_json(legacy, path)
+    migrated, code = setup._migrate_legacy_provision(
+        path,
+        bindings_loader=_migration_bindings_loader,
+        now=datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+    )
+    assert migrated is None
+    assert code == "DISALLOWED_TARGET"
+    assert json.loads(path.read_text(encoding="utf-8")) == legacy
+
+
+@pytest.mark.parametrize("mutation", ("gologin", "stealthfox"))
+def test_legacy_migration_refuses_non_multilogin_mimic_without_rewrite(tmp_path, mutation):
+    """Catches rewriting a legacy provision outside the approved Mimic carrier."""
+    legacy = _legacy_v2_provision()
+    if mutation == "stealthfox":
+        legacy["browser_type"] = "stealthfox"
+    else:
+        legacy = {
+            "schema": port_policy.LEGACY_PROVISION_SCHEMA,
+            "vendor": "gologin",
+            "profile_id": "a" * 24,
+            "benign_origin": port_policy.LEGACY_BENIGN_ORIGIN,
+            "disposable_ack": canary.REQUIRED_ACK,
+        }
+    path = tmp_path / "provision.json"
+    setup._atomic_private_json(legacy, path)
+    migrated, code = setup._migrate_legacy_provision(
+        path,
+        bindings_loader=_migration_bindings_loader,
+        now=datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+    )
+    assert migrated is None
+    assert code == "DISALLOWED_TARGET"
+    assert json.loads(path.read_text(encoding="utf-8")) == legacy
 
 
 @pytest.mark.parametrize(
@@ -361,3 +456,62 @@ def test_atomic_private_provision_is_0600_and_canonical(tmp_path):
     assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text(encoding="utf-8")) == doc
     assert path.read_text(encoding="utf-8") == json.dumps(doc, indent=2, sort_keys=True) + "\n"
+
+
+def test_configure_command_migrates_then_routes_fixed_default_provision(monkeypatch):
+    """Catches caller-selected configuration fields or a skipped legacy migration."""
+    calls = []
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (None, "PROVISION_MISSING"))
+    monkeypatch.setattr(
+        setup,
+        "_migrate_legacy_provision",
+        lambda *args, **kwargs: ({"vendor": "multilogin"}, None),
+    )
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["configure-canary-port", "--vendor", "multilogin"]) == 0
+    assert calls == [[
+        "configure-canary-port",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+    ]]
+
+
+def test_configure_command_reuses_valid_v3_without_migration(monkeypatch):
+    """Catches making the idempotent configuration command v2-only."""
+    calls = []
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: ({"vendor": "multilogin"}, None),
+    )
+    monkeypatch.setattr(
+        setup, "_migrate_legacy_provision",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not migrate v3")),
+    )
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["configure-canary-port", "--vendor", "multilogin"]) == 0
+    assert calls[0][0] == "configure-canary-port"
+
+
+def test_run_canary_routes_run_operation_without_update_authority(monkeypatch):
+    """Catches accidentally granting the ordinary run path configuration authority."""
+    calls = []
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["run-canary", "--vendor", "multilogin"]) == 0
+    assert calls == [[
+        "run",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+    ]]
+
+
+def test_configure_command_refuses_gologin_before_provision_or_vendor(monkeypatch):
+    """Catches widening the one-shot profile update beyond Multilogin."""
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before provision")),
+    )
+    monkeypatch.setattr(
+        setup.vendors, "main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before vendor")),
+    )
+    assert setup.main(["configure-canary-port", "--vendor", "gologin"]) == 2

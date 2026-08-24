@@ -23,6 +23,7 @@ import httpx
 import pytest
 
 from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 from integrations.chairman_surfaces import nonseat_canary as core
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
 
@@ -46,7 +47,8 @@ def _valid_provision(vendor: str, **overrides) -> dict:
             "schema": core.PROVISION_SCHEMA,
             "vendor": "gologin",
             "profile_id": "aaaaaaaaaaaaaaaaaaaaaaaa",
-            "benign_origin": "http://127.0.0.1:7777",
+            "origin_policy": port_policy.ORIGIN_POLICY,
+            "benign_origin": port_policy.CANARY_ORIGIN,
             "disposable_ack": core.REQUIRED_ACK,
         }
     else:
@@ -56,7 +58,8 @@ def _valid_provision(vendor: str, **overrides) -> dict:
             "profile_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "folder_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
             "browser_type": "mimic",
-            "benign_origin": "http://127.0.0.1:7777",
+            "origin_policy": port_policy.ORIGIN_POLICY,
+            "benign_origin": port_policy.CANARY_ORIGIN,
             "disposable_ack": core.REQUIRED_ACK,
         }
     doc.update(overrides)
@@ -68,8 +71,30 @@ def _write_provision(tmp_path: Path, doc) -> Path:
     if isinstance(doc, str):
         path.write_text(doc, encoding="utf-8")
     else:
-        path.write_text(json.dumps(doc), encoding="utf-8")
+        stored = dict(doc)
+        if stored.get("benign_origin") == port_policy.CANARY_ORIGIN:
+            stored.pop("benign_origin")
+        path.write_text(json.dumps(stored), encoding="utf-8")
     return path
+
+
+def _stored_provision(doc: dict) -> dict:
+    stored = dict(doc)
+    stored.pop("benign_origin", None)
+    return stored
+
+
+def _environment_loader_for(provision: dict, *, running=False):
+    def _load():
+        return {
+            "multilogin": [{
+                "profile_id": provision["profile_id"],
+                "folder_id": provision["folder_id"],
+                "running": running,
+            }],
+            "gologin": [],
+        }
+    return _load
 
 
 def _binding_doc(*, colliding_profile_id=None) -> dict:
@@ -647,11 +672,14 @@ def test_hostile_url_widening_impossible(vendor):
 
 
 def test_hostile_allowed_url_exact_match_semantics():
-    provision = {"benign_origin": "http://127.0.0.1:7777"}
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/a") is True
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/b") is True
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/a/") is False
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/a?x=1") is False
+    provision = {
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "benign_origin": port_policy.CANARY_ORIGIN,
+    }
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/a") is True
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/b") is True
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/a/") is False
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/a?x=1") is False
     assert core.allowed_url(provision, "http://127.0.0.1:7777/etc/passwd") is False
     assert core.allowed_url(provision, "https://127.0.0.1:7777/a") is False
     assert core.allowed_url(provision, "http://127.0.0.1:7778/a") is False
@@ -703,15 +731,24 @@ def test_falsifier_no_click_fill_send_surface():
 # ---------------------------------------------------------------------------
 
 
-def test_falsifier_no_profile_config_mutation_surface():
-    for path in (CORE_PATH, VENDORS_PATH):
-        lowered = path.read_text(encoding="utf-8").lower()
-        for phrase in ("httpx.patch", "httpx.delete"):
-            assert phrase not in lowered, f"{path.name} contains forbidden mutation call {phrase!r}"
-        for token in ("patch", "delete"):
-            assert token not in lowered, f"{path.name} contains forbidden mutation token {token!r}"
-        for phrase in ("/browser/update", "profile/update", "fingerprint"):
-            assert phrase not in lowered, f"{path.name} contains forbidden mutation phrase {phrase!r}"
+def test_falsifier_profile_config_mutation_surface_is_exactly_allowlisted():
+    """Catches any mutation path beyond the single fixed-port transaction."""
+    core_text = CORE_PATH.read_text(encoding="utf-8").lower()
+    vendor_text = VENDORS_PATH.read_text(encoding="utf-8").lower()
+    for text in (core_text, vendor_text):
+        for phrase in ("httpx.patch", "httpx.delete", "/browser/update", '"profile/update"'):
+            assert phrase not in text
+    assert "/profile/partial_update" not in core_text
+    assert vendor_text.count('"/profile/partial_update"') == 1
+    assert tuple(inspect.signature(
+        vendors.BoundedHttpClient._mlx_configure_canary_port,
+    ).parameters) == ("self", "credential", "profile_id", "snapshot")
+    assert tuple(inspect.signature(
+        vendors.MultiloginClient.configure_canary_port,
+    ).parameters) == ("self", "profile_ref")
+    assert tuple(inspect.signature(
+        vendors.MultiloginClient.port_policy_snapshot,
+    ).parameters) == ("self", "profile_ref")
 
 
 def test_falsifier_webdriver_endpoint_allowlist():
@@ -899,11 +936,11 @@ def test_hostile_provision_gate_bad_ack(tmp_path):
         "http://evil.example.com:7777",
     ],
 )
-def test_hostile_provision_gate_disallowed_origin(tmp_path, origin):
+def test_hostile_provision_gate_rejects_any_persisted_origin_field(tmp_path, origin):
     bad = _valid_provision("gologin", benign_origin=origin)
     path = _write_provision(tmp_path, bad)
     doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
-    assert doc is None and code == "DISALLOWED_TARGET"
+    assert doc is None and code == "PROVISION_MISSING"
 
 
 def test_hostile_provision_gate_gologin_with_folder_id(tmp_path):
@@ -947,7 +984,7 @@ def test_hostile_provision_gate_valid_ok(tmp_path, vendor):
     path = _write_provision(tmp_path, good)
     doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert code is None
-    assert doc == good
+    assert doc == _stored_provision(good)
 
 
 def _chatgpt_binding_doc(profile_id: str) -> dict:
@@ -968,7 +1005,7 @@ def test_hostile_provision_gate_seat_collision_different_profile_id(tmp_path):
     other_doc = _chatgpt_binding_doc("bbbbbbbbbbbbbbbbbbbbbbbb")
     doc, code = _load_provision(str(path), bindings_loader=lambda: (other_doc, []))
     assert code is None
-    assert doc == good
+    assert doc == _stored_provision(good)
 
 
 def test_hostile_provision_gate_bindings_problems_fails_closed(tmp_path):
@@ -1079,7 +1116,10 @@ def test_hostile_loopback_benign_origin_integration():
     origin = vendors.LoopbackBenignOrigin(token="integration-token")
     try:
         base = origin.base_url
-        assert base.startswith("http://127.0.0.1:")
+        assert base == port_policy.CANARY_ORIGIN
+        assert origin.self_test() is True
+        assert origin.saw("/a") is False
+        assert origin.saw("/auth") is False
 
         with httpx.Client(base_url=base) as client:
             resp_a = client.get("/a")
@@ -1101,6 +1141,11 @@ def test_hostile_loopback_benign_origin_integration():
             assert resp_missing.status_code == 404
     finally:
         origin.close()
+
+
+def test_loopback_origin_constructor_has_no_port_parameter():
+    """Catches reintroducing caller-selected or fallback port behavior."""
+    assert tuple(inspect.signature(vendors.LoopbackBenignOrigin).parameters) == ("token",)
 
 
 # ---------------------------------------------------------------------------
@@ -1162,7 +1207,10 @@ def test_hostile_allowed_url_requires_loopback_hostname():
 
 
 def test_hostile_allowed_url_rejects_dangerous_url_schemes():
-    provision = {"benign_origin": "http://127.0.0.1:7777"}
+    provision = {
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "benign_origin": port_policy.CANARY_ORIGIN,
+    }
     for bad_url in ("javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"):
         assert core.allowed_url(provision, bad_url) is False
 
@@ -1205,19 +1253,65 @@ def _success(data, message=""):
     })
 
 
+def _metas_payload(
+    *, profile_id="p1", folder_id="f1", ports=None, auto=False,
+    browser_type="mimic", in_use_by="", storage_flag=False,
+):
+    fingerprint = {} if ports is None else {"ports": list(ports)}
+    return {
+        "status": {
+            "error_code": "",
+            "http_code": 200,
+            "message": "List of profiles metadata",
+        },
+        "data": {
+            "profiles": [{
+                "id": profile_id,
+                "folder_id": folder_id,
+                "browser_type": browser_type,
+                "in_use_by": in_use_by,
+                "is_auto_update": auto,
+                "parameters": {
+                    "flags": {"ports_masking": "mask"},
+                    "fingerprint": fingerprint,
+                    "storage": {
+                        "is_local": False,
+                        "save_service_worker": storage_flag,
+                    },
+                },
+                "last_update_at": "synthetic-before",
+                "last_updated_by": "synthetic-operator",
+            }],
+        },
+    }
+
+
 class _ExactMultiloginTransport:
-    def __init__(self, browser_type="mimic"):
+    def __init__(self, browser_type="mimic", profile_id="p1", folder_id="f1"):
         self.calls = []
         self.state = "stopped"
         self.status_response = None
         self.browser_type = browser_type
+        self.profile_id = profile_id
+        self.folder_id = folder_id
+        self.ports = []
+        self.auto_update = False
+        self.partial_update_response = _success(None, "Profile successfully updated")
+        self.apply_update_effect = True
+        self.mutate_storage_after_update = False
+        self.search_in_use_by = ""
+        self.search_locked_by = ""
+        self.metas_response = None
+        self.metas_mode = "mask"
 
     def _mlx_profile_search(self, credential, folder_id, *, offset):
         self.calls.append(("search", folder_id, offset))
         return _success({
             "profiles": [{
-                "id": "p1", "folder_id": folder_id, "name": "synthetic",
-                "browser_type": self.browser_type, "in_use_by": "", "locked_by": "",
+                "id": self.profile_id, "folder_id": folder_id, "name": "synthetic",
+                "browser_type": self.browser_type,
+                "in_use_by": self.search_in_use_by,
+                "locked_by": self.search_locked_by,
             }],
             "total_count": 1,
         }, "Search profile successfully result")
@@ -1228,7 +1322,7 @@ class _ExactMultiloginTransport:
             return self.status_response
         return _success({
             "profile_id": profile_id,
-            "folder_id": "f1",
+            "folder_id": self.folder_id,
             "status": self.state,
             "browser_type": self.browser_type,
             "core_version": 132,
@@ -1257,6 +1351,368 @@ class _ExactMultiloginTransport:
         return vendors._BoundedResponse(200, {
             "status": {"error_code": "", "http_code": 200, "message": ""},
         })
+
+    def _mlx_profile_metas(self, credential, profile_id):
+        self.calls.append(("metas", profile_id))
+        if self.metas_response is not None:
+            return self.metas_response
+        payload = _metas_payload(
+            profile_id=profile_id,
+            folder_id=self.folder_id,
+            ports=self.ports,
+            auto=self.auto_update,
+            browser_type=self.browser_type,
+            storage_flag=self.mutate_storage_after_update and bool(self.ports),
+        )
+        payload["data"]["profiles"][0]["parameters"]["flags"]["ports_masking"] = self.metas_mode
+        return vendors._BoundedResponse(200, payload)
+
+    def _mlx_configure_canary_port(self, credential, profile_id, snapshot):
+        self.calls.append(("configure", profile_id, snapshot.auto_update_core))
+        if self.apply_update_effect:
+            self.ports = [port_policy.CANARY_PORT]
+        return self.partial_update_response
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+class _ReadyOrigin:
+    base_url = port_policy.CANARY_ORIGIN
+
+    def __init__(self, *, token):
+        self.token = token
+        self.closed = False
+
+    def self_test(self):
+        return True
+
+    def close(self):
+        self.closed = True
+
+
+def test_configure_canary_port_preserves_auto_update_and_reads_back():
+    """Catches omitting the vendor auto-update flag or accepting without read-back."""
+    transport = _ExactMultiloginTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "CONFIGURED"
+    assert receipt["predicates"] == {
+        "preservation_unchanged": True,
+        "auto_update_unchanged": True,
+        "exact_profile_stopped": True,
+    }
+    assert transport.calls == [
+        ("search", "f1", 0), ("status", "p1"), ("metas", "p1"),
+        ("configure", "p1", False),
+        ("search", "f1", 0), ("status", "p1"), ("metas", "p1"),
+    ]
+
+
+def test_configure_canary_port_is_idempotent_without_update():
+    """Catches writing an already exact disposable profile."""
+    transport = _ExactMultiloginTransport()
+    transport.ports = [port_policy.CANARY_PORT]
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "ALREADY_CONFIGURED"
+    assert not any(call[0] == "configure" for call in transport.calls)
+
+
+@pytest.mark.parametrize(
+    ("response", "effect", "expected"),
+    (
+        (None, False, "EFFECT_UNKNOWN"),
+        (vendors._BoundedResponse(200, {"renamed": "response"}), True,
+         "CONFIGURED_AFTER_RECONCILIATION"),
+        (vendors._BoundedResponse(500, None), False, "EFFECT_UNKNOWN"),
+    ),
+)
+def test_ambiguous_update_never_retries_and_only_reconciles_read_only(response, effect, expected):
+    """Catches retrying an ambiguous mutation or skipping its single read-back."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = response
+    transport.apply_update_effect = effect
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert sum(call[0] == "configure" for call in transport.calls) == 1
+    assert receipt["code"] == expected
+    assert receipt["reconciled"] is True
+    assert [call[0] for call in transport.calls[-3:]] == ["search", "status", "metas"]
+
+
+def test_post_update_non_target_drift_vetoes_success():
+    """Catches reporting PASS when an unrelated profile parameter changed."""
+    transport = _ExactMultiloginTransport()
+    transport.mutate_storage_after_update = True
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "PRESERVATION_DRIFT"
+    assert receipt["verdict"] == "HOLD"
+
+
+@pytest.mark.parametrize("status_code", (401, 403))
+def test_configuration_auth_rejection_has_no_readback_or_retry(status_code):
+    """Catches treating explicit auth failure as an ambiguous applied update."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = vendors._BoundedResponse(status_code, None)
+    transport.apply_update_effect = False
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "AUTH_EXPIRED_NO_PROOF"
+    assert [call[0] for call in transport.calls].count("configure") == 1
+    assert [call[0] for call in transport.calls].count("metas") == 1
+
+
+def test_configuration_explicit_rejection_has_no_readback_or_retry():
+    """Catches retry/reconciliation after a schema-valid definitive rejection."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = vendors._BoundedResponse(400, {
+        "status": {"error_code": "INVALID_INPUT", "http_code": 400, "message": "rejected"},
+        "data": None,
+    })
+    transport.apply_update_effect = False
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "REJECTED_NO_PROOF"
+    assert [call[0] for call in transport.calls].count("configure") == 1
+    assert [call[0] for call in transport.calls].count("metas") == 1
+
+
+def test_wrong_success_message_requires_read_only_reconciliation():
+    """Catches trusting vendor prose drift as a definitive success envelope."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = _success(None, "renamed success")
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "CONFIGURED_AFTER_RECONCILIATION"
+    assert receipt["reconciled"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("running", "browser_running"),
+        ("owned", "other-session"),
+        ("locked", "other-lock"),
+        ("browser", "stealthfox"),
+        ("mode", "natural"),
+    ),
+)
+def test_configuration_refuses_nonexact_preflight_without_update(mutation, value):
+    """Catches configuring a running, owned, locked, non-Mimic, or widened profile."""
+    transport = _ExactMultiloginTransport()
+    if mutation == "running":
+        transport.state = value
+    elif mutation == "owned":
+        transport.search_in_use_by = value
+    elif mutation == "locked":
+        transport.search_locked_by = value
+    elif mutation == "browser":
+        transport.browser_type = value
+    else:
+        transport.metas_mode = value
+    client = vendors.MultiloginClient(
+        core.Credential("cred", "stdin"), transport, browser_type=transport.browser_type,
+    )
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["verdict"] != "PASS"
+    assert not any(call[0] == "configure" for call in transport.calls)
+
+
+def test_configuration_missing_credential_refuses_before_vendor_calls():
+    """Catches a configuration read or write without a present credential."""
+    transport = _ExactMultiloginTransport()
+    client = vendors.MultiloginClient(core.Credential(None, "absent"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert transport.calls == []
+
+
+def test_bounded_transport_serializes_only_the_approved_partial_update():
+    """Catches endpoint, method, authorization, or body widening at the HTTP boundary."""
+    observed = []
+
+    def handler(request):
+        observed.append({
+            "method": request.method,
+            "url": str(request.url),
+            "authorization": request.headers.get("authorization"),
+            "body": json.loads(request.content),
+        })
+        return httpx.Response(200, json={
+            "status": {
+                "error_code": "",
+                "http_code": 200,
+                "message": "Profile successfully updated",
+            },
+            "data": None,
+        })
+
+    raw = httpx.Client(
+        transport=httpx.MockTransport(handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=raw)
+    snapshot = port_policy.classify_profile_metas(
+        _metas_payload(), profile_id="p1", folder_id="f1",
+    )
+    response = bounded._mlx_configure_canary_port(
+        core.Credential("secret-value", "stdin"), "p1", snapshot,
+    )
+    bounded.close()
+    assert response.status_code == 200
+    assert observed == [{
+        "method": "POST",
+        "url": "https://api.multilogin.com/profile/partial_update",
+        "authorization": "Bearer secret-value",
+        "body": {
+            "profile_id": "p1",
+            "auto_update_core": False,
+            "parameters": {
+                "flags": {"ports_masking": "mask"},
+                "fingerprint": {"ports": [65535]},
+            },
+        },
+    }]
+
+
+def test_vendor_configure_operation_emits_only_redacted_configuration_receipt(tmp_path):
+    """Catches routing the operator command into the C0-C10 launch path."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    transport = _ExactMultiloginTransport(
+        profile_id=provision["profile_id"], folder_id=provision["folder_id"],
+    )
+    out = io.StringIO()
+    code = vendors.main(
+        [
+            "configure-canary-port", "--vendor", "multilogin",
+            "--provision-path", str(path),
+        ],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 0
+    assert receipt["code"] == "CONFIGURED"
+    assert "p1" not in out.getvalue()
+    assert [call[0] for call in transport.calls].count("configure") == 1
+    assert not any(call[0] == "start" for call in transport.calls)
+
+
+def test_vendor_run_refuses_default_policy_without_update_or_start(tmp_path):
+    """Catches ordinary run silently mutating or launching an unconfigured profile."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    transport = _ExactMultiloginTransport(
+        profile_id=provision["profile_id"], folder_id=provision["folder_id"],
+    )
+    out = io.StringIO()
+    code = vendors.main(
+        ["run", "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "UNSUPPORTED_PORT_STATE"
+    assert not any(call[0] in {"configure", "start"} for call in transport.calls)
+
+
+def test_vendor_run_requires_exact_preflight_and_postflight_without_update(tmp_path, monkeypatch):
+    """Catches launching before the exact policy or omitting post-run preservation proof."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    transport = _ExactMultiloginTransport(
+        profile_id=provision["profile_id"], folder_id=provision["folder_id"],
+    )
+    transport.ports = [port_policy.CANARY_PORT]
+    matrix_calls = []
+
+    def fake_matrix(**kwargs):
+        matrix_calls.append(kwargs["provision"]["benign_origin"])
+        return {
+            "schema": core.RECEIPTS_SCHEMA,
+            "vendor": "multilogin",
+            "rows": [{
+                "row": "C10", "code": "OK", "ok": True,
+                "detail": core.DETAILS["OK"], "ts": "synthetic",
+            }],
+            "cleanup": {"ok": True},
+            "verdict": "PASS",
+        }
+
+    monkeypatch.setattr(vendors._core, "run_matrix", fake_matrix)
+    monkeypatch.setattr(vendors, "live_process_probe", lambda provision: lambda: {})
+    out = io.StringIO()
+    code = vendors.main(
+        ["run", "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    assert code == 0
+    assert json.loads(out.getvalue())["verdict"] == "PASS"
+    assert matrix_calls == [port_policy.CANARY_ORIGIN]
+    assert [call[0] for call in transport.calls].count("metas") == 2
+    assert not any(call[0] == "configure" for call in transport.calls)
+
+
+def test_vendor_run_postflight_drift_vetoes_matrix_pass(tmp_path, monkeypatch):
+    """Catches returning PASS after the profile policy drifts during C0-C10."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    transport = _ExactMultiloginTransport(
+        profile_id=provision["profile_id"], folder_id=provision["folder_id"],
+    )
+    transport.ports = [port_policy.CANARY_PORT]
+
+    def fake_matrix(**kwargs):
+        transport.mutate_storage_after_update = True
+        return {
+            "schema": core.RECEIPTS_SCHEMA,
+            "vendor": "multilogin",
+            "rows": [{
+                "row": "C10", "code": "OK", "ok": True,
+                "detail": core.DETAILS["OK"], "ts": "synthetic",
+            }],
+            "cleanup": {"ok": True},
+            "verdict": "PASS",
+        }
+
+    monkeypatch.setattr(vendors._core, "run_matrix", fake_matrix)
+    monkeypatch.setattr(vendors, "live_process_probe", lambda provision: lambda: {})
+    out = io.StringIO()
+    code = vendors.main(
+        ["run", "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        credential_stream_factory=lambda: io.BytesIO(b"cred"),
+        client_factory=lambda: transport,
+        origin_factory=_ReadyOrigin,
+        now=_NOW,
+    )
+    receipt = json.loads(out.getvalue())
+    assert code == 1
+    assert receipt["verdict"] == "FAIL"
+    assert receipt["rows"][0]["row"] == "C10"
+    assert receipt["rows"][0]["code"] == "UNSUPPORTED_PORT_STATE"
+    assert receipt["rows"][0]["ok"] is False
+    assert not any(call[0] == "configure" for call in transport.calls)
 
 
 def test_hostile_multilogin_repeat_start_guard_before_http():
@@ -1717,6 +2173,93 @@ def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(t
     assert code == 2
     assert json.loads(buf.getvalue())["code"] == "BINDINGS_UNAVAILABLE"
     assert calls == {"keychain_spawn": 0, "client": 0, "origin": 0}
+
+
+def test_non_mimic_provision_refuses_before_local_census_origin_keychain_or_http(tmp_path):
+    """Catches deferring the approved Mimic gate until after secret access."""
+    provision = _valid_provision("multilogin", browser_type="stealthfox")
+    path = _write_provision(tmp_path, provision)
+    calls = []
+    boom = lambda *args, **kwargs: calls.append("unexpected")
+    out = io.StringIO()
+    code = vendors.main(
+        ["configure-canary-port", "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=boom,
+        origin_factory=boom,
+        credential_stream_factory=boom,
+        client_factory=boom,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "UNSUPPORTED_PORT_STATE"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    (
+        ({"multilogin": [], "gologin": []}, "PROFILE_NOT_FOUND"),
+        ("running", "BUSY_PROFILE"),
+    ),
+)
+def test_local_disposable_census_refuses_before_origin_keychain_or_http(
+    tmp_path, environment, expected,
+):
+    """Catches reading secrets before the local exact-profile stopped proof."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    calls = []
+    if environment == "running":
+        environment_loader = _environment_loader_for(provision, running=True)
+    else:
+        environment_loader = lambda: environment
+
+    def unexpected(*args, **kwargs):
+        calls.append("unexpected")
+        raise AssertionError("local refusal must precede origin, Keychain, and HTTP")
+
+    out = io.StringIO()
+    code = vendors.main(
+        ["run", "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=environment_loader,
+        origin_factory=unexpected,
+        credential_stream_factory=unexpected,
+        client_factory=unexpected,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == expected
+    assert calls == []
+
+
+def test_busy_fixed_port_refuses_before_keychain_or_http(tmp_path):
+    """Catches secret/vendor access before the fixed loopback port is proven."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    calls = []
+
+    def busy_origin(*, token):
+        calls.append("origin")
+        raise OSError("synthetic busy port")
+
+    buf = io.StringIO()
+    code = vendors.main(
+        ["--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=buf,
+        bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
+        origin_factory=busy_origin,
+        credential_stream_factory=lambda: calls.append("keychain"),
+        client_factory=lambda: calls.append("client"),
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(buf.getvalue())["code"] == "CANARY_PORT_UNAVAILABLE"
+    assert calls == ["origin"]
 
 
 def test_hostile_gologin_helper_refuses_before_any_io():
