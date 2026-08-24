@@ -183,6 +183,24 @@ def test_chatgpt_url_chat_openai_com_host_allowed():
     assert sb.validate_bindings_document(_doc(binding)) == []
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://chatgpt.com/c/conversation-alpha",
+        "https://chatgpt.com/g/g-p-project-alpha/c/conversation-beta",
+        "https://chat.openai.com/g/g-p-project_123/c/conversation-gamma/",
+    ],
+)
+def test_chatgpt_exact_normal_and_project_conversation_urls_allowed(url):
+    binding = _valid_binding()
+    binding["locator"] = {
+        "env_manager": "gologin",
+        "profile_id": _GOLOGIN_PROFILE_ID,
+        "url": url,
+    }
+    assert sb.validate_bindings_document(_doc(binding)) == []
+
+
 # ---------------------------------------------------------------------------
 # falsifier 3b — chatgpt_managed_env law (Sol architecture correction,
 # MAS-113, 2026-08-22): GoLogin/Multilogin environment identity, never a
