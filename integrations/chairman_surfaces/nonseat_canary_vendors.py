@@ -1242,10 +1242,42 @@ def _emit_refusal(out, vendor: str, code: str) -> int:
     return 2
 
 
+def _local_disposable_preflight(provision: dict, environment_loader=None):
+    """Require one exact locally stopped Multilogin profile before secrets."""
+
+    if environment_loader is None:
+        from integrations.chairman_surfaces import chatgpt as _chatgpt
+
+        environment_loader = _chatgpt.list_local_environments
+    try:
+        census = environment_loader()
+    except Exception:  # noqa: BLE001 — local uncertainty has one fixed result
+        return "VENDOR_ERROR"
+    if not isinstance(census, dict) or not isinstance(census.get("multilogin"), list):
+        return "VENDOR_ERROR"
+    profile_id = provision["profile_id"]
+    folder_id = provision["folder_id"]
+    matches = []
+    for row in census["multilogin"]:
+        if not isinstance(row, dict):
+            return "VENDOR_ERROR"
+        row_profile = row.get("profile_id")
+        row_folder = row.get("folder_id")
+        if isinstance(row_profile, str) and row_profile.lower() == profile_id:
+            if not isinstance(row_folder, str) or row_folder.lower() != folder_id:
+                return "VENDOR_ERROR"
+            matches.append(row)
+    if not matches:
+        return "PROFILE_NOT_FOUND"
+    if len(matches) != 1 or type(matches[0].get("running")) is not bool:
+        return "VENDOR_ERROR"
+    return "BUSY_PROFILE" if matches[0]["running"] else None
+
+
 def main(
     argv=None, *, stdout=None, bindings_loader=None, credential_stream_factory=None,
     client_factory=BoundedHttpClient, origin_factory=LoopbackBenignOrigin,
-    now=None,
+    environment_loader=None, now=None,
 ) -> int:
     """Run the operator-only helper.
 
@@ -1277,6 +1309,11 @@ def main(
         return _emit_refusal(out, args.vendor, code)
     if provision.get("vendor") != args.vendor:
         return _emit_refusal(out, args.vendor, "PROVISION_MISSING")
+    if provision.get("browser_type") != "mimic":
+        return _emit_refusal(out, args.vendor, "UNSUPPORTED_PORT_STATE")
+    local_code = _local_disposable_preflight(provision, environment_loader)
+    if local_code is not None:
+        return _emit_refusal(out, args.vendor, local_code)
 
     # Bind and self-test the one fixed loopback origin before any secret or
     # vendor transport exists. There is no fallback port.

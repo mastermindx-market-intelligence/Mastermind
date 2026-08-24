@@ -268,6 +268,32 @@ def test_legacy_migration_refuses_every_nonhistorical_origin(tmp_path, origin):
     assert json.loads(path.read_text(encoding="utf-8")) == legacy
 
 
+@pytest.mark.parametrize("mutation", ("gologin", "stealthfox"))
+def test_legacy_migration_refuses_non_multilogin_mimic_without_rewrite(tmp_path, mutation):
+    """Catches rewriting a legacy provision outside the approved Mimic carrier."""
+    legacy = _legacy_v2_provision()
+    if mutation == "stealthfox":
+        legacy["browser_type"] = "stealthfox"
+    else:
+        legacy = {
+            "schema": port_policy.LEGACY_PROVISION_SCHEMA,
+            "vendor": "gologin",
+            "profile_id": "a" * 24,
+            "benign_origin": port_policy.LEGACY_BENIGN_ORIGIN,
+            "disposable_ack": canary.REQUIRED_ACK,
+        }
+    path = tmp_path / "provision.json"
+    setup._atomic_private_json(legacy, path)
+    migrated, code = setup._migrate_legacy_provision(
+        path,
+        bindings_loader=_migration_bindings_loader,
+        now=datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+    )
+    assert migrated is None
+    assert code == "DISALLOWED_TARGET"
+    assert json.loads(path.read_text(encoding="utf-8")) == legacy
+
+
 @pytest.mark.parametrize(
     "marker,expected",
     [("Default", "mimic"), ("prefs.js", "stealthfox")],

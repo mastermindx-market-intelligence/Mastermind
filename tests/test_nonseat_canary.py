@@ -84,6 +84,19 @@ def _stored_provision(doc: dict) -> dict:
     return stored
 
 
+def _environment_loader_for(provision: dict, *, running=False):
+    def _load():
+        return {
+            "multilogin": [{
+                "profile_id": provision["profile_id"],
+                "folder_id": provision["folder_id"],
+                "running": running,
+            }],
+            "gologin": [],
+        }
+    return _load
+
+
 def _binding_doc(*, colliding_profile_id=None) -> dict:
     profile_ids = [
         colliding_profile_id or "111111111111111111111111",
@@ -1578,6 +1591,7 @@ def test_vendor_configure_operation_emits_only_redacted_configuration_receipt(tm
         ],
         stdout=out,
         bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
         credential_stream_factory=lambda: io.BytesIO(b"cred"),
         client_factory=lambda: transport,
         origin_factory=_ReadyOrigin,
@@ -1603,6 +1617,7 @@ def test_vendor_run_refuses_default_policy_without_update_or_start(tmp_path):
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
         credential_stream_factory=lambda: io.BytesIO(b"cred"),
         client_factory=lambda: transport,
         origin_factory=_ReadyOrigin,
@@ -1643,6 +1658,7 @@ def test_vendor_run_requires_exact_preflight_and_postflight_without_update(tmp_p
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
         credential_stream_factory=lambda: io.BytesIO(b"cred"),
         client_factory=lambda: transport,
         origin_factory=_ReadyOrigin,
@@ -1684,6 +1700,7 @@ def test_vendor_run_postflight_drift_vetoes_matrix_pass(tmp_path, monkeypatch):
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
         credential_stream_factory=lambda: io.BytesIO(b"cred"),
         client_factory=lambda: transport,
         origin_factory=_ReadyOrigin,
@@ -2158,9 +2175,71 @@ def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(t
     assert calls == {"keychain_spawn": 0, "client": 0, "origin": 0}
 
 
+def test_non_mimic_provision_refuses_before_local_census_origin_keychain_or_http(tmp_path):
+    """Catches deferring the approved Mimic gate until after secret access."""
+    provision = _valid_provision("multilogin", browser_type="stealthfox")
+    path = _write_provision(tmp_path, provision)
+    calls = []
+    boom = lambda *args, **kwargs: calls.append("unexpected")
+    out = io.StringIO()
+    code = vendors.main(
+        ["configure-canary-port", "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=boom,
+        origin_factory=boom,
+        credential_stream_factory=boom,
+        client_factory=boom,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "UNSUPPORTED_PORT_STATE"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    (
+        ({"multilogin": [], "gologin": []}, "PROFILE_NOT_FOUND"),
+        ("running", "BUSY_PROFILE"),
+    ),
+)
+def test_local_disposable_census_refuses_before_origin_keychain_or_http(
+    tmp_path, environment, expected,
+):
+    """Catches reading secrets before the local exact-profile stopped proof."""
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
+    calls = []
+    if environment == "running":
+        environment_loader = _environment_loader_for(provision, running=True)
+    else:
+        environment_loader = lambda: environment
+
+    def unexpected(*args, **kwargs):
+        calls.append("unexpected")
+        raise AssertionError("local refusal must precede origin, Keychain, and HTTP")
+
+    out = io.StringIO()
+    code = vendors.main(
+        ["run", "--vendor", "multilogin", "--provision-path", str(path)],
+        stdout=out,
+        bindings_loader=_no_collision_loader,
+        environment_loader=environment_loader,
+        origin_factory=unexpected,
+        credential_stream_factory=unexpected,
+        client_factory=unexpected,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == expected
+    assert calls == []
+
+
 def test_busy_fixed_port_refuses_before_keychain_or_http(tmp_path):
     """Catches secret/vendor access before the fixed loopback port is proven."""
-    path = _write_provision(tmp_path, _valid_provision("multilogin"))
+    provision = _valid_provision("multilogin")
+    path = _write_provision(tmp_path, provision)
     calls = []
 
     def busy_origin(*, token):
@@ -2172,6 +2251,7 @@ def test_busy_fixed_port_refuses_before_keychain_or_http(tmp_path):
         ["--vendor", "multilogin", "--provision-path", str(path)],
         stdout=buf,
         bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(provision),
         origin_factory=busy_origin,
         credential_stream_factory=lambda: calls.append("keychain"),
         client_factory=lambda: calls.append("client"),

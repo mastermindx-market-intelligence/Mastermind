@@ -393,11 +393,12 @@ def load_legacy_provision_for_migration(
     if doc is None:
         return None, "PROVISION_MISSING"
     vendor = doc.get("vendor")
+    if vendor != "multilogin" or doc.get("browser_type") != "mimic":
+        return None, "DISALLOWED_TARGET"
     expected_keys = set(_PROVISION_REQUIRED_KEYS_BASE)
     expected_keys.remove("origin_policy")
     expected_keys.add("benign_origin")
-    if vendor == "multilogin":
-        expected_keys.update({"folder_id", "browser_type"})
+    expected_keys.update({"folder_id", "browser_type"})
     if set(doc) != expected_keys:
         return None, "PROVISION_MISSING"
     if (
