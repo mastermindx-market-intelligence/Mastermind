@@ -561,9 +561,13 @@
     var failed = cardFailedJobs(card).length > 0;
     var disagreements = (card.disagreements || []).length;
     var cls = "ccr-mission-row";
+    var hasHumanAttention = targets.chairman || targets.ceo || targets.coo;
     if (targets.chairman) cls += " ccr-has-chairman-attention";
     else if (targets.ceo || targets.coo) cls += " ccr-has-role-attention";
-    if (failed || disagreements) cls += " ccr-has-danger";
+    // Human attention owns the row's brass stripe. Machine/runtime danger is
+    // still explicit in vermilion evidence chips but must never visually
+    // overwrite the fact that a person owes the canonical next move.
+    if ((failed || disagreements) && !hasHumanAttention) cls += " ccr-has-danger";
     var row = el("article", { className: cls, attrs: { tabindex: "0" } });
 
     var ao = card.agent_os || {};
@@ -824,6 +828,7 @@
         title: safeText(ao.title, card.work_ref),
         sub: safeText(card.work_ref) + (ao.program ? " · " + ao.program : ""),
         search: [card.work_ref, ao.title, ao.program, ao.next_action].map(normalizedSearchText).join(" "),
+        actionLabel: "Inspect",
         action: function () { closePalette(); openDetail(card); },
       });
       (((card.github || {}).prs) || []).forEach(function (pr) {
@@ -832,17 +837,31 @@
           title: safeText(pr.title, "Untitled PR"),
           sub: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + safeText(card.work_ref),
           search: [pr.title, pr.repo, pr.number, card.work_ref].map(normalizedSearchText).join(" "),
+          actionLabel: "Open",
           action: function () { closePalette(); if (pr.url) window.open(pr.url, "_blank", "noopener"); },
         });
       });
     });
     allBindings().forEach(function (binding) {
+      var confidence = bindingConfidence(binding);
+      var relatedCard = STATE.workByRef[binding.work_ref] || null;
       items.push({
         kind: "surface",
         title: seatLabel(binding) + " · " + workTitle(binding.work_ref),
-        sub: safeText(binding.provider) + " · " + safeText(binding.work_ref) + " · " + bindingConfidence(binding).state,
+        sub: safeText(binding.provider) + " · " + safeText(binding.work_ref) + " · " + confidence.state,
         search: [binding.seat_ref, binding.provider, binding.role, binding.work_ref, workTitle(binding.work_ref)].map(normalizedSearchText).join(" "),
-        action: function () { closePalette(); openBinding(binding, null, null).then(function () { loadState(); }); },
+        actionLabel: confidence.openable ? "Open" : "Inspect",
+        action: function () {
+          closePalette();
+          if (confidence.openable) {
+            openBinding(binding, null, null).then(function () { loadState(); });
+          } else if (relatedCard) {
+            openDetail(relatedCard);
+          } else {
+            document.getElementById("system").scrollIntoView({ behavior: "smooth", block: "start" });
+            setActiveNav("system");
+          }
+        },
       });
     });
     STATE.paletteItems = items;
@@ -872,7 +891,7 @@
       copy.appendChild(el("div", { text: item.title, className: "ccr-palette-title" }));
       copy.appendChild(el("div", { text: item.sub, className: "ccr-palette-sub" }));
       row.appendChild(copy);
-      row.appendChild(el("span", { text: item.kind === "work" ? "Inspect" : "Open", className: "ccr-palette-action" }));
+      row.appendChild(el("span", { text: item.actionLabel || (item.kind === "work" ? "Inspect" : "Open"), className: "ccr-palette-action" }));
       row.addEventListener("click", item.action);
       container.appendChild(row);
     });
@@ -1083,14 +1102,20 @@
     var layout = document.querySelector(".ccr-layout");
     var collapsed = false;
     function applyDockState() {
-      dock.classList.toggle("is-collapsed", collapsed);
-      if (layout) layout.classList.toggle("ccr-dock-collapsed", collapsed);
+      // Below the dock breakpoint the dock is replaced by the responsive
+      // Surfaces section. A remembered desktop collapse preference must not
+      // reserve a phantom 42px grid column when the dock itself is hidden.
+      var desktopDockVisible = !(window.matchMedia && window.matchMedia("(max-width: 1050px)").matches);
+      var activeCollapsed = collapsed && desktopDockVisible;
+      dock.classList.toggle("is-collapsed", activeCollapsed);
+      if (layout) layout.classList.toggle("ccr-dock-collapsed", activeCollapsed);
       var toggle = document.getElementById("ccr-dock-collapse");
       toggle.textContent = collapsed ? "›" : "‹";
       toggle.setAttribute("aria-label", collapsed ? "Expand surfaces" : "Collapse surfaces");
     }
     try { collapsed = window.localStorage.getItem(DOCK_KEY) === "1"; } catch (_e) { collapsed = false; }
     applyDockState();
+    window.addEventListener("resize", applyDockState);
     document.getElementById("ccr-dock-collapse").addEventListener("click", function () {
       collapsed = !collapsed;
       applyDockState();
