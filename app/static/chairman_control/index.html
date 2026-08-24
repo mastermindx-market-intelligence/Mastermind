@@ -183,8 +183,9 @@
           <div class="ccr-field ccr-field-wide" id="bind-chatgpt-fields" hidden>
             <p class="ccr-field-note">
               ChatGPT seats live in a persistent GoLogin or Multilogin managed-browser
-              environment. Bind its exact local identity plus the conversation URL —
-              never a Chrome profile, and never proxy/fingerprint/cookie material.
+              environment. Bind one exact chat URL to the work and role it serves — never
+              the Project overview URL. The same seat can have additional bindings for
+              other work. Never enter proxy/fingerprint/cookie material.
             </p>
             <div class="ccr-field">
               <label for="bind-chatgpt-manager">Environment manager</label>
@@ -205,6 +206,7 @@
             <div class="ccr-field">
               <label for="bind-chatgpt-url">Conversation URL</label>
               <input type="text" id="bind-chatgpt-url" name="url" placeholder="https://chatgpt.com/c/...">
+              <p class="ccr-field-note">Open the specific chat first, then copy its address. A Project is a collection, not a resume target.</p>
             </div>
           </div>
 
