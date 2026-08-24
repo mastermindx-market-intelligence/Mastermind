@@ -44,6 +44,7 @@
     paletteIndex: 0,
   };
 
+  // DOM -------------------------------------------------------------------
   function el(tag, opts) {
     var node = document.createElement(tag);
     opts = opts || {};
@@ -60,6 +61,11 @@
   function clear(node) {
     if (!node) return;
     while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function append(parent, child) {
+    if (parent && child) parent.appendChild(child);
+    return child;
   }
 
   function isBlank(value) {
@@ -113,6 +119,7 @@
     return node;
   }
 
+  // transport -------------------------------------------------------------
   function getJSON(path) {
     return fetch(path, {
       method: "GET",
@@ -134,6 +141,7 @@
     });
   }
 
+  // source pulse / system -------------------------------------------------
   var SOURCE_STAMPS = [
     { key: "mastermind_sha", label: "Mastermind", sha: true, extra: "mastermind_branch" },
     { key: "macro_sha", label: "Macro", sha: true },
@@ -174,9 +182,8 @@
     });
   }
 
-  function sourcePulsePill(label, value, stale, absent) {
+  function sourcePulsePill(label, value, absent) {
     var cls = "ccr-pulse-pill";
-    if (stale) cls += " is-stale";
     if (absent) cls += " is-absent";
     return el("span", { text: label + " · " + value, className: cls });
   }
@@ -184,13 +191,21 @@
   function renderSourcePulse(body, sources) {
     var node = document.getElementById("ccr-source-pulse");
     clear(node);
-    var aoAge = ageWords(sources.agent_os_state_generated_at) || "?";
-    var ghAge = ageWords(sources.active_builds_collected_at) || "?";
-    var aoMs = parseStamp(sources.agent_os_state_generated_at);
-    var ghMs = parseStamp(sources.active_builds_collected_at);
-    node.appendChild(sourcePulsePill("Agent OS", aoAge, aoMs !== null && Date.now() - aoMs > 6 * 60 * 60 * 1000, aoMs === null));
-    node.appendChild(sourcePulsePill("Executive", sources.runtime_db_present === true ? "connected" : sources.runtime_db_present === false ? "absent" : "unknown", false, sources.runtime_db_present !== true));
-    node.appendChild(sourcePulsePill("GitHub", (body && body.live_builds_active ? "live " : "snapshot ") + ghAge, ghMs !== null && Date.now() - ghMs > 6 * 60 * 60 * 1000, ghMs === null));
+    // Ages are shown exactly as clocks, not interpreted against a UI-invented
+    // freshness SLA. Source-owned degraded state is rendered separately.
+    var aoAge = ageWords(sources.agent_os_state_generated_at) || "unknown age";
+    var ghAge = ageWords(sources.active_builds_collected_at) || "unknown age";
+    node.appendChild(sourcePulsePill("Agent OS", aoAge, parseStamp(sources.agent_os_state_generated_at) === null));
+    node.appendChild(sourcePulsePill(
+      "Executive",
+      sources.runtime_db_present === true ? "DB present" : sources.runtime_db_present === false ? "DB absent" : "DB unknown",
+      sources.runtime_db_present !== true
+    ));
+    node.appendChild(sourcePulsePill(
+      "GitHub",
+      (body && body.live_builds_active ? "live cache · " : "snapshot · ") + ghAge,
+      parseStamp(sources.active_builds_collected_at) === null
+    ));
 
     var age = ageWords(body && body.composed_at);
     document.getElementById("ccr-composed-age").textContent = "State " + (age || "unknown");
@@ -237,6 +252,7 @@
     });
   }
 
+  // attention -------------------------------------------------------------
   function findCardForAttention(item) {
     var attentionId = item && item.attention_id;
     if (!attentionId) return null;
@@ -246,10 +262,10 @@
     return null;
   }
 
-  function preferredBinding(card, role) {
-    var rows = (card && card.bindings) || [];
-    for (var i = 0; i < rows.length; i++) if (rows[i].role === role) return rows[i];
-    return null;
+  function uniqueBinding(card, role) {
+    var rows = ((card && card.bindings) || []).filter(function (binding) { return binding.role === role; });
+    // Never silently pick a winner when more than one destination serves the same role.
+    return rows.length === 1 ? rows[0] : null;
   }
 
   function renderNeedsYou(items) {
@@ -283,7 +299,7 @@
         event.stopPropagation();
         openDetail(card);
       }));
-      var sol = preferredBinding(card, "ceo");
+      var sol = uniqueBinding(card, "ceo");
       if (sol) actions.appendChild(openBindingButton(sol, "Open Sol"));
       li.appendChild(actions);
       list.appendChild(li);
@@ -315,6 +331,7 @@
     if (rows.length > 5) container.appendChild(el("li", { text: "+" + (rows.length - 5) + " more", className: "ccr-empty-line" }));
   }
 
+  // bindings --------------------------------------------------------------
   function bindingConfidence(binding) {
     if (!binding) return { state: "UNBOUND", variant: "is-dim", openable: false, note: "No bound destination." };
     var expected = PROVIDER_LOCATOR_KIND[binding.provider];
@@ -460,6 +477,7 @@
     document.getElementById("nav-surface-count").textContent = String(a.count);
   }
 
+  // work ------------------------------------------------------------------
   function cardAttentionTargets(card) {
     var found = {};
     (card.attention_ids || []).forEach(function (id) {
@@ -514,26 +532,23 @@
     var track = el("div", { className: "ccr-chain-track" });
     var targets = cardAttentionTargets(card);
     var bindings = card.bindings || [];
-    var jobs = ((card.executive || {}).jobs) || [];
-    var failed = cardFailedJobs(card).length > 0;
 
     [
-      { role: "chairman", label: "You" },
-      { role: "ceo", label: "Sol" },
-      { role: "coo", label: "Fable" },
-      { role: "worker", label: "Workers" },
+      { role: "chairman", target: "chairman", label: "You" },
+      { role: "ceo", target: "ceo", label: "Sol" },
+      { role: "coo", target: "coo", label: "Fable" },
+      // Executive Inbox has no worker attention bucket. Worker nodes therefore
+      // express navigation addressability only, never inferred runtime state.
+      { role: "worker", target: null, label: "Workers" },
     ].forEach(function (spec) {
       var roleBindings = bindings.filter(function (b) { return b.role === spec.role; });
       var cls = "ccr-chain-node";
       if (roleBindings.length) cls += " is-bound";
-      if (targets[spec.role === "chairman" ? "chairman" : spec.role === "ceo" ? "ceo" : spec.role === "coo" ? "coo" : "worker"]) cls += " is-attention";
-      if (spec.role === "worker" && failed) cls += " is-failed";
+      if (spec.target && targets[spec.target]) cls += " is-attention";
       var node = el("div", { className: cls });
       node.appendChild(el("span", { text: spec.label, className: "ccr-chain-name" }));
-      var sub = "";
-      if (roleBindings.length) sub = roleBindings.length + " bound";
-      if (spec.role === "worker" && jobs.length) sub = jobs.length + " job" + (jobs.length === 1 ? "" : "s");
-      if (targets[spec.role]) sub = "attention";
+      var sub = roleBindings.length ? roleBindings.length + " bound" : "";
+      if (spec.target && targets[spec.target]) sub = "attention";
       node.appendChild(el("span", { text: sub, className: "ccr-chain-sub" }));
       track.appendChild(node);
     });
@@ -622,6 +637,7 @@
     for (var i = 0; i < buttons.length; i++) buttons[i].className = buttons[i].getAttribute("data-work-mode") === STATE.workMode ? "is-active" : "";
   }
 
+  // detail drawer ---------------------------------------------------------
   function detailLine(parent, text, mono) {
     parent.appendChild(el("p", { text: text, className: "ccr-detail-line" + (mono ? " mono" : "") }));
   }
@@ -760,6 +776,7 @@
     STATE.selectedWork = null;
   }
 
+  // loose ends ------------------------------------------------------------
   function renderLooseRows(selector, rows, rowBuilder, emptyLine) {
     var list = document.querySelector(selector + " ul");
     clear(list);
@@ -797,6 +814,7 @@
     return unjoined + unbound + conflicts;
   }
 
+  // command palette -------------------------------------------------------
   function rebuildPaletteIndex() {
     var items = [];
     STATE.work.forEach(function (card) {
@@ -872,6 +890,7 @@
 
   function closePalette() { document.getElementById("ccr-palette").hidden = true; }
 
+  // discovery / bind ------------------------------------------------------
   function discoverGroup(container, heading, rows, toText, emptyLine, runningChip) {
     container.appendChild(el("h3", { text: heading }));
     var list = el("ul");
@@ -920,6 +939,7 @@
     return locator;
   }
 
+  // state -----------------------------------------------------------------
   function indexState(doc) {
     STATE.work = doc.work || [];
     STATE.workByRef = {};
@@ -985,6 +1005,7 @@
     });
   }
 
+  // theme -----------------------------------------------------------------
   function readTheme() {
     try {
       var mode = window.localStorage.getItem(THEME_KEY);
@@ -1011,6 +1032,7 @@
     applyTheme(next);
   }
 
+  // nav -------------------------------------------------------------------
   function setActiveNav(name) {
     var links = document.querySelectorAll("[data-nav]");
     for (var i = 0; i < links.length; i++) {
@@ -1018,6 +1040,7 @@
     }
   }
 
+  // wiring ----------------------------------------------------------------
   document.addEventListener("DOMContentLoaded", function () {
     applyTheme(readTheme());
     loadState();
@@ -1057,15 +1080,20 @@
     for (var n = 0; n < navLinks.length; n++) navLinks[n].addEventListener("click", function () { setActiveNav(this.getAttribute("data-nav")); });
 
     var dock = document.getElementById("ccr-surface-dock");
+    var layout = document.querySelector(".ccr-layout");
     var collapsed = false;
+    function applyDockState() {
+      dock.classList.toggle("is-collapsed", collapsed);
+      if (layout) layout.classList.toggle("ccr-dock-collapsed", collapsed);
+      var toggle = document.getElementById("ccr-dock-collapse");
+      toggle.textContent = collapsed ? "›" : "‹";
+      toggle.setAttribute("aria-label", collapsed ? "Expand surfaces" : "Collapse surfaces");
+    }
     try { collapsed = window.localStorage.getItem(DOCK_KEY) === "1"; } catch (_e) { collapsed = false; }
-    dock.classList.toggle("is-collapsed", collapsed);
-    document.getElementById("ccr-dock-collapse").textContent = collapsed ? "›" : "‹";
+    applyDockState();
     document.getElementById("ccr-dock-collapse").addEventListener("click", function () {
       collapsed = !collapsed;
-      dock.classList.toggle("is-collapsed", collapsed);
-      this.textContent = collapsed ? "›" : "‹";
-      this.setAttribute("aria-label", collapsed ? "Expand surfaces" : "Collapse surfaces");
+      applyDockState();
       try { window.localStorage.setItem(DOCK_KEY, collapsed ? "1" : "0"); } catch (_e) { /* no-op */ }
     });
 
