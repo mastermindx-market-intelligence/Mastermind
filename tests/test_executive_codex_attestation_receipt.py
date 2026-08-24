@@ -226,7 +226,7 @@ def _write_worker_config(
 ) -> None:
     root = path.parent
     value = {
-        "schema_version": "mastermind.executive_worker_broker_config/v3",
+        "schema_version": "mastermind.executive_worker_broker_config/v4",
         "control_uid": os.geteuid() + 1000,
         "worker_uid": os.geteuid(),
         "worker_gid": os.getegid(),
@@ -245,6 +245,7 @@ def _write_worker_config(
         "launchd_socket_name": "WorkerBroker",
         "uid_sweep_receipt": str(root / "uid-sweep.json"),
         "require_secret_canary": True,
+        "operator_harness_armed": False,
     }
     path.write_text(json.dumps(value), encoding="utf-8")
     path.chmod(0o640)
@@ -309,7 +310,7 @@ def test_broker_construction_from_valid_receipt_spawns_no_subprocess(
     )
 
     config = {
-        "schema_version": "mastermind.executive_worker_broker_config/v3",
+        "schema_version": "mastermind.executive_worker_broker_config/v4",
         "control_uid": os.geteuid() + 1000,
         "worker_uid": os.geteuid(),
         "worker_gid": os.getegid(),
@@ -326,6 +327,7 @@ def test_broker_construction_from_valid_receipt_spawns_no_subprocess(
         "launchd_socket_name": "WorkerBroker",
         "uid_sweep_receipt": str(tmp_path / "uid-sweep.json"),
         "require_secret_canary": True,
+        "operator_harness_armed": False,
     }
 
     broker = _build_broker(config)
@@ -367,7 +369,7 @@ def test_build_broker_refuses_on_missing_receipt_without_subprocess_fallback(
     monkeypatch.setattr(cw.subprocess, "run", spy_run)
 
     config = {
-        "schema_version": "mastermind.executive_worker_broker_config/v3",
+        "schema_version": "mastermind.executive_worker_broker_config/v4",
         "control_uid": os.geteuid() + 1000,
         "worker_uid": os.geteuid(),
         "worker_gid": os.getegid(),
@@ -384,6 +386,7 @@ def test_build_broker_refuses_on_missing_receipt_without_subprocess_fallback(
         "launchd_socket_name": "WorkerBroker",
         "uid_sweep_receipt": str(tmp_path / "uid-sweep.json"),
         "require_secret_canary": True,
+        "operator_harness_armed": False,
     }
 
     with pytest.raises(cw.CodexAttestationReceiptError, match="missing or unreadable"):
@@ -878,7 +881,7 @@ def test_install_sh_receipt_writer_source_is_present_and_ordered() -> None:
     # version / hash / mode checks on the installed Codex binary succeed.
     codesign_check = install_text.index('/usr/bin/codesign --verify --strict "$INSTALLED_CODEX"')
     receipt_write = install_text.index("# --- BEGIN codex attestation receipt writer ---")
-    worker_config_write = install_text.index('"schema_version": "mastermind.executive_worker_broker_config/v3"')
+    worker_config_write = install_text.index('"schema_version": "mastermind.executive_worker_broker_config/v4"')
     assert codesign_check < receipt_write < worker_config_write
     # codesign/--version are not invoked again anywhere in the worker's own
     # startup entrypoint or its adapter's fast path.

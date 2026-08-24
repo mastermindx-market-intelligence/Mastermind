@@ -1,0 +1,482 @@
+"""Model-free lifecycle proofs for the worker-local Operator Harness broker."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+import stat
+from pathlib import Path
+
+import pytest
+
+from control_plane.codex_worker import BinaryAttestation
+from control_plane.executive_orchestration_principal import (
+    OSProcessCredentialObservation,
+    ProviderHomeIdentityObservation,
+)
+from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.executive_worker_broker import (
+    BROKER_REQUEST_SCHEMA_VERSION,
+    BrokerPolicy,
+    BrokerProtocolError,
+    BrokerStateError,
+    ExecutiveWorkerBroker,
+    PeerCredentials,
+    UIDSweepReceipt,
+    UID_SWEEP_SCHEMA_VERSION,
+)
+from control_plane.operator_harness_contract import (
+    AuthRealmFact,
+    CandidateResult,
+    CapabilityManifest,
+    EventCursor,
+    NativeHelperPolicy,
+    NormalizedEvent,
+    ObservedHarnessAttestation,
+    ObservedTriState,
+    OperationId,
+    ProcessGenerationRef,
+    ProcessIdentityObservation,
+    ProcessLiveness,
+    ProfileValidation,
+    ProviderSessionHandoff,
+    ProviderWriterState,
+    ReconcileObservation,
+    RequestedExecutionProfile,
+    SessionEpochRef,
+    SessionStartObservation,
+    TurnRef,
+    TurnStartObservation,
+    WorkspaceIdentity,
+    compare_launch,
+)
+from control_plane.operator_harness_wire import to_wire
+
+
+class _Sweeper:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def sweep(self, reason: str) -> UIDSweepReceipt:
+        self.calls.append(reason)
+        return UIDSweepReceipt(
+            schema_version=UID_SWEEP_SCHEMA_VERSION,
+            observed_at="2026-08-24T00:00:00+00:00",
+            reason=reason,
+            worker_uid=os.geteuid(),
+            broker_pid=os.getpid(),
+            residual_pids_before=(),
+            residual_pids_after=(),
+            signal_name="SIGKILL",
+            signal_sent=False,
+            quiescent_observations=2,
+        )
+
+
+class _SealedAdapter:
+    def __init__(self) -> None:
+        self.binary = BinaryAttestation(
+            path="/fixture/codex",
+            real_path="/fixture/codex",
+            version="0.147.0",
+            sha256="a" * 64,
+            team_identifier="2DC432GLL2",
+            size=1,
+            device=1,
+            inode=1,
+            mode=0o555,
+            uid=0,
+            gid=0,
+            mtime_ns=1,
+        )
+
+
+class _OperatorAdapter:
+    def __init__(
+        self,
+        requested: RequestedExecutionProfile,
+        provider_home: Path,
+        prompt_loader,
+    ) -> None:
+        self.requested = requested
+        self.provider_home = provider_home
+        self.prompt_loader = prompt_loader
+        self.process = ProcessIdentityObservation(7001, 7001, "start-7001", "boot")
+        self.turn: TurnRef | None = None
+        self.prompts: list[str] = []
+
+    def validate_requested_profile(self, requested):
+        return ProfileValidation(requested, requested == self.requested, ())
+
+    def start_session(self, **_kwargs):
+        return SessionStartObservation("thread-1", self.process)
+
+    def resume_session(self, *, provider_session, **_kwargs):
+        return SessionStartObservation(provider_session.provider_session_id, self.process)
+
+    def observed_attestation(self, _generation):
+        return ObservedHarnessAttestation(
+            served_model=self.requested.requested_model,
+            harness_version=self.requested.harness_version,
+            harness_binary_digest=self.requested.harness_binary_digest,
+            capabilities=(),
+            effective_skills=(),
+            effective_mcp=(),
+            effective_plugins_or_apps=(),
+            sandbox_state="read-only",
+            approval_state="never",
+            network_state="disabled",
+            effective_config_digest="d" * 64,
+            auth=AuthRealmFact(
+                worker_id=self.requested.worker_id,
+                provider=self.requested.provider,
+            ),
+            workspace=self.requested.workspace,
+            supports_subagent_capability_ceiling=ObservedTriState.FALSE,
+        )
+
+    def observe_process_credentials(self, _generation):
+        return OSProcessCredentialObservation(
+            process_identity={
+                "pid": self.process.pid,
+                "pgid": self.process.pgid,
+                "process_start_identity": self.process.process_start_identity,
+                "boot_id": self.process.boot_id,
+            },
+            os_principal_name="fixture-worker",
+            os_principal_uid=os.geteuid(),
+        )
+
+    def observe_provider_home_identity(self, _generation):
+        info = self.provider_home.lstat()
+        return ProviderHomeIdentityObservation(
+            {
+                "path": str(self.provider_home),
+                "device": info.st_dev,
+                "inode": info.st_ino,
+                "uid": info.st_uid,
+                "gid": info.st_gid,
+                "mode": stat.S_IMODE(info.st_mode),
+            }
+        )
+
+    def begin_turn(self, *, turn, **_kwargs):
+        self.turn = turn
+        self.prompts.append(self.prompt_loader(turn))
+        return TurnStartObservation("native-turn-1", True)
+
+    def read_events(self, cursor, *, timeout_seconds):
+        assert timeout_seconds > 0 and self.turn is not None
+        return (
+            (
+                NormalizedEvent(
+                    self.turn.attempt_id,
+                    self.turn.session_epoch_id,
+                    self.turn.process_generation_id,
+                    self.turn.turn_id,
+                    "turn.completed",
+                    payload_redacted={"status": "complete"},
+                ),
+            ),
+            EventCursor(
+                cursor.attempt_id,
+                cursor.session_epoch_id,
+                cursor.process_generation_id,
+                local_sequence=1,
+                turn_id=cursor.turn_id,
+            ),
+        )
+
+    def collect_candidate_result(self, turn):
+        return CandidateResult(
+            turn.attempt_id,
+            turn.session_epoch_id,
+            turn.process_generation_id,
+            "e" * 64,
+            "bounded candidate",
+        )
+
+    def observe_raw_role_result(self, turn):
+        raw = "{}"
+        return RawRoleResultObservation(
+            attempt_id=turn.attempt_id,
+            session_epoch_id=turn.session_epoch_id,
+            process_generation_id=turn.process_generation_id,
+            turn_id=turn.turn_id,
+            provider_session_id="thread-1",
+            provider_native_turn_id="native-turn-1",
+            provider_turn_artifact_digest="e" * 64,
+            canonical_result_json=raw,
+            canonical_result_digest=hashlib.sha256(raw.encode()).hexdigest(),
+            canonical_result_byte_length=len(raw),
+        )
+
+    def interrupt_turn(self, _turn, *, operation_id):
+        assert operation_id.command_id.startswith("ohf-op:")
+
+    def graceful_stop(self, _generation, **_kwargs):
+        return ReconcileObservation(
+            ProcessLiveness.PROVEN_DEAD,
+            self.process,
+            False,
+            ProviderWriterState.RELEASED,
+            "thread-1",
+            "d" * 64,
+        )
+
+    cancel = graceful_stop
+
+    def reconcile(self, _generation):
+        return ReconcileObservation(
+            ProcessLiveness.ALIVE,
+            self.process,
+            True,
+            ProviderWriterState.HELD,
+            "thread-1",
+            "d" * 64,
+        )
+
+
+def _request(operation: str, payload: dict, suffix: str) -> dict:
+    return {
+        "schema_version": BROKER_REQUEST_SCHEMA_VERSION,
+        "request_id": f"req-{suffix}",
+        "operation": operation,
+        "payload": payload,
+    }
+
+
+def _fixture(tmp_path: Path, *, armed: bool = True):
+    workspace_root = tmp_path / "workspaces"
+    workspace = workspace_root / "job-1"
+    run_root = tmp_path / "runs"
+    provider_home = tmp_path / "provider-home"
+    for path in (workspace, run_root, provider_home):
+        path.mkdir(parents=True, mode=0o700)
+    info = workspace.lstat()
+    profile = RequestedExecutionProfile(
+        worker_id="codex-01",
+        provider="openai-codex",
+        requested_model="gpt-5.6-sol",
+        harness_kind="codex-app-server",
+        harness_binary_digest="a" * 64,
+        harness_version="0.147.0",
+        workspace=WorkspaceIdentity(
+            str(workspace), "b" * 40, info.st_dev, info.st_ino, info.st_uid, info.st_gid
+        ),
+        sandbox_policy="read-only",
+        approval_policy="never",
+        network_policy="disabled",
+        capabilities=CapabilityManifest(),
+        native_helper_policy=NativeHelperPolicy.DISABLED,
+        authority_policy_hash="c" * 64,
+    )
+    policy = BrokerPolicy(
+        control_uid=os.geteuid() + 1000 if os.geteuid() != 0 else 501,
+        worker_uid=os.geteuid(),
+        worker_gid=os.getegid(),
+        worker_user="fixture-worker",
+        worker_id="codex-01",
+        workspace_root=workspace_root,
+        run_root=run_root,
+        provider_home=provider_home,
+        allowed_supplementary_gids=frozenset(set(os.getgroups()) - {os.getegid()}),
+    )
+    adapters: list[_OperatorAdapter] = []
+
+    def factory(_workspace, prompt_loader):
+        adapter = _OperatorAdapter(profile, provider_home, prompt_loader)
+        adapters.append(adapter)
+        return adapter
+
+    sweeper = _Sweeper()
+    broker = ExecutiveWorkerBroker(
+        _SealedAdapter(),  # type: ignore[arg-type]
+        policy,
+        sweeper,
+        operator_adapter_factory=factory,
+        operator_harness_armed=armed,
+    )
+    peer = PeerCredentials(policy.control_uid, policy.worker_gid, 100)
+    return broker, peer, profile, sweeper, adapters
+
+
+def test_operator_broker_runs_one_exact_generation_and_cleans_uid(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        epoch = SessionEpochRef("epoch-1", "ATT-1", "codex-01", 1)
+        generation = ProcessGenerationRef("generation-1", "epoch-1", 1, "codex-01")
+        start = await broker.execute(
+            _request(
+                "ohf-start",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:start-1")),
+                    "requested": to_wire(profile),
+                    "epoch": to_wire(epoch),
+                    "generation": to_wire(generation),
+                },
+                "start",
+            ),
+            peer=peer,
+        )
+        assert start["result"]["observation"]["provider_session_id"] == "thread-1"
+        turn = TurnRef("turn-1", "epoch-1", "generation-1", "ATT-1")
+        observed = adapters[-1].observed_attestation(generation)
+        await broker.execute(
+            _request(
+                "ohf-begin-turn",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:turn-1")),
+                    "turn": to_wire(turn),
+                    "generation": to_wire(generation),
+                    "launch": to_wire(compare_launch(profile, observed)),
+                    "prompt": "Produce one bounded read-only plan.",
+                },
+                "turn",
+            ),
+            peer=peer,
+        )
+        with pytest.raises(BrokerProtocolError, match="cursor"):
+            await broker.execute(
+                _request(
+                    "ohf-collect-turn",
+                    {
+                        "turn": to_wire(turn),
+                        "cursor": to_wire(
+                            EventCursor(
+                                "ATT-OTHER",
+                                "epoch-1",
+                                "generation-1",
+                                turn_id="turn-1",
+                            )
+                        ),
+                        "timeout_seconds": 30.0,
+                    },
+                    "collect-wrong-cursor",
+                ),
+                peer=peer,
+            )
+        collected = await broker.execute(
+            _request(
+                "ohf-collect-turn",
+                {
+                    "turn": to_wire(turn),
+                    "cursor": to_wire(
+                        EventCursor("ATT-1", "epoch-1", "generation-1", turn_id="turn-1")
+                    ),
+                    "timeout_seconds": 30.0,
+                },
+                "collect",
+            ),
+            peer=peer,
+        )
+        assert collected["result"]["candidate"]["complete_job_permitted"] is False
+        assert adapters[-1].prompts == ["Produce one bounded read-only plan."]
+        stopped = await broker.execute(
+            _request(
+                "ohf-stop",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:stop-1")),
+                    "generation": to_wire(generation),
+                },
+                "stop",
+            ),
+            peer=peer,
+        )
+        assert stopped["result"]["observation"]["process_liveness"] == "PROVEN_DEAD"
+        assert sweeper.calls == ["operator_terminal"]
+        status = await broker.execute(_request("status", {}, "status"), peer=peer)
+        assert status["result"]["active_operator_attempt_id"] is None
+
+    asyncio.run(scenario())
+
+
+def test_operator_broker_refuses_unarmed_and_cross_attempt_session_reuse(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        unarmed, peer, profile, _sweeper, _adapters = _fixture(
+            tmp_path / "unarmed", armed=False
+        )
+        epoch = SessionEpochRef("epoch-1", "ATT-1", "codex-01", 1)
+        generation = ProcessGenerationRef("generation-1", "epoch-1", 1, "codex-01")
+        payload = {
+            "operation_id": to_wire(OperationId("ohf-op:start-unarmed")),
+            "requested": to_wire(profile),
+            "epoch": to_wire(epoch),
+            "generation": to_wire(generation),
+        }
+        with pytest.raises(BrokerStateError, match="not armed"):
+            await unarmed.execute(_request("ohf-start", payload, "unarmed"), peer=peer)
+
+        broker, peer, profile, _sweeper, _adapters = _fixture(tmp_path / "armed")
+        armed_payload = {
+            **payload,
+            "requested": to_wire(profile),
+        }
+        await broker.execute(
+            _request("ohf-start", armed_payload, "start"), peer=peer
+        )
+        await broker.execute(
+            _request(
+                "ohf-stop",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:stop-cross")),
+                    "generation": to_wire(generation),
+                },
+                "stop",
+            ),
+            peer=peer,
+        )
+        epoch_two = SessionEpochRef("epoch-2", "ATT-2", "codex-01", 1)
+        generation_two = ProcessGenerationRef(
+            "generation-2", "epoch-2", 1, "codex-01"
+        )
+        with pytest.raises(BrokerStateError, match="across Executive Attempts"):
+            await broker.execute(
+                _request(
+                    "ohf-resume",
+                    {
+                        "operation_id": to_wire(OperationId("ohf-op:resume-cross")),
+                        "requested": to_wire(profile),
+                        "epoch": to_wire(epoch_two),
+                        "generation": to_wire(generation_two),
+                        "provider_session": to_wire(
+                            ProviderSessionHandoff("thread-1", "codex-01")
+                        ),
+                    },
+                    "resume",
+                ),
+                peer=peer,
+            )
+
+    asyncio.run(scenario())
+
+
+def test_operator_restart_absence_uses_fresh_dedicated_uid_sweep(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        broker, peer, _profile, sweeper, _adapters = _fixture(tmp_path)
+        generation = ProcessGenerationRef("generation-1", "epoch-1", 1, "codex-01")
+        process = ProcessIdentityObservation(7001, 7001, "start-7001", "boot")
+        result = await broker.execute(
+            _request(
+                "ohf-reconcile-absence",
+                {
+                    "generation": to_wire(generation),
+                    "process": to_wire(process),
+                    "provider_session_id": "thread-1",
+                    "config_digest": "d" * 64,
+                },
+                "absence",
+            ),
+            peer=peer,
+        )
+        assert result["result"]["observation"]["process_liveness"] == "PROVEN_DEAD"
+        assert result["result"]["observation"]["provider_writer_state"] == "RELEASED"
+        assert result["result"]["uid_sweep"]["passed"] is True
+        assert sweeper.calls == ["operator_reconcile_absence"]
+
+    asyncio.run(scenario())

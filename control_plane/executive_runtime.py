@@ -95,6 +95,23 @@ _ROUTING_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SEAT_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
 _JOB_SEATS = frozenset({"coo", "ceo", "chairman"})
 _BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
+OPERATOR_HARNESS_BINDING_KEYS = frozenset(
+    {
+        "operator_eligible_quota_classes",
+        "operator_provider",
+        "operator_model",
+        "operator_effort",
+        "operator_cost_class",
+        "operator_routing_policy_version",
+        "operator_execution_profile_id",
+        "operator_execution_profile_digest",
+        "operator_capability_policy_version",
+        "operator_capability_policy_digest",
+        "operator_harness_binary_digest",
+        "operator_harness_version",
+        "operator_harness_armed",
+    }
+)
 V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
     {
         "eligible_quota_classes",
@@ -109,6 +126,7 @@ V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
         "capability_policy_version",
         "capability_policy_digest",
     }
+    | OPERATOR_HARNESS_BINDING_KEYS
 )
 _ORCHESTRATION_ROLES = frozenset(
     {"plan", "work", "review", "repair", "aggregation"}
@@ -515,6 +533,95 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
         if re.fullmatch(r"[0-9a-f]{40,64}", base_sha) is None:
             raise StateConflict("constraint base_sha must be a full hexadecimal Git object id")
         result["base_sha"] = base_sha
+
+    present_harness_keys = set(raw) & {
+        "harness_binary_digest",
+        "harness_version",
+    }
+    if present_harness_keys:
+        if present_harness_keys != {
+            "harness_binary_digest",
+            "harness_version",
+        }:
+            raise StateConflict(
+                "harness execution constraints require digest and version"
+            )
+        harness_digest = str(raw["harness_binary_digest"]).strip().lower()
+        harness_version = str(raw["harness_version"]).strip()
+        if re.fullmatch(r"[0-9a-f]{64}", harness_digest) is None:
+            raise StateConflict(
+                "harness_binary_digest must be a lowercase SHA-256 digest"
+            )
+        if (
+            not harness_version
+            or len(harness_version) > 64
+            or _ROUTING_VALUE_RE.fullmatch(harness_version.lower()) is None
+        ):
+            raise StateConflict("harness_version must be a bounded identifier")
+        result["harness_binary_digest"] = harness_digest
+        result["harness_version"] = harness_version
+
+    present_operator_keys = set(raw) & set(OPERATOR_HARNESS_BINDING_KEYS)
+    if present_operator_keys:
+        if present_operator_keys != set(OPERATOR_HARNESS_BINDING_KEYS):
+            raise StateConflict(
+                "operator harness constraints must carry the complete binding identity"
+            )
+        if "base_sha" not in raw:
+            raise StateConflict(
+                "operator harness constraints require the exact workspace base_sha"
+            )
+        if not isinstance(raw["operator_harness_armed"], bool):
+            raise StateConflict("operator_harness_armed must be boolean")
+        normalized_operator = _normalise_constraints(
+            {
+                "eligible_quota_classes": raw["operator_eligible_quota_classes"],
+                "provider": raw["operator_provider"],
+                "model": raw["operator_model"],
+                "effort": raw["operator_effort"],
+                "cost_class": raw["operator_cost_class"],
+                "routing_policy_version": raw["operator_routing_policy_version"],
+                "execution_profile_id": raw["operator_execution_profile_id"],
+                "execution_profile_digest": raw[
+                    "operator_execution_profile_digest"
+                ],
+                "capability_policy_version": raw[
+                    "operator_capability_policy_version"
+                ],
+                "capability_policy_digest": raw[
+                    "operator_capability_policy_digest"
+                ],
+                "base_sha": raw["base_sha"],
+            }
+        )
+        for key in (
+            "eligible_quota_classes",
+            "provider",
+            "model",
+            "effort",
+            "cost_class",
+            "routing_policy_version",
+            "execution_profile_id",
+            "execution_profile_digest",
+            "capability_policy_version",
+            "capability_policy_digest",
+        ):
+            result[f"operator_{key}"] = normalized_operator[key]
+        harness_digest = str(raw["operator_harness_binary_digest"]).strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", harness_digest) is None:
+            raise StateConflict(
+                "operator_harness_binary_digest must be a lowercase SHA-256 digest"
+            )
+        harness_version = str(raw["operator_harness_version"]).strip()
+        if (
+            not harness_version
+            or len(harness_version) > 64
+            or _ROUTING_VALUE_RE.fullmatch(harness_version.lower()) is None
+        ):
+            raise StateConflict("operator_harness_version must be a bounded identifier")
+        result["operator_harness_binary_digest"] = harness_digest
+        result["operator_harness_version"] = harness_version
+        result["operator_harness_armed"] = raw["operator_harness_armed"]
     return result
 
 
@@ -566,9 +673,17 @@ def _assert_child_does_not_widen_parent(
             "child allowed_write_paths may only shrink relative to the parent: "
             + ", ".join(extra_paths)
         )
-    parent_cost = str(
-        _json_loads(parent_row["constraints_json"], fallback={}).get("cost_class") or ""
-    ).strip().lower()
+    parent_constraints = _json_loads(
+        parent_row["constraints_json"], fallback={}
+    )
+    parent_cost_value = parent_constraints.get("cost_class")
+    if (
+        parent_constraints.get("operator_harness_armed") is True
+        and constraints.get("execution_profile_id")
+        == parent_constraints.get("operator_execution_profile_id")
+    ):
+        parent_cost_value = parent_constraints.get("operator_cost_class")
+    parent_cost = str(parent_cost_value or "").strip().lower()
     child_cost = str(constraints.get("cost_class") or "").strip().lower()
     if parent_cost and child_cost:
         parent_rank = _COST_CLASS_RANK.get(parent_cost)
@@ -6797,25 +6912,59 @@ class JobRegistry:
         root_constraints = dict(root.constraints)
         root_cost = str(root_constraints.get("cost_class") or "default")
         cost_class = "small" if root_cost in {"small", "default", "frontier"} else "small"
-        constraints: dict[str, Any] = {
-            "eligible_quota_classes": list(
-                root_constraints.get("eligible_quota_classes") or ["default"]
+        operator_binding = {
+            "eligible_quota_classes": root_constraints.get(
+                "operator_eligible_quota_classes"
             ),
-            "cost_class": cost_class,
+            "provider": root_constraints.get("operator_provider"),
+            "model": root_constraints.get("operator_model"),
+            "effort": root_constraints.get("operator_effort"),
+            "cost_class": root_constraints.get("operator_cost_class"),
+            "routing_policy_version": root_constraints.get(
+                "operator_routing_policy_version"
+            ),
+            "execution_profile_id": root_constraints.get(
+                "operator_execution_profile_id"
+            ),
+            "execution_profile_digest": root_constraints.get(
+                "operator_execution_profile_digest"
+            ),
+            "capability_policy_version": root_constraints.get(
+                "operator_capability_policy_version"
+            ),
+            "capability_policy_digest": root_constraints.get(
+                "operator_capability_policy_digest"
+            ),
+            "harness_binary_digest": root_constraints.get(
+                "operator_harness_binary_digest"
+            ),
+            "harness_version": root_constraints.get("operator_harness_version"),
+            "base_sha": root_constraints.get("base_sha"),
         }
-        for key in (
-            "provider",
-            "model",
-            "effort",
-            "routing_policy_version",
-            "execution_profile_id",
-            "execution_profile_digest",
-            "capability_policy_version",
-            "capability_policy_digest",
-            "base_sha",
+        if root_constraints.get("operator_harness_armed") is True and all(
+            operator_binding.values()
         ):
-            if root_constraints.get(key):
-                constraints[key] = root_constraints[key]
+            constraints = _normalise_constraints(operator_binding)
+        else:
+            constraints = {
+                "eligible_quota_classes": list(
+                    root_constraints.get("eligible_quota_classes") or ["default"]
+                ),
+                "cost_class": cost_class,
+            }
+            for key in (
+                "provider",
+                "model",
+                "effort",
+                "routing_policy_version",
+                "execution_profile_id",
+                "execution_profile_digest",
+                "capability_policy_version",
+                "capability_policy_digest",
+                "base_sha",
+            ):
+                if root_constraints.get(key):
+                    constraints[key] = root_constraints[key]
         return self.create_job(
             f"Produce the bounded execution plan for {root.job_id}: {root.objective}",
             department=root.department,

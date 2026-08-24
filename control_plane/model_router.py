@@ -297,9 +297,12 @@ class ModelRouter:
                 raise RoutingPolicyError(
                     f"worker alias {alias!r} requires an enabled autonomous provider"
                 )
-            if worker_eligible and execution_profile.execution_surface != "codex-exec":
+            if worker_eligible and execution_profile.execution_surface not in {
+                "codex-exec",
+                "codex-app-server",
+            }:
                 raise RoutingPolicyError(
-                    f"worker alias {alias!r} requires the implemented codex-exec surface"
+                    f"worker alias {alias!r} requires an implemented Codex execution surface"
                 )
             model_aliases[alias] = ModelAlias(
                 model_alias=alias,

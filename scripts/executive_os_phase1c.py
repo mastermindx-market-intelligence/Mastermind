@@ -73,10 +73,15 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "coo_operator_harness_armed",
         "coo_tick_interval_seconds",
         "coo_model_alias",
         "coo_quota_class",
         "coo_default_quota_class",
+        "coo_operator_model_alias",
+        "coo_operator_quota_class",
+        "operator_harness_binary_digest",
+        "operator_harness_version",
         "broker_timeout_seconds",
         "shutdown_grace_seconds",
     }
@@ -231,6 +236,30 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if "coo_operator_harness_armed" in config and not isinstance(
+        config["coo_operator_harness_armed"], bool
+    ):
+        raise ServiceError(
+            "control config coo_operator_harness_armed must be boolean"
+        )
+    if config.get("coo_operator_harness_armed", False) and not config.get(
+        "coo_autonomy_armed", False
+    ):
+        raise ServiceError(
+            "control config cannot arm the COO Operator Harness while COO autonomy is off"
+        )
+    if "operator_harness_binary_digest" in config:
+        digest = config["operator_harness_binary_digest"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ServiceError(
+                "control config operator_harness_binary_digest must be SHA-256"
+            )
+    if "operator_harness_version" in config:
+        version = config["operator_harness_version"]
+        if not isinstance(version, str) or not version.strip() or len(version) > 64:
+            raise ServiceError(
+                "control config operator_harness_version must be bounded"
+            )
     if "coo_tick_interval_seconds" in config and (
         isinstance(config["coo_tick_interval_seconds"], bool)
         or not isinstance(config["coo_tick_interval_seconds"], (int, float))
@@ -473,11 +502,35 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
+    from control_plane.executive_operator_supervisor import (
+        ExecutiveOperatorSupervisor,
+    )
+    from control_plane.remote_codex_operator_adapter import (
+        RemoteCodexOperatorAdapter,
+    )
     from control_plane.executive_worker_broker import (
         RemoteCodexWorkerAdapter,
         RemoteWorkerProcessController,
         WorkerBrokerClient,
     )
+
+    client = WorkerBrokerClient(
+        raw["worker_broker_socket_path"],
+        timeout_seconds=float(raw.get("broker_timeout_seconds") or 30.0),
+        max_response_bytes=16 * 1024 * 1024,
+    )
+    expected_operator_arm = bool(raw.get("coo_operator_harness_armed", False))
+    binary_digest = str(raw.get("operator_harness_binary_digest") or "0" * 64)
+    binary_version = str(raw.get("operator_harness_version") or "unproven")
+    if expected_operator_arm and (
+        re.fullmatch(r"[0-9a-f]{64}", binary_digest) is None
+        or binary_digest == "0" * 64
+        or not binary_version
+        or binary_version == "unproven"
+    ):
+        raise ServiceError(
+            "armed COO Operator Harness requires an exact installed binary identity"
+        )
 
     config = ServiceConfig(
         runtime_root=raw["runtime_root"],
@@ -497,6 +550,9 @@ def _service_from_config(
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        coo_operator_harness_armed=raw.get(
+            "coo_operator_harness_armed", False
+        ),
         coo_tick_interval_seconds=float(
             raw.get("coo_tick_interval_seconds", 15.0)
         ),
@@ -505,6 +561,14 @@ def _service_from_config(
         coo_default_quota_class=str(
             raw.get("coo_default_quota_class") or "codex-coo-default"
         ),
+        coo_operator_model_alias=str(
+            raw.get("coo_operator_model_alias") or "coo.operator.readonly"
+        ),
+        coo_operator_quota_class=str(
+            raw.get("coo_operator_quota_class") or "codex-coo-operator"
+        ),
+        operator_harness_binary_digest=binary_digest,
+        operator_harness_version=binary_version,
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),
         shutdown_grace_seconds=float(raw.get("shutdown_grace_seconds") or 10.0),
     )
@@ -514,11 +578,6 @@ def _service_from_config(
     canary: dict[str, Any] = {}
 
     def supervisor_factory(runtime):
-        client = WorkerBrokerClient(
-            raw["worker_broker_socket_path"],
-            timeout_seconds=float(raw.get("broker_timeout_seconds") or 30.0),
-        )
-
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
             if job is None or job.current_attempt_id != spec.run_id:
@@ -548,10 +607,39 @@ def _service_from_config(
             process_controller=RemoteWorkerProcessController(client),
         )
 
+    def operator_supervisor_factory(runtime, sealed_supervisor):
+        def adapter_factory(turn_input_loader):
+            return RemoteCodexOperatorAdapter(
+                client,
+                turn_input_loader=turn_input_loader,
+            )
+
+        return ExecutiveOperatorSupervisor(
+            runtime,
+            adapter_factory=adapter_factory,
+            prompt_source=sealed_supervisor,
+        )
+
+    async def verify_operator_identity() -> None:
+        identity = await client.request("ohf-identity", {})
+        if identity.get("worker_id") != config.worker_id:
+            raise ServiceError("worker broker OHF identity has the wrong worker_id")
+        if (
+            identity.get("binary_sha256") != config.operator_harness_binary_digest
+            or identity.get("binary_version") != config.operator_harness_version
+        ):
+            raise ServiceError("control/worker Operator Harness binary identity differs")
+        if identity.get("operator_harness_armed") is not True:
+            raise ServiceError("control/worker Operator Harness arming state differs")
+
     listener = activate_launchd_socket(str(raw["launchd_socket_name"]))
     return ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        operator_supervisor_factory=operator_supervisor_factory,
+        operator_identity_verifier=(
+            verify_operator_identity if expected_operator_arm else None
+        ),
         activated_socket=listener,
         service_state="AWAITING_CANARY",
         canary_loader=canary_loader,

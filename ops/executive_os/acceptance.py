@@ -1118,6 +1118,10 @@ class Acceptance:
             or value.get("worker_gid") != self.worker_group.gr_gid
             or value.get("supplementary_gids")
             != self.worker_config.get("allowed_supplementary_gids")
+            or value.get("operator_harness_armed")
+            is not self.worker_config.get("operator_harness_armed")
+            or value.get("active_operator_attempt_id") is not None
+            or value.get("active_operator_generation_id") is not None
             or not isinstance(value.get("startup_sweep"), dict)
             or value["startup_sweep"].get("passed") is not True
             or value.get("quarantined_reason") is not None
@@ -1637,6 +1641,18 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         }
         if any(self.config.get(key) != value for key, value in expected_config.items()):
             raise AcceptanceError("installed control config differs from exact host policy")
+        if (
+            not isinstance(self.config.get("coo_operator_harness_armed"), bool)
+            or self.config.get("coo_operator_model_alias") != "coo.operator.readonly"
+            or self.config.get("coo_operator_quota_class") != "codex-coo-operator"
+            or self.worker_config.get("schema_version")
+            != "mastermind.executive_worker_broker_config/v4"
+            or self.worker_config.get("operator_harness_armed")
+            is not self.config.get("coo_operator_harness_armed")
+        ):
+            raise AcceptanceError(
+                "installed Operator Harness policy differs across control and worker"
+            )
         if self.operator_identity.pw_uid not in self.config.get("allowed_peer_uids", []):
             raise AcceptanceError("operator UID is not allowed by the control service")
         if (
@@ -1689,6 +1705,10 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             != self.worker_config.get("required_team_identifier")
             or codex_receipt.get("version")
             not in self.worker_config.get("allowed_codex_versions", [])
+            or codex_receipt.get("sha256")
+            != self.config.get("operator_harness_binary_digest")
+            or codex_receipt.get("version")
+            != self.config.get("operator_harness_version")
         ):
             raise AcceptanceError(
                 "Codex attestation receipt content differs from the installed worker policy"

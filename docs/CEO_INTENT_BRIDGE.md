@@ -305,9 +305,12 @@ will build a receipt, and `create_job` bounds the shape of any caller-supplied
 ## Phase 1F begins here
 
 Deliberately absent from 1E-A itself: automatic dispatch of a CEO-created Job.
-The later G1 service composition can advance only a strict-v2 root carrying the
+The G1 service composition can advance only a strict-v2 root carrying the
 host-derived exact execution binding, and only when reviewed host configuration
-arms `run-coo-cycle`/the bounded tick. V1 remains undispatchable. General scheduling,
+arms `run-coo-cycle`/the bounded tick. G2 may route only that cycle's read-only
+`plan` role through the exact `operator.appserver.readonly.v1` profile; work,
+review and repair remain sealed CLI Attempts, and checked-in configuration keeps
+both the COO cycle and Operator Harness unarmed. V1 remains undispatchable. General scheduling,
 new prioritization or admission policy over queued intents; multi-actor authorization or delegation;
 intent amendment, withdrawal, or supersession; a remote or authenticated non-local
 transport; and any write back into Agent OS to close the loop. Each of those is an

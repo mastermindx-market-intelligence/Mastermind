@@ -29,7 +29,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Awaitable, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from common.redaction import sanitize_external_text
@@ -125,6 +125,14 @@ class SupervisorProtocol(Protocol):
     def reconcile_restart(self, *, requeue_lost: bool = False) -> list[Any]: ...
 
 
+class OperatorSupervisorProtocol(Protocol):
+    async def start_cycle_job(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome: ...
+
+    def reconcile_restart(self, *, requeue_lost: bool = False) -> list[Any]: ...
+
+
 class BackupBackendProtocol(Protocol):
     def create_online_backup(self, store: Any, destination_dir: Path) -> Any: ...
 
@@ -154,10 +162,15 @@ class ServiceConfig:
     effort: str = "xhigh"
     cost_class: str = "standard"
     coo_autonomy_armed: bool = False
+    coo_operator_harness_armed: bool = False
     coo_tick_interval_seconds: float = 15.0
     coo_model_alias: str = "coo.sealed"
     coo_quota_class: str = "codex-coo"
     coo_default_quota_class: str = "codex-coo-default"
+    coo_operator_model_alias: str = "coo.operator.readonly"
+    coo_operator_quota_class: str = "codex-coo-operator"
+    operator_harness_binary_digest: str = "0" * 64
+    operator_harness_version: str = "unproven"
     allowed_peer_uids: tuple[int, ...] = ()
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
@@ -192,22 +205,39 @@ class ServiceConfig:
             "quota_class",
             "coo_quota_class",
             "coo_default_quota_class",
+            "coo_operator_quota_class",
         ):
             if _ID_RE.fullmatch(str(getattr(self, field_name))) is None:
                 raise ValueError(f"invalid {field_name}")
         if not isinstance(self.coo_autonomy_armed, bool):
             raise ValueError("coo_autonomy_armed must be boolean")
-        alias = str(self.coo_model_alias).strip().lower()
-        if _ID_RE.fullmatch(alias) is None:
-            raise ValueError("invalid coo_model_alias")
-        object.__setattr__(self, "coo_model_alias", alias)
+        if not isinstance(self.coo_operator_harness_armed, bool):
+            raise ValueError("coo_operator_harness_armed must be boolean")
+        if self.coo_operator_harness_armed and not self.coo_autonomy_armed:
+            raise ValueError(
+                "the COO Operator Harness cannot be armed while COO autonomy is off"
+            )
+        for field_name in ("coo_model_alias", "coo_operator_model_alias"):
+            alias = str(getattr(self, field_name)).strip().lower()
+            if _ID_RE.fullmatch(alias) is None:
+                raise ValueError(f"invalid {field_name}")
+            object.__setattr__(self, field_name, alias)
         quota_names = {
             self.quota_class,
             self.coo_quota_class,
             self.coo_default_quota_class,
+            self.coo_operator_quota_class,
         }
-        if len(quota_names) != 3:
+        if len(quota_names) != 4:
             raise ValueError("proof and COO quota classes must be distinct")
+        digest = str(self.operator_harness_binary_digest).strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValueError("operator_harness_binary_digest must be SHA-256")
+        object.__setattr__(self, "operator_harness_binary_digest", digest)
+        version = str(self.operator_harness_version).strip()
+        if not version or len(version) > 64:
+            raise ValueError("operator_harness_version is invalid")
+        object.__setattr__(self, "operator_harness_version", version)
         if not 1.0 <= float(self.coo_tick_interval_seconds) <= 3600.0:
             raise ValueError("coo_tick_interval_seconds must be between 1 and 3600")
         if not str(self.proof_branch).startswith("codex/"):
@@ -371,6 +401,11 @@ class ExecutiveControlService:
         *,
         runtime_factory: Callable[[Path], Runtime] = Runtime.at,
         supervisor_factory: Callable[[Runtime], SupervisorProtocol] | None = None,
+        operator_supervisor_factory: (
+            Callable[[Runtime, SupervisorProtocol], OperatorSupervisorProtocol]
+            | None
+        ) = None,
+        operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
         activated_socket: socket.socket | None = None,
         service_state: str = "READY",
@@ -384,6 +419,8 @@ class ExecutiveControlService:
         self.config = config
         self._runtime_factory = runtime_factory
         self._supervisor_factory = supervisor_factory
+        self._operator_supervisor_factory = operator_supervisor_factory
+        self._operator_identity_verifier = operator_identity_verifier
         self._backup_backend = backup_backend or _ModuleBackupBackend()
         if activated_socket is not None and activated_socket.family != socket.AF_UNIX:
             raise ValueError("activated_socket must use AF_UNIX")
@@ -406,6 +443,7 @@ class ExecutiveControlService:
         self._launchd_activated = activated_socket is not None
         self.runtime: Runtime | None = None
         self.supervisor: SupervisorProtocol | None = None
+        self.operator_supervisor: OperatorSupervisorProtocol | None = None
         self._server: asyncio.AbstractServer | None = None
         self._lock_fd: int | None = None
         self._dispatch_lock = asyncio.Lock()
@@ -514,6 +552,12 @@ class ExecutiveControlService:
             router = ModelRouter.load()
             alias = router.model_aliases[self.config.coo_model_alias]
             profile = router.capability_registry.resolve(alias.execution_profile_id)
+            operator_alias = router.model_aliases[
+                self.config.coo_operator_model_alias
+            ]
+            operator_profile = router.capability_registry.resolve(
+                operator_alias.execution_profile_id
+            )
         except (KeyError, RoutingPolicyError, CapabilityPolicyError) as exc:
             raise ValueError(f"configured COO execution alias is invalid: {exc}") from exc
         if (
@@ -532,6 +576,24 @@ class ExecutiveControlService:
             raise ValueError(
                 "configured COO alias must be a sealed, extension-free, write-capable Codex worker"
             )
+        if (
+            not operator_alias.worker_eligible
+            or operator_alias.adapter_id != "codex-cli"
+            or operator_profile.execution_surface != "codex-app-server"
+            or operator_profile.write_capable
+            or operator_profile.auth_realm != "dedicated-worker-account"
+            or operator_profile.sandbox_policy != "read-only"
+            or operator_profile.approval_policy != "never"
+            or operator_profile.network_policy != "disabled"
+            or operator_profile.native_helper_policy.value != "DISABLED"
+            or operator_profile.skills
+            or operator_profile.mcp_servers
+            or operator_profile.plugins
+        ):
+            raise ValueError(
+                "configured COO operator alias must be read-only, helper-free, "
+                "extension-free Codex App Server"
+            )
         binding = {
             "eligible_quota_classes": sorted(
                 {
@@ -549,6 +611,29 @@ class ExecutiveControlService:
             "execution_profile_digest": alias.execution_profile_digest,
             "capability_policy_version": alias.capability_policy_version,
             "capability_policy_digest": alias.capability_policy_digest,
+            "operator_eligible_quota_classes": [
+                self.config.coo_operator_quota_class
+            ],
+            "operator_provider": operator_alias.provider_alias,
+            "operator_model": operator_alias.model,
+            "operator_effort": operator_alias.effort,
+            "operator_cost_class": operator_alias.cost_class,
+            "operator_routing_policy_version": router.policy_version,
+            "operator_execution_profile_id": operator_alias.execution_profile_id,
+            "operator_execution_profile_digest": (
+                operator_alias.execution_profile_digest
+            ),
+            "operator_capability_policy_version": (
+                operator_alias.capability_policy_version
+            ),
+            "operator_capability_policy_digest": (
+                operator_alias.capability_policy_digest
+            ),
+            "operator_harness_binary_digest": (
+                self.config.operator_harness_binary_digest
+            ),
+            "operator_harness_version": self.config.operator_harness_version,
+            "operator_harness_armed": self.config.coo_operator_harness_armed,
         }
         if set(binding) != set(V2_HOST_EXECUTION_BINDING_KEYS):
             raise ValueError("configured COO host binding fields drifted")
@@ -600,6 +685,11 @@ class ExecutiveControlService:
         if self.supervisor is None:
             raise ServiceError("Executive supervisor is not configured")
         return self.supervisor
+
+    def _require_operator_supervisor(self) -> OperatorSupervisorProtocol:
+        if self.operator_supervisor is None:
+            raise ServiceError("Executive Operator Harness supervisor is not configured")
+        return self.operator_supervisor
 
     async def activate_canary(self, verdict: Mapping[str, Any]) -> None:
         """Leave bootstrap quarantine without changing the live launchd PID."""
@@ -803,11 +893,17 @@ class ExecutiveControlService:
             self.socket_path.chmod(0o600)
         else:
             activated, self._activated_socket = self._activated_socket, None
+            activated_options: dict[str, Any] = {}
+            if sys.version_info >= (3, 13):
+                # Python 3.13 added cleanup_socket and otherwise removes the
+                # launchd-owned pathname when the asyncio Server closes.
+                activated_options["cleanup_socket"] = False
             self._server = await asyncio.start_unix_server(
                 self._handle_connection,
                 sock=activated,
                 limit=self.config.max_request_bytes + 1,
                 start_serving=start_serving,
+                **activated_options,
             )
             mode = stat.S_IMODE(self.socket_path.stat().st_mode)
             if mode & 0o007:
@@ -831,11 +927,15 @@ class ExecutiveControlService:
                 self._ceo_ingress_activated_socket,
                 None,
             )
+            activated_options: dict[str, Any] = {}
+            if sys.version_info >= (3, 13):
+                activated_options["cleanup_socket"] = False
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 sock=activated,
                 limit=ceo_ingress.MAX_REQUEST_BYTES + 1,
                 start_serving=start_serving,
+                **activated_options,
             )
 
     async def _start_ceo_ingress_serving(self) -> None:
@@ -859,12 +959,32 @@ class ExecutiveControlService:
             if self._supervisor_factory is None:
                 raise ServiceError("supervisor_factory is required for startup reconciliation")
             self.supervisor = self._supervisor_factory(self.runtime)
+            if self.config.coo_operator_harness_armed:
+                if self._operator_supervisor_factory is None:
+                    raise ServiceError(
+                        "armed COO Operator Harness has no supervisor composition"
+                    )
+                if self._operator_identity_verifier is None:
+                    raise ServiceError(
+                        "armed COO Operator Harness has no worker identity verifier"
+                    )
+                await self._operator_identity_verifier()
+                self.operator_supervisor = self._operator_supervisor_factory(
+                    self.runtime, self.supervisor
+                )
             # Startup reconciliation must never auto-requeue.  LOST work returns
             # to QUEUED only through the explicit requeue command.
             if self._service_state == "READY":
                 self._startup_reconciliation = await asyncio.to_thread(
                     self.supervisor.reconcile_restart, requeue_lost=False
                 )
+                if self.operator_supervisor is not None:
+                    self._startup_reconciliation.extend(
+                        await asyncio.to_thread(
+                            self.operator_supervisor.reconcile_restart,
+                            requeue_lost=False,
+                        )
+                    )
             if self._ceo_ingress_socket_path is not None:
                 # R1 §2.1 / R2 §3 atomic dual-listener startup.  Construct/bind
                 # BOTH listeners with no-accept first; only then start serving,
@@ -1414,7 +1534,9 @@ class ExecutiveControlService:
         binding = self._require_current_coo_binding()
         router = ModelRouter.load()
         alias = router.model_aliases[self.config.coo_model_alias]
+        operator_alias = router.model_aliases[self.config.coo_operator_model_alias]
         coo_capabilities = list(alias.capabilities)
+        operator_capabilities = list(operator_alias.capabilities)
         coo_metadata = {
             "service_managed": True,
             "purpose": "executive-coo-cycle",
@@ -1428,6 +1550,28 @@ class ExecutiveControlService:
         coo_default_metadata = dict(coo_metadata)
         coo_default_metadata.pop("model_alias", None)
         coo_default_metadata["capacity_variant"] = "default"
+        operator_metadata = {
+            "service_managed": True,
+            "purpose": "executive-coo-operator-planner",
+            "model_alias": self.config.coo_operator_model_alias,
+            "routing_policy_version": binding[
+                "operator_routing_policy_version"
+            ],
+            "execution_profile_id": binding[
+                "operator_execution_profile_id"
+            ],
+            "execution_profile_digest": binding[
+                "operator_execution_profile_digest"
+            ],
+            "capability_policy_version": binding[
+                "operator_capability_policy_version"
+            ],
+            "capability_policy_digest": binding[
+                "operator_capability_policy_digest"
+            ],
+            "harness_binary_digest": binding["operator_harness_binary_digest"],
+            "harness_version": binding["operator_harness_version"],
+        }
         proof_capabilities = ["code", "research", "tests"]
         existing = runtime.workers.get_worker(self.config.worker_id)
         if existing is not None:
@@ -1466,6 +1610,17 @@ class ExecutiveControlService:
                 capabilities=coo_capabilities,
                 metadata=coo_default_metadata,
             )
+            if self.config.coo_operator_harness_armed:
+                runtime.workers.register_quota_class(
+                    self.config.worker_id,
+                    self.config.coo_operator_quota_class,
+                    provider=str(binding["operator_provider"]),
+                    model=str(binding["operator_model"]),
+                    effort=str(binding["operator_effort"]),
+                    cost_class=str(binding["operator_cost_class"]),
+                    capabilities=operator_capabilities,
+                    metadata=operator_metadata,
+                )
             refreshed = runtime.workers.get_worker(self.config.worker_id)
             assert refreshed is not None
             return refreshed
@@ -1474,7 +1629,15 @@ class ExecutiveControlService:
             provider=self.config.provider,
             account_label=self.config.worker_account_label,
             worker_type=self.config.worker_type,
-            capabilities=sorted(set(proof_capabilities) | set(coo_capabilities)),
+            capabilities=sorted(
+                set(proof_capabilities)
+                | set(coo_capabilities)
+                | (
+                    set(operator_capabilities)
+                    if self.config.coo_operator_harness_armed
+                    else set()
+                )
+            ),
             quota_classes={
                 self.config.quota_class: {
                     "provider": self.config.provider,
@@ -1499,6 +1662,20 @@ class ExecutiveControlService:
                     "capabilities": coo_capabilities,
                     "metadata": coo_default_metadata,
                 },
+                **(
+                    {
+                        self.config.coo_operator_quota_class: {
+                            "provider": binding["operator_provider"],
+                            "model": binding["operator_model"],
+                            "effort": binding["operator_effort"],
+                            "cost_class": binding["operator_cost_class"],
+                            "capabilities": operator_capabilities,
+                            "metadata": operator_metadata,
+                        }
+                    }
+                    if self.config.coo_operator_harness_armed
+                    else {}
+                ),
             },
             metadata={"service_managed": True},
         )
@@ -1983,22 +2160,62 @@ class ExecutiveControlService:
         ):
             raise StateConflict("COO dispatch target is outside the direct strict-v2 subtree")
         binding = self._require_current_coo_binding()
-        for key in (
-            "eligible_quota_classes",
-            "provider",
-            "model",
-            "effort",
-            "base_sha",
-            "routing_policy_version",
-            "execution_profile_id",
-            "execution_profile_digest",
-            "capability_policy_version",
-            "capability_policy_digest",
+        if (
+            job.orchestration_role == "plan"
+            and binding["operator_harness_armed"] is True
         ):
-            if job.constraints.get(key) != binding[key]:
+            expected = {
+                "eligible_quota_classes": binding[
+                    "operator_eligible_quota_classes"
+                ],
+                "provider": binding["operator_provider"],
+                "model": binding["operator_model"],
+                "effort": binding["operator_effort"],
+                "cost_class": binding["operator_cost_class"],
+                "base_sha": binding["base_sha"],
+                "routing_policy_version": binding[
+                    "operator_routing_policy_version"
+                ],
+                "execution_profile_id": binding[
+                    "operator_execution_profile_id"
+                ],
+                "execution_profile_digest": binding[
+                    "operator_execution_profile_digest"
+                ],
+                "capability_policy_version": binding[
+                    "operator_capability_policy_version"
+                ],
+                "capability_policy_digest": binding[
+                    "operator_capability_policy_digest"
+                ],
+                "harness_binary_digest": binding[
+                    "operator_harness_binary_digest"
+                ],
+                "harness_version": binding["operator_harness_version"],
+            }
+        else:
+            expected = {
+                key: binding[key]
+                for key in (
+                    "eligible_quota_classes",
+                    "provider",
+                    "model",
+                    "effort",
+                    "base_sha",
+                    "routing_policy_version",
+                    "execution_profile_id",
+                    "execution_profile_digest",
+                    "capability_policy_version",
+                    "capability_policy_digest",
+                )
+            }
+            if job.constraints.get("cost_class") not in {"small", "default"}:
+                raise StateConflict(
+                    "COO Job cost class has no reviewed serialized capacity"
+                )
+        for key, value in expected.items():
+            if job.constraints.get(key) != value:
                 raise StateConflict(f"COO Job host binding drifted at {key}")
-        if job.constraints.get("cost_class") not in {"small", "default"}:
-            raise StateConflict("COO Job cost class has no reviewed serialized capacity")
         if job.worktree != root.worktree or job.branch != root.branch:
             raise StateConflict("COO Job workspace/branch differs from its strict-v2 root")
         return root
@@ -2067,6 +2284,40 @@ class ExecutiveControlService:
                 ].capabilities).issubset(set(quota.capabilities))
             ):
                 raise StateConflict("reviewed COO worker quota identity is unavailable or drifted")
+        if self.config.coo_operator_harness_armed:
+            operator_quota = runtime.workers.get_quota_class(
+                self.config.worker_id, self.config.coo_operator_quota_class
+            )
+            operator_alias = ModelRouter.load().model_aliases[
+                self.config.coo_operator_model_alias
+            ]
+            if (
+                operator_quota is None
+                or operator_quota.provider != binding["operator_provider"]
+                or operator_quota.model != binding["operator_model"]
+                or operator_quota.effort != binding["operator_effort"]
+                or operator_quota.cost_class != binding["operator_cost_class"]
+                or any(
+                    operator_quota.metadata.get(key) != binding[f"operator_{key}"]
+                    for key in (
+                        "routing_policy_version",
+                        "execution_profile_id",
+                        "execution_profile_digest",
+                        "capability_policy_version",
+                        "capability_policy_digest",
+                    )
+                )
+                or operator_quota.metadata.get("harness_binary_digest")
+                != binding["operator_harness_binary_digest"]
+                or operator_quota.metadata.get("harness_version")
+                != binding["operator_harness_version"]
+                or not set(operator_alias.capabilities).issubset(
+                    set(operator_quota.capabilities)
+                )
+            ):
+                raise StateConflict(
+                    "reviewed COO operator quota identity is unavailable or drifted"
+                )
 
     async def _reconcile_unowned_cycle_attempts(self) -> None:
         if any(not task.done() for task in self._dispatch_tasks.values()):
@@ -2083,6 +2334,13 @@ class ExecutiveControlService:
             self._require_supervisor().reconcile_restart,
             requeue_lost=False,
         )
+        if self.operator_supervisor is not None:
+            receipts.extend(
+                await asyncio.to_thread(
+                    self.operator_supervisor.reconcile_restart,
+                    requeue_lost=False,
+                )
+            )
         self._startup_reconciliation.extend(receipts)
         ambiguous = [
             receipt
@@ -2105,7 +2363,6 @@ class ExecutiveControlService:
         self, job_id: str, command_id: str
     ) -> OrchestrationDispatchOutcome:
         runtime = self._require_runtime()
-        supervisor = self._require_supervisor()
         async with self._dispatch_lock:
             async with self._workspace_lock:
                 live = {
@@ -2129,6 +2386,14 @@ class ExecutiveControlService:
                     )
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
+                supervisor: Any = (
+                    self._require_operator_supervisor()
+                    if (
+                        job.orchestration_role == "plan"
+                        and self.config.coo_operator_harness_armed
+                    )
+                    else self._require_supervisor()
+                )
                 try:
                     started = await supervisor.start_cycle_job(
                         job_id, command_id=command_id

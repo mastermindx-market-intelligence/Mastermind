@@ -342,7 +342,7 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
             assert (await _request(service, "register-worker"))["ok"] is True
 
             created = await _request(service, "create-proof-job")
-            assert created["ok"] is True
+            assert created["ok"] is True, created
             job_id = created["result"]["job_id"]
             first_workspace = Path(created["result"]["worktree"])
             assert first_workspace.parent == service.config.proof_workspace_root
@@ -508,6 +508,107 @@ def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
                 for job in service.runtime.jobs.list_jobs()
                 if job.parent_job_id == root_two
             ] == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_armed_operator_lane_binds_read_only_planner_and_not_sealed_worker(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    async def exercise() -> None:
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_operator_harness_armed=True,
+            coo_tick_interval_seconds=3600.0,
+            operator_harness_binary_digest="a" * 64,
+            operator_harness_version="0.147.0",
+        )
+        holder: dict[str, object] = {"verified": 0}
+
+        def sealed_factory(runtime: Runtime):
+            supervisor = _FakeSupervisor(runtime)
+            holder["sealed"] = supervisor
+            return supervisor
+
+        class Operator:
+            def __init__(self, runtime: Runtime) -> None:
+                self.runtime = runtime
+                self.started_jobs: list[str] = []
+
+            def reconcile_restart(self, *, requeue_lost: bool = False):
+                assert requeue_lost is False
+                return []
+
+            async def start_cycle_job(self, job_id: str, *, command_id: str):
+                self.started_jobs.append(job_id)
+                outcome = self.runtime.attempts.dispatch_cycle_job(
+                    job_id,
+                    command_id=command_id,
+                    lease_owner="operator-service-fixture",
+                )
+                assert outcome is not None
+                return outcome
+
+        def operator_factory(runtime: Runtime, _sealed):
+            operator = Operator(runtime)
+            holder["operator"] = operator
+            return operator
+
+        async def verify_identity() -> None:
+            holder["verified"] = int(holder["verified"]) + 1
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=sealed_factory,
+            operator_supervisor_factory=operator_factory,
+            operator_identity_verifier=verify_identity,
+        )
+        await service.start()
+        try:
+            assert holder["verified"] == 1
+            assert (await _request(service, "register-worker"))["ok"] is True
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "operator")},
+            )
+            assert submitted["ok"] is True
+            root_id = submitted["result"]["job_id"]
+            root = service.runtime.jobs.get_job(root_id)
+            assert root is not None
+            assert root.constraints["operator_harness_armed"] is True
+            assert root.constraints["operator_harness_binary_digest"] == "a" * 64
+
+            created = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert created["ok"] is True, created
+            planner_id = created["result"]["selected_job_id"]
+            planner = service.runtime.jobs.get_job(planner_id)
+            assert planner is not None
+            assert planner.constraints["execution_profile_id"] == (
+                "operator.appserver.readonly.v1"
+            )
+            assert planner.constraints["eligible_quota_classes"] == [
+                "codex-coo-operator"
+            ]
+            assert planner.constraints["harness_binary_digest"] == "a" * 64
+            assert planner.requested_authorities == ["READ"]
+            assert planner.allowed_write_paths == []
+
+            dispatched = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert dispatched["ok"] is True
+            assert dispatched["result"]["action"] == "DISPATCHED"
+            operator = holder["operator"]
+            sealed = holder["sealed"]
+            assert operator.started_jobs == [planner_id]
+            assert sealed.started_jobs == []
         finally:
             await service.close()
 

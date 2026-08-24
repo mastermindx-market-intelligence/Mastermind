@@ -780,7 +780,7 @@ fi
     "$CONTROL_RUNTIME_ROOT" "$ADMIN_CHECKOUT" "$WORKSPACE_ROOT" "$EXPECTED_SHA" \
     "$BACKUP_ROOT" "$RECEIPTS_ROOT" "$PROVIDER_HOME" "$RUN_ROOT" \
     "$CANARY_RECEIPT" "$CONTROL_ENV_ATTESTATION" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
-    "$OPERATOR_UID" <<'PY'
+    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" <<'PY'
 import json, os, pathlib, re, sys
 release_root = sys.argv.pop(1)
 sys.path.insert(0, release_root)
@@ -807,6 +807,8 @@ from scripts.executive_os_phase1c import (
     worker_uid,
     worker_gid,
     operator_uid,
+    operator_harness_binary_digest,
+    operator_harness_version,
 ) = sys.argv[1:]
 
 expected = {
@@ -830,6 +832,8 @@ expected = {
     "allowed_peer_uids": sorted({int(control_uid), int(operator_uid)}),
     "secret_canary_receipt_path": canary_receipt,
     "control_environment_attestation_path": control_environment_attestation,
+    "operator_harness_binary_digest": operator_harness_binary_digest,
+    "operator_harness_version": operator_harness_version,
 }
 defaults = {
     "proof_branch": "codex/phase1c-a-proof",
@@ -840,10 +844,13 @@ defaults = {
     "effort": "xhigh",
     "cost_class": "standard",
     "coo_autonomy_armed": False,
+    "coo_operator_harness_armed": False,
     "coo_tick_interval_seconds": 15.0,
     "coo_model_alias": "coo.sealed",
     "coo_quota_class": "codex-coo",
     "coo_default_quota_class": "codex-coo-default",
+    "coo_operator_model_alias": "coo.operator.readonly",
+    "coo_operator_quota_class": "codex-coo-operator",
     "broker_timeout_seconds": 30.0,
     "shutdown_grace_seconds": 10.0,
 }
@@ -1057,14 +1064,16 @@ PY
 
 PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$WORKER_CONFIG" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
   "$WORKER_SUPPLEMENTARY_GIDS" "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" \
-  "$CODEX_ATTESTATION_RECEIPT" <<'PY'
+  "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_CONFIG" <<'PY'
 import json, os, pathlib, sys
 (
     destination, control_uid, worker_uid, worker_gid, supplementary_gids, workspace_root,
     run_root, provider_home, codex_binary, codex_version, codex_attestation_receipt,
+    control_config,
 ) = sys.argv[1:]
+control = json.loads(pathlib.Path(control_config).read_text(encoding="utf-8"))
 value = {
-    "schema_version": "mastermind.executive_worker_broker_config/v3",
+    "schema_version": "mastermind.executive_worker_broker_config/v4",
     "control_uid": int(control_uid),
     "worker_uid": int(worker_uid),
     "worker_gid": int(worker_gid),
@@ -1081,6 +1090,7 @@ value = {
     "launchd_socket_name": "WorkerBroker",
     "uid_sweep_receipt": str(pathlib.Path(provider_home).parent / "state" / "uid-sweep.json"),
     "require_secret_canary": True,
+    "operator_harness_armed": bool(control.get("coo_operator_harness_armed", False)),
 }
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")

@@ -99,6 +99,7 @@ class ReconcileStatus(str, Enum):
     LIVE_QUARANTINED = "LIVE_QUARANTINED"
     AWAITING_LEASE_EXPIRY = "AWAITING_LEASE_EXPIRY"
     IDENTITY_AMBIGUOUS = "IDENTITY_AMBIGUOUS"
+    OPERATOR_RECOVERED = "OPERATOR_RECOVERED"
 
 
 class ProcessPresence(str, Enum):
@@ -2022,6 +2023,10 @@ class ExecutiveSupervisor:
         outcomes: list[ReconcileReceipt] = []
         for attempt in self.runtime.attempts.list_attempts():
             if attempt.status not in _ACTIVE_ATTEMPT_STATUSES:
+                continue
+            if attempt.execution_mode == "OPERATOR_HARNESS":
+                # Rich-session generations have their own writer/epoch law;
+                # sealed-worker LOST reconciliation must never fence them.
                 continue
             presence = self.process_controller.presence(attempt)
             process_was_live = presence is ProcessPresence.LIVE
