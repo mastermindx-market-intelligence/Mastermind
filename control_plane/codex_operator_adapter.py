@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import stat
 import subprocess
 import time
@@ -23,6 +24,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from control_plane.executive_agent_capabilities import (
+    app_server_security_config_digest,
+    observed_mcp_tool_schema_digest,
+)
 from control_plane.operator_harness_contract import (
     ACCOUNT_REALM_STATUS,
     OPERATOR_HARNESS_INTERFACE_VERSION,
@@ -278,7 +283,9 @@ class CodexOperatorAdapter:
         workspace_root: Path,
         worker_id: str,
         app_server_argv: Sequence[str] | None = None,
+        app_server_config_overrides: Sequence[str] = (),
         expected_harness_version: str,
+        expected_config_digest: str | None = None,
         network_policy: str = "disabled",
         turn_input_loader: TurnInputLoader | None = None,
         base_sha_resolver: BaseShaResolver = _default_base_sha,
@@ -326,7 +333,18 @@ class CodexOperatorAdapter:
         self.worker_id = str(worker_id or "").strip()
         self.expected_harness_version = str(expected_harness_version or "").strip()
         self.network_policy = str(network_policy or "").strip()
+        self.app_server_config_overrides = tuple(app_server_config_overrides)
+        self.expected_config_digest = (
+            str(expected_config_digest).strip().lower()
+            if expected_config_digest is not None
+            else None
+        )
         self.argv = list(app_server_argv or (str(self.binary_path), "app-server"))
+        if self.app_server_config_overrides:
+            if "--strict-config" not in self.argv:
+                self.argv.append("--strict-config")
+            for value in self.app_server_config_overrides:
+                self.argv.extend(("-c", value))
         self.turn_input_loader = turn_input_loader
         self.base_sha_resolver = base_sha_resolver
         self.process_identity_observer = process_identity_observer
@@ -415,6 +433,35 @@ class CodexOperatorAdapter:
                     AdapterFailureClass.VALIDATION_FAILURE,
                     f"environment key is not allowlisted: {key}",
                 )
+        if self.expected_config_digest is not None and re.fullmatch(
+            r"[0-9a-f]{64}", self.expected_config_digest
+        ) is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "expected App Server config digest is invalid",
+            )
+        forbidden_config_markers = (
+            "token",
+            "secret",
+            "password",
+            "api_key",
+            "authorization",
+            "bearer",
+        )
+        for value in self.app_server_config_overrides:
+            lowered = str(value).lower()
+            if (
+                not isinstance(value, str)
+                or not value
+                or len(value.encode("utf-8")) > 4096
+                or "\x00" in value
+                or "\n" in value
+                or any(marker in lowered for marker in forbidden_config_markers)
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.VALIDATION_FAILURE,
+                    "App Server config override is unsafe",
+                )
 
     def _workspace_identity(self) -> WorkspaceIdentity:
         stat = self.workspace_root.stat()
@@ -489,6 +536,11 @@ class CodexOperatorAdapter:
             reasons.append("network_policy_mismatch")
         if requested.write_capable or requested.allowed_write_paths:
             reasons.append("write_capable_ohf_not_armed")
+        if (
+            self.expected_config_digest is not None
+            and requested.expected_config_digest != self.expected_config_digest
+        ):
+            reasons.append("expected_config_digest_mismatch")
         return ProfileValidation(
             requested=requested,
             accepted=not reasons,
@@ -548,9 +600,25 @@ class CodexOperatorAdapter:
         for row in mcp_rows:
             name = str(row.get("name") or "").strip()
             if name:
+                server_info = (
+                    row.get("serverInfo")
+                    if isinstance(row.get("serverInfo"), Mapping)
+                    else {}
+                )
                 capabilities.append(
                     ObservedCapabilityIdentity(
-                        kind="mcp_server", name=name, mcp_server_identity=name
+                        kind="mcp_server",
+                        name=name,
+                        tool_schema_digest=observed_mcp_tool_schema_digest(row),
+                        mcp_server_identity=(
+                            str(server_info.get("name") or "").strip() or None
+                        ),
+                        mcp_server_version=(
+                            str(server_info.get("version") or "").strip() or None
+                        ),
+                        mcp_auth_status=(
+                            str(row.get("authStatus") or "").strip() or None
+                        ),
                     )
                 )
         for name in plugins:
@@ -573,7 +641,7 @@ class CodexOperatorAdapter:
             ).strip()
             or None,
             network_state=_observed_network_state(config),
-            effective_config_digest=_canonical_digest(config),
+            effective_config_digest=app_server_security_config_digest(config),
             auth=AuthRealmFact(
                 worker_id=self.worker_id,
                 provider="openai-codex",

@@ -22,7 +22,7 @@ from control_plane.executive_runtime import JobPayload, Runtime, SCHEMA_VERSION
 from control_plane.model_router import ModelRouter, WorkRequest
 
 
-ROUTING_POLICY_VERSION = "2026-08-24.stage2"
+ROUTING_POLICY_VERSION = "2026-08-24.stage3"
 EVIDENCE_SCHEMA = "mastermind.executive_os_r1_shadow_evidence/v1"
 
 # These are the reviewed, bounded R1 fixture inputs.  The all-Sol values are a

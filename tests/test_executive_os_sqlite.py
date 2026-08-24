@@ -154,7 +154,7 @@ def test_claim_reauthorizes_and_fails_closed_without_partial_assignment(
 
 def test_stage2_job_requires_complete_execution_capability_identity(tmp_path):
     runtime = _runtime(tmp_path)
-    with pytest.raises(StateConflict, match="stage2 routed Jobs require"):
+    with pytest.raises(StateConflict, match=r"stage2\+ routed Jobs require"):
         runtime.jobs.create_job(
             "Reject an unbound stage2 route",
             constraints={"routing_policy_version": "2026-08-24.stage2"},

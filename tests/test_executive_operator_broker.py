@@ -285,7 +285,8 @@ def _fixture(tmp_path: Path, *, armed: bool = True):
     )
     adapters: list[_OperatorAdapter] = []
 
-    def factory(_workspace, prompt_loader):
+    def factory(_workspace, prompt_loader, requested):
+        assert requested == profile
         adapter = _OperatorAdapter(profile, provider_home, prompt_loader)
         adapters.append(adapter)
         return adapter

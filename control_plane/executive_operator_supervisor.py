@@ -219,11 +219,13 @@ class ExecutiveOperatorSupervisor:
             or profile.write_capable
             or profile.native_helper_policy.value != "DISABLED"
             or profile.skills
-            or profile.mcp_servers
+            or profile.profile_id
+            != "operator.appserver.readonly.docs-mcp.v1"
+            or profile.mcp_servers != ("openai-developer-docs-v1",)
             or profile.plugins
         ):
             raise ExecutiveOperatorSupervisorError(
-                "operator planner profile is not the reviewed extension-free read-only lane"
+                "operator planner profile is not the reviewed docs-MCP read-only lane"
             )
         if quota.model != job.constraints.get("model") or quota.effort != job.constraints.get(
             "effort"
@@ -248,6 +250,7 @@ class ExecutiveOperatorSupervisor:
             native_helper_policy=profile.native_helper_policy,
             authority_policy_hash=lease.attempt.authority_policy_hash,
             auth_realm_requirement=AuthRealmRequirement.SLOT_BOUND_V1,
+            expected_config_digest=profile.expected_config_digest,
             allowed_write_paths=(),
             write_capable=False,
         )

@@ -401,7 +401,7 @@ class OperatorAdapter(Protocol):
 
 
 OperatorAdapterFactory = Callable[
-    [Path, Callable[[TurnRef], str]], OperatorAdapter
+    [Path, Callable[[TurnRef], str], RequestedExecutionProfile], OperatorAdapter
 ]
 
 
@@ -1373,7 +1373,7 @@ class ExecutiveWorkerBroker:
                 ) from exc
 
         try:
-            adapter = self.operator_adapter_factory(workspace, load_turn)
+            adapter = self.operator_adapter_factory(workspace, load_turn, requested)
         except Exception as exc:
             raise BrokerStateError(
                 f"operator adapter construction failed: {type(exc).__name__}"

@@ -587,12 +587,14 @@ class ExecutiveControlService:
             or operator_profile.network_policy != "disabled"
             or operator_profile.native_helper_policy.value != "DISABLED"
             or operator_profile.skills
-            or operator_profile.mcp_servers
+            or operator_profile.profile_id
+            != "operator.appserver.readonly.docs-mcp.v1"
+            or operator_profile.mcp_servers != ("openai-developer-docs-v1",)
             or operator_profile.plugins
         ):
             raise ValueError(
                 "configured COO operator alias must be read-only, helper-free, "
-                "extension-free Codex App Server"
+                "and use the reviewed docs-MCP Codex App Server profile"
             )
         binding = {
             "eligible_quota_classes": sorted(

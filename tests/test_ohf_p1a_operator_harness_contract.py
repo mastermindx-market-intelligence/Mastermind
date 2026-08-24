@@ -693,6 +693,47 @@ def test_capability_classes_and_helpers():
     )
     assert digest_required.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
 
+    exact_mcp = CapabilityIdentity(
+        kind="mcp_server",
+        name="openaiDeveloperDocs",
+        harness_binary_digest="digest-v1",
+        tool_schema_digest="schema-v1",
+        mcp_server_identity="openai-docs-mcp",
+        mcp_server_version="1.0.0",
+        mcp_auth_status="unsupported",
+    )
+    observed_mcp = ObservedCapabilityIdentity(
+        kind="mcp_server",
+        name="openaiDeveloperDocs",
+        tool_schema_digest="schema-v1",
+        mcp_server_identity="openai-docs-mcp",
+        mcp_server_version="1.0.0",
+        mcp_auth_status="unsupported",
+    )
+    exact_mcp_launch = compare_launch(
+        _requested(
+            capabilities=CapabilityManifest(required=(exact_mcp,)),
+        ),
+        _observed(
+            capabilities=(observed_mcp,),
+            effective_skills=(),
+            effective_mcp=("openaiDeveloperDocs",),
+        ),
+    )
+    assert exact_mcp_launch.decision is LaunchDecision.ALLOW
+    wrong_auth = dataclasses.replace(observed_mcp, mcp_auth_status="oAuth")
+    wrong_auth_launch = compare_launch(
+        _requested(
+            capabilities=CapabilityManifest(required=(exact_mcp,)),
+        ),
+        _observed(
+            capabilities=(wrong_auth,),
+            effective_skills=(),
+            effective_mcp=("openaiDeveloperDocs",),
+        ),
+    )
+    assert wrong_auth_launch.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+
 
 def test_auth_realm_fact_rejects_credential_shaped_fields():
     with pytest.raises(ValueError):
@@ -1705,5 +1746,4 @@ def test_process_generations_identity_checks_match_executive_law():
                 row,
             )
     connection.close()
-
 
