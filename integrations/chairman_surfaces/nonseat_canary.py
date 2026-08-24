@@ -29,8 +29,9 @@ Receipt law
 -----------
 Receipts carry only fixed static detail sentences (:data:`DETAILS`) plus
 digests (:func:`sha256_hex`), booleans, counts, and timestamps — never a raw
-URL, profile id, credential value, or vendor payload. :func:`audit_receipts`
-is the row that proves this about every row that ran before it.
+URL, profile id, credential value, or vendor payload. C10 proves this about
+every row that ran before it; the outer matrix boundary repeats the same audit
+after appending the cleanup proof.
 
 Foreground/focus law
 ---------------------
@@ -75,6 +76,7 @@ RESULT_CODES = frozenset({
     "LAUNCH_FAILED",
     "NAVIGATION_FAILED",
     "STATE_NOT_PRESERVED",
+    "CLEANUP_FAILED",
     "RECEIPT_HYGIENE_FAILED",
     "VENDOR_ERROR",
 })
@@ -82,7 +84,7 @@ RESULT_CODES = frozenset({
 PROVISION_SCHEMA = "mastermind.mas115_nonseat_canary_provision.v2"
 DEFAULT_PROVISION_PATH = "~/Library/Application Support/Mastermind/control-room/mas115_nonseat_canary.json"
 REQUIRED_ACK = "disposable-non-chairman-profile"
-RECEIPTS_SCHEMA = "mastermind.mas115_nonseat_canary_receipts.v1"
+RECEIPTS_SCHEMA = "mastermind.mas115_nonseat_canary_receipts.v2"
 
 #: The ONLY navigable paths, appended to the provisioned loopback origin.
 ALLOWED_PATHS = ("/a", "/b", "/state/set", "/state/check", "/auth")
@@ -112,6 +114,7 @@ DETAILS = {
     "LAUNCH_FAILED": "the vendor did not launch the disposable profile as requested.",
     "NAVIGATION_FAILED": "the navigator did not confirm the requested navigation.",
     "STATE_NOT_PRESERVED": "the disposable profile did not preserve state across a close and reopen.",
+    "CLEANUP_FAILED": "the exact disposable profile could not be proven stopped during canary cleanup.",
     "RECEIPT_HYGIENE_FAILED": "a receipt failed the hygiene scan for forbidden content.",
     "VENDOR_ERROR": "the vendor surface returned an unexpected or malformed result.",
 }
@@ -611,7 +614,7 @@ def _build_row(row_id, code, ok, ts, /, **extra) -> dict:
     return rec
 
 
-def run_matrix(
+def _run_matrix_rows(
     *, vendor_client, navigator, provision: dict, credential: Credential,
     process_probe, origin_probe, clock, canary_token: str, focus_probe=None,
 ) -> dict:
@@ -654,22 +657,52 @@ def run_matrix(
             p1 = process_probe()
             after_c1_this_profile = p1.get("this_profile")
             saw = origin_probe.saw("/a")
-            same_others = p1.get("other_profiles") == p0.get("other_profiles")
-            # Real-launch evidence: the process probe must show exactly one
-            # more "this_profile" process than before acquire() — not merely
-            # an unrelated truthy count.
-            launch_evidence = p1.get("this_profile") == (p0.get("this_profile") or 0) + 1
+            baseline_count = p0.get("this_profile")
+            before_other_count = p0.get("other_profiles")
+            after_other_count = p1.get("other_profiles")
+            baseline_closed = (
+                isinstance(baseline_count, int)
+                and not isinstance(baseline_count, bool)
+                and baseline_count == 0
+            )
+            same_others = (
+                isinstance(before_other_count, int)
+                and not isinstance(before_other_count, bool)
+                and before_other_count >= 0
+                and isinstance(after_other_count, int)
+                and not isinstance(after_other_count, bool)
+                and after_other_count == before_other_count
+            )
+            # Multilogin launches a browser process group, not one process.
+            # The exact-profile probe already binds each counted row to the
+            # provisioned user-data directory, so positive evidence is one or
+            # more exact-profile processes from a zero baseline.
+            launch_evidence = (
+                isinstance(p1.get("this_profile"), int)
+                and not isinstance(p1.get("this_profile"), bool)
+                and p1.get("this_profile") >= 1
+            )
             pages = navigator.list_pages(actuator._port)
             page_membership = isinstance(pages, list) and navigated_url in pages
-            ok = bool(saw) and bool(same_others) and bool(launch_evidence) and page_membership
+            navigation_ok = bool(saw) and bool(page_membership)
+            launch_ok = bool(baseline_closed) and bool(same_others) and bool(launch_evidence)
+            ok = launch_ok and navigation_ok
             extra = {
                 "process_counts": {"before": p0, "after": p1},
                 "url_digest": sha256_hex(origin + "/a"),
+                "predicates": {
+                    "baseline_closed": bool(baseline_closed),
+                    "exact_profile_process_group_started": bool(launch_evidence),
+                    "other_profiles_unchanged": bool(same_others),
+                    "benign_origin_observed": bool(saw),
+                    "navigated_page_membership": bool(page_membership),
+                },
             }
             if focus_probe is not None:
                 extra["focus_observed"] = bool(focus_probe())
                 extra["observation_only"] = True
-            emit("C1", "OK" if ok else "NAVIGATION_FAILED", ok, **extra)
+            code = "OK" if ok else ("LAUNCH_FAILED" if not launch_ok else "NAVIGATION_FAILED")
+            emit("C1", code, ok, **extra)
             if not ok:
                 broken = True
         except CanaryRefusal as exc:
@@ -870,6 +903,120 @@ def run_matrix(
     return {"schema": RECEIPTS_SCHEMA, "vendor": vendor, "rows": rows, "verdict": verdict}
 
 
+def _reduced_process_counts(process_probe) -> dict:
+    """Return only validated non-negative counts; dynamic probe errors close."""
+    try:
+        observed = process_probe()
+    except Exception:  # noqa: BLE001 — cleanup receipts never carry dynamic probe errors
+        observed = None
+    if not isinstance(observed, dict):
+        return {"this_profile": None, "other_profiles": None}
+    reduced = {}
+    for key in ("this_profile", "other_profiles"):
+        value = observed.get(key)
+        reduced[key] = (
+            value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+        )
+    return reduced
+
+
+def _cleanup_after_matrix(vendor_client, process_probe, cleanup_probe=None) -> dict:
+    """Attempt one exact-profile teardown through the client's private lease.
+
+    The lease is minted only when this process sends its one preflighted
+    exact-profile start request and survives ambiguous responses plus C5's
+    simulated operational owner loss. No profile identity is supplied here
+    and none is emitted: the client can stop only that exact requested profile.
+    """
+    before = _reduced_process_counts(process_probe)
+    cleanup = getattr(vendor_client, "_cleanup_started_profile", None)
+    attempted = False
+    acknowledged = False
+    vendor_code = "OK"
+    if callable(cleanup):
+        try:
+            attempted = bool(cleanup())
+            acknowledged = True
+        except CanaryRefusal as refusal:
+            vendor_code = refusal.code
+        except Exception:  # noqa: BLE001 — no dynamic cleanup error crosses the receipt boundary
+            vendor_code = "VENDOR_ERROR"
+    elif before.get("this_profile") == 0:
+        acknowledged = True
+
+    after = _reduced_process_counts(cleanup_probe or process_probe)
+    exact_profile_stopped = after.get("this_profile") == 0
+    other_profiles_unchanged = (
+        before.get("other_profiles") is not None
+        and after.get("other_profiles") == before.get("other_profiles")
+    )
+    ok = acknowledged and exact_profile_stopped and other_profiles_unchanged
+    code = "OK" if ok else "CLEANUP_FAILED"
+    return {
+        "code": code,
+        "detail": DETAILS[code],
+        "ok": bool(ok),
+        "attempted": bool(attempted),
+        "vendor_code": vendor_code,
+        "process_counts": {"before": before, "after": after},
+        "predicates": {
+            "stop_acknowledged_or_not_needed": bool(acknowledged),
+            "exact_profile_stopped": bool(exact_profile_stopped),
+            "other_profiles_unchanged": bool(other_profiles_unchanged),
+        },
+    }
+
+
+def run_matrix(
+    *, vendor_client, navigator, provision: dict, credential: Credential,
+    process_probe, origin_probe, clock, canary_token: str, focus_probe=None,
+    cleanup_probe=None,
+) -> dict:
+    """Run C0..C10 and always close an exact profile started by this run."""
+    # Preserve the defense-in-depth gate before even a cleanup/process probe.
+    assert_disposable(provision)
+    try:
+        receipts = _run_matrix_rows(
+            vendor_client=vendor_client,
+            navigator=navigator,
+            provision=provision,
+            credential=credential,
+            process_probe=process_probe,
+            origin_probe=origin_probe,
+            clock=clock,
+            canary_token=canary_token,
+            focus_probe=focus_probe,
+        )
+    except BaseException:
+        # A dynamic matrix failure still owes one exact-profile teardown. The
+        # original failure is re-raised; no retry or cross-profile fallback is
+        # attempted if teardown itself cannot be proven.
+        _cleanup_after_matrix(vendor_client, process_probe, cleanup_probe)
+        raise
+
+    cleanup = _cleanup_after_matrix(vendor_client, process_probe, cleanup_probe)
+    receipts["cleanup"] = cleanup
+
+    forbidden_values = [provision.get("benign_origin"), provision.get("profile_id"), canary_token]
+    credential_value = credential.expose()
+    if credential_value:
+        forbidden_values.append(credential_value)
+    hygienic = audit_receipts(receipts["rows"] + [cleanup], forbidden_values)
+    c10 = next(row for row in receipts["rows"] if row.get("row") == "C10")
+    if not hygienic:
+        c10.update({
+            "code": "RECEIPT_HYGIENE_FAILED",
+            "detail": DETAILS["RECEIPT_HYGIENE_FAILED"],
+            "ok": False,
+        })
+    receipts["verdict"] = (
+        "PASS"
+        if cleanup["ok"] is True and all(row.get("ok") is True for row in receipts["rows"])
+        else "FAIL"
+    )
+    return receipts
+
+
 # ---------------------------------------------------------------------------
 # hermetic fakes (pure python, no I/O — reused by CLI --hermetic and tests)
 # ---------------------------------------------------------------------------
@@ -887,6 +1034,7 @@ class HermeticVendorFake:
         self.expired_credential = False
         self._running = False
         self._started_by_us = False
+        self._cleanup_started = False
         self._live_cookies: dict = {}
         self._persisted_cookies: dict = {}
         #: byte-identical across a full matrix per the frozen spec's falsifier 12.
@@ -925,6 +1073,7 @@ class HermeticVendorFake:
         self.start_calls += 1
         self._running = True
         self._started_by_us = True
+        self._cleanup_started = True
         self._live_cookies = dict(self._persisted_cookies)
         return {"profile_id": self.profile_id, "port": 9222}
 
@@ -934,11 +1083,22 @@ class HermeticVendorFake:
         self._persisted_cookies = dict(self._live_cookies)
         self._running = False
         self._started_by_us = False
+        self._cleanup_started = False
 
     def forget_ownership(self) -> None:
         """Mirror of the live clients' ``forget_ownership`` — clears only
         the started-by-us bookkeeping. No counter changes, no vendor call."""
         self._started_by_us = False
+
+    def _cleanup_started_profile(self) -> bool:
+        """Teardown lease retained independently from C5 owner loss."""
+        if not self._cleanup_started:
+            return False
+        profile_ref = {"profile_id": self.profile_id}
+        if self.folder_id is not None:
+            profile_ref["folder_id"] = self.folder_id
+        self.stop(profile_ref)
+        return True
 
     def external_shutdown(self) -> None:
         """Simulate an out-of-band close (e.g. an operator closed the window)."""
