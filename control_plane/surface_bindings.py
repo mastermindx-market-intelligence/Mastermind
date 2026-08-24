@@ -180,6 +180,9 @@ UUID_RE = _UUID_RE
 _WORK_REF_RE = re.compile(r"^(WS|JOB|PR):\S+$")
 
 _CHATGPT_HOSTS = frozenset({"chatgpt.com", "chat.openai.com"})
+_CHATGPT_CONVERSATION_PATH_RE = re.compile(
+    r"^(?:/c/[^/]+|/g/g-p-[A-Za-z0-9_-]+/c/[^/]+)/?$"
+)
 _CLAUDE_DESKTOP_HOST = "claude.ai"
 
 
@@ -258,13 +261,21 @@ def _check_chatgpt_url(url: Any) -> str | None:
         return "must not specify a port"
     if (parsed.hostname or "").lower() not in _CHATGPT_HOSTS:
         return f"host must be one of {sorted(_CHATGPT_HOSTS)}"
-    # A Project is a collection of chats, not an address for one conversation.
-    # The Control Room must resume an exact chat without making the operator
-    # search inside a Project, so only the provider's canonical conversation
-    # deep-link shape is accepted. Query/fragment-bearing variants are not a
-    # stable durable address and are deliberately refused.
-    if parsed.query or parsed.fragment or not re.fullmatch(r"/c/[^/]+/?", parsed.path):
-        return "must be an exact conversation URL with path /c/<conversation-id>, not a Project or home URL"
+    # A Project is shared context for many chats, not an address for one
+    # conversation. ChatGPT gives a project chat a nested deep link containing
+    # both its Project id and its conversation id; a non-project chat uses the
+    # shorter /c/<conversation-id> form. Both are exact resume addresses. The
+    # Project overview and query/fragment-bearing variants are deliberately
+    # refused because neither names one stable conversation.
+    if (
+        parsed.query
+        or parsed.fragment
+        or not _CHATGPT_CONVERSATION_PATH_RE.fullmatch(parsed.path)
+    ):
+        return (
+            "must be an exact conversation URL in normal-chat or Project-chat "
+            "form, not a Project overview or home URL"
+        )
     return None
 
 

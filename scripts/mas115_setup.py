@@ -104,7 +104,7 @@ def _locator(row: dict, url: str) -> dict:
 
 
 def build_enrollment_document(existing: dict | None, selections: dict[str, tuple[dict, str]], *, observed_at: str) -> dict:
-    """Replace the three CCR anchor chats while preserving work-specific chats."""
+    """Replace the three CCR initial destinations while preserving other chats."""
     if set(selections) != set(SEAT_REFS):
         raise SetupRefusal("all three Chairman ChatGPT seats must be selected in one enrollment")
     identities = [_identity(selections[seat][0]) for seat in SEAT_REFS]
@@ -125,12 +125,12 @@ def build_enrollment_document(existing: dict | None, selections: dict[str, tuple
             and binding.get("provider") == "chatgpt"
             and binding.get("seat_ref") in SEAT_REFS
         )
-        is_ccr_anchor = (
+        is_ccr_initial_destination = (
             is_named_chatgpt_seat
             and binding.get("work_ref") == WORK_REF
             and binding.get("role") == "ceo"
         )
-        if is_ccr_anchor:
+        if is_ccr_initial_destination:
             continue
         if is_named_chatgpt_seat:
             seat_ref = binding["seat_ref"]
@@ -276,8 +276,9 @@ def _copied_profile(prompt: str, rows: list[dict]) -> dict:
 def enroll_interactive() -> int:
     print("Seat enrollment does not start, stop, or inspect any profile content.")
     print("In the GoLogin/Multilogin profile list, use Copy profile ID for each Chairman seat.")
-    print("A ChatGPT Project contains many chats and is not an exact resume address.")
-    print("Choose one specific Sol anchor chat per seat; other work-specific chats remain separate bindings.")
+    print("Sol is bootstrapped by the ChatGPT account plus the MastermindX Project context, not by one primary chat.")
+    print("Choose one exact existing conversation as each seat's initial navigation destination.")
+    print("Normal-chat and Project-chat URLs are accepted; the Project overview is not an exact destination.")
     candidates = _candidate_rows(chatgpt.list_local_environments())
     selections: dict[str, tuple[dict, str]] = {}
     used: set[tuple[str, str | None, str]] = set()
@@ -289,7 +290,8 @@ def enroll_interactive() -> int:
         if _identity(selected) in used:
             raise SetupRefusal("one managed-browser environment cannot be assigned to two Chairman seats")
         url = _private_url(
-            f"Copy one exact Sol anchor-chat URL for ChatGPT Seat {index} (not the Project URL), "
+            f"Copy one exact normal-chat or Project-chat URL for ChatGPT Seat {index} "
+            "(not the Project overview), "
             "paste it here, then press Return: "
         )
         selections[seat_ref] = (selected, url)
@@ -303,7 +305,8 @@ def enroll_interactive() -> int:
         raise SetupRefusal("the existing surface-bindings file has problems; nothing was written")
     doc = build_enrollment_document(existing, selections, observed_at=_utc_now_z())
     sb.save_bindings(doc)
-    print("All three Chairman ChatGPT seat anchors are enrolled. Other chats remain independently bindable.")
+    print("All three Chairman ChatGPT seat navigation destinations are enrolled.")
+    print("They do not define Sol identity; other chats remain independently bindable.")
     print("No profile was started or stopped by this tool.")
     return 0
 

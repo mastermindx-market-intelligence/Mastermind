@@ -97,9 +97,9 @@ def test_build_enrollment_document_is_exact_three_distinct_seats_and_preserves_u
     assert {row["work_ref"] for row in chatgpt_rows} == {setup.WORK_REF, "WS:OTHER-CHAT"}
     assert {row["role"] for row in chatgpt_rows} == {"ceo"}
     assert work_specific_chat in chatgpt_rows
-    anchors = [row for row in chatgpt_rows if row["work_ref"] == setup.WORK_REF]
-    assert len(anchors) == 3
-    assert all(row["observed_at"] == "2026-08-23T12:00:00Z" for row in anchors)
+    initial_destinations = [row for row in chatgpt_rows if row["work_ref"] == setup.WORK_REF]
+    assert len(initial_destinations) == 3
+    assert all(row["observed_at"] == "2026-08-23T12:00:00Z" for row in initial_destinations)
     assert sb.find_conflicts(doc) == []
 
 
@@ -140,6 +140,12 @@ def test_private_url_refuses_non_conversation_addresses(monkeypatch, url):
     monkeypatch.setattr(setup.getpass, "getpass", lambda _prompt: url)
     with pytest.raises(setup.SetupRefusal, match="exact conversation URL"):
         setup._private_url("hidden: ")
+
+
+def test_private_url_accepts_exact_project_conversation_address(monkeypatch):
+    url = "https://chatgpt.com/g/g-p-project-alpha/c/conversation-beta"
+    monkeypatch.setattr(setup.getpass, "getpass", lambda _prompt: url)
+    assert setup._private_url("hidden: ") == url
 
 
 def test_disposable_preflight_requires_fresh_exact_three_seat_census_and_refuses_collision():
