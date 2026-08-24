@@ -227,6 +227,26 @@ def test_credential_setup_is_fixed_native_prompt_with_no_secret_carrier():
         setup.credential_setup_argv("gologin")
 
 
+def test_live_provision_loader_supplies_current_utc_to_fail_closed_census(monkeypatch):
+    observed = {}
+
+    def fake_load(path, *, now):
+        observed["path"] = path
+        observed["now"] = now
+        return {"accepted": True}, None
+
+    monkeypatch.setattr(setup.canary, "load_provision", fake_load)
+    before = datetime.now(timezone.utc)
+    loaded, code = setup._load_current_provision()
+    after = datetime.now(timezone.utc)
+
+    assert loaded == {"accepted": True}
+    assert code is None
+    assert observed["path"] == canary.DEFAULT_PROVISION_PATH
+    assert before <= observed["now"] <= after
+    assert observed["now"].tzinfo is timezone.utc
+
+
 def test_atomic_private_provision_is_0600_and_canonical(tmp_path):
     path = tmp_path / "private" / "provision.json"
     doc = setup.build_provision(_mlx(1, running=False), browser_type="mimic")

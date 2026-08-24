@@ -253,6 +253,14 @@ def credential_setup_argv(vendor: str) -> list[str]:
     ]
 
 
+def _load_current_provision():
+    """Load the provision with the live UTC reference time required by its census gate."""
+    return canary.load_provision(
+        canary.DEFAULT_PROVISION_PATH,
+        now=datetime.now(timezone.utc),
+    )
+
+
 def _private_url(prompt: str) -> str:
     value = getpass.getpass(prompt).strip()
     if not value or len(value.encode("utf-8")) > _MAX_PRIVATE_URL_BYTES:
@@ -331,7 +339,7 @@ def provision_interactive() -> int:
         raise SetupRefusal("disposable acknowledgement did not match; nothing was written")
     _atomic_private_json(provision, canary.DEFAULT_PROVISION_PATH)
 
-    loaded, code = canary.load_provision(canary.DEFAULT_PROVISION_PATH)
+    loaded, code = _load_current_provision()
     if loaded is None:
         raise SetupRefusal(f"the written provision failed its safety preflight ({code}); it was not accepted")
     print("Disposable profile provisioned. The canary has not been run.")
@@ -347,7 +355,7 @@ def status() -> int:
             row.get("seat_ref") for row in bindings.get("bindings", [])
             if isinstance(row, dict) and row.get("provider") == "chatgpt"
         } & set(SEAT_REFS)
-    provision, code = canary.load_provision(canary.DEFAULT_PROVISION_PATH)
+    provision, code = _load_current_provision()
     print(json.dumps({
         "local_environment_counts": {
             manager: {
