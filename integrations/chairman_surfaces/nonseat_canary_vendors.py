@@ -47,7 +47,11 @@ from . import nonseat_canary as _core
 _MLX_LAUNCHER_ORIGIN = "https://launcher.mlx.yt:45001"
 _MLX_CLOUD_ORIGIN = "https://api.multilogin.com"
 _MAX_RESPONSE_BYTES = 64 * 1024
-_PROFILE_PAGE_SIZE = 100
+# Keep each cloud-inventory response comfortably below the independent 64 KiB
+# transport cap even when profile metadata is several KiB per row. The census
+# remains complete and bounded by `_MAX_PROFILE_CENSUS`; only its page size is
+# reduced.
+_PROFILE_PAGE_SIZE = 10
 _MAX_PROFILE_CENSUS = 1000
 _MAX_STDIN_BYTES = 16 * 1024
 _KEYCHAIN_READ_TIMEOUT_SECONDS = 15.0

@@ -1740,6 +1740,45 @@ def test_hostile_bounded_client_caps_body_and_launders_transport_errors():
     assert "private response" not in repr(result)
 
 
+def test_hostile_multilogin_inventory_paginates_below_transport_response_cap():
+    total = 28
+    seen = []
+
+    def _handler(request):
+        body = json.loads(request.read())
+        offset = body["offset"]
+        limit = body["limit"]
+        seen.append((offset, limit))
+        profiles = [
+            {
+                "id": f"profile-{index}",
+                "folder_id": body["folder_id"],
+                # Ten rows fit below the independent 64 KiB response cap;
+                # one unpaginated 28-row response does not.
+                "bounded_metadata": "x" * 4096,
+            }
+            for index in range(offset, min(offset + limit, total))
+        ]
+        return httpx.Response(200, json={
+            "status": {
+                "error_code": "",
+                "http_code": 200,
+                "message": "Search profile successfully result",
+            },
+            "data": {"profiles": profiles, "total_count": total},
+        })
+
+    inner = httpx.Client(transport=httpx.MockTransport(_handler), trust_env=False)
+    bounded = vendors.BoundedHttpClient(client=inner)
+    client = vendors.MultiloginClient(core.Credential("synthetic", "stdin"), bounded)
+    try:
+        assert client.profile_exists({"profile_id": "absent", "folder_id": "folder"}) is False
+    finally:
+        bounded.close()
+
+    assert seen == [(0, 10), (10, 10), (20, 10)]
+
+
 def test_hostile_webdriver_rejects_external_url_before_transport():
     class _Recorder:
         def __init__(self):
