@@ -1254,6 +1254,10 @@ def main(
     No repository test calls a real credential store or vendor endpoint.
     """
     parser = argparse.ArgumentParser(prog="nonseat_canary_vendors")
+    parser.add_argument(
+        "operation", nargs="?", default="run",
+        choices=("run", "configure-canary-port"),
+    )
     parser.add_argument("--vendor", required=True, choices=("gologin", "multilogin"))
     parser.add_argument("--provision-path", required=True)
     args = parser.parse_args(argv)
@@ -1322,6 +1326,20 @@ def main(
         vendor_client = MultiloginClient(
             credential, client, browser_type=live_provision["browser_type"],
         )
+        profile_ref = {
+            "profile_id": provision["profile_id"],
+            "folder_id": provision["folder_id"],
+        }
+        if args.operation == "configure-canary-port":
+            receipt = vendor_client.configure_canary_port(profile_ref)
+            print(json.dumps(receipt, indent=2, sort_keys=True), file=out)
+            if receipt.get("verdict") == "PASS":
+                return 0
+            return 3 if receipt.get("verdict") == "HOLD" else 2
+
+        before_policy = vendor_client.port_policy_snapshot(profile_ref)
+        if before_policy.state != _port_policy.EXACT_CONFIGURED:
+            raise _core.CanaryRefusal("UNSUPPORTED_PORT_STATE")
         navigator = WebDriverNavigator(client, live_provision)
 
         def _clock() -> str:
@@ -1339,6 +1357,29 @@ def main(
             canary_token=token,
             cleanup_probe=_settled_cleanup_probe(process_probe),
         )
+        postflight_ok = False
+        try:
+            after_policy = vendor_client.port_policy_snapshot(profile_ref)
+            postflight_ok = (
+                after_policy.state == _port_policy.EXACT_CONFIGURED
+                and after_policy.auto_update_core == before_policy.auto_update_core
+                and after_policy.preservation_digest == before_policy.preservation_digest
+            )
+        except _core.CanaryRefusal:
+            postflight_ok = False
+        if not postflight_ok:
+            c10 = next(
+                (row for row in receipts.get("rows", []) if row.get("row") == "C10"),
+                None,
+            )
+            if c10 is None:
+                raise _core.CanaryRefusal("VENDOR_ERROR")
+            c10.update({
+                "code": "UNSUPPORTED_PORT_STATE",
+                "detail": _core.DETAILS["UNSUPPORTED_PORT_STATE"],
+                "ok": False,
+            })
+            receipts["verdict"] = "FAIL"
     except _core.CanaryRefusal as refusal:
         return _emit_refusal(out, args.vendor, refusal.code)
     except Exception:  # noqa: BLE001 — never echo a dynamic error or payload

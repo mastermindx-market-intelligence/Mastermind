@@ -430,3 +430,62 @@ def test_atomic_private_provision_is_0600_and_canonical(tmp_path):
     assert path.stat().st_mode & 0o777 == 0o600
     assert json.loads(path.read_text(encoding="utf-8")) == doc
     assert path.read_text(encoding="utf-8") == json.dumps(doc, indent=2, sort_keys=True) + "\n"
+
+
+def test_configure_command_migrates_then_routes_fixed_default_provision(monkeypatch):
+    """Catches caller-selected configuration fields or a skipped legacy migration."""
+    calls = []
+    monkeypatch.setattr(setup, "_load_current_provision", lambda: (None, "PROVISION_MISSING"))
+    monkeypatch.setattr(
+        setup,
+        "_migrate_legacy_provision",
+        lambda *args, **kwargs: ({"vendor": "multilogin"}, None),
+    )
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["configure-canary-port", "--vendor", "multilogin"]) == 0
+    assert calls == [[
+        "configure-canary-port",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+    ]]
+
+
+def test_configure_command_reuses_valid_v3_without_migration(monkeypatch):
+    """Catches making the idempotent configuration command v2-only."""
+    calls = []
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: ({"vendor": "multilogin"}, None),
+    )
+    monkeypatch.setattr(
+        setup, "_migrate_legacy_provision",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not migrate v3")),
+    )
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["configure-canary-port", "--vendor", "multilogin"]) == 0
+    assert calls[0][0] == "configure-canary-port"
+
+
+def test_run_canary_routes_run_operation_without_update_authority(monkeypatch):
+    """Catches accidentally granting the ordinary run path configuration authority."""
+    calls = []
+    monkeypatch.setattr(setup.vendors, "main", lambda argv: calls.append(argv) or 0)
+    assert setup.main(["run-canary", "--vendor", "multilogin"]) == 0
+    assert calls == [[
+        "run",
+        "--vendor", "multilogin",
+        "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+    ]]
+
+
+def test_configure_command_refuses_gologin_before_provision_or_vendor(monkeypatch):
+    """Catches widening the one-shot profile update beyond Multilogin."""
+    monkeypatch.setattr(
+        setup, "_load_current_provision",
+        lambda: (_ for _ in ()).throw(AssertionError("must refuse before provision")),
+    )
+    monkeypatch.setattr(
+        setup.vendors, "main",
+        lambda argv: (_ for _ in ()).throw(AssertionError("must refuse before vendor")),
+    )
+    assert setup.main(["configure-canary-port", "--vendor", "gologin"]) == 2

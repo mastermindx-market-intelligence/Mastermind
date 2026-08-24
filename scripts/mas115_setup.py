@@ -394,6 +394,12 @@ def main(argv=None) -> int:
     sub.add_parser("prepare-disposable", help="prepare one stopped non-Chairman profile")
     credential_parser = sub.add_parser("credential", help="open the native Keychain password prompt")
     credential_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
+    configure_parser = sub.add_parser(
+        "configure-canary-port", help="apply the one exact disposable Multilogin port policy",
+    )
+    configure_parser.add_argument(
+        "--vendor", default="multilogin", choices=("multilogin", "gologin"),
+    )
     run_parser = sub.add_parser("run-canary", help="run the accepted disposable canary")
     run_parser.add_argument("--vendor", default="multilogin", choices=("multilogin", "gologin"))
     args = parser.parse_args(argv)
@@ -408,8 +414,27 @@ def main(argv=None) -> int:
         if args.command == "credential":
             argv = credential_setup_argv(args.vendor)
             os.execve(argv[0], argv, {})
+        if args.command == "configure-canary-port":
+            if args.vendor != "multilogin":
+                raise SetupRefusal("fixed-port configuration is supported only for Multilogin")
+            provision, code = _load_current_provision()
+            if provision is None:
+                provision, code = _migrate_legacy_provision(
+                    canary.DEFAULT_PROVISION_PATH,
+                    now=datetime.now(timezone.utc),
+                )
+            if provision is None or provision.get("vendor") != "multilogin":
+                raise SetupRefusal(
+                    f"the exact disposable Multilogin provision is unavailable ({code})"
+                )
+            return vendors.main([
+                "configure-canary-port",
+                "--vendor", args.vendor,
+                "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
+            ])
         if args.command == "run-canary":
             return vendors.main([
+                "run",
                 "--vendor", args.vendor,
                 "--provision-path", str(Path(canary.DEFAULT_PROVISION_PATH).expanduser()),
             ])
