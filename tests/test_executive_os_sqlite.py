@@ -152,6 +152,24 @@ def test_claim_reauthorizes_and_fails_closed_without_partial_assignment(
     assert runtime.attempts.list_attempts(job.job_id) == []
 
 
+def test_stage2_job_requires_complete_execution_capability_identity(tmp_path):
+    runtime = _runtime(tmp_path)
+    with pytest.raises(StateConflict, match="stage2 routed Jobs require"):
+        runtime.jobs.create_job(
+            "Reject an unbound stage2 route",
+            constraints={"routing_policy_version": "2026-08-24.stage2"},
+        )
+
+    with pytest.raises(StateConflict, match="complete profile/policy identity"):
+        runtime.jobs.create_job(
+            "Reject a partial capability grant",
+            constraints={
+                "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+                "execution_profile_digest": "a" * 64,
+            },
+        )
+
+
 def test_quota_pool_matches_provider_model_effort_cost_class_and_caps(tmp_path):
     runtime = _runtime(tmp_path)
     runtime.workers.register_worker(

@@ -428,16 +428,49 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
     if excluded:
         result["excluded_worker_ids"] = excluded
 
-    for key in ("task_kind", "risk", "ambiguity", "routing_policy_version"):
+    for key in (
+        "task_kind",
+        "risk",
+        "ambiguity",
+        "routing_policy_version",
+        "execution_profile_id",
+        "capability_policy_version",
+    ):
         normalized = str(raw.get(key) or "").strip().lower()
         if normalized:
             if _ROUTING_VALUE_RE.fullmatch(normalized) is None:
                 raise StateConflict(f"constraint {key} must be a bounded identifier")
             result[key] = normalized
 
+    for key in ("execution_profile_digest", "capability_policy_digest"):
+        normalized = str(raw.get(key) or "").strip().lower()
+        if normalized:
+            if re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+                raise StateConflict(f"constraint {key} must be a lowercase SHA-256 digest")
+            result[key] = normalized
+
+    capability_keys = {
+        "execution_profile_id",
+        "execution_profile_digest",
+        "capability_policy_version",
+        "capability_policy_digest",
+    }
+    present_capability_keys = capability_keys & set(result)
+    if present_capability_keys and present_capability_keys != capability_keys:
+        raise StateConflict(
+            "execution capability constraints must carry the complete profile/policy identity"
+        )
+
     if aliases and "routing_policy_version" not in result:
         raise StateConflict(
             "preferred_model_aliases requires routing_policy_version"
+        )
+    if (
+        result.get("routing_policy_version") == "2026-08-24.stage2"
+        and present_capability_keys != capability_keys
+    ):
+        raise StateConflict(
+            "stage2 routed Jobs require an exact execution capability profile"
         )
 
     reason_codes_raw = raw.get("routing_reason_codes") or []
@@ -568,15 +601,31 @@ def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bo
     if str(row["worker_id"]) in set(constraints.get("excluded_worker_ids") or []):
         return False
     aliases = constraints.get("preferred_model_aliases") or []
-    if not aliases:
+    profile_id = str(constraints.get("execution_profile_id") or "")
+    if not aliases and not profile_id:
         return True
     metadata = _capacity_route_metadata(row)
-    worker_policy_version = str(
-        metadata.get("routing_policy_version") or ""
-    ).strip().lower()
-    return (
-        _capacity_model_alias(row) in aliases
-        and worker_policy_version == constraints.get("routing_policy_version")
+    if aliases:
+        worker_policy_version = str(
+            metadata.get("routing_policy_version") or ""
+        ).strip().lower()
+        route_matches = (
+            _capacity_model_alias(row) in aliases
+            and worker_policy_version == constraints.get("routing_policy_version")
+        )
+        if not route_matches:
+            return False
+    if not profile_id:
+        return True
+    return all(
+        str(metadata.get(key) or "").strip().lower()
+        == str(constraints.get(key) or "").strip().lower()
+        for key in (
+            "execution_profile_id",
+            "execution_profile_digest",
+            "capability_policy_version",
+            "capability_policy_digest",
+        )
     )
 
 
@@ -6591,7 +6640,16 @@ class JobRegistry:
             ),
             "cost_class": cost_class,
         }
-        for key in ("provider", "model", "effort", "routing_policy_version"):
+        for key in (
+            "provider",
+            "model",
+            "effort",
+            "routing_policy_version",
+            "execution_profile_id",
+            "execution_profile_digest",
+            "capability_policy_version",
+            "capability_policy_digest",
+        ):
             if root_constraints.get(key):
                 constraints[key] = root_constraints[key]
         return self.create_job(
@@ -8695,6 +8753,16 @@ class AttemptRegistry:
                 "authority_policy_hash": authority.policy_sha256,
                 "lease_expires_at_ms": timestamp + duration * 1000,
                 "routing_policy_version": constraints.get("routing_policy_version"),
+                "execution_profile_id": constraints.get("execution_profile_id"),
+                "execution_profile_digest": constraints.get(
+                    "execution_profile_digest"
+                ),
+                "capability_policy_version": constraints.get(
+                    "capability_policy_version"
+                ),
+                "capability_policy_digest": constraints.get(
+                    "capability_policy_digest"
+                ),
                 "preferred_model_aliases": constraints.get(
                     "preferred_model_aliases", []
                 ),

@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_worker_routes/v1",
-  "policy_version": "2026-08-16.stage1",
+  "policy_version": "2026-08-24.stage2",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {
@@ -28,6 +28,7 @@
   "model_aliases": {
     "frontier.orchestrator": {
       "provider_alias": "codex",
+      "execution_profile_id": "operator.appserver.readonly.v1",
       "model": "gpt-5.6-sol",
       "effort": "xhigh",
       "cost_class": "frontier",
@@ -36,6 +37,7 @@
     },
     "fast.engineering": {
       "provider_alias": "codex",
+      "execution_profile_id": "sealed.worker.write.no-extensions.v1",
       "model": "gpt-5.6-luna",
       "effort": "high",
       "cost_class": "small",
@@ -44,6 +46,7 @@
     },
     "standard.engineering": {
       "provider_alias": "codex",
+      "execution_profile_id": "sealed.worker.write.no-extensions.v1",
       "model": "gpt-5.6-terra",
       "effort": "high",
       "cost_class": "default",
@@ -52,6 +55,7 @@
     },
     "fast.research": {
       "provider_alias": "codex",
+      "execution_profile_id": "sealed.worker.readonly.no-extensions.v1",
       "model": "gpt-5.6-luna",
       "effort": "medium",
       "cost_class": "small",
@@ -60,6 +64,7 @@
     },
     "standard.research": {
       "provider_alias": "codex",
+      "execution_profile_id": "sealed.worker.readonly.no-extensions.v1",
       "model": "gpt-5.6-terra",
       "effort": "high",
       "cost_class": "default",
@@ -68,6 +73,7 @@
     },
     "standard.review": {
       "provider_alias": "codex",
+      "execution_profile_id": "sealed.worker.readonly.no-extensions.v1",
       "model": "gpt-5.6-terra",
       "effort": "high",
       "cost_class": "default",

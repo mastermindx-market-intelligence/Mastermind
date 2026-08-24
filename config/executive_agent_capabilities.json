@@ -1,0 +1,50 @@
+{
+  "schema_version": "mastermind.executive_agent_capabilities/v1",
+  "policy_version": "2026-08-24.g0",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "profiles": {
+    "operator.appserver.readonly.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "skills": [],
+      "mcp_servers": [],
+      "plugins": [],
+      "forbidden": []
+    },
+    "sealed.worker.readonly.no-extensions.v1": {
+      "enabled": true,
+      "execution_surface": "codex-exec",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "skills": [],
+      "mcp_servers": [],
+      "plugins": [],
+      "forbidden": []
+    },
+    "sealed.worker.write.no-extensions.v1": {
+      "enabled": true,
+      "execution_surface": "codex-exec",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "workspace-write",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": true,
+      "native_helper_policy": "disabled",
+      "skills": [],
+      "mcp_servers": [],
+      "plugins": [],
+      "forbidden": []
+    }
+  }
+}
