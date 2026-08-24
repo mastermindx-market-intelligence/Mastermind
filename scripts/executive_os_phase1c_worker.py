@@ -26,6 +26,10 @@ from control_plane.codex_worker import (
     load_codex_attestation_receipt,
 )
 from control_plane.codex_operator_adapter import CodexOperatorAdapter
+from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
+    ExecutionCapabilityRegistry,
+)
 from control_plane.executive_worker_broker import (
     BrokerPolicy,
     DedicatedUIDSweeper,
@@ -169,13 +173,45 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
         ambient_classifier=DarwinDistnotedClassifier(),
     )
 
-    def operator_adapter_factory(workspace: Path, turn_input_loader):
+    try:
+        capability_registry = ExecutionCapabilityRegistry.load()
+    except CapabilityPolicyError as exc:
+        raise WorkerConfigError(f"worker capability policy is invalid: {exc}") from exc
+
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        matching = []
+        for profile in capability_registry.profiles.values():
+            if not profile.enabled or profile.execution_surface != "codex-app-server":
+                continue
+            try:
+                manifest = profile.capability_manifest(
+                    harness_binary_digest=requested.harness_binary_digest
+                )
+            except CapabilityPolicyError:
+                continue
+            if (
+                manifest == requested.capabilities
+                and profile.sandbox_policy == requested.sandbox_policy
+                and profile.approval_policy == requested.approval_policy
+                and profile.network_policy == requested.network_policy
+                and profile.write_capable == requested.write_capable
+                and profile.native_helper_policy == requested.native_helper_policy
+                and profile.expected_config_digest == requested.expected_config_digest
+            ):
+                matching.append(profile)
+        if len(matching) != 1:
+            raise WorkerConfigError(
+                "requested Operator Harness profile does not resolve to one reviewed policy"
+            )
+        profile = matching[0]
         return CodexOperatorAdapter(
             binary_path=Path(config["codex_binary"]),
             codex_home=Path(config["provider_home"]),
             workspace_root=workspace,
             worker_id=policy.worker_id,
             expected_harness_version=binary_attestation.version,
+            expected_config_digest=profile.expected_config_digest,
+            app_server_config_overrides=profile.app_server_config_overrides(),
             network_policy="disabled",
             turn_input_loader=turn_input_loader,
         )

@@ -39,6 +39,7 @@ from control_plane.operator_harness_contract import (
     NativeHelperPolicy,
     NormalizedEvent,
     ObservedHarnessAttestation,
+    ObservedCapabilityIdentity,
     ObservedTriState,
     OperationId,
     OperationReceiptKind,
@@ -109,18 +110,32 @@ def _profile(dispatch: OrchestrationDispatchOutcome) -> RequestedExecutionProfil
 
 
 def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestation:
+    observed_capabilities = tuple(
+        ObservedCapabilityIdentity(
+            kind=item.kind,
+            name=item.name,
+            skill_content_digest=item.skill_content_digest,
+            tool_schema_digest=item.tool_schema_digest,
+            mcp_server_identity=item.mcp_server_identity,
+            mcp_server_version=item.mcp_server_version,
+            mcp_auth_status=item.mcp_auth_status,
+        )
+        for item in profile.capabilities.required
+    )
     return ObservedHarnessAttestation(
         served_model=profile.requested_model,
         harness_version=profile.harness_version,
         harness_binary_digest=profile.harness_binary_digest,
-        capabilities=(),
+        capabilities=observed_capabilities,
         effective_skills=(),
-        effective_mcp=(),
+        effective_mcp=tuple(
+            item.name for item in observed_capabilities if item.kind == "mcp_server"
+        ),
         effective_plugins_or_apps=(),
         sandbox_state=profile.sandbox_policy,
         approval_state=profile.approval_policy,
         network_state=profile.network_policy,
-        effective_config_digest="d" * 64,
+        effective_config_digest=profile.expected_config_digest or "d" * 64,
         auth=AuthRealmFact(worker_id=profile.worker_id, provider=profile.provider),
         workspace=profile.workspace,
         supports_subagent_capability_ceiling=ObservedTriState.FALSE,
@@ -630,13 +645,14 @@ class _ActiveAdapter(_RecoveryAdapter):
         return super().graceful_stop(generation, **kwargs)
 
     def reconcile(self, _generation):
+        assert self.profile is not None
         return ReconcileObservation(
             ProcessLiveness.ALIVE,
             self.process,
             True,
             ProviderWriterState.HELD,
             self.provider_session_id,
-            "d" * 64,
+            self.profile.expected_config_digest,
         )
 
 

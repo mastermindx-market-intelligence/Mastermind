@@ -1,13 +1,13 @@
-# Executive worker routing — stage 1
+# Executive worker routing — stage 3
 
 **Status:** R1 shadow evidence and Phase 1F-B are accepted. Phase 1F-C schema-v4
 and the explicit bounded COO `run-once` path merged in `db0bac5`. G0 capability
 identity merged in `ceebc82`; G1 exact-root service composition merged in
-`8602686`. All remain undeployed, unscheduled, production-unarmed, and
-unaccepted as live capability. This G2 source carrier composes one read-only
-Codex App Server planner inside the existing dedicated worker broker. It does
-not arm an App Server, MCP server, plugin, subagent or production worker merely
-by merging.
+`8602686`; G2 read-only planner composition merged in `c76d55b`. All remain
+undeployed, unscheduled, production-unarmed, and unaccepted as live capability.
+G3 composes one exact read-only OpenAI Docs MCP grant into that existing planner
+lane. It does not arm an App Server, MCP server, plugin, subagent or production
+worker merely by merging.
 
 This stage makes economical-worker-first execution real without creating a
 second queue, teaching Chris tmux, or widening Executive OS or MCP authority.
@@ -301,6 +301,40 @@ The separate offline v3-to-v4 migration CLI is the only supported upgrade path.
   readiness, service activation, or live planner proof.
 - MCP/plugin grants, native helpers, subagents, dynamic plugin installation and
   OAuth enrollment remain later, separately reviewed capability waves.
+
+### Wave G3 — governed read-only MCP composition — production-unarmed
+
+- Only `coo.operator.readonly` moves to
+  `operator.appserver.readonly.docs-mcp.v1`. Frontier planning and every sealed
+  CLI worker remain extension-free. The granted remote endpoint is exactly
+  `https://developers.openai.com/mcp`; its expected server identity/version are
+  `openai-docs-mcp` / `1.0.0`, auth status is `unsupported`, and its only tools
+  are `fetch_openai_doc` and `search_openai_docs`.
+- Before launch, the broker clears ambient MCP servers, plugins, configured
+  skills, apps and native-agent features. It then supplies only the reviewed
+  MCP URL, required-startup bit, exact tool allow-list and automatic approval
+  mode. `--strict-config` makes an unknown override a launch refusal.
+- App Server attestation binds the security-relevant `config/read` projection,
+  effective skills/plugins/MCP census, server identity, version, auth status,
+  and normalized tool-schema digest to the requested Attempt. Missing or extra
+  capability, a changed URL, feature flag, tool, annotation, schema, server
+  identity/version/auth status, or config digest refuses work before the turn.
+- `network_policy=disabled` still governs model shell/tool network access. The
+  separately named remote MCP grant is the only reviewed outbound knowledge
+  capability in this profile; it has read-only/non-destructive tool annotations
+  sealed into the tool-schema digest.
+- A secret-free developer-host probe against installed Codex `0.147.0` resolved
+  the expected server and two tools. The normalized tool-schema digest is
+  `9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7`; the
+  security-config digest is
+  `75ceb3e6e26ee770084d0d87923aa048b46415c11f1aac93d234559c61173629`.
+  This proves protocol composition, not a worker-authenticated turn or installed
+  service acceptance.
+- Plugin grants remain empty. App Server plugin install/uninstall RPCs are not a
+  production dependency. OAuth enrollment and native helpers/subagents remain
+  later, separately reviewed gates. Checked-in arming remains false, so G3 is
+  `BUILT_NOT_PROVEN / SERVICE_COMPOSED_UNARMED` until host install, dedicated
+  worker authentication and a real attributed planner/tool-call receipt pass.
 
 ### Wave R3 — reviewed Codex capacity composition
 

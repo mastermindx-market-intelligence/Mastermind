@@ -499,11 +499,12 @@ def _normalise_constraints(value: dict[str, Any] | None) -> dict[str, Any]:
             "preferred_model_aliases requires routing_policy_version"
         )
     if (
-        result.get("routing_policy_version") == "2026-08-24.stage2"
+        result.get("routing_policy_version")
+        in {"2026-08-24.stage2", "2026-08-24.stage3"}
         and present_capability_keys != capability_keys
     ):
         raise StateConflict(
-            "stage2 routed Jobs require an exact execution capability profile"
+            "stage2+ routed Jobs require an exact execution capability profile"
         )
 
     reason_codes_raw = raw.get("routing_reason_codes") or []

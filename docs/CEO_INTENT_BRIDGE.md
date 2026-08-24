@@ -307,8 +307,9 @@ will build a receipt, and `create_job` bounds the shape of any caller-supplied
 Deliberately absent from 1E-A itself: automatic dispatch of a CEO-created Job.
 The G1 service composition can advance only a strict-v2 root carrying the
 host-derived exact execution binding, and only when reviewed host configuration
-arms `run-coo-cycle`/the bounded tick. G2 may route only that cycle's read-only
-`plan` role through the exact `operator.appserver.readonly.v1` profile; work,
+arms `run-coo-cycle`/the bounded tick. G3 may route only that cycle's read-only
+`plan` role through the exact `operator.appserver.readonly.docs-mcp.v1` profile,
+whose sole extension is the exact, allow-listed OpenAI Docs MCP grant; work,
 review and repair remain sealed CLI Attempts, and checked-in configuration keeps
 both the COO cycle and Operator Harness unarmed. V1 remains undispatchable. General scheduling,
 new prioritization or admission policy over queued intents; multi-actor authorization or delegation;
