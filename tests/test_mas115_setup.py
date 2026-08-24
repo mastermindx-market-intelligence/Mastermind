@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 from integrations.chairman_surfaces import nonseat_canary as canary
 from scripts import mas115_keychain_store as keychain_store
 from scripts import mas115_setup as setup
@@ -194,9 +195,77 @@ def test_build_provision_requires_stopped_profile_and_exact_multilogin_core():
         "profile_id": stopped["profile_id"],
         "folder_id": stopped["folder_id"],
         "browser_type": "stealthfox",
-        "benign_origin": "http://127.0.0.1:7777",
+        "origin_policy": port_policy.ORIGIN_POLICY,
         "disposable_ack": canary.REQUIRED_ACK,
     }
+
+
+def _legacy_v2_provision() -> dict:
+    stopped = _mlx(4, running=False)
+    return {
+        "schema": port_policy.LEGACY_PROVISION_SCHEMA,
+        "vendor": "multilogin",
+        "profile_id": stopped["profile_id"],
+        "folder_id": stopped["folder_id"],
+        "browser_type": "mimic",
+        "benign_origin": port_policy.LEGACY_BENIGN_ORIGIN,
+        "disposable_ack": canary.REQUIRED_ACK,
+    }
+
+
+def _migration_bindings_loader():
+    return setup.build_enrollment_document(
+        None, _selections(), observed_at="2026-08-23T12:00:00Z",
+    ), []
+
+
+def test_legacy_migration_accepts_only_exact_v2_origin_and_preserves_identity(tmp_path):
+    """Catches migration loss, loose origin acceptance, or non-atomic permissions."""
+    path = tmp_path / "provision.json"
+    legacy = _legacy_v2_provision()
+    setup._atomic_private_json(legacy, path)
+    migrated, code = setup._migrate_legacy_provision(
+        path,
+        bindings_loader=_migration_bindings_loader,
+        now=datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+    )
+    assert code is None
+    assert migrated == {
+        "schema": "mastermind.mas115_nonseat_canary_provision.v3",
+        "vendor": "multilogin",
+        "profile_id": legacy["profile_id"],
+        "folder_id": legacy["folder_id"],
+        "browser_type": "mimic",
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "disposable_ack": canary.REQUIRED_ACK,
+    }
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text(encoding="utf-8")) == migrated
+
+
+@pytest.mark.parametrize(
+    "origin",
+    (
+        "http://127.0.0.1:65535",
+        "http://localhost:7777",
+        "https://127.0.0.1:7777",
+        "http://evil.example:7777",
+    ),
+)
+def test_legacy_migration_refuses_every_nonhistorical_origin(tmp_path, origin):
+    """Catches broad migration of an unrecognized or already-edited target."""
+    legacy = _legacy_v2_provision()
+    legacy["benign_origin"] = origin
+    path = tmp_path / "provision.json"
+    setup._atomic_private_json(legacy, path)
+    migrated, code = setup._migrate_legacy_provision(
+        path,
+        bindings_loader=_migration_bindings_loader,
+        now=datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc),
+    )
+    assert migrated is None
+    assert code == "DISALLOWED_TARGET"
+    assert json.loads(path.read_text(encoding="utf-8")) == legacy
 
 
 @pytest.mark.parametrize(

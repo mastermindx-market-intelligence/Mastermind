@@ -23,6 +23,7 @@ import httpx
 import pytest
 
 from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 from integrations.chairman_surfaces import nonseat_canary as core
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
 
@@ -46,7 +47,8 @@ def _valid_provision(vendor: str, **overrides) -> dict:
             "schema": core.PROVISION_SCHEMA,
             "vendor": "gologin",
             "profile_id": "aaaaaaaaaaaaaaaaaaaaaaaa",
-            "benign_origin": "http://127.0.0.1:7777",
+            "origin_policy": port_policy.ORIGIN_POLICY,
+            "benign_origin": port_policy.CANARY_ORIGIN,
             "disposable_ack": core.REQUIRED_ACK,
         }
     else:
@@ -56,7 +58,8 @@ def _valid_provision(vendor: str, **overrides) -> dict:
             "profile_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "folder_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
             "browser_type": "mimic",
-            "benign_origin": "http://127.0.0.1:7777",
+            "origin_policy": port_policy.ORIGIN_POLICY,
+            "benign_origin": port_policy.CANARY_ORIGIN,
             "disposable_ack": core.REQUIRED_ACK,
         }
     doc.update(overrides)
@@ -68,8 +71,17 @@ def _write_provision(tmp_path: Path, doc) -> Path:
     if isinstance(doc, str):
         path.write_text(doc, encoding="utf-8")
     else:
-        path.write_text(json.dumps(doc), encoding="utf-8")
+        stored = dict(doc)
+        if stored.get("benign_origin") == port_policy.CANARY_ORIGIN:
+            stored.pop("benign_origin")
+        path.write_text(json.dumps(stored), encoding="utf-8")
     return path
+
+
+def _stored_provision(doc: dict) -> dict:
+    stored = dict(doc)
+    stored.pop("benign_origin", None)
+    return stored
 
 
 def _binding_doc(*, colliding_profile_id=None) -> dict:
@@ -647,11 +659,14 @@ def test_hostile_url_widening_impossible(vendor):
 
 
 def test_hostile_allowed_url_exact_match_semantics():
-    provision = {"benign_origin": "http://127.0.0.1:7777"}
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/a") is True
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/b") is True
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/a/") is False
-    assert core.allowed_url(provision, "http://127.0.0.1:7777/a?x=1") is False
+    provision = {
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "benign_origin": port_policy.CANARY_ORIGIN,
+    }
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/a") is True
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/b") is True
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/a/") is False
+    assert core.allowed_url(provision, port_policy.CANARY_ORIGIN + "/a?x=1") is False
     assert core.allowed_url(provision, "http://127.0.0.1:7777/etc/passwd") is False
     assert core.allowed_url(provision, "https://127.0.0.1:7777/a") is False
     assert core.allowed_url(provision, "http://127.0.0.1:7778/a") is False
@@ -899,11 +914,11 @@ def test_hostile_provision_gate_bad_ack(tmp_path):
         "http://evil.example.com:7777",
     ],
 )
-def test_hostile_provision_gate_disallowed_origin(tmp_path, origin):
+def test_hostile_provision_gate_rejects_any_persisted_origin_field(tmp_path, origin):
     bad = _valid_provision("gologin", benign_origin=origin)
     path = _write_provision(tmp_path, bad)
     doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
-    assert doc is None and code == "DISALLOWED_TARGET"
+    assert doc is None and code == "PROVISION_MISSING"
 
 
 def test_hostile_provision_gate_gologin_with_folder_id(tmp_path):
@@ -947,7 +962,7 @@ def test_hostile_provision_gate_valid_ok(tmp_path, vendor):
     path = _write_provision(tmp_path, good)
     doc, code = _load_provision(str(path), bindings_loader=_no_collision_loader)
     assert code is None
-    assert doc == good
+    assert doc == _stored_provision(good)
 
 
 def _chatgpt_binding_doc(profile_id: str) -> dict:
@@ -968,7 +983,7 @@ def test_hostile_provision_gate_seat_collision_different_profile_id(tmp_path):
     other_doc = _chatgpt_binding_doc("bbbbbbbbbbbbbbbbbbbbbbbb")
     doc, code = _load_provision(str(path), bindings_loader=lambda: (other_doc, []))
     assert code is None
-    assert doc == good
+    assert doc == _stored_provision(good)
 
 
 def test_hostile_provision_gate_bindings_problems_fails_closed(tmp_path):
@@ -1162,7 +1177,10 @@ def test_hostile_allowed_url_requires_loopback_hostname():
 
 
 def test_hostile_allowed_url_rejects_dangerous_url_schemes():
-    provision = {"benign_origin": "http://127.0.0.1:7777"}
+    provision = {
+        "origin_policy": port_policy.ORIGIN_POLICY,
+        "benign_origin": port_policy.CANARY_ORIGIN,
+    }
     for bad_url in ("javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"):
         assert core.allowed_url(provision, bad_url) is False
 
