@@ -1,0 +1,124 @@
+"""Static product-contract tests for Chairman Control Room X1.
+
+These tests deliberately validate the private-local presentation surface only.
+They do not grant the UI lifecycle, attention, identity, or completion authority.
+"""
+from __future__ import annotations
+
+from html.parser import HTMLParser
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+STATIC = ROOT / "app" / "static" / "chairman_control"
+INDEX = STATIC / "index.html"
+JS = STATIC / "control_room.js"
+CSS = STATIC / "control_room.css"
+
+
+class _MarkupProbe(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: list[str] = []
+        self.inline_scripts = 0
+        self.script_srcs: list[str | None] = []
+        self.style_attrs: list[tuple[str, str]] = []
+        self._script_without_src = False
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        row = dict(attrs)
+        if row.get("id"):
+            self.ids.append(row["id"])
+        if row.get("style") is not None:
+            self.style_attrs.append((tag, row["style"]))
+        if tag == "script":
+            self.script_srcs.append(row.get("src"))
+            self._script_without_src = row.get("src") is None
+
+    def handle_data(self, data: str) -> None:
+        if self._script_without_src and data.strip():
+            self.inline_scripts += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._script_without_src = False
+
+
+def test_x1_command_deck_has_one_closed_static_shell() -> None:
+    probe = _MarkupProbe()
+    probe.feed(INDEX.read_text(encoding="utf-8"))
+
+    required = {
+        "ccr-command",
+        "needs-you",
+        "ccr-focus-list",
+        "ccr-work-list",
+        "ccr-surface-dock",
+        "ccr-detail-drawer",
+        "ccr-palette",
+        "system",
+        "discover-run",
+        "bind-form",
+        "refresh-builds",
+    }
+    assert required.issubset(set(probe.ids))
+    assert len(probe.ids) == len(set(probe.ids)), "duplicate DOM ids make navigation ambiguous"
+    assert probe.script_srcs == ["/static/control_room.js"]
+    assert probe.inline_scripts == 0
+    assert probe.style_attrs == []
+
+
+def test_x1_client_stays_on_existing_local_control_room_contract() -> None:
+    source = JS.read_text(encoding="utf-8")
+    for endpoint in (
+        "/api/state",
+        "/api/open",
+        "/api/discover",
+        "/api/refresh-builds",
+        "/api/bind",
+        "/api/unbind",
+    ):
+        assert endpoint in source
+
+    assert "innerHTML" not in source
+    assert "document.write" not in source
+    assert "eval(" not in source
+    assert '"X-CCR-Token"' in source
+
+
+def test_x1_focus_is_a_closed_deterministic_view_not_an_ai_priority_score() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function focusReasons(card)")
+    end = source.index("function isFocus(card)", start)
+    focus = source[start:end]
+
+    assert "attention_ids" in focus
+    assert "disagreements" in focus
+    assert '=== "blocked"' in focus
+    assert "unmet_dependencies" in focus
+    assert "cardFailedJobs" in focus
+    for forbidden in ("fetch(", "postJSON", "score", "priority", "rank"):
+        assert forbidden not in focus
+
+
+def test_x1_coordination_chain_does_not_claim_provider_presence_is_cognition() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function renderChain(card)")
+    end = source.index("function renderMissionRow(card)", start)
+    chain = source[start:end]
+
+    assert "cardAttentionTargets(card)" in chain
+    assert "card.bindings" in chain
+    assert "card.executive" in chain
+    for forbidden in ("capabilities", "running", "process", "installed"):
+        assert forbidden not in chain
+
+
+def test_x1_keeps_mastermind_semantic_palette_and_responsive_breakpoints() -> None:
+    source = CSS.read_text(encoding="utf-8")
+    for token in ("--brass:", "--slate:", "--danger:", "--font-mono:"):
+        assert token in source
+    assert ".ccr-detail-rail" in source
+    assert ".ccr-chain-node.is-attention" in source
+    assert "@media (max-width: 760px)" in source
+    assert "@media (prefers-reduced-motion: reduce)" in source
