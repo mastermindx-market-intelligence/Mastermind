@@ -56,6 +56,8 @@ _MAX_PROFILE_CENSUS = 1000
 _MAX_STDIN_BYTES = 16 * 1024
 _KEYCHAIN_READ_TIMEOUT_SECONDS = 15.0
 _KEYCHAIN_WAIT_TIMEOUT_SECONDS = 2.0
+_CLEANUP_PROCESS_TIMEOUT_SECONDS = 15.0
+_CLEANUP_PROCESS_POLL_SECONDS = 0.1
 _SECURITY_BIN = "/usr/bin/security"
 _KEYCHAIN_SERVICE = "mastermind.mas115.multilogin.disposable"
 _KEYCHAIN_ACCOUNT = "mastermind-mas115-canary"
@@ -352,6 +354,11 @@ class MultiloginClient:
         #: profile-SCOPED ownership, not a client-wide boolean. ``None`` when
         #: we hold no profile.
         self._started_profile_id = None
+        #: Exact teardown lease minted immediately before this client sends
+        #: its one preflighted start request. Unlike operational owner state,
+        #: it survives ambiguous responses and C5's simulated owner loss and
+        #: cannot be redirected to a caller-supplied profile.
+        self._cleanup_profile_ref = None
 
     def _require_credential(self) -> None:
         if not self._credential.present:
@@ -393,7 +400,14 @@ class MultiloginClient:
             return None
         if status.get("error_code") != "" or status.get("http_code") != 200:
             return None
-        if status.get("message") != expected_message:
+        message = status.get("message")
+        if not isinstance(message, str):
+            return None
+        # Multilogin Profile Search has changed this human-readable success
+        # prose while retaining the documented success codes and exact data
+        # contract.  ``None`` makes prose advisory for that one read-only
+        # census surface; lifecycle and launch responses remain exact.
+        if expected_message is not None and message != expected_message:
             return None
         if profile_id is not None and data.get("profile_id") != profile_id:
             return None
@@ -453,7 +467,7 @@ class MultiloginClient:
             raise _core.CanaryRefusal("VENDOR_ERROR")
         profile_id = profile_ref.get("profile_id")
         folder_id = profile_ref.get("folder_id")
-        if self._started_profile_id is not None:
+        if self._started_profile_id is not None or self._cleanup_profile_ref is not None:
             raise _core.CanaryRefusal("BUSY_PROFILE")
 
         # Direct callers cannot bypass the actuator's preflight: exact cloud
@@ -479,14 +493,21 @@ class MultiloginClient:
         if state != "stopped":
             raise _core.CanaryRefusal("BUSY_PROFILE")
 
+        # Once the request is sent, the effect can be ambiguous even if the
+        # transport/response is lost or malformed. Retain one exact-profile
+        # cleanup lease before the request; clear it only for definitive
+        # no-effect auth/not-found responses.
+        self._cleanup_profile_ref = dict(profile_ref)
         resp = self._safe_call(
             lambda: self._client._mlx_profile_start(self._credential, folder_id, profile_id),
         )
         if resp is None:
             raise _core.CanaryRefusal("VENDOR_ERROR")
         if resp.status_code in (401, 403):
+            self._cleanup_profile_ref = None
             raise _core.CanaryRefusal("AUTH_EXPIRED")
         if resp.status_code == 404:
+            self._cleanup_profile_ref = None
             raise _core.CanaryRefusal("PROFILE_NOT_FOUND")
         if resp.status_code != 200:
             raise _core.CanaryRefusal("VENDOR_ERROR")
@@ -516,11 +537,8 @@ class MultiloginClient:
         self._started_profile_id = profile_id
         return {"profile_id": profile_id, "port": port}
 
-    def stop(self, profile_ref: dict) -> None:
-        self._require_credential()
-        if not self._valid_ref(profile_ref) or self._started_profile_id != profile_ref.get("profile_id"):
-            raise _core.CanaryRefusal("UNOWNED_RUNNING_PROFILE")
-        profile_id = profile_ref.get("profile_id")
+    def _stop_cleanup_ref(self, profile_ref: dict) -> None:
+        profile_id = profile_ref["profile_id"]
         resp = self._safe_call(lambda: self._client._mlx_profile_stop(self._credential, profile_id))
         if resp is None:
             raise _core.CanaryRefusal("VENDOR_ERROR")
@@ -541,10 +559,33 @@ class MultiloginClient:
         ):
             raise _core.CanaryRefusal("VENDOR_ERROR")
         self._started_profile_id = None
+        self._cleanup_profile_ref = None
+
+    def stop(self, profile_ref: dict) -> None:
+        self._require_credential()
+        if (
+            not self._valid_ref(profile_ref)
+            or self._started_profile_id != profile_ref.get("profile_id")
+            or self._cleanup_profile_ref != profile_ref
+        ):
+            raise _core.CanaryRefusal("UNOWNED_RUNNING_PROFILE")
+        self._stop_cleanup_ref(profile_ref)
+
+    def _cleanup_started_profile(self) -> bool:
+        """Stop only the exact profile targeted by this client's start request."""
+        self._require_credential()
+        profile_ref = self._cleanup_profile_ref
+        if profile_ref is None:
+            return False
+        self._stop_cleanup_ref(profile_ref)
+        return True
 
     def forget_ownership(self) -> None:
-        """Owner-loss simulation hook: forget our own started-profile
-        bookkeeping. Never calls the vendor."""
+        """Forget operational ownership only; never call the vendor.
+
+        The private exact-profile teardown lease remains so the outer canary
+        boundary can still contain C5 and early matrix failures.
+        """
         self._started_profile_id = None
 
     def _profile_inventory_item(self, profile_ref: dict):
@@ -567,9 +608,7 @@ class MultiloginClient:
                 raise _core.CanaryRefusal("AUTH_EXPIRED")
             if resp.status_code != 200:
                 raise _core.CanaryRefusal("VENDOR_ERROR")
-            data = self._successful_envelope(
-                resp.payload, expected_message="Search profile successfully result",
-            )
+            data = self._successful_envelope(resp.payload, expected_message=None)
             if data is None or set(data) != {"profiles", "total_count"}:
                 raise _core.CanaryRefusal("VENDOR_ERROR")
             profiles = data.get("profiles")
@@ -652,6 +691,9 @@ class GoLoginClient:
         docstring), so it has no started-profile bookkeeping to forget.
         Exists only for uniform shape with MultiloginClient."""
         return None
+
+    def _cleanup_started_profile(self) -> bool:
+        return False
 
     def profile_exists(self, profile_ref: dict) -> bool:
         raise _core.CanaryRefusal("UNSUPPORTED_SURFACE")
@@ -792,6 +834,28 @@ def live_process_probe(provision: dict):
                 other_profiles += 1
 
         return {"this_profile": this_profile, "other_profiles": other_profiles}
+
+    return _probe
+
+
+def _settled_cleanup_probe(
+    process_probe, *, monotonic=time.monotonic, sleep=time.sleep,
+    timeout_seconds=_CLEANUP_PROCESS_TIMEOUT_SECONDS,
+):
+    """Wait boundedly for the exact disposable process group to disappear."""
+    def _probe():
+        deadline = monotonic() + timeout_seconds
+        latest = process_probe()
+        while (
+            isinstance(latest, dict)
+            and isinstance(latest.get("this_profile"), int)
+            and not isinstance(latest.get("this_profile"), bool)
+            and latest.get("this_profile") > 0
+            and monotonic() < deadline
+        ):
+            sleep(_CLEANUP_PROCESS_POLL_SECONDS)
+            latest = process_probe()
+        return latest
 
     return _probe
 
@@ -1019,15 +1083,17 @@ def main(
         def _clock() -> str:
             return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
+        process_probe = live_process_probe(live_provision)
         receipts = _core.run_matrix(
             vendor_client=vendor_client,
             navigator=navigator,
             provision=live_provision,
             credential=credential,
-            process_probe=live_process_probe(live_provision),
+            process_probe=process_probe,
             origin_probe=origin,
             clock=_clock,
             canary_token=token,
+            cleanup_probe=_settled_cleanup_probe(process_probe),
         )
     except _core.CanaryRefusal as refusal:
         return _emit_refusal(out, args.vendor, refusal.code)
