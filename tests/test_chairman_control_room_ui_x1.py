@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,12 +145,12 @@ def test_x1_attention_receipts_remain_forensically_reachable() -> None:
     assert "item.evidence" in attention
     assert "Object.keys(entry)" in attention
     assert "function renderAttentionDetail(item, target)" in attention
-    assert "function openAttentionDetail(item, target)" in attention
+    assert "function openAttentionDetail(item, target, opener)" in attention
     assert 'button("Inspect"' in attention
-    assert "openAttentionDetail(item, target)" in attention
+    assert "openAttentionDetail(item, \"chairman\", inspectBtn)" in attention
 
     detail_start = source.index("function renderDetail(card)")
-    detail_end = source.index("function openDetail(card)", detail_start)
+    detail_end = source.index("function openDetail(card, opener)", detail_start)
     detail = source[detail_start:detail_end]
     assert "attentionEvidenceFold(entry.item)" in detail
 
@@ -181,6 +185,18 @@ def test_x1_quick_open_sol_requires_one_unambiguous_destination() -> None:
     assert "return rows.length === 1 ? rows[0] : null;" in binding
 
 
+def test_x1_chatgpt_binding_is_addressable_but_not_openable_before_p0b() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function bindingConfidence(binding)")
+    end = source.index("function openBinding(binding", start)
+    confidence = source[start:end]
+
+    assert 'binding.provider === "chatgpt"' in confidence
+    assert 'state: "UNSUPPORTED"' in confidence
+    assert "openable: false" in confidence
+    assert "current P0B navigation actuator is not supported" in confidence
+
+
 def test_x1_palette_never_attempts_an_unsupported_surface_open() -> None:
     source = JS.read_text(encoding="utf-8")
     start = source.index("function rebuildPaletteIndex()")
@@ -193,16 +209,62 @@ def test_x1_palette_never_attempts_an_unsupported_surface_open() -> None:
     assert "else if (relatedCard)" in palette
 
 
+def test_x1_binding_conflicts_preserve_exact_claimant_ids() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function renderLooseEnds(doc)")
+    end = source.index("// command palette", start)
+    loose = source[start:end]
+
+    assert "row.binding_ids" in loose
+    assert 'claimantIds.join(", ")' in loose
+    assert "claimants unknown" in loose
+
+
+def test_x1_cursor_discovery_note_survives_system_projection() -> None:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("function renderDiscoverResults(doc)")
+    end = source.index("function updateBindFieldVisibility", start)
+    discovery = source[start:end]
+
+    assert "doc.cursor" in discovery
+    assert "cursor.note" in discovery
+    assert "Cursor native thread discovery is unsupported" in discovery
+
+
 def test_x1_remembered_dock_collapse_cannot_reserve_hidden_responsive_space() -> None:
     source = JS.read_text(encoding="utf-8")
-    start = source.index("function applyDockState()")
+    start = source.index("function desktopDockVisible()")
     end = source.index('document.getElementById("discover-run")', start)
     dock = source[start:end]
 
     assert 'matchMedia("(max-width: 1050px)")' in dock
-    assert "var activeCollapsed = collapsed && desktopDockVisible" in dock
+    assert "var activeCollapsed = collapsed && desktopDockVisible()" in dock
     assert 'classList.toggle("ccr-dock-collapsed", activeCollapsed)' in dock
     assert 'window.addEventListener("resize", applyDockState)' in dock
+
+
+def test_x1_desktop_surfaces_nav_targets_the_real_dock() -> None:
+    source = JS.read_text(encoding="utf-8")
+    assert 'name === "surfaces" && desktopDockVisible()' in source
+    assert 'dock.focus({ preventScroll: true })' in source
+    assert 'window.localStorage.setItem(DOCK_KEY, "0")' in source
+
+    markup = INDEX.read_text(encoding="utf-8")
+    assert 'id="ccr-surface-dock"' in markup
+    assert 'tabindex="-1"' in markup
+
+
+def test_x1_drawer_and_palette_are_modal_focus_scopes_with_return() -> None:
+    source = JS.read_text(encoding="utf-8")
+    markup = INDEX.read_text(encoding="utf-8")
+
+    assert 'id="ccr-detail-drawer" class="ccr-detail-drawer" role="dialog" aria-modal="true"' in markup
+    assert 'id="ccr-palette" class="ccr-palette-wrap" role="dialog" aria-modal="true"' in markup
+    assert "function trapFocus(event, container)" in source
+    assert "LAST_DRAWER_OPENER" in source
+    assert "LAST_PALETTE_OPENER" in source
+    assert "restoreFocus(opener)" in source
+    assert 'drawer.classList.contains("is-open")' in source
 
 
 def test_x1_keeps_mastermind_semantic_palette_and_responsive_breakpoints() -> None:
@@ -214,3 +276,10 @@ def test_x1_keeps_mastermind_semantic_palette_and_responsive_breakpoints() -> No
     assert ".ccr-layout.ccr-dock-collapsed" in source
     assert "@media (max-width: 760px)" in source
     assert "@media (prefers-reduced-motion: reduce)" in source
+
+
+def test_x1_javascript_parses_with_node_when_available() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed on this test host")
+    subprocess.run([node, "--check", str(JS)], check=True, capture_output=True, text=True)
