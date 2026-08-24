@@ -1,9 +1,10 @@
 # Executive OS Phase 1F — hierarchical orchestration contract
 
-**Status:** Phase 1F-A/1F-B accepted baseline plus Phase 1F-C inert implementation
-merged in `db0bac5`. The additive schema-v4/runtime/result/cycle surfaces are
-built and deterministically tested, but are not deployed, scheduled, armed, or
-accepted as live capability. The governing 1F-C source law is
+**Status:** Phase 1F-A/1F-B accepted baseline plus Phase 1F-C implementation
+merged in `db0bac5`, with the later G1 exact-root control-service composition
+implemented but production-unarmed. The additive schema-v4/runtime/result/cycle
+surfaces are built and deterministically tested, but are not installed, armed,
+or accepted as live capability. The governing 1F-C source law is
 `research/EXECUTIVE_OS_PHASE1FC_CEO_POLICY_AND_IMPLEMENTATION_COMMISSION_2026-08-20.md`
 as accepted by merge `a49ac647fff64d034cc965cf54ac48968d6c15be`; this older design memo is
 subordinate where the accepted commission repaired it. The historical
@@ -276,6 +277,16 @@ its own tree. The 1F-C implementation either passes an explicit job-id set to th
 existing dispatch machinery or grows a `--root JOB-nnn` filter on that entry —
 either way, the scope restriction is load-bearing, not stylistic.
 
+**G1 additive composition.** The installed control service now exposes
+`run-coo-cycle ROOT_JOB_ID` and may own one bounded in-process tick when the
+reviewed host configuration explicitly arms it. Both call the same `CooCycle`
+and existing supervisor. The tick reads at most 64 root identities, selects at
+most one host-bound strict-v2 root, performs at most one top-level cycle action,
+then stops until the next interval. It creates no table, queue, cursor, lease,
+session registry, APScheduler job or second lifecycle authority. Startup and
+pre-claim paths reconcile unowned active Attempts; another root can never slip
+through the serialized worker boundary.
+
 ### 4.2 The cycle state machine (one bounded step per invocation)
 
 ```text
@@ -346,14 +357,16 @@ therefore a hard prerequisite of 1F-C's escalation story, not an additive
 follow-on: they land in 1F-B (with the fields that make them evidence-bound), and
 1F-C may not build against an inbox that lacks them. Sequenced in §6.5.
 
-### 4.6 What 1F-C explicitly does not do
+### 4.6 What 1F-C/G1 explicitly does not do
 
-No scheduling loop (run-once only). No priority decisions (parent selection is the
-caller's `--parent`; "which parent first" belongs to the CEO/agenda). No strategic
-scope expansion (a child that needs paths/authorities outside the parent's grant is
-a refused creation and an escalation, not a widened grant). No automatic merge,
-deploy, or Agent OS/strategic-state writes. No CEO/model invocation from inside the
-cycle. No new transport, no Slack, no chat rooms.
+The original 1F-C CLI remains run-once only. G1 adds only the bounded service tick
+described above; it is not a general scheduler and remains checked-in unarmed. It
+makes no new priority decisions: eligible roots retain the existing runtime order,
+and agenda/CEO admission still decides what roots exist. No strategic scope
+expansion (a child that needs paths/authorities outside the parent's grant is a
+refused creation and an escalation, not a widened grant). No CEO/model invocation
+from inside the deterministic cycle. No new transport, Slack, chat rooms,
+automatic merge/deploy authority, or Agent OS/strategic-state writes.
 
 ---
 
@@ -404,6 +417,11 @@ merge, deploy, production, or capital authority. The explicit CLI is one
 caller-selected `run-once --parent` mutation against an existing v4 fixture or
 operator-selected root; it never polls or selects a parent. Production exact-ID
 dispatch and arming require their separately reviewed later gates.
+
+G1 is that later exact-ID composition gate: it adds a bounded service operation
+and in-process tick around the accepted cycle, not a generic scheduler. Its
+checked-in host arm remains false, it cannot dispatch v1/proof/foreign roots,
+and host install/provider readiness/current-release acceptance remain separate.
 
 ## §7 Architecture contradictions surfaced (for the return handoff)
 

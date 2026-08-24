@@ -2,9 +2,11 @@
 
 **Date:** 2026-08-24
 
-**Status:** G0 implemented and production-unarmed; host/runtime requalification and later arming are separate gates
+**Status:** G0 merged in `ceebc82`; G1 service composition implemented on a production-unarmed carrier; host/runtime requalification and later arming remain separate gates
 
-**Protected base:** `12117ca576cec2c4f054664dd62c4e0809f27e75`
+**G0 freeze base:** `12117ca576cec2c4f054664dd62c4e0809f27e75`
+
+**G1 carrier base:** `ceebc82f74b3101c36f67ca2fa5767a2a9d7453f`
 
 **Lifecycle authority:** Mastermind Executive OS Runtime only
 
@@ -36,7 +38,7 @@ The 10/10 product is an executive workforce, not a bag of logged-in terminals.
 |---|---|---|
 | Agent OS | `PROVEN_LIVE` as durable workstream/decision/discovery/handoff knowledge | It is not a dispatcher, Job store, lease table or session registry. |
 | Executive Runtime | `BUILT_NOT_PROVEN / HOST_DISABLED` | SQLite Job/Attempt/Worker/Event authority, broker, supervisor, backup, canary and launchd packaging exist. The installed host points at stale release `b5e45be...`; its formal acceptance is `SPENT_FAILED`, and both services remain deliberately disabled. |
-| Phase 1F-C COO hierarchy | `BUILT_NOT_PROVEN / DEVELOPMENT_UNARMED` | Schema v4 and deterministic planner/work/review/repair/aggregation transitions merged in `db0bac5...`. The checked-in CLI still injects no live dispatcher and performs no polling or scheduling. |
+| Phase 1F-C COO hierarchy | `BUILT_NOT_PROVEN / SERVICE_COMPOSED_UNARMED` | Schema v4 and deterministic planner/work/review/repair/aggregation transitions merged in `db0bac5...`. G1 now composes one exact-root action with the existing supervisor and a bounded in-process tick, but checked-in host configuration keeps the arm false and no current host release is installed/requalified. |
 | Codex sealed worker | `BUILT_NOT_PROVEN` | One-shot `codex exec --json` with isolated worktree, exact binary and auth home, no MCP/plugins/apps/subagents/network, supervisor-owned validation. The host has not been requalified on current master. |
 | Operator Harness / Codex App Server | `BUILT_NOT_PROVEN / DEVELOPMENT_UNARMED` | Durable session epochs, process generations, provider session IDs, turns, crash reconciliation, capability attestation and read-only Codex adapter merged in `4f672b8...`. No production adapter registration/composition exists. |
 | Agent OAuth/auth realm | `PARTIAL` | Dedicated worker auth provisioning, metadata checks, account identity probe and one bounded inference readiness receipt exist. Current host receipt is root-private and not currently verified. No copying of the Chairman's default `auth.json` is permitted. |
@@ -207,6 +209,16 @@ becomes a generic shell or a second scheduler.
 - Reconcile active Attempt identity before any new claim.
 - Add a bounded service-owned tick over existing eligible roots; no second
   scheduler/table/queue and no fleet-wide blind loop.
+
+G1 implementation binds the host-selected `coo.sealed` alias to the existing
+G0 profile/policy identity and two serialized logical cost capacities on the
+same dedicated worker identity. `submit-ceo-intent` may add that binding only to
+strict v2; the caller still cannot name provider, model, profile or credential
+realm. `run-coo-cycle` and the background tick both require
+`coo_autonomy_armed=true`, while the checked-in install/template default remains
+`false`. A tick selects at most one of 64 bounded strict roots, performs exactly
+one deterministic action, and persists a secret-free refusal event when the
+autonomous action cannot safely proceed.
 
 ### G2 — read-only semi-headless COO session
 

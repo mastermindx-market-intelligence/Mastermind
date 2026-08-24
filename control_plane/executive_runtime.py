@@ -95,6 +95,21 @@ _ROUTING_VALUE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SEAT_RE = re.compile(r"^[a-z][a-z0-9._-]{0,31}$")
 _JOB_SEATS = frozenset({"coo", "ceo", "chairman"})
 _BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
+V2_HOST_EXECUTION_BINDING_KEYS = frozenset(
+    {
+        "eligible_quota_classes",
+        "provider",
+        "model",
+        "effort",
+        "cost_class",
+        "base_sha",
+        "routing_policy_version",
+        "execution_profile_id",
+        "execution_profile_digest",
+        "capability_policy_version",
+        "capability_policy_digest",
+    }
+)
 _ORCHESTRATION_ROLES = frozenset(
     {"plan", "work", "review", "repair", "aggregation"}
 )
@@ -2768,6 +2783,134 @@ class WorkerRegistry:
         worker = self.get_worker(worker_id)
         assert worker is not None
         return worker
+
+    def register_quota_class(
+        self,
+        worker_id: str,
+        quota_class: str,
+        *,
+        provider: str,
+        model: str | None = None,
+        effort: str | None = None,
+        cost_class: str | None = None,
+        capabilities: str | list[str] | tuple[str, ...] | None = None,
+        metadata: dict[str, Any] | None = None,
+        status: WorkerStatus | str = WorkerStatus.AVAILABLE,
+    ) -> WorkerQuotaClass:
+        """Add or reconcile one exact capacity class on an existing worker.
+
+        This is an additive host-composition seam, not a mutable policy update.
+        An existing class must already be byte-equivalent after normalization;
+        drift is refused.  A new class is inserted only while the worker has no
+        held Attempt, so an upgrade cannot widen live capacity beneath a
+        running provider process.
+        """
+
+        worker_token = str(worker_id).strip()
+        quota_token = str(quota_class).strip().lower()
+        provider_token = str(provider).strip().lower()
+        if _WORKER_ID_RE.fullmatch(worker_token) is None:
+            raise StateConflict("invalid worker_id for quota registration")
+        if _WORKER_ID_RE.fullmatch(quota_token) is None:
+            raise StateConflict("invalid quota_class for quota registration")
+        if not provider_token:
+            raise StateConflict("quota provider is required")
+        if metadata is not None and not isinstance(metadata, dict):
+            raise StateConflict("quota metadata must be a mapping")
+        quota_status = WorkerStatus(_enum_value(status, WorkerStatus))
+        if quota_status == WorkerStatus.BUSY:
+            raise StateConflict("a quota class cannot register BUSY without an Attempt")
+        normalized_capabilities = _normalise_capabilities(capabilities)
+        normalized_metadata = dict(metadata or {})
+        normalized = {
+            "provider": provider_token,
+            "model": str(model).strip().lower() if model else None,
+            "effort": str(effort).strip().lower() if effort else None,
+            "cost_class": str(cost_class).strip().lower() if cost_class else None,
+            "capabilities": normalized_capabilities,
+            "metadata": normalized_metadata,
+        }
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            worker = connection.execute(
+                "SELECT * FROM workers WHERE worker_id=?", (worker_token,)
+            ).fetchone()
+            if worker is None:
+                raise StateConflict(f"worker {worker_token!r} does not exist")
+            if str(worker["provider"]) != provider_token:
+                raise StateConflict("quota provider differs from its worker identity")
+            existing = connection.execute(
+                "SELECT * FROM worker_quota_classes WHERE worker_id=? AND quota_class=?",
+                (worker_token, quota_token),
+            ).fetchone()
+            if existing is not None:
+                actual = {
+                    "provider": str(existing["provider"]),
+                    "model": existing["model"],
+                    "effort": existing["effort"],
+                    "cost_class": existing["cost_class"],
+                    "capabilities": _normalise_capabilities(
+                        _json_loads(existing["capabilities_json"], fallback=[])
+                    ),
+                    "metadata": dict(
+                        _json_loads(existing["metadata_json"], fallback={})
+                    ),
+                }
+                if actual != normalized:
+                    raise StateConflict(
+                        f"quota class {worker_token}:{quota_token} already exists with different policy"
+                    )
+                return _quota_from_row(existing)
+            held = connection.execute(
+                "SELECT 1 FROM worker_quota_classes WHERE worker_id=? AND held_attempt_id IS NOT NULL LIMIT 1",
+                (worker_token,),
+            ).fetchone()
+            if held is not None:
+                raise StateConflict(
+                    "cannot add a quota class while the worker owns an active Attempt"
+                )
+            connection.execute(
+                """
+                INSERT INTO worker_quota_classes(
+                  worker_id,quota_class,status,provider,model,effort,cost_class,
+                  capabilities_json,metadata_json,last_seen_at_ms,created_at_ms,updated_at_ms
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    worker_token,
+                    quota_token,
+                    quota_status.value,
+                    provider_token,
+                    normalized["model"],
+                    normalized["effort"],
+                    normalized["cost_class"],
+                    _json_dumps(normalized_capabilities),
+                    _json_dumps(normalized_metadata),
+                    timestamp,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            self.store.append_event(
+                connection,
+                aggregate_type="quota_class",
+                aggregate_id=f"{worker_token}:{quota_token}",
+                event_type="WORKER_QUOTA_REGISTERED",
+                worker_id=worker_token,
+                quota_class=quota_token,
+                payload={
+                    "provider": provider_token,
+                    "model": normalized["model"],
+                    "effort": normalized["effort"],
+                    "cost_class": normalized["cost_class"],
+                    "capabilities": normalized_capabilities,
+                    "metadata": normalized_metadata,
+                },
+                timestamp_ms=timestamp,
+            )
+        created = self.get_quota_class(worker_token, quota_token)
+        assert created is not None
+        return created
 
     def get_quota_class(
         self, worker_id: str, quota_class: str
@@ -6532,6 +6675,7 @@ class JobRegistry:
         fingerprint: str,
         command_id: str,
         workspace_root: str | Path | None,
+        execution_binding: dict[str, Any] | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -6557,6 +6701,25 @@ class JobRegistry:
         if command_id != command_id_for(str(normalized["intent_id"])):
             raise StateConflict("v2 COO root command_id is not intent-derived")
         contract = normalized["execution_contract"]
+        constraints = dict(contract.get("constraints") or {})
+        if execution_binding is not None:
+            if not isinstance(execution_binding, dict) or set(execution_binding) != set(
+                V2_HOST_EXECUTION_BINDING_KEYS
+            ):
+                raise StateConflict(
+                    "v2 host execution binding fields are incomplete or drifted"
+                )
+            bound = _normalise_constraints(execution_binding)
+            if set(bound) != set(V2_HOST_EXECUTION_BINDING_KEYS):
+                raise StateConflict("v2 host execution binding did not normalize exactly")
+            normalized_caller = _normalise_constraints(constraints)
+            for key in set(constraints) & set(bound):
+                if normalized_caller.get(key) != bound[key]:
+                    raise StateConflict(
+                        f"caller constraint {key} conflicts with reviewed host composition"
+                    )
+            normalized_caller.update(bound)
+            constraints = _normalise_constraints(normalized_caller)
         worktree = contract.get("worktree")
         if worktree is not None:
             if workspace_root is None:
@@ -6581,7 +6744,7 @@ class JobRegistry:
             authority_level=contract.get("authority_level", "A0"),
             branch=contract.get("branch"),
             worktree=worktree,
-            constraints=contract.get("constraints"),
+            constraints=constraints,
             attempt_limit=contract["attempt_limit"],
             requested_authorities=contract["requested_authorities"],
             allowed_write_paths=contract.get("allowed_write_paths"),
@@ -6649,6 +6812,7 @@ class JobRegistry:
             "execution_profile_digest",
             "capability_policy_version",
             "capability_policy_digest",
+            "base_sha",
         ):
             if root_constraints.get(key):
                 constraints[key] = root_constraints[key]
@@ -13673,6 +13837,7 @@ __all__ = [
     "RuntimeStore",
     "SCHEMA_VERSION",
     "StateConflict",
+    "V2_HOST_EXECUTION_BINDING_KEYS",
     "Worker",
     "WorkerQuotaClass",
     "WorkerRegistry",

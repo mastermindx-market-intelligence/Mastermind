@@ -233,6 +233,51 @@ def test_quota_pool_matches_provider_model_effort_cost_class_and_caps(tmp_path):
     assert inherited is not None and inherited.capabilities == ["research"]
 
 
+def test_additive_quota_registration_is_exact_idempotent_and_idle_only(tmp_path):
+    runtime = _runtime(tmp_path)
+    _register_default(runtime)
+    specification = {
+        "provider": "codex",
+        "model": "gpt-5.6-sol",
+        "effort": "xhigh",
+        "cost_class": "small",
+        "capabilities": ["code", "planning"],
+        "metadata": {"execution_profile_digest": "a" * 64},
+    }
+
+    created = runtime.workers.register_quota_class(
+        "worker-01", "codex-coo", **specification
+    )
+    replayed = runtime.workers.register_quota_class(
+        "worker-01", "codex-coo", **specification
+    )
+    assert created == replayed
+    assert len(
+        [
+            event
+            for event in runtime.events.list_events()
+            if event.event_type == "WORKER_QUOTA_REGISTERED"
+        ]
+    ) == 1
+
+    with pytest.raises(StateConflict, match="different policy"):
+        runtime.workers.register_quota_class(
+            "worker-01", "codex-coo", **{**specification, "effort": "high"}
+        )
+
+    held_job = runtime.jobs.create_job("Hold the existing worker identity")
+    assert runtime.attempts.claim_job(held_job.job_id) is not None
+    with pytest.raises(StateConflict, match="active Attempt"):
+        runtime.workers.register_quota_class(
+            "worker-01",
+            "codex-coo-default",
+            **{**specification, "cost_class": "default"},
+        )
+    assert (
+        runtime.workers.get_quota_class("worker-01", "codex-coo-default") is None
+    )
+
+
 def test_whole_identity_status_can_recover_an_offline_registered_worker(tmp_path):
     runtime = _runtime(tmp_path)
     runtime.workers.register_worker(

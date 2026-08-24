@@ -26,6 +26,15 @@
     }
   },
   "model_aliases": {
+    "coo.sealed": {
+      "provider_alias": "codex",
+      "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "cost_class": "small",
+      "capabilities": ["code", "planning", "research", "review", "tests"],
+      "worker_eligible": true
+    },
     "frontier.orchestrator": {
       "provider_alias": "codex",
       "execution_profile_id": "operator.appserver.readonly.v1",
