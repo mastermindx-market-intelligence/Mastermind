@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import signal
+import sqlite3
 import stat
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from control_plane.codex_worker import (
     WorkerResult,
     WorkerRunStatus,
 )
+from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.executive_runtime import (
     AttemptLease,
     AttemptStatus,
@@ -37,6 +39,7 @@ from control_plane.executive_supervisor import (
     ProcessPresence,
     ReconcileStatus,
     RESULT_SCHEMA_VERSION,
+    SupervisorError,
     worker_result_schema,
 )
 
@@ -421,6 +424,141 @@ def _supervisor(runtime: Runtime, tmp_path: Path, adapter: FakeAdapter) -> Execu
         require_complete_launch_attestation=True,
         instance_id="supervisor-fixture",
     )
+
+
+def _runtime_and_routed_job(
+    tmp_path: Path,
+    *,
+    profile_id: str = "sealed.worker.write.no-extensions.v1",
+) -> tuple[Runtime, str, Path]:
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve(profile_id)
+    capability_identity = {
+        "execution_profile_id": profile.profile_id,
+        "execution_profile_digest": profile.profile_digest,
+        "capability_policy_version": registry.policy_version,
+        "capability_policy_digest": registry.policy_digest,
+    }
+    runtime = Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "codex-routed-01",
+        provider="codex",
+        account_label="dedicated-worker-account",
+        worker_type="codex-cli",
+        capabilities=["code", "tests"],
+        quota_classes={
+            "codex-native": {
+                "capabilities": ["code", "tests"],
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "cost_class": "standard",
+                "metadata": capability_identity,
+            }
+        },
+    )
+    workspace = tmp_path / "workspaces" / "routed-workspace"
+    workspace.mkdir(mode=0o700, parents=True)
+    job = runtime.jobs.create_job(
+        "Execute only under the exact reviewed capability profile",
+        worktree=str(workspace.resolve()),
+        requested_authorities=["READ", "WRITE_BRANCH", "RUN_TESTS"],
+        allowed_write_paths=["control_plane/proof.py"],
+        validation_commands=[["/usr/bin/true"]],
+        constraints={
+            "provider": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "xhigh",
+            "cost_class": "standard",
+            "base_sha": "c" * 40,
+            "eligible_quota_classes": ["codex-native"],
+            "required_capabilities": ["code", "tests"],
+            "routing_policy_version": "2026-08-24.stage2",
+            **capability_identity,
+        },
+        attempt_limit=1,
+    )
+    return runtime, job.job_id, workspace
+
+
+def test_routed_job_launches_only_with_exact_installed_capability_profile(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _ = _runtime_and_routed_job(tmp_path)
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+
+    active = asyncio.run(supervisor.start_job(job_id))
+
+    assert adapter.spec is not None
+    assert active.lease.attempt.status is AttemptStatus.CLAIMED
+    persisted = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert persisted is not None and persisted.status is AttemptStatus.CHECKPOINTED
+    assert persisted.launch_metadata["routing"]["execution_profile_id"] == (
+        "sealed.worker.write.no-extensions.v1"
+    )
+
+
+def test_routed_job_refuses_capacity_profile_drift_before_provider_start(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _ = _runtime_and_routed_job(tmp_path)
+    lease = runtime.attempts.claim_job(job_id, lease_owner="supervisor-fixture")
+    assert lease is not None
+    with sqlite3.connect(runtime.store.path) as connection:
+        row = connection.execute(
+            """
+            SELECT metadata_json FROM worker_quota_classes
+            WHERE worker_id=? AND quota_class=?
+            """,
+            (lease.attempt.worker_id, lease.attempt.quota_class),
+        ).fetchone()
+        assert row is not None
+        metadata = json.loads(row[0])
+        metadata["execution_profile_digest"] = "0" * 64
+        connection.execute(
+            """
+            UPDATE worker_quota_classes SET metadata_json=?
+            WHERE worker_id=? AND quota_class=?
+            """,
+            (
+                json.dumps(metadata, sort_keys=True, separators=(",", ":")),
+                lease.attempt.worker_id,
+                lease.attempt.quota_class,
+            ),
+        )
+
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+    with pytest.raises(
+        SupervisorError, match="capacity execution-profile identity drifted"
+    ):
+        asyncio.run(supervisor._start_claimed_job(job_id, lease))
+
+    assert adapter.spec is None
+    attempt = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    job = runtime.jobs.get_job(job_id)
+    assert attempt is not None and attempt.status is AttemptStatus.FAILED
+    assert job is not None and job.status is JobStatus.FAILED
+
+
+def test_read_only_profile_refuses_write_grant_before_provider_start(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _ = _runtime_and_routed_job(
+        tmp_path,
+        profile_id="sealed.worker.readonly.no-extensions.v1",
+    )
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+
+    with pytest.raises(SupervisorError, match="read-only execution profile"):
+        asyncio.run(_supervisor(runtime, tmp_path, adapter).start_job(job_id))
+
+    assert adapter.spec is None
+    job = runtime.jobs.get_job(job_id)
+    assert job is not None and job.status is JobStatus.FAILED
 
 
 def test_start_cycle_job_claims_only_exact_command_bound_job_before_launch(

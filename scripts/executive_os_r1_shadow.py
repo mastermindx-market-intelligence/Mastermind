@@ -22,7 +22,7 @@ from control_plane.executive_runtime import JobPayload, Runtime, SCHEMA_VERSION
 from control_plane.model_router import ModelRouter, WorkRequest
 
 
-ROUTING_POLICY_VERSION = "2026-08-16.stage1"
+ROUTING_POLICY_VERSION = "2026-08-24.stage2"
 EVIDENCE_SCHEMA = "mastermind.executive_os_r1_shadow_evidence/v1"
 
 # These are the reviewed, bounded R1 fixture inputs.  The all-Sol values are a
@@ -102,6 +102,10 @@ def _register_fixture_capacity(runtime: Runtime, router: ModelRouter) -> list[di
                     "model_alias": profile.model_alias,
                     "provider_alias": profile.provider_alias,
                     "routing_policy_version": router.policy_version,
+                    "execution_profile_id": profile.execution_profile_id,
+                    "execution_profile_digest": profile.execution_profile_digest,
+                    "capability_policy_version": profile.capability_policy_version,
+                    "capability_policy_digest": profile.capability_policy_digest,
                     "fixture_only": True,
                     "stage1_production_armed": False,
                 },
@@ -128,6 +132,8 @@ def _register_fixture_capacity(runtime: Runtime, router: ModelRouter) -> list[di
                 "fixture_only": True,
                 "stage1_production_armed": False,
                 "routing_policy_version": router.policy_version,
+                "capability_policy_version": first.capability_policy_version,
+                "capability_policy_digest": first.capability_policy_digest,
                 "logical_capacity_aliases": list(aliases),
             },
         )

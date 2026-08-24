@@ -1,9 +1,11 @@
 # Executive worker routing — stage 1
 
 **Status:** R1 shadow evidence and Phase 1F-B are accepted. Phase 1F-C schema-v4
-and the explicit bounded COO `run-once` path are implemented on a HOLD-FOR-SOL
-branch with deterministic fixture evidence only. They are not merged, deployed,
-scheduled, production-armed, or accepted as live capability.
+and the explicit bounded COO `run-once` path merged in `db0bac5`, but remain
+undeployed, unscheduled, production-unarmed, and unaccepted as live capability.
+The 2026-08-24 G0 capability-grant seam binds an exact extension/profile digest
+through new routed Jobs, worker capacity and atomic claim receipts; it does not
+arm an App Server, MCP server, plugin, subagent or production worker.
 
 This stage makes economical-worker-first execution real without creating a
 second queue, teaching Chris tmux, or widening Executive OS or MCP authority.
@@ -39,7 +41,8 @@ process, poll, retry, or mark work complete.
 | worker launch | `CodexWorkerAdapter` already enforces exact-SHA workspaces, bounded authorities, no network, no MCP, structured output, artifact hashing, and supervisor-owned validation. | Keep it as the first adapter implementation. Generalize the supervisor type boundary, not its safety policy. |
 | Codex delegation | `.codex/config.toml` enables bounded native agents; read-only supporting profiles use Terra, while the deep reasoning profile keeps Sol. | Preserve those portfolio-analysis fences. Write-capable implementation remains an Executive Job in its own worktree. |
 | `config/agents.yml` | Portfolio reasoning roles still resolve to Sol/xhigh on the Codex production path. | Do not silently downgrade portfolio judgment. Point Executive worker labor to the separate routing policy. |
-| Phase 1F | Phase 1F-B supplies the accepted hierarchy baseline. The 1F-C branch additively supplies immutable orchestration placement/principal/grant lineage, closed role results, result seals, deterministic run-once transitions, TX-9 continuity, and schema-v4 migration tooling. | Keep SQLite Runtime as the sole lifecycle authority. Hold the PR for Sol; no live G0-G7 claim follows from fixture acceptance. |
+| Phase 1F | Phase 1F-B supplies the accepted hierarchy baseline. Merged Phase 1F-C additively supplies immutable orchestration placement/principal/grant lineage, closed role results, result seals, deterministic run-once transitions, TX-9 continuity, and schema-v4 migration tooling. | Keep SQLite Runtime as the sole lifecycle authority. The merge is still production-unarmed; no live G0-G7 claim follows from fixture acceptance. |
+| execution capability | `config/executive_agent_capabilities.json` plus `control_plane/executive_agent_capabilities.py` defines a secret-free, production-unarmed profile registry. | Route fallback aliases share one profile. Job constraints and worker capacity must match exact profile/policy digests before atomic claim. Provider-process attestation remains a later gate. |
 | EXEC-MCP-A | Exactly five tools exist. READONLY refuses the modifying tool; FIXTURE writes only to a temporary service and refuses production paths. No production-write server mode exists. | Make no MCP surface, mode, identity, socket, or peer-UID change. |
 
 ## 2. Policy and aliases
@@ -48,6 +51,12 @@ The source of routing policy is
 `config/executive_worker_routes.json`. It is JSON so the sealed Executive
 control-plane runtime can read and validate it with the Python standard library;
 it does not acquire a PyYAML dependency.
+
+The source of extension/tool authority is separately
+`config/executive_agent_capabilities.json`. The router resolves a logical model
+alias to one exact execution-profile ID and digest; model fallback may not change
+the profile. This file contains no credential, account ID, native session handle,
+MCP OAuth token, plugin state or mutable worker readiness.
 
 The loader fails closed unless:
 
@@ -213,14 +222,25 @@ The separate offline v3-to-v4 migration CLI is the only supported upgrade path.
 - Phase 1F-C remains a separate run-once COO cycle and introduces no queue or
   state store.
 
-### Wave Phase 1F-C — inert COO cycle — HOLD-FOR-SOL
+### Wave Phase 1F-C — inert COO cycle — merged, production-unarmed
 
 - Schema v4, closed typed orchestration evidence, command-aware exact-ID cycle
-  transitions, offline migration, and deterministic acceptance are implemented.
+  transitions, offline migration, and deterministic acceptance merged in
+  `db0bac5`.
 - No provider capacity, host database, service, scheduler, external adapter,
   credential, or production flag is changed.
-- Independent implementation review and Sol acceptance are required before merge;
+- Merge is not deployment, host acceptance, scheduling or production arming;
   G0-G7 remain distinct later proof/arming gates.
+
+### Wave G0 — capability identity at route/claim — production-unarmed
+
+- New routed Jobs carry exact execution-profile and capability-policy identity.
+- Model aliases in one fallback route must share one profile.
+- Worker quota metadata must match all profile/policy identity fields before
+  selection or claim.
+- `JOB_CLAIMED` records the selected profile/policy identity.
+- Default worker profiles remain extension-free; no MCP/plugin/native-helper
+  capability is production-granted by this wave.
 
 ### Wave R3 — reviewed Codex capacity composition
 

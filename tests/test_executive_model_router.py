@@ -29,6 +29,10 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
         "standard.engineering",
     )
     assert implementation.required_capabilities == ("code",)
+    assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
+    assert len(implementation.execution_profile_digest) == 64
+    assert implementation.capability_policy_version == "2026-08-24.g0"
+    assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
     assert elevated.preferred_model_aliases == ("standard.engineering",)
@@ -56,6 +60,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
         decision = router.route(request)
         assert decision.mode is RouteMode.FRONTIER_LEAD
         assert decision.preferred_model_aliases == ("frontier.orchestrator",)
+        assert decision.execution_profile_id == "operator.appserver.readonly.v1"
         with pytest.raises(RoutingPolicyError, match="frontier-lead work"):
             decision.job_constraints()
 
@@ -76,6 +81,7 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
     assert luna.worker_eligible
     terra = router.resolve_model_alias("standard.review")
     assert terra.model == "gpt-5.6-terra"
+    assert terra.execution_profile_id == "sealed.worker.readonly.no-extensions.v1"
 
     assert adapter_descriptor("codex-cli").implemented
     assert not adapter_descriptor("openai-compatible").implemented
@@ -123,6 +129,10 @@ def _register_alias_worker(
                     "model_alias": profile.model_alias,
                     "provider_alias": profile.provider_alias,
                     "routing_policy_version": ModelRouter.load().policy_version,
+                    "execution_profile_id": profile.execution_profile_id,
+                    "execution_profile_digest": profile.execution_profile_digest,
+                    "capability_policy_version": profile.capability_policy_version,
+                    "capability_policy_digest": profile.capability_policy_digest,
                 },
             }
         },
@@ -154,7 +164,11 @@ def test_runtime_claim_honors_alias_order_before_worker_id_and_records_receipt(t
         "fast.engineering",
         "standard.engineering",
     ]
-    assert event.payload["routing_policy_version"] == "2026-08-16.stage1"
+    assert event.payload["routing_policy_version"] == "2026-08-24.stage2"
+    assert event.payload["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
+    assert event.payload["execution_profile_digest"] == decision.execution_profile_digest
+    assert event.payload["capability_policy_version"] == "2026-08-24.g0"
+    assert event.payload["capability_policy_digest"] == decision.capability_policy_digest
 
 
 def test_review_route_excludes_builder_worker_at_claim(tmp_path):
@@ -197,6 +211,10 @@ def test_runtime_refuses_worker_capacity_from_a_stale_routing_policy(tmp_path):
                     "model_alias": profile.model_alias,
                     "provider_alias": profile.provider_alias,
                     "routing_policy_version": "2026-08-15.stale",
+                    "execution_profile_id": profile.execution_profile_id,
+                    "execution_profile_digest": profile.execution_profile_digest,
+                    "capability_policy_version": profile.capability_policy_version,
+                    "capability_policy_digest": profile.capability_policy_digest,
                 },
             }
         },
@@ -204,6 +222,46 @@ def test_runtime_refuses_worker_capacity_from_a_stale_routing_policy(tmp_path):
     decision = ModelRouter.load().route(WorkRequest("implementation"))
     job = runtime.jobs.create_job(
         "Do not claim stale capacity", constraints=decision.job_constraints()
+    )
+
+    assert runtime.broker.select_worker(job) is None
+    assert runtime.broker.claim(job.job_id) is None
+
+
+def test_runtime_refuses_capacity_with_a_different_capability_profile_digest(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    router = ModelRouter.load()
+    profile = router.resolve_model_alias("fast.engineering")
+    runtime.workers.register_worker(
+        "luna-wrong-grant",
+        provider=profile.provider_alias,
+        account_label="account-luna-wrong-grant",
+        worker_type=profile.adapter_id,
+        capabilities=list(profile.capabilities),
+        quota_classes={
+            "default": {
+                "provider": profile.provider_alias,
+                "model": profile.model,
+                "effort": profile.effort,
+                "cost_class": profile.cost_class,
+                "capabilities": list(profile.capabilities),
+                "metadata": {
+                    "adapter_id": profile.adapter_id,
+                    "model_alias": profile.model_alias,
+                    "provider_alias": profile.provider_alias,
+                    "routing_policy_version": router.policy_version,
+                    "execution_profile_id": profile.execution_profile_id,
+                    "execution_profile_digest": "0" * 64,
+                    "capability_policy_version": profile.capability_policy_version,
+                    "capability_policy_digest": profile.capability_policy_digest,
+                },
+            }
+        },
+    )
+    decision = router.route(WorkRequest("implementation"))
+    job = runtime.jobs.create_job(
+        "Do not claim capacity attested for another tool grant",
+        constraints=decision.job_constraints(),
     )
 
     assert runtime.broker.select_worker(job) is None
@@ -243,6 +301,8 @@ def test_cli_preview_is_read_only_and_alias_registration_is_policy_derived(
     assert quota.model == "gpt-5.6-luna"
     assert quota.effort == "high"
     assert quota.metadata["model_alias"] == "fast.engineering"
+    assert quota.metadata["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
+    assert len(quota.metadata["execution_profile_digest"]) == 64
     assert worker.metadata["stage1_production_armed"] is False
 
 
@@ -269,6 +329,10 @@ def test_cli_routed_job_persists_semantics_without_raw_provider_selection(
         "fast.research",
         "standard.research",
     ]
+    assert job.constraints["execution_profile_id"] == "sealed.worker.readonly.no-extensions.v1"
+    assert len(job.constraints["execution_profile_digest"]) == 64
+    assert job.constraints["capability_policy_version"] == "2026-08-24.g0"
+    assert len(job.constraints["capability_policy_digest"]) == 64
     assert "provider" not in job.constraints
     assert "model" not in job.constraints
 

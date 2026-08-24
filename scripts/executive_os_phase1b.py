@@ -298,9 +298,15 @@ def main(argv: list[str] | None = None) -> int:
                     "model_alias": profile.model_alias,
                     "provider_alias": profile.provider_alias,
                     "routing_policy_version": router.policy_version,
+                    "execution_profile_id": profile.execution_profile_id,
+                    "execution_profile_digest": profile.execution_profile_digest,
+                    "capability_policy_version": profile.capability_policy_version,
+                    "capability_policy_digest": profile.capability_policy_digest,
                 }
                 worker_metadata = {
                     "routing_policy_version": router.policy_version,
+                    "capability_policy_version": profile.capability_policy_version,
+                    "capability_policy_digest": profile.capability_policy_digest,
                     "stage1_production_armed": False,
                 }
             else:

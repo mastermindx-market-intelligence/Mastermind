@@ -1,13 +1,15 @@
 # Executive OS Phase 1F — hierarchical orchestration contract
 
 **Status:** Phase 1F-A/1F-B accepted baseline plus Phase 1F-C inert implementation
-on a HOLD-FOR-SOL branch. The additive schema-v4/runtime/result/cycle surfaces
-are built and deterministically tested, but are not merged, deployed, armed, or
+merged in `db0bac5`. The additive schema-v4/runtime/result/cycle surfaces are
+built and deterministically tested, but are not deployed, scheduled, armed, or
 accepted as live capability. The governing 1F-C source law is
 `research/EXECUTIVE_OS_PHASE1FC_CEO_POLICY_AND_IMPLEMENTATION_COMMISSION_2026-08-20.md`
 as accepted by merge `a49ac647fff64d034cc965cf54ac48968d6c15be`; this older design memo is
-subordinate where the accepted commission repaired it. The implementation base is
-Mastermind protected `master` `90db9baf5bcc5f2221e3c9870c2aa09a95293c99`.
+subordinate where the accepted commission repaired it. The historical
+implementation base was Mastermind protected `master`
+`90db9baf5bcc5f2221e3c9870c2aa09a95293c99`; current protected master includes
+the accepted implementation via `db0bac5`.
 **Shipped alongside:** `control_plane/executive_inbox.py` + `scripts/executive_inbox.py`
 + `docs/EXECUTIVE_INBOX.md` (the `mastermind.executive_inbox.v2` read-only projection)
 + `control_plane/executive_runtime.py` schema migration 2.

@@ -14,6 +14,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
+    ExecutionCapabilityRegistry,
+)
 from control_plane.worker_adapter import adapter_descriptor
 
 
@@ -77,6 +81,10 @@ class ModelAlias:
     model_alias: str
     provider_alias: str
     adapter_id: str
+    execution_profile_id: str
+    execution_profile_digest: str
+    capability_policy_version: str
+    capability_policy_digest: str
     model: str
     effort: str
     cost_class: str
@@ -131,6 +139,10 @@ class RoutingDecision:
     task_kind: str
     risk: str
     ambiguity: str
+    execution_profile_id: str
+    execution_profile_digest: str
+    capability_policy_version: str
+    capability_policy_digest: str
     preferred_model_aliases: tuple[str, ...]
     required_capabilities: tuple[str, ...]
     excluded_worker_ids: tuple[str, ...]
@@ -164,6 +176,10 @@ class RoutingDecision:
             "task_kind": self.task_kind,
             "risk": self.risk,
             "ambiguity": self.ambiguity,
+            "execution_profile_id": self.execution_profile_id,
+            "execution_profile_digest": self.execution_profile_digest,
+            "capability_policy_version": self.capability_policy_version,
+            "capability_policy_digest": self.capability_policy_digest,
             "preferred_model_aliases": list(self.preferred_model_aliases),
             "required_capabilities": list(self.required_capabilities),
             "excluded_worker_ids": list(self.excluded_worker_ids),
@@ -182,16 +198,23 @@ class ModelRouter:
         providers: Mapping[str, ProviderAlias],
         model_aliases: Mapping[str, ModelAlias],
         routes: Mapping[str, Mapping[str, Any]],
+        capability_registry: ExecutionCapabilityRegistry,
         source_path: Path,
     ) -> None:
         self.policy_version = policy_version
         self.providers = dict(providers)
         self.model_aliases = dict(model_aliases)
         self.routes = {key: dict(value) for key, value in routes.items()}
+        self.capability_registry = capability_registry
         self.source_path = source_path
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "ModelRouter":
+    def load(
+        cls,
+        path: str | Path | None = None,
+        *,
+        capability_policy_path: str | Path | None = None,
+    ) -> "ModelRouter":
         source = Path(path or DEFAULT_POLICY_PATH).expanduser().resolve(strict=True)
         try:
             raw = json.loads(source.read_text(encoding="utf-8"))
@@ -204,8 +227,14 @@ class ModelRouter:
         if raw.get("lifecycle_authority") != "executive_os":
             raise RoutingPolicyError("routing policy must preserve Executive OS lifecycle authority")
         if raw.get("production_armed") is not False:
-            raise RoutingPolicyError("stage-1 routing policy must remain production_armed=false")
+            raise RoutingPolicyError("routing policy must remain production_armed=false")
         policy_version = _bounded_id(raw.get("policy_version"), field="policy_version")
+        try:
+            capability_registry = ExecutionCapabilityRegistry.load(
+                capability_policy_path
+            )
+        except CapabilityPolicyError as exc:
+            raise RoutingPolicyError(f"capability policy is invalid: {exc}") from exc
 
         provider_raw = raw.get("providers")
         if not isinstance(provider_raw, dict) or not provider_raw:
@@ -248,6 +277,13 @@ class ModelRouter:
                 raise RoutingPolicyError(
                     f"model alias {alias!r} names unknown provider {provider_alias!r}"
                 )
+            execution_profile_id = _bounded_id(
+                value.get("execution_profile_id"), field="execution_profile_id"
+            )
+            try:
+                execution_profile = capability_registry.resolve(execution_profile_id)
+            except CapabilityPolicyError as exc:
+                raise RoutingPolicyError(str(exc)) from exc
             model = str(value.get("model") or "").strip()
             effort = _bounded_id(value.get("effort"), field="effort")
             cost_class = _bounded_id(value.get("cost_class"), field="cost_class")
@@ -261,10 +297,18 @@ class ModelRouter:
                 raise RoutingPolicyError(
                     f"worker alias {alias!r} requires an enabled autonomous provider"
                 )
+            if worker_eligible and execution_profile.execution_surface != "codex-exec":
+                raise RoutingPolicyError(
+                    f"worker alias {alias!r} requires the implemented codex-exec surface"
+                )
             model_aliases[alias] = ModelAlias(
                 model_alias=alias,
                 provider_alias=provider_alias,
                 adapter_id=provider.adapter_id,
+                execution_profile_id=execution_profile.profile_id,
+                execution_profile_digest=execution_profile.profile_digest,
+                capability_policy_version=capability_registry.policy_version,
+                capability_policy_digest=capability_registry.policy_digest,
                 model=model,
                 effort=effort,
                 cost_class=cost_class,
@@ -301,6 +345,17 @@ class ModelRouter:
                         raise RoutingPolicyError(
                             f"alias {alias!r} lacks capabilities required by {task_kind!r}"
                         )
+                execution_profiles = {
+                    (
+                        model_aliases[alias].execution_profile_id,
+                        model_aliases[alias].execution_profile_digest,
+                    )
+                    for alias in aliases
+                }
+                if len(execution_profiles) != 1:
+                    raise RoutingPolicyError(
+                        f"routes.{task_kind}.{risk} fallback aliases must share one execution profile"
+                    )
                 normalized[risk] = aliases
             routes[task_kind] = normalized
         return cls(
@@ -308,6 +363,7 @@ class ModelRouter:
             providers=providers,
             model_aliases=model_aliases,
             routes=routes,
+            capability_registry=capability_registry,
             source_path=source,
         )
 
@@ -334,12 +390,17 @@ class ModelRouter:
             lead_required = True
             reasons.append("high_ambiguity")
         if lead_required:
+            lead_profile = self.model_aliases["frontier.orchestrator"]
             return RoutingDecision(
                 mode=RouteMode.FRONTIER_LEAD,
                 policy_version=self.policy_version,
                 task_kind=request.task_kind,
                 risk=request.risk,
                 ambiguity=request.ambiguity,
+                execution_profile_id=lead_profile.execution_profile_id,
+                execution_profile_digest=lead_profile.execution_profile_digest,
+                capability_policy_version=lead_profile.capability_policy_version,
+                capability_policy_digest=lead_profile.capability_policy_digest,
                 preferred_model_aliases=("frontier.orchestrator",),
                 required_capabilities=request.required_capabilities,
                 excluded_worker_ids=request.excluded_worker_ids,
@@ -348,6 +409,7 @@ class ModelRouter:
 
         route = self.routes[request.task_kind]
         aliases = tuple(route[request.risk])
+        first_profile = self.model_aliases[aliases[0]]
         capabilities = tuple(
             sorted(set(route["required_capabilities"]) | set(request.required_capabilities))
         )
@@ -372,6 +434,10 @@ class ModelRouter:
             task_kind=request.task_kind,
             risk=request.risk,
             ambiguity=request.ambiguity,
+            execution_profile_id=first_profile.execution_profile_id,
+            execution_profile_digest=first_profile.execution_profile_digest,
+            capability_policy_version=first_profile.capability_policy_version,
+            capability_policy_digest=first_profile.capability_policy_digest,
             preferred_model_aliases=aliases,
             required_capabilities=capabilities,
             excluded_worker_ids=request.excluded_worker_ids,
@@ -387,10 +453,13 @@ def route_work(
     required_capabilities: Sequence[str] = (),
     excluded_worker_ids: Sequence[str] = (),
     policy_path: str | Path | None = None,
+    capability_policy_path: str | Path | None = None,
 ) -> RoutingDecision:
     """Convenience entry point used by CLI and future 1F child-job creation."""
 
-    return ModelRouter.load(policy_path).route(
+    return ModelRouter.load(
+        policy_path, capability_policy_path=capability_policy_path
+    ).route(
         WorkRequest(
             task_kind=task_kind,
             risk=risk,

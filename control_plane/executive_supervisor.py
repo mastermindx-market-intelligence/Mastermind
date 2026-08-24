@@ -41,6 +41,10 @@ from control_plane.codex_worker import (
     WorkerRunStatus,
 )
 from control_plane.worker_adapter import WorkerExecutionAdapter
+from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
+    ExecutionCapabilityRegistry,
+)
 from control_plane.executive_authority import (
     AuthorityDenied,
     AuthorityPolicyError,
@@ -833,6 +837,16 @@ class ExecutiveSupervisor:
             "routing_policy_version": job.constraints.get(
                 "routing_policy_version"
             ),
+            "execution_profile_id": job.constraints.get("execution_profile_id"),
+            "execution_profile_digest": job.constraints.get(
+                "execution_profile_digest"
+            ),
+            "capability_policy_version": job.constraints.get(
+                "capability_policy_version"
+            ),
+            "capability_policy_digest": job.constraints.get(
+                "capability_policy_digest"
+            ),
             "assigned_quota_class": attempt.quota_class,
             "checkpoint": job.checkpoint,
         }
@@ -938,6 +952,80 @@ class ExecutiveSupervisor:
             **spec_kwargs,
         )
 
+    def _validate_execution_profile(
+        self,
+        job: Job,
+        lease: AttemptLease,
+        effective_grant: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Bind a routed sealed worker to the exact reviewed capability profile.
+
+        Legacy Jobs without a profile keep their historical path. Newly routed
+        stage-2 Jobs cannot cross the provider boundary on metadata alone: the
+        installed release policy must still resolve to the same profile/policy
+        digests and the claimed capacity must advertise the same identity.
+        The current sealed adapter has no MCP/plugin/native-helper surface, so
+        any profile requesting one is refused before process launch.
+        """
+
+        profile_id = str(job.constraints.get("execution_profile_id") or "")
+        if not profile_id:
+            return
+        quota = self.runtime.workers.get_quota_class(
+            lease.attempt.worker_id, lease.attempt.quota_class
+        )
+        if quota is None:
+            raise SupervisorError("claimed worker quota class disappeared")
+        metadata = quota.metadata
+        keys = (
+            "execution_profile_id",
+            "execution_profile_digest",
+            "capability_policy_version",
+            "capability_policy_digest",
+        )
+        if any(
+            str(metadata.get(key) or "").strip().lower()
+            != str(job.constraints.get(key) or "").strip().lower()
+            for key in keys
+        ):
+            raise SupervisorError("claimed capacity execution-profile identity drifted")
+        try:
+            registry = ExecutionCapabilityRegistry.load()
+            profile = registry.resolve(profile_id)
+        except CapabilityPolicyError as exc:
+            raise SupervisorError(f"execution capability policy is invalid: {exc}") from exc
+        if (
+            registry.policy_version
+            != job.constraints.get("capability_policy_version")
+            or registry.policy_digest
+            != job.constraints.get("capability_policy_digest")
+            or profile.profile_digest
+            != job.constraints.get("execution_profile_digest")
+        ):
+            raise SupervisorError("installed execution capability policy drifted")
+        if (
+            profile.execution_surface != "codex-exec"
+            or profile.auth_realm != "dedicated-worker-account"
+            or profile.approval_policy != "never"
+            or profile.network_policy != "disabled"
+            or profile.native_helper_policy.value != "DISABLED"
+            or profile.skills
+            or profile.mcp_servers
+            or profile.plugins
+        ):
+            raise SupervisorError(
+                "sealed worker refuses an execution profile with an unimplemented surface"
+            )
+        authorities = (
+            effective_grant["authorities"]
+            if effective_grant is not None
+            else job.requested_authorities
+        )
+        if "WRITE_BRANCH" in authorities and not profile.write_capable:
+            raise SupervisorError(
+                "read-only execution profile refuses a write-capable Job grant"
+            )
+
     def _launch_metadata(
         self,
         *,
@@ -1014,6 +1102,18 @@ class ExecutiveSupervisor:
                 "selected_model_alias": quota_metadata.get("model_alias"),
                 "provider_alias": quota_metadata.get("provider_alias"),
                 "adapter_id": quota_metadata.get("adapter_id"),
+                "execution_profile_id": job.constraints.get(
+                    "execution_profile_id"
+                ),
+                "execution_profile_digest": job.constraints.get(
+                    "execution_profile_digest"
+                ),
+                "capability_policy_version": job.constraints.get(
+                    "capability_policy_version"
+                ),
+                "capability_policy_digest": job.constraints.get(
+                    "capability_policy_digest"
+                ),
             },
         }
         if effective_grant is not None:
@@ -1080,6 +1180,7 @@ class ExecutiveSupervisor:
         process_ref: ProcessRef | None = None
         start_invoked = False
         try:
+            self._validate_execution_profile(job, lease, effective_grant)
             schema_path = self._write_schema(
                 self._run_dir(lease.attempt.attempt_id),
                 job=job,
@@ -1170,6 +1271,20 @@ class ExecutiveSupervisor:
             # it must never publish a false terminal failure.
             if not start_invoked or process_ref is not None or unbound_sweep is not None:
                 try:
+                    run_dir = self._run_dir(lease.attempt.attempt_id)
+                    if not start_invoked and not run_dir.exists():
+                        # Policy/profile rejection can happen before the run
+                        # assignment is materialized.  No provider or worker-UID
+                        # process crossed the boundary, so there is nothing to
+                        # sweep or seal; preserve the original refusal as the
+                        # durable terminal reason instead of masking it with a
+                        # synthetic missing-run seal failure.
+                        self._fail_claim(lease, f"{type(exc).__name__}: {exc}")
+                        if isinstance(exc, SupervisorError):
+                            raise exc
+                        raise SupervisorError(
+                            f"Codex launch failed: {type(exc).__name__}: {exc}"
+                        ) from exc
                     sweep = (
                         self._active_terminal_uid_sweep(
                             ActiveRun(
@@ -1185,7 +1300,7 @@ class ExecutiveSupervisor:
                         attempt_id=lease.attempt.attempt_id,
                         job_id=job.job_id,
                         workspace=job.worktree or "",
-                        run_dir=self._run_dir(lease.attempt.attempt_id),
+                        run_dir=run_dir,
                         uid_sweep=sweep,
                         require_uid_sweep=start_invoked,
                     )
