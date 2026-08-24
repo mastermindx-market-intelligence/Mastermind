@@ -242,6 +242,20 @@ The separate offline v3-to-v4 migration CLI is the only supported upgrade path.
 - Default worker profiles remain extension-free; no MCP/plugin/native-helper
   capability is production-granted by this wave.
 
+### Wave G1 — exact-root COO service composition — production-unarmed
+
+- The existing control service can run one deterministic action for one
+  host-bound strict-v2 root through the existing supervisor.
+- A reviewed `coo.sealed` alias supplies exact model/profile identity; the CEO
+  envelope cannot choose provider, model, profile, credential realm or quota.
+- One existing worker identity receives serialized `small` and `default` COO
+  quota classes so plan-selected cost class does not create an implicit fallback.
+- A bounded in-process tick considers no more than 64 roots, advances at most
+  one root/action per interval, and creates no queue, scheduler table, session
+  registry or second lifecycle authority.
+- Checked-in host configuration keeps `coo_autonomy_armed=false`; merge is not
+  host install, provider readiness, service activation or production proof.
+
 ### Wave R3 — reviewed Codex capacity composition
 
 - Prove one dedicated OS principal and provider home per concurrently claimable

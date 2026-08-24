@@ -839,6 +839,11 @@ defaults = {
     "model": "gpt-5.6-sol",
     "effort": "xhigh",
     "cost_class": "standard",
+    "coo_autonomy_armed": False,
+    "coo_tick_interval_seconds": 15.0,
+    "coo_model_alias": "coo.sealed",
+    "coo_quota_class": "codex-coo",
+    "coo_default_quota_class": "codex-coo-default",
     "broker_timeout_seconds": 30.0,
     "shutdown_grace_seconds": 10.0,
 }

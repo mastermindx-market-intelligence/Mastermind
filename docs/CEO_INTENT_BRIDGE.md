@@ -304,10 +304,11 @@ will build a receipt, and `create_job` bounds the shape of any caller-supplied
 
 ## Phase 1F begins here
 
-Deliberately absent, and out of scope for 1E-A: automatic dispatch of a CEO-created Job
-(the service still accepts only its fixed proof job — but note the `run-once` caveat in
-the boundary section above, which Phase 1F must close before adding any automatic path);
-any scheduling, prioritization, or admission-control policy over queued intents; multi-actor authorization or delegation;
+Deliberately absent from 1E-A itself: automatic dispatch of a CEO-created Job.
+The later G1 service composition can advance only a strict-v2 root carrying the
+host-derived exact execution binding, and only when reviewed host configuration
+arms `run-coo-cycle`/the bounded tick. V1 remains undispatchable. General scheduling,
+new prioritization or admission policy over queued intents; multi-actor authorization or delegation;
 intent amendment, withdrawal, or supersession; a remote or authenticated non-local
 transport; and any write back into Agent OS to close the loop. Each of those is an
 authority expansion and needs its own review — none of them arrive by adding a field

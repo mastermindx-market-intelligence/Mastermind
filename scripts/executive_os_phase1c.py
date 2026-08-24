@@ -3,8 +3,10 @@
 The production ``serve --config`` path consumes a root-owned, secret-free JSON
 configuration and a launchd-activated Unix socket.  Worker execution always
 crosses the distinct-UID worker broker; this entrypoint has no local adapter or
-TCP fallback.  Restore operations are deliberately offline CLI commands and
-are never exposed through the live control socket.
+TCP fallback.  G1 adds one exact-root deterministic COO-cycle operation and one
+bounded service tick; both remain disabled by checked-in host configuration.
+Restore operations are deliberately offline CLI commands and are never exposed
+through the live control socket.
 """
 from __future__ import annotations
 
@@ -70,6 +72,11 @@ _CONFIG_OPTIONAL = frozenset(
         "model",
         "effort",
         "cost_class",
+        "coo_autonomy_armed",
+        "coo_tick_interval_seconds",
+        "coo_model_alias",
+        "coo_quota_class",
+        "coo_default_quota_class",
         "broker_timeout_seconds",
         "shutdown_grace_seconds",
     }
@@ -116,6 +123,11 @@ def _parser() -> argparse.ArgumentParser:
     attempt.add_argument("attempt_id")
     dispatch = sub.add_parser("dispatch", help="Explicitly dispatch one fixed proof Job.")
     dispatch.add_argument("job_id")
+    coo_cycle = sub.add_parser(
+        "run-coo-cycle",
+        help="Run one deterministic action for one exact host-bound strict-v2 root.",
+    )
+    coo_cycle.add_argument("root_job_id")
     cancel = sub.add_parser("cancel", help="Request cancellation for one Job.")
     cancel.add_argument("job_id")
     requeue = sub.add_parser("requeue", help="Explicitly requeue one LOST proof Job.")
@@ -215,6 +227,17 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     for name in ("launchd_socket_name", "worker_user"):
         if not isinstance(config[name], str) or not config[name].strip():
             raise ServiceError(f"control config {name} is required")
+    if "coo_autonomy_armed" in config and not isinstance(
+        config["coo_autonomy_armed"], bool
+    ):
+        raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if "coo_tick_interval_seconds" in config and (
+        isinstance(config["coo_tick_interval_seconds"], bool)
+        or not isinstance(config["coo_tick_interval_seconds"], (int, float))
+    ):
+        raise ServiceError(
+            "control config coo_tick_interval_seconds must be numeric"
+        )
     return config
 
 
@@ -473,6 +496,15 @@ def _service_from_config(
         model=str(raw.get("model") or "gpt-5.6-sol"),
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
+        coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        coo_tick_interval_seconds=float(
+            raw.get("coo_tick_interval_seconds", 15.0)
+        ),
+        coo_model_alias=str(raw.get("coo_model_alias") or "coo.sealed"),
+        coo_quota_class=str(raw.get("coo_quota_class") or "codex-coo"),
+        coo_default_quota_class=str(
+            raw.get("coo_default_quota_class") or "codex-coo-default"
+        ),
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),
         shutdown_grace_seconds=float(raw.get("shutdown_grace_seconds") or 10.0),
     )
@@ -566,6 +598,8 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return args.command, {}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
+    if args.command == "run-coo-cycle":
+        return args.command, {"root_job_id": args.root_job_id}
     if args.command == "attempt":
         return args.command, {"attempt_id": args.attempt_id}
     if args.command == "verify-backup":

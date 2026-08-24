@@ -27,7 +27,10 @@ Design laws
   v2 root remains unclaimable until the deterministic COO cycle has durably
   produced and revalidated its aggregation handoff.
   ``ExecutiveControlService.dispatch``/``requeue`` additionally refuse any job
-  that is not the fixed proof job, so the *service* will not run a CEO job.
+  that is not the fixed proof job.  The separate G1 ``run-coo-cycle`` operation
+  may advance one strict-v2 root only when reviewed host autonomy is armed and
+  the root, every selected Job, worker quota, routing policy, capability profile,
+  workspace and command identity all match.  V1 remains undispatchable there.
 
   Do not over-read the v1 compatibility lane: the generic Phase 1B supervisor
   can still claim a role-null v1 Job when an operator explicitly invokes it.
@@ -859,7 +862,11 @@ def _require_workspace(intent: Mapping[str, Any], workspace_root: Path | None) -
 
 
 def submit_intent(
-    runtime: Any, payload: Any, *, workspace_root: "Path | str | None" = None
+    runtime: Any,
+    payload: Any,
+    *,
+    workspace_root: "Path | str | None" = None,
+    execution_binding: "dict[str, Any] | None" = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -872,6 +879,12 @@ def submit_intent(
     ``workspace_root`` is the reviewed host directory every assigned worktree
     must live under.  It is a caller-supplied fence, never read from the intent:
     when it is omitted, an intent carrying ``worktree`` is refused outright.
+
+    ``execution_binding`` is optional reviewed-host composition for strict v2
+    only.  It is never accepted from the envelope and never enters the caller's
+    intent fingerprint.  The runtime validates and persists the exact binding
+    in Job constraints, making provider/profile selection host-owned while the
+    original CEO operation identity remains the complete normalized envelope.
     """
 
     intent = validate_intent(payload)
@@ -894,8 +907,11 @@ def submit_intent(
                 fingerprint=fingerprint,
                 command_id=command_id,
                 workspace_root=workspace_root,
+                execution_binding=execution_binding,
             )
         else:
+            if execution_binding is not None:
+                raise StateConflict("v1 CEO intent cannot carry a host execution binding")
             job = runtime.jobs.create_job(
                 intent["objective"],
                 department=intent["department"],

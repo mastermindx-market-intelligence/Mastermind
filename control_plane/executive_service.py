@@ -35,14 +35,20 @@ from uuid import uuid4
 from common.redaction import sanitize_external_text
 from control_plane import ceo_intent
 from control_plane import executive_ceo_ingress as ceo_ingress
+from control_plane.executive_agent_capabilities import CapabilityPolicyError
+from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import (
+    AttemptStatus,
     Job,
     JobStatus,
+    OrchestrationDispatchOutcome,
     Runtime,
     RuntimeProofError,
     SCHEMA_VERSION,
     StateConflict,
+    V2_HOST_EXECUTION_BINDING_KEYS,
 )
+from control_plane.model_router import ModelRouter, RoutingPolicyError
 from control_plane.executive_workspace import (
     GitHandoffError,
     LAUNCH_CLEAN_STATUS_ARGS,
@@ -61,6 +67,15 @@ DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
 _PROOF_WORKSPACE_RE = re.compile(r"^proof-([0-9a-f]{32})$")
+_COO_ROOT_SCAN_LIMIT = 64
+_COO_ACTIVE_ATTEMPT_STATUSES = frozenset(
+    {
+        AttemptStatus.CLAIMED,
+        AttemptStatus.RUNNING,
+        AttemptStatus.CHECKPOINTED,
+        AttemptStatus.CANCEL_REQUESTED,
+    }
+)
 _WORKSPACE_ROTATION_SCHEMA = "mastermind.executive_workspace_rotation/v1"
 _PROOF_ARTIFACT = "research/executive_os_phase1c_worker_proof/receipt.md"
 _SERVICE_GIT_OBSERVATION_ALLOWLIST = frozenset(
@@ -101,6 +116,10 @@ class ServiceError(RuntimeProofError):
 class SupervisorProtocol(Protocol):
     async def start_job(self, job_id: str) -> Any: ...
 
+    async def start_cycle_job(
+        self, job_id: str, *, command_id: str
+    ) -> Any: ...
+
     async def finish_job(self, active: Any) -> Any: ...
 
     def reconcile_restart(self, *, requeue_lost: bool = False) -> list[Any]: ...
@@ -134,6 +153,11 @@ class ServiceConfig:
     model: str = "gpt-5.6-sol"
     effort: str = "xhigh"
     cost_class: str = "standard"
+    coo_autonomy_armed: bool = False
+    coo_tick_interval_seconds: float = 15.0
+    coo_model_alias: str = "coo.sealed"
+    coo_quota_class: str = "codex-coo"
+    coo_default_quota_class: str = "codex-coo-default"
     allowed_peer_uids: tuple[int, ...] = ()
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
@@ -163,9 +187,29 @@ class ServiceConfig:
         if re.fullmatch(r"[0-9a-f]{40,64}", base_sha) is None:
             raise ValueError("proof_base_sha must be a full hexadecimal Git object id")
         object.__setattr__(self, "proof_base_sha", base_sha)
-        for field_name in ("worker_id", "quota_class"):
+        for field_name in (
+            "worker_id",
+            "quota_class",
+            "coo_quota_class",
+            "coo_default_quota_class",
+        ):
             if _ID_RE.fullmatch(str(getattr(self, field_name))) is None:
                 raise ValueError(f"invalid {field_name}")
+        if not isinstance(self.coo_autonomy_armed, bool):
+            raise ValueError("coo_autonomy_armed must be boolean")
+        alias = str(self.coo_model_alias).strip().lower()
+        if _ID_RE.fullmatch(alias) is None:
+            raise ValueError("invalid coo_model_alias")
+        object.__setattr__(self, "coo_model_alias", alias)
+        quota_names = {
+            self.quota_class,
+            self.coo_quota_class,
+            self.coo_default_quota_class,
+        }
+        if len(quota_names) != 3:
+            raise ValueError("proof and COO quota classes must be distinct")
+        if not 1.0 <= float(self.coo_tick_interval_seconds) <= 3600.0:
+            raise ValueError("coo_tick_interval_seconds must be between 1 and 3600")
         if not str(self.proof_branch).startswith("codex/"):
             raise ValueError("proof_branch must remain under codex/")
         if self.proof_shared_gid is not None and int(self.proof_shared_gid) < 0:
@@ -366,8 +410,17 @@ class ExecutiveControlService:
         self._lock_fd: int | None = None
         self._dispatch_lock = asyncio.Lock()
         self._workspace_lock = asyncio.Lock()
+        self._coo_cycle_lock = asyncio.Lock()
         self._dispatch_tasks: dict[str, asyncio.Task[Any]] = {}
         self._dispatch_errors: dict[str, str] = {}
+        self._coo_execution_binding = self._load_coo_execution_binding()
+        self._coo_tick_task: asyncio.Task[Any] | None = None
+        self._coo_shutdown_event: asyncio.Event | None = None
+        self._coo_action_tasks: set[asyncio.Task[Any]] = set()
+        self._coo_last_outcome: dict[str, Any] | None = None
+        self._coo_last_error: str | None = None
+        self._coo_last_tick_at: str | None = None
+        self._closing = False
         self._startup_reconciliation: list[Any] = []
         self._started_at: str | None = None
         if service_state not in {"READY", "AWAITING_CANARY"}:
@@ -453,6 +506,59 @@ class ExecutiveControlService:
         # §14.1 in-memory handler drain set.  No durable request registry,
         # lease, or table backs this.
         self._ceo_ingress_tasks: set[asyncio.Task[Any]] = set()
+
+    def _load_coo_execution_binding(self) -> dict[str, Any]:
+        """Resolve one reviewed sealed-COO alias into host-owned Job identity."""
+
+        try:
+            router = ModelRouter.load()
+            alias = router.model_aliases[self.config.coo_model_alias]
+            profile = router.capability_registry.resolve(alias.execution_profile_id)
+        except (KeyError, RoutingPolicyError, CapabilityPolicyError) as exc:
+            raise ValueError(f"configured COO execution alias is invalid: {exc}") from exc
+        if (
+            not alias.worker_eligible
+            or alias.adapter_id != "codex-cli"
+            or profile.execution_surface != "codex-exec"
+            or not profile.write_capable
+            or profile.auth_realm != "dedicated-worker-account"
+            or profile.approval_policy != "never"
+            or profile.network_policy != "disabled"
+            or profile.native_helper_policy.value != "DISABLED"
+            or profile.skills
+            or profile.mcp_servers
+            or profile.plugins
+        ):
+            raise ValueError(
+                "configured COO alias must be a sealed, extension-free, write-capable Codex worker"
+            )
+        binding = {
+            "eligible_quota_classes": sorted(
+                {
+                    self.config.coo_quota_class,
+                    self.config.coo_default_quota_class,
+                }
+            ),
+            "provider": alias.provider_alias,
+            "model": alias.model,
+            "effort": alias.effort,
+            "cost_class": alias.cost_class,
+            "base_sha": self.config.proof_base_sha,
+            "routing_policy_version": router.policy_version,
+            "execution_profile_id": alias.execution_profile_id,
+            "execution_profile_digest": alias.execution_profile_digest,
+            "capability_policy_version": alias.capability_policy_version,
+            "capability_policy_digest": alias.capability_policy_digest,
+        }
+        if set(binding) != set(V2_HOST_EXECUTION_BINDING_KEYS):
+            raise ValueError("configured COO host binding fields drifted")
+        return binding
+
+    def _require_current_coo_binding(self) -> dict[str, Any]:
+        current = self._load_coo_execution_binding()
+        if current != self._coo_execution_binding:
+            raise ServiceError("installed COO routing/capability policy drifted")
+        return dict(current)
 
     @property
     def ceo_ingress_socket_path(self) -> Path | None:
@@ -743,6 +849,7 @@ class ExecutiveControlService:
     async def start(self) -> None:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
+        self._closing = False
         self._prepare_socket()
         try:
             self.runtime = self._runtime_factory(self.config.runtime_root)
@@ -783,6 +890,12 @@ class ExecutiveControlService:
             # (Operator starts second, so this line already runs after both),
             # unchanged single-listener timing otherwise.
             self._started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            if self.config.coo_autonomy_armed:
+                self._coo_shutdown_event = asyncio.Event()
+                self._coo_tick_task = asyncio.create_task(
+                    self._coo_tick_loop(),
+                    name="executive-coo-bounded-tick",
+                )
         except Exception:
             await self.close()
             raise
@@ -792,6 +905,9 @@ class ExecutiveControlService:
         # anything else so a mid-startup failure or a fresh restart never
         # observes a stale true value.
         self._ceo_ingress_ready = False
+        self._closing = True
+        if self._coo_shutdown_event is not None:
+            self._coo_shutdown_event.set()
 
         # §14.2 step 1 — stop BOTH listeners first, preventing new
         # connections, before awaiting either one's ``wait_closed()``.  Calling
@@ -811,6 +927,23 @@ class ExecutiveControlService:
             await server.wait_closed()
         if ceo_ingress_server is not None:
             await ceo_ingress_server.wait_closed()
+
+        coo_tick, self._coo_tick_task = self._coo_tick_task, None
+        if coo_tick is not None:
+            # A CooCycle action can cross a durable mutation/claim boundary in
+            # its worker thread.  Cancellation would not stop that thread, so
+            # shutdown drains the one bounded action to a real return point.
+            await asyncio.gather(coo_tick, return_exceptions=True)
+        self._coo_shutdown_event = None
+        current_task = asyncio.current_task()
+        coo_actions = [
+            task
+            for task in self._coo_action_tasks
+            if task is not current_task and not task.done()
+        ]
+        if coo_actions:
+            await asyncio.gather(*coo_actions, return_exceptions=True)
+        self._coo_action_tasks.clear()
 
         tasks = [task for task in self._dispatch_tasks.values() if not task.done()]
         runtime = self.runtime
@@ -1278,34 +1411,94 @@ class ExecutiveControlService:
 
     def _register_worker(self) -> Any:
         runtime = self._require_runtime()
+        binding = self._require_current_coo_binding()
+        router = ModelRouter.load()
+        alias = router.model_aliases[self.config.coo_model_alias]
+        coo_capabilities = list(alias.capabilities)
+        coo_metadata = {
+            "service_managed": True,
+            "purpose": "executive-coo-cycle",
+            "model_alias": self.config.coo_model_alias,
+            "routing_policy_version": binding["routing_policy_version"],
+            "execution_profile_id": binding["execution_profile_id"],
+            "execution_profile_digest": binding["execution_profile_digest"],
+            "capability_policy_version": binding["capability_policy_version"],
+            "capability_policy_digest": binding["capability_policy_digest"],
+        }
+        coo_default_metadata = dict(coo_metadata)
+        coo_default_metadata.pop("model_alias", None)
+        coo_default_metadata["capacity_variant"] = "default"
+        proof_capabilities = ["code", "research", "tests"]
         existing = runtime.workers.get_worker(self.config.worker_id)
         if existing is not None:
-            expected_capabilities = ["code", "research", "tests"]
-            quota = existing.quota_classes.get(self.config.quota_class)
+            quota = runtime.workers.get_quota_class(
+                self.config.worker_id, self.config.quota_class
+            )
             if (
                 existing.provider != self.config.provider
                 or existing.account_label != self.config.worker_account_label
                 or existing.worker_type != self.config.worker_type
-                or existing.capabilities != expected_capabilities
                 or quota is None
-                or quota.get("capabilities") != expected_capabilities
+                or quota.provider != self.config.provider
+                or quota.model != self.config.model
+                or quota.effort != self.config.effort
+                or quota.cost_class != self.config.cost_class
+                or quota.capabilities != proof_capabilities
             ):
                 raise StateConflict("configured worker identity already exists with different policy")
-            return existing
+            runtime.workers.register_quota_class(
+                self.config.worker_id,
+                self.config.coo_quota_class,
+                provider=str(binding["provider"]),
+                model=str(binding["model"]),
+                effort=str(binding["effort"]),
+                cost_class=str(binding["cost_class"]),
+                capabilities=coo_capabilities,
+                metadata=coo_metadata,
+            )
+            runtime.workers.register_quota_class(
+                self.config.worker_id,
+                self.config.coo_default_quota_class,
+                provider=str(binding["provider"]),
+                model=str(binding["model"]),
+                effort=str(binding["effort"]),
+                cost_class="default",
+                capabilities=coo_capabilities,
+                metadata=coo_default_metadata,
+            )
+            refreshed = runtime.workers.get_worker(self.config.worker_id)
+            assert refreshed is not None
+            return refreshed
         return runtime.workers.register_worker(
             self.config.worker_id,
             provider=self.config.provider,
             account_label=self.config.worker_account_label,
             worker_type=self.config.worker_type,
-            capabilities=["research", "code", "tests"],
+            capabilities=sorted(set(proof_capabilities) | set(coo_capabilities)),
             quota_classes={
                 self.config.quota_class: {
                     "provider": self.config.provider,
                     "model": self.config.model,
                     "effort": self.config.effort,
                     "cost_class": self.config.cost_class,
-                    "capabilities": ["research", "code", "tests"],
-                }
+                    "capabilities": proof_capabilities,
+                },
+                self.config.coo_quota_class: {
+                    "provider": binding["provider"],
+                    "model": binding["model"],
+                    "effort": binding["effort"],
+                    "cost_class": binding["cost_class"],
+                    "capabilities": coo_capabilities,
+                    "metadata": coo_metadata,
+                },
+                self.config.coo_default_quota_class: {
+                    "provider": binding["provider"],
+                    "model": binding["model"],
+                    "effort": binding["effort"],
+                    "cost_class": "default",
+                    "capabilities": coo_capabilities,
+                    "metadata": coo_default_metadata,
+                },
             },
             metadata={"service_managed": True},
         )
@@ -1732,6 +1925,411 @@ class ExecutiveControlService:
             result["workspace_rotation"] = rotation
             return result
 
+    def _submit_service_intent(self, payload: Any) -> dict[str, Any]:
+        """Submit through the existing sink with v2 host composition attached."""
+
+        normalized = ceo_intent.validate_intent(payload)
+        binding: dict[str, Any] | None = None
+        if normalized.get("schema") == ceo_intent.INTENT_SCHEMA_V2:
+            if normalized["grounding"].get("mastermind_sha") != self.config.proof_base_sha:
+                raise ceo_intent.CeoIntentError(
+                    "v2 intent grounding.mastermind_sha differs from the installed reviewed release"
+                )
+            binding = self._require_current_coo_binding()
+        receipt = ceo_intent.submit_intent(
+            self._require_runtime(),
+            normalized,
+            workspace_root=self.config.proof_workspace_root,
+            execution_binding=binding,
+        )
+        if binding is not None:
+            job = self._require_runtime().jobs.get_job(str(receipt.get("job_id") or ""))
+            if job is None or not self._is_bound_coo_root(job):
+                raise ceo_intent.CeoIntentError(
+                    "accepted v2 intent is not bound to the current reviewed host profile"
+                )
+        return receipt
+
+    def _is_bound_coo_root(self, root: Job) -> bool:
+        binding = self._require_current_coo_binding()
+        provenance = root.orchestration_provenance
+        return bool(
+            root.parent_job_id is None
+            and root.root_job_id == root.job_id
+            and root.depth == 0
+            and root.orchestration_role == "aggregation"
+            and isinstance(provenance, dict)
+            and provenance.get("schema_version")
+            == "mastermind.executive_orchestration_provenance/v1"
+            and provenance.get("creator") == "ceo_intent"
+            and provenance.get("job_id") == root.job_id
+            and provenance.get("root_job_id") == root.job_id
+            and provenance.get("parent_job_id") is None
+            and root.worktree is not None
+            and root.branch is not None
+            and all(root.constraints.get(key) == value for key, value in binding.items())
+        )
+
+    def _require_bound_coo_job(self, job: Job) -> Job:
+        runtime = self._require_runtime()
+        root = runtime.jobs.get_job(job.root_job_id)
+        if root is None or not self._is_bound_coo_root(root):
+            raise StateConflict("COO dispatch root is not bound to the current host profile")
+        if job.job_id != root.job_id and (
+            job.parent_job_id != root.job_id
+            or job.root_job_id != root.job_id
+            or job.depth != 1
+            or job.orchestration_role not in {"plan", "work", "review", "repair"}
+        ):
+            raise StateConflict("COO dispatch target is outside the direct strict-v2 subtree")
+        binding = self._require_current_coo_binding()
+        for key in (
+            "eligible_quota_classes",
+            "provider",
+            "model",
+            "effort",
+            "base_sha",
+            "routing_policy_version",
+            "execution_profile_id",
+            "execution_profile_digest",
+            "capability_policy_version",
+            "capability_policy_digest",
+        ):
+            if job.constraints.get(key) != binding[key]:
+                raise StateConflict(f"COO Job host binding drifted at {key}")
+        if job.constraints.get("cost_class") not in {"small", "default"}:
+            raise StateConflict("COO Job cost class has no reviewed serialized capacity")
+        if job.worktree != root.worktree or job.branch != root.branch:
+            raise StateConflict("COO Job workspace/branch differs from its strict-v2 root")
+        return root
+
+    def _require_coo_workspace(self, job: Job) -> dict[str, Any]:
+        root = self._require_bound_coo_job(job)
+        assert root.worktree is not None and root.branch is not None
+        workspace = Path(root.worktree).resolve(strict=False)
+        if workspace.parent != self.config.proof_workspace_root:
+            raise StateConflict("COO workspace is not a direct reviewed-root assignment")
+        observation = self._workspace_observation(
+            workspace,
+            require_fresh=False,
+            expected_branch=root.branch,
+        )
+        if observation["branch"] != root.branch or observation["remote_count"] != 0:
+            raise ServiceError("COO workspace must remain branch-bound and credentialless")
+        if (
+            job.orchestration_role == "plan"
+            and job.attempt_count == 0
+            and (
+                observation["head"] != self.config.proof_base_sha
+                or observation["launch_clean"] is not True
+            )
+        ):
+            raise ServiceError(
+                "initial COO planner requires the clean exact reviewed-base workspace"
+            )
+        self._require_shared_git_handoff(workspace)
+        return observation
+
+    def _require_coo_worker_composed(self) -> None:
+        runtime = self._require_runtime()
+        binding = self._require_current_coo_binding()
+        worker = runtime.workers.get_worker(self.config.worker_id)
+        if (
+            worker is None
+            or worker.provider != binding["provider"]
+            or worker.account_label != self.config.worker_account_label
+            or worker.worker_type != self.config.worker_type
+        ):
+            raise StateConflict("reviewed COO worker identity is not registered")
+        for quota_name, cost_class in (
+            (self.config.coo_quota_class, "small"),
+            (self.config.coo_default_quota_class, "default"),
+        ):
+            quota = runtime.workers.get_quota_class(self.config.worker_id, quota_name)
+            if (
+                quota is None
+                or quota.provider != binding["provider"]
+                or quota.model != binding["model"]
+                or quota.effort != binding["effort"]
+                or quota.cost_class != cost_class
+                or any(
+                    quota.metadata.get(key) != binding[key]
+                    for key in (
+                        "routing_policy_version",
+                        "execution_profile_id",
+                        "execution_profile_digest",
+                        "capability_policy_version",
+                        "capability_policy_digest",
+                    )
+                )
+                or not set(ModelRouter.load().model_aliases[
+                    self.config.coo_model_alias
+                ].capabilities).issubset(set(quota.capabilities))
+            ):
+                raise StateConflict("reviewed COO worker quota identity is unavailable or drifted")
+
+    async def _reconcile_unowned_cycle_attempts(self) -> None:
+        if any(not task.done() for task in self._dispatch_tasks.values()):
+            return
+        runtime = self._require_runtime()
+        active = [
+            attempt
+            for attempt in runtime.attempts.list_attempts()
+            if attempt.status in _COO_ACTIVE_ATTEMPT_STATUSES
+        ]
+        if not active:
+            return
+        receipts = await asyncio.to_thread(
+            self._require_supervisor().reconcile_restart,
+            requeue_lost=False,
+        )
+        self._startup_reconciliation.extend(receipts)
+        ambiguous = [
+            receipt
+            for receipt in receipts
+            if str(getattr(getattr(receipt, "status", None), "value", ""))
+            == "IDENTITY_AMBIGUOUS"
+        ]
+        remaining = [
+            attempt
+            for attempt in runtime.attempts.list_attempts()
+            if attempt.status in _COO_ACTIVE_ATTEMPT_STATUSES
+        ]
+        if ambiguous or remaining:
+            self._service_state = "QUARANTINED"
+            raise StateConflict(
+                "unowned active Attempt identity could not be reconciled before COO claim"
+            )
+
+    async def _dispatch_cycle_job_exact(
+        self, job_id: str, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        runtime = self._require_runtime()
+        supervisor = self._require_supervisor()
+        async with self._dispatch_lock:
+            async with self._workspace_lock:
+                live = {
+                    value
+                    for value, task in self._dispatch_tasks.items()
+                    if not task.done()
+                }
+                if live and live != {job_id}:
+                    raise StateConflict("the serialized worker already has another active dispatch")
+                job = runtime.jobs.get_job(job_id)
+                if job is None:
+                    raise StateConflict(f"job {job_id!r} does not exist")
+                self._require_bound_coo_job(job)
+                if job.status not in {
+                    JobStatus.QUEUED,
+                    JobStatus.RUNNING,
+                    JobStatus.CHECKPOINTED,
+                }:
+                    raise StateConflict(
+                        f"job {job_id} cannot cycle-dispatch from {job.status.value}"
+                    )
+                if job.status is JobStatus.QUEUED:
+                    self._require_coo_workspace(job)
+                try:
+                    started = await supervisor.start_cycle_job(
+                        job_id, command_id=command_id
+                    )
+                except Exception as exc:
+                    current = runtime.jobs.get_job(job_id)
+                    if current is not None and current.status in {
+                        JobStatus.RUNNING,
+                        JobStatus.CHECKPOINTED,
+                        JobStatus.CANCEL_REQUESTED,
+                    }:
+                        self._dispatch_errors[job_id] = (
+                            f"{type(exc).__name__}: ambiguous cycle worker start; "
+                            "restart reconciliation required"
+                        )
+                        self._service_state = "QUARANTINED"
+                    raise
+                if isinstance(started, OrchestrationDispatchOutcome):
+                    return started
+                lease = getattr(started, "lease", None)
+                attempt = getattr(lease, "attempt", None)
+                token = getattr(lease, "lease_token", None)
+                if attempt is None or not token:
+                    raise ServiceError("cycle supervisor returned no active leased Attempt")
+                task = asyncio.create_task(
+                    self._finish_dispatched(job_id, started),
+                    name=f"executive-cycle-finish-{job_id}",
+                )
+                self._dispatch_tasks[job_id] = task
+                return OrchestrationDispatchOutcome(
+                    command_id=command_id,
+                    job_id=job_id,
+                    attempt=attempt,
+                    outcome="ACTIVE",
+                    lease_token=token,
+                )
+
+    async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
+        if self._closing:
+            raise StateConflict("Executive control service is closing")
+        if not self.config.coo_autonomy_armed:
+            raise StateConflict("COO autonomy is not armed in reviewed host configuration")
+        if self._service_state != "READY":
+            raise StateConflict(f"Executive control service is {self._service_state}")
+        root_id = self._id(root_job_id, "root_job_id")
+        async with self._coo_cycle_lock:
+            self._require_coo_worker_composed()
+            root = self._require_runtime().jobs.get_job(root_id)
+            if root is None or not self._is_bound_coo_root(root):
+                raise StateConflict("COO cycle accepts only an exact host-bound strict-v2 root")
+            children = [
+                job
+                for job in self._require_runtime().jobs.list_jobs()
+                if job.parent_job_id == root_id
+            ]
+            if not children:
+                observation = self._require_coo_workspace(root)
+                if (
+                    observation["head"] != self.config.proof_base_sha
+                    or observation["launch_clean"] is not True
+                ):
+                    raise ServiceError(
+                        "new COO root requires the clean exact reviewed-base workspace"
+                    )
+            live = {
+                value
+                for value, task in self._dispatch_tasks.items()
+                if not task.done()
+            }
+            live_jobs = [self._require_runtime().jobs.get_job(value) for value in live]
+            if live and (
+                any(value is None for value in live_jobs)
+                or any(value.root_job_id != root_id for value in live_jobs if value is not None)
+            ):
+                raise StateConflict("another COO root owns the serialized worker")
+            await self._reconcile_unowned_cycle_attempts()
+            loop = asyncio.get_running_loop()
+
+            def dispatch(job_id: str, command_id: str) -> OrchestrationDispatchOutcome:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._dispatch_cycle_job_exact(job_id, command_id), loop
+                )
+                return future.result()
+
+            outcome = await asyncio.to_thread(
+                CooCycle(self._require_runtime(), dispatcher=dispatch).run_once,
+                root_id,
+            )
+            self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+            self._coo_last_outcome = outcome.to_dict()
+            self._coo_last_error = None
+            return outcome
+
+    async def _run_coo_cycle(self, root_job_id: str) -> CooCycleOutcome:
+        task = asyncio.current_task()
+        if task is None:  # pragma: no cover - asyncio always owns service calls
+            return await self._run_coo_cycle_once(root_job_id)
+        self._coo_action_tasks.add(task)
+        try:
+            return await self._run_coo_cycle_once(root_job_id)
+        finally:
+            self._coo_action_tasks.discard(task)
+
+    def _next_bound_coo_root(self) -> str | None:
+        runtime = self._require_runtime()
+        with runtime.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT job_id FROM jobs
+                WHERE parent_job_id IS NULL AND root_job_id=job_id
+                  AND orchestration_role='aggregation'
+                  AND status IN ('QUEUED','RUNNING','CHECKPOINTED','RATE_LIMITED','FAILED','LOST')
+                ORDER BY priority DESC,created_at_ms,job_id
+                LIMIT ?
+                """,
+                (_COO_ROOT_SCAN_LIMIT + 1,),
+            ).fetchall()
+        if len(rows) > _COO_ROOT_SCAN_LIMIT:
+            raise ServiceError("bounded COO root scan limit was exceeded")
+        for row in rows:
+            root = runtime.jobs.get_job(str(row["job_id"]))
+            if root is None or not self._is_bound_coo_root(root):
+                continue
+            blocked = any(
+                event.event_type == "COO_CYCLE_BLOCKED"
+                for event in runtime.events.list_events(job_id=root.job_id)
+            )
+            if not blocked:
+                return root.job_id
+        return None
+
+    def _record_coo_tick_refusal(self, root_job_id: str, exc: Exception) -> None:
+        """Persist one idempotent, secret-free autonomous refusal receipt."""
+
+        runtime = self._require_runtime()
+        payload = {
+            "schema_version": "mastermind.executive_coo_tick_refusal/v1",
+            "root_job_id": root_job_id,
+            "error_type": type(exc).__name__,
+            "reason_code": "bounded_cycle_action_refused",
+            "routing_policy_version": self._coo_execution_binding[
+                "routing_policy_version"
+            ],
+            "capability_policy_digest": self._coo_execution_binding[
+                "capability_policy_digest"
+            ],
+        }
+        digest = hashlib.sha256(_canonical_json(payload)).hexdigest()
+        command_id = f"coo-service-refusal:{digest}"
+        with runtime.store.transaction() as connection:
+            if connection.execute(
+                "SELECT 1 FROM events WHERE command_id=?", (command_id,)
+            ).fetchone() is None:
+                runtime.store.append_event(
+                    connection,
+                    aggregate_type="job",
+                    aggregate_id=root_job_id,
+                    event_type="COO_SERVICE_TICK_REFUSED",
+                    actor="executive-control-service",
+                    job_id=root_job_id,
+                    payload=payload,
+                    command_id=command_id,
+                )
+
+    async def _coo_tick_loop(self) -> None:
+        assert self._coo_shutdown_event is not None
+        while not self._coo_shutdown_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._coo_shutdown_event.wait(),
+                    timeout=float(self.config.coo_tick_interval_seconds),
+                )
+            except asyncio.TimeoutError:
+                pass
+            if self._coo_shutdown_event.is_set():
+                return
+            if self._service_state != "READY" or any(
+                not task.done() for task in self._dispatch_tasks.values()
+            ):
+                continue
+            root_id: str | None = None
+            try:
+                root_id = self._next_bound_coo_root()
+                if root_id is not None:
+                    await self._run_coo_cycle(root_id)
+            except Exception as exc:
+                self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
+                    timespec="seconds"
+                )
+                self._coo_last_error = f"{type(exc).__name__}: {str(exc)[:500]}"
+                if root_id is not None:
+                    try:
+                        self._record_coo_tick_refusal(root_id, exc)
+                    except Exception:
+                        # The original refusal remains the status truth.  A
+                        # receipt-write defect must not trigger a second action
+                        # or turn the same tick into an unbounded retry loop.
+                        pass
+
     async def _finish_dispatched(self, job_id: str, active: Any) -> None:
         try:
             await self._require_supervisor().finish_job(active)
@@ -1829,6 +2427,17 @@ class ExecutiveControlService:
                 "active_dispatches": active,
                 "dispatch_errors": dict(sorted(self._dispatch_errors.items())),
                 "startup_reconciliation": _jsonable(self._startup_reconciliation),
+                "coo_autonomy": {
+                    "armed": self.config.coo_autonomy_armed,
+                    "tick_interval_seconds": self.config.coo_tick_interval_seconds,
+                    "model_alias": self.config.coo_model_alias,
+                    "quota_classes": list(
+                        self._coo_execution_binding["eligible_quota_classes"]
+                    ),
+                    "last_tick_at": self._coo_last_tick_at,
+                    "last_outcome": self._coo_last_outcome,
+                    "last_error": self._coo_last_error,
+                },
             }
         if command == "health":
             self._exact_args(args, set())
@@ -1876,29 +2485,27 @@ class ExecutiveControlService:
         if command == "dispatch":
             self._exact_args(args, {"job_id"})
             return await self._dispatch_job(self._id(args["job_id"], "job_id"))
+        if command == "run-coo-cycle":
+            self._exact_args(args, {"root_job_id"})
+            return _jsonable(
+                await self._run_coo_cycle(
+                    self._id(args["root_job_id"], "root_job_id")
+                )
+            )
         if command == "submit-ceo-intent":
             # The bounded CEO write bridge (Phase 1E-A).  It validates one typed
             # envelope, lets the existing authority policy adjudicate it inside
             # create_job, and returns a receipt naming the resulting QUEUED Job.
-            # It adds NO execution behaviour: submission is not dispatch, and a
-            # CEO-created job is structurally undispatchable by this service
-            # because `dispatch`/`requeue` accept only the fixed proof job.
+            # Submission remains distinct from execution. V1 is structurally
+            # undispatchable by this service. Strict v2 receives only the
+            # reviewed host-owned G1 execution binding; a later, separately
+            # armed run-coo-cycle action may advance that exact root.
             # ``CeoIntentError`` subclasses ValueError precisely so a refusal
             # lands on the existing `request_failed` code above rather than the
             # opaque `internal_error` path.
             self._exact_args(args, {"intent"})
             return _jsonable(
-                await asyncio.to_thread(
-                    ceo_intent.submit_intent,
-                    runtime,
-                    args["intent"],
-                    # An intent's worktree is fenced to the host's reviewed jobs
-                    # workspace root.  `proof_workspace_root` IS that root (it is
-                    # `jobs/workspaces` in control.json, not a proof-only
-                    # directory) — the field keeps its Phase 1C name because
-                    # renaming it would be a control-config schema change.
-                    workspace_root=self.config.proof_workspace_root,
-                )
+                await asyncio.to_thread(self._submit_service_intent, args["intent"])
             )
         if command == "ceo-intent-status":
             # Read-back only.  The durable JOB_CREATED event plus the Job row are

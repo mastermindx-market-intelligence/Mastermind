@@ -18,7 +18,15 @@ from pathlib import Path
 import pytest
 
 from common.redaction import TRUNCATION_MARKER
-from control_plane.executive_runtime import JobPayload, JobStatus, Runtime
+from control_plane.executive_runtime import (
+    AttemptLease,
+    AttemptStatus,
+    JobPayload,
+    JobStatus,
+    OrchestrationDispatchOutcome,
+    Runtime,
+    StateConflict,
+)
 from control_plane.executive_canary import (
     PrincipalIdentity,
     SecretCanaryConfig,
@@ -42,6 +50,7 @@ from control_plane.executive_workspace import (
     LAUNCH_CLEAN_STATUS_ARGS,
     LAUNCH_CLEAN_UNTRACKED_ARGS,
     WorkspaceError,
+    prepare_credentialless_clone,
 )
 from control_plane import executive_service as es_mod
 from scripts import executive_os_phase1c as service_cli
@@ -78,6 +87,27 @@ class _FakeSupervisor:
             attempt.attempt_id,
             fence_generation=attempt.fence_generation,
             lease_token=lease.lease_token,
+        )
+        self.started_jobs.append(job_id)
+        return _Active(lease=lease)
+
+    async def start_cycle_job(self, job_id: str, *, command_id: str):
+        outcome = self.runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            lease_owner="service-fixture",
+        )
+        if outcome is None:
+            raise StateConflict(f"no eligible worker capacity for {job_id}")
+        if (
+            outcome.outcome == "TERMINAL"
+            or outcome.attempt.status is not AttemptStatus.CLAIMED
+        ):
+            return outcome
+        assert outcome.lease_token is not None
+        lease = AttemptLease(
+            attempt=outcome.attempt,
+            lease_token=outcome.lease_token,
         )
         self.started_jobs.append(job_id)
         return _Active(lease=lease)
@@ -240,6 +270,39 @@ async def _raw_request(path: Path, raw: bytes) -> dict:
         await writer.wait_closed()
 
 
+def _coo_intent(config: ServiceConfig, name: str) -> dict:
+    workspace_name = f"coo-{name.lower()}"
+    branch = f"codex/coo-fixture-{name.lower()}"
+    receipt = prepare_credentialless_clone(
+        config.proof_source_repository,
+        config.proof_workspace_root,
+        job_id=workspace_name,
+        base_sha=config.proof_base_sha,
+        branch=branch,
+        shared_gid=config.proof_shared_gid,
+    )
+    return {
+        "schema": "mastermind.ceo_intent.v2",
+        "intent_id": f"CEO-G1-{name.upper()}",
+        "actor": "ceo-sol",
+        "objective": f"Execute one bounded G1 cycle fixture {name}.",
+        "department": "executive-infrastructure",
+        "priority": 9,
+        "grounding": {
+            "mastermind_sha": config.proof_base_sha,
+            "macro_sha": "b" * 40,
+        },
+        "execution_contract": {
+            "requested_authorities": ["READ"],
+            "branch": branch,
+            "worktree": receipt.workspace_path,
+            "attempt_limit": 2,
+        },
+        "intent_kind": "executive_coo_cycle",
+        "business_impact": "routine",
+    }
+
+
 def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
     tmp_path: Path, short_socket_root: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -319,7 +382,7 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
             assert len(created["result"]["validation_commands"]) == 1
 
             dispatched = await _request(service, "dispatch", {"job_id": job_id})
-            assert dispatched["ok"] is True
+            assert dispatched["ok"] is True, dispatched
             attempt_id = dispatched["result"]["attempt"]["attempt_id"]
             for _ in range(100):
                 inspected = await _request(service, "job", {"job_id": job_id})
@@ -356,6 +419,340 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
             await service.close()
         assert not service.socket_path.exists()
         assert not service.running_marker_path.exists()
+
+    asyncio.run(exercise())
+
+
+def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        finish_gate = asyncio.Event()
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=3600.0,
+        )
+        service, holder = _service(
+            tmp_path,
+            finish_gate=finish_gate,
+            config=config,
+        )
+        await service.start()
+        try:
+            registered = await _request(service, "register-worker")
+            assert registered["ok"] is True
+            assert set(registered["result"]["quota_classes"]) == {
+                "codex-native",
+                "codex-coo",
+                "codex-coo-default",
+            }
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "one")},
+            )
+            assert submitted["ok"] is True
+            assert submitted["result"]["dispatched"] is False
+            root_id = submitted["result"]["job_id"]
+            root = service.runtime.jobs.get_job(root_id)
+            assert root is not None
+            assert root.constraints["routing_policy_version"] == "2026-08-24.stage2"
+            assert root.constraints["execution_profile_id"] == (
+                "sealed.worker.write.no-extensions.v1"
+            )
+            assert root.constraints["eligible_quota_classes"] == [
+                "codex-coo",
+                "codex-coo-default",
+            ]
+            assert root.constraints["base_sha"] == config.proof_base_sha
+
+            created = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert created["ok"] is True
+            assert created["result"]["action"] == "PLANNER_CREATED"
+            planner_id = created["result"]["selected_job_id"]
+
+            dispatched = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert dispatched["ok"] is True, dispatched
+            assert dispatched["result"]["action"] == "DISPATCHED"
+            attempt_id = dispatched["result"]["receipt"]["attempt"]["attempt_id"]
+            assert "lease_token" not in json.dumps(dispatched, sort_keys=True)
+            assert holder["supervisor"].started_jobs == [planner_id]
+
+            replay = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert replay["ok"] is True
+            assert replay["result"]["action"] == "DISPATCHED"
+            assert replay["result"]["receipt"]["attempt"]["attempt_id"] == attempt_id
+            assert len(service.runtime.attempts.list_attempts(planner_id)) == 1
+
+            submitted_two = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "two")},
+            )
+            root_two = submitted_two["result"]["job_id"]
+            refused = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_two}
+            )
+            assert refused["ok"] is False
+            assert "serialized worker" in refused["error"]["message"]
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_two
+            ] == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_bounded_service_tick_advances_only_one_bound_root_action(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        finish_gate = asyncio.Event()
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=1.0,
+        )
+        service, _holder = _service(
+            tmp_path,
+            finish_gate=finish_gate,
+            config=config,
+        )
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "tick")},
+            )
+            root_id = submitted["result"]["job_id"]
+            submitted_two = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "tick-two")},
+            )
+            root_two = submitted_two["result"]["job_id"]
+            children = []
+            for _ in range(60):
+                children = [
+                    job
+                    for job in service.runtime.jobs.list_jobs()
+                    if job.parent_job_id == root_id
+                ]
+                if children:
+                    break
+                await asyncio.sleep(0.025)
+            assert len(children) == 1
+            assert children[0].orchestration_role == "plan"
+            assert service.runtime.attempts.list_attempts(children[0].job_id) == []
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_two
+            ] == []
+            assert len(
+                [
+                    job
+                    for job in service.runtime.jobs.list_jobs()
+                    if job.orchestration_role == "plan"
+                ]
+            ) == 1
+            status = await _request(service, "status")
+            assert status["result"]["coo_autonomy"]["armed"] is True
+            assert status["result"]["coo_autonomy"]["last_outcome"]["action"] == (
+                "PLANNER_CREATED"
+            )
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_bounded_service_tick_persists_one_refusal_without_mutating_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=1.0,
+        )
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "tick-refusal")},
+            )
+            assert submitted["ok"] is True
+            root_id = submitted["result"]["job_id"]
+
+            refusal_events = []
+            for _ in range(80):
+                refusal_events = [
+                    event
+                    for event in service.runtime.events.list_events(job_id=root_id)
+                    if event.event_type == "COO_SERVICE_TICK_REFUSED"
+                ]
+                if refusal_events:
+                    break
+                await asyncio.sleep(0.025)
+            assert len(refusal_events) == 1
+            assert refusal_events[0].payload["reason_code"] == (
+                "bounded_cycle_action_refused"
+            )
+            assert refusal_events[0].payload["error_type"] == "StateConflict"
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_id
+            ] == []
+
+            await asyncio.sleep(1.1)
+            assert len(
+                [
+                    event
+                    for event in service.runtime.events.list_events(job_id=root_id)
+                    if event.event_type == "COO_SERVICE_TICK_REFUSED"
+                ]
+            ) == 1
+            status = await _request(service, "status")
+            assert "reviewed COO worker identity" in status["result"][
+                "coo_autonomy"
+            ]["last_error"]
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_unarmed_service_admits_but_cannot_advance_bound_v2_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            await _request(service, "register-worker")
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "held")},
+            )
+            root_id = submitted["result"]["job_id"]
+            refused = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert refused["ok"] is False
+            assert "not armed" in refused["error"]["message"]
+            assert service._coo_tick_task is None
+            assert [
+                job
+                for job in service.runtime.jobs.list_jobs()
+                if job.parent_job_id == root_id
+            ] == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_service_adds_exact_coo_capacity_to_existing_legacy_worker(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        runtime = Runtime.at(config.runtime_root)
+        runtime.workers.register_worker(
+            config.worker_id,
+            provider=config.provider,
+            account_label=config.worker_account_label,
+            worker_type=config.worker_type,
+            capabilities=["code", "research", "tests"],
+            quota_classes={
+                config.quota_class: {
+                    "provider": config.provider,
+                    "model": config.model,
+                    "effort": config.effort,
+                    "cost_class": config.cost_class,
+                    "capabilities": ["code", "research", "tests"],
+                }
+            },
+            metadata={"service_managed": True},
+        )
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            registered = await _request(service, "register-worker")
+            assert registered["ok"] is True
+            assert set(registered["result"]["quota_classes"]) == {
+                config.quota_class,
+                config.coo_quota_class,
+                config.coo_default_quota_class,
+            }
+            events = [
+                event
+                for event in service.runtime.events.list_events()
+                if event.event_type == "WORKER_QUOTA_REGISTERED"
+                and event.worker_id == config.worker_id
+            ]
+            assert {event.quota_class for event in events} == {
+                config.coo_quota_class,
+                config.coo_default_quota_class,
+            }
+            assert (await _request(service, "register-worker"))["ok"] is True
+            assert len(
+                [
+                    event
+                    for event in service.runtime.events.list_events()
+                    if event.event_type == "WORKER_QUOTA_REGISTERED"
+                    and event.worker_id == config.worker_id
+                ]
+            ) == 2
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_caller_cannot_override_reviewed_v2_host_execution_binding(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        await service.start()
+        try:
+            intent = _coo_intent(config, "binding-conflict")
+            intent["execution_contract"]["constraints"] = {
+                "cost_class": "default"
+            }
+            refused = await _request(
+                service, "submit-ceo-intent", {"intent": intent}
+            )
+            assert refused["ok"] is False
+            assert "conflicts with reviewed host composition" in refused["error"][
+                "message"
+            ]
+            assert service.runtime.jobs.list_jobs() == []
+        finally:
+            await service.close()
 
     asyncio.run(exercise())
 
@@ -997,6 +1394,10 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         config_path.write_text(json.dumps(raw), encoding="utf-8")
         config_path.chmod(0o400)
         loaded = service_cli.load_control_config(config_path)
+        with pytest.raises(ValueError, match="coo_tick_interval_seconds"):
+            service_cli._service_from_config(
+                {**loaded, "coo_tick_interval_seconds": 0}
+            )
         monkeypatch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
         service = service_cli._service_from_config(loaded)
         await service.start()
@@ -1261,6 +1662,8 @@ def test_cli_exposes_configured_serve_and_offline_restore_only():
         ]
     )
     assert restore.command == "restore-backup"
+    cycle = service_cli._parser().parse_args(["run-coo-cycle", "JOB-001"])
+    assert cycle.command == "run-coo-cycle" and cycle.root_job_id == "JOB-001"
     # The live JSON protocol deliberately has no restore verb.
     assert "restore" not in {
         "status",
@@ -1272,6 +1675,7 @@ def test_cli_exposes_configured_serve_and_offline_restore_only():
         "register-worker",
         "create-proof-job",
         "dispatch",
+        "run-coo-cycle",
         "cancel",
         "reconcile",
         "requeue",
