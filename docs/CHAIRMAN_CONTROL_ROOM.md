@@ -136,9 +136,11 @@ The ordered journey is:
    file, a log, a receipt, or the repository.
 4. `configure-canary-port` first accepts an exact historical v2 provision only
    for an atomic v3 migration, then reaches the narrow secret-owning helper. It
-   binds and self-tests `http://127.0.0.1:65535` before reading Keychain or
-   constructing vendor HTTP. It proves the disposable Mimic profile is the
-   exact stopped, unowned, unlocked non-seat profile; reads Profile Metas;
+   first requires the local reduced environment census to identify exactly one
+   matching Mimic profile and report it stopped. It then binds and self-tests
+   `http://127.0.0.1:65535` before reading Keychain or constructing vendor
+   HTTP. After Keychain, it proves the disposable profile is still the exact
+   stopped, unowned, unlocked non-seat profile; reads Profile Metas;
    preserves the existing browser-core auto-update boolean; and, only from the
    default masked state, submits one exact partial update containing
    `ports_masking=mask` and `ports=[65535]`. An already exact profile is an

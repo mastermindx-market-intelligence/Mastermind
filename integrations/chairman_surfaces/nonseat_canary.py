@@ -426,8 +426,8 @@ def sha256_hex(text: str) -> str:
 def assert_disposable(provision) -> None:
     """Defense-in-depth gate: never trust a caller-supplied ``provision``
     dict at face value. Raises :class:`CanaryRefusal` (``DISALLOWED_TARGET``)
-    unless ``provision`` is a dict carrying the exact disposable ack AND a
-    the fixed origin policy and its runtime-derived exact loopback origin."""
+    unless ``provision`` is a dict carrying the exact disposable ack, the
+    fixed origin policy, and its runtime-derived exact loopback origin."""
     if not isinstance(provision, dict):
         raise CanaryRefusal("DISALLOWED_TARGET")
     if provision.get("disposable_ack") != REQUIRED_ACK:
