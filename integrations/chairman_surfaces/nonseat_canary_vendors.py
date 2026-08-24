@@ -393,7 +393,14 @@ class MultiloginClient:
             return None
         if status.get("error_code") != "" or status.get("http_code") != 200:
             return None
-        if status.get("message") != expected_message:
+        message = status.get("message")
+        if not isinstance(message, str):
+            return None
+        # Multilogin Profile Search has changed this human-readable success
+        # prose while retaining the documented success codes and exact data
+        # contract.  ``None`` makes prose advisory for that one read-only
+        # census surface; lifecycle and launch responses remain exact.
+        if expected_message is not None and message != expected_message:
             return None
         if profile_id is not None and data.get("profile_id") != profile_id:
             return None
@@ -567,9 +574,7 @@ class MultiloginClient:
                 raise _core.CanaryRefusal("AUTH_EXPIRED")
             if resp.status_code != 200:
                 raise _core.CanaryRefusal("VENDOR_ERROR")
-            data = self._successful_envelope(
-                resp.payload, expected_message="Search profile successfully result",
-            )
+            data = self._successful_envelope(resp.payload, expected_message=None)
             if data is None or set(data) != {"profiles", "total_count"}:
                 raise _core.CanaryRefusal("VENDOR_ERROR")
             profiles = data.get("profiles")
