@@ -20,7 +20,7 @@
       "binding_id": "22222222-2222-4222-8222-222222222222",
       "work_ref": "WS:ALPHA-ONE",
       "role": "ceo",
-      "seat_ref": "chatgpt2",
+      "seat_ref": "chatgpt1",
       "provider": "chatgpt",
       "locator_kind": "chatgpt_managed_env",
       "locator": {

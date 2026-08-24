@@ -162,6 +162,9 @@ def test_falsifier_unknown_key_at_locator_level():
         "https://evil.example.com/c/abc",  # wrong host
         "https://user:pass@chatgpt.com/c/abc",  # embedded credentials
         "https://chatgpt.com:8443/c/abc",  # embedded port
+        "https://chatgpt.com/",  # home, not one conversation
+        "https://chatgpt.com/g/g-p-project/project",  # Project overview, not one conversation
+        "https://chatgpt.com/c/abc?temporary=1",  # unstable query-bearing variant
         "",  # empty
     ],
 )
@@ -461,7 +464,7 @@ def test_load_bindings_permission_warning(tmp_path):
 
 def test_falsifier_duplicate_binding_conflict():
     a = _valid_binding(binding_id="11111111-1111-4111-8111-111111111111")
-    b = _valid_binding(binding_id="22222222-2222-4222-8222-222222222222", seat_ref="chatgpt2")
+    b = _valid_binding(binding_id="22222222-2222-4222-8222-222222222222", seat_ref="chatgpt1")
     doc = _doc(a, b)
     conflicts = sb.find_conflicts(doc)
     assert conflicts == [
@@ -476,6 +479,38 @@ def test_falsifier_duplicate_binding_conflict():
     ]
     # Both bindings are still present — no automatic winner picked.
     assert len(doc["bindings"]) == 2
+
+
+def test_distinct_named_chatgpt_seats_can_share_work_and_role_without_conflict():
+    rows = [
+        _valid_binding(
+            binding_id=(
+                f"{str(index) * 8}-{str(index) * 4}-4{str(index) * 3}-"
+                f"8{str(index) * 3}-{str(index) * 12}"
+            ),
+            seat_ref=f"chatgpt{index}",
+        )
+        for index in (1, 2, 3)
+    ]
+    assert sb.find_conflicts(_doc(*rows)) == []
+
+
+def test_mixed_provider_claim_for_same_work_and_role_remains_conflict():
+    chatgpt = _valid_binding(binding_id="11111111-1111-4111-8111-111111111111")
+    codex = sb.new_binding(
+        work_ref="WS:FOO", role="ceo", provider="codex",
+        locator_kind="codex_session", locator={"session_id": "session-other"},
+        observed_at="2026-08-21T00:00:00Z",
+        binding_id="22222222-2222-4222-8222-222222222222",
+    )
+    assert sb.find_conflicts(_doc(chatgpt, codex)) == [{
+        "work_ref": "WS:FOO",
+        "role": "ceo",
+        "binding_ids": [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222",
+        ],
+    }]
 
 
 def test_find_conflicts_no_conflict_for_distinct_roles():

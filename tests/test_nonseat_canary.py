@@ -84,9 +84,9 @@ def _binding_doc(*, colliding_profile_id=None) -> dict:
         locator = {
             "env_manager": "multilogin" if is_multilogin else "gologin",
             "profile_id": profile_id,
-            # Schema-valid but non-private: no conversation URL is needed to
-            # prove the managed-profile collision census.
-            "url": "https://chatgpt.com/",
+            # Schema-valid synthetic exact-chat address. The collision census
+            # uses only the managed-profile identity and never reads this URL.
+            "url": f"https://chatgpt.com/c/non-private-seat-{index}",
         }
         if is_multilogin:
             locator["folder_id"] = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"

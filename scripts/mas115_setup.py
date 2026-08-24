@@ -104,7 +104,7 @@ def _locator(row: dict, url: str) -> dict:
 
 
 def build_enrollment_document(existing: dict | None, selections: dict[str, tuple[dict, str]], *, observed_at: str) -> dict:
-    """Build one atomic three-seat replacement while preserving unrelated rows."""
+    """Replace the three CCR anchor chats while preserving work-specific chats."""
     if set(selections) != set(SEAT_REFS):
         raise SetupRefusal("all three Chairman ChatGPT seats must be selected in one enrollment")
     identities = [_identity(selections[seat][0]) for seat in SEAT_REFS]
@@ -115,14 +115,38 @@ def build_enrollment_document(existing: dict | None, selections: dict[str, tuple
     problems = sb.validate_bindings_document(base)
     if problems:
         raise SetupRefusal("the existing surface-bindings file is invalid; no enrollment was written")
-    preserved = [
-        row for row in base.get("bindings", [])
-        if not (
-            isinstance(row, dict)
-            and row.get("provider") == "chatgpt"
-            and row.get("seat_ref") in SEAT_REFS
+    selected_identities = {
+        seat_ref: _identity(selections[seat_ref][0]) for seat_ref in SEAT_REFS
+    }
+    preserved = []
+    for binding in base.get("bindings", []):
+        is_named_chatgpt_seat = (
+            isinstance(binding, dict)
+            and binding.get("provider") == "chatgpt"
+            and binding.get("seat_ref") in SEAT_REFS
         )
-    ]
+        is_ccr_anchor = (
+            is_named_chatgpt_seat
+            and binding.get("work_ref") == WORK_REF
+            and binding.get("role") == "ceo"
+        )
+        if is_ccr_anchor:
+            continue
+        if is_named_chatgpt_seat:
+            seat_ref = binding["seat_ref"]
+            locator = binding.get("locator")
+            try:
+                existing_identity = _identity(locator)
+            except SetupRefusal as exc:
+                raise SetupRefusal(
+                    "an existing work-specific ChatGPT binding has a malformed managed-environment identity"
+                ) from exc
+            if existing_identity != selected_identities[seat_ref]:
+                raise SetupRefusal(
+                    "an existing work-specific chat uses a different environment for this seat; "
+                    "reconcile or unbind it before changing the seat"
+                )
+        preserved.append(binding)
     enrolled = []
     for seat_ref in SEAT_REFS:
         row, url = selections[seat_ref]
@@ -139,6 +163,8 @@ def build_enrollment_document(existing: dict | None, selections: dict[str, tuple
     problems = sb.validate_bindings_document(result)
     if problems:
         raise SetupRefusal("the proposed enrollment failed the canonical binding schema; nothing was written")
+    if sb.find_conflicts(result):
+        raise SetupRefusal("the proposed enrollment would create an ambiguous surface binding; nothing was written")
     return result
 
 
@@ -231,6 +257,9 @@ def _private_url(prompt: str) -> str:
     value = getpass.getpass(prompt).strip()
     if not value or len(value.encode("utf-8")) > _MAX_PRIVATE_URL_BYTES:
         raise SetupRefusal("the private conversation URL is missing or too large")
+    problem = sb._check_chatgpt_url(value)  # noqa: SLF001 — reuse the canonical exact-chat validator
+    if problem:
+        raise SetupRefusal(f"the private ChatGPT URL {problem}")
     return value
 
 
@@ -247,6 +276,8 @@ def _copied_profile(prompt: str, rows: list[dict]) -> dict:
 def enroll_interactive() -> int:
     print("Seat enrollment does not start, stop, or inspect any profile content.")
     print("In the GoLogin/Multilogin profile list, use Copy profile ID for each Chairman seat.")
+    print("A ChatGPT Project contains many chats and is not an exact resume address.")
+    print("Choose one specific Sol anchor chat per seat; other work-specific chats remain separate bindings.")
     candidates = _candidate_rows(chatgpt.list_local_environments())
     selections: dict[str, tuple[dict, str]] = {}
     used: set[tuple[str, str | None, str]] = set()
@@ -258,7 +289,8 @@ def enroll_interactive() -> int:
         if _identity(selected) in used:
             raise SetupRefusal("one managed-browser environment cannot be assigned to two Chairman seats")
         url = _private_url(
-            f"Copy the exact Sol conversation URL for ChatGPT Seat {index}, paste it here, then press Return: "
+            f"Copy one exact Sol anchor-chat URL for ChatGPT Seat {index} (not the Project URL), "
+            "paste it here, then press Return: "
         )
         selections[seat_ref] = (selected, url)
         used.add(_identity(selected))
@@ -271,7 +303,8 @@ def enroll_interactive() -> int:
         raise SetupRefusal("the existing surface-bindings file has problems; nothing was written")
     doc = build_enrollment_document(existing, selections, observed_at=_utc_now_z())
     sb.save_bindings(doc)
-    print("All three Chairman ChatGPT seats are enrolled. No profile was started or stopped by this tool.")
+    print("All three Chairman ChatGPT seat anchors are enrolled. Other chats remain independently bindable.")
+    print("No profile was started or stopped by this tool.")
     return 0
 
 

@@ -109,10 +109,14 @@ python3 scripts/mas115_setup.py run-canary --vendor multilogin
 The ordered journey is:
 
 1. `enroll-seats` asks the Chairman to use the vendor UI's **Copy profile ID**
-   action for ChatGPT Seat 1, Seat 2, then Seat 3. It accepts each ID and
-   private conversation URL with terminal echo disabled, resolves the
-   Multilogin folder locally, and atomically writes all three rows through the
-   canonical `surface_bindings` writer. It never starts or stops a profile.
+   action for ChatGPT Seat 1, Seat 2, then Seat 3. It accepts each ID and one
+   exact private **anchor-chat** URL with terminal echo disabled, rejects a
+   Project overview URL, resolves the Multilogin folder locally, and atomically
+   writes all three rows through the canonical `surface_bindings` writer. The
+   three named seats may coexist as distinct Sol destinations for the Control
+   Room workstream. Re-enrollment replaces only those three anchors and
+   preserves other work-specific chat bindings. It never starts or stops a
+   profile.
 2. `prepare-disposable` accepts a copied non-Chairman profile ID, requires
    that profile to be positively stopped, proves it does not collide with any
    enrolled seat, detects the Multilogin browser
@@ -253,7 +257,14 @@ real-seat proof remains after Sol accepts the disposable receipts.
   `folder_id` + `profile_id` — plus the exact conversation URL, and NEVER
   proxy, IP, fingerprint, cookie, credential, or token material
   (`control_plane.surface_bindings.FORBIDDEN_SEMANTIC_KEYS`). Every
-  `chatgpt` open currently refuses with `unsupported_surface`: an
+  Project is a collection of chats, not an exact resume address; a ChatGPT
+  locator therefore accepts only the canonical `/c/<conversation-id>` deep
+  link. One seat may have many exact-chat rows when each is attached to the
+  real work reference and role it serves. The three explicitly named ChatGPT
+  seats are distinct destinations, so distinct `seat_ref` rows may share a
+  work reference and role; a duplicate inside the same seat remains a visible
+  conflict with no automatic winner. Every `chatgpt` open currently refuses
+  with `unsupported_surface`: an
   investigation on the real machine plus a sweep of both vendors' official
   documentation (multilogin.com/help "API basics — key terms & concepts",
   "How to use headless mode", "Learn CLI commands", "Learn CLI command

@@ -3,7 +3,10 @@
 This module owns a single local, private JSON file that maps a work reference
 (``WS:...`` / ``JOB:...`` / ``PR:...``) plus a seat role to *where a human or
 agent seat already is* on some external chat/session surface — a ChatGPT tab,
-a Claude Code session, a Cursor thread, a Codex thread.  It exists so the
+a Claude Code session, a Cursor thread, a Codex thread.  ChatGPT's three
+explicitly named Personal-Pro seats are distinct navigation destinations, so
+their effective local key is ``(work_ref, role, seat_ref)``; one seat may also
+have different exact-chat rows for different work references.  It exists so the
 Chairman Control Room compositor (:mod:`control_plane.chairman_control_room`)
 can offer "open this surface" navigation without inventing a second lifecycle
 or identity plane.
@@ -19,10 +22,10 @@ ARCHITECTURE_AND_FABLE00_COMMISSION_2026-08-21.md`` §5)
   runtime, or attention fact — only navigation convenience.
 * **``binding_id`` is a local-only handle, not an identity plane.**  It is a
   random ``uuid4`` minted so a human (or the unbind/conflict UI) has a short,
-  stable string to reference *this row* by when there are several bindings
-  for the same ``(work_ref, role)``.  It grants nothing, proves nothing about
-  provenance, and is never joined against any canonical Agent OS / Executive
-  OS / GitHub identity.  Treat it exactly like a spreadsheet row number.
+  stable string to reference *this row* by when there are several surfaces on
+  one work card.  It grants nothing, proves nothing about provenance, and is
+  never joined against any canonical Agent OS / Executive OS / GitHub
+  identity.  Treat it exactly like a spreadsheet row number.
 * **Closed schema, everywhere.**  Every dict in the document — the document
   itself, each binding, and each binding's ``locator`` — has an exact,
   closed key set.  An unknown key anywhere is a validation problem naming its
@@ -255,6 +258,13 @@ def _check_chatgpt_url(url: Any) -> str | None:
         return "must not specify a port"
     if (parsed.hostname or "").lower() not in _CHATGPT_HOSTS:
         return f"host must be one of {sorted(_CHATGPT_HOSTS)}"
+    # A Project is a collection of chats, not an address for one conversation.
+    # The Control Room must resume an exact chat without making the operator
+    # search inside a Project, so only the provider's canonical conversation
+    # deep-link shape is accepted. Query/fragment-bearing variants are not a
+    # stable durable address and are deliberately refused.
+    if parsed.query or parsed.fragment or not re.fullmatch(r"/c/[^/]+/?", parsed.path):
+        return "must be an exact conversation URL with path /c/<conversation-id>, not a Project or home URL"
     return None
 
 
@@ -547,14 +557,21 @@ def save_bindings(doc: dict, path: str | Path | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 def find_conflicts(doc: dict) -> list[dict]:
-    """Groups of >1 binding sharing ``(work_ref, role)``.
+    """Return ambiguous binding groups without collapsing distinct ChatGPT seats.
+
+    For ChatGPT, three explicitly named Personal-Pro seats are separate
+    destinations and may intentionally share ``(work_ref, role)``.  A true
+    duplicate is two rows sharing ``(work_ref, role, seat_ref)``.  A mixed
+    provider group remains ambiguous because it would make one role's Open
+    action choose between unlike surfaces.  Providers without a required
+    ``seat_ref`` retain the original ``(work_ref, role)`` conflict law.
 
     Returns ``[{"work_ref", "role", "binding_ids": [sorted]}, ...]`` sorted by
     ``(work_ref, role)``.  Never picks a winner — that judgment belongs to a
     human via explicit unbind, never to this module.
     """
     bindings = (doc or {}).get("bindings") or []
-    groups: dict[tuple[str, str], list[str]] = {}
+    groups: dict[tuple[str, str], list[dict]] = {}
     for binding in bindings:
         if not isinstance(binding, dict):
             continue
@@ -563,13 +580,32 @@ def find_conflicts(doc: dict) -> list[dict]:
         binding_id = binding.get("binding_id")
         if not isinstance(work_ref, str) or not isinstance(role, str) or not isinstance(binding_id, str):
             continue
-        groups.setdefault((work_ref, role), []).append(binding_id)
+        groups.setdefault((work_ref, role), []).append(binding)
 
-    result = [
-        {"work_ref": work_ref, "role": role, "binding_ids": sorted(ids)}
-        for (work_ref, role), ids in groups.items()
-        if len(ids) > 1
-    ]
+    result = []
+    for (work_ref, role), rows in groups.items():
+        if len(rows) <= 1:
+            continue
+        if all(row.get("provider") == "chatgpt" for row in rows):
+            by_seat: dict[str, list[str]] = {}
+            for row in rows:
+                seat_ref = row.get("seat_ref")
+                binding_id = row.get("binding_id")
+                if isinstance(seat_ref, str) and isinstance(binding_id, str):
+                    by_seat.setdefault(seat_ref, []).append(binding_id)
+            if len(by_seat) != len(rows):
+                ambiguous_ids = sorted(
+                    row["binding_id"] for row in rows if isinstance(row.get("binding_id"), str)
+                )
+            else:
+                ambiguous_ids = []
+            if not ambiguous_ids:
+                continue
+        else:
+            ambiguous_ids = sorted(
+                row["binding_id"] for row in rows if isinstance(row.get("binding_id"), str)
+            )
+        result.append({"work_ref": work_ref, "role": role, "binding_ids": ambiguous_ids})
     result.sort(key=lambda group: (group["work_ref"], group["role"]))
     return result
 

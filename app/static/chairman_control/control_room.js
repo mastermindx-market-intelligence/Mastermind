@@ -355,16 +355,21 @@
   function renderBindingRow(binding) {
     var confidence = bindingConfidence(binding);
     var row = el("div", { className: "ccr-binding-row" });
+    var seatSuffix = "";
+    if (binding.provider === "chatgpt" && !isBlank(binding.seat_ref)) {
+      var match = /^chatgpt([1-3])$/.exec(String(binding.seat_ref));
+      seatSuffix = match ? " · Seat " + match[1] : " · " + String(binding.seat_ref);
+    }
 
     row.appendChild(el("span", {
-      text: ROLE_NAME[binding.role] || String(binding.role),
+      text: (ROLE_NAME[binding.role] || String(binding.role)) + seatSuffix,
       className: "ccr-binding-who",
     }));
     row.appendChild(chip(confidence.state, confidence.variant));
     row.appendChild(el("span", { className: "ccr-binding-spacer" }));
 
     var openBtn = el("button", {
-      text: OPEN_LABEL[binding.role] || "Open surface",
+      text: (OPEN_LABEL[binding.role] || "Open surface") + seatSuffix,
       className: "ccr-open",
     });
     openBtn.type = "button";
