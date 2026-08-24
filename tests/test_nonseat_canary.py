@@ -718,15 +718,24 @@ def test_falsifier_no_click_fill_send_surface():
 # ---------------------------------------------------------------------------
 
 
-def test_falsifier_no_profile_config_mutation_surface():
-    for path in (CORE_PATH, VENDORS_PATH):
-        lowered = path.read_text(encoding="utf-8").lower()
-        for phrase in ("httpx.patch", "httpx.delete"):
-            assert phrase not in lowered, f"{path.name} contains forbidden mutation call {phrase!r}"
-        for token in ("patch", "delete"):
-            assert token not in lowered, f"{path.name} contains forbidden mutation token {token!r}"
-        for phrase in ("/browser/update", "profile/update", "fingerprint"):
-            assert phrase not in lowered, f"{path.name} contains forbidden mutation phrase {phrase!r}"
+def test_falsifier_profile_config_mutation_surface_is_exactly_allowlisted():
+    """Catches any mutation path beyond the single fixed-port transaction."""
+    core_text = CORE_PATH.read_text(encoding="utf-8").lower()
+    vendor_text = VENDORS_PATH.read_text(encoding="utf-8").lower()
+    for text in (core_text, vendor_text):
+        for phrase in ("httpx.patch", "httpx.delete", "/browser/update", '"profile/update"'):
+            assert phrase not in text
+    assert "/profile/partial_update" not in core_text
+    assert vendor_text.count('"/profile/partial_update"') == 1
+    assert tuple(inspect.signature(
+        vendors.BoundedHttpClient._mlx_configure_canary_port,
+    ).parameters) == ("self", "credential", "profile_id", "snapshot")
+    assert tuple(inspect.signature(
+        vendors.MultiloginClient.configure_canary_port,
+    ).parameters) == ("self", "profile_ref")
+    assert tuple(inspect.signature(
+        vendors.MultiloginClient.port_policy_snapshot,
+    ).parameters) == ("self", "profile_ref")
 
 
 def test_falsifier_webdriver_endpoint_allowlist():
@@ -1231,19 +1240,63 @@ def _success(data, message=""):
     })
 
 
+def _metas_payload(
+    *, profile_id="p1", folder_id="f1", ports=None, auto=False,
+    browser_type="mimic", in_use_by="", storage_flag=False,
+):
+    fingerprint = {} if ports is None else {"ports": list(ports)}
+    return {
+        "status": {
+            "error_code": "",
+            "http_code": 200,
+            "message": "List of profiles metadata",
+        },
+        "data": {
+            "profiles": [{
+                "id": profile_id,
+                "folder_id": folder_id,
+                "browser_type": browser_type,
+                "in_use_by": in_use_by,
+                "is_auto_update": auto,
+                "parameters": {
+                    "flags": {"ports_masking": "mask"},
+                    "fingerprint": fingerprint,
+                    "storage": {
+                        "is_local": False,
+                        "save_service_worker": storage_flag,
+                    },
+                },
+                "last_update_at": "synthetic-before",
+                "last_updated_by": "synthetic-operator",
+            }],
+        },
+    }
+
+
 class _ExactMultiloginTransport:
     def __init__(self, browser_type="mimic"):
         self.calls = []
         self.state = "stopped"
         self.status_response = None
         self.browser_type = browser_type
+        self.ports = []
+        self.auto_update = False
+        self.partial_update_response = _success(None, "Profile successfully updated")
+        self.apply_update_effect = True
+        self.mutate_storage_after_update = False
+        self.search_in_use_by = ""
+        self.search_locked_by = ""
+        self.metas_response = None
+        self.metas_mode = "mask"
 
     def _mlx_profile_search(self, credential, folder_id, *, offset):
         self.calls.append(("search", folder_id, offset))
         return _success({
             "profiles": [{
                 "id": "p1", "folder_id": folder_id, "name": "synthetic",
-                "browser_type": self.browser_type, "in_use_by": "", "locked_by": "",
+                "browser_type": self.browser_type,
+                "in_use_by": self.search_in_use_by,
+                "locked_by": self.search_locked_by,
             }],
             "total_count": 1,
         }, "Search profile successfully result")
@@ -1283,6 +1336,212 @@ class _ExactMultiloginTransport:
         return vendors._BoundedResponse(200, {
             "status": {"error_code": "", "http_code": 200, "message": ""},
         })
+
+    def _mlx_profile_metas(self, credential, profile_id):
+        self.calls.append(("metas", profile_id))
+        if self.metas_response is not None:
+            return self.metas_response
+        payload = _metas_payload(
+            profile_id=profile_id,
+            folder_id="f1",
+            ports=self.ports,
+            auto=self.auto_update,
+            browser_type=self.browser_type,
+            storage_flag=self.mutate_storage_after_update and bool(self.ports),
+        )
+        payload["data"]["profiles"][0]["parameters"]["flags"]["ports_masking"] = self.metas_mode
+        return vendors._BoundedResponse(200, payload)
+
+    def _mlx_configure_canary_port(self, credential, profile_id, snapshot):
+        self.calls.append(("configure", profile_id, snapshot.auto_update_core))
+        if self.apply_update_effect:
+            self.ports = [port_policy.CANARY_PORT]
+        return self.partial_update_response
+
+
+def test_configure_canary_port_preserves_auto_update_and_reads_back():
+    """Catches omitting the vendor auto-update flag or accepting without read-back."""
+    transport = _ExactMultiloginTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "CONFIGURED"
+    assert receipt["predicates"] == {
+        "preservation_unchanged": True,
+        "auto_update_unchanged": True,
+        "exact_profile_stopped": True,
+    }
+    assert transport.calls == [
+        ("search", "f1", 0), ("status", "p1"), ("metas", "p1"),
+        ("configure", "p1", False),
+        ("search", "f1", 0), ("status", "p1"), ("metas", "p1"),
+    ]
+
+
+def test_configure_canary_port_is_idempotent_without_update():
+    """Catches writing an already exact disposable profile."""
+    transport = _ExactMultiloginTransport()
+    transport.ports = [port_policy.CANARY_PORT]
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "ALREADY_CONFIGURED"
+    assert not any(call[0] == "configure" for call in transport.calls)
+
+
+@pytest.mark.parametrize(
+    ("response", "effect", "expected"),
+    (
+        (None, False, "EFFECT_UNKNOWN"),
+        (vendors._BoundedResponse(200, {"renamed": "response"}), True,
+         "CONFIGURED_AFTER_RECONCILIATION"),
+        (vendors._BoundedResponse(500, None), False, "EFFECT_UNKNOWN"),
+    ),
+)
+def test_ambiguous_update_never_retries_and_only_reconciles_read_only(response, effect, expected):
+    """Catches retrying an ambiguous mutation or skipping its single read-back."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = response
+    transport.apply_update_effect = effect
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert sum(call[0] == "configure" for call in transport.calls) == 1
+    assert receipt["code"] == expected
+    assert receipt["reconciled"] is True
+    assert [call[0] for call in transport.calls[-3:]] == ["search", "status", "metas"]
+
+
+def test_post_update_non_target_drift_vetoes_success():
+    """Catches reporting PASS when an unrelated profile parameter changed."""
+    transport = _ExactMultiloginTransport()
+    transport.mutate_storage_after_update = True
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "PRESERVATION_DRIFT"
+    assert receipt["verdict"] == "HOLD"
+
+
+@pytest.mark.parametrize("status_code", (401, 403))
+def test_configuration_auth_rejection_has_no_readback_or_retry(status_code):
+    """Catches treating explicit auth failure as an ambiguous applied update."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = vendors._BoundedResponse(status_code, None)
+    transport.apply_update_effect = False
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "AUTH_EXPIRED_NO_PROOF"
+    assert [call[0] for call in transport.calls].count("configure") == 1
+    assert [call[0] for call in transport.calls].count("metas") == 1
+
+
+def test_configuration_explicit_rejection_has_no_readback_or_retry():
+    """Catches retry/reconciliation after a schema-valid definitive rejection."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = vendors._BoundedResponse(400, {
+        "status": {"error_code": "INVALID_INPUT", "http_code": 400, "message": "rejected"},
+        "data": None,
+    })
+    transport.apply_update_effect = False
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "REJECTED_NO_PROOF"
+    assert [call[0] for call in transport.calls].count("configure") == 1
+    assert [call[0] for call in transport.calls].count("metas") == 1
+
+
+def test_wrong_success_message_requires_read_only_reconciliation():
+    """Catches trusting vendor prose drift as a definitive success envelope."""
+    transport = _ExactMultiloginTransport()
+    transport.partial_update_response = _success(None, "renamed success")
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "CONFIGURED_AFTER_RECONCILIATION"
+    assert receipt["reconciled"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    (
+        ("running", "browser_running"),
+        ("owned", "other-session"),
+        ("locked", "other-lock"),
+        ("browser", "stealthfox"),
+        ("mode", "natural"),
+    ),
+)
+def test_configuration_refuses_nonexact_preflight_without_update(mutation, value):
+    """Catches configuring a running, owned, locked, non-Mimic, or widened profile."""
+    transport = _ExactMultiloginTransport()
+    if mutation == "running":
+        transport.state = value
+    elif mutation == "owned":
+        transport.search_in_use_by = value
+    elif mutation == "locked":
+        transport.search_locked_by = value
+    elif mutation == "browser":
+        transport.browser_type = value
+    else:
+        transport.metas_mode = value
+    client = vendors.MultiloginClient(
+        core.Credential("cred", "stdin"), transport, browser_type=transport.browser_type,
+    )
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["verdict"] != "PASS"
+    assert not any(call[0] == "configure" for call in transport.calls)
+
+
+def test_configuration_missing_credential_refuses_before_vendor_calls():
+    """Catches a configuration read or write without a present credential."""
+    transport = _ExactMultiloginTransport()
+    client = vendors.MultiloginClient(core.Credential(None, "absent"), transport)
+    receipt = client.configure_canary_port({"profile_id": "p1", "folder_id": "f1"})
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert transport.calls == []
+
+
+def test_bounded_transport_serializes_only_the_approved_partial_update():
+    """Catches endpoint, method, authorization, or body widening at the HTTP boundary."""
+    observed = []
+
+    def handler(request):
+        observed.append({
+            "method": request.method,
+            "url": str(request.url),
+            "authorization": request.headers.get("authorization"),
+            "body": json.loads(request.content),
+        })
+        return httpx.Response(200, json={
+            "status": {
+                "error_code": "",
+                "http_code": 200,
+                "message": "Profile successfully updated",
+            },
+            "data": None,
+        })
+
+    raw = httpx.Client(
+        transport=httpx.MockTransport(handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=raw)
+    snapshot = port_policy.classify_profile_metas(
+        _metas_payload(), profile_id="p1", folder_id="f1",
+    )
+    response = bounded._mlx_configure_canary_port(
+        core.Credential("secret-value", "stdin"), "p1", snapshot,
+    )
+    bounded.close()
+    assert response.status_code == 200
+    assert observed == [{
+        "method": "POST",
+        "url": "https://api.multilogin.com/profile/partial_update",
+        "authorization": "Bearer secret-value",
+        "body": {
+            "profile_id": "p1",
+            "auto_update_core": False,
+            "parameters": {
+                "flags": {"ports_masking": "mask"},
+                "fingerprint": {"ports": [65535]},
+            },
+        },
+    }]
 
 
 def test_hostile_multilogin_repeat_start_guard_before_http():

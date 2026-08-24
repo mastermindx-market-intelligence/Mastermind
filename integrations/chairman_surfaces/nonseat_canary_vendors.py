@@ -155,6 +155,29 @@ class BoundedHttpClient:
         path = "/api/v1/profile/status/p/" + quote(profile_id, safe="")
         return self._request("GET", _MLX_LAUNCHER_ORIGIN, path, headers=self._bearer(credential))
 
+    def _mlx_profile_metas(self, credential, profile_id: str):
+        return self._request(
+            "POST", _MLX_CLOUD_ORIGIN, "/profile/metas",
+            headers=self._bearer(credential), json_body={"ids": [profile_id]},
+        )
+
+    def _mlx_configure_canary_port(self, credential, profile_id: str, snapshot):
+        body = _port_policy.build_partial_update_body(profile_id, snapshot)
+        expected = {
+            "profile_id": profile_id,
+            "auto_update_core": snapshot.auto_update_core,
+            "parameters": {
+                "flags": {"ports_masking": "mask"},
+                "fingerprint": {"ports": [_port_policy.CANARY_PORT]},
+            },
+        }
+        if body != expected:
+            return None
+        return self._request(
+            "POST", _MLX_CLOUD_ORIGIN, "/profile/partial_update",
+            headers=self._bearer(credential), json_body=body,
+        )
+
     def _mlx_profile_start(self, credential, folder_id: str, profile_id: str):
         path = (
             "/api/v2/profile/f/" + quote(folder_id, safe="")
@@ -341,6 +364,41 @@ class WebDriverNavigator:
 # ---------------------------------------------------------------------------
 # Multilogin
 # ---------------------------------------------------------------------------
+
+
+def _is_exact_partial_update_success(response) -> bool:
+    return (
+        response is not None
+        and response.status_code == 200
+        and response.payload == {
+            "status": {
+                "error_code": "",
+                "http_code": 200,
+                "message": "Profile successfully updated",
+            },
+            "data": None,
+        }
+    )
+
+
+def _is_explicit_partial_update_rejection(response) -> bool:
+    if response is None or response.status_code in (401, 403):
+        return False
+    if not isinstance(response.status_code, int) or not 400 <= response.status_code <= 599:
+        return False
+    payload = response.payload
+    if not isinstance(payload, dict) or set(payload) != {"status", "data"}:
+        return False
+    status = payload.get("status")
+    return (
+        payload.get("data") is None
+        and isinstance(status, dict)
+        and set(status) == {"error_code", "http_code", "message"}
+        and isinstance(status.get("error_code"), str)
+        and bool(status.get("error_code"))
+        and status.get("http_code") == response.status_code
+        and isinstance(status.get("message"), str)
+    )
 
 
 class MultiloginClient:
@@ -652,6 +710,147 @@ class MultiloginClient:
         if state == "stopped":
             return False
         return self._started_profile_id != profile_ref.get("profile_id")
+
+    def port_policy_snapshot(self, profile_ref: dict):
+        """Read and classify the exact stopped disposable profile policy."""
+
+        self._require_credential()
+        if not self._valid_ref(profile_ref):
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        profile = self._profile_inventory_item(profile_ref)
+        if profile is None:
+            raise _core.CanaryRefusal("PROFILE_NOT_FOUND")
+        if profile.get("browser_type") != "mimic":
+            raise _core.CanaryRefusal("UNSUPPORTED_PORT_STATE")
+        if profile.get("in_use_by") != "":
+            if isinstance(profile.get("in_use_by"), str) and profile.get("in_use_by"):
+                raise _core.CanaryRefusal("BUSY_PROFILE")
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        if "locked_by" in profile and profile.get("locked_by") != "":
+            if isinstance(profile.get("locked_by"), str) and profile.get("locked_by"):
+                raise _core.CanaryRefusal("BUSY_PROFILE")
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        if self._profile_state(profile_ref) != "stopped":
+            raise _core.CanaryRefusal("BUSY_PROFILE")
+
+        response = self._safe_call(
+            lambda: self._client._mlx_profile_metas(
+                self._credential, profile_ref["profile_id"],
+            ),
+        )
+        if response is None:
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        if response.status_code in (401, 403):
+            raise _core.CanaryRefusal("AUTH_EXPIRED")
+        if response.status_code != 200:
+            raise _core.CanaryRefusal("VENDOR_ERROR")
+        try:
+            return _port_policy.classify_profile_metas(
+                response.payload,
+                profile_id=profile_ref["profile_id"],
+                folder_id=profile_ref["folder_id"],
+            )
+        except _port_policy.PortPolicyRefusal as refusal:
+            code = (
+                "UNSUPPORTED_PORT_STATE"
+                if refusal.code == _port_policy.UNSUPPORTED_PORT_STATE
+                else "VENDOR_ERROR"
+            )
+            raise _core.CanaryRefusal(code) from None
+
+    @staticmethod
+    def _config_receipt(code: str, **flags) -> dict:
+        return _port_policy.configuration_receipt(code, **flags)
+
+    def _post_configuration_receipt(
+        self, before, profile_ref: dict, *, response_was_ambiguous: bool,
+    ) -> dict:
+        try:
+            after = self.port_policy_snapshot(profile_ref)
+        except _core.CanaryRefusal:
+            return self._config_receipt(
+                "EFFECT_UNKNOWN", updated=False, reconciled=response_was_ambiguous,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=False,
+            )
+        preservation_unchanged = after.preservation_digest == before.preservation_digest
+        auto_update_unchanged = after.auto_update_core == before.auto_update_core
+        if not preservation_unchanged or not auto_update_unchanged:
+            return self._config_receipt(
+                "PRESERVATION_DRIFT", updated=False, reconciled=response_was_ambiguous,
+                preservation_unchanged=preservation_unchanged,
+                auto_update_unchanged=auto_update_unchanged,
+                exact_profile_stopped=True,
+            )
+        if after.state != _port_policy.EXACT_CONFIGURED:
+            return self._config_receipt(
+                "EFFECT_UNKNOWN" if response_was_ambiguous else "VENDOR_ERROR",
+                updated=False, reconciled=response_was_ambiguous,
+                preservation_unchanged=True, auto_update_unchanged=True,
+                exact_profile_stopped=True,
+            )
+        return self._config_receipt(
+            "CONFIGURED_AFTER_RECONCILIATION" if response_was_ambiguous else "CONFIGURED",
+            updated=True, reconciled=response_was_ambiguous,
+            preservation_unchanged=True, auto_update_unchanged=True,
+            exact_profile_stopped=True,
+        )
+
+    def configure_canary_port(self, profile_ref: dict) -> dict:
+        """Perform at most one exact update, followed only by read-back."""
+
+        try:
+            before = self.port_policy_snapshot(profile_ref)
+        except _core.CanaryRefusal as refusal:
+            code = (
+                "UNSUPPORTED_PORT_STATE"
+                if refusal.code == "UNSUPPORTED_PORT_STATE"
+                else "AUTH_EXPIRED_NO_PROOF"
+                if refusal.code == "AUTH_EXPIRED"
+                else "VENDOR_ERROR"
+            )
+            return self._config_receipt(
+                code, updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=False,
+            )
+        if before.state == _port_policy.EXACT_CONFIGURED:
+            return self._config_receipt(
+                "ALREADY_CONFIGURED", updated=False, reconciled=False,
+                preservation_unchanged=True, auto_update_unchanged=True,
+                exact_profile_stopped=True,
+            )
+        if before.state != _port_policy.DEFAULT_MASKED:
+            return self._config_receipt(
+                "UNSUPPORTED_PORT_STATE", updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=True,
+            )
+        try:
+            response = self._client._mlx_configure_canary_port(
+                self._credential, profile_ref["profile_id"], before,
+            )
+        except Exception:  # noqa: BLE001 — reconcile read-only after ambiguous write
+            response = None
+        if response is not None and response.status_code in (401, 403):
+            return self._config_receipt(
+                "AUTH_EXPIRED_NO_PROOF", updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=True,
+            )
+        if _is_exact_partial_update_success(response):
+            return self._post_configuration_receipt(
+                before, profile_ref, response_was_ambiguous=False,
+            )
+        if _is_explicit_partial_update_rejection(response):
+            return self._config_receipt(
+                "REJECTED_NO_PROOF", updated=False, reconciled=False,
+                preservation_unchanged=False, auto_update_unchanged=False,
+                exact_profile_stopped=True,
+            )
+        return self._post_configuration_receipt(
+            before, profile_ref, response_was_ambiguous=True,
+        )
 
 
 # ---------------------------------------------------------------------------
