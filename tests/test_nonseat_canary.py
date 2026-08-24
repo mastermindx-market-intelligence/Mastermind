@@ -1932,6 +1932,66 @@ def test_mutation_multilogin_start_prose_cannot_replace_exact_success_contract()
     assert exc_info.value.code == "VENDOR_ERROR"
 
 
+def test_contract_multilogin_search_accepts_success_prose_drift_only():
+    class _SearchProseDriftTransport(_ExactMultiloginTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            self.calls.append(("search", folder_id, offset))
+            return _success({
+                "profiles": [{
+                    "id": "p1", "folder_id": folder_id, "name": "synthetic",
+                    "browser_type": "mimic", "in_use_by": "", "locked_by": "",
+                }],
+                "total_count": 1,
+            }, "Synthetic changed success prose")
+
+    transport = _SearchProseDriftTransport()
+    client = vendors.MultiloginClient(core.Credential("cred", "stdin"), transport)
+    assert client.profile_exists({"profile_id": "p1", "folder_id": "f1"}) is True
+    assert [call[0] for call in transport.calls] == ["search"]
+
+
+@pytest.mark.parametrize("message", (None, 200, True, []))
+def test_mutation_multilogin_search_message_must_remain_a_string(message):
+    class _MalformedSearchMessageTransport(_ExactMultiloginTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            response = _success({
+                "profiles": [{
+                    "id": "p1", "folder_id": folder_id, "name": "synthetic",
+                    "browser_type": "mimic", "in_use_by": "", "locked_by": "",
+                }],
+                "total_count": 1,
+            })
+            response.payload["status"]["message"] = message
+            return response
+
+    client = vendors.MultiloginClient(
+        core.Credential("cred", "stdin"), _MalformedSearchMessageTransport(),
+    )
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.profile_exists({"profile_id": "p1", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+
+
+@pytest.mark.parametrize(
+    "error_code,http_code",
+    (("ERR", 200), ("", 201), ("", "200"), (None, 200)),
+)
+def test_mutation_multilogin_search_success_codes_remain_exact(error_code, http_code):
+    class _MalformedSearchStatusTransport(_ExactMultiloginTransport):
+        def _mlx_profile_search(self, credential, folder_id, *, offset):
+            response = _success({"profiles": [], "total_count": 0})
+            response.payload["status"]["error_code"] = error_code
+            response.payload["status"]["http_code"] = http_code
+            return response
+
+    client = vendors.MultiloginClient(
+        core.Credential("cred", "stdin"), _MalformedSearchStatusTransport(),
+    )
+    with pytest.raises(core.CanaryRefusal) as exc_info:
+        client.profile_exists({"profile_id": "absent", "folder_id": "f1"})
+    assert exc_info.value.code == "VENDOR_ERROR"
+
+
 @pytest.mark.parametrize(
     "ownership_field,ownership_value,expected_code",
     [
