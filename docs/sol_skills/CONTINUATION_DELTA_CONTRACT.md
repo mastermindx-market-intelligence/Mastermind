@@ -56,9 +56,9 @@ identity:
     type: pull_request                  # or branch
     id: 6337                            # required for pull_request
     branch: branch/name
-    pickup_sha: <40-hex>                # REQUIRED for CONTINUATION_DELTA
+    pickup_sha: <40-hex>                # REQUIRED for CONTINUATION_DELTA; equals carrier_head_sha
     completed_waves: [R3A, R3B]         # optional; feeds the staleness hint
-  skillpack_sha: <40-hex>
+  skillpack_sha: <40-hex>               # REQUIRED exact immutable Skillpack commit SHA
 
 sources:                                # REQUIRED for CONTINUATION_DELTA
   agentos_workstream:
@@ -71,7 +71,7 @@ sources:                                # REQUIRED for CONTINUATION_DELTA
     status: present                     # present | absent | unavailable
   github:
     default_branch_sha: <40-hex>
-    carrier_head_sha: <40-hex>
+    carrier_head_sha: <40-hex>          # MUST equal identity.carrier.pickup_sha
 
 obligations:
   - id: APP-01
@@ -111,6 +111,30 @@ Exactly one of:
   (or `status: absent` when no such record exists yet).
 
 Anything else is `MALFORMED_MANIFEST`.
+
+### Grounding identity
+
+A continuation must bind both its procedure and carrier observation to exact
+immutable identities before executable scope is derived:
+
+- `identity.skillpack_sha` is **required** and must be an exact 40-hex
+  **Skillpack** commit SHA. Missing, short, or non-hex procedure identity is
+  `MALFORMED_MANIFEST`; a continuation may not float against a branch name or
+  an unspecified Skillpack revision.
+- `identity.carrier.pickup_sha` and `sources.github.carrier_head_sha` each use
+  exact 40-hex commit grammar and must be **equal** for `CONTINUATION_DELTA`.
+  The former says which carrier state the commission is derived from; the
+  latter says which carrier state Sol just observed. If they differ, the
+  commission is internally stale/contradictory and hard-fails as
+  `CARRIER_HEAD_MISMATCH` instead of allowing a stale pickup to masquerade as
+  current-source reconciliation.
+- `sources.github.default_branch_sha` remains a separately pinned repository
+  observation and is not required to equal the carrier head; a live carrier
+  may legitimately be ahead of or diverged from the default branch.
+
+These are local derivation-consistency checks only. The zero-network linter does
+not prove that any declared SHA exists remotely; current GitHub reads in
+`COMMISSION_WAVE.md` own that evidence before the manifest is constructed.
 
 ### Obligation dispositions
 
@@ -158,7 +182,7 @@ Zero-network, deterministic, validation-only. **It authorizes nothing.**
 
 | Finding | Fires when |
 |---|---|
-| `MALFORMED_MANIFEST` | unparseable/mis-typed manifest, unknown disposition/mode/status, bad SHA grammar, unreadable bundle |
+| `MALFORMED_MANIFEST` | unparseable/mis-typed manifest, unknown disposition/mode/status, bad SHA grammar including missing/invalid exact `skillpack_sha`, unreadable bundle |
 | `HANDOFF_REPLAY_COLLISION` | a `DONE` obligation appears in executable scope |
 | `SUPERSEDED_WORK_REOPENED` | a `SUPERSEDED` obligation appears in executable scope |
 | `REJECTED_WORK_REOPENED` | a `REJECTED` obligation appears in executable scope |
@@ -167,6 +191,7 @@ Zero-network, deterministic, validation-only. **It authorizes nothing.**
 | `DNR_STATE_COLLISION` | the same normalized `do_not_redo` statement has more than one reconciliation entry |
 | `UNJUSTIFIED_REVALIDATION` | `REVALIDATE_REQUIRED` lacking prior evidence or a concrete invalidating event |
 | `UNBOUND_CONTINUATION` | `CONTINUATION_DELTA` without an exact 40-hex carrier `pickup_sha` |
+| `CARRIER_HEAD_MISMATCH` | `CONTINUATION_DELTA` declares a valid `identity.carrier.pickup_sha` that differs from the valid `sources.github.carrier_head_sha` it says was just observed |
 | `UNDECLARED_EXECUTION` | any execution surface (held included) references an undeclared ID |
 | `EXECUTION_DISPOSITION_ILLEGAL` | a non-eligible disposition (e.g. `BLOCKED`) in executable scope |
 | `HELD_DISPOSITION_ILLEGAL` | settled work held, or `OPEN`-class work held without `hold_reason` |
