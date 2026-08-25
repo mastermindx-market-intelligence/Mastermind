@@ -298,19 +298,23 @@ the control service verifies:
 - exact installed SHA;
 - its own config digest and the expected worker config digest;
 - the frozen G4 capability/profile/helper/security digests; and
-- `now < readiness_expires_at` and an exact provider-readiness receipt digest.
+- an exact provider-readiness receipt digest and at least the existing
+  thirty-minute admission margin remaining before `readiness_expires_at`.
 
 A failed guard admits no new claim or provider effect. The service records one
 bounded refusal event on the affected existing root when possible, moves to
 `QUARANTINED`, and surfaces exception attention. It does not cancel or kill an
 already-running Attempt solely because wall time crossed the deadline; that
 Attempt may reconcile/finish, but no new Attempt or provider session may start.
+The same no-new-work rule begins when the remaining readiness window falls
+below the thirty-minute admission margin, before absolute expiry.
 
 ### Worker broker
 
 When `operator_harness_armed=true`, startup and every worker start request
 verify the same arm receipt, exact worker-config digest and readiness deadline.
-A missing, stale or mismatched receipt refuses before spawning Codex.
+A missing, stale, near-expiry or mismatched receipt refuses before spawning
+Codex.
 
 ### Credential/readiness invalidation
 
