@@ -2,12 +2,12 @@
 
 > Current-source continuation for Chairman-approved three-account Codex worker isolation.
 
-**Date:** 2026-08-25  
-**Repository:** `mastermindx-market-intelligence/Mastermind`  
-**Protected pickup:** `51f9942733b86e550bb9169d2a43462bd28e774f`  
-**Branch:** `codex/executive-personal-pro-worker-readiness-20260825`  
-**Worktree:** `/Users/chriswong/Documents/Cluade/Mastermind-phase1g-w6-personal-pro-20260825`  
-**Operation key:** `EXEC-PERSONAL-PRO-WORKER-READINESS-20260825`  
+**Date:** 2026-08-25
+**Repository:** `mastermindx-market-intelligence/Mastermind`
+**Protected pickup:** `51f9942733b86e550bb9169d2a43462bd28e774f`
+**Branch:** `codex/executive-personal-pro-worker-readiness-20260825`
+**Worktree:** `/Users/chriswong/Documents/Cluade/Mastermind-phase1g-w6-personal-pro-20260825`
+**Operation key:** `EXEC-PERSONAL-PRO-WORKER-READINESS-20260825`
 
 ## Observable mission
 
