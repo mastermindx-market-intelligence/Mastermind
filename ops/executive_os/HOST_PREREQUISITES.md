@@ -376,6 +376,62 @@ Do not copy provider auth, canary values, database rows, or environment contents
 into the follow-up PR. Record only the reviewed receipt paths, hashes, Job and
 Attempt IDs, UIDs, exit statuses, and exact SHA.
 
+## Receipt-gated autonomy arm, proof, and credential interlock
+
+Formal acceptance still leaves both installed arm bits false. Do not edit either
+JSON config. From the exact installed release, first prove the closed unarmed
+state, then run the one root transaction that binds the reviewed Gate B receipt,
+formal acceptance, current provider readiness, both configs, exact release and
+Runtime quiescence:
+
+```bash
+AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
+EXPECTED_CREDENTIAL_KIND='service-account'
+WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
+# Reuse the exact finite UTC value already used for --verify-ready.
+CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
+
+sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+sudo /bin/bash "$AUTONOMY_CONTROL" arm \
+  --expected-sha "$MERGE_SHA" \
+  --gate-b-receipt "$GATE_B_RECEIPT" \
+  --expected-credential-kind "$EXPECTED_CREDENTIAL_KIND" \
+  --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
+  --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
+sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+```
+
+The first status must be exactly `UNARMED`; the post-transaction status must be
+exactly `ARMED_READY`. Arm stops both services before committing either config,
+starts worker then control, and removes its durable transaction marker only
+after exact PID/principal/socket/`READY` proof. Every armed control restart
+obtains a fresh same-PID environment/secret canary through the existing worker
+broker before entering `READY`; a prior-PID envelope is never reused and no
+provider allocation is spent by this boot re-attestation.
+
+Run the bounded strict-v2 Chairman-intent proof described below, then rehearse
+the shrink-only rollback and confirm both services stopped and both configs
+false:
+
+```bash
+sudo /bin/bash "$AUTONOMY_CONTROL" disarm --expected-sha "$MERGE_SHA"
+sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+```
+
+The second status must be exactly `UNARMED` and the canonical receipt must be
+`DISARMED`. A final re-arm is allowed only when the installed release, Gate B,
+acceptance, provider-readiness receipt, credential metadata and every frozen
+capability digest are unchanged and no new authority appeared. Otherwise stop
+for a fresh Chairman decision; never reuse the old arm command as a blind retry.
+
+Credential enrollment, device reauthorization and replacement are explicit
+native operator operations and are refused while any arm bit is true, an
+autonomy transaction marker exists, or the current `DISARMED` receipt does not
+bind both exact configs. Before any later credential rotation, run and verify
+`disarm` as above. The credential helper checks this interlock before readiness
+invalidation, logout, token stdin or device authorization. Executive Jobs,
+workers, MCP tools, plugins and model prompts cannot bypass it.
+
 ## If acceptance fails
 
 Do not manually delete `/var/db/mastermind-executive`. The installed release

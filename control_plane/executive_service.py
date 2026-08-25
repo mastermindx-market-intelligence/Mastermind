@@ -406,6 +406,7 @@ class ExecutiveControlService:
             | None
         ) = None,
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
+        autonomy_guard: Callable[[], None] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
         activated_socket: socket.socket | None = None,
         service_state: str = "READY",
@@ -421,6 +422,9 @@ class ExecutiveControlService:
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
         self._operator_identity_verifier = operator_identity_verifier
+        self._autonomy_guard = autonomy_guard
+        if self.config.coo_autonomy_armed and not callable(self._autonomy_guard):
+            raise ValueError("armed COO autonomy requires an autonomy guard")
         self._backup_backend = backup_backend or _ModuleBackupBackend()
         if activated_socket is not None and activated_socket.family != socket.AF_UNIX:
             raise ValueError("activated_socket must use AF_UNIX")
@@ -667,6 +671,24 @@ class ExecutiveControlService:
     @property
     def socket_path(self) -> Path:
         return self.config.socket_path
+
+    @property
+    def service_state(self) -> str:
+        return self._service_state
+
+    def _require_current_autonomy(self) -> None:
+        if not self.config.coo_autonomy_armed:
+            return
+        guard = self._autonomy_guard
+        if guard is None:  # constructor proves this; retain a fail-closed seam.
+            self._service_state = "QUARANTINED"
+            raise StateConflict("Executive autonomy receipt refused")
+        try:
+            guard()
+        except Exception as exc:
+            self._service_state = "QUARANTINED"
+            self._coo_last_error = "AutonomyReceiptRefusal: closed"
+            raise StateConflict("Executive autonomy receipt refused") from exc
 
     @property
     def runtime_state_dir(self) -> Path:
@@ -954,6 +976,7 @@ class ExecutiveControlService:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
         self._closing = False
+        self._require_current_autonomy()
         self._prepare_socket()
         try:
             self.runtime = self._runtime_factory(self.config.runtime_root)
@@ -2440,6 +2463,7 @@ class ExecutiveControlService:
             raise StateConflict("Executive control service is closing")
         if not self.config.coo_autonomy_armed:
             raise StateConflict("COO autonomy is not armed in reviewed host configuration")
+        self._require_current_autonomy()
         if self._service_state != "READY":
             raise StateConflict(f"Executive control service is {self._service_state}")
         root_id = self._id(root_job_id, "root_job_id")

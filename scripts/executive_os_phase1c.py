@@ -18,10 +18,15 @@ import os
 import re
 import stat
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
+from control_plane.executive_autonomy import (
+    AutonomyRefusal,
+    validate_runtime_guard_file,
+)
 from control_plane.executive_service import (
     ExecutiveControlService,
     ServiceConfig,
@@ -32,6 +37,9 @@ from control_plane.executive_service import (
 
 
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
+AUTONOMY_RECEIPT = Path(
+    "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
+)
 SECRET_CANARY_ENVELOPE_SCHEMA_VERSION = (
     "mastermind.executive_secret_canary_envelope/v1"
 )
@@ -374,13 +382,6 @@ def _load_canary_envelope(
 ) -> dict[str, Any]:
     """Validate one fresh same-PID worker-bound canary envelope."""
 
-    from control_plane.executive_canary import (
-        PrincipalIdentity,
-        SecretCanaryConfig,
-        SecretCanaryError,
-        validate_secret_canary_binding,
-    )
-
     try:
         info = path.lstat()
     except OSError as exc:
@@ -392,6 +393,28 @@ def _load_canary_envelope(
         label="secret-canary envelope",
         root_owned=False,
     )
+    return _validate_canary_envelope(
+        envelope,
+        raw=raw,
+        control_attestation=control_attestation,
+    )
+
+
+def _validate_canary_envelope(
+    envelope: Mapping[str, Any],
+    *,
+    raw: Mapping[str, Any],
+    control_attestation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate an in-memory or persisted same-PID worker-bound envelope."""
+
+    from control_plane.executive_canary import (
+        PrincipalIdentity,
+        SecretCanaryConfig,
+        SecretCanaryError,
+        validate_secret_canary_binding,
+    )
+
     required_envelope = {
         "schema_version",
         "secret_canary",
@@ -496,10 +519,88 @@ def _load_canary_envelope(
         raise ServiceError(f"secret-canary binding is invalid: {exc.code}") from exc
 
 
+def _persist_canary_envelope(
+    path: Path,
+    envelope: Mapping[str, Any],
+) -> None:
+    """Atomically replace the stale prior-PID envelope with the live one."""
+
+    path = Path(path)
+    if not path.is_absolute():
+        raise ServiceError("secret-canary envelope destination must be absolute")
+    parent = path.parent
+    try:
+        parent_info = parent.lstat()
+    except OSError as exc:
+        raise ServiceError("secret-canary envelope parent is unavailable") from exc
+    if (
+        stat.S_ISLNK(parent_info.st_mode)
+        or not stat.S_ISDIR(parent_info.st_mode)
+        or parent_info.st_uid != os.geteuid()
+        or stat.S_IMODE(parent_info.st_mode) != 0o700
+    ):
+        raise ServiceError("secret-canary envelope parent is not owner-only")
+    try:
+        encoded = (
+            json.dumps(
+                dict(envelope),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ServiceError("secret-canary envelope is not canonical JSON") from exc
+    if len(encoded) > 256 * 1024:
+        raise ServiceError("secret-canary envelope exceeds the byte bound")
+    temporary = parent / f".{path.name}.boot-{uuid.uuid4().hex}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = -1
+    try:
+        descriptor = os.open(temporary, flags, 0o400)
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_uid != os.geteuid()
+        ):
+            raise ServiceError("secret-canary temporary file identity differs")
+        remaining = memoryview(encoded)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise ServiceError("secret-canary envelope write did not advance")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+        os.fchmod(descriptor, 0o400)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+        directory_descriptor = os.open(parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _service_from_config(
     raw: Mapping[str, Any],
     *,
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
+    autonomy_guard: Callable[[], None] | None = None,
+    initial_canary: Mapping[str, Any] | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
@@ -575,7 +676,8 @@ def _service_from_config(
     # A persisted receipt from another service instance is never startup
     # authority. Every new PID starts quarantined and can activate only after a
     # fresh same-PID worker probe followed by the private activation command.
-    canary: dict[str, Any] = {}
+    canary: dict[str, Any] = dict(initial_canary or {})
+    initially_ready = initial_canary is not None
 
     def supervisor_factory(runtime):
         def validations(spec):
@@ -603,7 +705,7 @@ def _service_from_config(
             worker_gid=raw["worker_gid"],
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
-            require_complete_launch_attestation=False,
+            require_complete_launch_attestation=initially_ready,
             process_controller=RemoteWorkerProcessController(client),
         )
 
@@ -640,15 +742,50 @@ def _service_from_config(
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
         ),
+        autonomy_guard=autonomy_guard,
         activated_socket=listener,
-        service_state="AWAITING_CANARY",
+        service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
     )
 
 
+async def _request_boot_autonomy_canary(
+    raw: Mapping[str, Any],
+    control_attestation: Mapping[str, Any],
+    *,
+    client=None,
+    persist_path: Path | None = None,
+) -> dict[str, Any]:
+    """Obtain and validate one same-PID canary through the existing broker."""
+
+    if client is None:
+        from control_plane.executive_worker_broker import WorkerBrokerClient
+
+        client = WorkerBrokerClient(
+            raw["worker_broker_socket_path"],
+            timeout_seconds=float(raw.get("broker_timeout_seconds") or 30.0),
+            max_response_bytes=1024 * 1024,
+        )
+    result = await client.request(
+        "autonomy-canary",
+        {"control_environment_attestation": control_attestation},
+    )
+    envelope = result.get("envelope")
+    if not isinstance(envelope, Mapping):
+        raise ServiceError("worker boot canary returned no typed envelope")
+    validated = _validate_canary_envelope(
+        envelope,
+        raw=raw,
+        control_attestation=control_attestation,
+    )
+    if persist_path is not None:
+        _persist_canary_envelope(persist_path, envelope)
+    return validated
+
+
 async def _serve_from_config(config_path: Path) -> None:
     raw = load_control_config(config_path)
-    _load_control_environment_attestation(
+    control_attestation = _load_control_environment_attestation(
         Path(raw["control_environment_attestation_path"]),
         config_path=config_path,
         expected_release_sha=str(raw["proof_base_sha"]),
@@ -667,7 +804,37 @@ async def _serve_from_config(config_path: Path) -> None:
             control_attestation=attestation,
         )
 
-    service = _service_from_config(raw, canary_loader=load_canary)
+    autonomy_guard: Callable[[], None] | None = None
+    initial_canary: Mapping[str, Any] | None = None
+    if raw.get("coo_autonomy_armed") is True:
+        own_config_sha256 = _sha256_file(config_path)
+        release_sha = str(raw["proof_base_sha"])
+
+        def require_autonomy() -> None:
+            try:
+                validate_runtime_guard_file(
+                    AUTONOMY_RECEIPT,
+                    role="control",
+                    own_config_sha256=own_config_sha256,
+                    release_sha=release_sha,
+                )
+            except AutonomyRefusal as exc:
+                raise ServiceError("Executive autonomy receipt refused") from exc
+
+        autonomy_guard = require_autonomy
+        require_autonomy()
+        initial_canary = await _request_boot_autonomy_canary(
+            raw,
+            control_attestation,
+            persist_path=canary_path,
+        )
+
+    service = _service_from_config(
+        raw,
+        canary_loader=load_canary,
+        autonomy_guard=autonomy_guard,
+        initial_canary=initial_canary,
+    )
     await service.serve_until_stopped()
 
 
