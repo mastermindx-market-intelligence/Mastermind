@@ -447,8 +447,8 @@ provider home and a current finite expiry is available without exposing the
 credential. This is the only required native user handoff.
 
 - [ ] **Step 1: Install the exact merged SHA with both arm bits false.** Verify
-  release manifest, current link, file identities, plists, pinned Python/Codex,
-  and stopped services.
+  release manifest, both plist release bindings, file identities, pinned
+  Python/Codex, and stopped services.
 - [ ] **Step 2: Mint/reuse provider readiness.** Spend at most one canary only
   when no valid receipt exists; never retry an ambiguous inference effect.
 - [ ] **Step 3: Run Gate B exactly once and inspect its sanitized receipt.**

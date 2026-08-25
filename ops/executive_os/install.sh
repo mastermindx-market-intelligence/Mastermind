@@ -664,6 +664,12 @@ else
   "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
     --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
 fi
+[ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
+  && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+  && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] || {
+  /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
+  exit 65
+}
 if [ -n "$(/usr/bin/find "$RELEASE_ROOT" -exec /usr/bin/stat -f '%Sp' {} \; \
   | /usr/bin/awk '/\+/{found=1} END {if(found) print "ACL"}')" ]; then
   /bin/echo "installed release contains a filesystem ACL" >&2

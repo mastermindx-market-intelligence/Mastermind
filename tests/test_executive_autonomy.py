@@ -194,6 +194,17 @@ def test_time_bounds_are_strict(field, value, code):
     assert raised.value.code == code
 
 
+def test_read_only_status_can_parse_an_expired_receipt_without_admitting_work():
+    binding = autonomy.validate_receipt_document(
+        _receipt(readiness_expires_at="2026-08-24T11:59:59Z"),
+        metadata=_metadata(),
+        expected=_expectation(),
+        now=NOW,
+        require_current=False,
+    )
+    assert binding.readiness_expires_at < NOW
+
+
 def test_receipt_bytes_are_secret_free_by_construction():
     encoded = json.dumps(_receipt(), sort_keys=True).lower()
     for forbidden in (

@@ -157,9 +157,10 @@ Three approaches were evaluated:
 `arm` must prove every predicate before it writes a config byte:
 
 1. macOS, EUID 0 and the exact pinned Executive Python are active;
-2. the installed `current` link, release manifest, formal-acceptance receipt and
-   requested SHA all identify the same already reviewed commit; protected-master
-   ancestry is deployment evidence, not a volatile live-network arm predicate;
+2. the exact release directory/manifest, both LaunchDaemon working directories
+   and program arguments, formal-acceptance receipt and requested SHA all
+   identify the same already reviewed commit; protected-master ancestry is
+   deployment evidence, not a volatile live-network arm predicate;
 3. the installed release, config roots, runtime roots, plists, Codex binary,
    Python runtime and receipt ancestors retain the existing owner/mode/no-ACL/
    no-symlink requirements;

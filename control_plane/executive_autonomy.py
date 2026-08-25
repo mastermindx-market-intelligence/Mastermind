@@ -248,6 +248,7 @@ def validate_receipt_document(
     metadata: ReceiptMetadata,
     expected: AutonomyExpectation,
     now: datetime | None = None,
+    require_current: bool = True,
 ) -> ArmBinding:
     """Validate one armed receipt against exact non-secret identities."""
 
@@ -349,10 +350,11 @@ def validate_receipt_document(
         raise AutonomyRefusal("readiness_timestamp_order_invalid")
     if readiness_expires_at > credential_expires_at:
         raise AutonomyRefusal("readiness_expiry_bounds_invalid")
-    if readiness_expires_at <= current:
-        raise AutonomyRefusal("readiness_expired")
-    if readiness_expires_at < current + MIN_ADMISSION_MARGIN:
-        raise AutonomyRefusal("readiness_margin_insufficient")
+    if require_current:
+        if readiness_expires_at <= current:
+            raise AutonomyRefusal("readiness_expired")
+        if readiness_expires_at < current + MIN_ADMISSION_MARGIN:
+            raise AutonomyRefusal("readiness_margin_insufficient")
 
     return ArmBinding(
         state=str(payload["state"]),
@@ -392,6 +394,7 @@ def validate_receipt_file(
     *,
     expected: AutonomyExpectation,
     now: datetime | None = None,
+    require_current: bool = True,
 ) -> ArmBinding:
     """Open and validate a bounded receipt without following a final symlink."""
 
@@ -431,7 +434,11 @@ def validate_receipt_file(
     if not isinstance(payload, dict):
         raise AutonomyRefusal("receipt_not_object")
     return validate_receipt_document(
-        payload, metadata=metadata, expected=expected, now=now
+        payload,
+        metadata=metadata,
+        expected=expected,
+        now=now,
+        require_current=require_current,
     )
 
 
