@@ -364,3 +364,84 @@ def test_status_precedence_never_hides_the_more_unsafe_state(evidence, expected)
 )
 def test_armed_config_requires_one_matching_armed_receipt(evidence):
     assert autonomy.classify_status(evidence, now=NOW) == "CONFIG_DRIFT"
+
+
+@pytest.mark.parametrize(
+    ("role", "own_digest"),
+    [("control", CONTROL_DIGEST), ("worker", WORKER_DIGEST)],
+)
+def test_runtime_guard_binds_each_service_to_its_own_config(role, own_digest):
+    binding = autonomy.validate_runtime_guard_document(
+        _receipt(
+            capability_policy_digest=autonomy.CAPABILITY_POLICY_DIGEST,
+            execution_profile_digest=autonomy.EXECUTION_PROFILE_DIGEST,
+            native_helper_grant_digest=autonomy.NATIVE_HELPER_GRANT_DIGEST,
+            security_config_digest=autonomy.SECURITY_CONFIG_DIGEST,
+        ),
+        metadata=_metadata(),
+        role=role,
+        own_config_sha256=own_digest,
+        release_sha=SHA,
+        now=NOW,
+    )
+    assert binding.state == "ARMED"
+
+
+@pytest.mark.parametrize("role", ["control", "worker"])
+def test_runtime_guard_refuses_wrong_own_config_before_work(role):
+    with pytest.raises(autonomy.AutonomyRefusal) as raised:
+        autonomy.validate_runtime_guard_document(
+            _receipt(
+                capability_policy_digest=autonomy.CAPABILITY_POLICY_DIGEST,
+                execution_profile_digest=autonomy.EXECUTION_PROFILE_DIGEST,
+                native_helper_grant_digest=autonomy.NATIVE_HELPER_GRANT_DIGEST,
+                security_config_digest=autonomy.SECURITY_CONFIG_DIGEST,
+            ),
+            metadata=_metadata(),
+            role=role,
+            own_config_sha256="f" * 64,
+            release_sha=SHA,
+            now=NOW,
+        )
+    expected = (
+        "control_config_digest_mismatch"
+        if role == "control"
+        else "worker_config_digest_mismatch"
+    )
+    assert raised.value.code == expected
+
+
+def test_runtime_guard_never_accepts_a_disarmed_receipt():
+    value = _receipt(
+        state="DISARMED",
+        acceptance_receipt_sha256="0" * 64,
+        gate_b_receipt_sha256="0" * 64,
+        provider_readiness_receipt_sha256="0" * 64,
+        readiness_observed_at="2026-08-24T12:00:00Z",
+        credential_expires_at="2026-08-24T12:00:00Z",
+        readiness_expires_at="2026-08-24T12:00:00Z",
+        expected_credential_kind="none",
+        workspace_binding_class="none",
+        predicates={
+            "acceptance_passed": False,
+            "configs_validated": True,
+            "gate_b_passed": False,
+            "provider_readiness_passed": False,
+            "runtime_quiescent": False,
+            "service_uids_quiescent": True,
+        },
+        capability_policy_digest=autonomy.CAPABILITY_POLICY_DIGEST,
+        execution_profile_digest=autonomy.EXECUTION_PROFILE_DIGEST,
+        native_helper_grant_digest=autonomy.NATIVE_HELPER_GRANT_DIGEST,
+        security_config_digest=autonomy.SECURITY_CONFIG_DIGEST,
+    )
+    with pytest.raises(autonomy.AutonomyRefusal) as raised:
+        autonomy.validate_runtime_guard_document(
+            value,
+            metadata=_metadata(),
+            role="control",
+            own_config_sha256=CONTROL_DIGEST,
+            release_sha=SHA,
+            now=NOW,
+        )
+    assert raised.value.code == "receipt_not_armed"

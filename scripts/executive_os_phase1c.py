@@ -22,6 +22,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
+from control_plane.executive_autonomy import (
+    AutonomyRefusal,
+    validate_runtime_guard_file,
+)
 from control_plane.executive_service import (
     ExecutiveControlService,
     ServiceConfig,
@@ -32,6 +36,9 @@ from control_plane.executive_service import (
 
 
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
+AUTONOMY_RECEIPT = Path(
+    "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
+)
 SECRET_CANARY_ENVELOPE_SCHEMA_VERSION = (
     "mastermind.executive_secret_canary_envelope/v1"
 )
@@ -500,6 +507,7 @@ def _service_from_config(
     raw: Mapping[str, Any],
     *,
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
+    autonomy_guard: Callable[[], None] | None = None,
 ) -> ExecutiveControlService:
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
@@ -640,6 +648,7 @@ def _service_from_config(
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
         ),
+        autonomy_guard=autonomy_guard,
         activated_socket=listener,
         service_state="AWAITING_CANARY",
         canary_loader=canary_loader,
@@ -667,7 +676,29 @@ async def _serve_from_config(config_path: Path) -> None:
             control_attestation=attestation,
         )
 
-    service = _service_from_config(raw, canary_loader=load_canary)
+    autonomy_guard: Callable[[], None] | None = None
+    if raw.get("coo_autonomy_armed") is True:
+        own_config_sha256 = _sha256_file(config_path)
+        release_sha = str(raw["proof_base_sha"])
+
+        def require_autonomy() -> None:
+            try:
+                validate_runtime_guard_file(
+                    AUTONOMY_RECEIPT,
+                    role="control",
+                    own_config_sha256=own_config_sha256,
+                    release_sha=release_sha,
+                )
+            except AutonomyRefusal as exc:
+                raise ServiceError("Executive autonomy receipt refused") from exc
+
+        autonomy_guard = require_autonomy
+
+    service = _service_from_config(
+        raw,
+        canary_loader=load_canary,
+        autonomy_guard=autonomy_guard,
+    )
     await service.serve_until_stopped()
 
 

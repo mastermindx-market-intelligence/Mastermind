@@ -26,6 +26,18 @@ TOOL_VERSION = "1.0.0"
 WORKSPACE_BINDING_CLASS = "company-workspace-admin-attested"
 MIN_ADMISSION_MARGIN = timedelta(minutes=30)
 MAX_RECEIPT_BYTES = 64 * 1024
+CAPABILITY_POLICY_DIGEST = (
+    "b8fbfd9065764206b03f835f7fbc09910326f806584a8185229474aff59008b7"
+)
+EXECUTION_PROFILE_DIGEST = (
+    "536853fb01d69ae8deca9a028b55c90aea0d1529f1fc80d83bb20d5d54f2cc44"
+)
+NATIVE_HELPER_GRANT_DIGEST = (
+    "2d5929ea453f368e7b3284b8509fd6e70d5ac16409642c216217c8fb78908c40"
+)
+SECURITY_CONFIG_DIGEST = (
+    "89612a1d7a64a77b9b42fab1522cab3465a7a763ba5be696f8a952ba7eaa366f"
+)
 
 UNARMED = "UNARMED"
 ARMED_READY = "ARMED_READY"
@@ -121,6 +133,8 @@ _REFUSAL_CODES = frozenset(
         "receipt_unavailable",
         "receipt_too_large",
         "receipt_not_utf8_json",
+        "receipt_not_armed",
+        "runtime_role_invalid",
     }
 )
 
@@ -391,6 +405,53 @@ def validate_receipt_document(
     )
 
 
+def validate_runtime_guard_document(
+    payload: Mapping[str, Any],
+    *,
+    metadata: ReceiptMetadata,
+    role: str,
+    own_config_sha256: str,
+    release_sha: str,
+    now: datetime | None = None,
+) -> ArmBinding:
+    """Validate the root receipt at one service's pre-effect boundary."""
+
+    if role not in {"control", "worker"}:
+        raise AutonomyRefusal("runtime_role_invalid")
+    if payload.get("state") != "ARMED":
+        raise AutonomyRefusal("receipt_not_armed")
+    _require_digest(own_config_sha256)
+    control_digest = (
+        own_config_sha256
+        if role == "control"
+        else _require_digest(payload.get("control_config_sha256"))
+    )
+    worker_digest = (
+        own_config_sha256
+        if role == "worker"
+        else _require_digest(payload.get("worker_config_sha256"))
+    )
+    expectation = AutonomyExpectation(
+        release_sha=release_sha,
+        control_config_sha256=control_digest,
+        worker_config_sha256=worker_digest,
+        provider_readiness_receipt_sha256=_require_digest(
+            payload.get("provider_readiness_receipt_sha256")
+        ),
+        capability_policy_digest=CAPABILITY_POLICY_DIGEST,
+        execution_profile_digest=EXECUTION_PROFILE_DIGEST,
+        native_helper_grant_digest=NATIVE_HELPER_GRANT_DIGEST,
+        security_config_digest=SECURITY_CONFIG_DIGEST,
+    )
+    return validate_receipt_document(
+        payload,
+        metadata=metadata,
+        expected=expectation,
+        now=now,
+        require_current=True,
+    )
+
+
 def _macos_acl(path: Path) -> bool:
     if sys.platform != "darwin":
         return False
@@ -406,14 +467,10 @@ def _macos_acl(path: Path) -> bool:
     return completed.stdout.strip().endswith("+")
 
 
-def validate_receipt_file(
+def load_receipt_file(
     path: str | Path,
-    *,
-    expected: AutonomyExpectation,
-    now: datetime | None = None,
-    require_current: bool = True,
-) -> ArmBinding:
-    """Open and validate a bounded receipt without following a final symlink."""
+) -> tuple[dict[str, Any], ReceiptMetadata]:
+    """Open one bounded root receipt without following a final symlink."""
 
     receipt_path = Path(path)
     flags = os.O_RDONLY
@@ -450,12 +507,44 @@ def validate_receipt_file(
         raise AutonomyRefusal("receipt_not_utf8_json") from exc
     if not isinstance(payload, dict):
         raise AutonomyRefusal("receipt_not_object")
+    return payload, metadata
+
+
+def validate_receipt_file(
+    path: str | Path,
+    *,
+    expected: AutonomyExpectation,
+    now: datetime | None = None,
+    require_current: bool = True,
+) -> ArmBinding:
+    """Open and validate a bounded receipt without following a final symlink."""
+
+    payload, metadata = load_receipt_file(path)
     return validate_receipt_document(
         payload,
         metadata=metadata,
         expected=expected,
         now=now,
         require_current=require_current,
+    )
+
+
+def validate_runtime_guard_file(
+    path: str | Path,
+    *,
+    role: str,
+    own_config_sha256: str,
+    release_sha: str,
+    now: datetime | None = None,
+) -> ArmBinding:
+    payload, metadata = load_receipt_file(path)
+    return validate_runtime_guard_document(
+        payload,
+        metadata=metadata,
+        role=role,
+        own_config_sha256=own_config_sha256,
+        release_sha=release_sha,
+        now=now,
     )
 
 
@@ -504,11 +593,15 @@ def classify_status(evidence: StatusEvidence, *, now: datetime | None = None) ->
 __all__ = [
     "ARMED_DEGRADED",
     "ARMED_READY",
+    "CAPABILITY_POLICY_DIGEST",
     "CONFIG_DRIFT",
     "EFFECT_UNKNOWN",
+    "EXECUTION_PROFILE_DIGEST",
     "MIN_ADMISSION_MARGIN",
+    "NATIVE_HELPER_GRANT_DIGEST",
     "READINESS_EXPIRED",
     "RECEIPT_SCHEMA_VERSION",
+    "SECURITY_CONFIG_DIGEST",
     "TOOL_VERSION",
     "TRANSACTION_INCOMPLETE",
     "UNARMED",
@@ -520,7 +613,10 @@ __all__ = [
     "StatusEvidence",
     "canonical_sha256",
     "classify_status",
+    "load_receipt_file",
     "sha256_file",
     "validate_receipt_document",
     "validate_receipt_file",
+    "validate_runtime_guard_document",
+    "validate_runtime_guard_file",
 ]

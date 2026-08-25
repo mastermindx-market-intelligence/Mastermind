@@ -250,8 +250,116 @@ def _service(
         config or _config(tmp_path, socket_root=socket_root),
         supervisor_factory=factory,
         backup_backend=backup,
+        autonomy_guard=(
+            (lambda: None)
+            if (config is not None and config.coo_autonomy_armed)
+            else None
+        ),
     )
     return service, holder
+
+
+def test_armed_service_requires_an_explicit_autonomy_guard(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    config = _config(
+        tmp_path,
+        socket_root=short_socket_root,
+        coo_autonomy_armed=True,
+    )
+    with pytest.raises(ValueError, match="autonomy guard"):
+        ExecutiveControlService(
+            config,
+            supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        )
+
+
+def test_armed_startup_guard_refuses_before_runtime_or_socket_mutation(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    config = _config(
+        tmp_path,
+        socket_root=short_socket_root,
+        coo_autonomy_armed=True,
+    )
+    calls = []
+
+    def guard() -> None:
+        calls.append("guard")
+        raise RuntimeError("expired receipt details must not escape")
+
+    def runtime_factory(_root):
+        calls.append("runtime")
+        raise AssertionError("runtime must not open after guard refusal")
+
+    service = ExecutiveControlService(
+        config,
+        runtime_factory=runtime_factory,
+        supervisor_factory=lambda runtime: _FakeSupervisor(runtime),
+        autonomy_guard=guard,
+    )
+    with pytest.raises(StateConflict, match="autonomy receipt refused"):
+        asyncio.run(service.start())
+    assert calls == ["guard"]
+    assert service.service_state == "QUARANTINED"
+    assert not config.socket_path.exists()
+
+
+def test_guard_runs_again_before_each_explicit_coo_cycle(
+    tmp_path: Path, short_socket_root: Path
+) -> None:
+    async def exercise() -> None:
+        config = _config(
+            tmp_path,
+            socket_root=short_socket_root,
+            coo_autonomy_armed=True,
+            coo_tick_interval_seconds=3600.0,
+        )
+        calls = []
+
+        def guard() -> None:
+            calls.append("guard")
+            if len(calls) == 3:
+                raise RuntimeError("receipt expired")
+
+        holder = {}
+
+        def factory(runtime):
+            holder["supervisor"] = _FakeSupervisor(runtime)
+            return holder["supervisor"]
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=factory,
+            autonomy_guard=guard,
+        )
+        await service.start()
+        try:
+            assert calls == ["guard"]
+            assert (await _request(service, "register-worker"))["ok"] is True
+            submitted = await _request(
+                service,
+                "submit-ceo-intent",
+                {"intent": _coo_intent(config, "guarded")},
+            )
+            root_id = submitted["result"]["job_id"]
+            first = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert first["ok"] is True
+            assert calls == ["guard", "guard"]
+
+            refused = await _request(
+                service, "run-coo-cycle", {"root_job_id": root_id}
+            )
+            assert refused["ok"] is False
+            assert "autonomy receipt refused" in refused["error"]["message"]
+            assert "expired" not in json.dumps(refused)
+            assert service.service_state == "QUARANTINED"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
 
 
 async def _request(service: ExecutiveControlService, command: str, args=None):
@@ -566,6 +674,7 @@ def test_armed_operator_lane_binds_read_only_planner_and_not_sealed_worker(
             supervisor_factory=sealed_factory,
             operator_supervisor_factory=operator_factory,
             operator_identity_verifier=verify_identity,
+            autonomy_guard=lambda: None,
         )
         await service.start()
         try:
