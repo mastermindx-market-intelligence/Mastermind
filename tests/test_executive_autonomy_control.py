@@ -270,6 +270,17 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     assert "autonomy_control.py" in install
     assert "credential_rotation_interlock.py" in install
 
+    production = (root / "ops/executive_os/autonomy_control.py").read_text(
+        encoding="utf-8"
+    )
+    for digest in (
+        control.CAPABILITY_POLICY_DIGEST,
+        control.EXECUTION_PROFILE_DIGEST,
+        control.NATIVE_HELPER_GRANT_DIGEST,
+        control.SECURITY_CONFIG_DIGEST,
+    ):
+        assert digest not in production
+
 
 def test_production_status_never_calls_an_invalid_present_receipt_unarmed(
     monkeypatch: pytest.MonkeyPatch,

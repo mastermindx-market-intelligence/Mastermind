@@ -28,7 +28,14 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from control_plane.executive_autonomy import (
     ARMED_READY,
+    CAPABILITY_POLICY_DIGEST,
+    EXECUTION_PROFILE_DIGEST,
+    NATIVE_HELPER_GRANT_DIGEST,
+    RECEIPT_SCHEMA_VERSION,
+    SECURITY_CONFIG_DIGEST,
+    TOOL_VERSION,
     UNARMED,
+    WORKSPACE_BINDING_CLASS,
     AutonomyExpectation,
     AutonomyRefusal,
     ReceiptMetadata,
@@ -62,19 +69,6 @@ PINNED_PYTHON = Path(
 CONTROL_USER = "_mastermind_exec"
 CONTROL_GROUP = "_mastermind_exec"
 WORKER_GROUP = "_mastermind_worker"
-
-CAPABILITY_POLICY_DIGEST = (
-    "b8fbfd9065764206b03f835f7fbc09910326f806584a8185229474aff59008b7"
-)
-EXECUTION_PROFILE_DIGEST = (
-    "536853fb01d69ae8deca9a028b55c90aea0d1529f1fc80d83bb20d5d54f2cc44"
-)
-NATIVE_HELPER_GRANT_DIGEST = (
-    "2d5929ea453f368e7b3284b8509fd6e70d5ac16409642c216217c8fb78908c40"
-)
-SECURITY_CONFIG_DIGEST = (
-    "89612a1d7a64a77b9b42fab1522cab3465a7a763ba5be696f8a952ba7eaa366f"
-)
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -524,7 +518,7 @@ def build_transaction_receipt(
     else:
         raise ArmTransactionError("arm_rolled_back")
     return {
-        "schema_version": "mastermind.executive_autonomy_state/v1",
+        "schema_version": RECEIPT_SCHEMA_VERSION,
         "state": state,
         "release_sha": transaction.expected_sha,
         "acceptance_receipt_sha256": acceptance_digest,
@@ -545,7 +539,7 @@ def build_transaction_receipt(
         "security_config_digest": SECURITY_CONFIG_DIGEST,
         "transaction_id": transaction.transaction_id,
         "observed_at": _receipt_timestamp(now),
-        "tool_version": "1.0.0",
+        "tool_version": TOOL_VERSION,
         "predicates": predicates,
     }
 
@@ -643,7 +637,7 @@ def _request_expiry(request: ArmRequest, *, now: datetime) -> datetime:
         "service-account",
     }:
         raise ArmAdmissionError("credential_kind_invalid")
-    if request.workspace_binding_class != "company-workspace-admin-attested":
+    if request.workspace_binding_class != WORKSPACE_BINDING_CLASS:
         raise ArmAdmissionError("workspace_binding_invalid")
     if (
         not isinstance(request.credential_expires_at, str)
