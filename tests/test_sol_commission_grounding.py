@@ -7,7 +7,7 @@ handoff may be emitted:
    it says it just observed; and
 2. the Skillpack identity must be an exact immutable commit SHA.
 
-The first committed version of this file is intentionally RED against the
+The first committed version of this file was observed RED against the
 pre-repair linter. Do not weaken the assertions to make the implementation pass.
 """
 from __future__ import annotations
@@ -58,7 +58,8 @@ def _hard(findings) -> set[str]:
 def test_continuation_pickup_must_match_observed_carrier_head(tmp_path):
     """A stale pickup cannot coexist with a separately claimed newer carrier head."""
     manifest = _base()
-    assert manifest["identity"]["carrier"]["pickup_sha"] != manifest["sources"]["github"]["carrier_head_sha"]
+    assert manifest["identity"]["carrier"]["pickup_sha"] == manifest["sources"]["github"]["carrier_head_sha"]
+    manifest["sources"]["github"]["carrier_head_sha"] = "f" * 40
 
     findings = _lint(tmp_path, manifest)
 
