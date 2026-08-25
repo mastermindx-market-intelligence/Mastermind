@@ -215,6 +215,89 @@ def test_open_work_in_held_with_hold_reason_is_lawful(tmp_path):
     assert "DARK_OPEN_WORK" not in _hard(findings)
 
 
+# ---------------------------------------------------------------- surface collision (Sol review finding 1)
+
+
+def test_same_id_twice_in_ordered_is_surface_collision(tmp_path):
+    m = _base()
+    m["execution"]["ordered"].append("APP-01")
+    assert "EXECUTION_SURFACE_COLLISION" in _hard(_lint_dict(tmp_path, m))
+
+
+def test_same_id_in_ordered_and_parallel_is_surface_collision(tmp_path):
+    m = _base()
+    m["execution"]["parallel"] = ["APP-01"]
+    assert "EXECUTION_SURFACE_COLLISION" in _hard(_lint_dict(tmp_path, m))
+
+
+def test_same_id_in_ordered_and_held_is_surface_collision(tmp_path):
+    m = _base()
+    m["execution"]["held"].append("APP-01")
+    assert "EXECUTION_SURFACE_COLLISION" in _hard(_lint_dict(tmp_path, m))
+
+
+# ---------------------------------------------------------------- DNR state collision (Sol review finding 2)
+
+
+def test_duplicate_normalized_dnr_statement_is_state_collision(tmp_path):
+    """The same binding statement must have exactly ONE reconciliation entry.
+    HONORED + REFUTED (even with a valid refutation) on one normalized
+    statement is a contradiction, not coverage — it must refuse."""
+    m = _base()
+    original = m["do_not_redo_reconciliation"][0]
+    m["do_not_redo_reconciliation"].append(
+        {
+            "source": original["source"],
+            # Case/whitespace variant of the same statement — normalization must
+            # collapse them into one identity before the collision check.
+            "statement": "  DO NOT re-derive the six-lane   archaeology; extend, don't re-census. ",
+            "disposition": "REFUTED",
+            "refuted_by": ["the archived dossier index is proven byte-corrupt vs its merge"],
+            "reopens": ["APP-01"],
+        }
+    )
+    findings = _lint_dict(tmp_path, m, context=FIX / "context_bundle.json")
+    assert "DNR_STATE_COLLISION" in _hard(findings)
+
+
+# ---------------------------------------------------------------- deferred_to floor (Sol review finding 3)
+
+
+def test_deferred_to_empty_key_does_not_escape_dark_open_work(tmp_path):
+    m = _base()
+    m["obligations"].append(
+        {"id": "APP-04", "statement": "escape attempt", "disposition": "OPEN", "deferred_to": "WS:"}
+    )
+    assert "DARK_OPEN_WORK" in _hard(_lint_dict(tmp_path, m))
+
+
+def test_deferred_to_self_workstream_does_not_escape_dark_open_work(tmp_path):
+    """Self-deferral is not an independent parallel wave."""
+    m = _base()
+    m["obligations"].append(
+        {
+            "id": "APP-04",
+            "statement": "self-deferral attempt",
+            "disposition": "OPEN",
+            "deferred_to": m["identity"]["program_or_workstream"],
+        }
+    )
+    assert "DARK_OPEN_WORK" in _hard(_lint_dict(tmp_path, m))
+
+
+def test_deferred_to_malformed_token_does_not_escape_dark_open_work(tmp_path):
+    m = _base()
+    m["obligations"].append(
+        {
+            "id": "APP-04",
+            "statement": "grammar escape attempt",
+            "disposition": "OPEN",
+            "deferred_to": "WS:lower case not a token",
+        }
+    )
+    assert "DARK_OPEN_WORK" in _hard(_lint_dict(tmp_path, m))
+
+
 # ---------------------------------------------------------------- dark work / empty delta
 
 
