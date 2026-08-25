@@ -64,6 +64,7 @@ REOPEN_FINDING_BY_DISPOSITION = {
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _OBSERVED_SHA = re.compile(r"^(blob:)?[0-9a-f]{40}$")
+_REPOSITORY = re.compile(r"^[^/\s]+/[^/\s]+$")
 # Exact deferred_to token grammar: WS: followed by a non-empty UPPER-KEBAB key.
 # Grammar + non-self are the whole deterministic floor; true existence and
 # independence of the named workstream are owned by Agent OS reconciliation
@@ -200,6 +201,20 @@ def _check_identity(manifest: dict, mode: str | None, lint: _Lint) -> None:
         lint.hard("MALFORMED_MANIFEST", "identity block missing or not a mapping")
         return
 
+    program_or_workstream = identity.get("program_or_workstream")
+    if not (isinstance(program_or_workstream, str) and program_or_workstream.strip()):
+        lint.hard(
+            "MALFORMED_MANIFEST",
+            f"identity.program_or_workstream must be a non-empty organizational identity, got {program_or_workstream!r}",
+        )
+
+    repository = identity.get("repository")
+    if not (isinstance(repository, str) and _REPOSITORY.fullmatch(repository)):
+        lint.hard(
+            "MALFORMED_MANIFEST",
+            f"identity.repository must use exact owner/repo shape, got {repository!r}",
+        )
+
     skillpack_sha = identity.get("skillpack_sha")
     if not (isinstance(skillpack_sha, str) and _SHA40.fullmatch(skillpack_sha)):
         lint.hard(
@@ -213,6 +228,29 @@ def _check_identity(manifest: dict, mode: str | None, lint: _Lint) -> None:
         return
     pickup = carrier.get("pickup_sha")
     if mode == "CONTINUATION_DELTA":
+        carrier_type = carrier.get("type")
+        branch = carrier.get("branch")
+        if carrier_type not in {"pull_request", "branch"}:
+            lint.hard(
+                "UNBOUND_CONTINUATION",
+                f"CONTINUATION_DELTA carrier.type must be 'pull_request' or 'branch', got {carrier_type!r}",
+            )
+        if not (isinstance(branch, str) and branch.strip()):
+            lint.hard(
+                "UNBOUND_CONTINUATION",
+                f"CONTINUATION_DELTA carrier.branch must be non-empty, got {branch!r}",
+            )
+        if carrier_type == "pull_request":
+            carrier_id = carrier.get("id")
+            if not (
+                isinstance(carrier_id, int)
+                and not isinstance(carrier_id, bool)
+                and carrier_id > 0
+            ):
+                lint.hard(
+                    "UNBOUND_CONTINUATION",
+                    f"CONTINUATION_DELTA pull_request carrier.id must be a positive integer, got {carrier_id!r}",
+                )
         if not (isinstance(pickup, str) and _SHA40.fullmatch(pickup)):
             lint.hard(
                 "UNBOUND_CONTINUATION",
