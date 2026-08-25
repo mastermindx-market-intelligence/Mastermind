@@ -130,9 +130,19 @@ Anything else is `MALFORMED_MANIFEST`.
   held — `HELD_DISPOSITION_ILLEGAL`).
 - **Every ID on every surface (held included) must be declared in
   `obligations`** — otherwise `UNDECLARED_EXECUTION`.
+- **One ID, one placement.** The same obligation ID must not appear more than
+  once anywhere across `ordered`/`parallel`/`held` — duplication inside one
+  list and cross-list placement are equally `EXECUTION_SURFACE_COLLISION`.
 - An `OPEN`/`NEW`/`REVALIDATE_REQUIRED` obligation must be executable, held,
-  or carry `deferred_to: WS:<KEY>` naming the independent workstream that owns
-  it — otherwise `DARK_OPEN_WORK`.
+  or validly deferred — otherwise `DARK_OPEN_WORK`. A valid deferral is an
+  exact `deferred_to` token matching `WS:` followed by a non-empty UPPER-KEBAB
+  key (`^WS:[A-Z0-9]+(-[A-Z0-9]+)*$`) that is **not** this commission's own
+  `identity.program_or_workstream` — self-deferral is not an independent
+  parallel wave. Bare `WS:`, malformed tokens, and self-deferral do not escape.
+- **One binding statement, one disposition.** A normalized `do_not_redo`
+  statement must have exactly one reconciliation entry; duplicates (e.g. the
+  same statement both `HONORED` and `REFUTED`) are `DNR_STATE_COLLISION`,
+  even when the refutation itself would be lawful.
 
 ## Deterministic linter
 
@@ -153,6 +163,8 @@ Zero-network, deterministic, validation-only. **It authorizes nothing.**
 | `SUPERSEDED_WORK_REOPENED` | a `SUPERSEDED` obligation appears in executable scope |
 | `REJECTED_WORK_REOPENED` | a `REJECTED` obligation appears in executable scope |
 | `OBLIGATION_STATE_COLLISION` | the same obligation ID is declared more than once |
+| `EXECUTION_SURFACE_COLLISION` | the same obligation ID placed more than once across `ordered`/`parallel`/`held` (within one list or cross-list) |
+| `DNR_STATE_COLLISION` | the same normalized `do_not_redo` statement has more than one reconciliation entry |
 | `UNJUSTIFIED_REVALIDATION` | `REVALIDATE_REQUIRED` lacking prior evidence or a concrete invalidating event |
 | `UNBOUND_CONTINUATION` | `CONTINUATION_DELTA` without an exact 40-hex carrier `pickup_sha` |
 | `UNDECLARED_EXECUTION` | any execution surface (held included) references an undeclared ID |
@@ -206,6 +218,12 @@ represent the existence of this tool as automatic enforcement.
   coverage of the bundle only, not of every durable record in the company.
 - **Wave ordering.** `POSSIBLE_STALE_ORG_STATE` is best-effort; the
   `DURABLE_STATE_STALE` judgment in `COLD_START.md` owns staleness detection.
+- **`deferred_to` existence/independence.** The deterministic floor is grammar
+  (exact `WS:<KEY>` token) plus not-self. Whether the named workstream actually
+  exists, is active, and genuinely owns the deferred obligation is NOT proven
+  here — no network access and no second registry lookup exist by design; that
+  judgment is owned by current Agent OS reconciliation plus behavioral
+  pressure testing.
 
 ## Over-hardening guard (Case K)
 

@@ -64,6 +64,11 @@ REOPEN_FINDING_BY_DISPOSITION = {
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _OBSERVED_SHA = re.compile(r"^(blob:)?[0-9a-f]{40}$")
+# Exact deferred_to token grammar: WS: followed by a non-empty UPPER-KEBAB key.
+# Grammar + non-self are the whole deterministic floor; true existence and
+# independence of the named workstream are owned by Agent OS reconciliation
+# plus behavioral pressure testing (see contract §Known deterministic blind spots).
+_WS_TOKEN = re.compile(r"^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$")
 
 HARD = "hard"
 WARNING = "warning"
@@ -357,6 +362,17 @@ def _check_execution(
 
     executable = surfaces["ordered"] + surfaces["parallel"]
 
+    # One ID, one placement — anywhere across the three surfaces. Duplication
+    # inside a list and cross-list placement are equally contradictions.
+    all_placements = surfaces["ordered"] + surfaces["parallel"] + surfaces["held"]
+    for oid in sorted({x for x in all_placements if all_placements.count(x) > 1}):
+        locations = [key for key in ("ordered", "parallel", "held") for x in surfaces[key] if x == oid]
+        lint.hard(
+            "EXECUTION_SURFACE_COLLISION",
+            f"obligation {oid} appears {len(locations)} times across execution surfaces "
+            f"({', '.join(locations)}) — one ID, one placement",
+        )
+
     for key in ("ordered", "parallel", "held"):
         for oid in surfaces[key]:
             if oid not in obligations:
@@ -399,16 +415,21 @@ def _check_execution(
                 f"obligation {oid} ({disposition}) may be held only with an explicit hold_reason",
             )
 
+    own_workstream = str((manifest.get("identity") or {}).get("program_or_workstream") or "").strip()
     placed = set(surfaces["ordered"]) | set(surfaces["parallel"]) | set(surfaces["held"])
     for oid, ob in obligations.items():
         if ob["disposition"] in EXEC_ELIGIBLE and oid not in placed:
             deferred = str(ob.get("deferred_to", "")).strip()
-            if deferred.startswith("WS:"):
+            if _WS_TOKEN.fullmatch(deferred) and deferred != own_workstream:
+                # Deterministic floor only: exact WS:<KEY> grammar and not this
+                # commission's own workstream. Existence/independence of the
+                # target is NOT proven here.
                 continue
             lint.hard(
                 "DARK_OPEN_WORK",
-                f"obligation {oid} ({ob['disposition']}) is neither executable, held, "
-                "nor deferred_to an independent workstream (WS:<KEY>)",
+                f"obligation {oid} ({ob['disposition']}) is neither executable, held, nor "
+                "validly deferred_to an independent workstream (exact WS:<KEY> token, not "
+                "this commission's own workstream)",
             )
 
     if mode == "CONTINUATION_DELTA" and not executable:
@@ -426,6 +447,21 @@ def _check_dnr(manifest: dict, obligations: dict[str, dict], lint: _Lint) -> Non
     if not isinstance(entries, list):
         lint.hard("MALFORMED_MANIFEST", "do_not_redo_reconciliation is not a list")
         return
+    # One normalized binding statement, exactly one reconciliation entry.
+    # HONORED + REFUTED duplicates would otherwise both "cover" the statement
+    # while contradicting each other (coverage collapses to set membership).
+    seen_statements: dict[str, int] = {}
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("statement"):
+            norm = _normalize_statement(entry["statement"])
+            seen_statements[norm] = seen_statements.get(norm, 0) + 1
+    for norm, count in sorted(seen_statements.items()):
+        if count > 1:
+            lint.hard(
+                "DNR_STATE_COLLISION",
+                f"do_not_redo statement reconciled {count} times (normalized: {norm!r}) — "
+                "one binding statement takes exactly one disposition",
+            )
     for entry in entries:
         if not isinstance(entry, dict) or not entry.get("statement"):
             lint.hard("MALFORMED_MANIFEST", f"do_not_redo entry lacks statement: {entry!r}")
