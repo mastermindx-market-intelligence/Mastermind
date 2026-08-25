@@ -199,6 +199,14 @@ def _check_identity(manifest: dict, mode: str | None, lint: _Lint) -> None:
     if not isinstance(identity, dict):
         lint.hard("MALFORMED_MANIFEST", "identity block missing or not a mapping")
         return
+
+    skillpack_sha = identity.get("skillpack_sha")
+    if not (isinstance(skillpack_sha, str) and _SHA40.fullmatch(skillpack_sha)):
+        lint.hard(
+            "MALFORMED_MANIFEST",
+            f"identity.skillpack_sha must be an exact 40-hex Skillpack commit SHA, got {skillpack_sha!r}",
+        )
+
     carrier = identity.get("carrier")
     if not isinstance(carrier, dict):
         lint.hard("MALFORMED_MANIFEST", "identity.carrier missing or not a mapping")
@@ -283,6 +291,22 @@ def _check_sources(manifest: dict, mode: str | None, lint: _Lint) -> None:
                     "MALFORMED_MANIFEST",
                     f"sources.github.{key} must be 40-hex, got {value!r}",
                 )
+        identity = manifest.get("identity") or {}
+        carrier = identity.get("carrier") if isinstance(identity, dict) else None
+        pickup = carrier.get("pickup_sha") if isinstance(carrier, dict) else None
+        carrier_head = github.get("carrier_head_sha")
+        if (
+            isinstance(pickup, str)
+            and _SHA40.fullmatch(pickup)
+            and isinstance(carrier_head, str)
+            and _SHA40.fullmatch(carrier_head)
+            and pickup != carrier_head
+        ):
+            lint.hard(
+                "CARRIER_HEAD_MISMATCH",
+                f"identity.carrier.pickup_sha {pickup} does not match "
+                f"sources.github.carrier_head_sha {carrier_head} — continuation grounding is inconsistent",
+            )
     # Best-effort staleness hint (documented as best-effort in the contract):
     # only fires when the author supplied both structured fields.
     workstream = sources.get("agentos_workstream")
