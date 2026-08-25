@@ -20,6 +20,25 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+_SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIRECTORY))
+
+try:
+    from ops.executive_os.provider_identity_policy import (
+        COMPANY_WORKSPACE_BINDING_CLASS,
+        EXPECTED_AUTH_MODE,
+        WORKSPACE_BINDING_CLASSES,
+        evaluate_identity_policy,
+    )
+except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
+    from provider_identity_policy import (  # type: ignore[no-redef]
+        COMPANY_WORKSPACE_BINDING_CLASS,
+        EXPECTED_AUTH_MODE,
+        WORKSPACE_BINDING_CLASSES,
+        evaluate_identity_policy,
+    )
+
 
 SCHEMA_VERSION = "mastermind.executive_provider_readiness/v2"
 IDENTITY_SCHEMA = "mastermind.executive_provider_identity/v1"
@@ -41,25 +60,7 @@ WORKER_GID = 451
 EXPECTED_KINDS = frozenset(
     {"service-account", "personal-access-token", "device-auth"}
 )
-EXPECTED_AUTH_MODE = {
-    "service-account": "agentIdentity",
-    "personal-access-token": "personalAccessToken",
-    "device-auth": "chatgpt",
-}
-COMPANY_PLAN_TYPES = frozenset(
-    {
-        "team",
-        "self_serve_business_prolite",
-        "self_serve_business_usage_based",
-        "business",
-        "ent26",
-        "enterprise_cbp_automation",
-        "enterprise_cbp_usage_based",
-        "enterprise",
-        "edu",
-    }
-)
-WORKSPACE_BINDING_CLASS = "company-workspace-admin-attested"
+WORKSPACE_BINDING_CLASS = COMPANY_WORKSPACE_BINDING_CLASS
 CANARY_ID_RE = re.compile(r"^canary-[0-9a-f]{12}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PRODUCTION_MODEL = "gpt-5.6-sol"
@@ -199,11 +200,16 @@ def lstat_identity(
     }
 
 
-def current_auth_identity(path: Path = AUTH_PATH) -> dict[str, int]:
+def current_auth_identity(
+    path: Path = AUTH_PATH,
+    *,
+    worker_uid: int = WORKER_UID,
+    worker_gid: int = WORKER_GID,
+) -> dict[str, int]:
     return lstat_identity(
         path,
-        expected_uid=WORKER_UID,
-        expected_gid=WORKER_GID,
+        expected_uid=worker_uid,
+        expected_gid=worker_gid,
         expected_mode=0o600,
         require_nonempty=True,
     )
@@ -253,16 +259,22 @@ def _safe_identity(value: Mapping[str, Any]) -> dict[str, Any]:
     expected_kind = result["expected_credential_kind"]
     if expected_kind not in EXPECTED_AUTH_MODE:
         raise ReadinessError("identity_credential_kind_unknown")
-    if result["auth_mode"] != EXPECTED_AUTH_MODE[expected_kind]:
-        raise ReadinessError("identity_auth_mode_mismatch")
-    if result["account_type"] != "chatgpt":
-        raise ReadinessError("identity_account_type_mismatch")
-    if result["plan_type"] not in COMPANY_PLAN_TYPES:
-        raise ReadinessError("identity_company_plan_required")
-    if result["requires_openai_auth"] is not True:
-        raise ReadinessError("identity_openai_auth_malformed")
-    if result["workspace_binding_class"] != WORKSPACE_BINDING_CLASS:
-        raise ReadinessError("identity_workspace_attestation_missing")
+    refusal = evaluate_identity_policy(
+        expected_kind=str(expected_kind),
+        auth_mode=result["auth_mode"],
+        account_type=result["account_type"],
+        plan_type=result["plan_type"],
+        requires_openai_auth=result["requires_openai_auth"],
+        workspace_binding_class=result["workspace_binding_class"],
+    )
+    if refusal is not None:
+        legacy_names = {
+            "auth_mode_policy_mismatch": "identity_auth_mode_mismatch",
+            "account_type_not_chatgpt": "identity_account_type_mismatch",
+            "openai_auth_requirement_malformed": "identity_openai_auth_malformed",
+            "workspace_binding_class_unknown": "identity_workspace_attestation_missing",
+        }
+        raise ReadinessError(legacy_names.get(refusal, f"identity_{refusal}"))
     _timestamp(result["observed_at"], code="identity_timestamp_malformed")
     if not isinstance(result["codex_binary"], Mapping):
         raise ReadinessError("identity_binary_missing")
@@ -271,6 +283,20 @@ def _safe_identity(value: Mapping[str, Any]) -> dict[str, Any]:
     if result["forced_chatgpt_workspace_id_applied"] is not False:
         raise ReadinessError("identity_forced_workspace_forbidden")
     return result
+
+
+def _assert_worker_identity(
+    identity: Mapping[str, Any], *, worker_uid: int, worker_gid: int
+) -> None:
+    if (
+        isinstance(worker_uid, bool)
+        or isinstance(worker_gid, bool)
+        or not 400 <= worker_uid < 500
+        or not 400 <= worker_gid < 500
+        or identity.get("uid") != worker_uid
+        or identity.get("gid") != worker_gid
+    ):
+        raise ReadinessError("worker_identity_mismatch")
 
 
 def _safe_canary(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -343,11 +369,16 @@ def compose_receipt(
     credential_expires_at: str,
     readiness_expires_at: str | None = None,
     canary_command_status: int | None = None,
+    worker_uid: int = WORKER_UID,
+    worker_gid: int = WORKER_GID,
 ) -> dict[str, Any]:
     if expected_kind not in EXPECTED_KINDS:
         raise ReadinessError("credential_kind_unknown")
-    if workspace_binding_class != WORKSPACE_BINDING_CLASS:
+    if workspace_binding_class not in WORKSPACE_BINDING_CLASSES:
         raise ReadinessError("workspace_attestation_missing")
+    _assert_worker_identity(
+        auth_identity, worker_uid=worker_uid, worker_gid=worker_gid
+    )
     safe_identity = _safe_identity(identity)
     if safe_identity["expected_credential_kind"] != expected_kind:
         raise ReadinessError("credential_kind_mismatch")
@@ -391,6 +422,10 @@ def validate_receipt_document(
     *,
     auth_identity: Mapping[str, Any],
     binary_identity: Mapping[str, Any],
+    expected_kind: str | None = None,
+    workspace_binding_class: str | None = None,
+    worker_uid: int = WORKER_UID,
+    worker_gid: int = WORKER_GID,
 ) -> None:
     if set(value) != _RECEIPT_FIELDS:
         raise ReadinessError("readiness_receipt_fields_malformed")
@@ -405,11 +440,27 @@ def validate_receipt_document(
     )
     if value.get("expected_credential_kind") not in EXPECTED_KINDS:
         raise ReadinessError("readiness_credential_kind_unknown")
-    if value.get("workspace_binding_class") != WORKSPACE_BINDING_CLASS:
+    if value.get("workspace_binding_class") not in WORKSPACE_BINDING_CLASSES:
         raise ReadinessError("readiness_workspace_attestation_missing")
+    if expected_kind is not None and value.get("expected_credential_kind") != expected_kind:
+        raise ReadinessError("readiness_expected_kind_mismatch")
+    if (
+        workspace_binding_class is not None
+        and value.get("workspace_binding_class") != workspace_binding_class
+    ):
+        raise ReadinessError("readiness_workspace_binding_mismatch")
     if value.get("forced_chatgpt_workspace_id_applied") is not False:
         raise ReadinessError("readiness_forced_workspace_forbidden")
-    if value.get("credential_lstat") != dict(auth_identity):
+    receipt_credential = value.get("credential_lstat")
+    if not isinstance(receipt_credential, Mapping):
+        raise ReadinessError("readiness_credential_stale")
+    _assert_worker_identity(
+        receipt_credential, worker_uid=worker_uid, worker_gid=worker_gid
+    )
+    _assert_worker_identity(
+        auth_identity, worker_uid=worker_uid, worker_gid=worker_gid
+    )
+    if receipt_credential != dict(auth_identity):
         raise ReadinessError("readiness_credential_stale")
     if value.get("codex_binary") != dict(binary_identity):
         raise ReadinessError("readiness_binary_stale")
@@ -463,20 +514,22 @@ def validate_receipt_file(
     expected_kind: str | None = None,
     workspace_binding_class: str | None = None,
     credential_expires_at: str | None = None,
+    worker_uid: int = WORKER_UID,
+    worker_gid: int = WORKER_GID,
 ) -> dict[str, Any]:
     value = _read_protected_receipt(path)
+    auth_identity = current_auth_identity(
+        auth_path, worker_uid=worker_uid, worker_gid=worker_gid
+    )
     validate_receipt_document(
         value,
-        auth_identity=current_auth_identity(auth_path),
+        auth_identity=auth_identity,
         binary_identity=current_binary_identity(binary_path),
+        expected_kind=expected_kind,
+        workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid,
+        worker_gid=worker_gid,
     )
-    if expected_kind is not None and value.get("expected_credential_kind") != expected_kind:
-        raise ReadinessError("readiness_expected_kind_mismatch")
-    if (
-        workspace_binding_class is not None
-        and value.get("workspace_binding_class") != workspace_binding_class
-    ):
-        raise ReadinessError("readiness_workspace_binding_mismatch")
     if (
         credential_expires_at is not None
         and value.get("credential_expires_at") != credential_expires_at
@@ -493,11 +546,16 @@ def compose_reservation(
     expected_kind: str,
     workspace_binding_class: str,
     credential_expires_at: str,
+    worker_uid: int = WORKER_UID,
+    worker_gid: int = WORKER_GID,
 ) -> dict[str, Any]:
     if expected_kind not in EXPECTED_KINDS:
         raise ReadinessError("credential_kind_unknown")
-    if workspace_binding_class != WORKSPACE_BINDING_CLASS:
+    if workspace_binding_class not in WORKSPACE_BINDING_CLASSES:
         raise ReadinessError("workspace_attestation_missing")
+    _assert_worker_identity(
+        auth_identity, worker_uid=worker_uid, worker_gid=worker_gid
+    )
     safe_identity = _safe_identity(identity)
     if safe_identity["expected_credential_kind"] != expected_kind:
         raise ReadinessError("credential_kind_mismatch")
@@ -533,6 +591,8 @@ def validate_reservation_document(
     expected_kind: str,
     workspace_binding_class: str,
     credential_expires_at: str,
+    worker_uid: int = WORKER_UID,
+    worker_gid: int = WORKER_GID,
 ) -> dict[str, Any]:
     if set(value) != _RECEIPT_FIELDS:
         raise ReadinessError("reservation_fields_malformed")
@@ -560,6 +620,12 @@ def validate_reservation_document(
         raise ReadinessError("reservation_kind_mismatch")
     if safe_identity["workspace_binding_class"] != workspace_binding_class:
         raise ReadinessError("reservation_workspace_mismatch")
+    credential_lstat = value.get("credential_lstat")
+    if not isinstance(credential_lstat, Mapping):
+        raise ReadinessError("reservation_credential_conflict")
+    _assert_worker_identity(
+        credential_lstat, worker_uid=worker_uid, worker_gid=worker_gid
+    )
     if safe_identity["credential_lstat"] != value.get("credential_lstat"):
         raise ReadinessError("reservation_credential_conflict")
     if safe_identity["codex_binary"] != value.get("codex_binary"):
@@ -710,6 +776,8 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     validate.add_argument("--auth", type=Path, default=AUTH_PATH)
     validate.add_argument("--binary", type=Path, default=CODEX_BINARY)
+    validate.add_argument("--worker-uid", type=int, default=WORKER_UID)
+    validate.add_argument("--worker-gid", type=int, default=WORKER_GID)
     reuse = sub.add_parser("reuse")
     reuse.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     reuse.add_argument("--auth", type=Path, default=AUTH_PATH)
@@ -717,6 +785,8 @@ def _parser() -> argparse.ArgumentParser:
     reuse.add_argument("--expected-kind", choices=sorted(EXPECTED_KINDS), required=True)
     reuse.add_argument("--workspace-binding-class", required=True)
     reuse.add_argument("--credential-expires-at", required=True)
+    reuse.add_argument("--worker-uid", type=int, default=WORKER_UID)
+    reuse.add_argument("--worker-gid", type=int, default=WORKER_GID)
     reserve = sub.add_parser("reserve")
     reserve.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     reserve.add_argument("--auth", type=Path, default=AUTH_PATH)
@@ -725,6 +795,8 @@ def _parser() -> argparse.ArgumentParser:
     reserve.add_argument("--expected-kind", choices=sorted(EXPECTED_KINDS), required=True)
     reserve.add_argument("--workspace-binding-class", required=True)
     reserve.add_argument("--credential-expires-at", required=True)
+    reserve.add_argument("--worker-uid", type=int, default=WORKER_UID)
+    reserve.add_argument("--worker-gid", type=int, default=WORKER_GID)
     finalize = sub.add_parser("finalize")
     finalize.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     finalize.add_argument("--auth", type=Path, default=AUTH_PATH)
@@ -736,6 +808,8 @@ def _parser() -> argparse.ArgumentParser:
     finalize.add_argument("--expected-kind", choices=sorted(EXPECTED_KINDS), required=True)
     finalize.add_argument("--workspace-binding-class", required=True)
     finalize.add_argument("--credential-expires-at", required=True)
+    finalize.add_argument("--worker-uid", type=int, default=WORKER_UID)
+    finalize.add_argument("--worker-gid", type=int, default=WORKER_GID)
     return parser
 
 
@@ -749,13 +823,17 @@ def _finalize(args: argparse.Namespace) -> int:
         expected_kind=args.expected_kind,
         workspace_binding_class=args.workspace_binding_class,
         credential_expires_at=args.credential_expires_at,
+        worker_uid=args.worker_uid,
+        worker_gid=args.worker_gid,
     )
     final_auth: dict[str, Any] | None = None
     final_binary: dict[str, Any] | None = None
     post_identity: dict[str, Any] | None = None
     canary: dict[str, Any] | None = None
     try:
-        final_auth = current_auth_identity(args.auth)
+        final_auth = current_auth_identity(
+            args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid
+        )
         final_binary = current_binary_identity(args.binary)
         if reservation.get("codex_binary") != final_binary:
             raise ReadinessError("binary_changed_during_canary")
@@ -781,6 +859,8 @@ def _finalize(args: argparse.Namespace) -> int:
             credential_expires_at=args.credential_expires_at,
             readiness_expires_at=str(reservation["readiness_expires_at"]),
             canary_command_status=args.canary_command_status,
+            worker_uid=args.worker_uid,
+            worker_gid=args.worker_gid,
         )
     except (ReadinessError, OSError) as exc:
         receipt = compose_adverse_from_reservation(
@@ -805,6 +885,8 @@ def _finalize(args: argparse.Namespace) -> int:
         expected_kind=args.expected_kind,
         workspace_binding_class=args.workspace_binding_class,
         credential_expires_at=args.credential_expires_at,
+        worker_uid=args.worker_uid,
+        worker_gid=args.worker_gid,
     )
     return 0
 
@@ -813,7 +895,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "validate":
-            validate_receipt_file(args.receipt, auth_path=args.auth, binary_path=args.binary)
+            validate_receipt_file(
+                args.receipt,
+                auth_path=args.auth,
+                binary_path=args.binary,
+                worker_uid=args.worker_uid,
+                worker_gid=args.worker_gid,
+            )
             return 0
         if args.command == "reuse":
             if not args.receipt.exists() and not args.receipt.is_symlink():
@@ -825,16 +913,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_kind=args.expected_kind,
                 workspace_binding_class=args.workspace_binding_class,
                 credential_expires_at=args.credential_expires_at,
+                worker_uid=args.worker_uid,
+                worker_gid=args.worker_gid,
             )
             return 0
         if args.command == "reserve":
             receipt = compose_reservation(
                 identity=_read_json(args.identity_json),
-                auth_identity=current_auth_identity(args.auth),
+                auth_identity=current_auth_identity(
+                    args.auth,
+                    worker_uid=args.worker_uid,
+                    worker_gid=args.worker_gid,
+                ),
                 binary_identity=current_binary_identity(args.binary),
                 expected_kind=args.expected_kind,
                 workspace_binding_class=args.workspace_binding_class,
                 credential_expires_at=args.credential_expires_at,
+                worker_uid=args.worker_uid,
+                worker_gid=args.worker_gid,
             )
             persist_receipt(args.receipt, receipt)
             return 0

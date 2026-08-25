@@ -240,6 +240,9 @@ def test_canary_script_is_executable_and_syntax_valid() -> None:
         line for line in source.splitlines() if "provider_inference_canary.py" in line
     )
     assert '"$@"' not in source
+    assert "--slot-id" in source
+    for slot_id in ("codex-01", "codex-pro-01", "codex-pro-02", "codex-pro-03"):
+        assert slot_id in source
     assert "--probe-root" not in python_line
     assert "--operator-home" not in python_line
     assert "--receipt-path" not in python_line
@@ -285,6 +288,7 @@ def test_live_cli_rejects_path_overrides_including_duplicates(tmp_path: Path) ->
     assert "probe_root" not in dests
     assert "receipt_path" not in dests
     assert "operator_home" not in dests
+    assert "slot_id" in dests
     for argv in argv_sets:
         with pytest.raises(canary.ProviderCanaryError) as rejected:
             canary.reject_live_path_options(argv)
@@ -293,6 +297,70 @@ def test_live_cli_rejects_path_overrides_including_duplicates(tmp_path: Path) ->
             canary.main(argv)
     assert db.read_bytes() == b"KEEP"
     assert not db.with_name("receipt.json").exists()
+
+
+def test_production_config_is_derived_from_exact_worker_slot() -> None:
+    company = canary.production_config(
+        probe_root=Path("/private/tmp/company"),
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="codex-01",
+    )
+    first = canary.production_config(
+        probe_root=Path("/private/tmp/pro-01"),
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="codex-pro-01",
+    )
+    third = canary.production_config(
+        probe_root=Path("/private/tmp/pro-03"),
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="codex-pro-03",
+    )
+    assert (company.worker_user, company.worker_uid, company.worker_gid) == (
+        "_mastermind_worker",
+        451,
+        451,
+    )
+    assert (first.worker_user, first.worker_uid, first.worker_gid) == (
+        "_mastermind_codex_01",
+        454,
+        454,
+    )
+    assert (third.worker_user, third.worker_uid, third.worker_gid) == (
+        "_mastermind_codex_03",
+        456,
+        456,
+    )
+    assert str(first.provider_home).endswith(
+        "/workers/codex-pro-01/provider-home"
+    )
+    assert first.provider_home != company.provider_home != third.provider_home
+
+
+def test_one_slot_invocation_contains_no_other_slot_home(tmp_path: Path) -> None:
+    config = dataclasses.replace(
+        _config(tmp_path),
+        worker_user="_mastermind_codex_02",
+        worker_uid=455,
+        worker_gid=455,
+        provider_home=Path(
+            "/var/db/mastermind-executive/workers/codex-pro-02/provider-home"
+        ),
+    )
+    invocation = canary.prepare_probe(config)
+    rendered = json.dumps(invocation.env) + " ".join(invocation.argv)
+    assert "codex-pro-02/provider-home" in rendered
+    assert "codex-pro-01/provider-home" not in rendered
+    assert "codex-pro-03/provider-home" not in rendered
+
+
+def test_unknown_slot_has_no_legacy_fallback() -> None:
+    with pytest.raises(canary.ProviderCanaryError) as refused:
+        canary.production_config(
+            probe_root=Path("/private/tmp/unknown"),
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="codex-pro-99",
+        )
+    assert refused.value.code == "configuration_invalid"
 
 
 def test_receipt_persistence_cannot_target_executive_or_operator_paths(
