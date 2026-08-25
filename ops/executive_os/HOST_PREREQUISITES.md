@@ -386,11 +386,18 @@ Runtime quiescence:
 
 ```bash
 AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
+EXPECTED_CREDENTIAL_KIND='service-account'
+WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
+# Reuse the exact finite UTC value already used for --verify-ready.
+CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
 
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --expected-sha "$MERGE_SHA" \
-  --gate-b-receipt "$GATE_B_RECEIPT"
+  --gate-b-receipt "$GATE_B_RECEIPT" \
+  --expected-credential-kind "$EXPECTED_CREDENTIAL_KIND" \
+  --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
+  --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
 

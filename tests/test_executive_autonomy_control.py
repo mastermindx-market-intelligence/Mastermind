@@ -271,6 +271,39 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     assert "credential_rotation_interlock.py" in install
 
 
+def test_production_status_never_calls_an_invalid_present_receipt_unarmed(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    host = control.ProductionStatusHost()
+    monkeypatch.setattr(host, "_require_host", lambda: None)
+    monkeypatch.setattr(host, "_release_identity", lambda expected_sha: expected_sha)
+    monkeypatch.setattr(host, "_transaction_present", lambda: False)
+    monkeypatch.setattr(
+        host,
+        "_configs",
+        lambda: (
+            {
+                "coo_autonomy_armed": False,
+                "coo_operator_harness_armed": False,
+            },
+            {"operator_harness_armed": False},
+            "1" * 64,
+            "2" * 64,
+            b"control",
+            b"worker",
+        ),
+    )
+    monkeypatch.setattr(
+        host,
+        "_receipt",
+        lambda **_kwargs: (None, False, None, "receipt_invalid"),
+    )
+    monkeypatch.setattr(host, "_service_state", lambda _sha: ("STOPPED", True))
+    snapshot = host.collect_status("a" * 40, now=NOW)
+    assert snapshot.evidence.config_drift is True
+    assert control.status_document(snapshot, now=NOW)["status"] == "CONFIG_DRIFT"
+
+
 class FakeAdmissionHost:
     GATE_ORDER = (
         "install",
@@ -792,6 +825,22 @@ def test_failure_after_every_durable_phase_rolls_back_to_both_false(phase):
     assert host.receipt["state"] == "DISARMED"
     assert host.services == "STOPPED"
     assert host.marker is False
+
+
+def test_concurrent_marker_race_never_rolls_back_a_foreign_transaction():
+    host = FakeTransactionHost()
+
+    def conflict(_transaction):
+        raise control.ArmAdmissionError("transaction_incomplete")
+
+    host.begin_transaction = conflict
+    with pytest.raises(control.ArmAdmissionError) as raised:
+        control.execute_arm(host, _arm_request(), now=NOW)
+    assert raised.value.code == "transaction_incomplete"
+    assert host.receipt is None
+    assert host.marker is False
+    assert host.control_config["coo_autonomy_armed"] is False
+    assert host.worker_config["operator_harness_armed"] is False
 
 
 def test_unproven_rollback_retains_marker_and_returns_effect_unknown():

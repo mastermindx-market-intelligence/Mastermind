@@ -330,4 +330,11 @@ def test_runbook_documents_one_canary_gate_and_company_admin_provenance() -> Non
     assert "--recover-readiness-transaction" in flat
     assert "Provider readiness is not Git handoff Gate B" in flat
     assert "git_handoff_preflight.py" in flat
+    assert "autonomy-control.sh" in flat
+    assert "ARMED_READY" in flat
+    assert "DISARMED" in flat
+    assert "--gate-b-receipt" in flat
+    assert "--expected-credential-kind" in flat
+    assert "--workspace-binding-class" in flat
+    assert "--credential-expires-at" in flat
     assert runbook.count("provider-inference-canary.sh") <= 1

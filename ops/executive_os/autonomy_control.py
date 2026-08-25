@@ -711,7 +711,6 @@ def execute_arm(
         candidates=derive_candidate_configs(admission.configs, armed=True),
         admission=admission,
     )
-    transaction_boundary_entered = True
     try:
         host.begin_transaction(transaction)
         host.write_candidates(transaction)
@@ -723,9 +722,12 @@ def execute_arm(
         host.start_services(request.expected_sha)
         host.prove_services_ready(request.expected_sha)
         host.complete_transaction(transaction)
+    except ArmAdmissionError:
+        # A marker that appeared between the read-only admission check and the
+        # atomic mkdir belongs to another root transaction. Never "recover"
+        # it through this operation's rollback carrier.
+        raise
     except Exception as exc:
-        if not transaction_boundary_entered:  # pragma: no cover - defensive
-            raise
         try:
             host.stop_services(request.expected_sha)
             rollback = dataclasses.replace(
@@ -1183,6 +1185,7 @@ class ProductionStatusHost:
             worker_digest=worker_digest,
             now=now,
         )
+        config_drift = config_drift or refusal is not None
         service_state, reconciled = self._service_state(expected_sha)
         return StatusSnapshot(
             expected_sha=expected_sha,
@@ -1666,8 +1669,14 @@ class ProductionTransactionHost(ProductionArmHost):
         return f"autonomy-{secrets.token_hex(6)}"
 
     def begin_transaction(self, transaction: TransactionContext) -> None:
+        if AUTONOMY_TRANSACTION.exists() or AUTONOMY_TRANSACTION.is_symlink():
+            raise ArmAdmissionError("transaction_incomplete")
         self._active_transaction = transaction
-        self._create_marker(transaction, operation="ARM")
+        try:
+            self._create_marker(transaction, operation="ARM")
+        except FileExistsError as exc:
+            self._active_transaction = None
+            raise ArmAdmissionError("transaction_incomplete") from exc
 
     def write_candidates(self, transaction: TransactionContext) -> None:
         self._active_transaction = transaction

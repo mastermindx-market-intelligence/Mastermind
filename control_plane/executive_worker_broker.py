@@ -1480,6 +1480,7 @@ class ExecutiveWorkerBroker:
             ) from exc
 
     async def _ohf_validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_current_autonomy()
         if set(payload) != {"requested"}:
             raise BrokerProtocolError("ohf-validate payload fields are invalid")
         try:
