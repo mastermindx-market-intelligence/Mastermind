@@ -151,7 +151,7 @@ _OHF_OPERATIONS = frozenset(
     }
 )
 _ALLOWED_OPERATIONS = frozenset(
-    {"start", "status", "collect", "cancel", "validate"}
+    {"start", "status", "collect", "cancel", "validate", "autonomy-canary"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -1226,6 +1226,10 @@ class ExecutiveWorkerBroker:
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
+        autonomy_canary_factory: Callable[
+            [Mapping[str, Any]], Mapping[str, Any]
+        ]
+        | None = None,
     ) -> None:
         self.adapter = adapter
         self.policy = policy
@@ -1234,6 +1238,7 @@ class ExecutiveWorkerBroker:
         self.operator_adapter_factory = operator_adapter_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
+        self.autonomy_canary_factory = autonomy_canary_factory
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
@@ -1241,6 +1246,12 @@ class ExecutiveWorkerBroker:
         if self.operator_harness_armed and not callable(self.autonomy_guard):
             raise WorkerBrokerError(
                 "armed Operator Harness requires a runtime autonomy guard"
+            )
+        if self.operator_harness_armed and not callable(
+            self.autonomy_canary_factory
+        ):
+            raise WorkerBrokerError(
+                "armed Operator Harness requires an autonomy canary factory"
             )
         self._runs: OrderedDict[str, _BrokerRun] = OrderedDict()
         self._active_run_id: str | None = None
@@ -1345,6 +1356,8 @@ class ExecutiveWorkerBroker:
             return await self._cancel(payload)
         if operation == "validate":
             return await self._validate(payload)
+        if operation == "autonomy-canary":
+            return await self._autonomy_canary(payload)
         if operation == "ohf-validate":
             return await self._ohf_validate(payload)
         if operation == "ohf-identity":
@@ -1368,6 +1381,57 @@ class ExecutiveWorkerBroker:
         if operation == "ohf-reconcile-absence":
             return await self._ohf_reconcile_absence(payload)
         raise AssertionError(operation)  # pragma: no cover
+
+    async def _autonomy_canary(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Issue one fixed, non-provider boot canary while the broker is idle."""
+
+        self._require_current_autonomy()
+        if set(payload) != {"control_environment_attestation"} or not isinstance(
+            payload.get("control_environment_attestation"), dict
+        ):
+            raise BrokerProtocolError("autonomy-canary payload fields are invalid")
+        if not self.operator_harness_armed or self.autonomy_canary_factory is None:
+            raise BrokerStateError("the autonomy canary is not armed by worker policy")
+        async with self._state_lock:
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError("the worker broker already has active work")
+            self._validation_busy = True
+        try:
+            envelope = await asyncio.to_thread(
+                self.autonomy_canary_factory,
+                {"control_environment_attestation": dict(
+                    payload["control_environment_attestation"]
+                )},
+            )
+            if not isinstance(envelope, Mapping):
+                raise BrokerStateError(
+                    "autonomy canary returned an untyped envelope"
+                )
+            encoded = json.dumps(
+                dict(envelope),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+            if len(encoded) > 256 * 1024:
+                raise BrokerStateError("autonomy canary envelope exceeds the bound")
+            return {"envelope": dict(envelope)}
+        except WorkerBrokerError:
+            raise
+        except Exception as exc:
+            raise BrokerStateError(
+                f"autonomy canary failed: {type(exc).__name__}"
+            ) from exc
+        finally:
+            async with self._state_lock:
+                self._validation_busy = False
 
     def _operator_factory(
         self, requested: RequestedExecutionProfile

@@ -329,6 +329,7 @@ rollback retains the marker and returns `EFFECT_UNKNOWN`.
 - Modify: `tests/test_executive_worker_broker.py`
 - Modify: `tests/test_executive_operator_broker.py`
 - Modify: `tests/test_executive_agent_capabilities.py`
+- Create: `tests/test_executive_boot_autonomy_canary.py`
 
 **Interfaces:**
 
@@ -338,6 +339,11 @@ rollback retains the marker and returns `EFFECT_UNKNOWN`.
 - Guard at broker startup and before ordinary sealed-exec `start`, OHF
   validation, OHF start/resume, and every new App Server session/turn boundary
   that can create provider effect.
+- One closed `autonomy-canary` broker operation accepts only the current
+  hash/status control-environment attestation, derives all protected paths from
+  fixed installed roots, makes no provider call, and returns a same-PID
+  envelope. The control validates and atomically persists it before starting
+  armed service state as `READY`.
 
 - [ ] **Step 1: Write failing startup and ordinary-exec tests.** Refusal occurs
   before adapter construction, process spawn, run-root creation, or busy-state
@@ -348,6 +354,9 @@ rollback retains the marker and returns `EFFECT_UNKNOWN`.
 - [ ] **Step 3: Implement the injected guard and production binding.** The
   worker script loads the exact same receipt but verifies its own config digest
   and expected control digest.
+- [ ] **Step 3a: Prove armed restart re-attestation.** Reject prior-PID
+  envelopes and caller-selected paths; prove no Provider/Model/Job/Attempt
+  operation occurs; validate and persist the fresh envelope before `READY`.
 - [ ] **Step 4: Run capability mutation fences.** Prove profile, capability,
   native-helper, security config, Docs MCP, no-plugin, no-write-helper, and
   subagent inheritance contracts are unchanged.

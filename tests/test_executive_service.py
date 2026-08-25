@@ -1609,7 +1609,10 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                 {**loaded, "coo_tick_interval_seconds": 0}
             )
         monkeypatch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
-        service = service_cli._service_from_config(loaded)
+        service = service_cli._service_from_config(
+            loaded,
+            initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+        )
         await service.start()
         try:
             from control_plane.executive_worker_broker import (
@@ -1621,14 +1624,14 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             assert isinstance(
                 service.supervisor.process_controller, RemoteWorkerProcessController
             )
-            assert service.supervisor.require_complete_launch_attestation is False
+            assert service.supervisor.require_complete_launch_attestation is True
             assert service.supervisor.isolation_roots == (
                 Path(raw["proof_workspace_root"]).resolve(),
                 Path(raw["worker_runs_root"]).resolve(),
             )
             status = await _request(service, "status")
             assert status["ok"] is True
-            assert status["result"]["service_state"] == "AWAITING_CANARY"
+            assert status["result"]["service_state"] == "READY"
         finally:
             await service.close()
 
@@ -1738,6 +1741,34 @@ def test_canary_envelope_binds_live_control_probe_and_inner_receipt(tmp_path: Pa
         raw=raw,
         control_attestation=control_attestation,
     ) == inner
+
+    class _BootClient:
+        async def request(self, operation, payload):
+            assert operation == "autonomy-canary"
+            assert payload == {"control_environment_attestation": control_attestation}
+            return {"envelope": envelope}
+
+    assert asyncio.run(
+        service_cli._request_boot_autonomy_canary(
+            raw,
+            control_attestation,
+            client=_BootClient(),
+        )
+    ) == inner
+    tmp_path.chmod(0o700)
+    persisted = tmp_path / "boot-secret-canary.json"
+    persisted.write_text('{"stale":true}\n', encoding="utf-8")
+    persisted.chmod(0o400)
+    assert asyncio.run(
+        service_cli._request_boot_autonomy_canary(
+            raw,
+            control_attestation,
+            client=_BootClient(),
+            persist_path=persisted,
+        )
+    ) == inner
+    assert stat.S_IMODE(persisted.stat().st_mode) == 0o400
+    assert json.loads(persisted.read_text(encoding="utf-8")) == envelope
 
     stale = dict(control_attestation)
     stale["process_identity"] = {**control_identity, "pid": 9999}

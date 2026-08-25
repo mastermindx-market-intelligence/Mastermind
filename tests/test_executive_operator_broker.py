@@ -302,6 +302,9 @@ def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
         autonomy_guard=(autonomy_guard if armed else None)
         if autonomy_guard is not None
         else (lambda: None if armed else None),
+        autonomy_canary_factory=(lambda payload: {"bound": dict(payload)})
+        if armed
+        else None,
     )
     peer = PeerCredentials(policy.control_uid, policy.worker_gid, 100)
     return broker, peer, profile, sweeper, adapters
@@ -319,6 +322,7 @@ def test_armed_operator_broker_requires_runtime_autonomy_guard(tmp_path: Path) -
             broker.sweeper,
             operator_adapter_factory=broker.operator_adapter_factory,
             operator_harness_armed=True,
+            autonomy_canary_factory=lambda payload: dict(payload),
         )
 
 
@@ -394,6 +398,49 @@ def test_operator_autonomy_guard_rechecks_before_each_provider_effect(tmp_path: 
             )
         assert "expired receipt detail" not in str(blocked.value)
         assert adapters[0].prompts == []
+
+    asyncio.run(scenario())
+
+
+def test_autonomy_canary_is_one_typed_idle_nonprovider_operation(tmp_path: Path) -> None:
+    observed: list[dict] = []
+
+    def factory(payload):
+        observed.append(dict(payload))
+        return {
+            "schema_version": "mastermind.executive_secret_canary_envelope/v1",
+            "secret_canary": {"passed": True},
+            "control_environment_probe": {"passed": True},
+            "control_environment_probe_sha256": "f" * 64,
+        }
+
+    async def scenario() -> None:
+        broker, peer, _profile, _sweeper, adapters = _fixture(tmp_path)
+        broker.autonomy_canary_factory = factory
+        broker.initialize()
+        attestation = {
+            "schema_version": "mastermind.executive_control_environment_attestation/v1",
+            "process_identity": {"pid": 1234},
+        }
+        response = await broker.execute(
+            _request(
+                "autonomy-canary",
+                {"control_environment_attestation": attestation},
+                "autonomy-canary",
+            ),
+            peer=peer,
+        )
+        assert response["result"]["envelope"]["control_environment_probe_sha256"] == (
+            "f" * 64
+        )
+        assert observed == [{"control_environment_attestation": attestation}]
+        assert adapters == []
+
+        with pytest.raises(BrokerProtocolError, match="payload"):
+            await broker.execute(
+                _request("autonomy-canary", {"path": "/tmp/forbidden"}, "bad-canary"),
+                peer=peer,
+            )
 
     asyncio.run(scenario())
 

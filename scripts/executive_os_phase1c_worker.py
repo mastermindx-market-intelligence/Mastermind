@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
 import signal
 import stat
+import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Mapping
 
 _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
@@ -35,6 +37,12 @@ from control_plane.executive_autonomy import (
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+)
+from control_plane.executive_canary import (
+    PrincipalIdentity,
+    SecretCanaryConfig,
+    SecretCanaryError,
+    run_secret_canary,
 )
 from control_plane.executive_worker_broker import (
     BrokerPolicy,
@@ -76,6 +84,39 @@ _CONFIG_FIELDS = frozenset(
         "require_secret_canary",
         "operator_harness_armed",
     }
+)
+_CONTROL_ENV_ATTESTATION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "observed_at",
+        "process_identity",
+        "config_sha256",
+        "release_manifest_sha256",
+        "release_commit_sha",
+        "python_executable_path",
+        "python_executable_sha256",
+        "sentinel_name_sha256",
+        "sentinel_value_sha256",
+        "sentinel_present",
+    }
+)
+_CONTROL_PROCESS_IDENTITY_FIELDS = frozenset(
+    {
+        "pid",
+        "pgid",
+        "session_id",
+        "start_identity",
+        "boot_id",
+        "effective_uid",
+        "effective_gid",
+        "real_uid",
+        "real_gid",
+    }
+)
+_CONTROL_ENV_SENTINEL = "EXECUTIVE_CONTROL_CANARY_VALUE"
+_CONTROL_LABEL = "com.mastermind.executive.control"
+_SECRET_CANARY_ENVELOPE_SCHEMA_VERSION = (
+    "mastermind.executive_secret_canary_envelope/v1"
 )
 
 
@@ -139,6 +180,213 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     ):
         raise WorkerConfigError("allowed supplementary groups are invalid")
     return value
+
+
+def _canonical_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _run_environment_probe(argv: list[str]) -> Mapping[str, Any]:
+    completed = subprocess.run(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=20,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"},
+    )
+    if len(completed.stdout) > 256 * 1024 or len(completed.stderr) > 64 * 1024:
+        raise WorkerConfigError("autonomy environment probe output exceeds the bound")
+    if completed.returncode != 0:
+        raise WorkerConfigError("autonomy environment probe refused")
+    try:
+        value = json.loads(completed.stdout.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkerConfigError("autonomy environment probe returned invalid JSON") from exc
+    if not isinstance(value, dict):
+        raise WorkerConfigError("autonomy environment probe returned no object")
+    return value
+
+
+def _build_autonomy_canary_factory(
+    config: Mapping[str, Any],
+    *,
+    release_root: Path = _ROOT,
+    environment_probe_runner: Callable[[list[str]], Mapping[str, Any]] = (
+        _run_environment_probe
+    ),
+    secret_canary_runner: Callable[[SecretCanaryConfig], Mapping[str, Any]] = (
+        run_secret_canary
+    ),
+) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
+    """Bind boot re-attestation to fixed installed paths and no provider call."""
+
+    workspace_root = Path(str(config["workspace_root"])).resolve(strict=True)
+    run_root = Path(str(config["run_root"])).resolve(strict=True)
+    provider_home = Path(str(config["provider_home"])).resolve(strict=True)
+    runtime_root = workspace_root.parents[1]
+    worker_id = str(config["worker_id"])
+    if (
+        workspace_root != runtime_root / "jobs" / "workspaces"
+        or run_root != runtime_root / "jobs" / "runs"
+        or provider_home
+        != runtime_root / "workers" / worker_id / "provider-home"
+    ):
+        raise WorkerConfigError("armed worker paths do not match the fixed host layout")
+    release_root = Path(release_root).resolve(strict=True)
+    release_sha = release_root.name
+    manifest = release_root / ".executive-release-manifest.json"
+    if (
+        re.fullmatch(r"[0-9a-f]{40}", release_sha) is None
+        or not manifest.is_file()
+    ):
+        raise WorkerConfigError("armed worker release identity is unavailable")
+    manifest_sha256 = sha256_file(manifest)
+    probe_script = release_root / "scripts" / "executive_os_phase1c_env_probe.py"
+    if not probe_script.is_file():
+        raise WorkerConfigError("autonomy environment probe is unavailable")
+
+    def issue(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        if set(payload) != {"control_environment_attestation"}:
+            raise WorkerConfigError("autonomy canary request fields differ")
+        attestation = payload.get("control_environment_attestation")
+        if (
+            not isinstance(attestation, Mapping)
+            or set(attestation) != _CONTROL_ENV_ATTESTATION_FIELDS
+            or attestation.get("schema_version")
+            != "mastermind.executive_control_environment_attestation/v1"
+            or attestation.get("sentinel_present") is not True
+            or attestation.get("release_commit_sha") != release_sha
+            or attestation.get("release_manifest_sha256") != manifest_sha256
+            or attestation.get("sentinel_name_sha256")
+            != hashlib.sha256(_CONTROL_ENV_SENTINEL.encode()).hexdigest()
+        ):
+            raise WorkerConfigError("control environment attestation differs")
+        identity = attestation.get("process_identity")
+        digest_fields = (
+            "config_sha256",
+            "python_executable_sha256",
+            "sentinel_value_sha256",
+        )
+        if (
+            not isinstance(identity, Mapping)
+            or set(identity) != _CONTROL_PROCESS_IDENTITY_FIELDS
+            or any(
+                type(identity.get(field)) is not int
+                for field in (
+                    "pid",
+                    "pgid",
+                    "session_id",
+                    "effective_uid",
+                    "effective_gid",
+                    "real_uid",
+                    "real_gid",
+                )
+            )
+            or any(
+                not isinstance(identity.get(field), str) or not identity[field]
+                for field in ("start_identity", "boot_id")
+            )
+            or int(identity["pid"]) <= 1
+            or int(identity["effective_uid"]) != int(config["control_uid"])
+            or int(identity["real_uid"]) != int(config["control_uid"])
+            or int(identity["effective_gid"]) <= 0
+            or int(identity["real_gid"]) != int(identity["effective_gid"])
+            or any(
+                not isinstance(attestation.get(field), str)
+                or re.fullmatch(r"[0-9a-f]{64}", str(attestation[field])) is None
+                for field in digest_fields
+            )
+        ):
+            raise WorkerConfigError("control environment process identity differs")
+        environment_probe = dict(
+            environment_probe_runner(
+                [
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    "-B",
+                    os.fspath(probe_script),
+                    "--pid",
+                    str(identity["pid"]),
+                    "--label",
+                    _CONTROL_LABEL,
+                    "--sentinel-name",
+                    _CONTROL_ENV_SENTINEL,
+                    "--sentinel-value-sha256",
+                    str(attestation["sentinel_value_sha256"]),
+                    "--config-sha256",
+                    str(attestation["config_sha256"]),
+                    "--release-manifest-sha256",
+                    manifest_sha256,
+                    "--control-process-identity-json",
+                    json.dumps(
+                        dict(identity),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    ),
+                    "--expected-worker-uid",
+                    str(config["worker_uid"]),
+                    "--expected-worker-gid",
+                    str(config["worker_gid"]),
+                ]
+            )
+        )
+        environment_probe_sha256 = _canonical_sha256(environment_probe)
+        canary_config = SecretCanaryConfig(
+            expected_worker_uid=int(config["worker_uid"]),
+            expected_worker_gid=int(config["worker_gid"]),
+            control_uid=int(config["control_uid"]),
+            control_gid=int(identity["effective_gid"]),
+            control_environment_sentinel=_CONTROL_ENV_SENTINEL,
+            control_environment_probe_sha256=environment_probe_sha256,
+            administrative_checkout_sentinel=(
+                runtime_root
+                / "control"
+                / "admin-checkout"
+                / release_sha
+                / ".git"
+                / "executive-secret-canary"
+            ),
+            executive_database=(
+                runtime_root
+                / "control"
+                / "db"
+                / "data"
+                / "control_plane"
+                / "executive.sqlite3"
+            ),
+            other_worker_home_sentinel=(
+                runtime_root / "canary-fixtures" / "other-worker-home" / "sentinel"
+            ),
+            forbidden_production_sentinel=(
+                runtime_root / "canary-fixtures" / "production-like" / "sentinel"
+            ),
+            codex_home=provider_home,
+        )
+        try:
+            secret_canary = dict(secret_canary_runner(canary_config))
+        except SecretCanaryError as exc:
+            raise WorkerConfigError("autonomy secret canary refused") from exc
+        return {
+            "schema_version": _SECRET_CANARY_ENVELOPE_SCHEMA_VERSION,
+            "secret_canary": secret_canary,
+            "control_environment_probe": environment_probe,
+            "control_environment_probe_sha256": environment_probe_sha256,
+        }
+
+    return issue
 
 
 def _build_broker(
@@ -230,13 +478,17 @@ def _build_broker(
             turn_input_loader=turn_input_loader,
         )
 
+    armed = bool(config["operator_harness_armed"])
     return ExecutiveWorkerBroker(
         adapter,
         policy,
         sweeper,
         operator_adapter_factory=operator_adapter_factory,
-        operator_harness_armed=bool(config["operator_harness_armed"]),
+        operator_harness_armed=armed,
         autonomy_guard=autonomy_guard,
+        autonomy_canary_factory=(
+            _build_autonomy_canary_factory(config) if armed else None
+        ),
     )
 
 

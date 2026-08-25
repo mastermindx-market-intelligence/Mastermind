@@ -317,6 +317,26 @@ verify the same arm receipt, exact worker-config digest and readiness deadline.
 A missing, stale, near-expiry or mismatched receipt refuses before spawning
 Codex.
 
+### Armed restart canary re-attestation
+
+The formal-acceptance secret-canary envelope is bound to the exact live control
+PID and therefore must never be reused after a service restart. Every armed
+control-process boot obtains a fresh envelope through one new, closed
+`autonomy-canary` operation on the existing distinct-UID worker broker. The
+request contains only the wrapper's hash/status-only control-environment
+attestation. It accepts no caller-supplied path, command, provider, model,
+prompt, credential, token, URL or retry option.
+
+The worker derives every protected canary path from its fixed installed roots
+and exact release SHA, runs the existing value-blind environment probe, and
+runs the existing hash/status-only secret canary directly under the dedicated
+worker principal. It does not invoke Codex or any provider. The control process
+validates the returned envelope against its own exact PID, config and release
+manifest, atomically replaces the stale prior-PID envelope at mode `0400`, and
+starts the service in `READY` only after validation. Failure leaves startup
+closed; launchd behavior does not grant retry authority, and no second daemon,
+queue, lifecycle, watcher or canary store is added.
+
 ### Credential/readiness invalidation
 
 `provision-worker-auth.sh` already invalidates the readiness receipt before an
@@ -406,6 +426,8 @@ that blocks `arm` and can only be converged by `disarm`.
 - unarmed fixture behavior remains unchanged;
 - expired/missing/mismatched receipt blocks tick, explicit cycle and worker
   spawn before provider construction;
+- an armed restart cannot reuse a prior-PID envelope and reaches `READY` only
+  after one fixed, non-provider worker-broker re-attestation;
 - crossing expiry during an active Attempt permits only reconciliation/finish;
 - credential replacement is refused while armed and succeeds only after a
   verified disarm; and
