@@ -250,7 +250,7 @@ def validate_receipt_document(
     now: datetime | None = None,
     require_current: bool = True,
 ) -> ArmBinding:
-    """Validate one armed receipt against exact non-secret identities."""
+    """Validate one armed or shrink-only receipt against exact identities."""
 
     _validate_metadata(metadata)
     if not isinstance(payload, Mapping):
@@ -259,7 +259,8 @@ def validate_receipt_document(
         raise AutonomyRefusal("receipt_fields_mismatch")
     if payload.get("schema_version") != RECEIPT_SCHEMA_VERSION:
         raise AutonomyRefusal("receipt_schema_mismatch")
-    if payload.get("state") not in {"ARMED", "DISARMED"}:
+    state = payload.get("state")
+    if state not in {"ARMED", "DISARMED"}:
         raise AutonomyRefusal("receipt_state_invalid")
     release_sha = payload.get("release_sha")
     if not isinstance(release_sha, str) or _SHA_RE.fullmatch(release_sha) is None:
@@ -322,10 +323,14 @@ def validate_receipt_document(
             raise AutonomyRefusal(mismatch_code)
 
     kind = payload.get("expected_credential_kind")
-    if kind not in _CREDENTIAL_KINDS:
+    if state == "ARMED" and kind not in _CREDENTIAL_KINDS:
+        raise AutonomyRefusal("credential_kind_invalid")
+    if state == "DISARMED" and kind != "none":
         raise AutonomyRefusal("credential_kind_invalid")
     binding_class = payload.get("workspace_binding_class")
-    if binding_class != WORKSPACE_BINDING_CLASS:
+    if state == "ARMED" and binding_class != WORKSPACE_BINDING_CLASS:
+        raise AutonomyRefusal("workspace_binding_mismatch")
+    if state == "DISARMED" and binding_class != "none":
         raise AutonomyRefusal("workspace_binding_mismatch")
     transaction_id = payload.get("transaction_id")
     if not isinstance(transaction_id, str) or _TRANSACTION_RE.fullmatch(transaction_id) is None:
@@ -336,8 +341,20 @@ def validate_receipt_document(
     predicates = payload.get("predicates")
     if not isinstance(predicates, Mapping) or set(predicates) != _PREDICATE_FIELDS:
         raise AutonomyRefusal("receipt_predicates_invalid")
-    if any(value is not True for value in predicates.values()):
-        raise AutonomyRefusal("receipt_predicates_failed")
+    if state == "ARMED":
+        if any(value is not True for value in predicates.values()):
+            raise AutonomyRefusal("receipt_predicates_failed")
+    else:
+        expected_disarmed = {
+            "acceptance_passed": False,
+            "configs_validated": True,
+            "gate_b_passed": False,
+            "provider_readiness_passed": False,
+            "runtime_quiescent": False,
+            "service_uids_quiescent": True,
+        }
+        if dict(predicates) != expected_disarmed:
+            raise AutonomyRefusal("receipt_predicates_failed")
 
     current = datetime.now(UTC) if now is None else now.astimezone(UTC)
     observed_at = _timestamp(payload.get("observed_at"))
@@ -357,7 +374,7 @@ def validate_receipt_document(
             raise AutonomyRefusal("readiness_margin_insufficient")
 
     return ArmBinding(
-        state=str(payload["state"]),
+        state=str(state),
         release_sha=release_sha,
         control_config_sha256=str(payload["control_config_sha256"]),
         worker_config_sha256=str(payload["worker_config_sha256"]),

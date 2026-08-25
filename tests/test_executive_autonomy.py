@@ -205,6 +205,37 @@ def test_read_only_status_can_parse_an_expired_receipt_without_admitting_work():
     assert binding.readiness_expires_at < NOW
 
 
+def test_disarmed_receipt_can_truthfully_omit_old_authority_evidence():
+    value = _receipt(
+        state="DISARMED",
+        acceptance_receipt_sha256="0" * 64,
+        gate_b_receipt_sha256="0" * 64,
+        provider_readiness_receipt_sha256="0" * 64,
+        readiness_observed_at="2026-08-24T12:00:00Z",
+        credential_expires_at="2026-08-24T12:00:00Z",
+        readiness_expires_at="2026-08-24T12:00:00Z",
+        expected_credential_kind="none",
+        workspace_binding_class="none",
+        predicates={
+            "acceptance_passed": False,
+            "configs_validated": True,
+            "gate_b_passed": False,
+            "provider_readiness_passed": False,
+            "runtime_quiescent": False,
+            "service_uids_quiescent": True,
+        },
+    )
+    binding = autonomy.validate_receipt_document(
+        value,
+        metadata=_metadata(),
+        expected=_expectation(provider_readiness_receipt_sha256="0" * 64),
+        now=NOW,
+        require_current=False,
+    )
+    assert binding.state == "DISARMED"
+    assert binding.expected_credential_kind == "none"
+
+
 def test_receipt_bytes_are_secret_free_by_construction():
     encoded = json.dumps(_receipt(), sort_keys=True).lower()
     for forbidden in (

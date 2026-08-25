@@ -531,14 +531,26 @@ def test_production_admission_reuses_readiness_and_opens_runtime_read_only():
         assert forbidden not in production
 
 
-def test_production_service_gate_requires_both_launchdaemons_absent(monkeypatch):
+def test_production_service_gate_stops_then_requires_both_launchdaemons_absent(monkeypatch):
     host = control.ProductionArmHost()
     monkeypatch.setattr(host, "_loaded", lambda label: False)
     host.require_services_stopped()
 
-    monkeypatch.setattr(
-        host, "_loaded", lambda label: label == control.CONTROL_LABEL
-    )
+    loaded = {control.CONTROL_LABEL: True, control.WORKER_LABEL: True}
+    stopped = []
+    monkeypatch.setattr(host, "_loaded", lambda label: loaded[label])
+
+    def stop():
+        stopped.append(True)
+        loaded[control.CONTROL_LABEL] = False
+        loaded[control.WORKER_LABEL] = False
+
+    monkeypatch.setattr(host, "_stop_services_for_admission", stop)
+    host.require_services_stopped()
+    assert stopped == [True]
+
+    loaded[control.CONTROL_LABEL] = True
+    monkeypatch.setattr(host, "_stop_services_for_admission", lambda: None)
     with pytest.raises(control.ArmAdmissionError) as raised:
         host.require_services_stopped()
     assert raised.value.code == "services_not_stopped"
@@ -548,3 +560,405 @@ def test_runtime_classifier_does_not_treat_empty_or_unknown_as_quiescent():
     with pytest.raises(control.ArmAdmissionError) as raised:
         control.validate_runtime_attempt_statuses([""])
     assert raised.value.code == "runtime_attempt_status_unknown"
+
+
+class FakeTransactionHost(FakeAdmissionHost):
+    PHASES = (
+        "lock",
+        "candidates",
+        "validated",
+        "worker",
+        "control",
+        "receipt",
+        "started",
+        "ready",
+    )
+
+    def __init__(self, fail_after=None, *, rollback_fails=False):
+        super().__init__()
+        self.fail_after = fail_after
+        self.rollback_fails = rollback_fails
+        self.marker = False
+        self.services = "STOPPED"
+        self.receipt = None
+        self.transaction_calls = []
+        self.control_config = {
+            "schema_version": "control-v1",
+            "proof_base_sha": SHA,
+            "coo_autonomy_armed": False,
+            "coo_operator_harness_armed": False,
+            "preserved": {"alpha": 1},
+        }
+        self.worker_config = {
+            "schema_version": "worker-v4",
+            "operator_harness_armed": False,
+            "preserved": ["beta"],
+        }
+        self.prior_control = None
+        self.prior_worker = None
+        self.last_request = None
+
+    def _phase(self, name):
+        self.transaction_calls.append(name)
+        if self.fail_after == name:
+            raise RuntimeError(f"fault after {name}")
+
+    def existing_arm(self, request, *, now):
+        if not self.control_config["coo_autonomy_armed"]:
+            return None
+        if self.last_request == request and self.receipt is not None:
+            return control.TransactionResult(
+                state="ARMED",
+                status="ARMED_READY",
+                transaction_id=self.receipt["transaction_id"],
+                replayed=True,
+            )
+        raise control.ArmAdmissionError("changed_arm_evidence")
+
+    def existing_disarm(self, expected_sha, *, now):
+        if (
+            not self.marker
+            and self.control_config["coo_autonomy_armed"] is False
+            and self.control_config["coo_operator_harness_armed"] is False
+            and self.worker_config["operator_harness_armed"] is False
+        ):
+            return control.TransactionResult(
+                state="DISARMED",
+                status="UNARMED",
+                transaction_id=(
+                    self.receipt["transaction_id"] if self.receipt is not None else None
+                ),
+                replayed=True,
+            )
+        return None
+
+    def load_unarmed_configs(self, expected_sha):
+        self._call("configs")
+        if self.control_config["coo_autonomy_armed"]:
+            raise control.ArmAdmissionError("configs_not_unarmed")
+        return control.ConfigEvidence(
+            control_sha256=control.sha256_bytes(
+                control.encode_config(self.control_config)
+            ),
+            worker_sha256=control.sha256_bytes(
+                control.encode_config(self.worker_config)
+            ),
+            control=dict(self.control_config),
+            worker=dict(self.worker_config),
+            control_bytes=control.encode_config(self.control_config),
+            worker_bytes=control.encode_config(self.worker_config),
+        )
+
+    def new_transaction_id(self):
+        return "autonomy-deadbeefcafe"
+
+    def begin_transaction(self, transaction):
+        self.marker = True
+        self.prior_control = dict(self.control_config)
+        self.prior_worker = dict(self.worker_config)
+        self._phase("lock")
+
+    def write_candidates(self, transaction):
+        self._phase("candidates")
+
+    def validate_candidates(self, transaction):
+        self._phase("validated")
+
+    def replace_worker_config(self, transaction):
+        self.worker_config = json.loads(transaction.candidates.worker_bytes)
+        self._phase("worker")
+
+    def replace_control_config(self, transaction):
+        self.control_config = json.loads(transaction.candidates.control_bytes)
+        self._phase("control")
+
+    def write_autonomy_receipt(self, transaction, receipt):
+        self.receipt = dict(receipt)
+        self._phase("receipt")
+
+    def start_services(self, expected_sha):
+        self.services = "STARTING"
+        self.service_starts += 1
+        self._phase("started")
+
+    def prove_services_ready(self, expected_sha):
+        self.services = "READY"
+        self._phase("ready")
+
+    def complete_transaction(self, transaction):
+        self.marker = False
+
+    def stop_services(self, expected_sha):
+        self.services = "STOPPED"
+
+    def rollback_disarmed(self, transaction, receipt):
+        if self.rollback_fails:
+            raise RuntimeError("rollback fault")
+        self.control_config = dict(self.prior_control)
+        self.worker_config = dict(self.prior_worker)
+        self.control_config["coo_autonomy_armed"] = False
+        self.control_config["coo_operator_harness_armed"] = False
+        self.worker_config["operator_harness_armed"] = False
+        self.receipt = dict(receipt)
+        self.marker = False
+
+    def begin_disarm(self, expected_sha, transaction_id):
+        self.marker = True
+        self.prior_control = dict(self.control_config)
+        self.prior_worker = dict(self.worker_config)
+        self._phase("lock")
+        return control.ConfigEvidence(
+            control_sha256=control.sha256_bytes(control.encode_config(self.control_config)),
+            worker_sha256=control.sha256_bytes(control.encode_config(self.worker_config)),
+            control=dict(self.control_config),
+            worker=dict(self.worker_config),
+            control_bytes=control.encode_config(self.control_config),
+            worker_bytes=control.encode_config(self.worker_config),
+        )
+
+
+def test_arm_transaction_changes_only_both_arm_bits_and_binds_one_receipt():
+    host = FakeTransactionHost()
+    request = _arm_request()
+    before_control = json.loads(json.dumps(host.control_config))
+    before_worker = json.loads(json.dumps(host.worker_config))
+
+    result = control.execute_arm(host, request, now=NOW)
+
+    assert result == control.TransactionResult(
+        state="ARMED",
+        status="ARMED_READY",
+        transaction_id="autonomy-deadbeefcafe",
+        replayed=False,
+    )
+    assert host.transaction_calls == list(FakeTransactionHost.PHASES)
+    assert host.marker is False
+    assert host.services == "READY"
+    assert host.control_config == {
+        **before_control,
+        "coo_autonomy_armed": True,
+        "coo_operator_harness_armed": True,
+    }
+    assert host.worker_config == {
+        **before_worker,
+        "operator_harness_armed": True,
+    }
+    assert host.receipt["state"] == "ARMED"
+    assert host.receipt["control_config_sha256"] == control.sha256_bytes(
+        control.encode_config(host.control_config)
+    )
+    assert host.receipt["worker_config_sha256"] == control.sha256_bytes(
+        control.encode_config(host.worker_config)
+    )
+    from control_plane import executive_autonomy
+
+    binding = executive_autonomy.validate_receipt_document(
+        host.receipt,
+        metadata=executive_autonomy.ReceiptMetadata(
+            uid=0,
+            gid=0,
+            mode=0o444,
+            nlink=1,
+            is_regular=True,
+            is_symlink=False,
+            has_acl=False,
+        ),
+        expected=executive_autonomy.AutonomyExpectation(
+            release_sha=SHA,
+            control_config_sha256=host.receipt["control_config_sha256"],
+            worker_config_sha256=host.receipt["worker_config_sha256"],
+            provider_readiness_receipt_sha256="5" * 64,
+            capability_policy_digest=control.CAPABILITY_POLICY_DIGEST,
+            execution_profile_digest=control.EXECUTION_PROFILE_DIGEST,
+            native_helper_grant_digest=control.NATIVE_HELPER_GRANT_DIGEST,
+            security_config_digest=control.SECURITY_CONFIG_DIGEST,
+        ),
+        now=NOW,
+    )
+    assert binding.state == "ARMED"
+    assert "token" not in json.dumps(host.receipt).lower()
+
+
+@pytest.mark.parametrize("phase", FakeTransactionHost.PHASES)
+def test_failure_after_every_durable_phase_rolls_back_to_both_false(phase):
+    host = FakeTransactionHost(fail_after=phase)
+    with pytest.raises(control.ArmTransactionError) as raised:
+        control.execute_arm(host, _arm_request(), now=NOW)
+    assert raised.value.code == "arm_rolled_back"
+    assert host.control_config["coo_autonomy_armed"] is False
+    assert host.control_config["coo_operator_harness_armed"] is False
+    assert host.worker_config["operator_harness_armed"] is False
+    assert host.receipt["state"] == "DISARMED"
+    assert host.services == "STOPPED"
+    assert host.marker is False
+
+
+def test_unproven_rollback_retains_marker_and_returns_effect_unknown():
+    host = FakeTransactionHost(fail_after="control", rollback_fails=True)
+    with pytest.raises(control.TransactionEffectUnknown) as raised:
+        control.execute_arm(host, _arm_request(), now=NOW)
+    assert raised.value.code == "effect_unknown"
+    assert host.marker is True
+    assert host.services == "STOPPED"
+
+
+def test_repeated_identical_arm_replays_receipt_without_restart_or_rewrite():
+    host = FakeTransactionHost()
+    request = _arm_request()
+    first = control.execute_arm(host, request, now=NOW)
+    first_calls = list(host.transaction_calls)
+    first_starts = host.service_starts
+    host.last_request = request
+
+    second = control.execute_arm(host, request, now=NOW + timedelta(minutes=1))
+    assert first.replayed is False
+    assert second.replayed is True
+    assert host.transaction_calls == first_calls
+    assert host.service_starts == first_starts
+
+
+def test_disarm_is_shrink_only_and_leaves_services_stopped():
+    host = FakeTransactionHost()
+    request = _arm_request()
+    control.execute_arm(host, request, now=NOW)
+    host.fail_after = None
+    host.transaction_calls.clear()
+
+    result = control.execute_disarm(host, SHA, now=NOW + timedelta(minutes=1))
+
+    assert result.state == "DISARMED"
+    assert result.status == "UNARMED"
+    assert host.control_config["coo_autonomy_armed"] is False
+    assert host.control_config["coo_operator_harness_armed"] is False
+    assert host.worker_config["operator_harness_armed"] is False
+    assert host.receipt["state"] == "DISARMED"
+    assert host.receipt["expected_credential_kind"] == "none"
+    assert host.services == "STOPPED"
+    assert host.marker is False
+
+
+def test_repeated_disarm_is_a_read_only_replay():
+    host = FakeTransactionHost()
+    first = control.execute_disarm(host, SHA, now=NOW)
+    assert first.replayed is True
+    assert host.transaction_calls == []
+    assert host.receipt is None
+
+    request = _arm_request()
+    control.execute_arm(host, request, now=NOW)
+    control.execute_disarm(host, SHA, now=NOW + timedelta(minutes=1))
+    calls = list(host.transaction_calls)
+    second = control.execute_disarm(host, SHA, now=NOW + timedelta(minutes=2))
+    assert second.replayed is True
+    assert host.transaction_calls == calls
+
+
+def test_main_arm_and_disarm_emit_closed_transaction_documents(capsys):
+    host = FakeTransactionHost()
+    arm_result = control.main(
+        [
+            "arm",
+            "--expected-sha",
+            SHA,
+            "--gate-b-receipt",
+            str(GATE_PATH),
+            "--expected-credential-kind",
+            "device-auth",
+            "--workspace-binding-class",
+            "company-workspace-admin-attested",
+            "--credential-expires-at",
+            "2026-08-25T12:00:00Z",
+        ],
+        host=host,
+        now=lambda: NOW,
+    )
+    assert arm_result == 0
+    armed = json.loads(capsys.readouterr().out)
+    assert armed == {
+        "code": "armed",
+        "replayed": False,
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "state": "ARMED",
+        "status": "ARMED_READY",
+        "transaction_id": "autonomy-deadbeefcafe",
+    }
+
+    host.fail_after = None
+    host.transaction_calls.clear()
+    disarm_result = control.main(
+        ["disarm", "--expected-sha", SHA], host=host, now=lambda: NOW
+    )
+    assert disarm_result == 0
+    disarmed = json.loads(capsys.readouterr().out)
+    assert disarmed["code"] == "disarmed"
+    assert disarmed["state"] == "DISARMED"
+    assert disarmed["status"] == "UNARMED"
+
+
+def test_main_arm_rollback_is_closed_nonzero_without_traceback(capsys):
+    host = FakeTransactionHost(fail_after="control")
+    result = control.main(
+        [
+            "arm",
+            "--expected-sha",
+            SHA,
+            "--gate-b-receipt",
+            str(GATE_PATH),
+            "--expected-credential-kind",
+            "device-auth",
+            "--workspace-binding-class",
+            "company-workspace-admin-attested",
+            "--credential-expires-at",
+            "2026-08-25T12:00:00Z",
+        ],
+        host=host,
+        now=lambda: NOW,
+    )
+    captured = capsys.readouterr()
+    assert result == 2
+    document = json.loads(captured.out)
+    assert document == {
+        "code": "arm_rolled_back",
+        "replayed": False,
+        "schema_version": control.OPERATION_SCHEMA_VERSION,
+        "state": "DISARMED",
+        "status": "UNARMED",
+        "transaction_id": None,
+    }
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_transaction_order_and_static_safety_fences_are_structural():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "ops/executive_os/autonomy_control.py"
+    ).read_text(encoding="utf-8")
+    execute = source.split("def execute_arm(", 1)[1].split("def execute_disarm(", 1)[0]
+    assert execute.index("host.replace_worker_config") < execute.index(
+        "host.replace_control_config"
+    ) < execute.index("host.write_autonomy_receipt") < execute.index(
+        "host.start_services"
+    ) < execute.index("host.prove_services_ready") < execute.index(
+        "host.complete_transaction"
+    )
+    assert execute.index("host.stop_services") < execute.index(
+        "host.rollback_disarmed"
+    )
+
+    production = source.split("class ProductionTransactionHost", 1)[1]
+    assert "os.mkdir(AUTONOMY_TRANSACTION, 0o700)" in production
+    assert "os.fsync(" in source
+    assert "os.replace(" in source
+    assert "prior-control.json" in production
+    assert "prior-worker.json" in production
+    assert ".autonomy-control-" in production
+    assert ".autonomy-worker-" in production
+    for forbidden in (
+        "rm -rf",
+        "rmtree(",
+        "eval(",
+        "shell=True",
+        "retry_arm",
+        "auto_failover",
+    ):
+        assert forbidden not in production

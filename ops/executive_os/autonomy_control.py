@@ -8,6 +8,7 @@ transaction gates are implemented and tested in the following plan tasks.
 from __future__ import annotations
 
 import argparse
+import copy
 import dataclasses
 import grp
 import hashlib
@@ -16,9 +17,11 @@ import os
 import plistlib
 import pwd
 import re
+import secrets
 import stat
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -39,6 +42,7 @@ from ops.executive_os import provider_readiness
 
 
 STATUS_SCHEMA_VERSION = "mastermind.executive_autonomy_status/v1"
+OPERATION_SCHEMA_VERSION = "mastermind.executive_autonomy_operation/v1"
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 CONFIG_ROOT = SYSTEM_ROOT / "config"
 RUNTIME_ROOT = Path("/var/db/mastermind-executive")
@@ -100,6 +104,7 @@ _ARM_ADMISSION_CODES = frozenset(
         "acceptance_receipt_invalid",
         "configs_gate_failed",
         "configs_not_unarmed",
+        "changed_arm_evidence",
         "credential_expired",
         "credential_expiry_invalid",
         "credential_kind_invalid",
@@ -125,6 +130,70 @@ _ARM_ADMISSION_CODES = frozenset(
     }
 )
 _MAX_JSON_BYTES = 1024 * 1024
+_TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_file(
+    path: Path,
+    payload: bytes,
+    *,
+    mode: int,
+    uid: int,
+    gid: int,
+    replace: bool,
+) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0),
+            mode,
+        )
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short autonomy transaction write")
+            view = view[written:]
+        os.fchown(descriptor, uid, gid)
+        os.fchmod(descriptor, mode)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        if not replace and (path.exists() or path.is_symlink()):
+            raise FileExistsError(os.fspath(path))
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+
+
+def _encoded_json(value: Mapping[str, Any]) -> bytes:
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
 
 
 class HostControlError(RuntimeError):
@@ -139,6 +208,24 @@ class ArmAdmissionError(RuntimeError):
     def __init__(self, code: str):
         if code not in _ARM_ADMISSION_CODES:
             raise ValueError("unknown arm-admission refusal")
+        self.code = code
+        super().__init__(code)
+
+
+class ArmTransactionError(RuntimeError):
+    CODES = frozenset({"arm_rolled_back", "disarm_recovered"})
+
+    def __init__(self, code: str):
+        if code not in self.CODES:
+            raise ValueError("unknown autonomy transaction refusal")
+        self.code = code
+        super().__init__(code)
+
+
+class TransactionEffectUnknown(RuntimeError):
+    def __init__(self, code: str = "effect_unknown"):
+        if code != "effect_unknown":
+            raise ValueError("unknown autonomy effect-unknown code")
         self.code = code
         super().__init__(code)
 
@@ -176,6 +263,8 @@ class ConfigEvidence:
     worker_sha256: str
     control: Mapping[str, Any]
     worker: Mapping[str, Any]
+    control_bytes: bytes = b""
+    worker_bytes: bytes = b""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -185,7 +274,36 @@ class ArmAdmission:
     gate_b_receipt_sha256: str
     readiness: ReadinessEvidence
     configs: ConfigEvidence
+    expected_credential_kind: str
+    workspace_binding_class: str
     predicates: Mapping[str, bool]
+
+
+@dataclasses.dataclass(frozen=True)
+class CandidateConfigs:
+    control: Mapping[str, Any]
+    worker: Mapping[str, Any]
+    control_bytes: bytes
+    worker_bytes: bytes
+    control_sha256: str
+    worker_sha256: str
+
+
+@dataclasses.dataclass(frozen=True)
+class TransactionContext:
+    transaction_id: str
+    expected_sha: str
+    prior_configs: ConfigEvidence
+    candidates: CandidateConfigs
+    admission: ArmAdmission | None
+
+
+@dataclasses.dataclass(frozen=True)
+class TransactionResult:
+    state: str
+    status: str
+    transaction_id: str | None
+    replayed: bool
 
 
 class StatusHost(Protocol):
@@ -214,6 +332,46 @@ class ArmAdmissionHost(Protocol):
     def require_service_uids_quiescent(self) -> None: ...
 
     def require_transaction_absent(self) -> None: ...
+
+
+class TransactionHost(ArmAdmissionHost, Protocol):
+    def existing_arm(
+        self, request: ArmRequest, *, now: datetime
+    ) -> TransactionResult | None: ...
+
+    def existing_disarm(
+        self, expected_sha: str, *, now: datetime
+    ) -> TransactionResult | None: ...
+
+    def new_transaction_id(self) -> str: ...
+
+    def begin_transaction(self, transaction: TransactionContext) -> None: ...
+
+    def write_candidates(self, transaction: TransactionContext) -> None: ...
+
+    def validate_candidates(self, transaction: TransactionContext) -> None: ...
+
+    def replace_worker_config(self, transaction: TransactionContext) -> None: ...
+
+    def replace_control_config(self, transaction: TransactionContext) -> None: ...
+
+    def write_autonomy_receipt(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None: ...
+
+    def start_services(self, expected_sha: str) -> None: ...
+
+    def prove_services_ready(self, expected_sha: str) -> None: ...
+
+    def complete_transaction(self, transaction: TransactionContext) -> None: ...
+
+    def stop_services(self, expected_sha: str) -> None: ...
+
+    def rollback_disarmed(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None: ...
+
+    def begin_disarm(self, expected_sha: str, transaction_id: str) -> ConfigEvidence: ...
 
 
 class _StoreOnce(argparse.Action):
@@ -277,6 +435,119 @@ def _iso(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def encode_config(value: Mapping[str, Any]) -> bytes:
+    try:
+        return (
+            json.dumps(
+                value,
+                sort_keys=True,
+                indent=2,
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise ArmTransactionError("arm_rolled_back") from exc
+
+
+def derive_candidate_configs(
+    configs: ConfigEvidence, *, armed: bool
+) -> CandidateConfigs:
+    control_value = copy.deepcopy(dict(configs.control))
+    worker_value = copy.deepcopy(dict(configs.worker))
+    if (
+        not isinstance(control_value.get("coo_autonomy_armed"), bool)
+        or not isinstance(control_value.get("coo_operator_harness_armed"), bool)
+        or not isinstance(worker_value.get("operator_harness_armed"), bool)
+    ):
+        raise ArmTransactionError("arm_rolled_back")
+    control_value["coo_autonomy_armed"] = armed
+    control_value["coo_operator_harness_armed"] = armed
+    worker_value["operator_harness_armed"] = armed
+    control_bytes = encode_config(control_value)
+    worker_bytes = encode_config(worker_value)
+    return CandidateConfigs(
+        control=control_value,
+        worker=worker_value,
+        control_bytes=control_bytes,
+        worker_bytes=worker_bytes,
+        control_sha256=sha256_bytes(control_bytes),
+        worker_sha256=sha256_bytes(worker_bytes),
+    )
+
+
+def _receipt_timestamp(now: datetime) -> str:
+    return now.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def build_transaction_receipt(
+    transaction: TransactionContext, *, state: str, now: datetime
+) -> dict[str, Any]:
+    if state == "ARMED":
+        admission = transaction.admission
+        if admission is None:
+            raise ArmTransactionError("arm_rolled_back")
+        acceptance_digest = admission.acceptance_receipt_sha256
+        gate_b_digest = admission.gate_b_receipt_sha256
+        readiness_digest = admission.readiness.receipt_sha256
+        readiness_observed_at = admission.readiness.observed_at
+        credential_expires_at = admission.readiness.credential_expires_at
+        readiness_expires_at = admission.readiness.readiness_expires_at
+        kind = admission.expected_credential_kind
+        binding_class = admission.workspace_binding_class
+        predicates = dict(admission.predicates)
+    elif state == "DISARMED":
+        timestamp = _receipt_timestamp(now)
+        acceptance_digest = "0" * 64
+        gate_b_digest = "0" * 64
+        readiness_digest = "0" * 64
+        readiness_observed_at = timestamp
+        credential_expires_at = timestamp
+        readiness_expires_at = timestamp
+        kind = "none"
+        binding_class = "none"
+        predicates = {
+            "acceptance_passed": False,
+            "configs_validated": True,
+            "gate_b_passed": False,
+            "provider_readiness_passed": False,
+            "runtime_quiescent": False,
+            "service_uids_quiescent": True,
+        }
+    else:
+        raise ArmTransactionError("arm_rolled_back")
+    return {
+        "schema_version": "mastermind.executive_autonomy_state/v1",
+        "state": state,
+        "release_sha": transaction.expected_sha,
+        "acceptance_receipt_sha256": acceptance_digest,
+        "gate_b_receipt_sha256": gate_b_digest,
+        "provider_readiness_receipt_sha256": readiness_digest,
+        "readiness_observed_at": readiness_observed_at,
+        "credential_expires_at": credential_expires_at,
+        "readiness_expires_at": readiness_expires_at,
+        "expected_credential_kind": kind,
+        "workspace_binding_class": binding_class,
+        "prior_control_config_sha256": transaction.prior_configs.control_sha256,
+        "prior_worker_config_sha256": transaction.prior_configs.worker_sha256,
+        "control_config_sha256": transaction.candidates.control_sha256,
+        "worker_config_sha256": transaction.candidates.worker_sha256,
+        "capability_policy_digest": CAPABILITY_POLICY_DIGEST,
+        "execution_profile_digest": EXECUTION_PROFILE_DIGEST,
+        "native_helper_grant_digest": NATIVE_HELPER_GRANT_DIGEST,
+        "security_config_digest": SECURITY_CONFIG_DIGEST,
+        "transaction_id": transaction.transaction_id,
+        "observed_at": _receipt_timestamp(now),
+        "tool_version": "1.0.0",
+        "predicates": predicates,
+    }
 
 
 _ACCEPTANCE_FIELDS = frozenset(
@@ -413,6 +684,8 @@ def evaluate_arm_admission(
         gate_b_receipt_sha256=gate_b_digest,
         readiness=readiness,
         configs=configs,
+        expected_credential_kind=request.expected_credential_kind,
+        workspace_binding_class=request.workspace_binding_class,
         predicates={
             "acceptance_passed": True,
             "configs_validated": True,
@@ -421,6 +694,107 @@ def evaluate_arm_admission(
             "runtime_quiescent": True,
             "service_uids_quiescent": True,
         },
+    )
+
+
+def execute_arm(
+    host: TransactionHost, request: ArmRequest, *, now: datetime
+) -> TransactionResult:
+    existing = host.existing_arm(request, now=now)
+    if existing is not None:
+        return existing
+    admission = evaluate_arm_admission(host, request, now=now)
+    transaction = TransactionContext(
+        transaction_id=host.new_transaction_id(),
+        expected_sha=request.expected_sha,
+        prior_configs=admission.configs,
+        candidates=derive_candidate_configs(admission.configs, armed=True),
+        admission=admission,
+    )
+    transaction_boundary_entered = True
+    try:
+        host.begin_transaction(transaction)
+        host.write_candidates(transaction)
+        host.validate_candidates(transaction)
+        host.replace_worker_config(transaction)
+        host.replace_control_config(transaction)
+        receipt = build_transaction_receipt(transaction, state="ARMED", now=now)
+        host.write_autonomy_receipt(transaction, receipt)
+        host.start_services(request.expected_sha)
+        host.prove_services_ready(request.expected_sha)
+        host.complete_transaction(transaction)
+    except Exception as exc:
+        if not transaction_boundary_entered:  # pragma: no cover - defensive
+            raise
+        try:
+            host.stop_services(request.expected_sha)
+            rollback = dataclasses.replace(
+                transaction,
+                candidates=derive_candidate_configs(
+                    transaction.prior_configs, armed=False
+                ),
+                admission=None,
+            )
+            host.rollback_disarmed(
+                rollback,
+                build_transaction_receipt(rollback, state="DISARMED", now=now),
+            )
+        except Exception as rollback_exc:
+            raise TransactionEffectUnknown() from rollback_exc
+        raise ArmTransactionError("arm_rolled_back") from exc
+    return TransactionResult(
+        state="ARMED",
+        status="ARMED_READY",
+        transaction_id=transaction.transaction_id,
+        replayed=False,
+    )
+
+
+def execute_disarm(
+    host: TransactionHost, expected_sha: str, *, now: datetime
+) -> TransactionResult:
+    existing = host.existing_disarm(expected_sha, now=now)
+    if existing is not None:
+        return existing
+    host.require_exact_install(expected_sha)
+    transaction_id = host.new_transaction_id()
+    host.stop_services(expected_sha)
+    try:
+        prior_configs = host.begin_disarm(expected_sha, transaction_id)
+    except Exception as exc:
+        raise TransactionEffectUnknown() from exc
+    transaction = TransactionContext(
+        transaction_id=transaction_id,
+        expected_sha=expected_sha,
+        prior_configs=prior_configs,
+        candidates=derive_candidate_configs(prior_configs, armed=False),
+        admission=None,
+    )
+    try:
+        host.write_candidates(transaction)
+        host.validate_candidates(transaction)
+        host.replace_worker_config(transaction)
+        host.replace_control_config(transaction)
+        receipt = build_transaction_receipt(transaction, state="DISARMED", now=now)
+        host.write_autonomy_receipt(transaction, receipt)
+        host.complete_transaction(transaction)
+    except Exception as exc:
+        try:
+            host.stop_services(expected_sha)
+            host.rollback_disarmed(
+                transaction,
+                build_transaction_receipt(
+                    transaction, state="DISARMED", now=now
+                ),
+            )
+        except Exception as rollback_exc:
+            raise TransactionEffectUnknown() from rollback_exc
+        raise ArmTransactionError("disarm_recovered") from exc
+    return TransactionResult(
+        state="DISARMED",
+        status="UNARMED",
+        transaction_id=transaction.transaction_id,
+        replayed=False,
     )
 
 
@@ -441,6 +815,24 @@ def status_document(snapshot: StatusSnapshot, *, now: datetime) -> dict[str, Any
         "readiness_expires_at": _iso(evidence.readiness_expires_at),
         "service_state": evidence.service_state,
         "refusal_code": snapshot.refusal_code,
+    }
+
+
+def operation_document(
+    *,
+    code: str,
+    state: str,
+    status: str,
+    transaction_id: str | None,
+    replayed: bool = False,
+) -> dict[str, Any]:
+    return {
+        "schema_version": OPERATION_SCHEMA_VERSION,
+        "code": code,
+        "state": state,
+        "status": status,
+        "transaction_id": transaction_id,
+        "replayed": replayed,
     }
 
 
@@ -620,7 +1012,9 @@ class ProductionStatusHost:
         return True
 
     @staticmethod
-    def _configs() -> tuple[dict[str, Any], dict[str, Any], str, str]:
+    def _configs() -> tuple[
+        dict[str, Any], dict[str, Any], str, str, bytes, bytes
+    ]:
         control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
         worker_gid = grp.getgrnam(WORKER_GROUP).gr_gid
         control, control_raw = _root_json(
@@ -636,7 +1030,6 @@ class ProductionStatusHost:
             not isinstance(control_arm, bool)
             or not isinstance(operator_arm, bool)
             or not isinstance(worker_arm, bool)
-            or operator_arm is not worker_arm
         ):
             raise HostControlError("config_schema_drift")
         return (
@@ -644,6 +1037,8 @@ class ProductionStatusHost:
             worker,
             hashlib.sha256(control_raw).hexdigest(),
             hashlib.sha256(worker_raw).hexdigest(),
+            control_raw,
+            worker_raw,
         )
 
     @staticmethod
@@ -724,6 +1119,8 @@ class ProductionStatusHost:
     ) -> tuple[str | None, bool, datetime | None, str | None]:
         if not AUTONOMY_RECEIPT.exists() and not AUTONOMY_RECEIPT.is_symlink():
             return None, False, None, None
+        state: str | None = None
+        readiness_deadline: datetime | None = None
         try:
             payload, _raw = _root_json(
                 AUTONOMY_RECEIPT, modes=frozenset({0o444}), gid=0
@@ -760,13 +1157,20 @@ class ProductionStatusHost:
             )
             return binding.state, True, binding.readiness_expires_at, None
         except (AutonomyRefusal, HostControlError):
-            return state if "state" in locals() else None, False, readiness_deadline if "readiness_deadline" in locals() else None, "receipt_invalid"
+            return state, False, readiness_deadline, "receipt_invalid"
 
     def collect_status(self, expected_sha: str, *, now: datetime) -> StatusSnapshot:
         self._require_host()
         installed_sha = self._release_identity(expected_sha)
         transaction_present = self._transaction_present()
-        control, worker, control_digest, worker_digest = self._configs()
+        (
+            control,
+            worker,
+            control_digest,
+            worker_digest,
+            _control_raw,
+            _worker_raw,
+        ) = self._configs()
         control_arm = bool(control["coo_autonomy_armed"])
         worker_arm = bool(worker["operator_harness_armed"])
         config_drift = (
@@ -803,10 +1207,15 @@ class ProductionStatusHost:
 class ProductionArmHost(ProductionStatusHost):
     """Read-only production admission for the later arm transaction."""
 
+    def __init__(self) -> None:
+        self._admission_sha: str | None = None
+
     def require_exact_install(self, expected_sha: str) -> str:
         try:
             self._require_host()
-            return self._release_identity(expected_sha)
+            installed = self._release_identity(expected_sha)
+            self._admission_sha = installed
+            return installed
         except HostControlError as exc:
             raise ArmAdmissionError("install_gate_failed") from exc
 
@@ -903,7 +1312,14 @@ class ProductionArmHost(ProductionStatusHost):
 
     def load_unarmed_configs(self, expected_sha: str) -> ConfigEvidence:
         try:
-            control, worker, control_digest, worker_digest = self._configs()
+            (
+                control,
+                worker,
+                control_digest,
+                worker_digest,
+                control_raw,
+                worker_raw,
+            ) = self._configs()
         except (HostControlError, KeyError, OSError) as exc:
             raise ArmAdmissionError("configs_gate_failed") from exc
         if (
@@ -918,6 +1334,8 @@ class ProductionArmHost(ProductionStatusHost):
             worker_sha256=worker_digest,
             control=control,
             worker=worker,
+            control_bytes=control_raw,
+            worker_bytes=worker_raw,
         )
 
     def require_runtime_quiescent(self, config: ConfigEvidence) -> None:
@@ -953,11 +1371,37 @@ class ProductionArmHost(ProductionStatusHost):
         except Exception as exc:
             raise ArmAdmissionError("runtime_integrity_failed") from exc
 
+    def _stop_services_for_admission(self) -> None:
+        if self._admission_sha is None:
+            raise ArmAdmissionError("services_gate_failed")
+        release = SYSTEM_ROOT / "releases" / self._admission_sha
+        try:
+            completed = subprocess.run(
+                [
+                    "/bin/bash",
+                    os.fspath(release / "ops/executive_os/service-control.sh"),
+                    "stop",
+                ],
+                cwd=release,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=45,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ArmAdmissionError("services_gate_failed") from exc
+        if completed.returncode != 0:
+            raise ArmAdmissionError("services_gate_failed")
+
     def require_services_stopped(self) -> None:
         try:
             loaded = (self._loaded(CONTROL_LABEL), self._loaded(WORKER_LABEL))
         except (OSError, subprocess.SubprocessError) as exc:
             raise ArmAdmissionError("services_gate_failed") from exc
+        if any(loaded):
+            self._stop_services_for_admission()
+            loaded = (self._loaded(CONTROL_LABEL), self._loaded(WORKER_LABEL))
         if any(loaded):
             raise ArmAdmissionError("services_not_stopped")
 
@@ -991,31 +1435,695 @@ class ProductionArmHost(ProductionStatusHost):
             raise ArmAdmissionError("transaction_incomplete")
 
 
+class ProductionTransactionHost(ProductionArmHost):
+    """One crash-recoverable transaction over the two installed configs."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._active_transaction: TransactionContext | None = None
+
+    @staticmethod
+    def _candidate_paths(transaction_id: str) -> tuple[Path, Path]:
+        if re.fullmatch(r"autonomy-[0-9a-f]{12}", transaction_id) is None:
+            raise TransactionEffectUnknown()
+        suffix = transaction_id.removeprefix("autonomy-")
+        return (
+            CONFIG_ROOT / f".autonomy-control-{suffix}.candidate.json",
+            CONFIG_ROOT / f".autonomy-worker-{suffix}.candidate.json",
+        )
+
+    @staticmethod
+    def _manifest_path() -> Path:
+        return AUTONOMY_TRANSACTION / "transaction.json"
+
+    @staticmethod
+    def _archive_paths() -> tuple[Path, Path]:
+        return (
+            AUTONOMY_TRANSACTION / "prior-control.json",
+            AUTONOMY_TRANSACTION / "prior-worker.json",
+        )
+
+    @staticmethod
+    def _config_root_safe() -> None:
+        try:
+            info = CONFIG_ROOT.lstat()
+        except OSError as exc:
+            raise TransactionEffectUnknown() from exc
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) != 0o755
+            or _has_acl(CONFIG_ROOT)
+        ):
+            raise TransactionEffectUnknown()
+
+    def _manifest(self) -> dict[str, Any]:
+        try:
+            value, _raw = _root_json(
+                self._manifest_path(),
+                modes=frozenset({0o400}),
+                uid=0,
+                gid=0,
+            )
+        except HostControlError as exc:
+            raise TransactionEffectUnknown() from exc
+        required = {
+            "schema_version",
+            "operation",
+            "phase",
+            "transaction_id",
+            "expected_sha",
+            "prior_control_sha256",
+            "prior_worker_sha256",
+            "target_control_sha256",
+            "target_worker_sha256",
+        }
+        if (
+            set(value) != required
+            or value.get("schema_version") != _TRANSACTION_SCHEMA
+            or value.get("operation") not in {"ARM", "DISARM"}
+            or not isinstance(value.get("phase"), str)
+            or re.fullmatch(
+                r"autonomy-[0-9a-f]{12}", str(value.get("transaction_id", ""))
+            )
+            is None
+            or _SHA_RE.fullmatch(str(value.get("expected_sha", ""))) is None
+            or any(
+                re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                for field in (
+                    "prior_control_sha256",
+                    "prior_worker_sha256",
+                    "target_control_sha256",
+                    "target_worker_sha256",
+                )
+            )
+        ):
+            raise TransactionEffectUnknown()
+        return value
+
+    def _persist_phase(self, transaction: TransactionContext, phase: str, *, operation: str | None = None) -> None:
+        if operation is None:
+            current = self._manifest()
+            operation = str(current["operation"])
+        value = {
+            "schema_version": _TRANSACTION_SCHEMA,
+            "operation": operation,
+            "phase": phase,
+            "transaction_id": transaction.transaction_id,
+            "expected_sha": transaction.expected_sha,
+            "prior_control_sha256": transaction.prior_configs.control_sha256,
+            "prior_worker_sha256": transaction.prior_configs.worker_sha256,
+            "target_control_sha256": transaction.candidates.control_sha256,
+            "target_worker_sha256": transaction.candidates.worker_sha256,
+        }
+        _atomic_file(
+            self._manifest_path(),
+            _encoded_json(value),
+            mode=0o400,
+            uid=0,
+            gid=0,
+            replace=self._manifest_path().exists(),
+        )
+
+    def _create_marker(self, transaction: TransactionContext, *, operation: str) -> None:
+        self._config_root_safe()
+        try:
+            os.mkdir(AUTONOMY_TRANSACTION, 0o700)
+            os.chown(AUTONOMY_TRANSACTION, 0, 0)
+            os.chmod(AUTONOMY_TRANSACTION, 0o700)
+            _fsync_directory(CONFIG_ROOT)
+            prior_control, prior_worker = self._archive_paths()
+            control_bytes = transaction.prior_configs.control_bytes or encode_config(
+                transaction.prior_configs.control
+            )
+            worker_bytes = transaction.prior_configs.worker_bytes or encode_config(
+                transaction.prior_configs.worker
+            )
+            if (
+                sha256_bytes(control_bytes)
+                != transaction.prior_configs.control_sha256
+                or sha256_bytes(worker_bytes)
+                != transaction.prior_configs.worker_sha256
+            ):
+                raise TransactionEffectUnknown()
+            _atomic_file(
+                prior_control,
+                control_bytes,
+                mode=0o400,
+                uid=0,
+                gid=0,
+                replace=False,
+            )
+            _atomic_file(
+                prior_worker,
+                worker_bytes,
+                mode=0o400,
+                uid=0,
+                gid=0,
+                replace=False,
+            )
+            self._persist_phase(transaction, "LOCKED", operation=operation)
+        except Exception:
+            # A partially created marker is evidence and is deliberately kept.
+            raise
+
+    def existing_arm(
+        self, request: ArmRequest, *, now: datetime
+    ) -> TransactionResult | None:
+        self.require_exact_install(request.expected_sha)
+        snapshot = self.collect_status(request.expected_sha, now=now)
+        evidence = snapshot.evidence
+        if not evidence.control_armed and not evidence.worker_armed:
+            return None
+        if status_document(snapshot, now=now)["status"] != "ARMED_READY":
+            raise ArmAdmissionError("changed_arm_evidence")
+        try:
+            payload, _raw = _root_json(
+                AUTONOMY_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
+            )
+            gate_digest = self.validate_gate_b(
+                request.gate_b_receipt, request.expected_sha
+            )
+            acceptance_digest = self.validate_acceptance(request.expected_sha)
+        except (HostControlError, ArmAdmissionError) as exc:
+            raise ArmAdmissionError("changed_arm_evidence") from exc
+        if (
+            payload.get("state") != "ARMED"
+            or payload.get("gate_b_receipt_sha256") != gate_digest
+            or payload.get("acceptance_receipt_sha256") != acceptance_digest
+            or payload.get("expected_credential_kind")
+            != request.expected_credential_kind
+            or payload.get("workspace_binding_class")
+            != request.workspace_binding_class
+            or payload.get("credential_expires_at")
+            != request.credential_expires_at
+        ):
+            raise ArmAdmissionError("changed_arm_evidence")
+        return TransactionResult(
+            state="ARMED",
+            status="ARMED_READY",
+            transaction_id=str(payload["transaction_id"]),
+            replayed=True,
+        )
+
+    def existing_disarm(
+        self, expected_sha: str, *, now: datetime
+    ) -> TransactionResult | None:
+        self.require_exact_install(expected_sha)
+        if AUTONOMY_TRANSACTION.exists() or AUTONOMY_TRANSACTION.is_symlink():
+            return None
+        snapshot = self.collect_status(expected_sha, now=now)
+        if status_document(snapshot, now=now)["status"] != "UNARMED":
+            return None
+        transaction_id: str | None = None
+        if AUTONOMY_RECEIPT.exists() and not AUTONOMY_RECEIPT.is_symlink():
+            try:
+                payload, _raw = _root_json(
+                    AUTONOMY_RECEIPT,
+                    modes=frozenset({0o444}),
+                    uid=0,
+                    gid=0,
+                )
+                if payload.get("state") == "DISARMED" and re.fullmatch(
+                    r"autonomy-[0-9a-f]{12}",
+                    str(payload.get("transaction_id", "")),
+                ):
+                    transaction_id = str(payload["transaction_id"])
+            except HostControlError:
+                return None
+        return TransactionResult(
+            state="DISARMED",
+            status="UNARMED",
+            transaction_id=transaction_id,
+            replayed=True,
+        )
+
+    def new_transaction_id(self) -> str:
+        if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            return str(self._manifest()["transaction_id"])
+        return f"autonomy-{secrets.token_hex(6)}"
+
+    def begin_transaction(self, transaction: TransactionContext) -> None:
+        self._active_transaction = transaction
+        self._create_marker(transaction, operation="ARM")
+
+    def write_candidates(self, transaction: TransactionContext) -> None:
+        self._active_transaction = transaction
+        control_candidate, worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
+        worker_gid = grp.getgrnam(WORKER_GROUP).gr_gid
+        _atomic_file(
+            control_candidate,
+            transaction.candidates.control_bytes,
+            mode=0o440,
+            uid=0,
+            gid=control_gid,
+            replace=False,
+        )
+        _atomic_file(
+            worker_candidate,
+            transaction.candidates.worker_bytes,
+            mode=0o440,
+            uid=0,
+            gid=worker_gid,
+            replace=False,
+        )
+        self._persist_phase(transaction, "CANDIDATES_WRITTEN")
+
+    @staticmethod
+    def _run_fixed(command: Sequence[str], *, cwd: Path, timeout: float = 30.0) -> None:
+        completed = subprocess.run(
+            list(command),
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=timeout,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError("fixed Executive host command refused")
+
+    def validate_candidates(self, transaction: TransactionContext) -> None:
+        release = SYSTEM_ROOT / "releases" / transaction.expected_sha
+        control_candidate, worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        worker_home = RUNTIME_ROOT / "workers" / "codex-01" / "provider-home"
+        control_home = RUNTIME_ROOT / "control" / "home"
+        self._run_fixed(
+            [
+                "/usr/bin/sudo",
+                "-u",
+                "_mastermind_worker",
+                "/usr/bin/env",
+                "-i",
+                f"HOME={worker_home}",
+                "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+                "LANG=C.UTF-8",
+                "LC_ALL=C.UTF-8",
+                os.fspath(PINNED_PYTHON),
+                "-I",
+                "-S",
+                "-B",
+                os.fspath(release / "scripts/executive_os_phase1c_worker.py"),
+                "check-config",
+                "--config",
+                os.fspath(worker_candidate),
+            ],
+            cwd=release,
+        )
+        self._run_fixed(
+            [
+                "/usr/bin/sudo",
+                "-u",
+                CONTROL_USER,
+                "/usr/bin/env",
+                "-i",
+                f"HOME={control_home}",
+                "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+                "LANG=C.UTF-8",
+                "LC_ALL=C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE=1",
+                os.fspath(PINNED_PYTHON),
+                "-I",
+                "-S",
+                "-B",
+                "-c",
+                (
+                    "import sys;sys.path.insert(0,sys.argv[1]);"
+                    "from scripts.executive_os_phase1c import load_control_config;"
+                    "load_control_config(sys.argv[2])"
+                ),
+                os.fspath(release),
+                os.fspath(control_candidate),
+            ],
+            cwd=release,
+        )
+        self._persist_phase(transaction, "CANDIDATES_VALIDATED")
+
+    @staticmethod
+    def _replace_candidate(candidate: Path, destination: Path, *, gid: int) -> None:
+        info = candidate.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0
+            or info.st_gid != gid
+            or stat.S_IMODE(info.st_mode) != 0o440
+            or info.st_nlink != 1
+            or _has_acl(candidate)
+        ):
+            raise TransactionEffectUnknown()
+        os.replace(candidate, destination)
+        _fsync_directory(CONFIG_ROOT)
+
+    def replace_worker_config(self, transaction: TransactionContext) -> None:
+        _control_candidate, worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        self._replace_candidate(
+            worker_candidate,
+            WORKER_CONFIG,
+            gid=grp.getgrnam(WORKER_GROUP).gr_gid,
+        )
+        self._persist_phase(transaction, "WORKER_REPLACED")
+
+    def replace_control_config(self, transaction: TransactionContext) -> None:
+        control_candidate, _worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        self._replace_candidate(
+            control_candidate,
+            CONTROL_CONFIG,
+            gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
+        )
+        self._persist_phase(transaction, "CONTROL_REPLACED")
+
+    def write_autonomy_receipt(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None:
+        observed = _parse_timestamp(receipt.get("observed_at"))
+        if observed is None:
+            raise TransactionEffectUnknown()
+        try:
+            validate_receipt_document(
+                receipt,
+                metadata=ReceiptMetadata(
+                    uid=0,
+                    gid=0,
+                    mode=0o444,
+                    nlink=1,
+                    is_regular=True,
+                    is_symlink=False,
+                    has_acl=False,
+                ),
+                expected=AutonomyExpectation(
+                    release_sha=transaction.expected_sha,
+                    control_config_sha256=transaction.candidates.control_sha256,
+                    worker_config_sha256=transaction.candidates.worker_sha256,
+                    provider_readiness_receipt_sha256=str(
+                        receipt.get("provider_readiness_receipt_sha256", "")
+                    ),
+                    capability_policy_digest=CAPABILITY_POLICY_DIGEST,
+                    execution_profile_digest=EXECUTION_PROFILE_DIGEST,
+                    native_helper_grant_digest=NATIVE_HELPER_GRANT_DIGEST,
+                    security_config_digest=SECURITY_CONFIG_DIGEST,
+                ),
+                now=observed,
+                require_current=receipt.get("state") == "ARMED",
+            )
+        except AutonomyRefusal as exc:
+            raise TransactionEffectUnknown() from exc
+        replace = AUTONOMY_RECEIPT.exists() or AUTONOMY_RECEIPT.is_symlink()
+        if replace:
+            metadata = _receipt_metadata(AUTONOMY_RECEIPT)
+            if metadata != ReceiptMetadata(
+                uid=0,
+                gid=0,
+                mode=0o444,
+                nlink=1,
+                is_regular=True,
+                is_symlink=False,
+                has_acl=False,
+            ):
+                raise TransactionEffectUnknown()
+        _atomic_file(
+            AUTONOMY_RECEIPT,
+            _encoded_json(receipt),
+            mode=0o444,
+            uid=0,
+            gid=0,
+            replace=replace,
+        )
+        self._persist_phase(transaction, "RECEIPT_REPLACED")
+
+    def _service_command(self, expected_sha: str, action: str) -> None:
+        if action not in {"start", "stop"}:
+            raise TransactionEffectUnknown()
+        release = SYSTEM_ROOT / "releases" / expected_sha
+        self._run_fixed(
+            [
+                "/bin/bash",
+                os.fspath(release / "ops/executive_os/service-control.sh"),
+                action,
+            ],
+            cwd=release,
+            timeout=45.0,
+        )
+
+    def start_services(self, expected_sha: str) -> None:
+        self._service_command(expected_sha, "start")
+        if self._active_transaction is not None:
+            self._persist_phase(self._active_transaction, "SERVICES_STARTED")
+
+    def prove_services_ready(self, expected_sha: str) -> None:
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
+            service_state, reconciled = self._service_state(expected_sha)
+            if reconciled and service_state == "READY":
+                if self._active_transaction is not None:
+                    self._persist_phase(self._active_transaction, "READY_PROVEN")
+                return
+            time.sleep(1.0)
+        raise RuntimeError("Executive services did not reach READY")
+
+    def stop_services(self, expected_sha: str) -> None:
+        self._service_command(expected_sha, "stop")
+        if self._loaded(CONTROL_LABEL) or self._loaded(WORKER_LABEL):
+            raise TransactionEffectUnknown()
+
+    @staticmethod
+    def _remove_candidate(path: Path) -> None:
+        if not path.exists() and not path.is_symlink():
+            return
+        info = path.lstat()
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0
+            or info.st_nlink != 1
+        ):
+            raise TransactionEffectUnknown()
+        path.unlink()
+        _fsync_directory(CONFIG_ROOT)
+
+    def complete_transaction(self, transaction: TransactionContext) -> None:
+        manifest = self._manifest()
+        if (
+            manifest.get("transaction_id") != transaction.transaction_id
+            or manifest.get("expected_sha") != transaction.expected_sha
+        ):
+            raise TransactionEffectUnknown()
+        control_candidate, worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        self._remove_candidate(control_candidate)
+        self._remove_candidate(worker_candidate)
+        expected = {"transaction.json", "prior-control.json", "prior-worker.json"}
+        if set(os.listdir(AUTONOMY_TRANSACTION)) != expected:
+            raise TransactionEffectUnknown()
+        for path in (*self._archive_paths(), self._manifest_path()):
+            info = path.lstat()
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o400
+                or info.st_nlink != 1
+            ):
+                raise TransactionEffectUnknown()
+            path.unlink()
+        _fsync_directory(AUTONOMY_TRANSACTION)
+        AUTONOMY_TRANSACTION.rmdir()
+        _fsync_directory(CONFIG_ROOT)
+        self._active_transaction = None
+
+    def _archived_configs(self, expected_sha: str) -> ConfigEvidence:
+        control_path, worker_path = self._archive_paths()
+        control, control_raw = _root_json(
+            control_path, modes=frozenset({0o400}), uid=0, gid=0
+        )
+        worker, worker_raw = _root_json(
+            worker_path, modes=frozenset({0o400}), uid=0, gid=0
+        )
+        manifest = self._manifest()
+        if (
+            manifest.get("expected_sha") != expected_sha
+            or sha256_bytes(control_raw) != manifest.get("prior_control_sha256")
+            or sha256_bytes(worker_raw) != manifest.get("prior_worker_sha256")
+        ):
+            raise TransactionEffectUnknown()
+        return ConfigEvidence(
+            control_sha256=sha256_bytes(control_raw),
+            worker_sha256=sha256_bytes(worker_raw),
+            control=control,
+            worker=worker,
+            control_bytes=control_raw,
+            worker_bytes=worker_raw,
+        )
+
+    def begin_disarm(self, expected_sha: str, transaction_id: str) -> ConfigEvidence:
+        if AUTONOMY_TRANSACTION.exists() and not AUTONOMY_TRANSACTION.is_symlink():
+            manifest = self._manifest()
+            if (
+                manifest.get("transaction_id") != transaction_id
+                or manifest.get("expected_sha") != expected_sha
+            ):
+                raise TransactionEffectUnknown()
+            return self._archived_configs(expected_sha)
+        try:
+            (
+                control,
+                worker,
+                control_digest,
+                worker_digest,
+                control_raw,
+                worker_raw,
+            ) = self._configs()
+        except (HostControlError, KeyError, OSError) as exc:
+            raise TransactionEffectUnknown() from exc
+        configs = ConfigEvidence(
+            control_sha256=control_digest,
+            worker_sha256=worker_digest,
+            control=control,
+            worker=worker,
+            control_bytes=control_raw,
+            worker_bytes=worker_raw,
+        )
+        placeholder = TransactionContext(
+            transaction_id=transaction_id,
+            expected_sha=expected_sha,
+            prior_configs=configs,
+            candidates=derive_candidate_configs(configs, armed=False),
+            admission=None,
+        )
+        self._active_transaction = placeholder
+        self._create_marker(placeholder, operation="DISARM")
+        return configs
+
+    def rollback_disarmed(
+        self, transaction: TransactionContext, receipt: Mapping[str, Any]
+    ) -> None:
+        self._active_transaction = transaction
+        control_candidate, worker_candidate = self._candidate_paths(
+            transaction.transaction_id
+        )
+        self._remove_candidate(control_candidate)
+        self._remove_candidate(worker_candidate)
+        self.write_candidates(transaction)
+        self.validate_candidates(transaction)
+        self.replace_worker_config(transaction)
+        self.replace_control_config(transaction)
+        self.write_autonomy_receipt(transaction, receipt)
+        (
+            control,
+            worker,
+            control_digest,
+            worker_digest,
+            _control_raw,
+            _worker_raw,
+        ) = self._configs()
+        if (
+            control.get("coo_autonomy_armed") is not False
+            or control.get("coo_operator_harness_armed") is not False
+            or worker.get("operator_harness_armed") is not False
+            or control_digest != transaction.candidates.control_sha256
+            or worker_digest != transaction.candidates.worker_sha256
+            or self._loaded(CONTROL_LABEL)
+            or self._loaded(WORKER_LABEL)
+        ):
+            raise TransactionEffectUnknown()
+        self.complete_transaction(transaction)
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
-    host: StatusHost | None = None,
+    host: StatusHost | TransactionHost | None = None,
     now: Callable[[], datetime] | None = None,
 ) -> int:
     args = _parser().parse_args(argv)
     current = (datetime.now(UTC) if now is None else now()).astimezone(UTC)
-    if args.command != "status":
-        document = status_document(
-            _fallback_snapshot(args.expected_sha, "command_not_implemented"),
-            now=current,
-        )
+    if args.command == "status":
+        collector = ProductionStatusHost() if host is None else host
+        try:
+            snapshot = collector.collect_status(args.expected_sha, now=current)
+        except HostControlError as exc:
+            snapshot = _fallback_snapshot(args.expected_sha, exc.code)
+        except Exception:
+            snapshot = _fallback_snapshot(args.expected_sha, "status_unavailable")
+        document = status_document(snapshot, now=current)
         print(json.dumps(document, sort_keys=True, separators=(",", ":")))
-        return 2
-    collector = ProductionStatusHost() if host is None else host
+        return 0 if document["status"] in {UNARMED, ARMED_READY} else 2
+
+    transaction_host = ProductionTransactionHost() if host is None else host
     try:
-        snapshot = collector.collect_status(args.expected_sha, now=current)
-    except HostControlError as exc:
-        snapshot = _fallback_snapshot(args.expected_sha, exc.code)
+        if args.command == "arm":
+            result = execute_arm(
+                transaction_host,
+                ArmRequest(
+                    expected_sha=args.expected_sha,
+                    gate_b_receipt=args.gate_b_receipt,
+                    expected_credential_kind=args.expected_credential_kind,
+                    workspace_binding_class=args.workspace_binding_class,
+                    credential_expires_at=args.credential_expires_at,
+                ),
+                now=current,
+            )
+            code = "already_armed" if result.replayed else "armed"
+        else:
+            result = execute_disarm(
+                transaction_host, args.expected_sha, now=current
+            )
+            code = "already_disarmed" if result.replayed else "disarmed"
+        document = operation_document(
+            code=code,
+            state=result.state,
+            status=result.status,
+            transaction_id=result.transaction_id,
+            replayed=result.replayed,
+        )
+        exit_code = 0
+    except ArmTransactionError as exc:
+        document = operation_document(
+            code=exc.code,
+            state="DISARMED",
+            status="UNARMED",
+            transaction_id=None,
+        )
+        exit_code = 2
+    except ArmAdmissionError as exc:
+        document = operation_document(
+            code=exc.code,
+            state="UNARMED",
+            status="UNARMED",
+            transaction_id=None,
+        )
+        exit_code = 2
+    except TransactionEffectUnknown:
+        document = operation_document(
+            code="effect_unknown",
+            state="UNKNOWN",
+            status="EFFECT_UNKNOWN",
+            transaction_id=None,
+        )
+        exit_code = 2
     except Exception:
-        snapshot = _fallback_snapshot(args.expected_sha, "status_unavailable")
-    document = status_document(snapshot, now=current)
+        document = operation_document(
+            code="effect_unknown",
+            state="UNKNOWN",
+            status="EFFECT_UNKNOWN",
+            transaction_id=None,
+        )
+        exit_code = 2
     print(json.dumps(document, sort_keys=True, separators=(",", ":")))
-    return 0 if document["status"] in {UNARMED, ARMED_READY} else 2
+    return exit_code
 
 
 if __name__ == "__main__":
