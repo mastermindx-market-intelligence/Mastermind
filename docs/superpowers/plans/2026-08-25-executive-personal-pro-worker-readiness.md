@@ -56,11 +56,11 @@ The public reviewed inventory contains logical host mechanics only—never provi
 | Slot | Worker principal | UID | Primary group | Provider home | OAuth seat reference | Policy |
 |---|---|---:|---|---|---|---|
 | `codex-01` | `_mastermind_worker` | 451 | `_mastermind_worker` / 451 | `/var/db/mastermind-executive/workers/codex-01/provider-home` | none | existing company realm |
-| `codex-pro-01` | `_mastermind_codex_01` | 454 | `_mastermind_worker` / 451 | `/var/db/mastermind-executive/workers/codex-pro-01/provider-home` | `chatgpt1` | Personal Pro device OAuth |
-| `codex-pro-02` | `_mastermind_codex_02` | 455 | `_mastermind_worker` / 451 | `/var/db/mastermind-executive/workers/codex-pro-02/provider-home` | `chatgpt2` | Personal Pro device OAuth |
-| `codex-pro-03` | `_mastermind_codex_03` | 456 | `_mastermind_worker` / 451 | `/var/db/mastermind-executive/workers/codex-pro-03/provider-home` | `chatgpt3` | Personal Pro device OAuth |
+| `codex-pro-01` | `_mastermind_codex_01` | 454 | `_mastermind_codex_01` / 454 | `/var/db/mastermind-executive/workers/codex-pro-01/provider-home` | `chatgpt1` | Personal Pro device OAuth |
+| `codex-pro-02` | `_mastermind_codex_02` | 455 | `_mastermind_codex_02` / 455 | `/var/db/mastermind-executive/workers/codex-pro-02/provider-home` | `chatgpt2` | Personal Pro device OAuth |
+| `codex-pro-03` | `_mastermind_codex_03` | 456 | `_mastermind_codex_03` / 456 | `/var/db/mastermind-executive/workers/codex-pro-03/provider-home` | `chatgpt3` | Personal Pro device OAuth |
 
-The Personal Pro principals share only the reviewed artifact group. Unique UIDs, mode-0700 provider homes, exact worker-owned mode-0600 single-link `auth.json` files, clean environment construction, per-UID process sweeps, and per-slot readiness receipts form the isolation boundary.
+The Personal Pro principals have distinct primary groups as well as distinct UIDs. Each dedicated group contains only its primary Personal Pro principal and no named members. This preserves both the existing `_mastermind_worker` membership contract and the control principal's exact macOS group vector. Mode-0700 provider homes, exact worker-owned mode-0600 single-link `auth.json` files, clean environment construction, per-UID process sweeps, and per-slot readiness receipts form the isolation boundary; root-only host helpers perform the bounded principal transition during readiness operations.
 
 ## Policy law
 
@@ -172,7 +172,7 @@ Files:
 - modify `ops/executive_os/bootstrap-host.sh`
 - modify `tests/test_executive_launchd_config.py`
 
-Start with tests for exact UIDs 454–456, shared artifact GID 451, four exact primary worker-group members, three mode-0700 provider homes, and no service start or credential copy.
+Start with tests for exact UID/GID pairs 454–456, three distinct Personal Pro primary groups, preserved legacy worker-group membership, three mode-0700 provider homes, and no service start or credential copy.
 
 ### Task 6 — sanitized operator journey
 

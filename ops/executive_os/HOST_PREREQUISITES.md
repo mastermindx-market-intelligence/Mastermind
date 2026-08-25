@@ -249,6 +249,82 @@ sudo /bin/bash \
   --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
 ```
 
+### Three isolated Personal Pro readiness slots
+
+The company worker above remains the only installed Executive worker service.
+The three Personal Pro slots are additional, independently attested credential
+realms; they are **not routed**, started, or available for automatic failover by
+this procedure. Their fixed mapping is:
+
+| Worker slot | Multilogin seat | Disabled macOS principal |
+|---|---|---|
+| `codex-pro-01` | `chatgpt1` | `_mastermind_codex_01` |
+| `codex-pro-02` | `chatgpt2` | `_mastermind_codex_02` |
+| `codex-pro-03` | `chatgpt3` | `_mastermind_codex_03` |
+
+Each login ceremony must happen one at a time. Keep the normal Mac Codex app
+and its browser session untouched. When the helper prints the device URL and
+one-time code, approve it only inside the named Multilogin seat in the table.
+If macOS opens a default browser, close that page without approving it and use
+the named Multilogin seat instead. Never sign the normal browser out or copy
+the normal `~/.codex` credential; each helper invocation sets both `HOME` and
+`CODEX_HOME` to the selected worker-only home.
+
+Run exactly the slot matching the open Multilogin seat:
+
+```bash
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-01 --reauthorize-device
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-02 --reauthorize-device
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-03 --reauthorize-device
+```
+
+Do not add `--replace-existing` on a first enrollment. If the selected slot
+already contains a credential, the helper stops with exit 65. Use the
+sanitized status command below to confirm the exact slot. Add
+`--replace-existing` only for a deliberate rotation of that same slot; it
+cannot select or overwrite another slot.
+
+Enrollment proves only safe credential metadata and exact `login status`; it
+does not spend inference and is not READY. Give each Personal Pro device login
+an explicit Chairman revalidation deadline no more than 24 hours ahead, then
+mint one independent readiness receipt per slot:
+
+```bash
+PERSONAL_PRO_REVALIDATE_AT='YYYY-MM-DDTHH:MM:SSZ'
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-01 --verify-ready \
+  --credential-expires-at "$PERSONAL_PRO_REVALIDATE_AT"
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-02 --verify-ready \
+  --credential-expires-at "$PERSONAL_PRO_REVALIDATE_AT"
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --slot-id codex-pro-03 --verify-ready \
+  --credential-expires-at "$PERSONAL_PRO_REVALIDATE_AT"
+```
+
+Finally, inspect all four reviewed realms without opening credential bytes or
+printing provider identities, paths, account names, profile IDs, or URLs:
+
+```bash
+sudo "$PYTHON_BINARY" -I -S -B \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provider-slot-status.py"
+```
+
+The status is deliberately narrow: slot and logical seat, filesystem-presence
+and metadata booleans, bounded readiness state/refusal, and worker-process
+presence. `ready` means that slot's current credential metadata, exact binary,
+identity policy, canary, and receipt still match. It does not mean the slot is
+routed, capacity-aware, or authorized to spawn sessions.
+
 For a service or personal access token, `CREDENTIAL_EXPIRES_AT` is the exact
 nonsecret UTC expiry attested by the workspace administrator; do not estimate or
 extend it locally. For the device-auth fallback, it is a Chairman-approved

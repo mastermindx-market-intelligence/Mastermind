@@ -1000,6 +1000,71 @@ def test_bootstrap_uses_supported_user_identity_and_disable_operations() -> None
     assert '"$state" = needs_disable' in source
 
 
+def test_bootstrap_provisions_exact_personal_pro_worker_realms_without_activation() -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+
+    assert 'PROVIDER_SLOT_RESOLVER="$SCRIPT_DIR/provider_worker_slots.py"' in source
+    assert 'PERSONAL_PRO_SLOT_IDS=("codex-pro-01" "codex-pro-02" "codex-pro-03")' in source
+    assert '"$SYSTEM_PYTHON" -I -S -B "$PROVIDER_SLOT_RESOLVER"' in source
+    assert 'for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do' in source
+    for field in (
+        "worker_user",
+        "worker_group",
+        "worker_uid",
+        "worker_gid",
+        "provider_home",
+    ):
+        assert f'slot_field "$slot_id" {field}' in source
+    assert 'ensure_group "$slot_group" "$slot_gid"' in source
+    assert 'ensure_user "$slot_user" "$slot_uid" "$slot_gid" "$slot_home"' in source
+    assert '-a "$CONTROL_USER" -t user "$slot_group"' not in source
+    assert 'assert_exact_members "$slot_group" "$slot_gid" "$slot_user" ""' in source
+    assert '-o "$slot_user" -g "$slot_group" -m 0700 "$slot_home"' in source
+    assert '-o "$slot_user" -g "$slot_group" -m 0700 "$slot_root/state"' in source
+    assert "launchctl" not in source
+    assert "service-control.sh" not in source
+    assert "/bin/cp" not in source and "/usr/bin/cp" not in source
+
+
+def test_personal_pro_groups_do_not_widen_existing_control_group_vector() -> None:
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _validate_service_directory_group_sets,
+    )
+
+    system = {
+        "everyone": 12,
+        "localaccounts": 61,
+        "_lpoperator": 100,
+        "com.apple.access_disabled": 396,
+    }
+    with pytest.raises(AcceptanceError, match="control account"):
+        _validate_service_directory_group_sets(
+            system_group_gids=system,
+            control_groups=[450, 451, 454, 12, 61, 100],
+            worker_groups=[451, 12, 61, 100],
+            control_gid=450,
+            worker_gid=451,
+        )
+
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+    assert '-a "$CONTROL_USER" -t user "$slot_group"' not in source
+    assert 'assert_exact_members "$slot_group" "$slot_gid" "$slot_user" ""' in source
+
+
+def test_personal_pro_bootstrap_identity_values_remain_catalog_owned() -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+
+    for private_identity_literal in (
+        "_mastermind_codex_01",
+        "_mastermind_codex_02",
+        "_mastermind_codex_03",
+    ):
+        assert private_identity_literal not in source
+    assert 'slot_field "$slot_id" worker_uid' in source
+    assert 'slot_field "$slot_id" worker_gid' in source
+
+
 def test_host_word_sorting_avoids_bsd_awk_index_builtin() -> None:
     for name in ("bootstrap-host.sh", "install.sh"):
         source = (OPS / name).read_text(encoding="utf-8")
