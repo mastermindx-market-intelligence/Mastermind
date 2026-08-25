@@ -14,6 +14,7 @@ from ops.executive_os import autonomy_control as control
 
 SHA = "c" * 40
 NOW = datetime(2026, 8, 24, 12, 0, 0, tzinfo=UTC)
+GATE_PATH = Path("/private/tmp/gate-b.json")
 
 
 class FakeStatusHost:
@@ -267,3 +268,283 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     assert '"coo_operator_harness_armed": False' in install
     assert "autonomy-control.sh" in install
     assert "autonomy_control.py" in install
+
+
+class FakeAdmissionHost:
+    GATE_ORDER = (
+        "install",
+        "acceptance",
+        "gate_b",
+        "readiness",
+        "configs",
+        "runtime",
+        "services",
+        "uids",
+        "transaction",
+    )
+
+    def __init__(self, fail_at=None):
+        self.fail_at = fail_at
+        self.calls = []
+        self.config_writes = 0
+        self.service_starts = 0
+        self.login_calls = 0
+        self.inference_calls = 0
+
+    def _call(self, name):
+        self.calls.append(name)
+        if self.fail_at == name:
+            raise control.ArmAdmissionError(f"{name}_gate_failed")
+
+    def require_exact_install(self, expected_sha):
+        self._call("install")
+        return expected_sha
+
+    def validate_acceptance(self, expected_sha):
+        self._call("acceptance")
+        return "3" * 64
+
+    def validate_gate_b(self, path, expected_sha):
+        self._call("gate_b")
+        assert path == GATE_PATH
+        return "4" * 64
+
+    def validate_provider_readiness(self, request, *, now):
+        self._call("readiness")
+        return control.ReadinessEvidence(
+            receipt_sha256="5" * 64,
+            observed_at="2026-08-24T11:50:00Z",
+            credential_expires_at=request.credential_expires_at,
+            readiness_expires_at="2026-08-24T14:00:00Z",
+        )
+
+    def load_unarmed_configs(self, expected_sha):
+        self._call("configs")
+        return control.ConfigEvidence(
+            control_sha256="6" * 64,
+            worker_sha256="7" * 64,
+            control={"coo_autonomy_armed": False, "coo_operator_harness_armed": False},
+            worker={"operator_harness_armed": False},
+        )
+
+    def require_runtime_quiescent(self, config):
+        self._call("runtime")
+
+    def require_services_stopped(self):
+        self._call("services")
+
+    def require_service_uids_quiescent(self):
+        self._call("uids")
+
+    def require_transaction_absent(self):
+        self._call("transaction")
+
+
+def _arm_request(**overrides):
+    values = {
+        "expected_sha": SHA,
+        "gate_b_receipt": GATE_PATH,
+        "expected_credential_kind": "device-auth",
+        "workspace_binding_class": "company-workspace-admin-attested",
+        "credential_expires_at": "2026-08-25T12:00:00Z",
+    }
+    values.update(overrides)
+    return control.ArmRequest(**values)
+
+
+def test_arm_admission_proves_every_gate_once_in_fixed_order():
+    host = FakeAdmissionHost()
+    admission = control.evaluate_arm_admission(host, _arm_request(), now=NOW)
+
+    assert host.calls == list(FakeAdmissionHost.GATE_ORDER)
+    assert admission.expected_sha == SHA
+    assert admission.acceptance_receipt_sha256 == "3" * 64
+    assert admission.gate_b_receipt_sha256 == "4" * 64
+    assert admission.readiness.receipt_sha256 == "5" * 64
+    assert admission.configs.control_sha256 == "6" * 64
+    assert admission.configs.worker_sha256 == "7" * 64
+    assert admission.predicates == {
+        "acceptance_passed": True,
+        "configs_validated": True,
+        "gate_b_passed": True,
+        "provider_readiness_passed": True,
+        "runtime_quiescent": True,
+        "service_uids_quiescent": True,
+    }
+    assert host.config_writes == host.service_starts == 0
+    assert host.login_calls == host.inference_calls == 0
+
+
+@pytest.mark.parametrize("gate", FakeAdmissionHost.GATE_ORDER)
+def test_every_admission_failure_stops_before_any_mutation_or_provider_effect(gate):
+    host = FakeAdmissionHost(fail_at=gate)
+    with pytest.raises(control.ArmAdmissionError) as raised:
+        control.evaluate_arm_admission(host, _arm_request(), now=NOW)
+    assert raised.value.code == f"{gate}_gate_failed"
+    assert host.calls == list(FakeAdmissionHost.GATE_ORDER[: FakeAdmissionHost.GATE_ORDER.index(gate) + 1])
+    assert host.config_writes == host.service_starts == 0
+    assert host.login_calls == host.inference_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("changes", "code"),
+    [
+        ({"passed": False}, "acceptance_not_passed"),
+        ({"exact_origin_master_sha": "d" * 40}, "acceptance_sha_mismatch"),
+        ({"detached_session_cleanup": "FAIL"}, "acceptance_predicate_failed"),
+        ({"extra": "field"}, "acceptance_fields_mismatch"),
+    ],
+)
+def test_acceptance_summary_is_exact_and_closed(changes, code):
+    value = {
+        "schema_version": "mastermind.executive_host_acceptance/v1",
+        "passed": True,
+        "observed_at": "2026-08-24T11:00:00Z",
+        "exact_origin_master_sha": SHA,
+        "release_root": f"/Library/Application Support/MastermindExecutive/releases/{SHA}",
+        "control_uid": 450,
+        "worker_uid": 451,
+        "success_job_id": "JOB-001",
+        "interrupted_requeued_job_id": "JOB-002",
+        "detached_session_cleanup": "PASS",
+        "terminal_assignment_sealing": "PASS",
+        "lost_workspace_rotation_boundary": "PASS",
+        "backup_restore": "PASS",
+        "no_public_listener": "PASS",
+        "credential_leakage_scan": "PASS",
+        "financial_scheduler_activation": "NOT_REQUESTED_OR_TOUCHED",
+    }
+    value.update(changes)
+    with pytest.raises(control.ArmAdmissionError) as raised:
+        control.validate_acceptance_document(value, expected_sha=SHA)
+    assert raised.value.code == code
+
+
+def test_acceptance_summary_happy_path_returns_no_content():
+    value = {
+        "schema_version": "mastermind.executive_host_acceptance/v1",
+        "passed": True,
+        "observed_at": "2026-08-24T11:00:00Z",
+        "exact_origin_master_sha": SHA,
+        "release_root": f"/Library/Application Support/MastermindExecutive/releases/{SHA}",
+        "control_uid": 450,
+        "worker_uid": 451,
+        "success_job_id": "JOB-001",
+        "interrupted_requeued_job_id": "JOB-002",
+        "detached_session_cleanup": "PASS",
+        "terminal_assignment_sealing": "PASS",
+        "lost_workspace_rotation_boundary": "PASS",
+        "backup_restore": "PASS",
+        "no_public_listener": "PASS",
+        "credential_leakage_scan": "PASS",
+        "financial_scheduler_activation": "NOT_REQUESTED_OR_TOUCHED",
+    }
+    assert control.validate_acceptance_document(value, expected_sha=SHA) is None
+
+
+def _gate_b(**overrides):
+    value = {
+        "schema_version": "mastermind.executive_git_handoff_preflight/v1",
+        "passed": True,
+        "release_sha": SHA,
+        "control": {},
+        "worker": {},
+        "workspace": {},
+        "index_before_service_observation": {},
+        "index_after_service_observation": {},
+        "index_after_worker_preflight": {},
+        "git": {},
+        "persistent_config_unchanged": True,
+        "worker_preflight_passed": True,
+        "workspace_root_restored": True,
+        "stimulus_used": True,
+        "stimulus": {},
+    }
+    value.update(overrides)
+    return value
+
+
+def test_gate_b_reuses_canonical_validator_and_binds_exact_sha():
+    control.validate_gate_b_document(_gate_b(), expected_sha=SHA)
+    with pytest.raises(control.ArmAdmissionError) as raised:
+        control.validate_gate_b_document(_gate_b(release_sha="d" * 40), expected_sha=SHA)
+    assert raised.value.code == "gate_b_sha_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("statuses", "code"),
+    [
+        (["COMPLETED", "FAILED", "CANCELLED", "LOST", "RATE_LIMITED"], None),
+        (["CLAIMED"], "runtime_live_attempt"),
+        (["RUNNING"], "runtime_live_attempt"),
+        (["CHECKPOINTED"], "runtime_live_attempt"),
+        (["CANCEL_REQUESTED"], "runtime_live_attempt"),
+        (["EFFECT_UNKNOWN"], "runtime_attempt_status_unknown"),
+    ],
+)
+def test_runtime_quiescence_classifier_refuses_every_live_or_unknown_attempt(statuses, code):
+    if code is None:
+        assert control.validate_runtime_attempt_statuses(statuses) is None
+    else:
+        with pytest.raises(control.ArmAdmissionError) as raised:
+            control.validate_runtime_attempt_statuses(statuses)
+        assert raised.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("workspace_binding_class", "personal", "workspace_binding_invalid"),
+        ("credential_expires_at", "never", "credential_expiry_invalid"),
+        ("credential_expires_at", "2026-08-24T12:00:00Z", "credential_expired"),
+        ("expected_credential_kind", "operator-copy", "credential_kind_invalid"),
+    ],
+)
+def test_arm_request_is_validated_before_the_first_host_gate(field, value, code):
+    host = FakeAdmissionHost()
+    with pytest.raises(control.ArmAdmissionError) as raised:
+        control.evaluate_arm_admission(host, _arm_request(**{field: value}), now=NOW)
+    assert raised.value.code == code
+    assert host.calls == []
+
+
+def test_production_admission_reuses_readiness_and_opens_runtime_read_only():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "ops/executive_os/autonomy_control.py"
+    ).read_text(encoding="utf-8")
+    production = source.split("class ProductionArmHost", 1)[1]
+    assert "provider_readiness.validate_receipt_file(" in production
+    assert "Runtime.at(" in production
+    assert "create=False" in production
+    assert '["/usr/bin/pgrep", "-U", str(uid)]' in production
+    for forbidden in (
+        "provider_readiness.reserve",
+        "provider_readiness._finalize",
+        "provider_inference_canary",
+        "codex login",
+        "--device-auth",
+        "--with-access-token",
+        "ps -",
+        "command=",
+    ):
+        assert forbidden not in production
+
+
+def test_production_service_gate_requires_both_launchdaemons_absent(monkeypatch):
+    host = control.ProductionArmHost()
+    monkeypatch.setattr(host, "_loaded", lambda label: False)
+    host.require_services_stopped()
+
+    monkeypatch.setattr(
+        host, "_loaded", lambda label: label == control.CONTROL_LABEL
+    )
+    with pytest.raises(control.ArmAdmissionError) as raised:
+        host.require_services_stopped()
+    assert raised.value.code == "services_not_stopped"
+
+
+def test_runtime_classifier_does_not_treat_empty_or_unknown_as_quiescent():
+    with pytest.raises(control.ArmAdmissionError) as raised:
+        control.validate_runtime_attempt_statuses([""])
+    assert raised.value.code == "runtime_attempt_status_unknown"

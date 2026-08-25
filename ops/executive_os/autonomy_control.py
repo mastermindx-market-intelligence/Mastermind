@@ -34,6 +34,8 @@ from control_plane.executive_autonomy import (
     validate_receipt_document,
 )
 from ops.executive_os import release_manifest
+from ops.executive_os import git_handoff_preflight
+from ops.executive_os import provider_readiness
 
 
 STATUS_SCHEMA_VERSION = "mastermind.executive_autonomy_status/v1"
@@ -87,6 +89,41 @@ _HOST_CODES = frozenset(
         "transaction_identity_unsafe",
     }
 )
+_ARM_ADMISSION_CODES = frozenset(
+    {
+        "acceptance_fields_mismatch",
+        "acceptance_gate_failed",
+        "acceptance_not_passed",
+        "acceptance_predicate_failed",
+        "acceptance_schema_mismatch",
+        "acceptance_sha_mismatch",
+        "acceptance_receipt_invalid",
+        "configs_gate_failed",
+        "configs_not_unarmed",
+        "credential_expired",
+        "credential_expiry_invalid",
+        "credential_kind_invalid",
+        "gate_b_gate_failed",
+        "gate_b_invalid",
+        "gate_b_receipt_invalid",
+        "gate_b_sha_mismatch",
+        "install_gate_failed",
+        "readiness_gate_failed",
+        "provider_readiness_invalid",
+        "runtime_attempt_status_unknown",
+        "runtime_gate_failed",
+        "runtime_live_attempt",
+        "runtime_integrity_failed",
+        "services_gate_failed",
+        "services_not_stopped",
+        "service_uid_process_live",
+        "service_uid_process_unknown",
+        "transaction_gate_failed",
+        "transaction_incomplete",
+        "uids_gate_failed",
+        "workspace_binding_invalid",
+    }
+)
 _MAX_JSON_BYTES = 1024 * 1024
 
 
@@ -94,6 +131,14 @@ class HostControlError(RuntimeError):
     def __init__(self, code: str):
         if code not in _HOST_CODES:
             raise ValueError("unknown host-control refusal")
+        self.code = code
+        super().__init__(code)
+
+
+class ArmAdmissionError(RuntimeError):
+    def __init__(self, code: str):
+        if code not in _ARM_ADMISSION_CODES:
+            raise ValueError("unknown arm-admission refusal")
         self.code = code
         super().__init__(code)
 
@@ -108,10 +153,67 @@ class StatusSnapshot:
     refusal_code: str | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class ArmRequest:
+    expected_sha: str
+    gate_b_receipt: Path
+    expected_credential_kind: str
+    workspace_binding_class: str
+    credential_expires_at: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ReadinessEvidence:
+    receipt_sha256: str
+    observed_at: str
+    credential_expires_at: str
+    readiness_expires_at: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ConfigEvidence:
+    control_sha256: str
+    worker_sha256: str
+    control: Mapping[str, Any]
+    worker: Mapping[str, Any]
+
+
+@dataclasses.dataclass(frozen=True)
+class ArmAdmission:
+    expected_sha: str
+    acceptance_receipt_sha256: str
+    gate_b_receipt_sha256: str
+    readiness: ReadinessEvidence
+    configs: ConfigEvidence
+    predicates: Mapping[str, bool]
+
+
 class StatusHost(Protocol):
     def collect_status(
         self, expected_sha: str, *, now: datetime
     ) -> StatusSnapshot: ...
+
+
+class ArmAdmissionHost(Protocol):
+    def require_exact_install(self, expected_sha: str) -> str: ...
+
+    def validate_acceptance(self, expected_sha: str) -> str: ...
+
+    def validate_gate_b(self, path: Path, expected_sha: str) -> str: ...
+
+    def validate_provider_readiness(
+        self, request: ArmRequest, *, now: datetime
+    ) -> ReadinessEvidence: ...
+
+    def load_unarmed_configs(self, expected_sha: str) -> ConfigEvidence: ...
+
+    def require_runtime_quiescent(self, config: ConfigEvidence) -> None: ...
+
+    def require_services_stopped(self) -> None: ...
+
+    def require_service_uids_quiescent(self) -> None: ...
+
+    def require_transaction_absent(self) -> None: ...
 
 
 class _StoreOnce(argparse.Action):
@@ -177,6 +279,151 @@ def _iso(value: datetime | None) -> str | None:
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+_ACCEPTANCE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "passed",
+        "observed_at",
+        "exact_origin_master_sha",
+        "release_root",
+        "control_uid",
+        "worker_uid",
+        "success_job_id",
+        "interrupted_requeued_job_id",
+        "detached_session_cleanup",
+        "terminal_assignment_sealing",
+        "lost_workspace_rotation_boundary",
+        "backup_restore",
+        "no_public_listener",
+        "credential_leakage_scan",
+        "financial_scheduler_activation",
+    }
+)
+_ACCEPTANCE_PASS_FIELDS = (
+    "detached_session_cleanup",
+    "terminal_assignment_sealing",
+    "lost_workspace_rotation_boundary",
+    "backup_restore",
+    "no_public_listener",
+    "credential_leakage_scan",
+)
+_TERMINAL_ATTEMPT_STATUSES = frozenset(
+    {"RATE_LIMITED", "FAILED", "LOST", "COMPLETED", "CANCELLED"}
+)
+_LIVE_ATTEMPT_STATUSES = frozenset(
+    {"CLAIMED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED"}
+)
+
+
+def validate_acceptance_document(
+    payload: Mapping[str, Any], *, expected_sha: str
+) -> None:
+    if not isinstance(payload, Mapping) or set(payload) != _ACCEPTANCE_FIELDS:
+        raise ArmAdmissionError("acceptance_fields_mismatch")
+    if payload.get("schema_version") != "mastermind.executive_host_acceptance/v1":
+        raise ArmAdmissionError("acceptance_schema_mismatch")
+    if payload.get("passed") is not True:
+        raise ArmAdmissionError("acceptance_not_passed")
+    if payload.get("exact_origin_master_sha") != expected_sha:
+        raise ArmAdmissionError("acceptance_sha_mismatch")
+    expected_release = os.fspath(SYSTEM_ROOT / "releases" / expected_sha)
+    if payload.get("release_root") != expected_release:
+        raise ArmAdmissionError("acceptance_sha_mismatch")
+    if any(payload.get(field) != "PASS" for field in _ACCEPTANCE_PASS_FIELDS):
+        raise ArmAdmissionError("acceptance_predicate_failed")
+    if payload.get("financial_scheduler_activation") != "NOT_REQUESTED_OR_TOUCHED":
+        raise ArmAdmissionError("acceptance_predicate_failed")
+    if (
+        type(payload.get("control_uid")) is not int
+        or type(payload.get("worker_uid")) is not int
+        or payload["control_uid"] == payload["worker_uid"]
+    ):
+        raise ArmAdmissionError("acceptance_predicate_failed")
+    for field in ("success_job_id", "interrupted_requeued_job_id", "observed_at"):
+        if not isinstance(payload.get(field), str) or not payload[field]:
+            raise ArmAdmissionError("acceptance_predicate_failed")
+
+
+def validate_gate_b_document(
+    payload: Mapping[str, Any], *, expected_sha: str
+) -> None:
+    try:
+        git_handoff_preflight.validate_receipt(payload)
+    except (git_handoff_preflight.PreflightError, TypeError, ValueError) as exc:
+        raise ArmAdmissionError("gate_b_invalid") from exc
+    if payload.get("passed") is not True:
+        raise ArmAdmissionError("gate_b_invalid")
+    if payload.get("release_sha") != expected_sha:
+        raise ArmAdmissionError("gate_b_sha_mismatch")
+
+
+def validate_runtime_attempt_statuses(statuses: Sequence[str]) -> None:
+    for status_value in statuses:
+        if status_value in _LIVE_ATTEMPT_STATUSES:
+            raise ArmAdmissionError("runtime_live_attempt")
+        if status_value not in _TERMINAL_ATTEMPT_STATUSES:
+            raise ArmAdmissionError("runtime_attempt_status_unknown")
+
+
+def _request_expiry(request: ArmRequest, *, now: datetime) -> datetime:
+    if request.expected_credential_kind not in {
+        "device-auth",
+        "personal-access-token",
+        "service-account",
+    }:
+        raise ArmAdmissionError("credential_kind_invalid")
+    if request.workspace_binding_class != "company-workspace-admin-attested":
+        raise ArmAdmissionError("workspace_binding_invalid")
+    if (
+        not isinstance(request.credential_expires_at, str)
+        or _TIMESTAMP_RE.fullmatch(request.credential_expires_at) is None
+    ):
+        raise ArmAdmissionError("credential_expiry_invalid")
+    try:
+        expiry = datetime.strptime(
+            request.credential_expires_at, "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise ArmAdmissionError("credential_expiry_invalid") from exc
+    if expiry <= now.astimezone(UTC):
+        raise ArmAdmissionError("credential_expired")
+    return expiry
+
+
+def evaluate_arm_admission(
+    host: ArmAdmissionHost, request: ArmRequest, *, now: datetime
+) -> ArmAdmission:
+    """Evaluate all arm gates in fixed order without mutating host state."""
+
+    _request_expiry(request, now=now)
+    host.require_exact_install(request.expected_sha)
+    acceptance_digest = host.validate_acceptance(request.expected_sha)
+    gate_b_digest = host.validate_gate_b(
+        request.gate_b_receipt, request.expected_sha
+    )
+    readiness = host.validate_provider_readiness(request, now=now)
+    configs = host.load_unarmed_configs(request.expected_sha)
+    host.require_runtime_quiescent(configs)
+    host.require_services_stopped()
+    host.require_service_uids_quiescent()
+    host.require_transaction_absent()
+    return ArmAdmission(
+        expected_sha=request.expected_sha,
+        acceptance_receipt_sha256=acceptance_digest,
+        gate_b_receipt_sha256=gate_b_digest,
+        readiness=readiness,
+        configs=configs,
+        predicates={
+            "acceptance_passed": True,
+            "configs_validated": True,
+            "gate_b_passed": True,
+            "provider_readiness_passed": True,
+            "runtime_quiescent": True,
+            "service_uids_quiescent": True,
+        },
+    )
+
+
 def status_document(snapshot: StatusSnapshot, *, now: datetime) -> dict[str, Any]:
     evidence = snapshot.evidence
     return {
@@ -230,7 +477,13 @@ def _has_acl(path: Path) -> bool:
     return completed.returncode != 0 or completed.stdout.strip().endswith(b"+")
 
 
-def _read_root_file(path: Path, *, modes: frozenset[int], gid: int | None = None) -> tuple[bytes, os.stat_result]:
+def _read_root_file(
+    path: Path,
+    *,
+    modes: frozenset[int],
+    uid: int = 0,
+    gid: int | None = None,
+) -> tuple[bytes, os.stat_result]:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     descriptor = -1
     try:
@@ -238,7 +491,7 @@ def _read_root_file(path: Path, *, modes: frozenset[int], gid: int | None = None
         info = os.fstat(descriptor)
         if (
             not stat.S_ISREG(info.st_mode)
-            or info.st_uid != 0
+            or info.st_uid != uid
             or (gid is not None and info.st_gid != gid)
             or stat.S_IMODE(info.st_mode) not in modes
             or info.st_nlink != 1
@@ -258,8 +511,14 @@ def _read_root_file(path: Path, *, modes: frozenset[int], gid: int | None = None
             os.close(descriptor)
 
 
-def _root_json(path: Path, *, modes: frozenset[int], gid: int | None = None) -> tuple[dict[str, Any], bytes]:
-    raw, _info = _read_root_file(path, modes=modes, gid=gid)
+def _root_json(
+    path: Path,
+    *,
+    modes: frozenset[int],
+    uid: int = 0,
+    gid: int | None = None,
+) -> tuple[dict[str, Any], bytes]:
+    raw, _info = _read_root_file(path, modes=modes, uid=uid, gid=gid)
     try:
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -539,6 +798,197 @@ class ProductionStatusHost:
             ),
             refusal_code=refusal,
         )
+
+
+class ProductionArmHost(ProductionStatusHost):
+    """Read-only production admission for the later arm transaction."""
+
+    def require_exact_install(self, expected_sha: str) -> str:
+        try:
+            self._require_host()
+            return self._release_identity(expected_sha)
+        except HostControlError as exc:
+            raise ArmAdmissionError("install_gate_failed") from exc
+
+    def validate_acceptance(self, expected_sha: str) -> str:
+        try:
+            control_identity = pwd.getpwnam(CONTROL_USER)
+            control_group = grp.getgrnam(CONTROL_GROUP)
+            receipt_root = (
+                RUNTIME_ROOT / "control" / "acceptance" / expected_sha
+            )
+            root_info = receipt_root.lstat()
+            if (
+                stat.S_ISLNK(root_info.st_mode)
+                or not stat.S_ISDIR(root_info.st_mode)
+                or root_info.st_uid != control_identity.pw_uid
+                or root_info.st_gid != control_group.gr_gid
+                or stat.S_IMODE(root_info.st_mode) != 0o700
+                or _has_acl(receipt_root)
+            ):
+                raise ArmAdmissionError("acceptance_receipt_invalid")
+            summary, raw = _root_json(
+                receipt_root / "acceptance-summary.json",
+                modes=frozenset({0o400}),
+                uid=control_identity.pw_uid,
+                gid=control_group.gr_gid,
+            )
+            validate_acceptance_document(summary, expected_sha=expected_sha)
+            return hashlib.sha256(raw).hexdigest()
+        except ArmAdmissionError:
+            raise
+        except (HostControlError, KeyError, OSError) as exc:
+            raise ArmAdmissionError("acceptance_receipt_invalid") from exc
+
+    def validate_gate_b(self, path: Path, expected_sha: str) -> str:
+        try:
+            receipt, raw = _root_json(
+                path,
+                modes=frozenset({0o600}),
+                uid=0,
+                gid=0,
+            )
+            validate_gate_b_document(receipt, expected_sha=expected_sha)
+            return hashlib.sha256(raw).hexdigest()
+        except ArmAdmissionError:
+            raise
+        except (HostControlError, OSError) as exc:
+            raise ArmAdmissionError("gate_b_receipt_invalid") from exc
+
+    def validate_provider_readiness(
+        self, request: ArmRequest, *, now: datetime
+    ) -> ReadinessEvidence:
+        try:
+            raw, _info = _read_root_file(
+                PROVIDER_READINESS_RECEIPT,
+                modes=frozenset({0o400}),
+                uid=0,
+                gid=0,
+            )
+            receipt = provider_readiness.validate_receipt_file(
+                PROVIDER_READINESS_RECEIPT,
+                auth_path=provider_readiness.AUTH_PATH,
+                binary_path=provider_readiness.CODEX_BINARY,
+                expected_kind=request.expected_credential_kind,
+                workspace_binding_class=request.workspace_binding_class,
+                credential_expires_at=request.credential_expires_at,
+            )
+            if receipt.get("passed") is not True:
+                raise ArmAdmissionError("provider_readiness_invalid")
+            observed = receipt.get("observed_at")
+            credential_expiry = receipt.get("credential_expires_at")
+            readiness_expiry = receipt.get("readiness_expires_at")
+            if (
+                not isinstance(observed, str)
+                or not isinstance(credential_expiry, str)
+                or not isinstance(readiness_expiry, str)
+            ):
+                raise ArmAdmissionError("provider_readiness_invalid")
+            deadline = _parse_timestamp(readiness_expiry)
+            if (
+                deadline is None
+                or deadline < now.astimezone(UTC) + provider_readiness.MIN_ACCEPTANCE_MARGIN
+            ):
+                raise ArmAdmissionError("provider_readiness_invalid")
+            return ReadinessEvidence(
+                receipt_sha256=hashlib.sha256(raw).hexdigest(),
+                observed_at=observed,
+                credential_expires_at=credential_expiry,
+                readiness_expires_at=readiness_expiry,
+            )
+        except ArmAdmissionError:
+            raise
+        except (HostControlError, provider_readiness.ReadinessError, OSError) as exc:
+            raise ArmAdmissionError("provider_readiness_invalid") from exc
+
+    def load_unarmed_configs(self, expected_sha: str) -> ConfigEvidence:
+        try:
+            control, worker, control_digest, worker_digest = self._configs()
+        except (HostControlError, KeyError, OSError) as exc:
+            raise ArmAdmissionError("configs_gate_failed") from exc
+        if (
+            control.get("proof_base_sha") != expected_sha
+            or control.get("coo_autonomy_armed") is not False
+            or control.get("coo_operator_harness_armed") is not False
+            or worker.get("operator_harness_armed") is not False
+        ):
+            raise ArmAdmissionError("configs_not_unarmed")
+        return ConfigEvidence(
+            control_sha256=control_digest,
+            worker_sha256=worker_digest,
+            control=control,
+            worker=worker,
+        )
+
+    def require_runtime_quiescent(self, config: ConfigEvidence) -> None:
+        try:
+            from control_plane.executive_runtime import Runtime
+
+            root_value = config.control.get("runtime_root")
+            if not isinstance(root_value, str) or not Path(root_value).is_absolute():
+                raise ArmAdmissionError("runtime_integrity_failed")
+            runtime = Runtime.at(Path(root_value), create=False)
+            with runtime.store.read() as connection:
+                quick_check = [
+                    str(row[0]) for row in connection.execute("PRAGMA quick_check")
+                ]
+                foreign_keys = list(connection.execute("PRAGMA foreign_key_check"))
+                journal_row = connection.execute("PRAGMA journal_mode").fetchone()
+                statuses = [
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT status FROM attempts ORDER BY created_at_ms,attempt_id"
+                    )
+                ]
+            if (
+                quick_check != ["ok"]
+                or foreign_keys
+                or journal_row is None
+                or str(journal_row[0]).lower() != "wal"
+            ):
+                raise ArmAdmissionError("runtime_integrity_failed")
+            validate_runtime_attempt_statuses(statuses)
+        except ArmAdmissionError:
+            raise
+        except Exception as exc:
+            raise ArmAdmissionError("runtime_integrity_failed") from exc
+
+    def require_services_stopped(self) -> None:
+        try:
+            loaded = (self._loaded(CONTROL_LABEL), self._loaded(WORKER_LABEL))
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ArmAdmissionError("services_gate_failed") from exc
+        if any(loaded):
+            raise ArmAdmissionError("services_not_stopped")
+
+    def require_service_uids_quiescent(self) -> None:
+        try:
+            identities = (
+                pwd.getpwnam(CONTROL_USER).pw_uid,
+                pwd.getpwnam("_mastermind_worker").pw_uid,
+            )
+        except KeyError as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        for uid in identities:
+            try:
+                completed = subprocess.run(
+                    ["/usr/bin/pgrep", "-U", str(uid)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=5,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise ArmAdmissionError("service_uid_process_unknown") from exc
+            if completed.returncode == 0 and completed.stdout.strip():
+                raise ArmAdmissionError("service_uid_process_live")
+            if completed.returncode not in {0, 1}:
+                raise ArmAdmissionError("service_uid_process_unknown")
+
+    def require_transaction_absent(self) -> None:
+        if AUTONOMY_TRANSACTION.exists() or AUTONOMY_TRANSACTION.is_symlink():
+            raise ArmAdmissionError("transaction_incomplete")
 
 
 def main(
