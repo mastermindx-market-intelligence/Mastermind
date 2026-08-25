@@ -542,10 +542,25 @@ verify_pinned_python_available() {
   }
 }
 
+require_autonomy_disarmed_for_credential_mutation() {
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/credential_rotation_interlock.py" \
+    >/dev/null || {
+      /bin/echo "credential mutation requires a verified autonomy disarm" >&2
+      exit 65
+    }
+}
+
 if [ "$RECOVER_READINESS_TRANSACTION" = "true" ]; then
   verify_pinned_python_available
   recover_readiness_transaction_lock
   exit 0
+fi
+
+if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ] \
+  || [ "$ENROLL_PERSONAL_ACCESS_TOKEN" = "true" ] \
+  || [ "$REAUTHORIZE_DEVICE" = "true" ]; then
+  verify_pinned_python_available
+  require_autonomy_disarmed_for_credential_mutation
 fi
 
 if [ "$VERIFY_READY" = "true" ] || [ "$ENROLL_SERVICE_ACCOUNT" = "true" ] \

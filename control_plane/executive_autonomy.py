@@ -134,6 +134,7 @@ _REFUSAL_CODES = frozenset(
         "receipt_too_large",
         "receipt_not_utf8_json",
         "receipt_not_armed",
+        "receipt_not_disarmed",
         "runtime_role_invalid",
     }
 )
@@ -452,6 +453,39 @@ def validate_runtime_guard_document(
     )
 
 
+def validate_disarmed_interlock_document(
+    payload: Mapping[str, Any],
+    *,
+    metadata: ReceiptMetadata,
+    control_config_sha256: str,
+    worker_config_sha256: str,
+    now: datetime | None = None,
+) -> ArmBinding:
+    """Prove credential mutation is bound to the current disarmed configs."""
+
+    if payload.get("state") != "DISARMED":
+        raise AutonomyRefusal("receipt_not_disarmed")
+    expectation = AutonomyExpectation(
+        release_sha=str(payload.get("release_sha") or ""),
+        control_config_sha256=_require_digest(control_config_sha256),
+        worker_config_sha256=_require_digest(worker_config_sha256),
+        provider_readiness_receipt_sha256=_require_digest(
+            payload.get("provider_readiness_receipt_sha256")
+        ),
+        capability_policy_digest=CAPABILITY_POLICY_DIGEST,
+        execution_profile_digest=EXECUTION_PROFILE_DIGEST,
+        native_helper_grant_digest=NATIVE_HELPER_GRANT_DIGEST,
+        security_config_digest=SECURITY_CONFIG_DIGEST,
+    )
+    return validate_receipt_document(
+        payload,
+        metadata=metadata,
+        expected=expectation,
+        now=now,
+        require_current=False,
+    )
+
+
 def _macos_acl(path: Path) -> bool:
     if sys.platform != "darwin":
         return False
@@ -619,4 +653,5 @@ __all__ = [
     "validate_receipt_file",
     "validate_runtime_guard_document",
     "validate_runtime_guard_file",
+    "validate_disarmed_interlock_document",
 ]

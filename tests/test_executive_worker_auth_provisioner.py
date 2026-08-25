@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import os
+import importlib.util
 import signal
 import stat
 import subprocess
 import time
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +131,69 @@ def test_readiness_and_rotation_share_one_crash_durable_transaction_lock() -> No
     replacement = source.split("prepare_explicit_replacement() {", 1)[1].split("\n}", 1)[0]
     assert "invalidate_readiness_receipt" in replacement
     assert "run_codex_as_worker logout" in replacement
+
+
+def test_credential_mutation_requires_verified_disarm_before_any_effect() -> None:
+    source = _source()
+    gate = source.index("require_autonomy_disarmed_for_credential_mutation\nfi")
+    assert '"$SCRIPT_DIR/credential_rotation_interlock.py"' in source
+    assert gate < source.index("acquire_readiness_transaction_lock\nfi")
+    assert gate < source.index('if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then')
+    assert gate < source.index('if [ "$ENROLL_PERSONAL_ACCESS_TOKEN" = "true" ]; then')
+    assert gate < source.index('if [ "$REAUTHORIZE_DEVICE" = "true" ]; then')
+    interlock = source.split(
+        "require_autonomy_disarmed_for_credential_mutation() {", 1
+    )[1].split("\n}", 1)[0]
+    assert "AUTH_PATH" not in interlock
+    assert "auth.json" not in interlock
+    assert "login" not in interlock
+    assert "logout" not in interlock
+
+
+def test_credential_interlock_pure_state_rejects_every_armed_or_mixed_bit() -> None:
+    path = ROOT / "ops" / "executive_os" / "credential_rotation_interlock.py"
+    spec = importlib.util.spec_from_file_location("credential_rotation_interlock", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    CredentialInterlockError = module.CredentialInterlockError
+    evaluate_credential_mutation_state = module.evaluate_credential_mutation_state
+
+    disarmed_control = {
+        "coo_autonomy_armed": False,
+        "coo_operator_harness_armed": False,
+    }
+    disarmed_worker = {"operator_harness_armed": False}
+    evaluate_credential_mutation_state(
+        disarmed_control,
+        disarmed_worker,
+        transaction_present=False,
+    )
+    cases = (
+        (
+            {**disarmed_control, "coo_autonomy_armed": True},
+            disarmed_worker,
+            False,
+        ),
+        (
+            {**disarmed_control, "coo_operator_harness_armed": True},
+            disarmed_worker,
+            False,
+        ),
+        (
+            disarmed_control,
+            {"operator_harness_armed": True},
+            False,
+        ),
+        (disarmed_control, disarmed_worker, True),
+    )
+    for control, worker, transaction_present in cases:
+        with pytest.raises(CredentialInterlockError):
+            evaluate_credential_mutation_state(
+                control,
+                worker,
+                transaction_present=transaction_present,
+            )
 
 
 def test_catchable_termination_preserves_lock_while_child_survives(tmp_path: Path) -> None:

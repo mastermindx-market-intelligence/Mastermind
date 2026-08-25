@@ -445,3 +445,64 @@ def test_runtime_guard_never_accepts_a_disarmed_receipt():
             now=NOW,
         )
     assert raised.value.code == "receipt_not_armed"
+
+
+def test_credential_rotation_interlock_requires_matching_disarmed_receipt():
+    value = _receipt(
+        state="DISARMED",
+        acceptance_receipt_sha256="0" * 64,
+        gate_b_receipt_sha256="0" * 64,
+        provider_readiness_receipt_sha256="0" * 64,
+        readiness_observed_at="2026-08-24T12:00:00Z",
+        credential_expires_at="2026-08-24T12:00:00Z",
+        readiness_expires_at="2026-08-24T12:00:00Z",
+        expected_credential_kind="none",
+        workspace_binding_class="none",
+        predicates={
+            "acceptance_passed": False,
+            "configs_validated": True,
+            "gate_b_passed": False,
+            "provider_readiness_passed": False,
+            "runtime_quiescent": False,
+            "service_uids_quiescent": True,
+        },
+        capability_policy_digest=autonomy.CAPABILITY_POLICY_DIGEST,
+        execution_profile_digest=autonomy.EXECUTION_PROFILE_DIGEST,
+        native_helper_grant_digest=autonomy.NATIVE_HELPER_GRANT_DIGEST,
+        security_config_digest=autonomy.SECURITY_CONFIG_DIGEST,
+    )
+    binding = autonomy.validate_disarmed_interlock_document(
+        value,
+        metadata=_metadata(),
+        control_config_sha256=CONTROL_DIGEST,
+        worker_config_sha256=WORKER_DIGEST,
+        now=NOW,
+    )
+    assert binding.state == "DISARMED"
+
+    with pytest.raises(autonomy.AutonomyRefusal) as raised:
+        autonomy.validate_disarmed_interlock_document(
+            value,
+            metadata=_metadata(),
+            control_config_sha256="f" * 64,
+            worker_config_sha256=WORKER_DIGEST,
+            now=NOW,
+        )
+    assert raised.value.code == "control_config_digest_mismatch"
+
+
+def test_credential_rotation_interlock_rejects_armed_receipt():
+    with pytest.raises(autonomy.AutonomyRefusal) as raised:
+        autonomy.validate_disarmed_interlock_document(
+            _receipt(
+                capability_policy_digest=autonomy.CAPABILITY_POLICY_DIGEST,
+                execution_profile_digest=autonomy.EXECUTION_PROFILE_DIGEST,
+                native_helper_grant_digest=autonomy.NATIVE_HELPER_GRANT_DIGEST,
+                security_config_digest=autonomy.SECURITY_CONFIG_DIGEST,
+            ),
+            metadata=_metadata(),
+            control_config_sha256=CONTROL_DIGEST,
+            worker_config_sha256=WORKER_DIGEST,
+            now=NOW,
+        )
+    assert raised.value.code == "receipt_not_disarmed"

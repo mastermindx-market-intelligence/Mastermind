@@ -380,6 +380,7 @@ rollback retains the marker and returns `EFFECT_UNKNOWN`.
 **Files:**
 
 - Modify: `ops/executive_os/provision-worker-auth.sh`
+- Create: `ops/executive_os/credential_rotation_interlock.py`
 - Modify: `tests/test_executive_worker_auth_provisioner.py`
 - Modify: `ops/executive_os/HOST_PREREQUISITES.md`
 - Modify: `tests/test_executive_python_runtime_provisioner.py`
@@ -390,7 +391,9 @@ rollback retains the marker and returns `EFFECT_UNKNOWN`.
   login. `--verify-only` and `--verify-ready` remain read-only and allowed.
 - [ ] **Step 2: Implement the fixed disarm interlock.** It does not call the arm
   CLI or edit configs; it refuses with a bounded message directing the operator
-  to the explicit shrink-only command.
+  to the explicit shrink-only command. It requires both exact config arm bits
+  false, no autonomy transaction marker, and—when a canonical receipt exists—a
+  fully validated `DISARMED` receipt bound to both current config digests.
 - [ ] **Step 3: Write the exact host journey.** Install false; native enroll;
   readiness; Gate B; acceptance; status; arm; typed intent proof; disarm
   rehearsal; unchanged-input final re-arm; expiry/rotation recovery. Include
@@ -402,6 +405,7 @@ rollback retains the marker and returns `EFFECT_UNKNOWN`.
     tests/test_executive_worker_auth_provisioner.py \
     tests/test_executive_python_runtime_provisioner.py
   git add ops/executive_os/provision-worker-auth.sh \
+    ops/executive_os/credential_rotation_interlock.py \
     ops/executive_os/HOST_PREREQUISITES.md \
     tests/test_executive_worker_auth_provisioner.py \
     tests/test_executive_python_runtime_provisioner.py

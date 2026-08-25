@@ -666,7 +666,9 @@ else
 fi
 [ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
   && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
-  && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] || {
+  && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+  && [ -f "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] \
+  && [ ! -L "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] || {
   /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
   exit 65
 }

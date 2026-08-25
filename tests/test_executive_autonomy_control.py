@@ -268,6 +268,7 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     assert '"coo_operator_harness_armed": False' in install
     assert "autonomy-control.sh" in install
     assert "autonomy_control.py" in install
+    assert "credential_rotation_interlock.py" in install
 
 
 class FakeAdmissionHost:
