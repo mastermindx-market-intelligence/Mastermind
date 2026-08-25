@@ -41,7 +41,7 @@ sources:
     status: present
   github:
     default_branch_sha: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-    carrier_head_sha: ffffffffffffffffffffffffffffffffffffffff
+    carrier_head_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 obligations:
   - id: DUR-01
