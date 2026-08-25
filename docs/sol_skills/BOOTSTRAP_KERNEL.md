@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: bootstrap_kernel
 ---
@@ -32,6 +32,7 @@ For substantial Mastermind work:
 11. Never create a duplicate lifecycle, queue, identity, memory, grounding, retry or control plane.
 12. Green CI, merge, Slack delivery and QUEUED admission are distinct from execution, production proof and final acceptance.
 13. After material work, update the correct durable records so the next fresh session does not need this chat to recover the ruling.
+14. Before any continuation handoff, reconcile current GitHub + Agent OS state, subtract completed/superseded/rejected/do-not-redo work, and dispatch only the unresolved delta. A verification rerun requires a named receipt-invalidating change.
 ```
 
 ## Project configuration law

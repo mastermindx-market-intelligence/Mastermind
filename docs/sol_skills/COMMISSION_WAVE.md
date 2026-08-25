@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: commission_wave
 ---
@@ -70,6 +70,40 @@ or a deliberately inert architecture/source-law slice whose completion definitio
 what it does **not** make live.
 
 Reject commissions such as “build the whole vision,” “improve Executive OS,” or “finish Slack.”
+
+## Handoff mode declaration
+
+Every substantial handoff declares one mode:
+
+* `NEW_WAVE` — a genuinely new bounded wave is being opened. A comprehensive
+  context packet is allowed because the operator may be fresh.
+* `CONTINUATION_DELTA` — resuming the same PR/carrier, the same wave after a
+  worker return, the same program after a stop/review/reconciliation, or a
+  successor action whose scope depends on prior completed obligations.
+  Delta-first: historical work may appear as evidence, but only IDs in the
+  declared execution section are executable.
+
+## Gate C — Completion Subtraction Gate (mandatory for CONTINUATION_DELTA)
+
+Before constructing a `CONTINUATION_DELTA` handoff, load
+`CONTINUATION_DELTA_CONTRACT.md` and:
+
+1. load the current Agent OS workstream/latest handoff when one exists;
+2. pin the current GitHub carrier/default branch (exact pickup SHA);
+3. reconcile every prior obligation into exactly one disposition;
+4. reconcile every binding `do_not_redo`;
+5. derive the `NEXT_WORKSET` (subtract `DONE`/`SUPERSEDED`/`REJECTED`/binding DNR);
+6. run the deterministic commission lint
+   (`python3 scripts/sol_commission_lint.py <handoff> [--agentos-context <bundle>]`);
+7. only then emit the operator handoff.
+
+Law: historical evidence can be described anywhere; executable scope exists
+only in the declared execution section. If an operator obeyed every executable
+instruction literally from the pickup SHA, no completed/superseded/rejected
+effect may be repeated. If no executable work remains, emit
+`NOTHING_TO_COMMISSION` instead of a commission. The lint is procedurally
+mandatory here and technically advisory for free-form chat handoffs — it
+authorizes nothing (`CONTINUATION_DELTA_CONTRACT.md` §Enforcement honesty).
 
 ## Step 4 — Build the complete operator handoff
 

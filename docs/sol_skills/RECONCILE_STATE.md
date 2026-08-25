@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: reconcile_state
 ---
@@ -187,6 +187,26 @@ Repair the owning/projection layer only:
 * runtime canonical defect → dedicated Executive repair under its architecture.
 
 After a material cross-session reconciliation, use `CLOSEOUT.md` so the next session can recover it.
+
+## Step 13 — Instruction census for duplication/replay disputes
+
+When a user, worker, or source claims a handoff repeats completed work, do not
+infer duplication merely because completed work is described in the packet.
+First identify the declared executable surface (`execution.ordered` /
+`execution.parallel`, or imperative sentences in a legacy handoff), then
+compare those instructions against current canonical completion evidence.
+Repeated context is verbosity; repeated executable effect is replay. Repair
+the actual class — a false concession spawns an unnecessary replacement
+handoff; a false denial replays completed work.
+
+Required output for this disagreement class:
+
+```text
+Executable instructions
+Completed effects referenced only as context
+Actual replay collisions
+Correction required
+```
 
 ## Reconciliation output
 

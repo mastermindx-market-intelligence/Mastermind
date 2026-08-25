@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.1.0
 minimum_bootstrap_major: 1
 skill: cold_start
 ---
@@ -122,7 +122,23 @@ Before that capability exists, do not fabricate it or treat an older MCP/state f
 
 For a future modifying action, stale SOL_STATE beyond the accepted freshness budget blocks modification.
 
-## Step 8 — Return the exact next action
+## Step 8 — Detect durable-state lag (Continuation Delta Law)
+
+For existing workstreams:
+
+* compare Agent OS `next_action` / wave status / latest handoff against current GitHub evidence
+  (carrier state, merged PRs, heads);
+* if GitHub materially advanced beyond the organizational record — a wave the record calls
+  current/next has already completed, merged, or been superseded — classify `DURABLE_STATE_STALE`;
+* do not dispatch an action that depends on the stale sequence;
+* repair the owning Agent OS layer (supersede with a newer record/handoff; never rewrite the
+  historical one) or explicitly hold until repaired.
+
+The hard shape to survive: a RECENTLY REPAIRED record can itself be stale — a reconciliation
+commit hours old does not prove currency if the carrier completed after it. Freshness is judged
+against GitHub evidence, never against how recently the record was written.
+
+## Step 9 — Return the exact next action
 
 The recommendation must be an **observable capability step**, not “continue work.” State:
 
@@ -131,7 +147,8 @@ The recommendation must be an **observable capability step**, not “continue wo
 * why it is the next dependency rather than merely available work;
 * what is explicitly held in parallel;
 * what evidence will make the step complete;
-* what would cause a return to Sol instead of proceeding.
+* what would cause a return to Sol instead of proceeding;
+* `Durable-state freshness: CURRENT | DURABLE_STATE_STALE` (from Step 8).
 
 If the answer is a Chairman/admin gate, name the single external action precisely.
 
