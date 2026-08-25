@@ -1,0 +1,13 @@
+{
+  "schema": "mastermind.sol_commission_context.v1",
+  "note": "The REPAIRED organizational do_not_redo set for WS:INSTITUTIONAL-PRODUCT-EXPERIENCE-V2 after merged #6337. Statement-identical to the 2026-08-25 Agent OS handoff shipped by the macro records repair PR.",
+  "do_not_redo": [
+    "Do not redispatch R3B or R3B_HANDOFF_DRAFT.md — the R3B reference cycle completed as merge f5b0094614b688e8b66552e35ac65d23656fbc64 and was superseded by R3B.1/R3B.2.",
+    "Do not redo R3B.1 — the successor correction completed as merge 780cbcf6d2d2c7b32b87a4674929e1732e5ad036 and its verdict lineage was finally ratified via the #6337 F2 ruling.",
+    "Do not redo the #6388 workstream reconciliation (merge 4faf00a44510a41f968a272a6fae5d8acb7890be) — repaired-then-superseded state is repaired forward, never replayed.",
+    "Do not redo F1/F2 — both closed inside merged #6337 (F1 top-level artifact_sha mirror; F2 branch-side R3B.1 verdict ratified).",
+    "Do not rerun the four final R3B.2 critics absent a named receipt-invalidating event — their receipts are durable under research/reference_integrity/mastermind-xpv2-sector-r3b-2/reviews/.",
+    "Do not redo or re-litigate the #6337 approval/merge — Sol ruled APPROVE_WITH_CONDITIONS; merge 8b303a58e8c0b807ef34d1913c4cacf5bb346e2d is canonical.",
+    "Do not start R3C or treat the five carried R3C-owned conditions as open executable work — R3C implementation is explicitly not authorized."
+  ]
+}

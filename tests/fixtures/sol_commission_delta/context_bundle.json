@@ -1,0 +1,7 @@
+{
+  "schema": "mastermind.sol_commission_context.v1",
+  "note": "Bounded Agent OS context bundle for the green corpus base. do_not_redo statements here must each appear (normalized) in the manifest's do_not_redo_reconciliation.",
+  "do_not_redo": [
+    "Do not re-derive the six-lane archaeology; extend, don't re-census."
+  ]
+}
