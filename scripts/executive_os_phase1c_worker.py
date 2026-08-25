@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import signal
 import stat
 import sys
@@ -26,6 +27,11 @@ from control_plane.codex_worker import (
     load_codex_attestation_receipt,
 )
 from control_plane.codex_operator_adapter import CodexOperatorAdapter
+from control_plane.executive_autonomy import (
+    AutonomyRefusal,
+    sha256_file,
+    validate_runtime_guard_file,
+)
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
@@ -41,6 +47,9 @@ from control_plane.executive_ambient_process import DarwinDistnotedClassifier
 
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
+AUTONOMY_RECEIPT = Path(
+    "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
+)
 _OPENAI_TEAM_IDENTIFIER = "2DC432GLL2"
 _REVIEWED_AMBIENT_GID_SETS = (
     frozenset({12, 61, 100}),
@@ -132,7 +141,11 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     return value
 
 
-def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
+def _build_broker(
+    config: dict[str, Any],
+    *,
+    autonomy_guard=None,
+) -> ExecutiveWorkerBroker:
     policy = BrokerPolicy(
         control_uid=int(config["control_uid"]),
         worker_uid=int(config["worker_uid"]),
@@ -223,11 +236,12 @@ def _build_broker(config: dict[str, Any]) -> ExecutiveWorkerBroker:
         sweeper,
         operator_adapter_factory=operator_adapter_factory,
         operator_harness_armed=bool(config["operator_harness_armed"]),
+        autonomy_guard=autonomy_guard,
     )
 
 
-async def _serve(config: dict[str, Any]) -> None:
-    broker = _build_broker(config)
+async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
+    broker = _build_broker(config, autonomy_guard=autonomy_guard)
     activated = activate_launchd_socket(str(config["launchd_socket_name"]))
     task = asyncio.create_task(broker.serve(activated))
     stopping = asyncio.Event()
@@ -310,8 +324,32 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-        config = _load_config(args.config, require_root_owner=True)
-        asyncio.run(_serve(config))
+        config_path = Path(args.config)
+        config = _load_config(config_path, require_root_owner=True)
+        autonomy_guard = None
+        if config.get("operator_harness_armed") is True:
+            own_config_sha256 = sha256_file(config_path)
+            release_sha = _ROOT.name
+            if re.fullmatch(r"[0-9a-f]{40}", release_sha) is None:
+                raise WorkerConfigError(
+                    "armed worker release root is not an exact commit SHA"
+                )
+
+            def require_autonomy() -> None:
+                try:
+                    validate_runtime_guard_file(
+                        AUTONOMY_RECEIPT,
+                        role="worker",
+                        own_config_sha256=own_config_sha256,
+                        release_sha=release_sha,
+                    )
+                except AutonomyRefusal as exc:
+                    raise WorkerConfigError(
+                        "Executive autonomy receipt refused"
+                    ) from exc
+
+            autonomy_guard = require_autonomy
+        asyncio.run(_serve(config, autonomy_guard=autonomy_guard))
         return 0
     except (WorkerBrokerError, BinaryAttestationError, OSError, ValueError) as exc:
         # BinaryAttestationError (and its CodexAttestationReceiptError subclass

@@ -1225,6 +1225,7 @@ class ExecutiveWorkerBroker:
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_harness_armed: bool = False,
+        autonomy_guard: Callable[[], None] | None = None,
     ) -> None:
         self.adapter = adapter
         self.policy = policy
@@ -1232,9 +1233,14 @@ class ExecutiveWorkerBroker:
         self.peer_resolver = peer_resolver
         self.operator_adapter_factory = operator_adapter_factory
         self.operator_harness_armed = bool(operator_harness_armed)
+        self.autonomy_guard = autonomy_guard
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
+            )
+        if self.operator_harness_armed and not callable(self.autonomy_guard):
+            raise WorkerBrokerError(
+                "armed Operator Harness requires a runtime autonomy guard"
             )
         self._runs: OrderedDict[str, _BrokerRun] = OrderedDict()
         self._active_run_id: str | None = None
@@ -1251,11 +1257,26 @@ class ExecutiveWorkerBroker:
         self.startup_sweep: UIDSweepReceipt | None = None
         self.last_sweep: UIDSweepReceipt | None = None
 
+    def _require_current_autonomy(self) -> None:
+        """Revalidate current arm authority without exposing receipt diagnostics."""
+
+        if not self.operator_harness_armed:
+            return
+        if self._quarantined_reason == "autonomy_receipt_refused":
+            raise BrokerStateError("Executive autonomy receipt refused")
+        try:
+            assert self.autonomy_guard is not None
+            self.autonomy_guard()
+        except Exception as exc:
+            self._quarantined_reason = "autonomy_receipt_refused"
+            raise BrokerStateError("Executive autonomy receipt refused") from exc
+
     def initialize(self) -> UIDSweepReceipt:
         """Prove the dedicated UID is clean before accepting any request."""
 
         if self.startup_sweep is not None:
             return self.startup_sweep
+        self._require_current_autonomy()
         if os.geteuid() != self.policy.worker_uid or os.getegid() != self.policy.worker_gid:
             raise DedicatedUIDError("broker process does not match the configured worker UID/GID")
         observed_groups = set(os.getgroups()) - {self.policy.worker_gid}
@@ -1351,6 +1372,7 @@ class ExecutiveWorkerBroker:
     def _operator_factory(
         self, requested: RequestedExecutionProfile
     ) -> tuple[OperatorAdapter, dict[str, str]]:
+        self._require_current_autonomy()
         if not self.operator_harness_armed or self.operator_adapter_factory is None:
             raise BrokerStateError("the Operator Harness is not armed by worker policy")
         workspace = _resolve_child(
@@ -1440,6 +1462,7 @@ class ExecutiveWorkerBroker:
     async def _ohf_start(
         self, payload: dict[str, Any], *, resume: bool
     ) -> dict[str, Any]:
+        self._require_current_autonomy()
         expected = {"operation_id", "requested", "epoch", "generation"}
         if resume:
             expected.add("provider_session")
@@ -1603,6 +1626,7 @@ class ExecutiveWorkerBroker:
             state.busy = False
 
     async def _ohf_begin_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_current_autonomy()
         if set(payload) != {
             "operation_id",
             "turn",
@@ -1988,6 +2012,7 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
         spec = _launch_spec(payload["launch_spec"], self.policy)

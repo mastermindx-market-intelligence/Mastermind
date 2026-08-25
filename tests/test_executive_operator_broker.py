@@ -25,6 +25,7 @@ from control_plane.executive_worker_broker import (
     PeerCredentials,
     UIDSweepReceipt,
     UID_SWEEP_SCHEMA_VERSION,
+    WorkerBrokerError,
 )
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
@@ -247,7 +248,7 @@ def _request(operation: str, payload: dict, suffix: str) -> dict:
     }
 
 
-def _fixture(tmp_path: Path, *, armed: bool = True):
+def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "job-1"
     run_root = tmp_path / "runs"
@@ -298,9 +299,103 @@ def _fixture(tmp_path: Path, *, armed: bool = True):
         sweeper,
         operator_adapter_factory=factory,
         operator_harness_armed=armed,
+        autonomy_guard=(autonomy_guard if armed else None)
+        if autonomy_guard is not None
+        else (lambda: None if armed else None),
     )
     peer = PeerCredentials(policy.control_uid, policy.worker_gid, 100)
     return broker, peer, profile, sweeper, adapters
+
+
+def test_armed_operator_broker_requires_runtime_autonomy_guard(tmp_path: Path) -> None:
+    broker, _peer, _profile, _sweeper, _adapters = _fixture(
+        tmp_path,
+        armed=False,
+    )
+    with pytest.raises(WorkerBrokerError, match="autonomy guard"):
+        ExecutiveWorkerBroker(
+            broker.adapter,
+            broker.policy,
+            broker.sweeper,
+            operator_adapter_factory=broker.operator_adapter_factory,
+            operator_harness_armed=True,
+        )
+
+
+def test_armed_operator_broker_refuses_before_startup_sweep(tmp_path: Path) -> None:
+    def refuse() -> None:
+        raise RuntimeError("private receipt diagnostic")
+
+    broker, _peer, _profile, sweeper, _adapters = _fixture(
+        tmp_path,
+        autonomy_guard=refuse,
+    )
+    with pytest.raises(BrokerStateError, match="autonomy receipt refused") as blocked:
+        broker.initialize()
+    assert "private receipt diagnostic" not in str(blocked.value)
+    assert sweeper.calls == []
+
+
+def test_operator_autonomy_guard_rechecks_before_each_provider_effect(tmp_path: Path) -> None:
+    calls = 0
+
+    def guard() -> None:
+        nonlocal calls
+        calls += 1
+        if calls >= 4:
+            raise RuntimeError("expired receipt detail")
+
+    async def scenario() -> None:
+        broker, peer, profile, _sweeper, adapters = _fixture(
+            tmp_path,
+            autonomy_guard=guard,
+        )
+        broker.initialize()
+        epoch = SessionEpochRef("epoch-guard", "ATT-GUARD", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-guard", "epoch-guard", 1, "codex-01"
+        )
+        await broker.execute(
+            _request(
+                "ohf-start",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:start-guard")),
+                    "requested": to_wire(profile),
+                    "epoch": to_wire(epoch),
+                    "generation": to_wire(generation),
+                },
+                "start-guard",
+            ),
+            peer=peer,
+        )
+        turn = TurnRef(
+            "turn-guard", "epoch-guard", "generation-guard", "ATT-GUARD"
+        )
+        launch = compare_launch(
+            profile,
+            adapters[0].observed_attestation(generation),
+        )
+        with pytest.raises(BrokerStateError, match="autonomy receipt refused") as blocked:
+            await broker.execute(
+                _request(
+                    "ohf-begin-turn",
+                    {
+                        "operation_id": to_wire(
+                            OperationId("ohf-op:begin-turn-guard")
+                        ),
+                        "turn": to_wire(turn),
+                        "generation": to_wire(generation),
+                        "launch": to_wire(launch),
+                        "prompt": "bounded prompt",
+                    },
+                    "begin-turn-guard",
+                ),
+                peer=peer,
+            )
+        assert "expired receipt detail" not in str(blocked.value)
+        assert adapters[0].prompts == []
+
+    asyncio.run(scenario())
 
 
 def test_operator_broker_runs_one_exact_generation_and_cleans_uid(tmp_path: Path) -> None:
