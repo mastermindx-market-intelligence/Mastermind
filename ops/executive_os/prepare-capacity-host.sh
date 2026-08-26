@@ -182,6 +182,12 @@ verify_legacy_files_unchanged() {
   done
 }
 
+label_persistently_disabled() {
+  local label="$1"
+  /bin/launchctl print-disabled system 2>/dev/null | \
+    /usr/bin/python3 -I -S -B "$ARTIFACTS" check-launchctl-disabled --label "$label" >/dev/null
+}
+
 current_legacy_state_digest() {
   local path label disabled loaded
   {
@@ -190,7 +196,7 @@ current_legacy_state_digest() {
     done
     for label in "${LEGACY_LABELS[@]}"; do
       disabled=false; loaded=false
-      if /bin/launchctl print-disabled system 2>/dev/null | /usr/bin/grep -Fq '"'"$label"'" => true'; then disabled=true; fi
+      if label_persistently_disabled "$label"; then disabled=true; fi
       if /bin/launchctl print "system/$label" >/dev/null 2>&1; then loaded=true; fi
       /bin/echo "$label:disabled=$disabled:loaded=$loaded"
     done
@@ -262,7 +268,7 @@ verify_telemetry_boundary() {
 
 label_disabled_unloaded() {
   local label="$1"
-  /bin/launchctl print-disabled system 2>/dev/null | /usr/bin/grep -Fq '"'"$label"'" => true' || return 1
+  label_persistently_disabled "$label" || return 1
   if /bin/launchctl print "system/$label" >/dev/null 2>&1; then return 1; fi
 }
 
