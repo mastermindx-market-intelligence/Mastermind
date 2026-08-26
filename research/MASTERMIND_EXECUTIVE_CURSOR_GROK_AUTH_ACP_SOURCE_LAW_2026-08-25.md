@@ -340,7 +340,9 @@ Grok ACP documentation does not freeze equivalent load semantics. If the shipped
 not advertise a resumable operation, the adapter fails closed and returns to Sol; it may not infer
 ACP resume from Grok's separate headless `--session-id`/`--resume` feature.
 
-Required core changes after CF2-I/RF1/HF1 release them:
+Required core/provider changes are released only after CF2-I, RF1 and HF1 are accepted **and** the
+Autonomy V1 parent has proven one real Claude worker child Job through the common harness with
+terminal receipt, cancellation/absence, replay and restart-reconciliation evidence:
 
 - add one reviewed `acp-agent` execution surface to the existing capability registry;
 - implement the currently false `acp` descriptor;
@@ -373,6 +375,10 @@ not declare Cursor/Grok model suitability or treat unknown subscription headroom
 ---
 
 ## 8. Provider verticals
+
+Cursor-C0, Grok-B0 and all real provider verticals below remain executable-work held until that
+Claude common-harness proof is accepted. Official-source research and deterministic fake fixtures
+may proceed in parallel; they cannot install/authenticate/enable a provider or claim the gate passed.
 
 ### 8.1 Cursor ACP — generic-core proof
 
@@ -532,6 +538,7 @@ CF2-F accepted
   -> CF2-I same-provider Codex capacity proven
   -> RF1 suitability accepted
   -> HF1 common harness accepted
+  -> one real Claude worker child Job proves the common harness, receipts, cancel, replay and recovery
   -> Cursor-C0 installed-binary config and credential-boundary probe
   -> Cursor ACP base vertical only if Cursor-C0 passes
   -> Grok-B0 dedicated browser/account identity probe
