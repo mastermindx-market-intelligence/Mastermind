@@ -886,21 +886,29 @@ producer_audit.material_sources_match_commit == true
 each receipt observation digest == its candidate worker_observation.observation_digest
 each worker observation host/capability == the immutable candidate join
 each worker observation source_config_digest == its join.worker_source_config_digest
+runtime_acquisition_config.macro_release_commit == receipt.macro_release_commit
+runtime_acquisition_config.producer_material_source_digest == receipt.producer_material_source_digest
+runtime_acquisition_config.inventory_config_digest == installed_source_config.inventory_config_digest
+runtime_acquisition_config.allowed_environment_names_digest == sha256(canonical(installed_source_config.allowed_environment_names))
+runtime_acquisition_config.telemetry_config_digest == installed_source_config.telemetry_config_digest
 receipt.acquisition_config_digest == sha256(canonical(runtime_acquisition_config))
 ~~~
 
 `runtime_acquisition_config` is the closed
 `mastermind.executive_capacity_acquisition_config/v1` object with exactly `schema_version`,
-`p0_acceptance_digest`, `source_config_digest` and `broker_bindings`. `broker_bindings` is sorted by
-`(host_ref, capacity_capability_id)`, contains exactly the unchanged preflight candidates and each row
-has exactly `host_ref`, `capacity_capability_id` and `worker_source_config_digest`, byte-equal to the
-immutable capacity join. `acquisition_config_digest =
-sha256(canonical(runtime_acquisition_config))` with no excluded field.
+`p0_acceptance_digest`, `source_config_digest`, `macro_release_commit`,
+`producer_material_source_digest`, `inventory_config_digest`,
+`allowed_environment_names_digest`, `telemetry_config_digest` and `broker_bindings`.
+`broker_bindings` is sorted by `(host_ref, capacity_capability_id)`, contains exactly the unchanged
+preflight candidates and each row has exactly `host_ref`, `capacity_capability_id` and
+`worker_source_config_digest`, byte-equal to the immutable capacity join.
+`acquisition_config_digest = sha256(canonical(runtime_acquisition_config))` with no excluded field.
 
 This accepted root-owned configuration identity thereby covers the exact P0 producer
 operation/release, fixed three-home Macro inventory, allowed environment names, telemetry surface
 identities and every contacted broker's immutable capability/config binding. A runtime observation
-whose source digest differs from its binding refuses the whole invocation. Receipts reveal no path,
+whose source digest differs from its binding returns `CAPACITY_OBSERVE_CONFIG_DRIFT` and refuses the
+whole invocation. Receipts reveal no path,
 principal/account name or secret. `completed_at` is UTC, not before snapshot generation or any
 observation time, and not after the earliest applicable expiration plus the 2-second tolerance.
 
@@ -1027,6 +1035,9 @@ Require tests that:
   two-second skew are discriminated at boundaries;
 - canonical worker source-config golden vectors bind each observation to the exact immutable join
   expected digest and reject every field/config/generation drift;
+- swapping or changing one broker source-config digest and recomputing a valid observation self-hash
+  still returns `CAPACITY_OBSERVE_CONFIG_DRIFT` with no ranking, quota hold, Attempt, Event,
+  reacquisition loop or failover;
 - credential absent/wrong owner/type/mode, binary drift or broker generation drift refuses;
 - no path, UID, username, account label, browser identity, secret-ref, auth bytes or raw exception
   crosses the socket;
