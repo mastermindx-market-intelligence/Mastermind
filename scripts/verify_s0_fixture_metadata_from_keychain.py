@@ -184,6 +184,8 @@ def _validate_secret(secret: Any) -> bytearray:
 def _verifier_argv() -> list[str]:
     return [
         sys.executable,
+        "-I",
+        "-S",
         str(_VERIFIER_SCRIPT),
         "--expected-team-id",
         _EXPECTED_TEAM_ID,
