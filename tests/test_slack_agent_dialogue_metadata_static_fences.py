@@ -44,6 +44,7 @@ def test_documented_direct_cli_runs_without_pythonpath(tmp_path: Path) -> None:
     completed = subprocess.run(
         [
             sys.executable,
+            "-S",
             str(SCRIPT),
             "--expected-team-id",
             "T0BRD2AQXQV",
