@@ -4,8 +4,9 @@
 **Owner:** Sol, AI CEO
 **Chairman:** Chris
 **Status:** **SOL SOURCE-LAW FREEZE / RECORDS-ONLY CARRIER. No runtime, worker, login, route or service is changed by this document.**
-**Protected Mastermind basis:** `eff2033c639cb25f8b4a2a4e5f90e1a4a6002138`
-**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.0, bootstrap major 1, loaded atomically from that exact protected commit.
+**Current protected Mastermind / Skillpack basis:** `068125e3524eb1b327721f1e79a2338f3d367554`
+**Autonomy V1 architecture parent:** `eff2033c639cb25f8b4a2a4e5f90e1a4a6002138`
+**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.0, bootstrap major 1, loaded atomically from the current protected commit above.
 **Accepted CF1 candidate:** `fc12904f59a5758817aa2c76ffaa40bb1ebcbf8e`
 **Accepted CF1 squash merge:** `dcdd939c45b23abce5ba04f95e330ac914a3904b`
 **Organizational parent:** `WS:EXECUTIVE-CAPACITY-FABRIC`
@@ -23,13 +24,12 @@ re-ranking current provider state.
 
 CF2-F freezes that law. It makes one correction to the earlier preferred acquisition family:
 
-> A single subprocess under the Executive control principal is not a lawful concrete producer for
-> the three Personal Pro realms. Each realm is intentionally owned by a distinct UID and mode-0700
-> provider home. The accepted repair is a distributed **read**, not shared credential access:
-> each existing worker-broker principal observes only its own realm through Macro-owned code;
-> Macro-owned code validates and aggregates those secret-free fragments into the one accepted
-> `mastermind.provider_capacity.v1` projection; Executive consumes the final projection and owns
-> only placement/lifecycle evidence.
+> The unchanged strict Macro CF1 projection remains provider truth even when its isolated Codex
+> `present` fields are honestly null. Executive acquires that projection from one exact grounded,
+> root-owned Macro release without gaining provider-home access, asks each relevant existing worker
+> broker for one bounded realm-local readiness observation, and joins the two evidence owners at
+> claim time without rewriting either. Executive consumes provider capacity; it does not become a
+> second provider normalizer.
 
 This ruling does not accept or install that path. The records-only result is `SPEC_ONLY`. CF2-I
 remains held until its acquisition subcarriers are implemented, independently reviewed and proven
@@ -45,8 +45,8 @@ on the installed three-principal host.
 | CF1 semantic content at merge | `BUILT_NOT_PROVEN` | Candidate and squash delta have stable patch ID `eece33a635bcb536a93146b19f74339f080115dc`; all twelve CF1-owned blobs are byte-identical. |
 | Three Personal Pro realm definitions | `BUILT_NOT_PROVEN` | Protected Mastermind defines isolated principals/homes/readiness ceremonies; merge is not host installation, authentication or service proof. |
 | Current installed all-three acquisition path | `DARK_OR_DISCONNECTED` | No lawful principal can currently observe all three private realms and emit one complete CF1 snapshot. |
-| Distributed fragment producer/aggregator | `NOT_BUILT` | Required Macro-owned follow-on frozen below. |
-| Per-realm broker capacity-read operation | `NOT_BUILT` | Required additive read operation on the existing worker-broker boundary. |
+| Central grounded CF1 acquisition path | `DARK_OR_DISCONNECTED` | A safe installed Macro producer/telemetry path must be proven by CF2-P0. |
+| Per-realm broker `capacity-observe/v1` | `NOT_BUILT` | Required additive fixed read operation on the existing worker-broker boundary. |
 | Three worker-broker service composition | `NOT_BUILT` | Current protected readiness realms do not start or fan out three worker services. |
 | Typed `JOB_CLAIMED.capacity_evidence` | `NOT_BUILT` | Existing event/transaction is sufficient; the exact extension is frozen below. |
 | Capacity-aware claim ranking | `NOT_BUILT` | Must remain after all existing route/authority/capability/identity filters. |
@@ -58,15 +58,19 @@ No row above is upgraded by this records-only source law.
 
 ## 2. Estate reconciliation and concrete blocker
 
-### 2.1 CF1 is a single-process producer today
+### 2.1 CF1 already supports honest isolation-null evidence
 
-Accepted Macro CF1 calls the Codex owner once. `capacity_account_observations()` enumerates
-`CODEX_ACCOUNT_HOMES`, assigns the stable `codex_account`, `codex_account_2`, and
-`codex_account_3` identities by configured position, and checks only `auth.json` file metadata.
-The normalizer then joins those observations with existing Provider Control health, cooling,
-budget and outcome owners before emitting one complete twelve-slot snapshot.
+Accepted Macro CF1 calls the Codex owner once. `capacity_account_observations()` enumerates the
+producer-owned ordered `CODEX_ACCOUNT_HOMES` inventory, assigns the stable `codex_account`,
+`codex_account_2`, and `codex_account_3` identities by that accepted order, and checks only
+`auth.json` filesystem metadata. When the metadata check receives `PermissionError`/`OSError`, it
+emits `present=null` plus the required scoped `SOURCE_UNREADABLE` and
+`PROVIDER_PRESENCE_UNKNOWN` degradation instead of inventing false absence. The strict v1
+validator accepts exactly that honest-null state.
 
-The implementation never opens auth bytes. That property remains frozen.
+The normalizer separately joins existing Provider Control health, cooling, budget and outcome
+owners before emitting one complete twelve-slot snapshot. It never opens auth bytes. Those
+properties remain frozen.
 
 ### 2.2 Mastermind intentionally prevents one principal seeing every realm
 
@@ -90,6 +94,11 @@ worker broker refuses unexpected supplementary groups. Therefore:
 
 The current installed host is older still: the protected three-principal source is not itself
 proof that those users, homes, brokers or an exact accepted release are installed and running.
+
+The lawful central producer configuration must list the exact three canonical Personal Pro homes
+in Macro's accepted producer-owned order while `_mastermind_exec` retains zero traverse authority.
+That fixed root-owned order is a Macro inventory input; Mastermind may never infer capability
+identity from response position or provider-home path.
 
 ### 2.3 Exact current-code receipts
 
@@ -131,9 +140,12 @@ CF2 implementation must not:
 - copy, link, export or centrally cache `auth.json` or provider-native tokens;
 - infer logical account identity from path, browser seat, array order or account label;
 - run three full CF1 snapshots and merge them inside Executive;
+- add a Macro fragment/envelope/finalizer protocol when the accepted strict v1 null law already
+  preserves the isolation boundary;
 - import Macro's private `_build_snapshot_from_observations` test seam;
 - reimplement CF1 normalization or canonical hashing in Mastermind;
-- add a bridge daemon merely to cross the principal boundary.
+- add a bridge daemon merely to cross the principal boundary;
+- equate an Executive `account_label` with a Macro `capability_id`.
 
 These shortcuts either weaken the accepted realm boundary or create a second producer/truth plane.
 
@@ -143,244 +155,310 @@ These shortcuts either weaken the accepted realm boundary or create a second pro
 
 The accepted implementation target is:
 
-```text
-AttemptRegistry command replay lookup
+~~~text
+outer command replay lookup
         |
         | no historical claim found
         v
-read-only Executive preflight produces lawful available candidates
+short read-only Executive hard-eligibility preflight
         |
-        v
-Macro acquisition-begin executable (control principal; no provider state)
-        |
-        | closed request envelope, bounded lifetime
-        v
-existing worker broker for each candidate realm (peer-UID authenticated)
-        |
-        | fixed idle-only capacity-observe operation for candidate realms only
-        v
-Macro fragment executable under that worker's existing UID/environment
-        |
-        | one closed secret-free normalized slot fragment
-        v
-Executive control gathers fragments without interpreting provider evidence
-        |
-        v
-Macro acquisition-finalize executable (strict stdin; no provider credentials)
-        |
-        | one complete validated mastermind.provider_capacity.v1 document
-        v
-Mastermind independent strict consumer
-        |
-        v
-immutable slot-to-quota join -> deterministic capacity ranking
-        |
-        v
-existing atomic JOB_CLAIMED event + unchanged placement snapshot
-```
+        +------------------------------+
+        |                              |
+        v                              v
+one unchanged strict CF1 snapshot      relevant existing worker brokers
+under _mastermind_exec                 under each dedicated worker UID
+        |                              |
+        | provider capacity truth      | fixed capacity-observe/v1
+        |                              | realm/readiness evidence only
+        +---------------+--------------+
+                        v
+immutable (host_ref, capacity_capability_id) join
+                        |
+                        v
+Mastermind strict consumer + deterministic capacity rank
+                        |
+                        v
+BEGIN IMMEDIATE
+  -> command/candidate/freshness recheck
+  -> existing atomic JOB_CLAIMED event
+  -> unchanged placement snapshot
+~~~
 
-Macro remains the only normalization/canonical-hash producer. Mastermind owns transport,
-candidate eligibility, deterministic selection and lifecycle. The worker broker is extended; it
-is not replaced and no provider-specific broker is added.
+Macro remains the only provider-capacity normalizer and semantic-hash producer. The existing worker
+broker remains the private-principal readiness boundary. Mastermind owns the immutable join,
+candidate eligibility, deterministic selection and lifecycle evidence. No side rewrites the other
+side's historical facts.
+
+The central CF1 process may know the fixed provider-home path strings through root-owned
+configuration but receives no filesystem traverse/read authority to those homes. The worker broker
+may inspect only metadata for its own fixed realm and never reads or returns credential bytes.
 
 ### 3.1 Implementation carrier sequence
 
-CF2-I is implemented through three bounded subcarriers, never one cross-repository merge bomb:
+The implementation sequence is bounded:
 
-1. **CF2-I-A / Macro distributed producer:** public acquisition-envelope, fragment and finalize
-   entrypoints plus strict schemas/golden vectors; no provider calls, no persistence, no
-   Mastermind changes.
-2. **CF2-I-B / Mastermind acquisition transport:** one closed idle-only read operation on the
-   existing worker-broker protocol, exact per-realm immutable capability binding, three broker
-   service composition and strict Macro executable invocation; no claim ranking yet.
-3. **CF2-I-C / Mastermind claim integration:** independent strict final-snapshot consumer,
-   capacity join/ranking, atomic event evidence, replay/conflict law and the real three-seat
-   canary; no provider adapter or schema migration.
+1. **CF2-P0 / read-only host census:** identify the actual Macro Provider Control producer/state
+   roots, permission surfaces and installed Executive host topology; accept one safe source path or
+   return `NO_SAFE_CF1_ACQUISITION_PATH`.
+2. **CF2-I-A / grounded central acquisition:** add the strict Mastermind consumer and fixed
+   acquisition of the unchanged CF1 projection from the accepted Macro path; no worker observation
+   or claim ranking yet.
+3. **CF2-I-B / worker-realm observation:** add one closed `capacity-observe/v1` operation to the
+   existing broker and compose the three broker services with immutable capability bindings; no
+   claim ranking yet.
+4. **CF2-I-C / claim integration:** join the two evidence owners, rank already-lawful candidates,
+   persist exact capacity evidence atomically and prove the real three-seat canary.
 
-Each subcarrier receives an independent review and exact-head hosted proof. Failure of an earlier
-subcarrier holds later ones without authorizing another acquisition design.
-
----
-
-## 4. Macro-owned distributed producer protocol
-
-The exact field names may be implemented only as frozen here. All JSON is canonical UTF-8 with
-sorted keys, compact separators, no NaN/Infinity and no trailing bytes. In every digest below,
-`canonical(x)` means those exact bytes and `sha256` means lowercase hexadecimal SHA-256 over those
-bytes.
-
-### 4.1 Acquisition envelope
-
-Closed schema `mastermind.provider_capacity.acquisition_request.v1`:
-
-```json
-{
-  "schema": "mastermind.provider_capacity.acquisition_request.v1",
-  "request_id": "<32-lower-hex>",
-  "snapshot_generated_at": "2026-08-26T01:45:00Z",
-  "expires_at": "2026-08-26T01:45:30Z",
-  "host_ref": "local-unbound",
-  "required_capability_ids": ["codex_account_2", "codex_account_3"],
-  "producer": {},
-  "producer_audit": {},
-  "request_digest": "<64-lower-hex>"
-}
-```
-
-Rules:
-
-- the Macro begin executable owns `request_id`, both times, producer identity and digest;
-- `expires_at` is exactly 30 seconds after `snapshot_generated_at`; the numeric future-clock
-  tolerance is 2 seconds at begin, worker, finalizer and claim commit;
-- first single-host V1 may use accepted `local-unbound` only because every broker and Executive
-  control socket is on the same attested host; it is not a remote address;
-- `required_capability_ids` is the sorted, unique set of capability IDs joined to the current
-  preflight hard-eligible candidate set; it contains one to three members drawn only from
-  `codex_account`, `codex_account_2`, and `codex_account_3`;
-- only trusted Executive preflight may supply that derived subset; no Job, caller, prompt, model or
-  Slack payload may author it, and Macro rejects any identity outside the fixed inventory;
-- `request_digest = sha256(canonical(request_without_request_digest))`; the excluded field is
-  exactly `request_digest` and no other field is omitted;
-- canonical envelope size is at most 4 KiB.
-
-### 4.2 Immutable realm-to-capability join
-
-The installed root-owned worker configuration freezes exactly:
-
-```text
-codex-pro-01 -> codex_account
-codex-pro-02 -> codex_account_2
-codex-pro-03 -> codex_account_3
-```
-
-The worker broker supplies only its own immutable configured capability ID to the Macro fragment
-executable. Macro validates that identity against the envelope and its reviewed inventory. Neither
-control nor a model may choose or rewrite the mapping at request time.
-
-This is a cross-system join, not a second provider identity registry. Macro remains owner of
-`capability_id`; Mastermind remains owner of worker/slot/principal identity.
-
-### 4.3 Slot fragment
-
-Closed schema `mastermind.provider_capacity.fragment.v1`:
-
-```json
-{
-  "schema": "mastermind.provider_capacity.fragment.v1",
-  "request_digest": "<64-lower-hex>",
-  "host_ref": "local-unbound",
-  "capability_id": "codex_account_2",
-  "producer": {},
-  "producer_audit": {},
-  "slot": {},
-  "degraded": [],
-  "observed_at": "2026-08-26T01:45:00Z",
-  "fragment_hash": "<64-lower-hex>"
-}
-```
-
-`slot` is the exact complete closed CF1 slot object for that capability. `degraded` contains only
-producer-global rows required to interpret that fragment and rows scoped to that capability. The
-fragment producer:
-
-- executes under the worker's existing UID and exact allowlisted environment;
-- may observe only its configured provider home and already-owned local Provider Control sources;
-- never performs a provider/network call;
-- never opens or serializes auth contents;
-- never returns a path, UID, username, browser-seat label, email, account/provider-native ID,
-  token, cookie, secret-ref name, raw stderr or exception text;
-- fails with one closed refusal code rather than a partial structurally valid fragment;
-- evaluates projection-time presence, enablement and all freshness against the envelope's exact
-  `snapshot_generated_at`; `observed_at` is only the bounded fragment-completion receipt and must
-  lie between `snapshot_generated_at` and `expires_at` plus the 2-second clock tolerance;
-- sets `fragment_hash = sha256(canonical(fragment_without_fragment_hash))`; the excluded field is
-  exactly `fragment_hash` and no other field is omitted;
-- emits at most 32 KiB and exits within 5 seconds.
-
-There must be exactly one fragment for every requested capability ID and no other fragment. Every
-fragment binds the same request digest, producer implementation/version, repository commit and
-material-source digest. Mixed releases, duplicate capability IDs, missing requested fragments,
-unexpected fragments, stale observations or different `host_ref` values refuse. Non-requested
-inventory slots never block this acquisition.
-
-### 4.4 Finalization
-
-The Macro finalize executable receives one canonical object on stdin containing the envelope and
-the fragments. It accepts at most 256 KiB, reads no provider home and receives no secret-bearing
-environment. It independently:
-
-1. validates every closed schema/hash/time/source binding;
-2. requires exactly one fragment for each requested Codex capability and none for non-requested
-   capabilities;
-3. preserves the complete accepted twelve-slot CF1 inventory;
-4. emits explicit unknown/degraded rows for inventory slots without a lawful observation source;
-5. sets the final document `generated_at` exactly equal to the envelope's
-   `snapshot_generated_at`, and uses that same instant for every projection-time normalization and
-   freshness calculation;
-6. computes the final semantic `snapshot_hash` under the accepted CF1 law;
-7. emits exactly one strict `mastermind.provider_capacity.v1` document of at most 256 KiB;
-8. writes no file/database/cache and exits within 5 seconds.
-
-The aggregation/finalization entrypoint must be public and reviewed in Macro. Mastermind may call
-the executable; it may not import the implementation or build the snapshot itself.
+Each carrier receives independent exact-head review and hosted proof. Failure of an earlier gate
+holds later work without authorizing another producer, daemon, credential group or lifecycle.
 
 ---
 
-## 5. Mastermind acquisition port and worker-broker operation
+## 4. Unchanged Macro CF1 projection acquisition
+
+### 4.1 CF2-P0 read-only host census
+
+Before production acquisition code is commissioned, CF2-P0 must record without mutation:
+
+1. the actual Macro Provider Control code/process root available to Executive;
+2. the exact secret-free health/cooling/quota/outcome telemetry roots required by accepted CF1;
+3. owner/group/mode/ACL/symlink boundaries without reading credential values;
+4. whether an existing bounded Macro-owned process/API already emits strict
+   `mastermind.provider_capacity.v1`;
+5. whether the accepted CF1 code can instead run from a root-owned exact-commit grounded Git
+   checkout under `_mastermind_exec` with only narrow telemetry access;
+6. the fixed root-owned three-home inventory configuration and proof that `_mastermind_exec` cannot
+   traverse any listed Personal Pro home;
+7. the executable/process principal, exact release and source/state identity of the selected path.
+
+The census makes no service, permission, group, file copy, login, provider call or production-arm
+change. Its closed outcome is exactly one of:
+
+~~~text
+EXISTING_MACRO_PROJECTION_PATH_ACCEPTED
+GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED
+NO_SAFE_CF1_ACQUISITION_PATH
+~~~
+
+`NO_SAFE_CF1_ACQUISITION_PATH` holds CF2-I and returns to Sol. It does not authorize widening home
+permissions, copying telemetry into Executive, running a root bridge or recreating CF1 logic.
+
+### 4.2 Allowed producer paths
+
+An existing Macro-owned projection path is preferred only if it:
+
+- emits the unchanged complete strict v1 projection;
+- is bounded and locally authenticated;
+- names exact producer/material/audit identity;
+- reads canonical current Provider Control state;
+- grants no new lifecycle or storage authority.
+
+Otherwise CF2-I may install the accepted Macro CF1 merge
+`dcdd939c45b23abce5ba04f95e330ac914a3904b` as a root-owned, non-group/other-writable, exact-commit
+Git checkout. A copied source-only bundle is insufficient: accepted CF1 calls Git for
+`repository_commit`, material blobs and `material_sources_match_commit`. The installed release must
+retain the Git metadata and every material source required by the accepted receipt.
+
+The selected path may read only the exact secret-free telemetry files accepted by CF2-P0. If that
+requires access to a broader credential-bearing tree, the path refuses.
+
+### 4.3 Fixed three-home producer inventory
+
+Root-owned installed configuration supplies `CODEX_ACCOUNT_HOMES` as exactly three absolute
+canonical Personal Pro home paths in Macro's accepted producer order:
+
+~~~text
+position 0 -> codex_account
+position 1 -> codex_account_2
+position 2 -> codex_account_3
+~~~
+
+This order belongs to the Macro producer contract. It is not a Mastermind runtime inference.
+Mastermind never derives capability identity from path, position, response order, account label or
+browser seat.
+
+`_mastermind_exec` must remain outside all three worker groups and must fail to traverse/read each
+home. The expected metadata outcome is therefore `present=null`, not false, for the isolated slots,
+with exact scoped `SOURCE_UNREADABLE` and `PROVIDER_PRESENCE_UNKNOWN` rows. A false value means the
+producer observed absence and cannot be overridden by worker evidence.
+
+### 4.4 Fixed acquisition port
 
 Mastermind defines one internal `ProviderCapacitySource`-equivalent port whose only successful
-return is a fully validated immutable `mastermind.provider_capacity.v1` value plus canonical bytes.
-The production implementation is the fixed distributed Macro executable path above. Tests may use
-an inert fake implementing the same closed return; production config may not select arbitrary
-commands, modules or URLs.
+return is the strict immutable `mastermind.provider_capacity.v1` value plus canonical bytes.
+Production configuration selects only the CF2-P0-accepted path. Tests may inject an inert fake
+implementing the same closed return.
 
-### 5.1 Fixed subprocess law
+For the grounded Git path, the operation is conceptually:
 
-Every Macro invocation uses:
+~~~text
+<absolute reviewed Python executable>
+<absolute root-owned exact Macro Git checkout>/scripts/build_provider_capacity.py
+~~~
 
-- an absolute root-owned installed release path pinned to exact accepted commit/material digest;
-- fixed executable and argv, direct execution, never a shell;
-- empty stdin except the finalizer's bounded canonical document;
-- fixed root-owned working directory;
-- `-I -S -B` where Python entrypoints permit;
-- a newly constructed allowlisted environment containing no inherited auth/token/cookie/Keychain,
-  clipboard, proxy, Git credential or interactive-login variables;
-- bounded stdout captured in memory, stderr discarded or mapped to a closed refusal code;
-- closed timeout and process-group cleanup;
-- no fallback executable, PATH search, floating checkout or user-writable code.
+with no caller/model-supplied arguments and without `--pretty`.
 
-### 5.2 Existing broker extension only
+Every invocation:
 
-The worker operation is `capacity-observe/v1`. It is:
+- uses fixed absolute executable/source paths, direct execution and no shell/PATH lookup;
+- uses a fixed root-owned working directory;
+- sets stdin to null;
+- uses a newly constructed allowlisted environment containing only required interpreter/runtime,
+  fixed three-home inventory and accepted secret-free telemetry configuration;
+- inherits no token, API key, cookie, Keychain, clipboard, proxy, Git credential or interactive
+  login variable;
+- captures stdout/stderr separately;
+- accepts at most 256 KiB stdout and retains at most 4 KiB stderr internally;
+- times out after 10 seconds and kills/reaps only its owned process group;
+- never persists or forwards raw stderr, paths, exception text or provider responses;
+- writes no file/database/cache and performs no provider/network call.
 
-- read-only and valid only while that exact worker/quota has no held Attempt/provider process;
-- authorized by the existing control-to-worker peer UID and exact installed service configuration;
-- bound to one envelope digest and the broker's immutable capability ID;
-- unable to accept a home path, executable path, capability ID or arbitrary environment from
-  control;
-- limited to a 4 KiB request and 32 KiB response;
-- complete within 8 seconds including subprocess cleanup;
-- non-retriable through another worker under the same request after an ambiguous response.
+Acquisition accepts only one UTF-8 JSON document with no trailing bytes and all accepted CF1 strict
+v1 validation, including exact canonical snapshot hash,
+`producer.material_source_digest`, `audit.repository_commit`, and
+`audit.material_sources_match_commit=true`.
 
-Only brokers represented in `required_capability_ids` are contacted. A worker already holding an
-Attempt is absent from the preflight candidate set, so its idle-only broker refusal cannot block a
-second child from using another available realm. The finalizer still emits the full twelve-slot
-inventory, with explicit unknown/degraded evidence for every non-requested slot.
+The acquired snapshot is valid for claim commit only while:
 
-If a requested broker response is uncertain, the entire capacity acquisition is refused and no Job is
-claimed. A later claim command may start a new acquisition only after canonical command replay
-proves the prior command did not commit.
+~~~text
+snapshot.generated_at - 2 seconds <= trusted_current_utc
+trusted_current_utc <= snapshot.generated_at + 32 seconds
+~~~
 
-### 5.3 Three broker services are composition, not three runtimes
+The 30-second age budget plus 2-second clock tolerance is fixed. The same trusted current time is
+used for post-acquisition claim/lease timestamping.
 
-The three Personal Pro worker services may each run the existing worker-broker implementation
-under their own reviewed UID, socket and provider home. They do not receive separate Executive
-databases, queues, schedulers, retry state or control services. One `_mastermind_exec` control
-runtime remains lifecycle authority.
+Closed acquisition refusal codes:
+
+~~~text
+CAPACITY_SOURCE_UNAVAILABLE
+CAPACITY_SOURCE_TIMEOUT
+CAPACITY_SOURCE_NONZERO_EXIT
+CAPACITY_SOURCE_OVERSIZE
+CAPACITY_SOURCE_INVALID_UTF8
+CAPACITY_SOURCE_SCHEMA_INVALID
+CAPACITY_SOURCE_HASH_INVALID
+CAPACITY_SOURCE_UNGROUNDED
+CAPACITY_SOURCE_STALE
+CAPACITY_SOURCE_FUTURE
+CAPACITY_SOURCE_INTERNAL
+~~~
+
+No acquisition cache, daemon, refresh scheduler or provider state copy is authorized.
 
 ---
 
-## 6. Capacity-slot to Executive-quota join
+## 5. Existing worker-broker realm observation
+
+### 5.1 Fixed operation
+
+The existing worker broker gains exactly one operation name:
+
+~~~text
+capacity-observe/v1
+~~~
+
+The request is the exact canonical object
+`{"schema_version":"mastermind.executive_worker_capacity_observe_request/v1"}` and contains no path,
+argv, environment variable, provider, capability, account, prompt, time or model-authored field.
+The canonical request is at most 128 bytes.
+
+Admission requires:
+
+- exact configured Executive peer UID through kernel peer credentials;
+- exact configured worker UID/GID and approved supplementary-group vector;
+- valid current production autonomy authority when armed;
+- no held Attempt/provider/validation/OHF process active or starting for that worker/quota;
+- one immutable root-owned `(host_ref, capacity_capability_id)` binding;
+- exact installed broker release and operation implementation.
+
+The operation performs no provider call, creates no provider session and cannot execute an arbitrary
+command.
+
+### 5.2 Closed response
+
+Canonical JSON is UTF-8, sorted-key, compact-separator, no NaN/Infinity and no trailing bytes.
+The closed response has exactly:
+
+~~~json
+{
+  "schema_version": "mastermind.executive_worker_capacity_observation/v1",
+  "host_ref": "local-unbound",
+  "capacity_capability_id": "codex_account_2",
+  "realm_metadata_valid": true,
+  "credential_present": true,
+  "credential_metadata_valid": true,
+  "provider_binary_attested": true,
+  "broker_generation_ready": true,
+  "source_config_digest": "<64-lower-hex>",
+  "observed_at": "2026-08-26T01:45:00Z",
+  "expires_at": "2026-08-26T01:45:15Z",
+  "observation_digest": "<64-lower-hex>"
+}
+~~~
+
+`expires_at` is exactly 15 seconds after `observed_at`.
+`observation_digest = sha256(canonical(response_without_observation_digest))`; the excluded field is
+exactly `observation_digest`.
+
+The operation:
+
+- checks only the fixed own-realm directory/auth-object type, owner and mode metadata plus exact
+  binary and broker generation/config identity;
+- never opens, parses, copies, hashes or returns credential bytes;
+- never returns a path, UID, username, Executive account label, browser seat, email, provider-native
+  account/session ID, secret-ref name, raw exception or arbitrary filesystem metadata;
+- emits at most 4 KiB and completes within 5 seconds;
+- permits at most 2 seconds future clock skew;
+- is valid at claim commit only when
+  `observed_at - 2s <= trusted_current_utc <= expires_at + 2s`.
+
+All five readiness booleans must be true. `credential_present=true` means only that the fixed auth
+object exists with the reviewed metadata boundary; it does not claim provider acceptance or quota.
+Existing G7/provider-readiness admission remains independently required and is not duplicated.
+
+### 5.3 Refusal and ambiguity
+
+Closed refusal codes:
+
+~~~text
+CAPACITY_OBSERVE_UNAUTHORIZED
+CAPACITY_OBSERVE_WRONG_PRINCIPAL
+CAPACITY_OBSERVE_GROUP_DRIFT
+CAPACITY_OBSERVE_NOT_ARMED
+CAPACITY_OBSERVE_BUSY
+CAPACITY_OBSERVE_CONFIG_DRIFT
+CAPACITY_OBSERVE_REALM_INVALID
+CAPACITY_OBSERVE_CREDENTIAL_ABSENT
+CAPACITY_OBSERVE_CREDENTIAL_METADATA_INVALID
+CAPACITY_OBSERVE_BINARY_UNATTESTED
+CAPACITY_OBSERVE_GENERATION_UNREADY
+CAPACITY_OBSERVE_TIMEOUT
+CAPACITY_OBSERVE_OVERSIZE
+CAPACITY_OBSERVE_SCHEMA_INVALID
+CAPACITY_OBSERVE_DIGEST_INVALID
+CAPACITY_OBSERVE_STALE
+CAPACITY_OBSERVE_FUTURE
+CAPACITY_OBSERVE_INTERNAL
+~~~
+
+Only brokers joined to the read-only preflight hard-eligible candidate set are contacted. A busy
+non-candidate realm therefore cannot block another available seat. Missing, duplicate, invalid,
+expired or ambiguous observation for a requested candidate refuses that candidate acquisition; it
+is never retried through another worker/broker under the same invocation.
+
+A later invocation may observe again only after canonical command replay proves no claim committed.
+After commit, historical observation/evidence is immutable.
+
+### 5.4 Three brokers remain one runtime
+
+The three Personal Pro services compose the same broker implementation under distinct reviewed
+UIDs, sockets and homes. They receive no separate Executive database, queue, scheduler, retry
+state, control service or lifecycle. One `_mastermind_exec` runtime remains authority.
+
+---
+
+## 6. Capacity capability to Executive-quota join
 
 The join lives as one closed nested object in existing immutable quota-registration metadata:
 
@@ -389,7 +467,7 @@ The join lives as one closed nested object in existing immutable quota-registrat
   "capacity_join": {
     "schema": "mastermind.executive_capacity_join/v1",
     "host_ref": "local-unbound",
-    "capability_id": "codex_account_2",
+    "capacity_capability_id": "codex_account_2",
     "provider_capacity_schema": "mastermind.provider_capacity.v1"
   }
 }
@@ -399,14 +477,17 @@ Rules:
 
 - the nested object has exactly those four keys;
 - `register_quota_class()` existing byte-equivalent reconciliation makes the join immutable;
-- exactly one registered `(worker_id, quota_class)` maps to one `(host_ref, capability_id)`;
+- exactly one registered `(worker_id, quota_class)` maps to one
+  `(host_ref, capacity_capability_id)`;
 - duplicate joins, missing joins, provider mismatch or drift refuse before ranking;
 - the join does not contain a provider home, UID, account email/name, OAuth seat, token, host
   address or provider-native session identity;
 - `local-unbound` is lawful only for this explicitly same-host local V1 canary;
 - MH1 must replace it with a reviewed authenticated host binding before remote placement.
 
-No new table or placement field is authorized.
+`capacity_capability_id` is the exact Macro CF1 capability identity. It is deliberately not named
+or derived from Executive `account_label`; that existing field remains separate. No new table or
+placement field is authorized.
 
 ---
 
@@ -426,12 +507,13 @@ Executive lifecycle writer lock.
 4. collect currently AVAILABLE/unheld quota rows and apply every existing quarantine, requested
    worker/quota, route, execution-profile, capability-policy, provider/model/effort/cost, identity
    and required-capability filter;
-5. validate the immutable capacity joins, derive the sorted unique one-to-three requested
-   capability IDs and compute `preflight_candidate_digest` over canonical candidate semantic rows;
+5. validate the immutable capacity joins, derive the sorted unique one-to-three relevant
+   `capacity_capability_id` values and compute `preflight_candidate_digest` over canonical
+   candidate semantic rows;
 6. close the read transaction; if no lawful candidate remains, return no claim with zero
    acquisition;
-7. acquire one strict grounded distributed capacity snapshot for only that requested subset,
-   entirely outside any SQLite write transaction.
+7. acquire one complete strict grounded CF1 snapshot, then call `capacity-observe/v1` exactly once
+   for each relevant candidate broker, entirely outside any SQLite write transaction;
 
 **Atomic recheck and commit, inside the existing write transaction:**
 
@@ -440,13 +522,16 @@ Executive lifecycle writer lock.
    evidence;
 9. reload and revalidate the Job semantic target, state, attempt/requeue/authority law, every
    hard-filter input, current AVAILABLE/unheld candidate rows, immutable joins, routing/policy
-   identity and snapshot freshness;
+   identity, CF1 snapshot freshness and worker-observation freshness;
 10. recompute the candidate semantic rows and require byte equality of
     `preflight_candidate_digest`; any drift returns `CAPACITY_PREFLIGHT_CONFLICT` with no mutation
     and no external I/O under the lock;
 11. validate the final snapshot, evaluate only the unchanged hard-eligible candidate rows and rank
     deterministically;
-12. derive the claim/lease timestamp now, after acquisition, then atomically hold quota, create the
+12. derive one trusted current UTC time inside the transaction; require
+    `snapshot.generated_at - 2s <= current_time <= snapshot.generated_at + 32s` and every
+    `observation.observed_at - 2s <= current_time <= observation.expires_at + 2s`, then use that
+    same time for the claim/lease timestamp and atomically hold quota, create the
     Attempt, transition the Job and append `JOB_CLAIMED.capacity_evidence` while leaving the closed
     placement bytes/digest unchanged;
 13. commit and return the Attempt.
@@ -492,12 +577,20 @@ Hard capacity exclusions:
 
 - missing/duplicate/drifting join;
 - snapshot ungrounded, expired, oversized, invalid or producer material mismatch;
-- `present=false` or `present=null`;
+- missing/duplicate/invalid/stale worker-realm observation or any false readiness boolean;
+- `present=false`;
+- `present=null` unless this is one of the three frozen Personal Pro isolation slots, the slot has
+  the exact scoped `SOURCE_UNREADABLE` and `PROVIDER_PRESENCE_UNKNOWN` degradation, the central
+  acquisition/config identity is attested and the matching worker observation is fully valid;
 - `enabled=false` or `enabled=null`;
 - fresh health `unavailable`;
 - `cooling.active=true` with current trusted evidence;
 - fresh known exhaustion for the relevant five-hour/weekly horizon;
 - slot/provider/capability identity mismatch.
+
+Worker evidence resolves Executive execution eligibility only. It never rewrites the persisted CF1
+slot: an accepted isolation-null remains `present=null` historically. Worker evidence cannot
+override CF1 disabled state, active cooling, known exhaustion or health unavailable.
 
 Unknown/stale evidence is not free capacity:
 
@@ -513,7 +606,7 @@ Unknown/stale evidence is not free capacity:
 - stable `(worker_id, quota_class)` ordering breaks genuine ties.
 
 For each horizon, a fresh finite quantitative row is one whose `freshness=fresh`, whose evidence is
-`provider_reported` or `estimated`, and which contains either finite `used_percent` or a finite
+`exact`, `provider_reported` or `estimated`, and which contains either finite `used_percent` or a finite
 positive `limit` plus finite `remaining`. Headroom percent is `100-used_percent` when present,
 otherwise `100*remaining/limit`; disagreement or a value outside `[0,100]` refuses the candidate.
 The multi-horizon bottleneck is the minimum known headroom across the five-hour and weekly rows.
@@ -527,7 +620,7 @@ Eligible candidates sort lexicographically by this exact lowest-wins tuple:
   cooling_rank,                 # false=0, null=1; true is excluded
   health_rank,                  # fresh available=0, fresh degraded=1, unknown/stale=2
   quota_coverage_rank,          # both horizons quantitative=0, one=1, none=2
-  quota_evidence_rank,          # all known reported=0, mixed=1, all known estimated=2, none=3
+  quota_evidence_rank,          # all known exact/reported=0, mixed-with-estimated=1, all estimated=2, none=3
   headroom_unknown_rank,        # numeric bottleneck=0, null=1
   negative_bottleneck_basis_points,  # greater known bottleneck wins
   worker_id,
@@ -536,18 +629,20 @@ Eligible candidates sort lexicographically by this exact lowest-wins tuple:
 ```
 
 Fresh health `unavailable`, known cooling active and fresh known exhaustion are excluded before the
-tuple. `quota_evidence_rank=mixed` means the known horizon rows contain both provider-reported and
-estimated evidence. Stale rows are unknown for ranking. Stable identifiers are used only after all
+tuple. `quota_evidence_rank=mixed` means at least one known row is estimated and another is exact
+or provider-reported. Exact and provider-reported rows share the highest evidence class. Stale rows
+are unknown for ranking. Stable identifiers are used only after all
 capacity dimensions genuinely tie.
 
 The exact policy object whose canonical bytes are hashed is:
 
 ```json
-{"cooling_unknown":"eligible_penalized","hard_exclusions":["join_invalid","snapshot_invalid","present_false_or_unknown","enabled_false_or_unknown","fresh_health_unavailable","cooling_active","fresh_quota_exhausted","slot_identity_mismatch"],"headroom_rounding":"decimal_round_half_even_basis_points","quota_horizons":["five_hour","weekly"],"quota_metric":"provider_allocation","rank_tuple":["cooling_rank","health_rank","quota_coverage_rank","quota_evidence_rank","headroom_unknown_rank","negative_bottleneck_basis_points","worker_id","quota_class"],"schema":"capacity-placement.v1","stale_evidence":"unknown","unknown_quota":"eligible_without_positive_headroom"}
+{"cooling_unknown":"eligible_penalized","hard_exclusions":["join_invalid","snapshot_invalid","worker_observation_invalid","present_false","present_null_without_isolation_proof","enabled_false_or_unknown","fresh_health_unavailable","cooling_active","fresh_quota_exhausted","slot_identity_mismatch"],"headroom_rounding":"decimal_round_half_even_basis_points","isolation_null":"eligible_only_with_scoped_degradation_and_worker_proof","quota_evidence_highest":["exact","provider_reported"],"quota_horizons":["five_hour","weekly"],"quota_metric":"provider_allocation","rank_tuple":["cooling_rank","health_rank","quota_coverage_rank","quota_evidence_rank","headroom_unknown_rank","negative_bottleneck_basis_points","worker_id","quota_class"],"schema":"capacity-placement.v1","stale_evidence":"unknown","unknown_quota":"eligible_without_positive_headroom"}
 ```
 
-`capacity_policy_digest = sha256(canonical(policy_object))`. No LLM interprets provider evidence,
-chooses a worker or waives independence.
+`capacity_policy_digest = sha256(canonical(policy_object))` and the frozen v1 value is
+`a50ac8345187354b778179d2744e0ba24c40b843c38241a7eacb90fe82ed3683`. No LLM interprets
+provider evidence, chooses a worker or waives independence.
 
 ---
 
@@ -558,7 +653,7 @@ evidence is one nested object in the existing `JOB_CLAIMED` payload.
 
 Closed schema `mastermind.executive_capacity_evidence/v1` has exactly:
 
-```text
+~~~text
 schema_version
 capacity_snapshot_hash
 capacity_snapshot_generated_at
@@ -569,62 +664,73 @@ capacity_policy_digest
 selected_slot
 selected_slot_digest
 selected_degraded_rows
+selected_worker_observation
 candidate_decisions
 acquisition_receipt
-```
+~~~
 
 Semantics:
 
 - `producer_identity` is the exact closed CF1 `producer` object;
 - `producer_audit` is the exact closed CF1 `audit` object;
-- `selected_slot` is the complete exact secret-free CF1 slot used for the decision;
-- `selected_slot_digest` is SHA-256 over its canonical bytes;
-- `selected_degraded_rows` contains only producer-global and selected-slot rows;
+- `selected_slot` is the complete canonical secret-free CF1 slot used for the decision;
+- `selected_slot_digest = sha256(canonical(selected_slot))`;
+- `selected_degraded_rows` contains every producer-global and selected-slot scoped row needed to
+  interpret that slot;
+- `selected_worker_observation` is the complete canonical closed worker observation used for
+  execution-realm eligibility;
 - `candidate_decisions` is deterministically ordered and contains only candidates already lawful
   under Executive/Router hard filters;
-- `acquisition_receipt` is the exact closed object below and binds the preflight, requested subset,
-  envelope digest, ordered fragments, installed Macro release/material identity and completion
-  time without paths or principal names.
+- `acquisition_receipt` is the exact closed object below.
 
 Each candidate decision has exactly:
 
-```text
+~~~text
 host_ref
-capability_id
+capacity_capability_id
 worker_id
 quota_class
 slot_evidence
 slot_digest
 degraded_rows
+worker_observation
 disposition
 reason_codes
 rank_vector
-```
+~~~
 
-`slot_evidence` is the complete canonical secret-free CF1 slot for that candidate.
-`slot_digest = sha256(canonical(slot_evidence))`. `degraded_rows` contains every producer-global and
-candidate-scoped row needed to interpret that slot. Persisting full evidence for all one-to-three
-capacity-evaluated candidates makes the historical choice independently explainable without a
-mutable provider lookup. `selected_slot`, `selected_slot_digest` and `selected_degraded_rows` must
-be byte-equal to the corresponding fields in the one selected candidate row.
+`slot_evidence` is the complete canonical CF1 slot. `slot_digest = sha256(canonical(slot_evidence))`.
+`degraded_rows` includes all producer-global and candidate-scoped rows needed to interpret it.
+`worker_observation` is the complete canonical secret-free
+`mastermind.executive_worker_capacity_observation/v1` object.
+
+Persisting full provider and realm evidence for all one-to-three capacity-evaluated candidates makes
+the historical choice independently explainable without a mutable provider/worker lookup.
+The top-level selected slot, digest, degradation and worker observation must be byte-equal to the
+corresponding fields in the one selected row.
 
 `disposition` is `selected | eligible | excluded`. Excluded here means capacity-excluded after all
 other hard filters; unauthorized or otherwise ineligible workers never enter this list.
 
-`rank_vector` is either null for a hard-excluded candidate or an exact object with these eight
-keys: `cooling_rank`, `health_rank`, `quota_coverage_rank`, `quota_evidence_rank`,
-`headroom_unknown_rank`, `negative_bottleneck_basis_points`, `worker_id`, `quota_class`. Its values
-must reproduce the tuple in Section 7.1 exactly.
+`rank_vector` is null for a hard-excluded candidate or an exact object with these eight keys:
+`cooling_rank`, `health_rank`, `quota_coverage_rank`, `quota_evidence_rank`,
+`headroom_unknown_rank`, `negative_bottleneck_basis_points`, `worker_id` and `quota_class`.
+Its values must reproduce Section 7.1 exactly.
 
-The closed candidate reason vocabulary is:
+Closed candidate reason vocabulary:
 
-```text
+~~~text
 CAPACITY_JOIN_MISSING
 CAPACITY_JOIN_AMBIGUOUS
 CAPACITY_JOIN_DRIFT
 CAPACITY_SLOT_IDENTITY_MISMATCH
+CAPACITY_WORKER_OBSERVATION_MISSING
+CAPACITY_WORKER_OBSERVATION_INVALID
+CAPACITY_WORKER_OBSERVATION_STALE
+CAPACITY_WORKER_REALM_READY
 CAPACITY_PRESENT_FALSE
 CAPACITY_PRESENT_UNKNOWN
+CAPACITY_PRESENT_ISOLATION_NULL_ACCEPTED
 CAPACITY_ENABLED_FALSE
 CAPACITY_ENABLED_UNKNOWN
 CAPACITY_HEALTH_AVAILABLE
@@ -638,6 +744,7 @@ CAPACITY_COOLING_ACTIVE
 CAPACITY_QUOTA_COMPLETE
 CAPACITY_QUOTA_PARTIAL
 CAPACITY_QUOTA_UNKNOWN
+CAPACITY_QUOTA_EXACT
 CAPACITY_QUOTA_REPORTED
 CAPACITY_QUOTA_ESTIMATED
 CAPACITY_QUOTA_MIXED
@@ -646,38 +753,62 @@ CAPACITY_QUOTA_EXHAUSTED
 CAPACITY_SELECTED
 CAPACITY_ELIGIBLE_LOWER_RANK
 CAPACITY_STABLE_TIE_BREAK
-```
+~~~
 
-Reason lists are sorted, unique and contain only facts applicable to the row.
+Reason lists are sorted, unique and contain only applicable deterministic facts. An accepted null
+presence must carry both `CAPACITY_PRESENT_UNKNOWN` and
+`CAPACITY_PRESENT_ISOLATION_NULL_ACCEPTED`; it never receives a synthetic true reason.
 
-Closed `acquisition_receipt` schema `mastermind.executive_capacity_acquisition_receipt/v1` has
-exactly:
+Closed `acquisition_receipt` schema
+`mastermind.executive_capacity_acquisition_receipt/v1` has exactly:
 
-```json
+~~~json
 {
   "schema_version": "mastermind.executive_capacity_acquisition_receipt/v1",
   "preflight_candidate_digest": "<64-lower-hex>",
-  "request_digest": "<64-lower-hex>",
-  "requested_capability_ids": ["codex_account_2", "codex_account_3"],
-  "fragment_receipts": [
-    {"capability_id": "codex_account_2", "fragment_hash": "<64-lower-hex>"},
-    {"capability_id": "codex_account_3", "fragment_hash": "<64-lower-hex>"}
-  ],
+  "capacity_snapshot_hash": "<64-lower-hex>",
+  "capacity_snapshot_generated_at": "2026-08-26T01:45:00Z",
+  "acquisition_config_digest": "<64-lower-hex>",
   "macro_release_commit": "<40-lower-hex>",
   "producer_material_source_digest": "<64-lower-hex>",
+  "worker_observation_receipts": [
+    {
+      "capacity_capability_id": "codex_account_2",
+      "observation_digest": "<64-lower-hex>"
+    },
+    {
+      "capacity_capability_id": "codex_account_3",
+      "observation_digest": "<64-lower-hex>"
+    }
+  ],
   "completed_at": "2026-08-26T01:45:04Z"
 }
-```
+~~~
 
-The two lists are sorted by capability ID. They contain the same one-to-three identities exactly.
-The material digest equals the final CF1 producer audit; the installed release commit equals the
-attested Macro executable release; `completed_at` is UTC, is not before `snapshot_generated_at`,
-and is not after `expires_at` plus the 2-second clock tolerance. Any extra key, duplicate, mismatch
-or bound violation refuses before mutation.
+The observation receipt list is sorted by `capacity_capability_id` and contains exactly the
+one-to-three unchanged preflight candidates. It has no duplicate or unexpected identity.
+
+Required identity equalities before mutation:
+
+~~~text
+receipt.capacity_snapshot_hash == capacity_evidence.capacity_snapshot_hash
+receipt.capacity_snapshot_generated_at == capacity_evidence.capacity_snapshot_generated_at
+receipt.producer_material_source_digest == producer_identity.material_source_digest
+receipt.macro_release_commit == producer_audit.repository_commit
+producer_audit.material_sources_match_commit == true
+each receipt observation digest == its candidate worker_observation.observation_digest
+each worker observation host/capability == the immutable candidate join
+~~~
+
+`acquisition_config_digest` is the accepted root-owned configuration digest covering the exact
+producer operation/release, fixed three-home Macro inventory, allowed environment names, telemetry
+surface identities and per-broker capability bindings. It reveals no path, principal/account name or
+secret. `completed_at` is UTC, not before snapshot generation or any observation time, and not after
+the earliest applicable expiration plus the 2-second tolerance.
 
 Bounds:
 
-- at most 3 candidate decisions in the Codex-only first vertical;
+- at most 3 candidate decisions;
 - at most 16 reason codes per candidate, each at most 64 ASCII characters;
 - at most 32 degradation rows per candidate;
 - canonical `capacity_evidence` at most 64 KiB;
@@ -694,14 +825,16 @@ provider-native account/session ID, raw provider output or exception text is per
 ### 9.1 Replay before acquisition
 
 The first operation is a read-only `command_id` event lookup before acquisition, followed by the
-same lookup as the first operation inside the eventual write transaction. When either lookup finds
-the event:
+same lookup as the first operation inside the eventual write transaction.
 
-- validate the historical event target and closed capacity evidence;
-- return the persisted historical Attempt/outcome;
-- perform zero broker calls, zero Macro subprocesses, zero provider/home observations and zero
-  ranking;
-- never compare the historical evidence to current capacity state.
+**Outer replay hit:** validate the historical event target/evidence and return the persisted
+Attempt/outcome with zero CF1 acquisition, broker observation, ranking or mutation. Never compare
+historical evidence to current capacity state.
+
+**Inner transactional race hit:** the losing caller may already have completed read-only CF1 and
+broker acquisition outside the lock. It discards those fresh observations, validates and returns
+the winner's persisted Attempt/evidence, and performs zero ranking, mutation, second Attempt/Event
+or provider turn. A later replay invocation performs zero second acquisition.
 
 ### 9.2 Semantic conflict
 
@@ -752,65 +885,84 @@ and existing worker-broker transport are the only Mastermind persistence/transpo
 
 ## 11. Test and mutation matrix
 
-### CF2-I-A / Macro producer
+### CF2-P0 / host census
 
-Require tests that:
+Require read-only proof that:
 
-- reject missing/extra keys, invalid hashes/times, NaN/Infinity, duplicate identities and trailing
-  stdout;
-- prove explicit capability binding maps the three isolated realms exactly and never by path/order;
-- reject mixed commit/material digests and altered request envelopes;
-- prove one-, two- and three-ID requested subsets; a non-requested busy realm cannot block the
-  available subset and the final inventory remains twelve slots with explicit unknowns;
-- preserve twelve-slot inventory with explicit unknown/degraded rows for unavailable fragments;
-- keep `generated_at` nonsemantic while source observations/material identity remain semantic;
-- prove fragment/finalizer output redlines all credential/path/PII classes;
-- prove zero provider calls and zero writes;
-- prove fixed bounds and golden canonical vectors.
+- either an existing Macro producer or an exact root-owned grounded Git checkout can emit strict
+  accepted CF1 v1;
+- the installed checkout retains Git metadata and every accepted material source;
+- the shared telemetry surface is narrow, secret-free, correction-current and readable without
+  provider-home access;
+- root-owned `CODEX_ACCOUNT_HOMES` contains exactly three canonical paths in accepted Macro order;
+- `_mastermind_exec` cannot traverse/read any Personal Pro home and is not in any Pro group;
+- the real central snapshot emits `present=null`, not false, for all three isolated slots plus every
+  exact required scoped degradation;
+- source path, owner/mode/ACL/symlink and no-write receipts are sanitized and complete.
 
-Mutation kills must include swapping codex account 2/3 identities, dropping a fragment, treating
-unknown as false/free, accepting mixed producer commits and allowing a path in a fragment.
+Adding control to a Pro group, weakening a home mode, omitting/reordering a configured home, using a
+source-only bundle or exposing credential-bearing telemetry must fail the gate.
 
-### CF2-I-B / Mastermind acquisition
+### CF2-I-A / grounded central acquisition
 
 Require tests that:
 
 - fixed absolute argv uses no shell/PATH/user checkout and inherits no sensitive environment;
-- each broker can request only its own immutable capability ID/home;
-- wrong peer UID, supplementary group, worker-busy state, unexpected capability, oversized output,
-  timeout, nonzero exit or malformed fragment refuses;
-- three service instances share one Executive Runtime/database and have distinct sockets/Uids/homes;
-- zero auth bytes are opened by Executive or returned across broker;
-- ambiguous broker response causes no claim and no cross-worker retry;
-- installed release/material identity is attested.
+- stdout/stderr/time/process-group bounds are enforced and owned processes are reaped;
+- wrong/ungrounded release, material mismatch, invalid hash/schema/UTF-8/trailing bytes, stale/future
+  snapshot, oversize output and nonzero exit refuse;
+- `producer.material_source_digest` and `audit.repository_commit` bind exactly to receipt fields and
+  `material_sources_match_commit=true`;
+- all twelve slots and every honest null/degradation are preserved byte-for-byte;
+- no credential bytes/provider-home contents are opened, no provider/network call occurs and no
+  file/database/cache is written.
+
+### CF2-I-B / broker realm observation
+
+Require tests that:
+
+- the request is the one exact fixed object and rejects every extra/dynamic field;
+- each broker reports only its immutable `capacity_capability_id` and own fixed realm;
+- wrong peer UID, wrong broker UID/GID, supplementary-group drift, missing autonomy, held Attempt,
+  active provider/process, config drift or another capability identity refuses;
+- response closed keys, canonical digest, 4-KiB bound, five-second timeout, 15-second TTL and
+  two-second skew are discriminated at boundaries;
+- credential absent/wrong owner/type/mode, binary drift or broker generation drift refuses;
+- no path, UID, username, account label, browser identity, secret-ref, auth bytes or raw exception
+  crosses the socket;
+- three broker services share one Executive Runtime/database and use distinct sockets/principals/homes;
+- a busy non-candidate broker is not contacted and cannot block an available candidate;
+- an ambiguous response causes no claim and no cross-worker retry.
 
 ### CF2-I-C / claim integration
 
 Require tests that:
 
-- command replay occurs before acquisition and invokes the source zero times;
+- an outer replay hit invokes zero CF1/broker acquisition;
+- an inner same-command race may discard already-acquired reads but creates zero second
+  Attempt/Event/provider turn and returns the winner;
 - a capacity source blocked longer than SQLite's five-second busy timeout does not hold the
-  lifecycle writer lock and does not delay an unrelated Job/Event/Attempt writer;
-- every existing hard filter runs before capacity ranking;
-- missing/duplicate/drifting join refuses;
-- false/null presence or enablement, fresh unavailable health, active cooling and fresh exhaustion
-  exclude exactly as frozen;
-- unknown/stale penalties never become free/unlimited headroom;
-- ranking and reason codes are stable under input order changes;
-- golden vectors independently recompute request, fragment, preflight, policy, slot, snapshot and
-  acquisition-receipt digests plus the exact multi-horizon rank decision;
-- every capacity-evaluated candidate persists its complete canonical slot/degradation/rank evidence
-  and independently explains the selected/lower/excluded disposition;
-- capacity evidence bounds/privacy validators reject before mutation;
+  lifecycle writer lock or delay an unrelated Job/Event/Attempt writer;
+- every existing hard filter runs before capacity acquisition/ranking;
+- missing/duplicate/drifting join or worker observation refuses;
+- CF1 `present=false` always refuses;
+- CF1 `present=null` is eligible only for the exact three isolation slots with scoped degradation,
+  attested config and fully valid matching worker evidence, and remains null in persisted evidence;
+- worker evidence never overrides disabled state, active cooling, fresh exhaustion or health
+  unavailable;
+- unknown/stale cooling, health and quota receive the exact penalties and never become free;
+- fresh exact/provider-reported quota share the highest evidence class; estimated is lower;
+- ranking/reasons are stable under input ordering;
+- golden vectors independently recompute snapshot, worker observation, preflight, policy, slot,
+  configuration and acquisition-receipt digests plus the multi-horizon rank;
+- every evaluated candidate persists full canonical slot/degradation/worker/rank evidence;
+- commit exactly at the freshness/skew boundary passes and one tick beyond refuses;
 - one transaction commits quota hold, Attempt, Job transition, unchanged placement and exact
   capacity evidence together—or none;
-- a concurrent race creates exactly one Attempt;
-- concurrent same-command callers may duplicate read-only acquisition but the losing write
-  transaction reconciles the winner and creates no second Attempt/Event/provider turn;
 - preflight/transaction candidate or policy drift returns `CAPACITY_PREFLIGHT_CONFLICT`, performs no
   mutation and never reacquires while the writer lock is held;
-- changed same-command evidence conflicts while exact replay returns history without acquisition;
-- later correction leaves historical evidence unchanged;
+- exact replay returns history without acquisition; changed semantic target conflicts;
+- later provider/realm correction leaves historical evidence unchanged;
 - exact pre-CF2 v4 placement canonical bytes/digest and normalized SQLite schema digest do not
   change.
 
@@ -818,25 +970,30 @@ Require tests that:
 
 ## 12. Real production proof owed by CF2-I
 
-The final CF2-I canary must use an exact accepted installed release and prove:
+The final CF2-I canary must use exact accepted installed releases and prove:
 
 1. all three Personal Pro realms have separate sanitized readiness and inference-canary receipts;
 2. all three worker brokers run under the correct distinct principals with one canonical Executive
    Runtime;
-3. three immutable worker/quota joins bind the exact Codex capability IDs;
-4. one complete grounded fresh `mastermind.provider_capacity.v1` snapshot is obtained through the
-   distributed Macro producer path without root/shared credential access;
-5. one harmless Chairman-authorized Executive Job chooses deterministically among the three
-   already-eligible seats and persists exact capacity evidence atomically;
-6. one real worker execution reaches a terminal result;
-7. replay of the same command performs zero second acquisition/provider turn/Attempt;
-8. a future observation change does not alter the historical claim;
-9. disarm/rearm and recovery preserve one lifecycle and no hidden provider process;
-10. secret/PII scans and before/after write receipts remain clean.
+3. three immutable worker/quota joins bind exact
+   `(host_ref, capacity_capability_id)` identities without equating account labels;
+4. one complete grounded fresh unchanged `mastermind.provider_capacity.v1` snapshot is emitted by
+   the CF2-P0-accepted central Macro path while control cannot traverse any Pro home;
+5. all three Codex slots preserve exact null presence/degradation from the isolation boundary;
+6. fresh candidate-only worker observations establish current realm eligibility without reading
+   credential bytes or blocking a parallel seat;
+7. one harmless Chairman-authorized Executive Job chooses deterministically among the three
+   already-eligible seats and persists full provider/realm decision evidence atomically;
+8. the selected worker reaches a terminal result;
+9. same-command replay performs zero second acquisition/provider turn/Attempt;
+10. a later provider or realm observation change cannot alter the historical claim;
+11. disarm/rearm/restart recovery preserves one lifecycle and no hidden provider process;
+12. secret/PII scans and before/after write receipts remain clean.
 
-The proof packet names exact release, Mastermind/Macro commits, process principals in sanitized
-form, snapshot/policy/slot/event digests, Job/Attempt/command identities, terminal result and every
-degraded/null field. It never publishes auth material or account identity.
+The proof packet names exact Mastermind/Macro releases, sanitized principal/broker identities,
+snapshot/policy/slot/observation/config/Event digests, Job/Attempt/command identities, terminal
+result and every degraded/null field. It never publishes auth material, provider-home paths or
+account identity.
 
 ---
 
@@ -861,24 +1018,26 @@ This CF2-F records-only carrier passes only when an independent reviewer proves:
 
 1. protected Mastermind and compatible Skillpack were pinned exactly;
 2. accepted CF1 candidate/merge and current #149 integration freeze are named;
-3. the current single-principal acquisition falsifier is preserved honestly;
-4. the distributed read path preserves mode-0700/principal isolation and one Macro producer;
-5. exact acquisition, fragment, join, evidence, bounds, privacy, time, null, correction and replay
+3. the current control-principal acquisition falsifier and accepted CF1 isolation-null behavior are
+   preserved honestly;
+4. the central unchanged CF1 plus worker-local realm-evidence join preserves mode-0700 isolation,
+   one Macro producer and one existing worker-broker family;
+5. exact P0, acquisition, observation, join, evidence, bounds, privacy, time, null, correction and replay
    laws are closed;
 6. existing `JOB_CLAIMED` is sufficient and placement/schema remain unchanged;
-7. implementation is split into bounded Macro producer, Mastermind transport and Mastermind claim
-   carriers with exact proof gates;
+7. implementation is split into bounded P0, grounded central acquisition, broker observation and
+   claim carriers with exact proof gates;
 8. Cursor/Grok research remains parallel while executable adapters remain RF1/HF1-gated.
 
 Merge makes this source law `SPEC_ONLY`. It does not install services, authenticate accounts,
 enable routing, place work, spawn sessions, grant MCP/plugins, deploy to a VPS or arm autonomy.
 
-After PASS/merge, the exact next action is CF2-I-A: implement the Macro-owned distributed
-fragment/finalize producer as one no-write independently useful carrier. CF2-I-B remains held until
-that exact contract is accepted. Personal Pro readiness may continue on its separate host carrier,
-and Cursor/Grok source research may continue on disjoint read-only carriers.
+After PASS/merge, the exact next action is CF2-P0: run the read-only host census and return one
+closed safe-source outcome. Only an accepted source path releases CF2-I-A. Personal Pro readiness
+may continue on its separate host carrier, and Cursor/Grok source research may continue on disjoint
+records-only carriers.
 
-Stop and return to Sol if implementation proves the existing broker cannot carry the bounded read,
-the final projection cannot remain Macro-owned, the closed event payload cannot fit the evidence,
-or any proposed repair requires shared/root credential observation, another service family, another
+Stop and return to Sol if no grounded Macro path can read only secret-free telemetry, the existing
+broker cannot carry the bounded observation, the closed event payload cannot fit full evidence, or
+any proposed repair requires shared/root credential observation, a new service family, another
 database/event/lifecycle, schema v5 or changed placement identity.
