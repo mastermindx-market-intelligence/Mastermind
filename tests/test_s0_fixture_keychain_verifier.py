@@ -170,6 +170,8 @@ def test_valid_secret_reaches_verifier_only_through_anonymous_stdin_pipe_and_is_
     assert not any(token.decode('ascii') in arg for arg in captured['argv'])
     assert captured['argv'] == [
         sys.executable,
+        '-I',
+        '-S',
         str(helper._VERIFIER_SCRIPT),
         '--expected-team-id',
         'T0BRD2AQXQV',
