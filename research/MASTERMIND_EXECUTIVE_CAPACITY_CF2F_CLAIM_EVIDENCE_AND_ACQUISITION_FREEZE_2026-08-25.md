@@ -326,10 +326,15 @@ Every invocation:
 The accepted P0 record is the exact canonical object
 `mastermind.executive_capacity_p0_acceptance/v1` with exactly `schema_version`, `outcome`,
 `source_kind`, `source_config_digest`, `macro_release_commit` and
-`producer_material_source_digest`. `outcome` is one of the closed Section 4.1 values;
-`source_kind` is `grounded_cf1_git_release` or `existing_macro_projection`; and the release/material
-identities must equal the strict CF1 producer audit subsequently acquired. Its identity is
-`p0_acceptance_digest = sha256(canonical(p0_record))`.
+`producer_material_source_digest`. This acceptance object exists only for
+`GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED` or `EXISTING_MACRO_PROJECTION_PATH_ACCEPTED`;
+`source_kind` is respectively `grounded_cf1_git_release` or `existing_macro_projection`, and the
+release/material identities must equal the strict CF1 producer audit subsequently acquired. Its
+identity is `p0_acceptance_digest = sha256(canonical(p0_record))`.
+
+`NO_SAFE_CF1_ACQUISITION_PATH` is a terminal P0 refusal, not an accepted source. It creates no
+acceptance object/digest, has no source kind/release/material fields, releases no CF2-I work and can
+never appear in a successful acquisition receipt.
 
 `source_config_digest = sha256(canonical(source_config))`, where the closed
 `mastermind.executive_capacity_source_config/v1` object has exactly:
@@ -482,9 +487,11 @@ The operation:
 - is valid at claim commit only when
   `observed_at - 2s <= trusted_current_utc <= expires_at + 2s`.
 
-All five readiness booleans must be true. `credential_present=true` means only that the fixed auth
-object exists with the reviewed metadata boundary; it does not claim provider acceptance or quota.
-Existing G7/provider-readiness admission remains independently required and is not duplicated.
+The broker emits the successful observation object only when all five readiness booleans are true.
+Any false value returns its exact closed refusal code below and emits no observation object/digest.
+`credential_present=true` means only that the fixed auth object exists with the reviewed metadata
+boundary; it does not claim provider acceptance or quota. Existing G7/provider-readiness admission
+remains independently required and is not duplicated.
 
 ### 5.3 Refusal and ambiguity
 
@@ -513,7 +520,7 @@ CAPACITY_OBSERVE_INTERNAL
 
 Only brokers joined to the read-only preflight hard-eligible candidate set are contacted. A busy
 non-candidate realm therefore cannot block another available seat. Missing, duplicate, invalid,
-expired or ambiguous observation for any requested candidate refuses the whole claim invocation
+expired, refused or ambiguous observation for any requested candidate refuses the whole claim invocation
 before ranking or `JOB_CLAIMED`; no candidate decision or acquisition receipt is persisted. It is
 never retried through another worker/broker under the same invocation. This conservative V1 law
 keeps every successful receipt complete; per-candidate refusal would require a later frozen evidence
@@ -654,8 +661,9 @@ Hard capacity exclusions:
 
 - missing/duplicate/drifting join;
 - snapshot ungrounded, expired, oversized, invalid or producer material mismatch;
-- any false worker-realm readiness boolean; missing/duplicate/invalid/stale/ambiguous observations
-  have already refused the whole acquisition before policy evaluation;
+- every worker observation is already a complete all-true acquisition precondition; any false,
+  missing, duplicate, invalid, stale or ambiguous observation has refused the whole invocation
+  before policy evaluation;
 - `present=false`;
 - `present=null` unless this is one of the three frozen Personal Pro isolation slots, the slot has
   the exact scoped `SOURCE_UNREADABLE` and `PROVIDER_PRESENCE_UNKNOWN` degradation, the central
@@ -715,11 +723,11 @@ capacity dimensions genuinely tie.
 The exact policy object whose canonical bytes are hashed is:
 
 ```json
-{"cooling_unknown":"eligible_penalized","hard_exclusions":["join_invalid","snapshot_invalid","worker_observation_invalid","present_false","present_null_without_isolation_proof","enabled_false_or_unknown","fresh_health_unavailable","cooling_active","fresh_quota_exhausted","slot_identity_mismatch"],"headroom_rounding":"decimal_round_half_even_basis_points","isolation_null":"eligible_only_with_scoped_degradation_and_worker_proof","quota_evidence_highest":["exact","provider_reported"],"quota_horizons":["five_hour","weekly"],"quota_metric":"provider_allocation","rank_tuple":["cooling_rank","health_rank","quota_coverage_rank","quota_evidence_rank","headroom_unknown_rank","negative_bottleneck_basis_points","worker_id","quota_class"],"schema":"capacity-placement.v1","stale_evidence":"unknown","unknown_quota":"eligible_without_positive_headroom"}
+{"cooling_unknown":"eligible_penalized","hard_exclusions":["join_invalid","snapshot_invalid","present_false","present_null_without_isolation_proof","enabled_false_or_unknown","fresh_health_unavailable","cooling_active","fresh_quota_exhausted","slot_identity_mismatch"],"headroom_rounding":"decimal_round_half_even_basis_points","isolation_null":"eligible_only_with_scoped_degradation_and_worker_proof","quota_evidence_highest":["exact","provider_reported"],"quota_horizons":["five_hour","weekly"],"quota_metric":"provider_allocation","rank_tuple":["cooling_rank","health_rank","quota_coverage_rank","quota_evidence_rank","headroom_unknown_rank","negative_bottleneck_basis_points","worker_id","quota_class"],"schema":"capacity-placement.v1","stale_evidence":"unknown","unknown_quota":"eligible_without_positive_headroom"}
 ```
 
 `capacity_policy_digest = sha256(canonical(policy_object))` and the frozen v1 value is
-`a50ac8345187354b778179d2744e0ba24c40b843c38241a7eacb90fe82ed3683`. No LLM interprets
+`9cd60fb8b522f615d9314b283a36c6ec7aecae953147ddf87fd748de3d455546`. No LLM interprets
 provider evidence, chooses a worker or waives independence.
 
 ---
@@ -803,11 +811,6 @@ CAPACITY_JOIN_AMBIGUOUS
 CAPACITY_JOIN_DRIFT
 CAPACITY_SLOT_IDENTITY_MISMATCH
 CAPACITY_WORKER_REALM_READY
-CAPACITY_WORKER_REALM_METADATA_INVALID
-CAPACITY_WORKER_CREDENTIAL_ABSENT
-CAPACITY_WORKER_CREDENTIAL_METADATA_INVALID
-CAPACITY_WORKER_PROVIDER_BINARY_UNATTESTED
-CAPACITY_WORKER_BROKER_GENERATION_UNREADY
 CAPACITY_PRESENT_FALSE
 CAPACITY_PRESENT_UNKNOWN
 CAPACITY_PRESENT_ISOLATION_NULL_ACCEPTED
