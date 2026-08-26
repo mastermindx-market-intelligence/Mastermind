@@ -596,9 +596,13 @@ cleanup() {
       /bin/launchctl disable "system/$label" >/dev/null 2>&1 || true
       /bin/launchctl bootout "system/$label" >/dev/null 2>&1 || true
     done
-    for path in "${NEW_TOPOLOGY_PATHS[@]}"; do archive_path "$path" failed-topology || true; done
+    if [ "${#NEW_TOPOLOGY_PATHS[@]}" -gt 0 ]; then
+      for path in "${NEW_TOPOLOGY_PATHS[@]}"; do archive_path "$path" failed-topology || true; done
+    fi
     [ -z "$GENERATION_CANDIDATE" ] || archive_path "$GENERATION_CANDIDATE" failed-generation || true
-    for path in "${NEW_VERSIONED_PATHS[@]}"; do archive_path "$path" failed-versioned || true; done
+    if [ "${#NEW_VERSIONED_PATHS[@]}" -gt 0 ]; then
+      for path in "${NEW_VERSIONED_PATHS[@]}"; do archive_path "$path" failed-versioned || true; done
+    fi
     [ -z "$STAGING_SESSION" ] || archive_path "$STAGING_SESSION" failed-stage || true
   fi
   exit "$status"

@@ -130,6 +130,31 @@ def test_capacity_preparer_uses_recoverable_staging_and_no_recursive_deletion() 
     assert "rm -R" not in source
 
 
+def test_capacity_preparer_cleanup_guards_empty_arrays_for_macos_bash() -> None:
+    cleanup = _source().split("cleanup() {", 1)[1].split("trap cleanup EXIT", 1)[0]
+    topology_guard = 'if [ "${#NEW_TOPOLOGY_PATHS[@]}" -gt 0 ]; then'
+    versioned_guard = 'if [ "${#NEW_VERSIONED_PATHS[@]}" -gt 0 ]; then'
+    topology_loop = 'for path in "${NEW_TOPOLOGY_PATHS[@]}"; do'
+    versioned_loop = 'for path in "${NEW_VERSIONED_PATHS[@]}"; do'
+    assert topology_guard in cleanup
+    assert versioned_guard in cleanup
+    assert cleanup.index(topology_guard) < cleanup.index(topology_loop)
+    assert cleanup.index(versioned_guard) < cleanup.index(versioned_loop)
+    completed = subprocess.run(
+        [
+            "/bin/bash",
+            "-uc",
+            'paths=(); if [ "${#paths[@]}" -gt 0 ]; then '
+            'for path in "${paths[@]}"; do :; done; fi',
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "unbound variable" not in completed.stderr
+
+
 def test_capacity_preparer_refuses_foreign_telemetry_without_mutating_it() -> None:
     source = _source()
     preflight = 'verify_telemetry_boundary || refuse "pre-existing Provider Control telemetry root is not the exact canonical absence boundary"'
