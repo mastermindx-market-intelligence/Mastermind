@@ -117,18 +117,22 @@ _mastermind_worker uid/gid 451
 There are not three distinct Codex worker principals. The sole worker plist uses
 `_mastermind_worker`, one broker socket and the configured logical realm `codex-01`.
 
-Material drift from CF2-F:
+Observed topology facts:
 
-- `_mastermind_exec` currently has `_mastermind_worker` as a supplementary group;
+- `_mastermind_exec` currently has the legacy `_mastermind_worker` artifact group as a
+  supplementary group, as the accepted Phase 1C workspace boundary requires;
 - the worker root contains only `codex-01`;
 - `codex-01` is `_mastermind_worker:_mastermind_worker`, mode `0700`;
 - its configured `provider-home` path was absent at observation time;
 - no `codex-02` or `codex-03` worker realm, home, config, socket or service exists.
 
 The `0700` owner-only `codex-01` directory still prevents group-based traversal, so P0 does not claim
-that credential material was readable. Nevertheless, control membership in the shared worker group
-and reuse of one worker UID are incompatible with the accepted three-principal design. Future work
-must remove that ambient membership rather than extending it.
+that credential material was readable. The shared `_mastermind_worker` artifact group is not one of
+the three Personal Pro primary groups and is not itself a CF2-F violation. The blockers are that the
+three dedicated users/groups/homes are not installed and therefore no negative control-membership or
+traversal proof exists for `_mastermind_codex_01`, `_mastermind_codex_02` and
+`_mastermind_codex_03`. Host preparation must keep `_mastermind_exec` outside those three Pro groups
+while preserving only the separately reviewed legacy artifact boundary.
 
 ---
 
@@ -221,7 +225,8 @@ and three-principal host preparation**. It must remain on one carrier and prove,
    environment-name allowlist, three-home inventory and secret-free telemetry identities;
 3. three distinct worker users/groups, homes, configs, sockets and launchd services using the existing
    broker implementation family;
-4. removal of `_mastermind_exec` from every worker group and negative traversal proof;
+4. proof that `_mastermind_exec` is outside all three dedicated Personal Pro groups plus negative
+   traversal proof, while preserving only the separate Phase 1C artifact-group boundary;
 5. no credential copy during host preparation; each empty private realm receives credentials only
    through a later bounded native ceremony;
 6. installed-host verification and rollback receipts before CF2-I-A is released.
