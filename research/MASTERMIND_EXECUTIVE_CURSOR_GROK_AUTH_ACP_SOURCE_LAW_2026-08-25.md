@@ -4,15 +4,15 @@
 **Owner:** Sol, AI CEO  
 **Chairman:** Chris  
 **Status:** **SOL SOURCE-LAW FREEZE / RECORDS ONLY / NO LOGIN OR PROVIDER ENABLEMENT**  
-**Protected Mastermind basis:** `068125e3524eb1b327721f1e79a2338f3d367554`  
+**Protected Mastermind basis:** `cdfecc6f6b382862238c15fe1d5bd646eb62213c`
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.0, bootstrap major 1, loaded atomically from that exact commit.  
 **Integration parent:** `research/MASTERMIND_EXECUTIVE_AUTONOMY_V1_CLOSURE_2026-08-25.md`  
 **Capacity dependency:** CF2-F -> CF2-I  
 **Execution dependencies:** RF1 provider-neutral suitability -> HF1 provider-neutral harness  
 
 The basis advanced from the Autonomy V1 freeze only through the disjoint Worker Browser/DevServer
-F0 records carrier. The Skillpack schema/version and every Cursor/Grok material execution/auth seam
-named below remain compatible at this exact basis.
+F0 records carrier and the MAS-112 Slack metadata-verifier repair. The Skillpack schema/version and
+every Cursor/Grok material execution/auth seam named below remain compatible at this exact basis.
 
 ---
 
@@ -101,12 +101,16 @@ Every accepted provider realm must have:
   principal;
 - one provider-owned configuration/session home inaccessible to the Chairman's normal app/home;
 - one immutable provider alias and credential realm binding in root-owned installed config;
-- credential injection only to the exact broker-owned child process;
+- provider-manifest-specific authentication at the exact broker-owned child boundary: a worker-local
+  broker may inject an allowed static/short-lived credential only when the accepted descendant-
+  environment falsifier proves that model-spawned commands cannot read it; a provider-managed home
+  remains provider-managed and is never re-exported as a token;
 - no secret in argv, process title, logs, Events, Slack, result, exception, checkpoint, receipt,
   workspace file, Git, clipboard or model context;
 - no credential-byte inspection as readiness or capacity evidence;
-- native provider renewal only inside the dedicated realm, or a reviewed one-way broker refresh
-  operation that returns a token directly to the child without persistence in Executive state;
+- native provider renewal only inside the dedicated realm, or an already-owned, reviewed one-way
+  worker-local operation that returns a token directly to the provider child without persistence in
+  Executive state;
 - sanitized readiness based on metadata, command success and bounded provider response, never raw
   credential content.
 
@@ -131,11 +135,14 @@ machine-owned. Human ceremony does not make the Chairman an MCP bus or prompt re
 
 ## 4. Cursor authentication ruling
 
-### 4.1 Accepted V1 route
+### 4.1 Conditional V1 candidate
 
-The first Cursor worker uses a manually issued user API key injected as `CURSOR_API_KEY` into the
-exact `agent acp` child environment. It runs under a dedicated OS principal whose normal provider
-config/cache directories are isolated by that principal's private home.
+The first Cursor candidate uses a manually issued user API key stored in root-provisioned,
+worker-private secret storage and made available by the existing worker-local broker as
+`CURSOR_API_KEY` to the exact `agent acp` child. The route is not accepted until **Cursor-C0** proves
+both the credential boundary and the effective configuration boundary on the exact installed
+binary. It runs under a dedicated OS principal whose normal provider configuration/cache
+directories are isolated by that principal's private home.
 
 Rules:
 
@@ -146,23 +153,38 @@ Rules:
   input but does not freeze a public consumer issuance/renewal contract;
 - do not claim Personal subscription remaining capacity; absent a documented endpoint the value
   is null with an explicit unknown reason;
+- do not claim a closed Cursor ACP profile merely from a private home. The documented CLI loads
+  project/user instructions and MCP configuration, including repository `AGENTS.md`/`CLAUDE.md`;
+  exact effective-config census and reliable suppression of every unapproved user/team/plugin/
+  project MCP, hook, rule and subagent surface must be proven by Cursor-C0 on the installed binary;
+- bind the protected-basis SHA-256 digests of intentionally allowed repository instructions:
+  `AGENTS.md=b7878cdec9567af693209ce7548c1da558bd4e8933e8d5baf094bada47521aaf` and
+  `CLAUDE.md=65e7e526dd09abc933e57c4c5de8ef69d6c4f4b5b4c400e9d172d6591e7b099f`.
+  A changed digest or any additional effective instruction/configuration source fails closed;
 - a 401/403 is an auth outcome; a 429 is cooling/rate evidence. Neither proves another account is
   free or authorizes blind failover.
 
+If Cursor-C0 finds no supported, reliable census and suppression path for all ambient authority,
+the local ACP route returns to Sol. A later Cursor SDK profile is a separate reviewed route: it must
+use `setting_sources=[]`, an empty inline MCP configuration and a closed tool surface, and it must
+still enter through the existing `WorkerExecutionAdapter` and Executive Attempt lifecycle.
+
 Browser-cookie or cached-refresh-token scraping is `REJECTED_BY_DESIGN`.
 
-### 4.2 Enterprise route
+### 4.2 Enterprise route — held pending credential-owner freeze
 
-An Enterprise installation may replace the user key with a Cursor service-account API key held by
-the control credential service. Where user attribution is required, that service account may mint
-the documented one-hour user-scoped worker token for an active team member.
+Cursor documents one-hour user-scoped worker tokens minted with an agent-scoped team service-account
+key for an active team member. This route remains `SPEC_ONLY` and held until a bounded credential-
+owner micro-freeze proves that an existing canonical worker-local secret owner can hold the service-
+account key, mint the token and deliver it one-way to the exact child. No new control credential
+service, token database or renewal plane is authorized.
 
 The worker token:
 
 - is short-lived;
 - cannot mint another worker token;
 - cannot refresh itself;
-- must be replaced by the control-side credential broker;
+- must be replaced only by the accepted existing worker-local credential owner;
 - is injected only into the exact child and is not persisted in Executive events/state.
 
 Service-account execution cannot silently inherit a human user's MCP OAuth grants. Every MCP
@@ -202,20 +224,30 @@ Grok Build agent authentication and xAI inference API authentication are differe
   headroom;
 - a disabled future direct-inference alias remains distinct from the Grok Build ACP worker alias.
 
-### 5.2 Accepted consumer OAuth route
+### 5.2 Conditional consumer OAuth candidate
 
-The first Grok Build worker uses:
+The first Grok Build worker candidate uses:
 
 - one dedicated OS principal;
 - one private, dedicated `GROK_HOME`;
 - one one-time `grok login --device-auth` ceremony under that principal;
+- one dedicated browser profile and provider-account identity used only for that worker realm;
 - the provider's built-in refresh behavior inside that realm;
 - exact pinned Grok Build binary/version/digest;
 - `grok --no-auto-update agent stdio` for deterministic ACP execution.
 
-The enrollment page/code may be shown to the Chairman through a focused native flow, but the token,
-refresh token and auth files are never copied to chat, clipboard, Executive state or another user.
-The Chairman's normal browser/app account state must remain untouched.
+The broker supplies only the fixed private-home binding required by the reviewed manifest. It never
+opens, copies, parses or injects Grok auth files or token bytes; Grok alone manages persisted auth
+and renewal inside that home.
+
+The route is not accepted until **Grok-B0** proves the browser/account identity boundary before and
+after enrollment. `GROK_HOME` isolates provider files; it does not by itself isolate the browser
+session or provider account selected during authorization. The enrollment page/code may therefore
+be shown only through the dedicated browser profile/session. The token, refresh token and auth files
+are never copied to chat, clipboard, Executive state or another user, and the Chairman's normal
+browser/app account state must remain untouched. If Grok exposes a non-secret team/account/realm
+identifier, Grok-B0 binds it in sanitized installed configuration and readiness evidence. If it does
+not, identity remains explicitly unknown and concurrent multi-account Grok routing stays disabled.
 
 ### 5.3 Enterprise alternatives
 
@@ -229,7 +261,8 @@ The external command is accepted only if:
 
 - its path/digest/argv are root-owned and fixed by the provider manifest;
 - it receives no model/caller-authored input;
-- its stdout is connected through an uncaptured one-way channel to the exact Grok child;
+- Grok itself receives its stdout through an uncaptured one-way channel; Executive and the worker
+  broker never capture, parse, copy or persist that credential stream;
 - logs/events never receive its output;
 - when `GROK_AUTH_EXPIRED=1`, it refreshes silently and quickly or fails closed;
 - it never opens an interactive window during background renewal.
@@ -276,8 +309,9 @@ Executive Job
 The shared ACP adapter implements only the existing `WorkerExecutionAdapter` operations:
 
 - **start:** launch one exact allowlisted binary under the already-selected worker principal,
-  initialize ACP, authenticate through broker injection, create/load a session only when advertised
-  and persist only the non-secret provider session ID on the existing Attempt/harness epoch;
+  initialize ACP, apply only the provider manifest's accepted authentication mode, create/load a
+  session only when advertised and persist only the non-secret provider session ID on the existing
+  Attempt/harness epoch;
 - **collect_result:** consume bounded protocol updates, enforce permission/profile policy and
   normalize one terminal result plus redacted evidence;
 - **cancel:** send the advertised ACP cancellation operation, then apply the existing broker
@@ -348,14 +382,25 @@ Observable mission:
 > dedicated Cursor worker, returns a typed result, and reconciles or cancels without a duplicate
 > Attempt.
 
-Scope:
+Prerequisite Cursor-C0 installed-binary probe:
+
+1. enumerate the exact Cursor Agent path, digest and version;
+2. discover and record every effective user/team/plugin/project MCP, hook, rule, instruction and
+   subagent source without reading any credential bytes;
+3. prove supported suppression of every unapproved source and bind the exact protected-basis
+   instruction digests frozen in Section 4.1;
+4. run hostile user/team/project fixtures and fail closed on any uncensused or unsuppressed source;
+5. prove that `CURSOR_API_KEY` is unavailable to model-spawned command, tool and subagent
+   descendants; otherwise reject local ACP and return to Sol.
+
+Only after Cursor-C0 passes, scope is:
 
 1. implement the generic adapter against a deterministic hostile fake ACP server;
 2. add disabled `cursor` provider/model aliases;
 3. install one dedicated worker principal and exact Cursor Agent binary;
-4. inject only `CURSOR_API_KEY` into the exact child;
-5. deny ambient team/user/project MCP, plugins, hooks, rules and subagents; expected extension census
-   is empty;
+4. make `CURSOR_API_KEY` available only through the accepted broker/child boundary;
+5. enforce the Cursor-C0 effective-config allowlist; the expected extension census is empty, while
+   only the exact-digest protected-basis `AGENTS.md`/`CLAUDE.md` instructions are allowed;
 6. handle initialize, authentication, session/new, prompt/update stream, permission requests,
    cancellation and advertised session/load;
 7. bind the provider session ID to the existing harness epoch;
@@ -376,7 +421,8 @@ Scope:
 
 1. reuse the accepted adapter and add only a Grok manifest/error map;
 2. install one dedicated worker principal, private `GROK_HOME` and exact Grok Build binary;
-3. complete the one-time device ceremony without touching the Chairman's normal app/home;
+3. pass Grok-B0, then complete the one-time device ceremony through the dedicated browser profile
+   and provider identity without touching the Chairman's normal browser/app/home/account state;
 4. launch `grok --no-auto-update agent stdio` through the broker;
 5. verify sanitized effective configuration through `grok inspect --json`;
 6. deny MCP, plugins, skills, hooks, subagents, write mode and auto-approval; expected extension
@@ -420,14 +466,15 @@ The common ACP implementation must prove:
 
 - deterministic fake-server contracts for initialize, auth, new/load, prompt/update, permission,
   cancel, terminal result, malformed frames, oversize frames, hangs and disconnects;
-- secret can never reach argv, environment census, logs, events, exceptions, checkpoints, receipts,
-  result payloads, Git/workspace files or sibling processes;
+- secret can never reach argv, sanitized environment census, logs, events, exceptions, checkpoints,
+  receipts, result payloads, Git/workspace files, sibling processes or model-spawned descendants;
 - provider session ID maps to exactly one existing Attempt and harness epoch;
 - restart reconciliation never creates a second provider turn for an effect-unknown operation;
 - permission requests outside the frozen profile fail closed;
 - cancellation yields protocol acknowledgement plus broker process/UID/generation absence proof;
 - provider auto-update is disabled or version drift is refused;
-- empty extension census is required for base canaries;
+- an exact closed effective-extension census is required for base canaries; Cursor additionally
+  binds the exact allowed repository-instruction digests discovered by Cursor-C0;
 - 401/403, 429, context exhaustion, permission denial, protocol violation and provider outage map to
   typed bounded outcomes without raw provider bodies;
 - consumed usage is descriptive evidence only;
@@ -438,7 +485,9 @@ The common ACP implementation must prove:
 Cursor-specific falsifiers:
 
 - no browser/desktop cookie or refresh cache is read;
-- key is present only in the exact child environment;
+- Cursor-C0 proves every effective configuration/instruction source or rejects the local ACP route;
+- hostile user/team/project MCP, hook, rule, instruction and subagent fixtures fail closed;
+- the key is unavailable to model-spawned command/tool/subagent descendants;
 - `--api-key` is rejected by the manifest;
 - absent/rotated key fails safely without affecting the Chairman's normal Cursor app;
 - service-account worker token cannot self-refresh or mint another token;
@@ -447,10 +496,13 @@ Cursor-specific falsifiers:
 Grok-specific falsifiers:
 
 - dedicated `GROK_HOME` is private and separate from every interactive home;
-- device enrollment affects only the dedicated realm;
+- Grok-B0 proves a dedicated browser profile/session and intended provider-account identity before
+  and after authorization;
+- device enrollment affects only the dedicated filesystem and browser/account realm;
 - no raw auth file/token inspection occurs;
 - built-in refresh stays within the realm;
-- external auth background refresh honors `GROK_AUTH_EXPIRED=1` without UI or log output;
+- external auth background refresh honors `GROK_AUTH_EXPIRED=1` without UI or log output, and its
+  credential stream is consumed only by Grok;
 - missing ACP resume/load capability fails closed;
 - Grok consumer weekly usage is never replaced by xAI API-key QPS/QPM/TPM evidence.
 
@@ -480,8 +532,10 @@ CF2-F accepted
   -> CF2-I same-provider Codex capacity proven
   -> RF1 suitability accepted
   -> HF1 common harness accepted
-  -> Cursor ACP base vertical
-  -> Grok Build ACP/OIDC reuse vertical
+  -> Cursor-C0 installed-binary config and credential-boundary probe
+  -> Cursor ACP base vertical only if Cursor-C0 passes
+  -> Grok-B0 dedicated browser/account identity probe
+  -> Grok Build ACP/OIDC reuse vertical only if Grok-B0 passes
   -> one shared MCP capability
   -> one shared plugin/skill capability
   -> bounded provider-native subagents
@@ -518,7 +572,11 @@ Stop and return to Sol if implementation would require:
 - provider-native session semantics the shipped ACP server does not advertise;
 - dynamic model-controlled installation/authorization;
 - treating a provider child agent as independent review;
-- weakening the dedicated-principal boundary.
+- weakening the dedicated-principal boundary;
+- accepting local Cursor ACP without a reliable effective-config census, supported suppression and
+  descendant-environment credential proof;
+- authorizing Grok device/OIDC in an ordinary or ambiguous browser/account session;
+- inventing a credential service, token database or renewal control plane.
 
 Merge makes this record `SPEC_ONLY`. It does not prove either provider installed, authenticated,
 enabled, capacity-aware or live.
