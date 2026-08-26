@@ -27,6 +27,36 @@ def _git(repository: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
+@pytest.mark.parametrize("state", ("true", "disabled"))
+def test_launchctl_disabled_parser_accepts_both_exact_macos_spellings(state: str) -> None:
+    label = "com.mastermind.executive.worker.codex-pro-01"
+    output = f'disabled services = {{\n    "{label}" => {state}\n}}\n'
+    assert artifacts.parse_launchctl_disabled(output, label) == {
+        "label": label,
+        "normalized_state": "disabled",
+        "observed_state": state,
+    }
+
+
+@pytest.mark.parametrize(
+    "output",
+    (
+        '"com.mastermind.executive.worker.codex-pro-01" => false\n',
+        '"com.mastermind.executive.worker.codex-pro-01" => enabled\n',
+        '"com.mastermind.executive.worker.codex-pro-01-extra" => disabled\n',
+        '"com.mastermind.executive.worker.codex-pro-01" => disabled extra\n',
+        '"com.mastermind.executive.worker.codex-pro-01" => disabled\n'
+        '"com.mastermind.executive.worker.codex-pro-01" => true\n',
+    ),
+)
+def test_launchctl_disabled_parser_rejects_false_ambiguous_or_inexact_state(output: str) -> None:
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="LAUNCHCTL_DISABLED_STATE_INVALID"):
+        artifacts.parse_launchctl_disabled(
+            output,
+            "com.mastermind.executive.worker.codex-pro-01",
+        )
+
+
 def _repository(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
     root = tmp_path / "source"
     root.mkdir()

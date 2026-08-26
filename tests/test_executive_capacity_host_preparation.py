@@ -170,10 +170,18 @@ def test_capacity_preparer_legacy_digest_ignores_unrelated_launchd_labels() -> N
     source = _source()
     function = source.split("current_legacy_state_digest() {", 1)[1].split("\n}", 1)[0]
     assert 'for label in "${LEGACY_LABELS[@]}"' in function
-    assert "print-disabled system" in function
+    assert "label_persistently_disabled" in function
     assert "unrelated_launchd" not in function
     for slot_id in ("codex-pro-01", "codex-pro-02", "codex-pro-03"):
         assert slot_id not in function
+
+
+def test_capacity_preparer_accepts_only_exact_launchctl_disabled_spellings() -> None:
+    source = _source()
+    helper = source.split("label_persistently_disabled() {", 1)[1].split("\n}", 1)[0]
+    assert "print-disabled system" in helper
+    assert "check-launchctl-disabled" in helper
+    assert '=> true' not in source
 
 
 def test_capacity_preparer_installs_exactly_three_inert_broker_definitions() -> None:
