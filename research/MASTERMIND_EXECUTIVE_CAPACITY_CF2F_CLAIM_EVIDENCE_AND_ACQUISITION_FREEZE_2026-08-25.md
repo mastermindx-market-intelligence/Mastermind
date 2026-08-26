@@ -878,6 +878,8 @@ receipt.capacity_snapshot_generated_at == capacity_evidence.capacity_snapshot_ge
 receipt.p0_acceptance_digest == sha256(canonical(accepted_p0_record))
 receipt.source_config_digest == accepted_p0_record.source_config_digest
 receipt.source_config_digest == sha256(canonical(installed_source_config))
+installed_source_config.p0_source_kind == accepted_p0_record.source_kind
+installed_source_config.source_release_commit == receipt.macro_release_commit
 receipt.producer_material_source_digest == producer_identity.material_source_digest
 receipt.macro_release_commit == producer_audit.repository_commit
 accepted_p0_record.macro_release_commit == producer_audit.repository_commit
@@ -886,6 +888,8 @@ producer_audit.material_sources_match_commit == true
 each receipt observation digest == its candidate worker_observation.observation_digest
 each worker observation host/capability == the immutable candidate join
 each worker observation source_config_digest == its join.worker_source_config_digest
+runtime_acquisition_config.p0_acceptance_digest == receipt.p0_acceptance_digest
+runtime_acquisition_config.source_config_digest == receipt.source_config_digest
 runtime_acquisition_config.macro_release_commit == receipt.macro_release_commit
 runtime_acquisition_config.producer_material_source_digest == receipt.producer_material_source_digest
 runtime_acquisition_config.inventory_config_digest == installed_source_config.inventory_config_digest
@@ -1068,6 +1072,10 @@ Require tests that:
 - ranking/reasons are stable under input ordering;
 - golden vectors independently recompute snapshot, worker observation, preflight, policy, slot,
   configuration and acquisition-receipt digests plus the multi-horizon rank;
+- changing only `runtime_acquisition_config.p0_acceptance_digest`,
+  `runtime_acquisition_config.source_config_digest`, `installed_source_config.p0_source_kind` or
+  `installed_source_config.source_release_commit`, then recomputing every enclosing digest, still
+  refuses before ranking or mutation;
 - every evaluated candidate persists full canonical slot/degradation/worker/rank evidence;
 - commit exactly at the freshness/skew boundary passes and one tick beyond refuses;
 - one transaction commits quota hold, Attempt, Job transition, unchanged placement and exact
