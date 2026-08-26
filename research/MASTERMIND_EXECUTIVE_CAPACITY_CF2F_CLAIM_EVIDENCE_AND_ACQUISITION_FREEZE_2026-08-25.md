@@ -4,7 +4,7 @@
 **Owner:** Sol, AI CEO
 **Chairman:** Chris
 **Status:** **SOL SOURCE-LAW FREEZE / RECORDS-ONLY CARRIER. No runtime, worker, login, route or service is changed by this document.**
-**Current protected Mastermind / Skillpack basis:** `068125e3524eb1b327721f1e79a2338f3d367554`
+**Current protected Mastermind / Skillpack basis:** `cdfecc6f6b382862238c15fe1d5bd646eb62213c`
 **Autonomy V1 architecture parent:** `eff2033c639cb25f8b4a2a4e5f90e1a4a6002138`
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.0, bootstrap major 1, loaded atomically from the current protected commit above.
 **Accepted CF1 candidate:** `fc12904f59a5758817aa2c76ffaa40bb1ebcbf8e`
@@ -243,6 +243,14 @@ NO_SAFE_CF1_ACQUISITION_PATH
 `NO_SAFE_CF1_ACQUISITION_PATH` holds CF2-I and returns to Sol. It does not authorize widening home
 permissions, copying telemetry into Executive, running a root bridge or recreating CF1 logic.
 
+`EXISTING_MACRO_PROJECTION_PATH_ACCEPTED` may be emitted only when that already-existing process/API
+has a separately frozen exact local request/authentication/peer-principal/timeout/output/error and
+release-identity contract satisfying Sections 4.2, 4.4 and 4.5. CF2-P0 discovery alone cannot invent
+or infer that protocol. If an existing path is found without such a current source-law record, P0
+pauses for that bounded follow-on freeze and CF2-I-A remains held; it must otherwise return
+`NO_SAFE_CF1_ACQUISITION_PATH`. At this basis only the grounded-Git subprocess contract below is
+closed by this record.
+
 ### 4.2 Allowed producer paths
 
 An existing Macro-owned projection path is preferred only if it:
@@ -312,6 +320,47 @@ Every invocation:
 - times out after 10 seconds and kills/reaps only its owned process group;
 - never persists or forwards raw stderr, paths, exception text or provider responses;
 - writes no file/database/cache and performs no provider/network call.
+
+### 4.5 Canonical P0 and central-source configuration identity
+
+The accepted P0 record is the exact canonical object
+`mastermind.executive_capacity_p0_acceptance/v1` with exactly `schema_version`, `outcome`,
+`source_kind`, `source_config_digest`, `macro_release_commit` and
+`producer_material_source_digest`. `outcome` is one of the closed Section 4.1 values;
+`source_kind` is `grounded_cf1_git_release` or `existing_macro_projection`; and the release/material
+identities must equal the strict CF1 producer audit subsequently acquired. Its identity is
+`p0_acceptance_digest = sha256(canonical(p0_record))`.
+
+`source_config_digest = sha256(canonical(source_config))`, where the closed
+`mastermind.executive_capacity_source_config/v1` object has exactly:
+
+~~~text
+schema_version
+p0_source_kind
+source_contract_id
+source_release_commit
+source_executable_identity_digest
+source_entrypoint_identity_digest
+source_working_directory_identity_digest
+allowed_environment_names
+inventory_config_digest
+telemetry_config_digest
+timeout_seconds
+stdout_max_bytes
+stderr_retained_max_bytes
+no_shell
+network_denied
+write_denied
+~~~
+
+Digests are lower-case SHA-256 of the canonical root-owned installed object they name;
+`allowed_environment_names` is a sorted unique string array; the fixed values are 10, 262144, 4096,
+true, true and true for the final six fields. For the currently closed grounded path,
+`source_contract_id=grounded_cf1_git_subprocess/v1`. An existing Macro projection requires its own
+previously frozen contract identifier and exact protocol digest; it cannot reuse that identifier.
+The accepted P0 record, source config and all referenced installed objects are root-owned,
+non-group/other-writable and immutable for one acquisition. Receipts persist only their digests, not
+paths, principals, home names or secret-bearing values.
 
 Acquisition accepts only one UTF-8 JSON document with no trailing bytes and all accepted CF1 strict
 v1 validation, including exact canonical snapshot hash,
@@ -401,6 +450,26 @@ The closed response has exactly:
 `observation_digest = sha256(canonical(response_without_observation_digest))`; the excluded field is
 exactly `observation_digest`.
 
+`source_config_digest = sha256(canonical(worker_source_config))`, where the closed
+`mastermind.executive_worker_capacity_source_config/v1` object has exactly:
+
+~~~text
+schema_version
+host_ref
+capacity_capability_id
+broker_release_identity_digest
+broker_operation_identity_digest
+broker_generation
+executive_peer_policy_digest
+worker_realm_metadata_policy_digest
+provider_binary_identity_digest
+~~~
+
+Every digest field is lowercase SHA-256 over the accepted root-owned canonical object it names;
+`broker_generation` is the accepted nonnegative integer generation. The object contains no path,
+UID, username, account label, provider-native identity or secret. Its digest must equal the expected
+`worker_source_config_digest` in the immutable capacity join before the response is usable.
+
 The operation:
 
 - checks only the fixed own-realm directory/auth-object type, owner and mode metadata plus exact
@@ -444,8 +513,11 @@ CAPACITY_OBSERVE_INTERNAL
 
 Only brokers joined to the read-only preflight hard-eligible candidate set are contacted. A busy
 non-candidate realm therefore cannot block another available seat. Missing, duplicate, invalid,
-expired or ambiguous observation for a requested candidate refuses that candidate acquisition; it
-is never retried through another worker/broker under the same invocation.
+expired or ambiguous observation for any requested candidate refuses the whole claim invocation
+before ranking or `JOB_CLAIMED`; no candidate decision or acquisition receipt is persisted. It is
+never retried through another worker/broker under the same invocation. This conservative V1 law
+keeps every successful receipt complete; per-candidate refusal would require a later frozen evidence
+union and is not an implementation liberty.
 
 A later invocation may observe again only after canonical command replay proves no claim committed.
 After commit, historical observation/evidence is immutable.
@@ -468,18 +540,21 @@ The join lives as one closed nested object in existing immutable quota-registrat
     "schema": "mastermind.executive_capacity_join/v1",
     "host_ref": "local-unbound",
     "capacity_capability_id": "codex_account_2",
-    "provider_capacity_schema": "mastermind.provider_capacity.v1"
+    "provider_capacity_schema": "mastermind.provider_capacity.v1",
+    "worker_source_config_digest": "<64-lower-hex>"
   }
 }
 ```
 
 Rules:
 
-- the nested object has exactly those four keys;
+- the nested object has exactly those five keys;
 - `register_quota_class()` existing byte-equivalent reconciliation makes the join immutable;
 - exactly one registered `(worker_id, quota_class)` maps to one
   `(host_ref, capacity_capability_id)`;
 - duplicate joins, missing joins, provider mismatch or drift refuse before ranking;
+- each successful observation `source_config_digest` must equal the immutable join's
+  `worker_source_config_digest`;
 - the join does not contain a provider home, UID, account email/name, OAuth seat, token, host
   address or provider-native session identity;
 - `local-unbound` is lawful only for this explicitly same-host local V1 canary;
@@ -514,6 +589,8 @@ Executive lifecycle writer lock.
    acquisition;
 7. acquire one complete strict grounded CF1 snapshot, then call `capacity-observe/v1` exactly once
    for each relevant candidate broker, entirely outside any SQLite write transaction;
+   any missing/duplicate/invalid/stale/ambiguous observation refuses the whole invocation here with
+   no ranking, mutation or persisted candidate evidence;
 
 **Atomic recheck and commit, inside the existing write transaction:**
 
@@ -577,7 +654,8 @@ Hard capacity exclusions:
 
 - missing/duplicate/drifting join;
 - snapshot ungrounded, expired, oversized, invalid or producer material mismatch;
-- missing/duplicate/invalid/stale worker-realm observation or any false readiness boolean;
+- any false worker-realm readiness boolean; missing/duplicate/invalid/stale/ambiguous observations
+  have already refused the whole acquisition before policy evaluation;
 - `present=false`;
 - `present=null` unless this is one of the three frozen Personal Pro isolation slots, the slot has
   the exact scoped `SOURCE_UNREADABLE` and `PROVIDER_PRESENCE_UNKNOWN` degradation, the central
@@ -724,10 +802,12 @@ CAPACITY_JOIN_MISSING
 CAPACITY_JOIN_AMBIGUOUS
 CAPACITY_JOIN_DRIFT
 CAPACITY_SLOT_IDENTITY_MISMATCH
-CAPACITY_WORKER_OBSERVATION_MISSING
-CAPACITY_WORKER_OBSERVATION_INVALID
-CAPACITY_WORKER_OBSERVATION_STALE
 CAPACITY_WORKER_REALM_READY
+CAPACITY_WORKER_REALM_METADATA_INVALID
+CAPACITY_WORKER_CREDENTIAL_ABSENT
+CAPACITY_WORKER_CREDENTIAL_METADATA_INVALID
+CAPACITY_WORKER_PROVIDER_BINARY_UNATTESTED
+CAPACITY_WORKER_BROKER_GENERATION_UNREADY
 CAPACITY_PRESENT_FALSE
 CAPACITY_PRESENT_UNKNOWN
 CAPACITY_PRESENT_ISOLATION_NULL_ACCEPTED
@@ -768,6 +848,8 @@ Closed `acquisition_receipt` schema
   "preflight_candidate_digest": "<64-lower-hex>",
   "capacity_snapshot_hash": "<64-lower-hex>",
   "capacity_snapshot_generated_at": "2026-08-26T01:45:00Z",
+  "p0_acceptance_digest": "<64-lower-hex>",
+  "source_config_digest": "<64-lower-hex>",
   "acquisition_config_digest": "<64-lower-hex>",
   "macro_release_commit": "<40-lower-hex>",
   "producer_material_source_digest": "<64-lower-hex>",
@@ -793,18 +875,34 @@ Required identity equalities before mutation:
 ~~~text
 receipt.capacity_snapshot_hash == capacity_evidence.capacity_snapshot_hash
 receipt.capacity_snapshot_generated_at == capacity_evidence.capacity_snapshot_generated_at
+receipt.p0_acceptance_digest == sha256(canonical(accepted_p0_record))
+receipt.source_config_digest == accepted_p0_record.source_config_digest
+receipt.source_config_digest == sha256(canonical(installed_source_config))
 receipt.producer_material_source_digest == producer_identity.material_source_digest
 receipt.macro_release_commit == producer_audit.repository_commit
+accepted_p0_record.macro_release_commit == producer_audit.repository_commit
+accepted_p0_record.producer_material_source_digest == producer_identity.material_source_digest
 producer_audit.material_sources_match_commit == true
 each receipt observation digest == its candidate worker_observation.observation_digest
 each worker observation host/capability == the immutable candidate join
+each worker observation source_config_digest == its join.worker_source_config_digest
+receipt.acquisition_config_digest == sha256(canonical(runtime_acquisition_config))
 ~~~
 
-`acquisition_config_digest` is the accepted root-owned configuration digest covering the exact
-producer operation/release, fixed three-home Macro inventory, allowed environment names, telemetry
-surface identities and per-broker capability bindings. It reveals no path, principal/account name or
-secret. `completed_at` is UTC, not before snapshot generation or any observation time, and not after
-the earliest applicable expiration plus the 2-second tolerance.
+`runtime_acquisition_config` is the closed
+`mastermind.executive_capacity_acquisition_config/v1` object with exactly `schema_version`,
+`p0_acceptance_digest`, `source_config_digest` and `broker_bindings`. `broker_bindings` is sorted by
+`(host_ref, capacity_capability_id)`, contains exactly the unchanged preflight candidates and each row
+has exactly `host_ref`, `capacity_capability_id` and `worker_source_config_digest`, byte-equal to the
+immutable capacity join. `acquisition_config_digest =
+sha256(canonical(runtime_acquisition_config))` with no excluded field.
+
+This accepted root-owned configuration identity thereby covers the exact P0 producer
+operation/release, fixed three-home Macro inventory, allowed environment names, telemetry surface
+identities and every contacted broker's immutable capability/config binding. A runtime observation
+whose source digest differs from its binding refuses the whole invocation. Receipts reveal no path,
+principal/account name or secret. `completed_at` is UTC, not before snapshot generation or any
+observation time, and not after the earliest applicable expiration plus the 2-second tolerance.
 
 Bounds:
 
@@ -927,12 +1025,15 @@ Require tests that:
   active provider/process, config drift or another capability identity refuses;
 - response closed keys, canonical digest, 4-KiB bound, five-second timeout, 15-second TTL and
   two-second skew are discriminated at boundaries;
+- canonical worker source-config golden vectors bind each observation to the exact immutable join
+  expected digest and reject every field/config/generation drift;
 - credential absent/wrong owner/type/mode, binary drift or broker generation drift refuses;
 - no path, UID, username, account label, browser identity, secret-ref, auth bytes or raw exception
   crosses the socket;
 - three broker services share one Executive Runtime/database and use distinct sockets/principals/homes;
 - a busy non-candidate broker is not contacted and cannot block an available candidate;
-- an ambiguous response causes no claim and no cross-worker retry.
+- one failed/ambiguous candidate plus one valid candidate refuses the whole V1 invocation before
+  ranking, persists no `JOB_CLAIMED`/candidate/receipt evidence and performs no cross-worker retry.
 
 ### CF2-I-C / claim integration
 
@@ -944,7 +1045,8 @@ Require tests that:
 - a capacity source blocked longer than SQLite's five-second busy timeout does not hold the
   lifecycle writer lock or delay an unrelated Job/Event/Attempt writer;
 - every existing hard filter runs before capacity acquisition/ranking;
-- missing/duplicate/drifting join or worker observation refuses;
+- missing/duplicate/drifting join refuses; any missing/duplicate/invalid/stale/ambiguous worker
+  observation refuses the whole invocation before ranking or mutation;
 - CF1 `present=false` always refuses;
 - CF1 `present=null` is eligible only for the exact three isolation slots with scoped degradation,
   attested config and fully valid matching worker evidence, and remains null in persisted evidence;
