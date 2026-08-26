@@ -29,6 +29,7 @@ RECOVERY_RECEIPT_SCHEMA = "mastermind.executive_capacity_h0_recovery/v1"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _OBJECT_RE = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_LAUNCHD_LABEL_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _MATERIAL_MODES = frozenset({"100644", "100755"})
 _TRANSPORT_MEMBERS = frozenset({"manifest.json", "payload.pack"})
 _WHEEL_PREFIXES = ("yaml/", "_yaml/", "pyyaml-6.0.3.dist-info/")
@@ -50,6 +51,25 @@ def canonical_json(value: Any) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise CapacityHostArtifactError("NON_CANONICAL_JSON") from exc
+
+
+def parse_launchctl_disabled(output: str, label: str) -> dict[str, str]:
+    """Normalize the two exact disabled spellings emitted by supported macOS hosts."""
+
+    if _LAUNCHD_LABEL_RE.fullmatch(label) is None or len(output.encode("utf-8")) > 256 * 1024:
+        raise CapacityHostArtifactError("LAUNCHCTL_DISABLED_STATE_INVALID")
+    matches: list[str] = []
+    for line in output.splitlines():
+        match = re.fullmatch(r'\s*"([^"\r\n]+)"\s*=>\s*(\S+)\s*', line)
+        if match is not None and match.group(1) == label:
+            matches.append(match.group(2))
+    if len(matches) != 1 or matches[0] not in {"true", "disabled"}:
+        raise CapacityHostArtifactError("LAUNCHCTL_DISABLED_STATE_INVALID")
+    return {
+        "label": label,
+        "normalized_state": "disabled",
+        "observed_state": matches[0],
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -1005,6 +1025,8 @@ def _parser() -> argparse.ArgumentParser:
     recovery_resume.add_argument("--expected-uid", type=int, required=True)
     approved_xattrs = commands.add_parser("verify-approved-xattrs")
     approved_xattrs.add_argument("--path", type=Path, required=True)
+    launchctl_disabled = commands.add_parser("check-launchctl-disabled")
+    launchctl_disabled.add_argument("--label", required=True)
     return parser
 
 
@@ -1065,8 +1087,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.archive,
                 expected_uid=args.expected_uid,
             )
-        else:
+        elif args.command == "verify-approved-xattrs":
             value = verify_approved_xattrs(args.path)
+        else:
+            value = parse_launchctl_disabled(sys.stdin.read(256 * 1024 + 1), args.label)
     except (CapacityHostArtifactError, OSError, UnicodeError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
         print(f"capacity host artifact refused: {type(exc).__name__}", file=sys.stderr)
         return 65
