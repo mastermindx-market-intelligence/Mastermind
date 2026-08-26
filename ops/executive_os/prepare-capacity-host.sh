@@ -259,7 +259,7 @@ verify_telemetry_boundary() {
     [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$expected")" = "0:0:555" ] || return 1
   done
   observed_inventory="$(/usr/bin/find "$root" -mindepth 1 -type d -print | /usr/bin/sort)"
-  expected_inventory="$(/bin/printf '%s\n' "$root/data" "$root/data/ai_costs" "$root/data/metabolism" | /usr/bin/sort)"
+  expected_inventory="$(/usr/bin/printf '%s\n' "$root/data" "$root/data/ai_costs" "$root/data/metabolism" | /usr/bin/sort)"
   [ "$observed_inventory" = "$expected_inventory" ] || return 1
   [ -z "$(/usr/bin/find "$root" ! -type d -print -quit)" ] || return 1
   assert_no_acl "$root"
@@ -346,7 +346,7 @@ verify_generation() {
   local generation="$1" mode="${2:-installed}" expected_inventory observed artifact
   [ -d "$generation" ] && [ ! -L "$generation" ] || return 1
   [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$generation")" = "0:0:555" ] || return 1
-  expected_inventory="$(/bin/printf '%s\n' broker-topology.json components.json host-preparation-receipt.json rollback-contract.json rollback-drill-receipt.json source-config.json | /usr/bin/sort)"
+  expected_inventory="$(/usr/bin/printf '%s\n' broker-topology.json components.json host-preparation-receipt.json rollback-contract.json rollback-drill-receipt.json source-config.json | /usr/bin/sort)"
   observed="$(/usr/bin/find "$generation" -mindepth 1 -maxdepth 1 -type f -print | while IFS= read -r artifact; do /usr/bin/basename "$artifact"; done | /usr/bin/sort)"
   [ "$observed" = "$expected_inventory" ] || return 1
   [ -z "$(/usr/bin/find "$generation" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ] || return 1
@@ -654,7 +654,7 @@ verify_materialized_source "$SOURCE_STAGE" || refuse "staged Macro source did no
 "$PYTHON_BINARY" -I -S -B -m venv --copies --without-pip "$RUNTIME_STAGE"
 [ -z "$(/usr/bin/find "$RUNTIME_STAGE" -type l -print -quit)" ] || refuse "capacity runtime contains a symlink"
 /usr/bin/install -d -o root -g wheel -m 0700 "$STAGING_SESSION/runtime-pruned"
-EXPECTED_RUNTIME_BIN_INVENTORY="$(/bin/printf '%s\n' Activate.ps1 activate activate.csh activate.fish python python3 python3.12 | /usr/bin/sort)"
+EXPECTED_RUNTIME_BIN_INVENTORY="$(/usr/bin/printf '%s\n' Activate.ps1 activate activate.csh activate.fish python python3 python3.12 | /usr/bin/sort)"
 OBSERVED_RUNTIME_BIN_INVENTORY="$(/usr/bin/find "$RUNTIME_STAGE/bin" -mindepth 1 -maxdepth 1 -type f -print | while IFS= read -r path; do /usr/bin/basename "$path"; done | /usr/bin/sort)"
 [ "$OBSERVED_RUNTIME_BIN_INVENTORY" = "$EXPECTED_RUNTIME_BIN_INVENTORY" ] || refuse "fresh runtime executable inventory differs"
 for path in \

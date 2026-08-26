@@ -23,6 +23,23 @@ def test_capacity_preparer_is_executable_and_shell_syntax_valid() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_capacity_preparer_inventory_renderer_is_native_and_executable() -> None:
+    renderer_paths = []
+    for line in _source().splitlines():
+        if "expected_inventory=\"$(" in line or "EXPECTED_RUNTIME_BIN_INVENTORY=\"$(" in line:
+            renderer_paths.append(line.split('"$(', 1)[1].split(" ", 1)[0])
+
+    assert renderer_paths == ["/usr/bin/printf"] * 3
+    completed = subprocess.run(
+        [renderer_paths[0], "%s\\n", "z", "a"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "z\na\n"
+
+
 def test_capacity_preparer_pins_exact_source_runtime_and_entrypoint_inputs() -> None:
     source = _source()
     for exact in (
