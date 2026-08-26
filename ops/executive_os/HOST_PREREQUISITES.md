@@ -555,3 +555,184 @@ benign identity change self-heals on the next install run. A genuinely
 tampered or wrong binary will instead fail the pre-existing `codesign
 --verify --strict` / exact SHA-256 checks in `install.sh` itself before a
 new receipt is ever written -- which is the correct, fail-closed outcome.
+
+## CF2-H0 — grounded capacity-source host preparation
+
+This is a separate credential-free preparation stage. Run it only from the
+exact merged `origin/master` history, with the reviewed CF2-H0 merge commit
+checked out detached and passed as the explicit expected Mastermind SHA.
+H0 installs the grounded Macro source/runtime and exactly three inert Personal
+Pro broker definitions. The three new labels stay persistently disabled and
+unloaded and their three socket nodes stay absent.
+
+H0 does **not** authenticate a provider, open or create a credential, perform
+OAuth/device authorization, execute a worker/provider call, compose the new
+brokers with the control runtime, route a job, implement CF2-I, fan out work or
+issue CF2-P0 acceptance. Its success outcome is
+`H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED`.
+
+### Build the two inert inputs as the authenticated operator
+
+Do all GitHub review, exact-head and hosted-check review before privilege. Use
+an already-authenticated local Macro repository to acquire the accepted CF1
+commit. Do not give root an anonymous HTTPS remote and do not copy a Macro
+checkout recursively across the privilege boundary.
+
+The reviewed `capacity_host_artifacts.py` helper reads immutable Git objects at
+the exact commit and produces one data-only custom transport. The ZIP contains
+only `manifest.json` and `payload.pack`; it cannot carry the caller's worktree,
+index, Git config, hooks, ignored files, credential helpers or credentials.
+
+```bash
+set -euo pipefail
+test "$(/usr/bin/id -u)" -ne 0
+REPOSITORY=/absolute/path/to/Mastermind
+MACRO_REPOSITORY=/absolute/path/to/authenticated/macro
+OPERATOR_USER="$(/usr/bin/id -un)"
+DELIVERY_PR=<cf2-h0-pr-number>
+MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b
+test "$OPERATOR_USER" != root
+test "$DELIVERY_PR" -gt 0
+
+git -C "$REPOSITORY" fetch origin master
+test "$(gh pr view "$DELIVERY_PR" --repo mastermindx-market-intelligence/Mastermind \
+  --json state --jq .state)" = MERGED
+PR_MERGE_SHA="$(gh pr view "$DELIVERY_PR" \
+  --repo mastermindx-market-intelligence/Mastermind \
+  --json mergeCommit --jq .mergeCommit.oid)"
+MERGE_SHA="$PR_MERGE_SHA"
+test "$(git -C "$REPOSITORY" rev-parse "$MERGE_SHA^{commit}")" = "$MERGE_SHA"
+git -C "$REPOSITORY" merge-base --is-ancestor \
+  "$MERGE_SHA" refs/remotes/origin/master
+
+H0_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-cf2-h0.XXXXXX)"
+SOURCE_REPO="$H0_PARENT/mastermind-source"
+MACRO_TRANSPORT="$H0_PARENT/macro-cf1-data-only.zip"
+PYYAML_WHEEL="$H0_PARENT/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl"
+
+git clone --no-local --no-hardlinks --no-checkout "$REPOSITORY" "$SOURCE_REPO"
+git -C "$SOURCE_REPO" checkout --detach "$MERGE_SHA"
+git -C "$SOURCE_REPO" remote remove origin
+git -C "$SOURCE_REPO" config --local core.hooksPath /dev/null
+test "$(git -C "$SOURCE_REPO" rev-parse HEAD)" = "$MERGE_SHA"
+test -z "$(git -C "$SOURCE_REPO" remote)"
+test -z "$(git -C "$SOURCE_REPO" status --porcelain=v1)"
+
+git -C "$MACRO_REPOSITORY" fetch origin master
+test "$(git -C "$MACRO_REPOSITORY" rev-parse "$MACRO_COMMIT^{commit}")" = \
+  "$MACRO_COMMIT"
+
+MATERIAL_PATHS=(
+  config/capability_manifest.yml
+  config/metabolism_budget.yml
+  engine/codex_lane/runner.py
+  engine/codex_provider.py
+  engine/llm_auth.py
+  engine/metabolism/budget_gate.py
+  engine/neuralweb/key_pool.py
+  engine/provider_capacity.py
+  engine/provider_health.py
+  lib/ai_costs.py
+  scripts/build_provider_capacity.py
+)
+MATERIAL_ARGUMENTS=()
+for path in "${MATERIAL_PATHS[@]}"; do
+  MATERIAL_ARGUMENTS+=(--material-path "$path")
+done
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/capacity_host_artifacts.py" \
+  build-source-transport \
+  --source-repository "$MACRO_REPOSITORY" \
+  --output "$MACRO_TRANSPORT" \
+  --commit "$MACRO_COMMIT" \
+  "${MATERIAL_ARGUMENTS[@]}"
+test -f "$MACRO_TRANSPORT"
+test ! -L "$MACRO_TRANSPORT"
+test "$(/usr/bin/stat -f '%l' "$MACRO_TRANSPORT")" -eq 1
+MACRO_TRANSPORT_SHA256="$(/usr/bin/shasum -a 256 "$MACRO_TRANSPORT" | \
+  /usr/bin/awk '{print $1}')"
+test "${#MACRO_TRANSPORT_SHA256}" -eq 64
+
+/usr/bin/curl --fail --location --proto '=https' --tlsv1.2 \
+  --output "$PYYAML_WHEEL" \
+  https://files.pythonhosted.org/packages/89/a0/6cf41a19a1f2f3feab0e9c0b74134aa2ce6849093d5517a0c550fe37a648/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl
+test "$(/usr/bin/shasum -a 256 "$PYYAML_WHEEL" | /usr/bin/awk '{print $1}')" = \
+  fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
+```
+
+The wheel filename and SHA-256 are both frozen. The root preparer copies these
+two single-link files into a root-only stage and revalidates the complete
+transport, exact material Git blobs, wheel digest, PyYAML `RECORD` and the full
+pip-free runtime tree before installation.
+
+### Run the exact merged protected checkout as root
+
+Only now begin the local administrator ceremony. Move the dedicated detached
+Mastermind checkout beneath a new root-owned, non-writable parent, remove ACLs
+and removable extended attributes from that disposable clone, and make the whole
+clone root-owned and non-group/other-writable before root executes it. The
+preparer tolerates only macOS's system-maintained `com.apple.provenance` xattr;
+every caller-controlled or otherwise unapproved xattr fails closed. Leaving the
+clone beneath an operator-writable `/private/tmp` parent is forbidden because
+that parent could replace the reviewed tree after preflight. Root must run only
+this clean checkout at the exact merged protected SHA; it must not execute the
+ordinary user checkout or a copied Macro worktree.
+
+```bash
+sudo -v
+ROOT_SOURCE_PARENT="$(sudo /usr/bin/mktemp -d /private/var/root/mastermind-cf2-h0.XXXXXX)"
+ROOT_SOURCE_REPO="$ROOT_SOURCE_PARENT/mastermind-source"
+sudo /bin/mv "$SOURCE_REPO" "$ROOT_SOURCE_REPO"
+sudo /bin/chmod -N "$ROOT_SOURCE_PARENT"
+sudo /usr/bin/xattr -c "$ROOT_SOURCE_PARENT"
+sudo /bin/chmod -RN "$ROOT_SOURCE_REPO"
+sudo /usr/bin/xattr -cr "$ROOT_SOURCE_REPO"
+sudo /usr/sbin/chown -R root:wheel "$ROOT_SOURCE_REPO"
+sudo /bin/chmod -R go-w "$ROOT_SOURCE_REPO"
+sudo /bin/bash "$ROOT_SOURCE_REPO/ops/executive_os/prepare-capacity-host.sh" \
+  --expected-mastermind-sha "$MERGE_SHA" \
+  --operator-user "$OPERATOR_USER" \
+  --macro-transport "$MACRO_TRANSPORT" \
+  --macro-transport-sha256 "$MACRO_TRANSPORT_SHA256" \
+  --pyyaml-wheel "$PYYAML_WHEEL"
+sudo /bin/bash "$ROOT_SOURCE_REPO/ops/executive_os/prepare-capacity-host.sh" \
+  --expected-mastermind-sha "$MERGE_SHA" \
+  --verify-only
+```
+
+The preparer installs exactly three realm configs, three per-realm Codex
+attestation receipts and three launchd plists. Before and after installation it
+proves the new labels are disabled and unloaded and the new socket nodes are
+absent. Installing the definitions grants no service-start authority.
+
+One root-only host lock excludes overlapping H0 preparations. If an earlier
+process was killed after installing only part of the nine-file topology, the
+same carrier proves stopped/absent state, archives every exact partial target
+and temporary artifact, records `INTERRUPTED_H0_PARTIAL_RECOVERED`, and resumes
+from the sealed inputs. Intent and receipt publication are resumable and
+crash-atomic through same-directory candidates, file and directory fsync
+barriers and atomic renames; each target move fsyncs both affected parents. It
+never overwrites an ambiguous target or revives a service. A completed
+generation is never recovered this way; normal follow-up
+uses `--verify-only`.
+
+The preparer then performs the real shrink-only rollback drill: it moves all
+nine new artifacts to a root-only archive, proves disabled/unloaded service and
+absent-socket postconditions, records `SHRINK_ONLY_ROLLBACK_PASS`, and reinstalls
+the same nine inert artifacts. Principals, private homes, any later credentials,
+immutable releases, grounded Macro source, the capacity runtime, the read-only
+telemetry boundary and legacy Phase 1C artifacts are preserved. Rollback does
+not delete them and does not start a service.
+
+The immutable six-file H0 generation (including a self-contained copy of the
+durable rollback-drill receipt) and installed-host receipt are committed
+only after source, runtime, release, topology, legacy-state and rollback proof
+pass. The successful install and each successful verification report
+`H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED`.
+
+Run `--verify-only` a second time to prove zero-mutation idempotence. Then rerun
+the independently governed, read-only CF2-P0 census. Proceed only if that
+census—not this preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Even
+then, CF2-I-A is the next separate carrier. OAuth/device ceremonies,
+credentials, provider calls, service start, runtime composition, routing,
+fan-out and failover remain held.
