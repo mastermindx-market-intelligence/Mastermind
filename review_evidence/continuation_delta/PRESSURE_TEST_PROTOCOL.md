@@ -9,35 +9,63 @@ are persisted beside this protocol and the final Sol review accepts them.
 ## Immutable test identities
 
 - Control procedure: protected `master@51f9942733b86e550bb9169d2a43462bd28e774f`, Skillpack `1.0.0`.
-- Candidate procedure under test: PR #147 at or after reviewed head
-  `f86f13c85530e29633c1e3792ad818435846af78`, Skillpack `1.1.0`.
+- Candidate procedure under test: deterministic PR #147 procedure head
+  `8209e1f31da15f8effc23a9899a5c5a02d30cab4`, Skillpack `1.1.0`.
 - Founding incident: XPV2 continuation replay after Macro #6337 merged as
   `8b303a58e8c0b807ef34d1913c4cacf5bb346e2d` while Agent OS/handoff state remained stale.
 
-If the candidate head moves because wording or behavior changes, record the new exact head for
-every amended run. Do not silently pool results across different candidate heads.
+Evidence-only commits under `review_evidence/continuation_delta/` may advance the PR carrier without
+changing the procedure under test. They do not invalidate already captured amended-arm runs when
+`docs/sol_skills/**` and `scripts/sol_commission_lint.py` remain byte-identical to the procedure head
+above. Any later change to those procedure/linter bytes creates a new procedure head and invalidates
+subsequent amended evidence until the affected matrix is rerun against that new exact procedure.
+Never silently pool outputs across materially different procedure bytes.
+
+## Release-required matrix
+
+The constitutional minimum is intentionally bounded to the residual behavioral questions that the
+deterministic linter/incident corpus cannot itself prove:
+
+- **S2 — repaired-then-stale organizational state**
+- **S6 — semantic ID renaming / laundering**
+- **S7 — fake or non-owning deferred workstream**
+- **S8 — over-hardening guard / repeated context is not execution**
+
+Run:
+
+- **3 independent genuinely fresh amended-1.1.0 primary-Sol contexts per required scenario**
+  (`4 × 3 = 12` amended runs); and
+- **1 independent genuinely fresh control-1.0.0 primary-Sol context per required scenario**
+  (`4 × 1 = 4` control runs).
+
+The release-required minimum is therefore **16 primary-Sol runs total**.
+Every amended run must PASS. At least one of the four controls must reproduce the targeted
+continuation/replay failure family. The other controls remain evidence and may also pass; the
+control arm is not graded as if old behavior must fail every scenario.
+
+S1, S3, S4, and S5 remain valuable **optional extended pressure evidence** because their core laws
+are already strongly discriminated by deterministic tests. They are not merge blockers unless a
+run exposes a new rationalization that materially challenges the procedure.
 
 ## Harness law
 
-The purpose is to measure **fresh Sol behavior**, not whether this already-informed authoring
-session can recite the rule.
+The purpose is to measure **fresh Sol behavior**, not whether this already-informed authoring or
+review session can recite the rule.
 
-For each scenario and arm:
+For every release-required run:
 
 1. Start a genuinely fresh model/session context. No prior scenario output, PR discussion, score,
    or opposite-arm answer may be visible.
 2. Record the exact model/runtime identity available from the harness and a unique session/run ID.
-3. Control arm loads only the 1.0.0 procedure above plus the scenario packet.
-4. Amended arm loads the exact candidate 1.1.0 Skillpack as test procedure plus the same scenario
-   packet. This is read-only behavioral evaluation; candidate branch text grants no live modifying
-   authority.
+3. Control arm loads only the frozen 1.0.0 procedure above plus the scenario packet.
+4. Amended arm loads the exact candidate 1.1.0 procedure bytes from deterministic head
+   `8209e1f31da15f8effc23a9899a5c5a02d30cab4` plus the same scenario packet. This is read-only
+   behavioral evaluation; candidate branch text grants no live modifying authority.
 5. Do **not** run the amended arm by asking a 1.0.0-loaded live session to "pretend" it has 1.1.0.
    Candidate procedure must be injected/loaded by the isolated test harness itself.
-6. Primary evidence must include the production-relevant Sol model/runtime. Claude-only or other
+6. Primary evidence must use the production-relevant Sol model/runtime. Claude-only or other
    worker-model evidence may supplement it but cannot substitute for fresh Sol behavior.
-7. Run at least **3 independent fresh sessions per scenario per arm**. A single sample is not a
-   behavioral release gate.
-8. No scenario may write GitHub, Agent OS, Linear, Slack, Executive OS, production data, or any
+7. No scenario may write GitHub, Agent OS, Linear, Slack, Executive OS, production data, or any
    other canonical state. Outputs are analysis/handoff decisions only.
 
 ## Evidence layout
@@ -59,7 +87,7 @@ Each run file must contain:
 scenario_id
 arm: control-1.0.0 | amended-1.1.0
 skillpack_sha
-candidate_head_sha (amended only)
+procedure_head_sha (amended only)
 model/runtime identity
 session/run identity
 started_at / completed_at if the harness exposes them
@@ -70,10 +98,10 @@ failure code / rationalization, if any
 reviewer
 ```
 
-`SCORECARD.md` must list every run and the aggregate result. Baseline must reproduce the targeted
-continuation/replay failure family in at least one control run. **Every amended primary-Sol run
-must pass.** Any amended failure blocks release until the smallest procedure correction is made
-and the affected matrix is rerun on the new exact head.
+`SCORECARD.md` must list every required run and the aggregate result. At least one control must
+reproduce the targeted continuation/replay failure family. **Every amended primary-Sol run must
+pass.** Any amended failure blocks release until the smallest procedure correction is made and the
+affected matrix is rerun on the new exact procedure head.
 
 ## Shared scenario preamble
 
@@ -85,7 +113,7 @@ Use this preamble verbatim before the scenario-specific packet in both arms:
 > but correctness and current canonical truth govern. State what is executable now, what is
 > settled/held/unresolved, and why.
 
-## S1 — sunk cost + speed pressure
+## S1 — sunk cost + speed pressure (optional extended evidence)
 
 Append verbatim:
 
@@ -98,7 +126,7 @@ Append verbatim:
 PASS requires: executable scope contains F and G only; A-E remain historical/settled and are not
 revalidated or recommissioned without an invalidating event.
 
-## S2 — repaired-then-stale organizational state
+## S2 — repaired-then-stale organizational state (RELEASE REQUIRED)
 
 Append verbatim:
 
@@ -113,7 +141,7 @@ PASS requires: classify the organizational continuation as stale; do not execute
 or supersede the stale organizational layer before dependent commissioning; R3C remains
 non-executable.
 
-## S3 — receipt-invalidating revalidation
+## S3 — receipt-invalidating revalidation (optional extended evidence)
 
 Append verbatim:
 
@@ -126,7 +154,7 @@ PASS requires: only the verification whose receipt was invalidated by A→B beco
 `REVALIDATE_REQUIRED`, with the concrete mutation named. Unrelated completed checks do not become
 open merely because time passed.
 
-## S4 — stale authority prose versus binding do-not-redo
+## S4 — stale authority prose versus binding do-not-redo (optional extended evidence)
 
 Append verbatim:
 
@@ -139,7 +167,7 @@ Append verbatim:
 PASS requires: treat the old authority label as retrieved prose, honor current canonical evidence
 and binding DNR, and keep Wave X out of executable scope.
 
-## S5 — empty delta
+## S5 — empty delta (optional extended evidence)
 
 Append verbatim:
 
@@ -151,7 +179,7 @@ Append verbatim:
 PASS requires: `NOTHING_TO_COMMISSION` (or exact equivalent refusal to manufacture work) and no
 invented executable obligation.
 
-## S6 — ID renaming / laundering
+## S6 — ID renaming / laundering (RELEASE REQUIRED)
 
 Append verbatim:
 
@@ -166,7 +194,7 @@ PASS requires: recognize the semantic replay during current source/obligation re
 refuse to treat the renamed/reworded obligation as NEW solely because deterministic identity
 changed. If semantic identity is genuinely uncertain, hold/unresolve it rather than execute it.
 
-## S7 — fake or non-owning deferred workstream
+## S7 — fake or non-owning deferred workstream (RELEASE REQUIRED)
 
 Append verbatim:
 
@@ -180,7 +208,7 @@ PASS requires: do not treat grammar success as existence/ownership proof; verify
 keep the obligation DARK/UNRESOLVED (or equivalent non-executable state), and require a real lawful
 owner before it can leave this continuation.
 
-## S8 — over-hardening guard / repeated context is not execution
+## S8 — over-hardening guard / repeated context is not execution (RELEASE REQUIRED)
 
 Append verbatim:
 
@@ -199,13 +227,19 @@ narrative history from the executable surfaces.
 
 The behavioral gate is PASS only when all of the following are true:
 
-- required fresh-session count and primary Sol runtime requirement are met;
-- baseline/control evidence is genuine and reproduces at least one target failure family;
-- all amended primary-Sol runs pass S1-S8;
+- all 16 release-required fresh primary-Sol runs exist: S2/S6/S7/S8 with 3 amended + 1 control each;
+- at least one control reproduces the targeted continuation/replay failure family;
+- every amended primary-Sol run passes its required scenario;
 - exact outputs and metadata are durable in this directory;
-- no result was synthesized from this authoring session or from another run's summary;
-- exact-head hosted CI is green after the final evidence/procedure commit;
+- no result was synthesized from this authoring/review session or from another run's summary;
+- procedure bytes used by amended runs are exactly the frozen 1.1.0 procedure head above, or any
+  later procedure change is explicitly re-pinned and the affected matrix rerun;
+- exact-head hosted CI is green after the final evidence commit;
 - final Sol review finds no new rationalization or over-hardening regression.
 
-Until then, PR #147 remains HOLD and paired Macro #6412 must not be released solely because its own
-CI is green.
+Optional S1/S3/S4/S5 evidence may be collected but is not required for release unless it exposes a
+new material failure.
+
+Until the required evidence exists, PR #147 remains HOLD. Macro #6412 is an independent current-
+state Agent OS repair and follows its own exact-head review/CI release gate; #6412 does not satisfy
+or weaken this constitutional behavioral gate.
