@@ -555,3 +555,98 @@ benign identity change self-heals on the next install run. A genuinely
 tampered or wrong binary will instead fail the pre-existing `codesign
 --verify --strict` / exact SHA-256 checks in `install.sh` itself before a
 new receipt is ever written -- which is the correct, fail-closed outcome.
+
+## CF2-H0 — grounded capacity-source host preparation
+
+This is a separate credential-free preparation stage. Run it only from the
+exact merged `origin/master` that contains the reviewed CF2-H0 carrier. It
+installs no plist, starts no service, performs no provider call, opens no
+credential, and does not issue P0 acceptance. OAuth and device ceremonies,
+CF2-I, routing and worker fan-out remain held; all services remain stopped.
+
+Prepare the exact sparse Macro transport and pinned PyYAML wheel without
+administrator privileges. The sparse checkout is transport only. The root
+preparer copies it into a new system staging area, removes the remote, proves
+the exact Git/material identity, hardens it and retains direct `.git` metadata.
+
+```bash
+set -euo pipefail
+test "$(/usr/bin/id -u)" -ne 0
+REPOSITORY=/absolute/path/to/Mastermind
+OPERATOR_USER="$(/usr/bin/id -un)"
+DELIVERY_PR=<cf2-h0-pr-number>
+test "$OPERATOR_USER" != root
+test "$DELIVERY_PR" -gt 0
+
+git -C "$REPOSITORY" fetch origin master
+test "$(gh pr view "$DELIVERY_PR" --repo mastermindx-market-intelligence/Mastermind \
+  --json state --jq .state)" = MERGED
+PR_MERGE_SHA="$(gh pr view "$DELIVERY_PR" \
+  --repo mastermindx-market-intelligence/Mastermind \
+  --json mergeCommit --jq .mergeCommit.oid)"
+MERGE_SHA="$(git -C "$REPOSITORY" rev-parse refs/remotes/origin/master)"
+git -C "$REPOSITORY" merge-base --is-ancestor "$PR_MERGE_SHA" "$MERGE_SHA"
+
+H0_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-cf2-h0.XXXXXX)"
+SOURCE_REPO="$H0_PARENT/mastermind-source"
+MACRO_SOURCE="$H0_PARENT/macro-source"
+PYYAML_WHEEL="$H0_PARENT/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl"
+
+git clone --no-local --no-hardlinks "$REPOSITORY" "$SOURCE_REPO"
+git -C "$SOURCE_REPO" checkout --detach "$MERGE_SHA"
+test "$(git -C "$SOURCE_REPO" rev-parse HEAD)" = "$MERGE_SHA"
+test -z "$(git -C "$SOURCE_REPO" status --porcelain=v1)"
+
+git init "$MACRO_SOURCE"
+git -C "$MACRO_SOURCE" remote add origin \
+  https://github.com/mastermindx-market-intelligence/macro.git
+git -C "$MACRO_SOURCE" sparse-checkout init --no-cone
+git -C "$MACRO_SOURCE" sparse-checkout set --no-cone \
+  config/capability_manifest.yml \
+  config/metabolism_budget.yml \
+  engine/codex_lane/runner.py \
+  engine/codex_provider.py \
+  engine/llm_auth.py \
+  engine/metabolism/budget_gate.py \
+  engine/neuralweb/key_pool.py \
+  engine/provider_capacity.py \
+  engine/provider_health.py \
+  lib/ai_costs.py \
+  scripts/build_provider_capacity.py
+git -C "$MACRO_SOURCE" fetch --filter=blob:none --depth=1 origin \
+  dcdd939c45b23abce5ba04f95e330ac914a3904b
+git -C "$MACRO_SOURCE" checkout --detach \
+  dcdd939c45b23abce5ba04f95e330ac914a3904b
+test -z "$(git -C "$MACRO_SOURCE" status --porcelain=v1)"
+
+/usr/bin/curl --fail --location --proto '=https' --tlsv1.2 \
+  --output "$PYYAML_WHEEL" \
+  https://files.pythonhosted.org/packages/89/a0/6cf41a19a1f2f3feab0e9c0b74134aa2ce6849093d5517a0c550fe37a648/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl
+test "$(/usr/bin/shasum -a 256 "$PYYAML_WHEEL" | /usr/bin/awk '{print $1}')" = \
+  fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
+```
+
+Only now begin the one unavoidable local administrator ceremony. Changing the
+fresh Mastermind transport to `root:wheel` closes the mutable-script boundary
+before root executes it. The preparer re-verifies every input after copying,
+reuses the existing bootstrap identity law, installs the receipt last, and
+prints only `PREPARED_NOT_P0_ACCEPTED`.
+
+```bash
+sudo -v
+sudo /usr/sbin/chown -R root:wheel "$SOURCE_REPO"
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/prepare-capacity-host.sh" \
+  --expected-mastermind-sha "$MERGE_SHA" \
+  --operator-user "$OPERATOR_USER" \
+  --macro-source "$MACRO_SOURCE" \
+  --pyyaml-wheel "$PYYAML_WHEEL"
+sudo /bin/bash "$SOURCE_REPO/ops/executive_os/prepare-capacity-host.sh" \
+  --expected-mastermind-sha "$MERGE_SHA" \
+  --verify-only
+```
+
+Run `--verify-only` a second time to prove zero-mutation idempotence. Then rerun
+the independent read-only CF2-P0 census. Proceed only if that census—not this
+preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Even then, CF2-I-A is
+the next separate carrier; this stage grants no login, routing, service-start,
+fan-out or failover authority.
