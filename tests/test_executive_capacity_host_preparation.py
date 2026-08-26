@@ -36,7 +36,7 @@ def test_capacity_preparer_pins_exact_source_runtime_and_entrypoint_inputs() -> 
         'CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"',
     ):
         assert exact in source
-    assert "https://github.com/mastermindx-market-intelligence/macro" not in source
+    assert "MACRO_ORIGIN" not in source
 
 
 def test_capacity_preparer_closes_host_and_reviewed_mastermind_before_mutation() -> None:
