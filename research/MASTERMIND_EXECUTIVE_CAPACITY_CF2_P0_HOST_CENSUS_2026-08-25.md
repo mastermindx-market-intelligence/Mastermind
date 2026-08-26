@@ -208,7 +208,7 @@ digest. Doing so would turn absence into fabricated readiness.
 | `capacity-observe/v1` | `NOT_BUILT` | Legacy worker broker has no accepted operation |
 | Capacity-aware atomic claim | `NOT_BUILT` | CF2-I remains held |
 | Three Personal Pro credentials | `DARK_OR_DISCONNECTED` | Prior ceremonies are not accepted here; P0 inspected no credential bytes |
-| Live Executive service | `BROKEN` or dormant | Plists/sockets exist, but launchd labels and processes were absent |
+| Live Executive service | `DARK_OR_DISCONNECTED` | Plists/socket nodes are installed, but no launchd label, process or live-service acceptance was observed |
 | Cursor/Grok provider routes | `SPEC_ONLY` | Separate source-law carrier; no auth or runtime enablement |
 
 Repository acceptance, installed state, authentication and live runtime proof remain separate claims.
