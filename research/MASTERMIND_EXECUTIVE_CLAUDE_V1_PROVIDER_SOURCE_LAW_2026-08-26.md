@@ -267,6 +267,8 @@ A provider refusal is a normal bounded provider result. It is not permission to 
 
 Claude Code subscription access and Claude Console/API access are separate transports. The first V1 proof is a subscription-backed Claude Code worker unless a later explicit commercial/transport ruling says otherwise.
 
+**Current billing/usage correction — revalidated 2026-08-26:** Anthropic's June 16 Help Center update says the June 15 Agent SDK pricing/usage change is paused. For now, Claude Agent SDK, `claude -p`, and third-party app usage still draw from the user's Claude subscription usage limits, and the previously announced separate monthly Agent SDK credit is not available. Anthropic says it will announce an update before a future change takes effect. Therefore HF1 must revalidate this first-party page immediately before the host proof instead of implementing against the stale pre-June-15 text preserved lower on that page.
+
 Hard rules:
 
 - a successful Claude Code login proves only the authenticated surface actually observed; it does not prove API billing eligibility or Managed Agents eligibility;
@@ -425,6 +427,7 @@ First-party Anthropic sources only for provider contract facts:
 - Claude Code settings: https://code.claude.com/docs/en/settings
 - Claude Code permissions: https://code.claude.com/docs/en/permissions
 - Claude Code model configuration: https://code.claude.com/docs/en/model-config
+- Claude Help Center, Agent SDK subscription usage (June 16 page; June 15 change paused): https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan
 - Claude Managed Agents quickstart: https://platform.claude.com/docs/en/managed-agents/quickstart
 - Claude Managed Agents agent setup: https://platform.claude.com/docs/en/managed-agents/agent-setup
 - Claude Managed Agents sessions: https://platform.claude.com/docs/en/managed-agents/sessions
