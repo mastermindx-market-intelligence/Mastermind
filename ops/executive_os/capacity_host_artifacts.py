@@ -848,6 +848,21 @@ def materialize_source_transport(
         sparse = source_root / ".git" / "info" / "sparse-checkout"
         sparse.write_text("".join(f"/{path}\n" for path in material_paths), encoding="utf-8")
         _run_git(source_root, "checkout", "--detach", expected_commit)
+        for row in manifest["material"]:
+            material_path = source_root / str(row["path"])
+            descriptor = os.open(
+                material_path,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+            try:
+                material_info = os.fstat(descriptor)
+                if not stat.S_ISREG(material_info.st_mode) or material_info.st_nlink != 1:
+                    raise CapacityHostArtifactError("SOURCE_WORKTREE_FILE_MISMATCH")
+                os.fchmod(descriptor, 0o755 if row["mode"] == "100755" else 0o644)
+            finally:
+                os.close(descriptor)
         (source_root / ".git" / "cf2-h0-transport-manifest.json").write_bytes(
             canonical_json(manifest)
         )
@@ -1091,7 +1106,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             value = verify_approved_xattrs(args.path)
         else:
             value = parse_launchctl_disabled(sys.stdin.read(256 * 1024 + 1), args.label)
-    except (CapacityHostArtifactError, OSError, UnicodeError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+    except CapacityHostArtifactError as exc:
+        reason = str(exc)
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", reason) is None:
+            reason = type(exc).__name__
+        print(f"capacity host artifact refused: {reason}", file=sys.stderr)
+        return 65
+    except (OSError, UnicodeError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
         print(f"capacity host artifact refused: {type(exc).__name__}", file=sys.stderr)
         return 65
     sys.stdout.write(canonical_json(value).decode("utf-8") + "\n")

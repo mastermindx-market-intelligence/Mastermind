@@ -57,6 +57,24 @@ def test_launchctl_disabled_parser_rejects_false_ambiguous_or_inexact_state(outp
         )
 
 
+def test_cli_emits_safe_typed_refusal_code(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO('"com.mastermind.executive.worker.codex-pro-01" => false\n'),
+    )
+    assert artifacts.main(
+        [
+            "check-launchctl-disabled",
+            "--label",
+            "com.mastermind.executive.worker.codex-pro-01",
+        ]
+    ) == 65
+    assert capsys.readouterr().err == (
+        "capacity host artifact refused: LAUNCHCTL_DISABLED_STATE_INVALID\n"
+    )
+
+
 def _repository(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
     root = tmp_path / "source"
     root.mkdir()
@@ -68,6 +86,8 @@ def _repository(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"fixture-{index}\n", encoding="utf-8")
+        if relative.startswith("scripts/"):
+            path.chmod(0o755)
     ignored = root / "ignored-secret.txt"
     ignored.write_text("must-not-cross\n", encoding="utf-8")
     (root / ".gitignore").write_text("ignored-secret.txt\n", encoding="utf-8")
@@ -111,6 +131,30 @@ def test_source_transport_contains_only_manifest_and_git_pack(tmp_path: Path) ->
         for path in checkout.rglob("*")
         if ".git" not in path.relative_to(checkout).parts and path.is_file()
     ) == list(paths)
+
+
+def test_source_transport_materialization_normalizes_modes_under_root_umask(
+    tmp_path: Path,
+) -> None:
+    source, commit, paths = _repository(tmp_path)
+    output = tmp_path / "transport.zip"
+    manifest = artifacts.build_source_transport(
+        source, output, commit=commit, material_paths=paths
+    )
+    checkout = tmp_path / "installed-root-umask"
+
+    previous_umask = os.umask(0o077)
+    try:
+        assert artifacts.materialize_source_transport(
+            output, checkout, expected_commit=commit, material_paths=paths
+        ) == manifest
+    finally:
+        os.umask(previous_umask)
+
+    for row in manifest["material"]:
+        expected_mode = 0o755 if row["mode"] == "100755" else 0o644
+        assert stat.S_IMODE((checkout / row["path"]).stat().st_mode) == expected_mode
+    artifacts.verify_materialized_source(checkout, manifest=manifest)
 
 
 def test_source_transport_rejects_extra_archive_member_and_manifest_drift(tmp_path: Path) -> None:
