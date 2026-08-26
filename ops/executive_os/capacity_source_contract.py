@@ -25,7 +25,6 @@ P0_SOURCE_KIND = "grounded_cf1_git_release"
 SOURCE_CONTRACT_ID = "grounded_cf1_git_subprocess/v1"
 
 PRODUCER_REPOSITORY = "mastermindx-market-intelligence/macro"
-PRODUCER_ORIGIN = "https://github.com/mastermindx-market-intelligence/macro.git"
 PRODUCER_COMMIT = "dcdd939c45b23abce5ba04f95e330ac914a3904b"
 PRODUCER_MATERIAL_SOURCE_DIGEST = (
     "35931b4ef965c5d67a7e01444dd483804e48671784716ea8196c94e925466650"
@@ -50,9 +49,20 @@ PYYAML_WHEEL = "pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl"
 PYYAML_WHEEL_SHA256 = (
     "fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0"
 )
+PYYAML_RECORD_SHA256 = (
+    "715146d21711444bc73c3137d18cffb6e38ace40e8998c5a9dfa69bd7dc46e3e"
+)
+RUNTIME_TREE_SHA256 = (
+    "79e1e4dc67c0fbefc266fcf2c27b98a7e0aeff5048e015fae11b20115ee864ee"
+)
+ENTRYPOINT_GIT_BLOB = "9b9457c6beb673cbbb08ee00421b2d0718cbec60"
+ENTRYPOINT_SHA256 = (
+    "6688e6278a8cde7107b4f565d381ca57314a71913f50606f231835bb4e3e20f5"
+)
 
-TELEMETRY_ROOT = Path("/var/db/mastermind-executive/capacity-telemetry")
-AI_COSTS_STATE_ROOT = TELEMETRY_ROOT / "ai-costs"
+TELEMETRY_ROOT = Path("/var/db/mastermind-provider-control")
+AI_COSTS_STATE_ROOT = TELEMETRY_ROOT
+METABOLISM_STATE_ROOT = TELEMETRY_ROOT
 SOURCE_CONFIG_PATH = SYSTEM_ROOT / "config" / "capacity-source-v1.json"
 HOST_RECEIPT_PATH = SYSTEM_ROOT / "config" / "capacity-host-preparation-v1.json"
 COMPONENT_ROOT = SYSTEM_ROOT / "config" / "capacity-source-components-v1"
@@ -119,13 +129,20 @@ _HOST_RECEIPT_FIELDS = frozenset(
     {
         "schema_version",
         "outcome",
-        "installed_mastermind_commit",
+        "preparer_source_commit",
         "source_release_commit",
         "producer_material_source_digest",
         "source_config_digest",
         "component_manifest_digest",
+        "broker_count",
+        "broker_topology_digest",
+        "rollback_contract_digest",
+        "rollback_drill_receipt_digest",
         "service_state",
+        "socket_state",
+        "control_state",
         "credential_state",
+        "worker_execution_state",
         "cf2_i_state",
     }
 )
@@ -180,12 +197,20 @@ def _inventory_realms() -> list[dict[str, str]]:
 
 
 def build_component_objects(
-    *, material_source_digest: str, pyyaml_record_sha256: str
+    *,
+    material_source_digest: str,
+    pyyaml_record_sha256: str,
+    runtime_tree_sha256: str,
 ) -> dict[str, dict[str, Any]]:
     material_digest = _digest(material_source_digest)
     if material_digest != PRODUCER_MATERIAL_SOURCE_DIGEST:
         raise CapacitySourceContractError("MATERIAL_DIGEST_MISMATCH")
     record_digest = _digest(pyyaml_record_sha256)
+    runtime_digest = _digest(runtime_tree_sha256)
+    if record_digest != PYYAML_RECORD_SHA256:
+        raise CapacitySourceContractError("PYYAML_RECORD_DIGEST_MISMATCH")
+    if runtime_digest != RUNTIME_TREE_SHA256:
+        raise CapacitySourceContractError("RUNTIME_TREE_DIGEST_MISMATCH")
     return {
         "source_executable_identity": {
             "schema_version": "mastermind.executive_capacity_executable_identity/v1",
@@ -196,6 +221,7 @@ def build_component_objects(
             "pyyaml_wheel": PYYAML_WHEEL,
             "pyyaml_wheel_sha256": PYYAML_WHEEL_SHA256,
             "pyyaml_record_sha256": record_digest,
+            "runtime_tree_sha256": runtime_digest,
             "isolated_mode": True,
             "user_site_disabled": True,
         },
@@ -204,6 +230,8 @@ def build_component_objects(
             "repository": PRODUCER_REPOSITORY,
             "commit": PRODUCER_COMMIT,
             "entrypoint": str(ENTRYPOINT),
+            "entrypoint_git_blob": ENTRYPOINT_GIT_BLOB,
+            "entrypoint_sha256": ENTRYPOINT_SHA256,
             "material_source_digest": material_digest,
             "material_sources_match_commit": True,
         },
@@ -213,9 +241,12 @@ def build_component_objects(
             "commit": PRODUCER_COMMIT,
             "working_directory": str(SOURCE_ROOT),
             "git_directory_kind": "direct",
+            "checkout_scope": "accepted_cf1_material_only",
             "head_detached": True,
             "worktree_clean": True,
             "remote_count": 0,
+            "promisor_state": "offline_no_remote",
+            "lazy_fetch_denied": True,
         },
         "inventory_config": {
             "schema_version": "mastermind.executive_capacity_inventory_config/v1",
@@ -226,7 +257,9 @@ def build_component_objects(
             "metabolism_state_root": str(TELEMETRY_ROOT),
             "ai_costs_state_root": str(AI_COSTS_STATE_ROOT),
             "source_owner": "macro_shared_ai_provider_control",
-            "initial_state": "empty_absence_witness",
+            "filesystem_owner": "root:wheel",
+            "write_authority": "none_h0_read_only",
+            "initial_state": "canonical_empty_absence_witness",
             "absence_semantics": "unknown_not_zero",
         },
     }
@@ -242,6 +275,7 @@ def validate_component_objects(value: Any) -> dict[str, dict[str, Any]]:
     expected = build_component_objects(
         material_source_digest=_digest(entrypoint.get("material_source_digest")),
         pyyaml_record_sha256=_digest(executable.get("pyyaml_record_sha256")),
+        runtime_tree_sha256=_digest(executable.get("runtime_tree_sha256")),
     )
     if value != expected:
         raise CapacitySourceContractError("COMPONENT_OBJECTS_MISMATCH")
@@ -286,20 +320,33 @@ def validate_source_config(value: Any, *, component_objects: Any) -> dict[str, A
 
 
 def build_host_receipt(
-    *, source_config: Any, component_objects: Any, installed_mastermind_commit: str
+    *,
+    source_config: Any,
+    component_objects: Any,
+    preparer_source_commit: str,
+    broker_topology_digest: str,
+    rollback_contract_digest: str,
+    rollback_drill_receipt_digest: str,
 ) -> dict[str, Any]:
     components = validate_component_objects(component_objects)
     config = validate_source_config(source_config, component_objects=components)
     return {
         "schema_version": HOST_RECEIPT_SCHEMA,
-        "outcome": "PREPARED_NOT_P0_ACCEPTED",
-        "installed_mastermind_commit": _commit(installed_mastermind_commit),
+        "outcome": "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED",
+        "preparer_source_commit": _commit(preparer_source_commit),
         "source_release_commit": PRODUCER_COMMIT,
         "producer_material_source_digest": PRODUCER_MATERIAL_SOURCE_DIGEST,
         "source_config_digest": canonical_digest(config),
         "component_manifest_digest": canonical_digest(components),
-        "service_state": "unchanged_no_h0_service_install_or_start",
+        "broker_count": 3,
+        "broker_topology_digest": _digest(broker_topology_digest),
+        "rollback_contract_digest": _digest(rollback_contract_digest),
+        "rollback_drill_receipt_digest": _digest(rollback_drill_receipt_digest),
+        "service_state": "definitions_installed_labels_disabled_unloaded",
+        "socket_state": "definitions_installed_nodes_absent",
+        "control_state": "legacy_files_unchanged_services_disabled_unloaded",
         "credential_state": "not_read_copied_or_created",
+        "worker_execution_state": "held",
         "cf2_i_state": "held",
     }
 
@@ -312,7 +359,10 @@ def validate_host_receipt(
     expected = build_host_receipt(
         source_config=source_config,
         component_objects=component_objects,
-        installed_mastermind_commit=_commit(value.get("installed_mastermind_commit")),
+        preparer_source_commit=_commit(value.get("preparer_source_commit")),
+        broker_topology_digest=_digest(value.get("broker_topology_digest")),
+        rollback_contract_digest=_digest(value.get("rollback_contract_digest")),
+        rollback_drill_receipt_digest=_digest(value.get("rollback_drill_receipt_digest")),
     )
     if value != expected:
         raise CapacitySourceContractError("HOST_RECEIPT_MISMATCH")
@@ -332,7 +382,11 @@ def _parser() -> argparse.ArgumentParser:
     render = commands.add_parser("render")
     render.add_argument("--material-source-digest", required=True)
     render.add_argument("--pyyaml-record-sha256", required=True)
+    render.add_argument("--runtime-tree-sha256", required=True)
     render.add_argument("--mastermind-commit")
+    render.add_argument("--broker-topology-digest")
+    render.add_argument("--rollback-contract-digest")
+    render.add_argument("--rollback-drill-receipt-digest")
     verify = commands.add_parser("verify")
     verify.add_argument("--components", type=Path, required=True)
     verify.add_argument("--config", type=Path, required=True)
@@ -347,14 +401,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             components = build_component_objects(
                 material_source_digest=args.material_source_digest,
                 pyyaml_record_sha256=args.pyyaml_record_sha256,
+                runtime_tree_sha256=args.runtime_tree_sha256,
             )
             config = build_source_config(component_objects=components)
             value: dict[str, Any] = {"components": components, "source_config": config}
             if args.mastermind_commit is not None:
+                if (
+                    args.broker_topology_digest is None
+                    or args.rollback_contract_digest is None
+                    or args.rollback_drill_receipt_digest is None
+                ):
+                    raise CapacitySourceContractError("HOST_RECEIPT_DIGESTS_REQUIRED")
                 value["host_receipt"] = build_host_receipt(
                     source_config=config,
                     component_objects=components,
-                    installed_mastermind_commit=args.mastermind_commit,
+                    preparer_source_commit=args.mastermind_commit,
+                    broker_topology_digest=args.broker_topology_digest,
+                    rollback_contract_digest=args.rollback_contract_digest,
+                    rollback_drill_receipt_digest=args.rollback_drill_receipt_digest,
                 )
         else:
             components = validate_component_objects(_read_json(args.components))

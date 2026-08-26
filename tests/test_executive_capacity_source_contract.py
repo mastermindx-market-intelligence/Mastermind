@@ -9,7 +9,8 @@ from ops.executive_os import capacity_source_contract as contract
 
 
 MATERIAL_DIGEST = "35931b4ef965c5d67a7e01444dd483804e48671784716ea8196c94e925466650"
-RECORD_DIGEST = "b" * 64
+RECORD_DIGEST = contract.PYYAML_RECORD_SHA256
+RUNTIME_DIGEST = contract.RUNTIME_TREE_SHA256
 MASTERMIND_COMMIT = "c" * 40
 
 
@@ -17,6 +18,7 @@ def _components() -> dict[str, dict[str, object]]:
     return contract.build_component_objects(
         material_source_digest=MATERIAL_DIGEST,
         pyyaml_record_sha256=RECORD_DIGEST,
+        runtime_tree_sha256=RUNTIME_DIGEST,
     )
 
 
@@ -103,18 +105,24 @@ def test_component_objects_freeze_runtime_entrypoint_git_inventory_and_telemetry
     assert executable["pyyaml_version"] == "6.0.3"
     assert executable["pyyaml_wheel_sha256"] == contract.PYYAML_WHEEL_SHA256
     assert executable["pyyaml_record_sha256"] == RECORD_DIGEST
+    assert executable["runtime_tree_sha256"] == RUNTIME_DIGEST
 
     entrypoint = components["source_entrypoint_identity"]
     assert entrypoint["repository"] == "mastermindx-market-intelligence/macro"
     assert entrypoint["commit"] == contract.PRODUCER_COMMIT
     assert entrypoint["material_source_digest"] == MATERIAL_DIGEST
     assert entrypoint["material_sources_match_commit"] is True
+    assert entrypoint["entrypoint_git_blob"] == contract.ENTRYPOINT_GIT_BLOB
+    assert entrypoint["entrypoint_sha256"] == contract.ENTRYPOINT_SHA256
 
     working = components["source_working_directory_identity"]
     assert working["git_directory_kind"] == "direct"
+    assert working["checkout_scope"] == "accepted_cf1_material_only"
     assert working["head_detached"] is True
     assert working["worktree_clean"] is True
     assert working["remote_count"] == 0
+    assert working["promisor_state"] == "offline_no_remote"
+    assert working["lazy_fetch_denied"] is True
 
     inventory = components["inventory_config"]
     assert [row["capacity_capability_id"] for row in inventory["realms"]] == [
@@ -132,7 +140,16 @@ def test_component_objects_freeze_runtime_entrypoint_git_inventory_and_telemetry
         "/var/db/mastermind-executive/workers/codex-pro-02/provider-home",
         "/var/db/mastermind-executive/workers/codex-pro-03/provider-home",
     ]
-    assert components["telemetry_config"]["absence_semantics"] == "unknown_not_zero"
+    assert components["telemetry_config"] == {
+        "schema_version": "mastermind.executive_capacity_telemetry_config/v1",
+        "metabolism_state_root": "/var/db/mastermind-provider-control",
+        "ai_costs_state_root": "/var/db/mastermind-provider-control",
+        "source_owner": "macro_shared_ai_provider_control",
+        "filesystem_owner": "root:wheel",
+        "write_authority": "none_h0_read_only",
+        "initial_state": "canonical_empty_absence_witness",
+        "absence_semantics": "unknown_not_zero",
+    }
 
 
 def test_canonical_objects_contain_no_private_auth_or_provider_identity() -> None:
@@ -182,6 +199,19 @@ def test_component_construction_refuses_wrong_material_digest_and_reordered_real
         contract.build_component_objects(
             material_source_digest="a" * 64,
             pyyaml_record_sha256=RECORD_DIGEST,
+            runtime_tree_sha256=RUNTIME_DIGEST,
+        )
+    with pytest.raises(contract.CapacitySourceContractError, match="PYYAML_RECORD"):
+        contract.build_component_objects(
+            material_source_digest=MATERIAL_DIGEST,
+            pyyaml_record_sha256="b" * 64,
+            runtime_tree_sha256=RUNTIME_DIGEST,
+        )
+    with pytest.raises(contract.CapacitySourceContractError, match="RUNTIME_TREE"):
+        contract.build_component_objects(
+            material_source_digest=MATERIAL_DIGEST,
+            pyyaml_record_sha256=RECORD_DIGEST,
+            runtime_tree_sha256="d" * 64,
         )
     components = copy.deepcopy(_components())
     components["inventory_config"]["realms"].reverse()
@@ -193,18 +223,28 @@ def test_h0_receipt_is_sanitized_and_explicitly_not_p0_acceptance() -> None:
     receipt = contract.build_host_receipt(
         source_config=_config(),
         component_objects=_components(),
-        installed_mastermind_commit=MASTERMIND_COMMIT,
+        preparer_source_commit=MASTERMIND_COMMIT,
+        broker_topology_digest="e" * 64,
+        rollback_contract_digest="f" * 64,
+        rollback_drill_receipt_digest="1" * 64,
     )
     assert receipt == {
         "schema_version": "mastermind.executive_capacity_host_preparation/v1",
-        "outcome": "PREPARED_NOT_P0_ACCEPTED",
-        "installed_mastermind_commit": MASTERMIND_COMMIT,
+        "outcome": "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED",
+        "preparer_source_commit": MASTERMIND_COMMIT,
         "source_release_commit": contract.PRODUCER_COMMIT,
         "producer_material_source_digest": MATERIAL_DIGEST,
         "source_config_digest": contract.canonical_digest(_config()),
         "component_manifest_digest": contract.canonical_digest(_components()),
-        "service_state": "unchanged_no_h0_service_install_or_start",
+        "broker_count": 3,
+        "broker_topology_digest": "e" * 64,
+        "rollback_contract_digest": "f" * 64,
+        "rollback_drill_receipt_digest": "1" * 64,
+        "service_state": "definitions_installed_labels_disabled_unloaded",
+        "socket_state": "definitions_installed_nodes_absent",
+        "control_state": "legacy_files_unchanged_services_disabled_unloaded",
         "credential_state": "not_read_copied_or_created",
+        "worker_execution_state": "held",
         "cf2_i_state": "held",
     }
     encoded = contract.canonical_json(receipt)
@@ -221,7 +261,10 @@ def test_h0_receipt_refuses_extra_field_wrong_digest_and_invalid_commit() -> Non
     receipt = contract.build_host_receipt(
         source_config=_config(),
         component_objects=_components(),
-        installed_mastermind_commit=MASTERMIND_COMMIT,
+        preparer_source_commit=MASTERMIND_COMMIT,
+        broker_topology_digest="e" * 64,
+        rollback_contract_digest="f" * 64,
+        rollback_drill_receipt_digest="1" * 64,
     )
     with pytest.raises(contract.CapacitySourceContractError):
         contract.validate_host_receipt(
@@ -239,5 +282,8 @@ def test_h0_receipt_refuses_extra_field_wrong_digest_and_invalid_commit() -> Non
         contract.build_host_receipt(
             source_config=_config(),
             component_objects=_components(),
-            installed_mastermind_commit="not-a-commit",
+            preparer_source_commit="not-a-commit",
+            broker_topology_digest="e" * 64,
+            rollback_contract_digest="f" * 64,
+            rollback_drill_receipt_digest="1" * 64,
         )
