@@ -128,7 +128,7 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'",
         "checkout --detach",
         "one native administrator dialog",
-        "/usr/bin/sudo /bin/bash -s --",
+        "/usr/bin/sudo /usr/bin/env -i",
         "No network command runs as root",
         "2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60",
         "02886a6c79f22534ac24234d8adb3224329976342393988541c2a50d7e297f29",
@@ -145,16 +145,61 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
     for value in required:
         assert value in normalized
 
-    repair = """/bin/bash ops/executive_os/repair-capacity-source-closure.sh repair \\
+    repair = """/bin/bash "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" repair \\
   --expected-source-closure-repair-commit \"$REPAIR_MERGE_SHA\" \\
   --operator-user \"$OPERATOR_USER\" \\
   --macro-transport \"$MACRO_TRANSPORT\" \\
   --macro-transport-sha256 \"$MACRO_TRANSPORT_SHA256\""""
-    verify = """/bin/bash ops/executive_os/repair-capacity-source-closure.sh verify-only \\
+    verify = """/bin/bash "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" verify-only \\
   --expected-source-closure-repair-commit \"$REPAIR_MERGE_SHA\""""
     assert repair in runbook
     assert runbook.count(verify) == 2
     assert "\n  sudo /bin/bash -s -- \\" not in runbook
+
+
+def test_native_ceremony_materializes_one_digest_bound_root_created_carrier() -> None:
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    normalized = " ".join(runbook.split())
+    required = (
+        "git bundle create",
+        "REPAIR_CARRIER_SHA256",
+        "inert exact-commit carrier",
+        "/usr/bin/env -i",
+        "GIT_CONFIG_NOSYSTEM=1",
+        "GIT_CONFIG_GLOBAL=/dev/null",
+        "GIT_CONFIG_LOCAL=/dev/null",
+        "GIT_ATTR_NOSYSTEM=1",
+        "GIT_NO_REPLACE_OBJECTS=1",
+        "GIT_EXTERNAL_DIFF=/usr/bin/false",
+        "GIT_ALLOW_PROTOCOL=file",
+        "protocol.allow=never",
+        "protocol.file.allow=always",
+        "core.hooksPath=/dev/null",
+        "core.fsmonitor=false",
+        "core.attributesFile=/dev/null",
+        "--no-ext-diff --no-textconv",
+        "root-created `0700`",
+        "verify-repair-carrier",
+        ".repair-carrier-commit",
+        "No installed release executable or Python module is launched",
+    )
+    for value in required:
+        assert value in normalized
+    forbidden = (
+        'cd "$REPAIR_CHECKOUT"',
+        "/usr/sbin/chown -R root:wheel .",
+        '/bin/bash ops/executive_os/repair-capacity-source-closure.sh repair',
+    )
+    for value in forbidden:
+        assert value not in runbook
+
+
+def test_root_carrier_wrapper_uses_no_git_and_requires_descriptor_verification() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert "/usr/bin/git" not in script
+    assert "verify-repair-carrier" in script
+    assert ".repair-carrier-commit" in script
+    assert "/usr/bin/env -i" in script
 
 
 def test_runbook_fixes_output_recovery_two_axis_proof_and_all_holds() -> None:

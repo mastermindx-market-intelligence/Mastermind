@@ -214,12 +214,17 @@ observed from the verified v2 manifest, never accepted as caller assertions.
 
 ## 8. Filesystem and digest law
 
-Every security-relevant path is opened without following links and rebound by descriptor. This
-includes `.git/config`, `.git/packed-refs`, `.git/info/alternates`, `.git/info/grafts`, shallow and
-promisor markers, their parents, and lock siblings; a symlink, hard link, or pre-existing lock at
-any optional metadata location refuses rather than being treated as absence. Regular files have
+Every security-relevant path is opened without following links and rebound by descriptor. The fixed
+system root is traversed component-by-component from an open `/` descriptor; the root and its
+capacity-source, generation, staging, archive, and lock parents stay open through the operation and
+their pathname relations are revalidated before and after use. Preserved generation/archive,
+runtime, release, topology, and rollback evidence is likewise read through retained descriptors.
+This includes `.git/config`, `.git/packed-refs`, `.git/info/alternates`, `.git/info/grafts`, shallow
+and promisor markers, their parents, and lock siblings; a symlink, hard link, or pre-existing lock
+at any optional metadata location refuses rather than being treated as absence. Regular files have
 link count one. Symlinks, sockets, devices, FIFOs, hard links, ACLs, non-root/non-wheel ownership,
-wrong expected GID, and group/other-writable objects refuse. Only system-maintained
+wrong expected GID, and group/other-writable objects refuse. Every relevant object's BSD `st_flags`
+must equal the frozen allowed value zero before acceptance and on revalidation. Only system-maintained
 `com.apple.provenance` may exist; every other xattr refuses, and provenance bytes are excluded from
 content identity.
 
@@ -236,7 +241,7 @@ no-replace primitive refuses before overwriting; copying, deleting, or replacing
 forbidden.
 
 The closed tree digest is SHA-256 over canonical compact JSON for rows sorted by UTF-8 POSIX
-relative path. Every row has `path,type,uid,gid,mode,nlink`; file rows also have `size,sha256`.
+relative path. Every row has `path,type,uid,gid,mode,nlink,flags`; file rows also have `size,sha256`.
 The root row path is `.`, modes are four-digit octal, and ACL/unapproved-xattr state prevents digest
 construction.
 
@@ -479,13 +484,21 @@ new attempt. No output contains a path, Git output, principal, account, credenti
 
 ## 13. Native administrator ceremony and proof
 
-Review, CI, Macro acquisition, v2 transport construction/hash, and the exact merged Mastermind
-checkout occur before privilege. Root receives only the single-link operator transport plus its
-recorded digest. During the root ceremony there is no network, credential/provider-home access,
-service mutation, socket creation/connection, provider call, routing, or worker execution.
+Review, CI, Macro acquisition, v2 transport construction/hash, and construction of a digest-bound
+exact-merge Git bundle occur before privilege. Root receives only the inert bundle plus its SHA-256
+and the single-link operator transport plus its recorded digest. The trusted inline root shell runs
+under `env -i`, copies the bundle without preserving metadata into a new root-created `0700`
+namespace, removes ACLs/xattrs/flags from those new inodes, and verifies the recorded digest. Fully
+hardened Git is local-file-only and ignores system/global/local config, hooks, fsmonitor,
+attributes, replacement refs, external diff/textconv, prompts, lazy fetch, optional locks, ambient
+locale, `HOME`, and `PATH`. It extracts only the exact reviewed carrier blobs, verifies their Git
+object identities, and writes them into new root-owned single-link inodes before descriptor
+verification. Root never executes an operator-created inode and performs no network access.
 
-One native administrator dialog executes the repair once from the sealed merged checkout. That
-checkout then runs verify-only twice using the exact CLI grammar. Each pass independently reopens
+One native administrator dialog executes the repair once from that root-created carrier, then runs
+verify-only twice using the exact CLI grammar. The installed `release_manifest.py` is never
+executed or imported: the reviewed carrier authenticates the preserved e4 release and its manifest
+strictly as descriptor-relative inert data. Each pass independently reopens
 and verifies complete object closure, the six-file generation, repair archive/receipt, runtime,
 byte-preserved topology/rollback evidence, telemetry boundary, fixed directory-service identity
 and membership facts, disabled/unloaded labels, absent sockets, and legacy state. Verify-only does

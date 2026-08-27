@@ -96,7 +96,7 @@ _TRANSPORT_MEMBERS = frozenset({"manifest.json", "payload.pack"})
 _WHEEL_PREFIXES = ("yaml/", "_yaml/", "pyyaml-6.0.3.dist-info/")
 _APPROVED_SYSTEM_XATTRS = frozenset({b"com.apple.provenance"})
 _CLOSED_DIRECTORY_MODES = frozenset({0o555, 0o700})
-_CLOSED_FILE_MODES = frozenset({0o400, 0o444, 0o555})
+_CLOSED_FILE_MODES = frozenset({0o400, 0o444, 0o500, 0o555})
 _DARWIN_XATTR_LIST_MAX_BYTES = 64 * 1024
 _DARWIN_XATTR_ERANGE_RETRIES = 3
 _V2_MANIFEST_MAX_BYTES = 1024 * 1024
@@ -127,6 +127,15 @@ _SOURCE_REPAIR_INTENT_NAME = "source-repair-intent.json"
 _SOURCE_REPAIR_RECEIPT_NAME = "source-repair-receipt.json"
 _ARCHIVED_SOURCE_NAME = "archived-source"
 _ARCHIVED_GENERATION_NAME = "archived-generation"
+_ALLOWED_BSD_FLAGS = 0
+_RELEASE_MANIFEST_SCHEMA = "mastermind.executive_release_manifest/v1"
+_RELEASE_MANIFEST_NAME = ".executive-release-manifest.json"
+_REPAIR_CARRIER_FILES = {
+    ".repair-carrier-commit": 0o400,
+    "ops/executive_os/repair-capacity-source-closure.sh": 0o500,
+    "ops/executive_os/capacity_host_artifacts.py": 0o400,
+    "ops/executive_os/capacity_source_contract.py": 0o400,
+}
 
 
 class CapacityHostArtifactError(ValueError):
@@ -340,11 +349,58 @@ class SourceRepairParents:
     device: int
     intent_archive_path: Path | None = None
     intent_archive: int | None = None
+    guard_descriptors: tuple[int, ...] = ()
+    guard_names: tuple[str, ...] = ()
+    system_root: int | None = None
+    capacity_sources: int | None = None
+    locks: int | None = None
+    relations: tuple[tuple[int, str, int], ...] = ()
+    security_states: tuple[tuple[int, tuple[int, ...]], ...] = ()
+
+    def revalidate(self) -> None:
+        """Refuse descriptor or pathname-relation drift across the operation."""
+
+        try:
+            for descriptor, expected in self.security_states:
+                info = os.fstat(descriptor)
+                if _descriptor_security_state(info) != expected:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
+                _require_secure_descriptor(
+                    descriptor, info, reason="SOURCE_REPAIR_PARENT_DRIFT"
+                )
+            for parent, name, child in self.relations:
+                observed = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if _descriptor_security_state(observed) != _descriptor_security_state(
+                    os.fstat(child)
+                ):
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
+            for index in range(1, len(self.guard_descriptors)):
+                observed = os.stat(
+                    self.guard_names[index],
+                    dir_fd=self.guard_descriptors[index - 1],
+                    follow_symlinks=False,
+                )
+                if _descriptor_security_state(observed) != _descriptor_security_state(
+                    os.fstat(self.guard_descriptors[index])
+                ):
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
+        except CapacityHostArtifactError:
+            raise
+        except OSError as exc:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT") from exc
 
     def close(self) -> None:
         descriptors = [self.source, self.generation, self.staging, self.archive]
         if self.intent_archive is not None:
             descriptors.append(self.intent_archive)
+        for descriptor in (
+            self.locks,
+            self.capacity_sources,
+            self.system_root,
+            *reversed(self.guard_descriptors),
+        ):
+            if descriptor is not None and descriptor not in descriptors:
+                descriptors.append(descriptor)
         first_error: OSError | None = None
         for descriptor in reversed(descriptors):
             try:
@@ -448,6 +504,7 @@ def _validate_canonical_file(
         or info.st_nlink != 1
         or info.st_uid != expected_uid
         or stat.S_IMODE(info.st_mode) != mode
+        or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
         or _extended_attribute_names(path) - _APPROVED_SYSTEM_XATTRS
         or path.read_bytes() != payload
     ):
@@ -478,6 +535,7 @@ def _publish_resumable_canonical_file(
             or candidate_info.st_nlink != 1
             or candidate_info.st_uid != expected_uid
             or stat.S_IMODE(candidate_info.st_mode) not in {mode, candidate_mode}
+            or int(getattr(candidate_info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or _extended_attribute_names(candidate) - _APPROVED_SYSTEM_XATTRS
         ):
             raise CapacityHostArtifactError("CANONICAL_CANDIDATE_METADATA_INVALID")
@@ -491,6 +549,7 @@ def _publish_resumable_canonical_file(
             or info.st_nlink != 1
             or info.st_uid != expected_uid
             or stat.S_IMODE(info.st_mode) != candidate_mode
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
         ):
             raise CapacityHostArtifactError("CANONICAL_CANDIDATE_METADATA_INVALID")
         existing = _read_descriptor(descriptor, len(payload))
@@ -556,6 +615,7 @@ def copy_closed_input(
             or info.st_nlink != 1
             or info.st_uid != operator_uid
             or stat.S_IMODE(info.st_mode) & 0o022
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or info.st_size > maximum_bytes
         ):
             raise CapacityHostArtifactError("CLOSED_INPUT_METADATA_INVALID")
@@ -742,9 +802,46 @@ def _descriptor_directory_state(info: os.stat_result) -> tuple[int, ...]:
         stat.S_IMODE(info.st_mode),
         info.st_uid,
         info.st_gid,
+        int(getattr(info, "st_flags", 0)),
         info.st_mtime_ns,
         info.st_ctime_ns,
     )
+
+
+def _require_allowed_bsd_flags(
+    info: os.stat_result, reason: str = "CLOSURE_FLAGS_INVALID"
+) -> None:
+    if int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS:
+        raise CapacityHostArtifactError(reason)
+
+
+def _descriptor_security_state(info: os.stat_result) -> tuple[int, ...]:
+    """Identity and security metadata that a transition cannot legitimately alter."""
+
+    return (
+        info.st_dev,
+        info.st_ino,
+        stat.S_IFMT(info.st_mode),
+        stat.S_IMODE(info.st_mode),
+        info.st_uid,
+        info.st_gid,
+        int(getattr(info, "st_flags", 0)),
+    )
+
+
+def _require_secure_descriptor(
+    descriptor: int,
+    info: os.stat_result,
+    *,
+    reason: str,
+    approved_xattrs: frozenset[bytes] = _APPROVED_SYSTEM_XATTRS,
+) -> None:
+    _require_allowed_bsd_flags(info, reason)
+    if (
+        _descriptor_extended_attribute_names(descriptor) - approved_xattrs
+        or _descriptor_has_extended_acl(descriptor)
+    ):
+        raise CapacityHostArtifactError(reason)
 
 
 def _descriptor_closed_tree_digest(
@@ -754,6 +851,7 @@ def _descriptor_closed_tree_digest(
     expected_gid: int,
     approved_xattrs: frozenset[bytes] = frozenset({b"com.apple.provenance"}),
     root_mode_override: int | None = None,
+    root_descriptor: int | None = None,
 ) -> str:
     """Hash one closed tree through no-follow descriptors and exact metadata rows."""
 
@@ -780,6 +878,7 @@ def _descriptor_closed_tree_digest(
 
     def visit(descriptor: int, relative: str) -> None:
         before = os.fstat(descriptor)
+        _require_allowed_bsd_flags(before)
         if before.st_uid != expected_uid or before.st_gid != expected_gid:
             raise CapacityHostArtifactError("CLOSURE_OWNER_INVALID")
         if _descriptor_extended_attribute_names(descriptor) - approved_xattrs:
@@ -803,6 +902,7 @@ def _descriptor_closed_tree_digest(
                     "gid": before.st_gid,
                     "mode": f"{row_mode:04o}",
                     "nlink": before.st_nlink,
+                    "flags": _ALLOWED_BSD_FLAGS,
                 }
             )
             ordered_names = _descriptor_directory_names(descriptor)
@@ -819,6 +919,7 @@ def _descriptor_closed_tree_digest(
                 finally:
                     os.close(child_descriptor)
             after = os.fstat(descriptor)
+            _require_allowed_bsd_flags(after)
             final_names = _descriptor_directory_names(descriptor)
             final = os.fstat(descriptor)
             if (
@@ -852,6 +953,7 @@ def _descriptor_closed_tree_digest(
                     "gid": before.st_gid,
                     "mode": f"{mode:04o}",
                     "nlink": 1,
+                    "flags": _ALLOWED_BSD_FLAGS,
                     "size": before.st_size,
                     "sha256": digest,
                 }
@@ -860,7 +962,11 @@ def _descriptor_closed_tree_digest(
             raise CapacityHostArtifactError("CLOSURE_TYPE_INVALID")
 
     try:
-        descriptor = os.open(root, open_flags)
+        descriptor = (
+            os.dup(root_descriptor)
+            if root_descriptor is not None
+            else os.open(root, open_flags)
+        )
     except OSError as exc:
         raise CapacityHostArtifactError("CLOSURE_TYPE_INVALID") from exc
     try:
@@ -877,6 +983,7 @@ def closed_tree_digest(
     expected_uid: int,
     expected_gid: int,
     approved_xattrs: frozenset[bytes] = frozenset({b"com.apple.provenance"}),
+    _root_descriptor: int | None = None,
 ) -> str:
     """Hash one closed tree through no-follow descriptors and exact metadata rows."""
 
@@ -885,6 +992,7 @@ def closed_tree_digest(
         expected_uid=expected_uid,
         expected_gid=expected_gid,
         approved_xattrs=approved_xattrs,
+        root_descriptor=_root_descriptor,
     )
 
 
@@ -1031,6 +1139,7 @@ def _open_source_repair_archive(
         or info.st_uid != expected_uid
         or info.st_gid != expected_gid
         or stat.S_IMODE(info.st_mode) != 0o700
+        or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
         or _descriptor_extended_attribute_names(descriptor) - _APPROVED_SYSTEM_XATTRS
         or _descriptor_has_extended_acl(descriptor)
     ):
@@ -1062,6 +1171,7 @@ def _read_source_repair_file(
             or info.st_gid != expected_gid
             or info.st_dev != expected_device
             or stat.S_IMODE(info.st_mode) != 0o400
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or _descriptor_extended_attribute_names(descriptor)
             - _APPROVED_SYSTEM_XATTRS
             or _descriptor_has_extended_acl(descriptor)
@@ -1105,6 +1215,7 @@ def _read_source_repair_candidate_prefix(
             or info.st_gid != expected_gid
             or info.st_dev != expected_device
             or stat.S_IMODE(info.st_mode) not in {0o400, 0o600}
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or _descriptor_extended_attribute_names(descriptor)
             - _APPROVED_SYSTEM_XATTRS
             or _descriptor_has_extended_acl(descriptor)
@@ -1219,6 +1330,8 @@ def _publish_source_repair_object(
                     or candidate_info.st_gid != expected_gid
                     or candidate_info.st_dev != expected_device
                     or stat.S_IMODE(candidate_info.st_mode) not in {0o400, 0o600}
+                    or int(getattr(candidate_info, "st_flags", 0))
+                    != _ALLOWED_BSD_FLAGS
                 ):
                     raise CapacityHostArtifactError("SOURCE_REPAIR_CANDIDATE_INVALID")
                 existing_prefix = _read_descriptor(inspect_descriptor, len(payload))
@@ -1242,6 +1355,7 @@ def _publish_source_repair_object(
                 or info.st_gid != expected_gid
                 or info.st_dev != expected_device
                 or stat.S_IMODE(info.st_mode) not in {0o400, 0o600}
+                or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             ):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_CANDIDATE_INVALID")
             if crash_at == f"after_candidate_create_{publication_kind}":
@@ -1409,6 +1523,7 @@ def _validate_source_repair_failure_namespace(
             or failure_info.st_gid != expected_gid
             or failure_info.st_dev != intent["filesystem_device"]
             or stat.S_IMODE(failure_info.st_mode) != 0o700
+            or int(getattr(failure_info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or _descriptor_extended_attribute_names(failure_descriptor)
             - _APPROVED_SYSTEM_XATTRS
             or _descriptor_has_extended_acl(failure_descriptor)
@@ -1447,6 +1562,7 @@ def _validate_source_repair_failure_namespace(
                 or before.st_gid != expected_gid
                 or before.st_dev != intent["filesystem_device"]
                 or stat.S_IMODE(before.st_mode) != expected_mode
+                or int(getattr(before, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
                 or _descriptor_extended_attribute_names(child_descriptor)
                 - _APPROVED_SYSTEM_XATTRS
                 or _descriptor_has_extended_acl(child_descriptor)
@@ -1457,7 +1573,9 @@ def _validate_source_repair_failure_namespace(
             child_path = archive / failure_name / child_name
             try:
                 _manifest, evidence = _verify_installed_repair_source(
-                    child_path, PRODUCER_COMMIT
+                    child_path,
+                    PRODUCER_COMMIT,
+                    parent_descriptor=failure_descriptor,
                 )
             except (CapacityHostArtifactError, OSError) as exc:
                 raise CapacityHostArtifactError(
@@ -1784,44 +1902,117 @@ def _path_lexists(path: Path) -> bool:
 def _open_source_repair_parents(
     system_root: Path, *, expected_uid: int, expected_gid: int
 ) -> SourceRepairParents:
-    paths = (
-        system_root / "capacity-sources" / "macro",
-        system_root / "capacity-generations",
-        system_root / "capacity-staging",
-        system_root / "capacity-archive",
+    absolute = system_root.absolute()
+    paths = {
+        "source": absolute / "capacity-sources" / "macro",
+        "generation": absolute / "capacity-generations",
+        "staging": absolute / "capacity-staging",
+        "archive": absolute / "capacity-archive",
+    }
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
     )
     descriptors: list[int] = []
     try:
-        for path in paths:
-            descriptor = os.open(
-                path,
-                os.O_RDONLY
-                | getattr(os, "O_DIRECTORY", 0)
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
+        guard_descriptors = [os.open("/", directory_flags)]
+        descriptors.extend(guard_descriptors)
+        guard_names = ["/"]
+        for component in absolute.parent.parts[1:]:
+            child = os.open(
+                component, directory_flags, dir_fd=guard_descriptors[-1]
             )
-            descriptors.append(descriptor)
+            descriptors.append(child)
+            guard_descriptors.append(child)
+            guard_names.append(component)
+            if not stat.S_ISDIR(os.fstat(child).st_mode):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_ROOT_INVALID")
+
+        root_descriptor = os.open(
+            absolute.name, directory_flags, dir_fd=guard_descriptors[-1]
+        )
+        descriptors.append(root_descriptor)
+        capacity_sources = os.open(
+            "capacity-sources", directory_flags, dir_fd=root_descriptor
+        )
+        descriptors.append(capacity_sources)
+        source_descriptor = os.open(
+            "macro", directory_flags, dir_fd=capacity_sources
+        )
+        descriptors.append(source_descriptor)
+        generation_descriptor = os.open(
+            "capacity-generations", directory_flags, dir_fd=root_descriptor
+        )
+        descriptors.append(generation_descriptor)
+        staging_descriptor = os.open(
+            "capacity-staging", directory_flags, dir_fd=root_descriptor
+        )
+        descriptors.append(staging_descriptor)
+        archive_descriptor = os.open(
+            "capacity-archive", directory_flags, dir_fd=root_descriptor
+        )
+        descriptors.append(archive_descriptor)
+        locks_descriptor = os.open("locks", directory_flags, dir_fd=root_descriptor)
+        descriptors.append(locks_descriptor)
+
+        secured = (
+            (root_descriptor, 0o755),
+            (capacity_sources, 0o755),
+            (source_descriptor, 0o755),
+            (generation_descriptor, 0o755),
+            (staging_descriptor, 0o700),
+            (archive_descriptor, 0o700),
+            (locks_descriptor, 0o700),
+        )
+        for descriptor, expected_mode in secured:
             info = os.fstat(descriptor)
             if (
                 not stat.S_ISDIR(info.st_mode)
                 or info.st_uid != expected_uid
                 or info.st_gid != expected_gid
+                or stat.S_IMODE(info.st_mode) != expected_mode
             ):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
-        devices = {os.fstat(descriptor).st_dev for descriptor in descriptors}
+            _require_secure_descriptor(
+                descriptor, info, reason="SOURCE_REPAIR_PARENT_INVALID"
+            )
+        devices = {os.fstat(descriptor).st_dev for descriptor, _mode in secured}
         if len(devices) != 1:
             raise CapacityHostArtifactError("SOURCE_REPAIR_DEVICE_MISMATCH")
-        return SourceRepairParents(
-            source_path=paths[0],
-            source=descriptors[0],
-            generation_path=paths[1],
-            generation=descriptors[1],
-            staging_path=paths[2],
-            staging=descriptors[2],
-            archive_path=paths[3],
-            archive=descriptors[3],
+        parents = SourceRepairParents(
+            source_path=paths["source"],
+            source=source_descriptor,
+            generation_path=paths["generation"],
+            generation=generation_descriptor,
+            staging_path=paths["staging"],
+            staging=staging_descriptor,
+            archive_path=paths["archive"],
+            archive=archive_descriptor,
             device=next(iter(devices)),
+            guard_descriptors=tuple(guard_descriptors),
+            guard_names=tuple(guard_names),
+            system_root=root_descriptor,
+            capacity_sources=capacity_sources,
+            locks=locks_descriptor,
+            relations=(
+                (guard_descriptors[-1], absolute.name, root_descriptor),
+                (root_descriptor, "capacity-sources", capacity_sources),
+                (capacity_sources, "macro", source_descriptor),
+                (root_descriptor, "capacity-generations", generation_descriptor),
+                (root_descriptor, "capacity-staging", staging_descriptor),
+                (root_descriptor, "capacity-archive", archive_descriptor),
+                (root_descriptor, "locks", locks_descriptor),
+            ),
+            security_states=tuple(
+                (descriptor, _descriptor_security_state(os.fstat(descriptor)))
+                for descriptor, _mode in secured
+            ),
         )
+        parents.revalidate()
+        descriptors.clear()
+        return parents
     except Exception:
         for descriptor in reversed(descriptors):
             try:
@@ -1859,6 +2050,10 @@ def _attach_source_repair_archive_parent(
             or info.st_gid != expected_gid
             or info.st_dev != parents.device
             or stat.S_IMODE(info.st_mode) != 0o700
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
+            or _descriptor_extended_attribute_names(descriptor)
+            - _APPROVED_SYSTEM_XATTRS
+            or _descriptor_has_extended_acl(descriptor)
         ):
             raise CapacityHostArtifactError("SOURCE_REPAIR_ARCHIVE_INVALID")
         if parents.intent_archive is not None:
@@ -1993,6 +2188,7 @@ def _validate_prior_generation(
             or info.st_nlink != 1
             or info.st_uid != expected_uid
             or info.st_gid != expected_gid
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or sha256_file(candidate) != digest
         ):
             raise CapacityHostArtifactError("PRIOR_GENERATION_INVALID")
@@ -2010,11 +2206,38 @@ def _load_complete_manifest(source_root: Path, expected_commit: str) -> dict[str
 
 
 def _verify_installed_repair_source(
-    source_root: Path, expected_commit: str
+    source_root: Path,
+    expected_commit: str,
+    *,
+    parent_descriptor: int | None = None,
 ) -> tuple[dict[str, Any], SourceClosureEvidence]:
-    manifest = _load_complete_manifest(source_root, expected_commit)
-    evidence = verify_complete_repository(source_root, manifest)
-    return manifest, evidence
+    view = _RepositoryView(
+        source_root,
+        parent_descriptor=parent_descriptor,
+        root_name=source_root.name,
+    )
+    try:
+        descriptor = view.descriptors.get(".git/cf2-h0-transport-manifest.json")
+        if descriptor is None:
+            raise CapacityHostArtifactError("SOURCE_MANIFEST_MISMATCH")
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or stat.S_IMODE(info.st_mode) != 0o444
+        ):
+            raise CapacityHostArtifactError("SOURCE_MANIFEST_MISMATCH")
+        manifest = validate_transport_manifest_v2(
+            json.loads(_read_descriptor(descriptor, _V2_MANIFEST_MAX_BYTES)),
+            expected_commit=expected_commit,
+        )
+        evidence = verify_complete_repository(
+            source_root, manifest, retained_view=view
+        )
+        view.revalidate()
+        return manifest, evidence
+    finally:
+        view.close()
 
 
 def _write_generation_payload(
@@ -2034,6 +2257,7 @@ def _write_generation_payload(
             or info.st_uid != expected_uid
             or info.st_gid != expected_gid
             or stat.S_IMODE(info.st_mode) != 0o444
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or target.read_bytes() != payload
         ):
             raise CapacityHostArtifactError("GENERATION_CANDIDATE_INVALID")
@@ -2117,6 +2341,7 @@ def _verify_repaired_generation(
         or info.st_uid != expected_uid
         or info.st_gid != expected_gid
         or stat.S_IMODE(info.st_mode) != expected_mode
+        or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
         or generation.name != expected_digest
         or {path.name for path in generation.iterdir()} != set(expected_payloads)
     ):
@@ -2130,6 +2355,7 @@ def _verify_repaired_generation(
             or child.st_uid != expected_uid
             or child.st_gid != expected_gid
             or stat.S_IMODE(child.st_mode) != 0o444
+            or int(getattr(child, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or path.read_bytes() != payload
         ):
             raise CapacityHostArtifactError("REPAIRED_GENERATION_INVALID")
@@ -2165,6 +2391,7 @@ def _build_repaired_generation_candidate(
         or info.st_uid != expected_uid
         or info.st_gid != expected_gid
         or stat.S_IMODE(info.st_mode) not in {0o700, 0o555}
+        or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
     ):
         raise CapacityHostArtifactError("GENERATION_CANDIDATE_INVALID")
     if stat.S_IMODE(info.st_mode) == 0o700:
@@ -2256,11 +2483,20 @@ def _existing_repair_archive(
 
 
 def _source_repair_lock(
-    lock_file: Path, *, expected_uid: int, expected_gid: int, writable: bool
+    lock_file: Path,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+    writable: bool,
+    parent_descriptor: int | None = None,
 ) -> int:
     flags = (os.O_RDWR if writable else os.O_RDONLY) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        descriptor = os.open(lock_file, flags)
+        descriptor = os.open(
+            lock_file.name if parent_descriptor is not None else lock_file,
+            flags,
+            dir_fd=parent_descriptor,
+        )
     except OSError as exc:
         raise CapacityHostArtifactError("SOURCE_REPAIR_LOCK_INVALID") from exc
     info = os.fstat(descriptor)
@@ -2269,7 +2505,8 @@ def _source_repair_lock(
         or info.st_nlink != 1
         or info.st_uid != expected_uid
         or info.st_gid != expected_gid
-        or stat.S_IMODE(info.st_mode) & 0o077
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
         or _descriptor_extended_attribute_names(descriptor) - _APPROVED_SYSTEM_XATTRS
         or _descriptor_has_extended_acl(descriptor)
     ):
@@ -2343,13 +2580,280 @@ def _verify_disabled_unloaded_label(label: str, disabled_output: str) -> None:
         raise CapacityHostArtifactError("SOURCE_REPAIR_SERVICE_STATE_INVALID")
 
 
-def _verify_preserved_h0_invariants(
-    system_root: Path, generation: Path, *, test_adapter: bool
+def _release_object_state(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        stat.S_IFMT(info.st_mode),
+        stat.S_IMODE(info.st_mode),
+        info.st_uid,
+        info.st_gid,
+        info.st_nlink,
+        info.st_size,
+        int(getattr(info, "st_flags", 0)),
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        int(getattr(info, "st_birthtime_ns", 0)),
+    )
+
+
+def _open_release_symlink(parent: int, name: str) -> int:
+    if sys.platform == "darwin":
+        flags = os.O_RDONLY | 0x00200000  # O_SYMLINK
+    else:
+        flags = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    return os.open(name, flags, dir_fd=parent)
+
+
+def _safe_release_link_target(relative: str, target: str) -> None:
+    if not target or target.startswith("/") or "\x00" in target:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+    stack = list(PurePosixPath(relative).parent.parts)
+    for part in PurePosixPath(target).parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            if not stack:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            stack.pop()
+        else:
+            stack.append(part)
+
+
+def _verify_inert_release_manifest(
+    release: Path,
+    *,
+    expected_commit: str,
+    expected_uid: int,
+    expected_gid: int,
+    parent_descriptor: int | None = None,
+) -> dict[str, Any]:
+    """Verify an installed release strictly as inert descriptor-read data."""
+
+    if _COMMIT_RE.fullmatch(expected_commit) is None:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    owns_parent = parent_descriptor is None
+    parent = parent_descriptor
+    try:
+        if parent is None:
+            parent = os.open(release.absolute().parent, directory_flags)
+        root = os.open(release.name, directory_flags, dir_fd=parent)
+    except OSError as exc:
+        if owns_parent and parent is not None:
+            os.close(parent)
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
+    descriptors: list[int] = [root]
+    try:
+        root_before = os.fstat(root)
+        if (
+            not stat.S_ISDIR(root_before.st_mode)
+            or root_before.st_uid != expected_uid
+            or root_before.st_gid != expected_gid
+            or stat.S_IMODE(root_before.st_mode) != 0o755
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        _require_secure_descriptor(
+            root, root_before, reason="SOURCE_REPAIR_RELEASE_INVALID"
+        )
+        device = root_before.st_dev
+        states: dict[str, tuple[int, ...]] = {".": _release_object_state(root_before)}
+        namespaces: dict[str, tuple[str, ...]] = {}
+        descriptor_by_path: dict[str, int] = {".": root}
+
+        def inspect(parent_fd: int, relative_parent: str) -> list[dict[str, Any]]:
+            names = tuple(_descriptor_directory_names(parent_fd))
+            namespaces[relative_parent] = names
+            immediate: list[tuple[str, int, os.stat_result, str]] = []
+            directories: list[tuple[str, int]] = []
+            entries: list[dict[str, Any]] = []
+            for name in names:
+                relative = name if relative_parent == "." else f"{relative_parent}/{name}"
+                if relative == _RELEASE_MANIFEST_NAME:
+                    continue
+                link_info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if stat.S_ISDIR(link_info.st_mode):
+                    descriptor = os.open(name, directory_flags, dir_fd=parent_fd)
+                    kind = "directory"
+                elif stat.S_ISREG(link_info.st_mode):
+                    descriptor = os.open(
+                        name,
+                        os.O_RDONLY
+                        | getattr(os, "O_NOFOLLOW", 0)
+                        | getattr(os, "O_CLOEXEC", 0),
+                        dir_fd=parent_fd,
+                    )
+                    kind = "file"
+                elif stat.S_ISLNK(link_info.st_mode):
+                    descriptor = _open_release_symlink(parent_fd, name)
+                    kind = "symlink"
+                else:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+                descriptors.append(descriptor)
+                descriptor_by_path[relative] = descriptor
+                info = os.fstat(descriptor)
+                if (
+                    stat.S_IFMT(info.st_mode) != stat.S_IFMT(link_info.st_mode)
+                    or info.st_dev != device
+                    or info.st_uid != expected_uid
+                    or info.st_gid != expected_gid
+                    or stat.S_IMODE(info.st_mode) & 0o022
+                    or (not stat.S_ISDIR(info.st_mode) and info.st_nlink != 1)
+                ):
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+                _require_secure_descriptor(
+                    descriptor, info, reason="SOURCE_REPAIR_RELEASE_INVALID"
+                )
+                states[relative] = _release_object_state(info)
+                immediate.append((relative, descriptor, info, kind))
+
+            # The persisted v1 manifest is validated by path, while recursion
+            # stays descriptor-relative and never imports or launches content.
+            for relative, descriptor, info, kind in immediate:
+                common = {
+                    "path": relative,
+                    "mode": stat.S_IMODE(info.st_mode),
+                    "uid": info.st_uid,
+                    "gid": info.st_gid,
+                }
+                if kind == "directory":
+                    entries.append({**common, "type": "directory"})
+                    directories.append((relative, descriptor))
+                elif kind == "file":
+                    entries.append(
+                        {
+                            **common,
+                            "type": "file",
+                            "size": info.st_size,
+                            "sha256": _descriptor_sha256(descriptor),
+                        }
+                    )
+                else:
+                    parent_relative, leaf = relative.rsplit("/", 1) if "/" in relative else (".", relative)
+                    link_parent = root if parent_relative == "." else next(
+                        value for path, value in directories_by_path.items() if path == parent_relative
+                    )
+                    target = os.readlink(leaf, dir_fd=link_parent)
+                    _safe_release_link_target(relative, target)
+                    entries.append({**common, "type": "symlink", "target": target})
+            for relative, descriptor in directories:
+                directories_by_path[relative] = descriptor
+                entries.extend(inspect(descriptor, relative))
+            return entries
+
+        directories_by_path: dict[str, int] = {".": root}
+        observed_entries = inspect(root, ".")
+        try:
+            manifest_descriptor = os.open(
+                _RELEASE_MANIFEST_NAME,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=root,
+            )
+        except OSError as exc:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
+        descriptors.append(manifest_descriptor)
+        manifest_info = os.fstat(manifest_descriptor)
+        if (
+            not stat.S_ISREG(manifest_info.st_mode)
+            or manifest_info.st_nlink != 1
+            or manifest_info.st_dev != device
+            or manifest_info.st_uid != expected_uid
+            or manifest_info.st_gid != expected_gid
+            or stat.S_IMODE(manifest_info.st_mode) != 0o444
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        _require_secure_descriptor(
+            manifest_descriptor,
+            manifest_info,
+            reason="SOURCE_REPAIR_RELEASE_INVALID",
+        )
+        manifest_state = _release_object_state(manifest_info)
+        manifest_bytes = _read_descriptor(manifest_descriptor, 64 * 1024 * 1024)
+        try:
+            manifest = json.loads(manifest_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
+        if (
+            not isinstance(manifest, Mapping)
+            or set(manifest) != {"schema_version", "commit_sha", "tree_sha", "entries"}
+            or manifest.get("schema_version") != _RELEASE_MANIFEST_SCHEMA
+            or manifest.get("commit_sha") != expected_commit
+            or _COMMIT_RE.fullmatch(str(manifest.get("tree_sha"))) is None
+            or not isinstance(manifest.get("entries"), list)
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        persisted_by_path: dict[str, Any] = {}
+        for entry in manifest["entries"]:
+            if not isinstance(entry, Mapping):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            path = entry.get("path")
+            if (
+                not isinstance(path, str)
+                or not path
+                or path in persisted_by_path
+                or PurePosixPath(path).is_absolute()
+                or ".." in PurePosixPath(path).parts
+            ):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            persisted_by_path[path] = dict(entry)
+        observed_by_path = {entry["path"]: entry for entry in observed_entries}
+        if persisted_by_path != observed_by_path:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+
+        # Rewalk every retained descriptor and relation after the semantic read.
+        if _release_object_state(os.fstat(root)) != states["."]:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        for relative, descriptor in directories_by_path.items():
+            if tuple(_descriptor_directory_names(descriptor)) != namespaces[relative]:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        for relative, expected_state in states.items():
+            descriptor = descriptor_by_path[relative]
+            if _release_object_state(os.fstat(descriptor)) != expected_state:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        if (
+            _release_object_state(os.fstat(manifest_descriptor)) != manifest_state
+            or _read_descriptor(manifest_descriptor, 64 * 1024 * 1024) != manifest_bytes
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        return dict(manifest)
+    except (CapacityHostArtifactError, OSError, StopIteration) as exc:
+        if isinstance(exc, CapacityHostArtifactError):
+            raise
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
+    finally:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if owns_parent and parent is not None:
+            try:
+                os.close(parent)
+            except OSError:
+                pass
+
+
+def _verify_preserved_h0_invariants_body(
+    system_root: Path,
+    generation: Path,
+    *,
+    test_adapter: bool,
+    parents: SourceRepairParents | None = None,
 ) -> None:
     """Read only the fixed H0 roots and identity attributes; never provider homes."""
 
     if test_adapter:
         return
+    if parents is None or parents.system_root is None:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
     runtime = system_root / "capacity-runtimes" / "cf1-pyyaml-6.0.3-cp312-arm64"
     if (
         verify_pyyaml_record(runtime) != PYYAML_RECORD_SHA256
@@ -2386,40 +2890,38 @@ def _verify_preserved_h0_invariants(
             raise CapacityHostArtifactError("SOURCE_REPAIR_TELEMETRY_INVALID")
 
     release = system_root / "releases" / PRESERVED_TOPOLOGY_RELEASE_COMMIT
-    manifest_path = release / ".executive-release-manifest.json"
-    try:
-        release_manifest = json.loads(manifest_path.read_bytes())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
-    if (
-        release_manifest.get("commit_sha") != PRESERVED_TOPOLOGY_RELEASE_COMMIT
-        or _COMMIT_RE.fullmatch(str(release_manifest.get("tree_sha"))) is None
-    ):
-        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-    completed = subprocess.run(
-        [
-            "/usr/bin/python3",
-            "-I",
-            "-S",
-            "-B",
-            os.fspath(release / "ops" / "executive_os" / "release_manifest.py"),
-            "verify",
-            "--root",
-            os.fspath(release),
-            "--commit-sha",
-            PRESERVED_TOPOLOGY_RELEASE_COMMIT,
-            "--tree-sha",
-            str(release_manifest["tree_sha"]),
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-        timeout=30,
-        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"},
+    release_parent = os.open(
+        "releases",
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0),
+        dir_fd=parents.system_root,
     )
-    if completed.returncode != 0:
-        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+    try:
+        release_parent_info = os.fstat(release_parent)
+        if (
+            not stat.S_ISDIR(release_parent_info.st_mode)
+            or release_parent_info.st_uid != 0
+            or release_parent_info.st_gid != 0
+            or stat.S_IMODE(release_parent_info.st_mode) != 0o755
+            or release_parent_info.st_dev != parents.device
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        _require_secure_descriptor(
+            release_parent,
+            release_parent_info,
+            reason="SOURCE_REPAIR_RELEASE_INVALID",
+        )
+        _verify_inert_release_manifest(
+            release,
+            expected_commit=PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+            expected_uid=0,
+            expected_gid=0,
+            parent_descriptor=release_parent,
+        )
+    finally:
+        os.close(release_parent)
 
     topology = json.loads((generation / "broker-topology.json").read_bytes())
     rows = topology.get("brokers")
@@ -2604,6 +3106,135 @@ def _verify_preserved_h0_invariants(
         raise CapacityHostArtifactError("SOURCE_REPAIR_PRINCIPAL_INVALID")
 
 
+def _verify_preserved_h0_invariants(
+    system_root: Path,
+    generation: Path,
+    *,
+    test_adapter: bool,
+    parents: SourceRepairParents | None = None,
+) -> None:
+    """Retain the complete preserved evidence graph around semantic verification."""
+
+    if test_adapter:
+        return
+    if (
+        parents is None
+        or parents.system_root is None
+        or parents.intent_archive is None
+    ):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
+    views: list[_RepositoryView] = []
+    extra_descriptors: list[int] = []
+    try:
+        runtime_parent = os.open(
+            "capacity-runtimes",
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=parents.system_root,
+        )
+        extra_descriptors.append(runtime_parent)
+        runtime_parent_info = os.fstat(runtime_parent)
+        if (
+            not stat.S_ISDIR(runtime_parent_info.st_mode)
+            or runtime_parent_info.st_uid != 0
+            or runtime_parent_info.st_gid != 0
+            or stat.S_IMODE(runtime_parent_info.st_mode) != 0o755
+            or runtime_parent_info.st_dev != parents.device
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+        _require_secure_descriptor(
+            runtime_parent,
+            runtime_parent_info,
+            reason="SOURCE_REPAIR_RUNTIME_INVALID",
+        )
+        views.append(
+            _RepositoryView(
+                system_root
+                / "capacity-runtimes"
+                / "cf1-pyyaml-6.0.3-cp312-arm64",
+                parent_descriptor=runtime_parent,
+                root_name="cf1-pyyaml-6.0.3-cp312-arm64",
+            )
+        )
+        views.append(
+            _RepositoryView(
+                generation,
+                parent_descriptor=parents.intent_archive,
+                root_name=generation.name,
+            )
+        )
+        views.append(_RepositoryView(Path("/var/db/mastermind-provider-control")))
+
+        generation_view = views[1]
+        drill_descriptor = generation_view.descriptors.get(
+            "rollback-drill-receipt.json"
+        )
+        topology_descriptor = generation_view.descriptors.get("broker-topology.json")
+        if drill_descriptor is None or topology_descriptor is None:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+        drill = json.loads(_read_descriptor(drill_descriptor, 1024 * 1024))
+        drill_archive = Path(str(drill.get("archive_root")))
+        if (
+            drill_archive.parent != parents.archive_path
+            or not drill_archive.name.startswith("rollback-drill-")
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+        views.append(
+            _RepositoryView(
+                drill_archive,
+                parent_descriptor=parents.archive,
+                root_name=drill_archive.name,
+            )
+        )
+        topology = json.loads(_read_descriptor(topology_descriptor, 1024 * 1024))
+        rows = topology.get("brokers")
+        if not isinstance(rows, list):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+        retained_paths: set[Path] = set()
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+            for key in ("config_path", "attestation_path", "plist_path"):
+                path = Path(str(row.get(key)))
+                if not path.is_absolute() or path in retained_paths:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+                retained_paths.add(path)
+                views.append(_RepositoryView(path))
+        for legacy in (
+            system_root / "config" / "control.json",
+            system_root / "config" / "worker-codex.json",
+            Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist"),
+            Path("/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"),
+        ):
+            if _path_lexists(legacy):
+                views.append(_RepositoryView(legacy))
+
+        parents.revalidate()
+        _verify_preserved_h0_invariants_body(
+            system_root,
+            generation,
+            test_adapter=False,
+            parents=parents,
+        )
+        parents.revalidate()
+        for view in views:
+            view.revalidate()
+    except CapacityHostArtifactError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID") from exc
+    finally:
+        for view in reversed(views):
+            view.close()
+        for descriptor in reversed(extra_descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
 def _advance_source_repair_source_phase(
     *,
     parents: SourceRepairParents,
@@ -2667,7 +3298,9 @@ def _advance_source_repair_source_phase(
     ):
         source_root.chmod(0o555)
     _manifest, evidence = _verify_installed_repair_source(
-        source_root, expected_source_commit
+        source_root,
+        expected_source_commit,
+        parent_descriptor=parents.source,
     )
     if (
         evidence.source_tree_sha256 != intent["candidate_source_tree_sha256"]
@@ -2719,7 +3352,10 @@ def _advance_source_repair_generation_phase(
         expected_gid=expected_gid,
     )
     _verify_preserved_h0_invariants(
-        system_root, archived_generation, test_adapter=test_adapter
+        system_root,
+        archived_generation,
+        test_adapter=test_adapter,
+        parents=parents,
     )
     return archived_generation, closed_tree_digest(
         archived_generation, expected_uid=expected_uid, expected_gid=expected_gid
@@ -2789,11 +3425,14 @@ def _observe_source_repair_source(
     *,
     intent: Mapping[str, Any],
     expected_source_commit: str,
+    parent_descriptor: int | None = None,
 ) -> SourceClosureEvidence:
     """Read and bind the installed candidate to the durable intent."""
 
     _manifest, evidence = _verify_installed_repair_source(
-        source_root, expected_source_commit
+        source_root,
+        expected_source_commit,
+        parent_descriptor=parent_descriptor,
     )
     if (
         evidence.source_tree_sha256 != intent["candidate_source_tree_sha256"]
@@ -2920,7 +3559,9 @@ def _restore_digest_bound_precommit_state(
                 failure_descriptor, "installed-source"
             ) is None:
                 _manifest, evidence = _verify_installed_repair_source(
-                    source_root, PRODUCER_COMMIT
+                    source_root,
+                    PRODUCER_COMMIT,
+                    parent_descriptor=parents.source,
                 )
                 if evidence.source_tree_sha256 != intent["candidate_source_tree_sha256"]:
                     raise CapacityHostArtifactError(
@@ -2954,7 +3595,9 @@ def _restore_digest_bound_precommit_state(
             failure_descriptor, "staged-source"
         ) is None:
             _manifest, evidence = _verify_installed_repair_source(
-                staged_source, PRODUCER_COMMIT
+                staged_source,
+                PRODUCER_COMMIT,
+                parent_descriptor=parents.staging,
             )
             if evidence.source_tree_sha256 != intent["candidate_source_tree_sha256"]:
                 raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_DIGEST_MISMATCH")
@@ -3138,7 +3781,9 @@ def _verify_committed_source_repair(
 
     source_root = parents.source_path / expected_source_commit
     _manifest, evidence = _verify_installed_repair_source(
-        source_root, expected_source_commit
+        source_root,
+        expected_source_commit,
+        parent_descriptor=parents.source,
     )
     if (
         evidence.source_tree_sha256 != intent["candidate_source_tree_sha256"]
@@ -3256,12 +3901,7 @@ def run_source_repair_host(
         raise CapacityHostArtifactError("SOURCE_REPAIR_TEST_ADAPTER_INVALID")
     expected_uid = os.geteuid() if test_adapter else 0
     expected_gid = os.getegid() if test_adapter else 0
-    lock_descriptor = _source_repair_lock(
-        lock_file,
-        expected_uid=expected_uid,
-        expected_gid=expected_gid,
-        writable=mode == "repair",
-    )
+    lock_descriptor: int | None = None
     archive: Path | None = None
     intent: dict[str, Any] | None = None
     source_root: Path | None = None
@@ -3276,19 +3916,21 @@ def run_source_repair_host(
         SourceRepairTransition,
     ] | None = None
     try:
-        root_info = system_root.lstat()
-        if (
-            not stat.S_ISDIR(root_info.st_mode)
-            or system_root.is_symlink()
-            or root_info.st_uid != expected_uid
-            or root_info.st_gid != expected_gid
-        ):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_ROOT_INVALID")
         parents = _open_source_repair_parents(
             system_root, expected_uid=expected_uid, expected_gid=expected_gid
         )
+        if lock_file.absolute() != (system_root.absolute() / "locks" / "cf2-h0.lock"):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_LOCK_INVALID")
+        lock_descriptor = _source_repair_lock(
+            lock_file,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            writable=mode == "repair",
+            parent_descriptor=parents.locks,
+        )
+        parents.revalidate()
         if mode == "verify-only":
-            return _verify_committed_source_repair(
+            outcome = _verify_committed_source_repair(
                 system_root=system_root,
                 parents=parents,
                 expected_repair_commit=expected_repair_commit,
@@ -3297,6 +3939,8 @@ def run_source_repair_host(
                 expected_gid=expected_gid,
                 test_adapter=test_adapter,
             )
+            parents.revalidate()
+            return outcome
 
         resolved_operator_uid = operator_uid
         if operator_user is not None:
@@ -3334,7 +3978,9 @@ def run_source_repair_host(
                 expected_gid=expected_gid,
             )
             manifest, evidence = _verify_installed_repair_source(
-                staged_source, expected_source_commit
+                staged_source,
+                expected_source_commit,
+                parent_descriptor=parents.staging,
             )
             prefix_intent = build_source_repair_intent(
                 source_closure_repair_commit=expected_repair_commit,
@@ -3612,6 +4258,7 @@ def run_source_repair_host(
                     source_root,
                     intent=intent,
                     expected_source_commit=expected_source_commit,
+                    parent_descriptor=parents.source,
                 )
                 archived_generation, archived_generation_digest = (
                     _observe_source_repair_archived_generation(
@@ -3778,6 +4425,7 @@ def run_source_repair_host(
                     source_root,
                     intent=intent,
                     expected_source_commit=expected_source_commit,
+                    parent_descriptor=parents.source,
                 )
                 archived_generation, archived_generation_digest = (
                     _observe_source_repair_archived_generation(
@@ -3841,6 +4489,7 @@ def run_source_repair_host(
                     SourceRepairFailureLayout.NONE,
                 )
                 os.fsync(parents.generation)
+                parents.revalidate()
                 return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
 
             _require_permitted_next_state(
@@ -3875,6 +4524,7 @@ def run_source_repair_host(
                 source_root,
                 intent=intent,
                 expected_source_commit=expected_source_commit,
+                parent_descriptor=parents.source,
             )
             if final_evidence != evidence:
                 raise CapacityHostArtifactError("SOURCE_REPAIR_SOURCE_DRIFT")
@@ -3882,7 +4532,10 @@ def run_source_repair_host(
                 archive, expected_uid=expected_uid, expected_gid=expected_gid
             )
             _verify_preserved_h0_invariants(
-                system_root, archived_generation, test_adapter=test_adapter
+                system_root,
+                archived_generation,
+                test_adapter=test_adapter,
+                parents=parents,
             )
             if crash_at == "before_final_rename":
                 raise SourceRepairIncomplete(crash_at)
@@ -3921,6 +4574,7 @@ def run_source_repair_host(
             )
             if crash_at == "after_parent_fsync_before_stdout":
                 raise SourceRepairIncomplete(crash_at)
+            parents.revalidate()
             return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
         raise CapacityHostArtifactError("SOURCE_REPAIR_TRANSITION_LOOP")
     finally:
@@ -3963,16 +4617,17 @@ def run_source_repair_host(
                     parents.close()
                 except OSError as exc:
                     cleanup_error = exc
-            try:
-                fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
-            except OSError as exc:
-                if cleanup_error is None:
-                    cleanup_error = exc
-            try:
-                os.close(lock_descriptor)
-            except OSError as exc:
-                if cleanup_error is None:
-                    cleanup_error = exc
+            if lock_descriptor is not None:
+                try:
+                    fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
+                except OSError as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+                try:
+                    os.close(lock_descriptor)
+                except OSError as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
             if cleanup_error is not None and active_error is None:
                 if semantic_commit_visible:
                     raise SourceRepairIncomplete(
@@ -4024,6 +4679,7 @@ def _closed_tree_digest(path: Path, *, expected_uid: int) -> str:
             stat.S_ISLNK(info.st_mode)
             or info.st_uid != expected_uid
             or stat.S_IMODE(info.st_mode) & 0o022
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or _extended_attribute_names(candidate) - _APPROVED_SYSTEM_XATTRS
         ):
             raise CapacityHostArtifactError("RECOVERY_OBJECT_INVALID")
@@ -4032,6 +4688,7 @@ def _closed_tree_digest(path: Path, *, expected_uid: int) -> str:
                 "gid": info.st_gid,
                 "mode": f"{stat.S_IMODE(info.st_mode):04o}",
                 "nlink": info.st_nlink,
+                "flags": _ALLOWED_BSD_FLAGS,
                 "path": relative,
                 "type": "directory",
                 "uid": info.st_uid,
@@ -4041,6 +4698,7 @@ def _closed_tree_digest(path: Path, *, expected_uid: int) -> str:
                 "gid": info.st_gid,
                 "mode": f"{stat.S_IMODE(info.st_mode):04o}",
                 "nlink": 1,
+                "flags": _ALLOWED_BSD_FLAGS,
                 "path": relative,
                 "sha256": sha256_file(candidate),
                 "size": info.st_size,
@@ -4191,20 +4849,33 @@ def _git_environment() -> dict[str, str]:
     return {
         "HOME": "/var/empty",
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
+        "LANG": "C",
+        "LC_ALL": "C",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_LOCAL": "/dev/null",
+        "GIT_ATTR_NOSYSTEM": "1",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/usr/bin/false",
+        "SSH_ASKPASS": "/usr/bin/false",
         "GIT_OPTIONAL_LOCKS": "0",
         "GIT_NO_LAZY_FETCH": "1",
-        "GIT_CONFIG_COUNT": "3",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_EXTERNAL_DIFF": "/usr/bin/false",
+        "GIT_ALLOW_PROTOCOL": "file",
+        "GIT_CONFIG_COUNT": "6",
         "GIT_CONFIG_KEY_0": "core.hooksPath",
         "GIT_CONFIG_VALUE_0": "/dev/null",
         "GIT_CONFIG_KEY_1": "core.fsmonitor",
         "GIT_CONFIG_VALUE_1": "false",
         "GIT_CONFIG_KEY_2": "core.attributesFile",
         "GIT_CONFIG_VALUE_2": "/dev/null",
+        "GIT_CONFIG_KEY_3": "protocol.allow",
+        "GIT_CONFIG_VALUE_3": "never",
+        "GIT_CONFIG_KEY_4": "protocol.file.allow",
+        "GIT_CONFIG_VALUE_4": "always",
+        "GIT_CONFIG_KEY_5": "diff.external",
+        "GIT_CONFIG_VALUE_5": "/usr/bin/false",
     }
 
 
@@ -5145,6 +5816,7 @@ def _read_verified_metadata_file(
             or info.st_uid != expected_uid
             or info.st_gid != expected_gid
             or stat.S_IMODE(info.st_mode) != 0o444
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
             or _descriptor_extended_attribute_names(descriptor) - _APPROVED_SYSTEM_XATTRS
             or _descriptor_has_extended_acl(descriptor)
         ):
@@ -5166,7 +5838,13 @@ def _repository_snapshot_state(info: os.stat_result) -> tuple[int, ...]:
 class _RepositoryView:
     """Retained descriptor graph that makes transient pathname swaps observable."""
 
-    def __init__(self, source_root: Path) -> None:
+    def __init__(
+        self,
+        source_root: Path,
+        *,
+        parent_descriptor: int | None = None,
+        root_name: str | None = None,
+    ) -> None:
         absolute = source_root.absolute()
         parent_flags = (
             os.O_RDONLY
@@ -5174,15 +5852,31 @@ class _RepositoryView:
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_CLOEXEC", 0)
         )
-        self.parent_descriptor = os.open(absolute.parent, parent_flags)
-        self.root_name = absolute.name
+        self.parent_descriptor = (
+            os.dup(parent_descriptor)
+            if parent_descriptor is not None
+            else os.open(absolute.parent, parent_flags)
+        )
+        self.root_name = root_name if root_name is not None else absolute.name
         self.descriptors: dict[str, int] = {}
         self.states: dict[str, tuple[int, ...]] = {}
         self.directory_names: dict[str, tuple[str, ...]] = {}
         self.parents: dict[str, tuple[str, str]] = {}
         try:
+            relation_info = os.stat(
+                self.root_name,
+                dir_fd=self.parent_descriptor,
+                follow_symlinks=False,
+            )
+            root_flags = (
+                parent_flags
+                if stat.S_ISDIR(relation_info.st_mode)
+                else os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+            )
             root_descriptor = os.open(
-                self.root_name, parent_flags, dir_fd=self.parent_descriptor
+                self.root_name, root_flags, dir_fd=self.parent_descriptor
             )
             self.root_descriptor = root_descriptor
             self._retain(".", root_descriptor)
@@ -5195,6 +5889,9 @@ class _RepositoryView:
         info = os.fstat(descriptor)
         if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
             raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        _require_secure_descriptor(
+            descriptor, info, reason="SOURCE_METADATA_INVALID"
+        )
         self.descriptors[relative] = descriptor
         self.states[relative] = _repository_snapshot_state(info)
         if not stat.S_ISDIR(info.st_mode):
@@ -5259,7 +5956,70 @@ class _RepositoryView:
                 os.close(parent_descriptor)
             except OSError:
                 pass
-            self.parent_descriptor = None
+        self.parent_descriptor = None
+
+
+def verify_repair_carrier(
+    carrier_root: Path,
+    *,
+    expected_commit: str,
+    expected_uid: int,
+    expected_gid: int,
+) -> dict[str, Any]:
+    """Authenticate the root-created executable carrier through retained FDs."""
+
+    if (
+        _COMMIT_RE.fullmatch(expected_commit) is None
+        or expected_uid < 0
+        or expected_gid < 0
+    ):
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+    view = _RepositoryView(carrier_root)
+    try:
+        expected_paths = {
+            ".",
+            ".repair-carrier-commit",
+            "ops",
+            "ops/executive_os",
+            *_REPAIR_CARRIER_FILES.keys(),
+        }
+        if set(view.descriptors) != expected_paths:
+            raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+        for relative, descriptor in view.descriptors.items():
+            info = os.fstat(descriptor)
+            expected_mode = (
+                0o700
+                if stat.S_ISDIR(info.st_mode)
+                else _REPAIR_CARRIER_FILES.get(relative)
+            )
+            if (
+                info.st_uid != expected_uid
+                or info.st_gid != expected_gid
+                or expected_mode is None
+                or stat.S_IMODE(info.st_mode) != expected_mode
+                or (stat.S_ISREG(info.st_mode) and info.st_nlink != 1)
+                or _descriptor_extended_attribute_names(descriptor)
+                - _APPROVED_SYSTEM_XATTRS
+                or _descriptor_has_extended_acl(descriptor)
+            ):
+                raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+            _require_allowed_bsd_flags(info, "REPAIR_CARRIER_INVALID")
+        stamp = _read_descriptor(
+            view.descriptors[".repair-carrier-commit"], 41
+        )
+        if stamp != f"{expected_commit}\n".encode("ascii"):
+            raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+        view.revalidate()
+        return {
+            "commit_sha": expected_commit,
+            "verified_file_count": len(_REPAIR_CARRIER_FILES),
+        }
+    except CapacityHostArtifactError:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID") from exc
+    finally:
+        view.close()
 
 
 def _run_git_v2(
@@ -5568,20 +6328,25 @@ def _observed_worktree_files(source_root: Path) -> list[str]:
 
 
 def verify_complete_repository(
-    source_root: Path, manifest: Mapping[str, Any]
+    source_root: Path,
+    manifest: Mapping[str, Any],
+    *,
+    retained_view: _RepositoryView | None = None,
 ) -> SourceClosureEvidence:
     """Descriptor-first proof of a direct, complete, sparse ordinary repository."""
 
     validated = validate_transport_manifest_v2(
         manifest, expected_commit=str(manifest.get("commit"))
     )
-    view = _RepositoryView(source_root)
+    owns_view = retained_view is None
+    view = retained_view if retained_view is not None else _RepositoryView(source_root)
     try:
         root_info = os.fstat(view.root_descriptor)
         first_tree_digest = closed_tree_digest(
             source_root,
             expected_uid=root_info.st_uid,
             expected_gid=root_info.st_gid,
+            _root_descriptor=view.root_descriptor,
         )
         view.revalidate()
         _pack_path, index_path = _inspect_complete_repository_direct(
@@ -5643,6 +6408,7 @@ def verify_complete_repository(
             source_root,
             expected_uid=root_info.st_uid,
             expected_gid=root_info.st_gid,
+            _root_descriptor=view.root_descriptor,
         )
         view.revalidate()
         if final_tree_digest != first_tree_digest:
@@ -5655,7 +6421,8 @@ def verify_complete_repository(
             )
         )
     finally:
-        view.close()
+        if owns_view:
+            view.close()
 
 
 def materialize_source_transport_v2(
@@ -5871,6 +6638,11 @@ def _parser() -> argparse.ArgumentParser:
     verify_complete.add_argument("--source-root", type=Path, required=True)
     verify_complete.add_argument("--manifest", type=Path, required=True)
     verify_complete.add_argument("--commit", required=True)
+    verify_carrier = commands.add_parser("verify-repair-carrier")
+    verify_carrier.add_argument("--path", type=Path, required=True)
+    verify_carrier.add_argument("--expected-commit", required=True)
+    verify_carrier.add_argument("--expected-uid", type=int, required=True)
+    verify_carrier.add_argument("--expected-gid", type=int, required=True)
     repair_host = commands.add_parser("source-repair-host")
     repair_host.add_argument("--mode", choices=("repair", "verify-only"), required=True)
     repair_host.add_argument("--system-root", type=Path, required=True)
@@ -5967,6 +6739,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "object_inventory_sha256": evidence.object_inventory_sha256,
                 "source_tree_sha256": evidence.source_tree_sha256,
             }
+        elif args.command == "verify-repair-carrier":
+            value = verify_repair_carrier(
+                args.path,
+                expected_commit=args.expected_commit,
+                expected_uid=args.expected_uid,
+                expected_gid=args.expected_gid,
+            )
         elif args.command == "source-repair-host":
             value = run_source_repair_host(
                 mode=args.mode,

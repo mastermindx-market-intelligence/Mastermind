@@ -66,10 +66,11 @@ else
   invalid_invocation
 fi
 
-# Resolve the carrier checkout only after the complete argv grammar is accepted.
+# Resolve the already root-created carrier only after complete argv validation.
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "${BASH_SOURCE[0]}")" && /bin/pwd)"
-MASTERMIND_SOURCE_REPO="$(cd "$SCRIPT_DIR/../.." && /bin/pwd -P)"
+CARRIER_ROOT="$(cd "$SCRIPT_DIR/../.." && /bin/pwd -P)"
 ARTIFACTS="$SCRIPT_DIR/capacity_host_artifacts.py"
+CARRIER_STAMP="$CARRIER_ROOT/.repair-carrier-commit"
 
 TEST_ADAPTER="false"
 if [ -n "${MMX_CAPACITY_REPAIR_TEST_ROOT:-}" ] && [ "$(/usr/bin/id -u)" != "0" ]; then
@@ -78,19 +79,14 @@ if [ -n "${MMX_CAPACITY_REPAIR_TEST_ROOT:-}" ] && [ "$(/usr/bin/id -u)" != "0" ]
   LOCK_FILE="$SYSTEM_ROOT/locks/cf2-h0.lock"
 else
   [ "$(/usr/bin/id -u)" = "0" ] || finish 77 "ROOT_REQUIRED"
-  [ -d "$MASTERMIND_SOURCE_REPO" ] && [ ! -L "$MASTERMIND_SOURCE_REPO" ] || refused
-  [ "$(GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$MASTERMIND_SOURCE_REPO" rev-parse HEAD)" = "$EXPECTED_REPAIR_COMMIT" ] \
-    || refused
-  GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$MASTERMIND_SOURCE_REPO" diff --quiet --exit-code || refused
-  GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$MASTERMIND_SOURCE_REPO" diff --cached --quiet --exit-code || refused
-  [ -z "$(GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$MASTERMIND_SOURCE_REPO" status --porcelain --untracked-files=all)" ] \
-    || refused
-  [ -z "$(/usr/bin/find "$MASTERMIND_SOURCE_REPO" ! -user root -print -quit)" ] || refused
-  [ -z "$(/usr/bin/find "$MASTERMIND_SOURCE_REPO" -perm +022 -print -quit)" ] || refused
-  [ -z "$(/usr/bin/find "$MASTERMIND_SOURCE_REPO" -type l -print -quit)" ] || refused
-  [ -z "$(/usr/bin/find "$MASTERMIND_SOURCE_REPO" -type f -links +1 -print -quit)" ] || refused
-  /usr/bin/python3 -I -S -B "$ARTIFACTS" verify-approved-xattrs \
-    --path "$MASTERMIND_SOURCE_REPO" >/dev/null || refused
+  [ -f "$CARRIER_STAMP" ] || refused
+  /usr/bin/env -i \
+    HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+    /usr/bin/python3 -I -S -B "$ARTIFACTS" verify-repair-carrier \
+    --path "$CARRIER_ROOT" \
+    --expected-commit "$EXPECTED_REPAIR_COMMIT" \
+    --expected-uid 0 \
+    --expected-gid 0 >/dev/null || refused
 fi
 
 PYTHON_ARGUMENTS=(
@@ -113,7 +109,13 @@ if [ "$TEST_ADAPTER" = "true" ]; then
 fi
 
 set +e
-/usr/bin/python3 -I -S -B "$ARTIFACTS" "${PYTHON_ARGUMENTS[@]}" >/dev/null
+if [ "$TEST_ADAPTER" = "true" ]; then
+  /usr/bin/python3 -I -S -B "$ARTIFACTS" "${PYTHON_ARGUMENTS[@]}" >/dev/null
+else
+  /usr/bin/env -i \
+    HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+    /usr/bin/python3 -I -S -B "$ARTIFACTS" "${PYTHON_ARGUMENTS[@]}" >/dev/null
+fi
 RESULT="$?"
 set -e
 case "$RESULT" in

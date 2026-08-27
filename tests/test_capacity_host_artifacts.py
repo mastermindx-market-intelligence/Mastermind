@@ -433,6 +433,7 @@ def test_closed_tree_digest_uses_exact_canonical_rows_and_descriptor_reads(
             "gid": root_info.st_gid,
             "mode": "0700",
             "nlink": root_info.st_nlink,
+            "flags": 0,
         },
         {
             "path": "alpha.txt",
@@ -441,6 +442,7 @@ def test_closed_tree_digest_uses_exact_canonical_rows_and_descriptor_reads(
             "gid": payload_info.st_gid,
             "mode": "0400",
             "nlink": 1,
+            "flags": 0,
             "size": 6,
             "sha256": hashlib.sha256(b"alpha\n").hexdigest(),
         },
@@ -460,6 +462,54 @@ def test_closed_tree_digest_uses_exact_canonical_rows_and_descriptor_reads(
         expected_uid=os.getuid(),
         expected_gid=os.getgid(),
     ) == expected
+
+
+def test_closed_tree_digest_refuses_nonzero_mocked_fstat_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+    original_fstat = os.fstat
+
+    class FlaggedStat:
+        st_flags = 1
+
+        def __init__(self, value: os.stat_result) -> None:
+            self._value = value
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._value, name)
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: FlaggedStat(original_fstat(descriptor)))
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="FLAGS_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not hasattr(os, "chflags") or not hasattr(stat, "UF_NODUMP"),
+    reason="native harmless BSD user flag requires macOS",
+)
+def test_closed_tree_digest_refuses_native_harmless_user_flag(tmp_path: Path) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+    os.chflags(payload, stat.UF_NODUMP)
+    try:
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="FLAGS_INVALID"):
+            artifacts.closed_tree_digest(
+                root, expected_uid=os.getuid(), expected_gid=os.getgid()
+            )
+    finally:
+        os.chflags(payload, 0)
 
 
 def test_closed_tree_digest_refuses_directory_mutation_during_child_traversal(
@@ -1912,6 +1962,323 @@ def _repair_arguments(
         "transport_sha256": hashlib.sha256(transport.read_bytes()).hexdigest(),
         "test_adapter": True,
     }
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "intermediate-symlink",
+        "parent-mode",
+        "parent-xattr",
+        "parent-acl",
+        "parent-flags",
+    ),
+)
+def test_source_repair_parent_graph_refuses_untrusted_intermediate_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    capacity_sources = system_root / "capacity-sources"
+    cleanup_xattr: tuple[Path, bytes] | None = None
+    cleanup_acl = False
+    cleanup_flags = False
+    if drift == "intermediate-symlink":
+        moved = system_root / "real-capacity-sources"
+        capacity_sources.rename(moved)
+        capacity_sources.symlink_to(moved, target_is_directory=True)
+    elif drift == "parent-mode":
+        capacity_sources.chmod(0o777)
+    elif drift == "parent-xattr":
+        name = b"com.mastermind.test" if sys.platform == "darwin" else b"user.mastermind-test"
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(
+                    ["/usr/bin/xattr", "-w", name.decode(), "unsafe", capacity_sources],
+                    check=True,
+                    capture_output=True,
+                )
+            else:
+                os.setxattr(capacity_sources, name, b"unsafe", follow_symlinks=False)
+        except (AttributeError, OSError, subprocess.CalledProcessError):
+            pytest.skip("extended attribute fixture is unavailable")
+        cleanup_xattr = (capacity_sources, name)
+    elif drift == "parent-acl":
+        if sys.platform != "darwin":
+            pytest.skip("macOS ACL fixture is unavailable")
+        subprocess.run(
+            [
+                "/bin/chmod",
+                "+a",
+                f"{pwd.getpwuid(os.getuid()).pw_name} allow read",
+                capacity_sources,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        cleanup_acl = True
+    else:
+        if sys.platform != "darwin" or not hasattr(os, "chflags"):
+            pytest.skip("macOS BSD flags fixture is unavailable")
+        os.chflags(capacity_sources, stat.UF_NODUMP)
+        cleanup_flags = True
+    try:
+        with pytest.raises(
+            (artifacts.CapacityHostArtifactError, OSError),
+            match="SOURCE_REPAIR_(PARENT|ROOT)|Too many levels|Not a directory",
+        ):
+            artifacts._open_source_repair_parents(
+                system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+            )
+    finally:
+        if cleanup_xattr is not None:
+            if sys.platform == "darwin":
+                subprocess.run(
+                    [
+                        "/usr/bin/xattr",
+                        "-d",
+                        cleanup_xattr[1].decode(),
+                        cleanup_xattr[0],
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+            else:
+                os.removexattr(*cleanup_xattr, follow_symlinks=False)
+        if cleanup_acl:
+            subprocess.run(["/bin/chmod", "-N", capacity_sources], check=True)
+        if cleanup_flags:
+            os.chflags(capacity_sources, 0)
+
+
+def test_source_repair_parent_graph_detects_synchronized_system_root_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    parents = artifacts._open_source_repair_parents(
+        system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    retained = system_root.with_name("retained-host")
+    try:
+        system_root.rename(retained)
+        system_root.mkdir(mode=0o755)
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="PARENT_DRIFT"):
+            parents.revalidate()
+    finally:
+        parents.close()
+
+
+def test_inert_release_manifest_verifier_never_executes_installed_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = tmp_path / ("e" * 40)
+    script = release / "ops" / "executive_os" / "release_manifest.py"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(b"# reviewed release verifier placeholder\n")
+    script.chmod(0o444)
+    for directory in (release, release / "ops", script.parent):
+        directory.chmod(0o755)
+    original = script.read_bytes()
+    entries = [
+        {
+            "path": "ops",
+            "mode": 0o755,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "type": "directory",
+        },
+        {
+            "path": "ops/executive_os",
+            "mode": 0o755,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "type": "directory",
+        },
+        {
+            "path": "ops/executive_os/release_manifest.py",
+            "mode": 0o444,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "type": "file",
+            "size": len(original),
+            "sha256": hashlib.sha256(original).hexdigest(),
+        },
+    ]
+    manifest = release / ".executive-release-manifest.json"
+    manifest.write_bytes(
+        json.dumps(
+            {
+                "schema_version": "mastermind.executive_release_manifest/v1",
+                "commit_sha": "e" * 40,
+                "tree_sha": "f" * 40,
+                "entries": entries,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    manifest.chmod(0o444)
+    sentinel = tmp_path / "installed-code-executed"
+    script.chmod(0o600)
+    script.write_text(
+        f"from pathlib import Path\nPath({str(sentinel)!r}).write_text('ran')\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o444)
+
+    def subprocess_is_forbidden(*args: object, **kwargs: object) -> object:
+        raise AssertionError("installed release code must never be launched")
+
+    monkeypatch.setattr(artifacts.subprocess, "run", subprocess_is_forbidden)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+        artifacts._verify_inert_release_manifest(
+            release,
+            expected_commit="e" * 40,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+    assert not sentinel.exists()
+
+
+def test_privileged_git_environment_is_closed_to_ambient_execution_and_network() -> None:
+    environment = artifacts._git_environment()
+    assert environment == {
+        "HOME": "/var/empty",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_LOCAL": "/dev/null",
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/usr/bin/false",
+        "SSH_ASKPASS": "/usr/bin/false",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_NO_LAZY_FETCH": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_EXTERNAL_DIFF": "/usr/bin/false",
+        "GIT_ALLOW_PROTOCOL": "file",
+        "GIT_CONFIG_COUNT": "6",
+        "GIT_CONFIG_KEY_0": "core.hooksPath",
+        "GIT_CONFIG_VALUE_0": "/dev/null",
+        "GIT_CONFIG_KEY_1": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_1": "false",
+        "GIT_CONFIG_KEY_2": "core.attributesFile",
+        "GIT_CONFIG_VALUE_2": "/dev/null",
+        "GIT_CONFIG_KEY_3": "protocol.allow",
+        "GIT_CONFIG_VALUE_3": "never",
+        "GIT_CONFIG_KEY_4": "protocol.file.allow",
+        "GIT_CONFIG_VALUE_4": "always",
+        "GIT_CONFIG_KEY_5": "diff.external",
+        "GIT_CONFIG_VALUE_5": "/usr/bin/false",
+    }
+
+
+def test_hardened_git_does_not_execute_local_include_fsmonitor_diff_or_textconv(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "config", "user.name", "Fixture")
+    _git(repository, "config", "user.email", "fixture@example.invalid")
+    payload = repository / "payload.txt"
+    payload.write_text("one\n", encoding="utf-8")
+    (repository / ".gitattributes").write_text(
+        "payload.txt diff=hostile\n", encoding="utf-8"
+    )
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-qm", "fixture")
+    payload.write_text("two\n", encoding="utf-8")
+
+    sentinel = tmp_path / "external-code-ran"
+    hostile = tmp_path / "hostile.sh"
+    hostile.write_text(
+        f"#!/bin/sh\n/usr/bin/touch {str(sentinel)!r}\nexit 1\n",
+        encoding="utf-8",
+    )
+    hostile.chmod(0o700)
+    included = tmp_path / "included.config"
+    included.write_text(
+        f"[diff \"hostile\"]\n\texternal = {hostile}\n\ttextconv = {hostile}\n",
+        encoding="utf-8",
+    )
+    _git(repository, "config", "core.fsmonitor", str(hostile))
+    _git(repository, "config", "include.path", str(included))
+    _git(repository, "config", "diff.hostile.external", str(hostile))
+    _git(repository, "config", "diff.hostile.textconv", str(hostile))
+
+    artifacts._run_git(repository, "status", "--porcelain=v1")
+    artifacts._run_git(
+        repository, "diff", "--no-ext-diff", "--no-textconv", "--", "payload.txt"
+    )
+    assert not sentinel.exists()
+
+
+def test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor(
+    tmp_path: Path,
+) -> None:
+    operator_source = tmp_path / "operator-source"
+    operator_source.write_bytes(b"reviewed carrier bytes\n")
+    writable_descriptor = os.open(operator_source, os.O_RDWR)
+    carrier = tmp_path / "carrier"
+    executive_os = carrier / "ops" / "executive_os"
+    executive_os.mkdir(parents=True, mode=0o700)
+    for directory in (carrier, carrier / "ops", executive_os):
+        directory.chmod(0o700)
+    files = {
+        ".repair-carrier-commit": (b"d" * 40 + b"\n", 0o400),
+        "ops/executive_os/repair-capacity-source-closure.sh": (
+            operator_source.read_bytes(),
+            0o500,
+        ),
+        "ops/executive_os/capacity_host_artifacts.py": (b"# reviewed\n", 0o400),
+        "ops/executive_os/capacity_source_contract.py": (b"# reviewed\n", 0o400),
+    }
+    for relative, (payload, mode) in files.items():
+        destination = carrier / relative
+        destination.write_bytes(payload)
+        destination.chmod(mode)
+    if sys.platform == "darwin":
+        for path in (carrier, carrier / "ops", executive_os):
+            subprocess.run(["/usr/bin/xattr", "-c", path], check=True, capture_output=True)
+        for relative, (_payload, mode) in files.items():
+            path = carrier / relative
+            path.chmod(0o600)
+            subprocess.run(["/usr/bin/xattr", "-c", path], check=True, capture_output=True)
+            path.chmod(mode)
+    try:
+        os.lseek(writable_descriptor, 0, os.SEEK_SET)
+        os.write(writable_descriptor, b"attacker mutation\n")
+        os.ftruncate(writable_descriptor, len(b"attacker mutation\n"))
+        assert artifacts.verify_repair_carrier(
+            carrier,
+            expected_commit="d" * 40,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )["commit_sha"] == "d" * 40
+        assert (carrier / "ops/executive_os/repair-capacity-source-closure.sh").read_bytes() == (
+            b"reviewed carrier bytes\n"
+        )
+    finally:
+        os.close(writable_descriptor)
+
+    linked = tmp_path / "carrier-hardlink"
+    os.link(carrier / "ops/executive_os/capacity_host_artifacts.py", linked)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="REPAIR_CARRIER_INVALID"):
+        artifacts.verify_repair_carrier(
+            carrier,
+            expected_commit="d" * 40,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
 
 
 def _verify_arguments(system_root: Path, commit: str) -> dict[str, object]:

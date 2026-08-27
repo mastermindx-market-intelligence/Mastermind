@@ -256,7 +256,14 @@ Expected: absent publication helpers and repair script.
 - [ ] **Step 4: Implement minimum carrier**
 
 Use Bash 3.2 `set -euo pipefail`, `umask 077`, fixed roots/tools, and one cleanup trap. Preflight the
-sealed repair checkout and preserved H0 state. Acquire the existing lock, reconcile the exact
+root-created exact-blob repair carrier and preserved H0 state. Root must not execute an
+operator-created checkout or installed release code. Build a digest-bound exact-merge Git bundle
+outside privilege, then use only trusted system tools under `env -i` to copy it into a new root
+`0700` namespace and materialize the three reviewed carrier files into new root-owned inodes. Bind
+each file to its exact Git blob under local-file-only Git with system/global/local config, hooks,
+fsmonitor, attributes, replacement refs, external diff/textconv, prompts, lazy fetch, optional
+locks, locale, `HOME`, and `PATH` closed. Descriptor-verify exact inventory, type, UID/GID, mode,
+device, links, zero BSD flags, ACL absence, and xattrs before execution. Acquire the existing lock, reconcile the exact
 intent, copy one operator transport by no-follow helper, fully build/verify the candidate, then
 publish intent before installed mutation. Before intent, use opened parent descriptors to require
 one `st_dev` and absent destinations. Use descriptor-relative macOS
@@ -327,7 +334,7 @@ does not apply to any other filesystem, root, provider, or worker surface.
 - [ ] **Step 1: Add failing runbook/compatibility tests**
 
 Require the runbook to name alternative B, exact old gates, complete v2 transport, no root network,
-exact merged repair checkout, one H0 lock/intent, archive-only swap, generation-last commit, two
+exact root-created repair carrier, one H0 lock/intent, archive-only swap, generation-last commit, two
 verify-only passes, `e4e44867...` as unchanged topology release/preparer, the distinct repair merge
 identity, no release install/topology rerender, explicit P0 re-pin, and every credential/provider-
 home/service/socket/worker/CF2-I hold. Require the exact ordered repair and verify-only CLI forms,
@@ -430,7 +437,7 @@ semantic drift when inventory and material identity match.
 
 - [ ] **Step 5: Run one native repair ceremony**
 
-From a sealed root-owned detached checkout at the repair merge, run the repair exactly once. Require
+From the descriptor-verified root-created carrier at the repair merge, run the repair exactly once. Require
 the exact ordered `repair --expected-source-closure-repair-commit ... --operator-user ...
 --macro-transport ... --macro-transport-sha256 ...` form, exit 0, and exact stdout
 `H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED\n`. On exit 70 reconcile the same intent/carrier; do

@@ -48,12 +48,14 @@ publish its one durable repair intent or mutate installed state:
 Any mismatch refuses before installed mutation and returns to Sol. The carrier never rewrites an
 intent around a different observed state.
 
-### Nonprivileged v2 transport and direct repair checkout
+### Nonprivileged v2 transport and inert exact-commit carrier
 
 Complete all Git review, protected merge verification, and any network acquisition before this
 block. The local Macro repository must already contain the exact accepted commit and its complete
 reachable object graph. The local Mastermind repository must already contain the exact protected
-repair merge. This block performs no provider, service, socket, worker, P0, or root action.
+repair merge. This block performs no provider, service, socket, worker, P0, or root action. It
+creates a digest-bound Git bundle as inert data; no inode created here is later executed as root.
+The `git bundle create` step names the already verified protected ref whose tip is the exact merge.
 
 Set the two repository paths and replace only the repair-merge placeholder with the observed
 40-lower-hex protected merge. Do not substitute a PR head, invent a future merge SHA, or precompute
@@ -70,23 +72,45 @@ REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'
 test "$OPERATOR_USER" != root
 [[ "$REPAIR_MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
 
-GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$MACRO_REPOSITORY" cat-file -e "$MACRO_COMMIT^{commit}"
-test "$(GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$MASTERMIND_REPOSITORY" rev-parse "$REPAIR_MERGE_SHA^{commit}")" = "$REPAIR_MERGE_SHA"
-GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$MASTERMIND_REPOSITORY" merge-base --is-ancestor \
-  "$REPAIR_MERGE_SHA" refs/remotes/origin/master
+safe_git() {
+  /usr/bin/env -i \
+    HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_LOCAL=/dev/null \
+    GIT_ATTR_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+    SSH_ASKPASS=/usr/bin/false GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 \
+    GIT_NO_REPLACE_OBJECTS=1 GIT_EXTERNAL_DIFF=/usr/bin/false GIT_ALLOW_PROTOCOL=file \
+    /usr/bin/git --no-replace-objects \
+      -c protocol.allow=never -c protocol.file.allow=always \
+      -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+      -c core.attributesFile=/dev/null -c diff.external=/usr/bin/false "$@"
+}
+safe_git -C "$MACRO_REPOSITORY" cat-file -e "$MACRO_COMMIT^{commit}"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse "$REPAIR_MERGE_SHA^{commit}")" = "$REPAIR_MERGE_SHA"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse refs/remotes/origin/master)" = "$REPAIR_MERGE_SHA"
+safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --quiet --exit-code
+safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --cached --quiet --exit-code
 
 REPAIR_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-source-repair.XXXXXX)"
 REPAIR_CHECKOUT="$REPAIR_PARENT/mastermind"
-GIT_CONFIG_NOSYSTEM=1 GIT_OPTIONAL_LOCKS=0 /usr/bin/git clone --no-local --no-hardlinks \
-  --no-checkout "$MASTERMIND_REPOSITORY" "$REPAIR_CHECKOUT"
-GIT_CONFIG_NOSYSTEM=1 GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$REPAIR_CHECKOUT" \
-  checkout --detach "$REPAIR_MERGE_SHA"
+safe_git clone --no-local --no-hardlinks --no-checkout \
+  "$MASTERMIND_REPOSITORY" "$REPAIR_CHECKOUT"
+safe_git -C "$REPAIR_CHECKOUT" checkout --detach "$REPAIR_MERGE_SHA"
 test -d "$REPAIR_CHECKOUT/.git"
 test ! -f "$REPAIR_CHECKOUT/.git"
-test "$(GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$REPAIR_CHECKOUT" rev-parse HEAD)" = "$REPAIR_MERGE_SHA"
-test -z "$(GIT_OPTIONAL_LOCKS=0 /usr/bin/git -C "$REPAIR_CHECKOUT" status --porcelain=v1 --untracked-files=all)"
+test "$(safe_git -C "$REPAIR_CHECKOUT" rev-parse HEAD)" = "$REPAIR_MERGE_SHA"
+test -z "$(safe_git -C "$REPAIR_CHECKOUT" status --porcelain=v1 --untracked-files=all)"
 test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type l -print -quit)"
 test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type f -links +1 -print -quit)"
+
+REPAIR_CARRIER="$REPAIR_PARENT/mastermind-exact-commit.bundle"
+safe_git -C "$MASTERMIND_REPOSITORY" bundle create \
+  "$REPAIR_CARRIER" refs/remotes/origin/master
+/bin/chmod 0400 "$REPAIR_CARRIER"
+test "$(safe_git bundle list-heads "$REPAIR_CARRIER")" = \
+  "$REPAIR_MERGE_SHA refs/remotes/origin/master"
+REPAIR_CARRIER_SHA256="$(/usr/bin/shasum -a 256 "$REPAIR_CARRIER" | /usr/bin/awk '{print $1}')"
+[[ "$REPAIR_CARRIER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+/usr/bin/printf 'repair_carrier_sha256=%s\n' "$REPAIR_CARRIER_SHA256"
 
 TRANSPORT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-v2-transport.XXXXXX)"
 MACRO_TRANSPORT="$TRANSPORT_PARENT/macro-complete-v2.zip"
@@ -115,46 +139,129 @@ digest. These are per-carrier proof; they are not a future generation identity.
 
 Keep the same Terminal and invoke the following block once. `sudo` opens one native administrator
 dialog and one root shell. The root shell receives only the expected repair commit, operator name,
-transport path, and transport digest as arguments; the sealed direct checkout is its already
-selected working directory. No network command runs as root. The root shell first seals the direct
-detached checkout `root:wheel` and non-writable by group/other, then runs exactly one repair and two
-verify-only passes from that same checkout.
+transport path/digest, and inert carrier path/digest as arguments. No network command runs as root.
+The trusted inline shell copies the bundle into a root-created `0700` namespace, authenticates its
+digest and exact commit with fully closed Git configuration, and materializes only the three reviewed
+program files into new root-owned inodes. It descriptor-verifies that one carrier before running
+exactly one repair and two verify-only passes.
 
 ```bash
-(
-  cd "$REPAIR_CHECKOUT"
-  /usr/bin/sudo /bin/bash -s -- \
-    "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" <<'H0_SOURCE_REPAIR'
+/usr/bin/sudo /usr/bin/env -i \
+  HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /bin/bash -s -- \
+  "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \
+  "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256" <<'H0_SOURCE_REPAIR'
 set -euo pipefail
+umask 077
 REPAIR_MERGE_SHA="$1"
 OPERATOR_USER="$2"
 MACRO_TRANSPORT="$3"
 MACRO_TRANSPORT_SHA256="$4"
-test "$#" -eq 4
+REPAIR_CARRIER="$5"
+REPAIR_CARRIER_SHA256="$6"
+test "$#" -eq 6
 test "$(/usr/bin/id -u)" -eq 0
-test "$(GIT_OPTIONAL_LOCKS=0 /usr/bin/git rev-parse HEAD)" = "$REPAIR_MERGE_SHA"
-REPAIR_PARENT="$(/usr/bin/dirname "$PWD")"
-/usr/sbin/chown root:wheel "$REPAIR_PARENT"
-/bin/chmod 0700 "$REPAIR_PARENT"
-/usr/sbin/chown -R root:wheel .
-/bin/chmod -R go-w .
-test "$(/usr/bin/stat -f %Su:%Sg "$REPAIR_PARENT")" = root:wheel
-test "$(/usr/bin/stat -f %Lp "$REPAIR_PARENT")" = 700
-test -z "$(/usr/bin/find . ! -user root -print -quit)"
-test -z "$(/usr/bin/find . -perm +022 -print -quit)"
+[[ "$REPAIR_MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+[[ "$REPAIR_CARRIER_SHA256" =~ ^[0-9a-f]{64}$ ]]
 
-/bin/bash ops/executive_os/repair-capacity-source-closure.sh repair \
+safe_root_git() {
+  /usr/bin/env -i \
+    HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_LOCAL=/dev/null \
+    GIT_ATTR_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+    SSH_ASKPASS=/usr/bin/false GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 \
+    GIT_NO_REPLACE_OBJECTS=1 GIT_EXTERNAL_DIFF=/usr/bin/false GIT_ALLOW_PROTOCOL=file \
+    /usr/bin/git --no-replace-objects \
+      -c protocol.allow=never -c protocol.file.allow=always \
+      -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+      -c core.attributesFile=/dev/null -c diff.external=/usr/bin/false "$@"
+}
+
+ROOT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-root-carrier.XXXXXX)"
+/bin/chmod 0700 "$ROOT_PARENT"
+ROOT_BUNDLE="$ROOT_PARENT/repair.bundle"
+/bin/cp -X -P "$REPAIR_CARRIER" "$ROOT_BUNDLE"
+/usr/bin/chflags 0 "$ROOT_BUNDLE"
+/bin/chmod -N "$ROOT_BUNDLE"
+/usr/bin/xattr -c "$ROOT_BUNDLE"
+/usr/sbin/chown root:wheel "$ROOT_BUNDLE"
+/bin/chmod 0400 "$ROOT_BUNDLE"
+test "$(/usr/bin/stat -f %HT "$ROOT_BUNDLE")" = "Regular File"
+test "$(/usr/bin/stat -f %l "$ROOT_BUNDLE")" -eq 1
+test "$(/usr/bin/shasum -a 256 "$ROOT_BUNDLE" | /usr/bin/awk '{print $1}')" = \
+  "$REPAIR_CARRIER_SHA256"
+
+ROOT_REPOSITORY="$ROOT_PARENT/repository.git"
+ROOT_CARRIER="$ROOT_PARENT/carrier"
+safe_root_git init --bare --quiet "$ROOT_REPOSITORY"
+safe_root_git -C "$ROOT_REPOSITORY" bundle verify "$ROOT_BUNDLE" >/dev/null 2>&1
+safe_root_git -C "$ROOT_REPOSITORY" bundle unbundle "$ROOT_BUNDLE" >/dev/null
+test "$(safe_root_git -C "$ROOT_REPOSITORY" rev-parse "$REPAIR_MERGE_SHA^{commit}")" = \
+  "$REPAIR_MERGE_SHA"
+/usr/bin/install -d -m 0700 -o root -g wheel \
+  "$ROOT_CARRIER" "$ROOT_CARRIER/ops" "$ROOT_CARRIER/ops/executive_os"
+for DIRECTORY in "$ROOT_CARRIER" "$ROOT_CARRIER/ops" "$ROOT_CARRIER/ops/executive_os"; do
+  /usr/bin/chflags 0 "$DIRECTORY"
+  /bin/chmod -N "$DIRECTORY"
+  /usr/bin/xattr -c "$DIRECTORY"
+done
+
+for MATERIAL_PATH in \
+  ops/executive_os/repair-capacity-source-closure.sh \
+  ops/executive_os/capacity_host_artifacts.py \
+  ops/executive_os/capacity_source_contract.py; do
+  case "$MATERIAL_PATH" in
+    ops/executive_os/repair-capacity-source-closure.sh) GIT_MODE=100755; HOST_MODE=0500 ;;
+    *) GIT_MODE=100644; HOST_MODE=0400 ;;
+  esac
+  TREE_ROW="$(safe_root_git -C "$ROOT_REPOSITORY" ls-tree "$REPAIR_MERGE_SHA" -- "$MATERIAL_PATH")"
+  [[ "$TREE_ROW" =~ ^$GIT_MODE\ blob\ ([0-9a-f]{40})$'\t'"$MATERIAL_PATH"$ ]]
+  GIT_BLOB="${BASH_REMATCH[1]}"
+  DESTINATION="$ROOT_CARRIER/$MATERIAL_PATH"
+  /usr/bin/touch "$DESTINATION"
+  /usr/sbin/chown root:wheel "$DESTINATION"
+  /bin/chmod 0600 "$DESTINATION"
+  safe_root_git -C "$ROOT_REPOSITORY" cat-file blob "$GIT_BLOB" >"$DESTINATION"
+  test "$(safe_root_git hash-object --no-filters --stdin <"$DESTINATION")" = "$GIT_BLOB"
+  /usr/bin/chflags 0 "$DESTINATION"
+  /bin/chmod -N "$DESTINATION"
+  /usr/bin/xattr -c "$DESTINATION"
+  /bin/chmod "$HOST_MODE" "$DESTINATION"
+done
+/usr/bin/printf '%s\n' "$REPAIR_MERGE_SHA" >"$ROOT_CARRIER/.repair-carrier-commit"
+/usr/sbin/chown root:wheel "$ROOT_CARRIER/.repair-carrier-commit"
+/usr/bin/chflags 0 "$ROOT_CARRIER/.repair-carrier-commit"
+/bin/chmod -N "$ROOT_CARRIER/.repair-carrier-commit"
+/usr/bin/xattr -c "$ROOT_CARRIER/.repair-carrier-commit"
+/bin/chmod 0400 "$ROOT_CARRIER/.repair-carrier-commit"
+
+/usr/bin/env -i HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /usr/bin/python3 -I -S -B "$ROOT_CARRIER/ops/executive_os/capacity_host_artifacts.py" \
+  verify-repair-carrier --path "$ROOT_CARRIER" --expected-commit "$REPAIR_MERGE_SHA" \
+  --expected-uid 0 --expected-gid 0 >/dev/null
+
+/usr/bin/env -i HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /bin/bash "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" repair \
   --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA" \
   --operator-user "$OPERATOR_USER" \
   --macro-transport "$MACRO_TRANSPORT" \
   --macro-transport-sha256 "$MACRO_TRANSPORT_SHA256"
-/bin/bash ops/executive_os/repair-capacity-source-closure.sh verify-only \
+/usr/bin/env -i HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /bin/bash "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" verify-only \
   --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA"
-/bin/bash ops/executive_os/repair-capacity-source-closure.sh verify-only \
+/usr/bin/env -i HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /bin/bash "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" verify-only \
   --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA"
 H0_SOURCE_REPAIR
-)
 ```
+
+The copied bundle remains inert data. Root executes no operator-created inode: a pre-opened writable
+descriptor can only alter the operator bundle and therefore either loses the recorded SHA-256 check
+or leaves the already copied root inode unchanged. All privileged Git uses the root-created bundle
+and bare repository, has local/system/global config, hooks, fsmonitor, attributes, replacements,
+external diff/textconv, prompts, lazy fetch, optional locks, locale, `HOME`, `PATH`, and protocols
+closed, and permits only local file transport. No installed release executable or Python module is
+launched; the reviewed carrier verifies the preserved release strictly as inert data.
 
 The carrier reuses exactly
 `/Library/Application Support/MastermindExecutive/locks/cf2-h0.lock`. While holding it, the repair
