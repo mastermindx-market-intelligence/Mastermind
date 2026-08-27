@@ -219,6 +219,21 @@ def test_component_construction_refuses_wrong_material_digest_and_reordered_real
         contract.validate_component_objects(components)
 
 
+@pytest.mark.parametrize(
+    "capability_ids",
+    [
+        ("codex_account", "codex_account_2"),
+        ("codex_account", "codex_account_2", "codex_account_3", "extra"),
+    ],
+)
+def test_component_construction_refuses_capability_cardinality_drift(
+    monkeypatch: pytest.MonkeyPatch, capability_ids: tuple[str, ...]
+) -> None:
+    monkeypatch.setattr(contract, "CAPACITY_CAPABILITY_IDS", capability_ids)
+    with pytest.raises(contract.CapacitySourceContractError, match="REALM_INVENTORY"):
+        _components()
+
+
 def test_h0_receipt_is_sanitized_and_explicitly_not_p0_acceptance() -> None:
     receipt = contract.build_host_receipt(
         source_config=_config(),
