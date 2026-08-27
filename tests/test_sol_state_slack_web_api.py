@@ -199,3 +199,27 @@ def test_malformed_slack_response_is_fixed_opaque_error_without_secret_leak():
     message = asyncio.run(exercise())
     assert message == "SLACK_API_INVALID_RESPONSE"
     assert TOKEN not in message
+
+
+def test_http_failure_is_fixed_opaque_unavailable_without_body_leak():
+    slack_web_api = _module()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            503,
+            text=f"upstream failure carrying {TOKEN}",
+            request=request,
+        )
+
+    async def exercise():
+        client = _client(slack_web_api, handler)
+        try:
+            with pytest.raises(RuntimeError) as caught:
+                await client.fetch_history(channel_id=CHANNEL, limit=100)
+            return str(caught.value)
+        finally:
+            await client.aclose()
+
+    message = asyncio.run(exercise())
+    assert message == "SLACK_API_UNAVAILABLE"
+    assert TOKEN not in message
