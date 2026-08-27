@@ -1,13 +1,15 @@
 """Closed non-secret production configuration for the C1 SOL_STATE Relay.
 
-Secrets never belong in this JSON contract.  The configuration names the
+Secrets never belong in this JSON contract. The configuration names the
 root-managed credential file and the already-owned CeoIngress socket, plus the
 fixed Slack workspace/channel/bot identity and reviewed timing bounds.
 """
 from __future__ import annotations
 
+import grp
 import json
 import os
+import pwd
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +19,7 @@ import httpx
 
 CONFIG_SCHEMA = "mastermind.sol_state_relay_config.v1"
 SLACK_API_ROOT = "https://slack.com/api/"
+RELAY_USERNAME = "_mastermind_sol_relay"
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -117,6 +120,34 @@ def load_config(path: str | Path) -> C1RuntimeConfig:
     if config.max_executive_age_seconds < config.heartbeat_seconds:
         raise ValueError("invalid C1 config: max_executive_age_seconds")
     return config
+
+
+def assert_relay_principal() -> None:
+    """Fail closed unless the process is the exact dedicated non-root Relay."""
+
+    try:
+        euid = os.geteuid()
+        if euid == 0:
+            raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
+        account = pwd.getpwuid(euid)
+        if account.pw_name != RELAY_USERNAME:
+            raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
+        gids = set(os.getgroups()) | {account.pw_gid}
+        group_names = {grp.getgrgid(gid).gr_name for gid in gids}
+    except RuntimeError:
+        raise
+    except (KeyError, OSError):
+        raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED") from None
+
+    forbidden = {
+        name
+        for name in group_names
+        if name.startswith("_mastermind_worker")
+        or name.startswith("_mastermind_codex")
+        or name == "_mastermind_exec"
+    }
+    if forbidden:
+        raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
 
 
 def read_token_file(path: str | Path) -> str:
