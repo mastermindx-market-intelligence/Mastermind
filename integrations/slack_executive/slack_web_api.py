@@ -16,6 +16,13 @@ SLACK_API_ROOT = "https://slack.com/api/"
 _DEFAULT_TIMEOUT_SECONDS = 10.0
 
 
+def _require_success(response: httpx.Response) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError:
+        raise RuntimeError("SLACK_API_UNAVAILABLE") from None
+
+
 def _decode_payload(response: httpx.Response) -> dict[str, Any]:
     try:
         payload: Any = response.json()
@@ -62,7 +69,7 @@ class SlackWebApiStateClient:
             "conversations.history",
             params={"channel": channel_id, "limit": limit},
         )
-        response.raise_for_status()
+        _require_success(response)
         payload = _decode_payload(response)
         if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
@@ -102,7 +109,7 @@ class SlackWebApiStateClient:
             "chat.postMessage",
             json={"channel": channel_id, "text": text},
         )
-        response.raise_for_status()
+        _require_success(response)
         payload = _decode_payload(response)
         if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
@@ -138,7 +145,7 @@ class SlackWebApiStateClient:
             "chat.update",
             json={"channel": channel_id, "ts": message_ts, "text": text},
         )
-        response.raise_for_status()
+        _require_success(response)
         payload = _decode_payload(response)
         if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
