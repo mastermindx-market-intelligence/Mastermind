@@ -81,3 +81,31 @@ class SlackWebApiStateClient:
         next_cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
         complete = payload.get("has_more") is False and not next_cursor
         return HistoryPage(messages=tuple(messages), complete=complete)
+
+    async def create_message(self, *, channel_id: str, text: str) -> StateMessage:
+        if not isinstance(channel_id, str) or not channel_id:
+            raise ValueError("channel_id must be a non-empty string")
+        if not isinstance(text, str) or not text:
+            raise ValueError("text must be a non-empty string")
+
+        response = await self._client.post(
+            "chat.postMessage",
+            json={"channel": channel_id, "text": text},
+        )
+        response.raise_for_status()
+        payload: Any = response.json()
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise RuntimeError("SLACK_API_REFUSED")
+        if payload.get("channel") != channel_id:
+            raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+        ts = payload.get("ts")
+        message = payload.get("message")
+        if not isinstance(ts, str) or not isinstance(message, dict):
+            raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+        if (
+            message.get("ts") != ts
+            or message.get("user") != self._bot_user_id
+            or message.get("text") != text
+        ):
+            raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+        return StateMessage(ts=ts, author_user_id=self._bot_user_id, text=text)
