@@ -2,7 +2,7 @@
 
 Secrets never belong in this JSON contract.  The configuration names the
 root-managed credential file and the already-owned CeoIngress socket, plus the
-fixed private Slack identity/channel and reviewed timing bounds.
+fixed Slack workspace/channel/bot identity and reviewed timing bounds.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ _CONFIG_KEYS = frozenset(
     {
         "schema",
         "executive_socket",
+        "slack_workspace_id",
         "slack_channel_id",
         "slack_bot_user_id",
         "slack_token_file",
@@ -32,6 +33,7 @@ _CONFIG_KEYS = frozenset(
 @dataclass(frozen=True)
 class C1RuntimeConfig:
     executive_socket: Path
+    slack_workspace_id: str
     slack_channel_id: str
     slack_bot_user_id: str
     slack_token_file: Path
@@ -76,6 +78,9 @@ def load_config(path: str | Path) -> C1RuntimeConfig:
     config = C1RuntimeConfig(
         executive_socket=_absolute_path(
             document.get("executive_socket"), name="executive_socket"
+        ),
+        slack_workspace_id=_nonempty_string(
+            document.get("slack_workspace_id"), name="slack_workspace_id"
         ),
         slack_channel_id=_nonempty_string(
             document.get("slack_channel_id"), name="slack_channel_id"
