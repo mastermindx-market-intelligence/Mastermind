@@ -197,6 +197,31 @@ assert_authentication_disabled() {
   }
 }
 
+sleep_for_authentication_propagation() {
+  /bin/sleep 1
+}
+
+wait_for_authentication_disabled() {
+  local name="$1"
+  local attempt state
+  for attempt in 1 2 3 4 5; do
+    assert_reviewed_authentication_authority "$name"
+    state="$(authentication_state "$name")" || exit 65
+    if [ "$state" = disabled ]; then
+      return
+    fi
+    [ "$state" = needs_disable ] || {
+      /bin/echo "service account $name entered an unreviewed authentication state" >&2
+      exit 65
+    }
+    if [ "$attempt" -lt 5 ]; then
+      sleep_for_authentication_propagation
+    fi
+  done
+  /bin/echo "service account $name did not reach authentication-disabled state" >&2
+  exit 65
+}
+
 ensure_authentication_disabled() {
   local name="$1"
   local state
@@ -209,7 +234,7 @@ ensure_authentication_disabled() {
       exit 65
     }
   fi
-  assert_authentication_disabled "$name"
+  wait_for_authentication_disabled "$name"
 }
 
 ensure_numeric_unused() {
