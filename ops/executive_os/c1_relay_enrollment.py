@@ -5,7 +5,7 @@ enables a service. An operator first creates/selects the dedicated Executive
 Relay app and invites its bot to the already-private ``#sol-runtime`` channel
 using native Slack administration. This root-only helper then:
 
-1. accepts the bot token only as one bounded stdin line;
+1. accepts the bot token only as one bounded, no-echo stdin line;
 2. verifies exact workspace, bot user and OAuth scope identity;
 3. proves the bot can read the fixed private channel;
 4. writes the fixed token/config files with exact ownership/modes; and
@@ -29,6 +29,7 @@ import re
 import stat
 import subprocess
 import sys
+import termios
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import BinaryIO, TextIO
@@ -141,10 +142,38 @@ def _decode_token_bytes(raw: bytes) -> str:
         raise C1EnrollmentError("C1_ENROLLMENT_INPUT_REFUSED") from None
 
 
+def _tty_fd(stream: BinaryIO) -> int | None:
+    try:
+        descriptor = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return None
+    if not isinstance(descriptor, int) or not os.isatty(descriptor):
+        return None
+    return descriptor
+
+
 def read_token_from_stdin(stream: BinaryIO) -> str:
     # readline is load-bearing for a native TTY: Enter completes the ceremony;
     # BufferedReader.read(N) would wait for EOF after a short token line.
-    return _decode_token_bytes(stream.readline(MAX_TOKEN_BYTES + 2))
+    descriptor = _tty_fd(stream)
+    if descriptor is None:
+        return _decode_token_bytes(stream.readline(MAX_TOKEN_BYTES + 2))
+
+    try:
+        original = termios.tcgetattr(descriptor)
+        muted = list(original)
+        muted[3] &= ~termios.ECHO
+        termios.tcsetattr(descriptor, termios.TCSANOW, muted)
+    except (OSError, termios.error):
+        raise C1EnrollmentError("C1_ENROLLMENT_INPUT_REFUSED") from None
+    try:
+        raw = stream.readline(MAX_TOKEN_BYTES + 2)
+    finally:
+        try:
+            termios.tcsetattr(descriptor, termios.TCSANOW, original)
+        except (OSError, termios.error):
+            raise C1EnrollmentError("C1_ENROLLMENT_INPUT_REFUSED") from None
+    return _decode_token_bytes(raw)
 
 
 def build_config_document(*, bot_user_id: str, release_sha: str) -> dict[str, object]:
