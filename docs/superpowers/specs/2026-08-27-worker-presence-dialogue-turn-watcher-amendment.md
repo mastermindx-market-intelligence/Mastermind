@@ -29,7 +29,7 @@ This amendment has higher precedence only for the following parent-spec topics:
 
 The parent ruling “Slack never originates a Wake obligation” is narrowed to:
 
-> **Raw Slack delivery, arbitrary Slack prose, channel membership and caller-selected session claims never originate Wake. A fully validated, commission-bound `mastermind.agent_dialogue` frame may deterministically produce an `AgentDialogueAttention` source fact. Executive Wake Fabric may then mint one route-independent Wake obligation from that source fact. Slack still does not originate a Job, Worker claim, authority grant, retry, provider failover or production mutation.**
+> **Raw Slack delivery, arbitrary Slack prose, channel membership and caller-selected session claims never originate Wake. A fully validated, immutable-commission-bound `mastermind.agent_dialogue` frame may deterministically produce an `AgentDialogueAttention` source fact. Executive Wake Fabric may then mint one route-independent Wake obligation from that source fact. Slack still does not originate a Job, Worker claim, authority grant, retry, provider failover or production mutation.**
 
 All other parent architecture-freeze rulings remain unchanged.
 
@@ -96,7 +96,7 @@ No watcher component may own work status, completion, retries, provider selectio
 
 The user-visible behavior is “this handoff has a watcher.” The implementation is **not** one process/task/database per handoff.
 
-There is one existing Agent Relay service. It gains one bounded dialogue-observer loop and one pure turn-classifier. At runtime it may hold an ephemeral in-memory set of currently eligible thread locators for efficiency, but that set is never authoritative and is never persisted.
+There is one existing Agent Relay service. It gains one bounded dialogue-observer loop and one pure turn-classifier. At runtime it may hold an ephemeral in-memory set of currently eligible thread locators and active `wait_for_reply` callers for efficiency, but those values are never authoritative and are never persisted.
 
 Forbidden implementations include:
 
@@ -118,19 +118,34 @@ Restart must lose only caches, not semantic truth.
 
 The watcher applies only to one already-authorized operation. It is not generic `#agent-dispatch` pickup.
 
+### 4.1 Immutable watcher opt-in
+
+Automatic turn watching is **not retroactive** for historical ASD threads. The eligible top-level parent/binding must carry the exact closed mode:
+
+```text
+watch_mode = "turn_watch_v1"
+```
+
+That mode is fingerprinted as part of the immutable thread/commission binding. A missing, unknown or edited mode receives ordinary ASD behavior only and can never trigger automatic Wake.
+
+`watch_mode` grants no execution or authority. It only declares that valid opposite-side turns from this already-authorized commission are eligible for the deterministic classifier below.
+
+### 4.2 Admission requirements
+
 Before the first actionable turn, the exact thread must validate all of:
 
 1. one eligible top-level parent in the reviewed Slack channel;
-2. exact stable `operation_key`;
-3. exact immutable `commission_ref` (`repository`, `commit`, `path`, `content_sha256`) or an equivalent already-accepted immutable commission identity;
-4. exact `work_ref` / workstream identity where applicable;
-5. accountable target seat(s);
-6. an already-lawful session-routing basis resolvable by existing Wake policy:
+2. `watch_mode="turn_watch_v1"` in the immutable parent binding;
+3. exact stable `operation_key`;
+4. exact immutable `commission_ref` (`repository`, `commit`, `path`, `content_sha256`) or an equivalent already-accepted immutable commission identity;
+5. exact `work_ref` / workstream identity where applicable;
+6. accountable target seat(s);
+7. an already-lawful session-routing basis resolvable by existing Wake policy:
    - canonical `root_job_id` binding when one exists;
    - otherwise reviewed workstream→seat binding;
    - otherwise only the existing seat default when the operation law explicitly permits that fallback;
-7. exact allowed Slack sender/app identities and dialogue schema version;
-8. complete bounded thread history sufficient to prove there is no conflicting parent or semantic fork.
+8. exact allowed Slack sender/app identities and dialogue schema version;
+9. complete bounded thread history sufficient to prove there is no conflicting parent or semantic fork.
 
 A Slack message may contain a human-readable session label, but `SessionTargetRegistry.resolve(... claimed_session_alias=...)` already ignores caller-claimed aliases. This amendment preserves that law. The watcher never routes from free-form Slack text.
 
@@ -157,7 +172,7 @@ BEFORE DOING ANY WORK:
 
 The machine contract does not infer compliance merely because an ACK string exists. A real provider/session receipt or later target acknowledgement remains separately required where the underlying Wake/runtime law requires it.
 
-The top-level commission can trigger `WAKE_COO` only when the commission already exists canonically and the exact COO routing basis is already bound. It may not find/assign a new worker, choose a provider, or mint a new Job. Absent bound recipient => `NO_ACTION / TARGET_UNBOUND`, never generic Slack dispatch.
+The top-level commission can trigger `WAKE_COO` only when the commission already exists canonically, `watch_mode` is exact, and the COO routing basis is already bound. It may not find/assign a new worker, choose a provider, or mint a new Job. Absent bound recipient => `NO_ACTION / TARGET_UNBOUND`, never generic Slack dispatch.
 
 ---
 
@@ -180,7 +195,7 @@ REFUSE
 
 | Latest valid semantic turn | Classifier result |
 |---|---|
-| valid initial commission, exact COO target bound, no COO ACK yet | `WAKE_COO` |
+| valid watcher-enabled initial commission, exact COO target bound, no COO ACK yet | `WAKE_COO` |
 | `ACK` | `NO_ACTION` |
 | `PROGRESS` with `requires_response=false` | `NO_ACTION` |
 | `BLOCKED` | `WAKE_CEO` |
@@ -230,18 +245,19 @@ Required semantic fields are limited to:
 - canonical workstream / root-job correlation when already present;
 - non-authoritative evidence refs needed to reread the exact Slack thread.
 
-The attention identity MUST NOT include:
+This source fact does **not** mint a parallel attention ID namespace. Its Wake source reference is deterministically derived from exactly:
 
-- Slack event delivery ID;
-- Slack retry count;
-- provider/model/account;
-- native session handle;
-- current RuntimeBinding generation;
-- arbitrary message prose;
-- timestamp except as non-identity evidence;
-- caller-claimed session alias.
+```text
+agent_dialogue_attention
++ commission_fingerprint
++ message_key
++ target_seat
++ dialogue_turn_pending
+```
 
-The same valid dialogue turn observed five times or rediscovered after restart produces the same semantic attention identity.
+Slack event delivery ID, Slack retry count, timestamps, provider/model/account, native session handle, current RuntimeBinding generation, arbitrary message prose and caller-claimed session alias are excluded from that identity material.
+
+The same valid dialogue turn observed five times or rediscovered after restart therefore produces the same Wake source reference.
 
 This attention fact is derived, not persisted in a new store. Slack remains the owner of thread history; the existing dialogue contract remains owner of message semantic identity.
 
@@ -249,16 +265,16 @@ This attention fact is derived, not persisted in a new store. Slack remains the 
 
 ## 8. Wake composition
 
-The Wake Fabric gains one reviewed source family conceptually equivalent to:
+The Wake Fabric gains exactly these semantic vocabulary additions when the implementation wave is lawfully released:
 
 ```text
-SourceKind.AGENT_DIALOGUE_ATTENTION
-WakeKind.DIALOGUE_TURN_PENDING
+SourceKind.AGENT_DIALOGUE_ATTENTION = "agent_dialogue_attention"
+WakeKind.DIALOGUE_TURN_PENDING = "dialogue_turn_pending"
 ```
 
-Exact enum/string syntax is frozen by the implementation plan after current #174 head/merge reconciliation, but the semantic law is fixed here.
+The implementation must re-pin #174's final accepted source law before editing Wake vocabulary; any name/path collision returns to Sol instead of silently creating synonyms.
 
-The Wake obligation identity is route-independent. It is derived from the deterministic attention source identity and wake kind, not from Slack delivery retries or provider/session routing.
+The Wake obligation identity is route-independent. It is derived from the deterministic attention source reference and wake kind, not from Slack delivery retries or provider/session routing.
 
 Routing then follows **existing `SessionTargetRegistry` precedence**:
 
@@ -286,19 +302,22 @@ If the target Claude/Fable process is still alive and already using the accepted
 
 ```text
 COO posts DECISION_REQUEST / RESULT
-    -> waits on the exact bound thread
+    -> same Agent Relay process registers one ephemeral exact-thread waiter
     -> Sol reply appears
-    -> same process validates reply
+    -> Relay satisfies that exact waiter
+    -> same COO process validates reply
     -> continues immediately
 ```
 
-No Wake delivery is necessary while the exact session is already actively waiting.
+While that exact waiter is live in the same Relay process, the observer MUST NOT issue a redundant provider Wake for the same target/turn. This is an optimization over the same semantic attention fact, not durable liveness truth.
 
-The Relay observer may still derive the same attention fact for Sol; duplicate observation remains identity-stable.
+If the Relay process restarts, the waiter disappears. The blocked client call is no longer proven live, so restart reconciliation may lawfully take the cold Wake path for the same deterministic turn.
+
+No waiter registration is persisted, leased or treated as session ownership.
 
 ### 9.2 Cold/sleeping target path
 
-If the target is not actively waiting:
+If no exact active waiter is present:
 
 ```text
 valid opposite-side dialogue turn
@@ -327,11 +346,11 @@ This preserves accountability across multiple sister Sol sessions while refusing
 
 The existing Agent Relay service owns one background observation loop after the production dialogue prerequisite permits it. This is an extension of the same service, not a second daemon.
 
-The first implementation SHOULD use the least-authority transport already supported by the accepted Agent Relay app. A bounded Web API polling implementation is acceptable for the first proof if it requires no new Slack credential class/scope and meets latency/rate limits. Socket Mode or another event stream is a later optimization only if separately justified; it is not required merely to make the architecture work.
+The WP-TW2 baseline MUST use bounded Slack Web API history/reply polling through the already-reviewed Agent Relay app surface. It may not add Socket Mode, a second app-level credential, a webhook service or another event daemon merely for the first proof. A later transport optimization needs its own bounded review.
 
 ### 10.1 No persistent cursor
 
-The observer may cache eligible thread locators and latest validated frames in memory. Those caches disappear on restart.
+The observer may cache watcher-enabled thread locators and latest validated frames in memory. Those caches disappear on restart.
 
 On service boot/reconnect:
 
@@ -339,18 +358,19 @@ On service boot/reconnect:
 CONNECTED
 -> RECONCILING
 -> bounded channel history traversal
--> identify eligible watcher-enabled commission parents
+-> identify parents with exact watch_mode="turn_watch_v1"
+-> verify immutable commission/thread binding
 -> read bounded complete thread history for each
 -> recompute turn classifier
--> derive the same attention identities
+-> derive the same attention source references
 -> READY
 ```
 
-The reviewed implementation plan must freeze numerical history/time/page bounds from actual `#agent-dispatch` volume. The bounds must be large enough to cover the declared maximum watcher-enabled commission lifetime. If complete traversal cannot be proven within those bounds, the service remains `RECONCILIATION_INCOMPLETE`; it does not skip old pending turns or create a cursor DB.
+The reviewed implementation plan must freeze numerical history/time/page bounds from actual `#agent-dispatch` volume. The bounds must cover the declared maximum watcher-enabled commission lifetime. If complete traversal cannot be proven within those bounds, the service remains `RECONCILIATION_INCOMPLETE`; it does not skip old pending turns or create a cursor DB.
 
 ### 10.2 No per-thread task lifecycle
 
-A watcher-enabled thread is eligible because its validated parent/commission says so and remains within its reviewed nonterminal dialogue semantics. There is no durable `watching=true`, lease, heartbeat or task row.
+A watcher-enabled thread is eligible because its immutable validated parent/commission carries the exact watch mode and remains within nonterminal dialogue semantics. There is no durable `watching=true`, lease, heartbeat or task row.
 
 ---
 
@@ -376,15 +396,19 @@ The separately approved Wake ACK-ingress architecture remains the owner of targe
 
 ### 12.1 Duplicate observation
 
-Same dialogue `message_key` + same semantic fingerprint + same commission => same attention source => same Wake obligation.
+Same dialogue `message_key` + same semantic fingerprint + same commission => same attention source reference => same Wake obligation.
 
-Repeated Slack events, polling passes or service restarts do not mint another logical Wake.
+Repeated Slack polling passes or service restarts do not mint another logical Wake.
 
 ### 12.2 Changed semantic payload
 
 Same semantic key + changed fingerprint => existing ASD conflict/refusal. No Wake is minted from the conflicted frame.
 
-### 12.3 Wake effect unknown
+### 12.3 Hot-wait suppression
+
+An exact in-process `wait_for_reply` waiter suppresses only the external provider delivery for its own target/turn while that call is live. It does not change source identity, persist completion or suppress Wake for another seat.
+
+### 12.4 Wake effect unknown
 
 If provider delivery may have begun but the Wake client loses the response:
 
@@ -396,17 +420,17 @@ EFFECT_UNKNOWN
 -> never choose another session/provider
 ```
 
-### 12.4 Slack write effect unknown
+### 12.5 Slack write effect unknown
 
 Existing ASD message-key/history reconciliation remains controlling. No GitHub-comment or personal-account failover is added.
 
-### 12.5 Self-loop
+### 12.6 Self-loop
 
 Agent Relay ignores/refuses its own non-dialogue transport echoes. One Sol `RULING` does not wake Sol again; one COO `RESULT` does not wake COO again. Target direction comes only from the closed classifier table.
 
-### 12.6 Stale applicability
+### 12.7 Stale applicability
 
-If the frame applies to an immutable head/commission/root identity that is now invalid under the accepted dialogue contract, classify `REFUSE`, not Wake. The target session may be manually inspected by Sol only after canonical reconciliation; the watcher does not repair source law.
+If the frame applies to an immutable head/commission/root identity that is now invalid under the accepted dialogue contract, classify `REFUSE`, not Wake. The watcher does not repair source law.
 
 ---
 
@@ -459,16 +483,17 @@ These are sub-waves of the existing WP-0 carrier/program. They do not create a n
 
 ### WP-TW1 — deterministic thread-turn classifier
 
-**Mission:** inside the existing `integrations/slack_agent_dialogue` package, implement pure deterministic parent/thread validation, turn classification and `AgentDialogueAttention` projection with zero network and zero persistence.
+**Mission:** inside the existing `integrations/slack_agent_dialogue` package, implement pure deterministic parent/thread validation, watcher-mode admission, turn classification and `AgentDialogueAttention` projection with zero network and zero persistence.
 
 **Required discriminators:**
 
-- initial bound commission => `WAKE_COO` only when recipient routing is already lawful;
+- historical parent without exact `turn_watch_v1` mode => no automatic wake;
+- initial watcher-enabled bound commission => `WAKE_COO` only when recipient routing is already lawful;
 - ACK/ordinary PROGRESS => no CEO wake;
 - BLOCKED/DECISION_REQUEST/RESULT => CEO wake;
 - RULING/CONTINUE/AMENDMENT_AVAILABLE => COO wake;
 - STOP => one terminal COO wake then terminal after exact consumption receipt;
-- duplicate Slack delivery/restart => same attention identity;
+- duplicate Slack observation/restart => same attention source reference;
 - same message key changed payload => refusal;
 - two semantic leaves => refusal;
 - wrong sender/channel/commission/work/head => refusal;
@@ -480,9 +505,9 @@ These are sub-waves of the existing WP-0 carrier/program. They do not create a n
 
 **Gates:** WP-TW1 accepted; current ASD service collision census; #174 transport/source-law reconciliation; production remains disarmed until its own gates permit.
 
-**Mission:** extend the existing Agent Relay service with one bounded background observer/reconciliation loop and adapt exact `AgentDialogueAttention` to existing Wake Fabric. No provider imports inside Slack code. No new daemon, queue, cursor, scheduler or session registry.
+**Mission:** extend the existing Agent Relay service with one bounded Web API polling/reconciliation loop and adapt exact `AgentDialogueAttention` to existing Wake Fabric. No provider imports inside Slack code. No new daemon, queue, cursor, scheduler or session registry.
 
-**Required proof:** restart reconstruction, bounded history completeness, duplicate event suppression by identity rather than mutable cursor, exact root/workstream/seat routing, unbound target refusal, Wake effect-unknown same-carrier reconciliation, and no self-loop.
+**Required proof:** exact active-waiter suppression; restart reconstruction; bounded history completeness; duplicate polling suppression by identity rather than mutable cursor; exact root/workstream/seat routing; unbound target refusal; Wake effect-unknown same-carrier reconciliation; and no self-loop.
 
 ### WP-TW3 — bilateral no-Chairman wake canary
 
@@ -533,18 +558,19 @@ Records/spec merge must never be called the capability working.
 This amendment is complete only when the real system demonstrates all of:
 
 1. one canonical commission and one Slack thread;
-2. initial COO admission requires ACK + full-thread read before work;
-3. a valid COO return wakes/re-enters the owning Sol responsibility without Chairman action;
-4. Sol rereads canonical GitHub/Agent OS/Executive evidence before consequential review/action;
-5. Sol's RULING/CONTINUE wakes the same bound COO reasoning surface without Chairman action;
-6. session/provider destination changes cannot change executive authority or dialogue identity;
-7. duplicate/replayed Slack observations cannot create duplicate logical Wake;
-8. Relay restart loses no pending turn and uses no persistent cursor/inbox;
-9. unbound/ambiguous target refuses instead of selecting another ChatGPT/Claude session;
-10. STOP reaches the target once and becomes terminal rather than creating a ping-pong loop;
-11. Slack ACK, Wake delivery and Wake TARGET_ACKNOWLEDGED remain separate facts;
-12. no new lifecycle, worker registry, watcher registry, Wake registry, queue, scheduler, retry plane or session database exists;
-13. Chris performs zero intermediate wake/copy/paste actions in the canary.
+2. old/non-opted-in ASD threads remain inert to automatic Wake;
+3. initial COO admission requires ACK + full-thread read before work;
+4. a valid COO return wakes/re-enters the owning Sol responsibility without Chairman action;
+5. Sol rereads canonical GitHub/Agent OS/Executive evidence before consequential review/action;
+6. Sol's RULING/CONTINUE either satisfies an exact live Relay waiter or wakes the same bound COO reasoning surface without Chairman action;
+7. session/provider destination changes cannot change executive authority or dialogue identity;
+8. duplicate/replayed Slack observations cannot create duplicate logical Wake;
+9. Relay restart loses no pending turn and uses no persistent cursor/inbox;
+10. unbound/ambiguous target refuses instead of selecting another ChatGPT/Claude session;
+11. STOP reaches the target once and becomes terminal rather than creating a ping-pong loop;
+12. Slack ACK, Wake delivery and Wake TARGET_ACKNOWLEDGED remain separate facts;
+13. no new lifecycle, worker registry, watcher registry, Wake registry, queue, scheduler, retry plane or session database exists;
+14. Chris performs zero intermediate wake/copy/paste actions in the canary.
 
 ---
 
