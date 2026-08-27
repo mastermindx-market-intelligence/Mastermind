@@ -44,8 +44,12 @@ _REVISION_FIELDS = {
     "identities": ("observed_at",),
 }
 _SAFE_MODES = frozenset({"GROUNDING_COMPLETE", "GROUNDING_PARTIAL"})
-# The one Agent OS envelope field that records the read, not the records.
+# The Agent OS envelope fields that record the read, not the records. Macro marks this
+# region "envelope: volatile, excluded from the byte-identity comparison" in its own
+# ``build_state``. ``active_builds_age_hours`` is ``now - active_builds.generated_at``,
+# so it carries no information the retained ``inputs.active_builds`` stamp does not.
 _AGENTOS_ACQUISITION_CLOCK = "generated_at"
+_AGENTOS_ACQUISITION_AGE = ("inputs", "active_builds_age_hours")
 
 
 def _source_available(value: object) -> bool:
@@ -166,10 +170,15 @@ def _strip_agentos_acquisition_clocks(agentos: Any) -> None:
 
     ``collect_agentos()`` forwards the caller ``--now`` to both canonical Macro reads, so
     the ``agent_os_state.v1`` and ``context_bundle.v1`` envelopes record when the read
-    happened rather than what the records say. Macro itself declares that stamp volatile
+    happened rather than what the records say. Macro itself declares that region volatile
     and excludes it from its own byte-identity comparison. Only those exact envelope
-    fields are removed here: ``source_sha``, owner record clocks, context targets and
-    sections, facts, findings, scope and admission all remain covered by the hash.
+    fields are removed here: ``source_sha``, owner record clocks, the
+    ``inputs.active_builds`` owner stamp, context targets and sections, facts, findings,
+    scope and admission all remain covered by the hash.
+
+    Measured against real canonical output taken 40 minutes apart, dropping the two
+    ``generated_at`` stamps alone still left ``inputs.active_builds_age_hours`` (76.7 vs
+    77.4) diverging, so the semantic hash still disagreed for identical records.
     """
 
     if not isinstance(agentos, dict):
@@ -177,6 +186,9 @@ def _strip_agentos_acquisition_clocks(agentos: Any) -> None:
     state = agentos.get("state")
     if isinstance(state, dict):
         state.pop(_AGENTOS_ACQUISITION_CLOCK, None)
+        envelope = state.get(_AGENTOS_ACQUISITION_AGE[0])
+        if isinstance(envelope, dict):
+            envelope.pop(_AGENTOS_ACQUISITION_AGE[1], None)
     contexts = agentos.get("contexts")
     if isinstance(contexts, list):
         for context in contexts:

@@ -259,6 +259,8 @@ def agentos_observation(
     *,
     source_sha: str = SHA_B,
     workstream_updated: str = "2026-08-26",
+    builds_stamp: str = "2026-08-24T01:18:31.138716+00:00",
+    builds_age_hours: float = 76.7,
 ) -> dict:
     """Real-style Agent OS acquisition, as ``collect_agentos()`` actually returns it.
 
@@ -275,6 +277,14 @@ def agentos_observation(
             "schema": "agent_os_state.v1",
             "generator": "scripts/agentos.py status",
             "generated_at": acquisition_clock,
+            # Macro's own volatile envelope. ``active_builds`` is the owner artifact's
+            # stamp; ``active_builds_age_hours`` is that stamp measured against --now.
+            "inputs": {
+                "workstreams": 1,
+                "active_builds": "data/governance/active_builds.json@" + builds_stamp,
+                "active_builds_age_hours": builds_age_hours,
+                "degraded": [],
+            },
             "workstreams": [
                 {
                     "key": "TARGET",
@@ -431,3 +441,45 @@ def test_required_linear_unavailable_is_dialogue_only_not_refused():
     codes = {finding["code"] for finding in receipt["findings"]}
     assert "PR_BINDING_CONFLICT" not in codes
     assert "MISSING_LINEAR_PROJECTION" not in codes
+
+
+def test_agentos_derived_build_age_does_not_change_semantic_hash():
+    """D1 residual: ``active_builds_age_hours`` is --now minus a stamp we already keep.
+
+    Measured on real canonical output 40 minutes apart: 76.7 vs 77.4 for byte-identical
+    records. Dropping only the two ``generated_at`` stamps left this field diverging, so
+    the promised law still failed on the real acquisition path.
+    """
+
+    one = build_receipt(
+        acquired_inputs(CLOCK_ONE, builds_age_hours=76.7),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    two = build_receipt(
+        acquired_inputs(CLOCK_TWO, builds_age_hours=77.4),
+        observed_started_at=CLOCK_TWO,
+        observed_ended_at=CLOCK_TWO,
+    )
+    assert semantic_projection(one) == semantic_projection(two)
+    assert one["semantic_hash"] == two["semantic_hash"]
+
+
+def test_agentos_owner_build_stamp_is_still_semantic():
+    """The owner artifact stamp the age was derived from stays covered by the hash."""
+
+    one = build_receipt(
+        acquired_inputs(CLOCK_ONE),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    two = build_receipt(
+        acquired_inputs(CLOCK_ONE, builds_stamp="2026-08-25T01:18:31.138716+00:00"),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    assert one["semantic_hash"] != two["semantic_hash"]
+    projected = semantic_projection(one)["observations"]["agentos"]["state"]["inputs"]
+    assert projected["active_builds"].endswith("2026-08-24T01:18:31.138716+00:00")
+    assert projected["workstreams"] == 1
+    assert "active_builds_age_hours" not in projected
