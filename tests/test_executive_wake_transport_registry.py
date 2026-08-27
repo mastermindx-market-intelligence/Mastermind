@@ -20,6 +20,21 @@ from integrations.executive_wake.registry import WakeDispatcherRegistry
 
 @dataclasses.dataclass
 class _FakeDispatcher:
+    transport_id: str = "codex-app-server"
+    calls: int = 0
+
+    async def nudge(self, wake):
+        self.calls += 1
+        return TransportReceipt(
+            outcome=TransportOutcome.ACCEPTED,
+            reason_code="accepted",
+            created_at="2026-08-27T09:00:00Z",
+            details=(("nudge_id", wake.nudge_id),),
+        )
+
+
+@dataclasses.dataclass
+class _IdentitylessDispatcher:
     calls: int = 0
 
     async def nudge(self, wake):
@@ -75,6 +90,27 @@ def test_registry_returns_exact_explicit_dispatcher_for_implemented_transport(mo
     registry = WakeDispatcherRegistry({"codex-app-server": fake})
 
     assert registry.resolve("codex-app-server") is fake
+
+
+def test_registry_refuses_concrete_dispatcher_identity_mismatch(monkeypatch):
+    _mark_implemented(monkeypatch, "codex-app-server")
+    _mark_implemented(monkeypatch, "claude-code-session")
+    fake = _FakeDispatcher(transport_id="claude-code-session")
+
+    with pytest.raises(WakeDispatchError, match="dispatcher transport identity"):
+        WakeDispatcherRegistry({"codex-app-server": fake})
+
+    assert fake.calls == 0
+
+
+def test_registry_refuses_missing_dispatcher_identity(monkeypatch):
+    _mark_implemented(monkeypatch, "codex-app-server")
+    fake = _IdentitylessDispatcher()
+
+    with pytest.raises(WakeDispatchError, match="dispatcher transport identity"):
+        WakeDispatcherRegistry({"codex-app-server": fake})
+
+    assert fake.calls == 0
 
 
 def test_registry_refuses_registration_for_unknown_transport():
