@@ -39,6 +39,8 @@ _WHEEL_PREFIXES = ("yaml/", "_yaml/", "pyyaml-6.0.3.dist-info/")
 _APPROVED_SYSTEM_XATTRS = frozenset({b"com.apple.provenance"})
 _CLOSED_DIRECTORY_MODES = frozenset({0o555, 0o700})
 _CLOSED_FILE_MODES = frozenset({0o400, 0o444, 0o555})
+_DARWIN_XATTR_LIST_MAX_BYTES = 64 * 1024
+_DARWIN_XATTR_ERANGE_RETRIES = 3
 
 
 class CapacityHostArtifactError(ValueError):
@@ -311,25 +313,53 @@ def _extended_attribute_names(path: Path) -> frozenset[bytes]:
 
 
 def _descriptor_extended_attribute_names(descriptor: int) -> frozenset[bytes]:
-    listxattr = getattr(os, "listxattr", None)
-    if listxattr is not None:
+    if sys.platform != "darwin":
+        listxattr = getattr(os, "listxattr", None)
+        if listxattr is None:
+            raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_UNAVAILABLE")
         try:
             return frozenset(os.fsencode(name) for name in listxattr(descriptor))
         except (OSError, TypeError, ValueError) as exc:
             raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_FAILED") from exc
-    if sys.platform != "darwin":
-        raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_UNAVAILABLE")
-    completed = subprocess.run(
-        ["/usr/bin/xattr", f"/dev/fd/{descriptor}"],
-        capture_output=True,
-        check=False,
-        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"},
-        pass_fds=(descriptor,),
-        timeout=5,
-    )
-    if completed.returncode != 0:
-        raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_FAILED")
-    return frozenset(name for name in completed.stdout.splitlines() if name)
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        flistxattr = libc.flistxattr
+    except (AttributeError, OSError) as exc:
+        raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_UNAVAILABLE") from exc
+    flistxattr.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_int,
+    ]
+    flistxattr.restype = ctypes.c_ssize_t
+    for _attempt in range(_DARWIN_XATTR_ERANGE_RETRIES):
+        ctypes.set_errno(0)
+        required = flistxattr(descriptor, None, 0, 0)
+        if required < 0:
+            raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_FAILED")
+        if required == 0:
+            return frozenset()
+        if required > _DARWIN_XATTR_LIST_MAX_BYTES:
+            raise CapacityHostArtifactError("CLOSURE_XATTR_LIST_TOO_LARGE")
+        buffer = ctypes.create_string_buffer(required)
+        ctypes.set_errno(0)
+        observed = flistxattr(descriptor, buffer, required, 0)
+        if observed < 0:
+            if ctypes.get_errno() == errno.ERANGE:
+                continue
+            raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_FAILED")
+        raw = buffer.raw[:observed]
+        if observed > required or not raw.endswith(b"\0"):
+            raise CapacityHostArtifactError("CLOSURE_XATTR_LIST_INVALID")
+        names = raw[:-1].split(b"\0")
+        if (
+            any(not name or len(name) > 127 for name in names)
+            or len(set(names)) != len(names)
+        ):
+            raise CapacityHostArtifactError("CLOSURE_XATTR_LIST_INVALID")
+        return frozenset(names)
+    raise CapacityHostArtifactError("CLOSURE_XATTR_LIST_UNSTABLE")
 
 
 def _descriptor_has_extended_acl(descriptor: int) -> bool:
@@ -377,6 +407,35 @@ def _descriptor_sha256(descriptor: int) -> str:
     for chunk in iter(lambda: os.read(descriptor, 1024 * 1024), b""):
         digest.update(chunk)
     return digest.hexdigest()
+
+
+def _descriptor_directory_names(descriptor: int) -> list[str]:
+    try:
+        with os.scandir(descriptor) as entries:
+            names = [entry.name for entry in entries]
+    except OSError as exc:
+        raise CapacityHostArtifactError("CLOSURE_DIRECTORY_UNREADABLE") from exc
+    try:
+        ordered_names = sorted(names, key=lambda name: name.encode("utf-8", "strict"))
+    except UnicodeEncodeError as exc:
+        raise CapacityHostArtifactError("CLOSURE_PATH_INVALID") from exc
+    if any(name in {"", ".", ".."} or "/" in name for name in ordered_names):
+        raise CapacityHostArtifactError("CLOSURE_PATH_INVALID")
+    return ordered_names
+
+
+def _descriptor_directory_state(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_nlink,
+        stat.S_IFMT(info.st_mode),
+        stat.S_IMODE(info.st_mode),
+        info.st_uid,
+        info.st_gid,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
 
 
 def closed_tree_digest(
@@ -431,18 +490,8 @@ def closed_tree_digest(
                     "nlink": before.st_nlink,
                 }
             )
-            try:
-                with os.scandir(descriptor) as entries:
-                    names = [entry.name for entry in entries]
-            except OSError as exc:
-                raise CapacityHostArtifactError("CLOSURE_DIRECTORY_UNREADABLE") from exc
-            try:
-                ordered_names = sorted(names, key=lambda name: name.encode("utf-8", "strict"))
-            except UnicodeEncodeError as exc:
-                raise CapacityHostArtifactError("CLOSURE_PATH_INVALID") from exc
+            ordered_names = _descriptor_directory_names(descriptor)
             for name in ordered_names:
-                if name in {"", ".", ".."} or "/" in name:
-                    raise CapacityHostArtifactError("CLOSURE_PATH_INVALID")
                 child_relative = name if relative == "." else f"{relative}/{name}"
                 try:
                     child_descriptor = os.open(
@@ -454,6 +503,17 @@ def closed_tree_digest(
                     visit(child_descriptor, child_relative)
                 finally:
                     os.close(child_descriptor)
+            after = os.fstat(descriptor)
+            final_names = _descriptor_directory_names(descriptor)
+            final = os.fstat(descriptor)
+            if (
+                _descriptor_directory_state(after)
+                != _descriptor_directory_state(before)
+                or final_names != ordered_names
+                or _descriptor_directory_state(final)
+                != _descriptor_directory_state(after)
+            ):
+                raise CapacityHostArtifactError("CLOSURE_DIRECTORY_DRIFT")
         elif stat.S_ISREG(before.st_mode):
             if before.st_nlink != 1:
                 raise CapacityHostArtifactError("CLOSURE_LINK_INVALID")

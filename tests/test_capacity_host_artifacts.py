@@ -458,6 +458,35 @@ def test_closed_tree_digest_uses_exact_canonical_rows_and_descriptor_reads(
     ) == expected
 
 
+def test_closed_tree_digest_refuses_directory_mutation_during_child_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+    original_sha256 = artifacts._descriptor_sha256
+    mutation_done = False
+
+    def mutate_after_child_read(descriptor: int) -> str:
+        nonlocal mutation_done
+        digest = original_sha256(descriptor)
+        if not mutation_done:
+            mutation_done = True
+            late = root / "late"
+            late.write_bytes(b"late")
+            late.chmod(0o400)
+        return digest
+
+    monkeypatch.setattr(artifacts, "_descriptor_sha256", mutate_after_child_read)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="DIRECTORY_DRIFT"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
 def test_closed_tree_digest_refuses_wrong_owner_group_mode_links_and_types(
     tmp_path: Path,
 ) -> None:
@@ -528,6 +557,34 @@ def test_closed_tree_digest_refuses_unapproved_xattrs(tmp_path: Path) -> None:
     except OSError:
         pytest.skip("test filesystem does not support extended attributes")
     payload.chmod(0o400)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="XATTR_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS xattr name contract")
+def test_closed_tree_digest_refuses_newline_bearing_unapproved_xattr_name(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    subprocess.run(
+        [
+            "/usr/bin/xattr",
+            "-w",
+            "com.apple.provenance\n",
+            "unsafe",
+            payload,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    payload.chmod(0o400)
+    root.chmod(0o700)
+
     with pytest.raises(artifacts.CapacityHostArtifactError, match="XATTR_INVALID"):
         artifacts.closed_tree_digest(
             root, expected_uid=os.getuid(), expected_gid=os.getgid()
