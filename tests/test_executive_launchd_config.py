@@ -810,12 +810,13 @@ def test_host_scripts_census_all_directory_membership_representations() -> None:
 
 
 def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() -> None:
-    source_policy = (OPS / "install_source_policy.py").read_text(encoding="utf-8")
+    install = (OPS / "install.sh").read_text(encoding="utf-8")
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
-    assert '["/usr/bin/git", "--no-optional-locks", "-C", str(repo), *args]' in source_policy
-    assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
-    assert "--refresh" not in source_policy
+    assert (
+        '/usr/bin/git --no-optional-locks -C "$SOURCE_REPO" status '
+        "--porcelain=v1 --untracked-files=normal"
+    ) in install
     assert (
         '"/usr/bin/git",\n'
         '                "--no-optional-locks",\n'
@@ -840,33 +841,321 @@ def test_canary_activation_uses_bounded_control_command_not_signal() -> None:
 
 
 def test_acceptance_allows_a_bounded_worker_broker_startup_window() -> None:
+    # Renamed: the worker no longer has a cold codesign/--version
+    # attestation path at startup (control_plane.codex_worker.
+    # load_codex_attestation_receipt replaced it -- see
+    # tests/test_executive_codex_attestation_receipt.py), so a bound this
+    # generous is no longer justified by *that* cost specifically. It is
+    # kept as a general allowance for the broker's other real startup work
+    # (the UID sweep, socket activation, interpreter start) on a cold,
+    # possibly host-loaded start. LowPriorityIO=true disk I/O throttling --
+    # once inherited by this same startup path -- was removed from both
+    # Executive launchd plists (see
+    # test_executive_daemons_do_not_throttle_disk_io above); this test only
+    # pins that the bound still exists and has not silently shrunk.
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
+
     assert "WorkerBrokerClient(sys.argv[1],timeout_seconds=90.0)" in acceptance
     assert 'timeout=120.0,\n            label="worker broker status"' in acceptance
 
 
 def test_acceptance_canonicalizes_canary_paths_like_control_service(tmp_path: Path) -> None:
     from ops.executive_os.acceptance import _canonical_canary_paths
+
     physical = tmp_path / "private/var/db/mastermind-executive"
     physical.mkdir(parents=True)
     alias = tmp_path / "var"
     alias.symlink_to(tmp_path / "private/var", target_is_directory=True)
     config = {
         "runtime_root": str(alias / "db/mastermind-executive/control/db"),
-        "proof_source_repository": str(alias / "db/mastermind-executive/control/admin-checkout" / ("a" * 40)),
-        "worker_provider_home": str(alias / "db/mastermind-executive/workers/codex-01/provider-home"),
+        "proof_source_repository": str(
+            alias / "db/mastermind-executive/control/admin-checkout" / ("a" * 40)
+        ),
+        "worker_provider_home": str(
+            alias / "db/mastermind-executive/workers/codex-01/provider-home"
+        ),
     }
+
     paths = _canonical_canary_paths(config)
-    assert paths["runtime_root"] == physical / "control/db"
+    assert paths == {
+        "runtime_root": physical / "control/db",
+        "database": physical / "control/db/data/control_plane/executive.sqlite3",
+        "administrative_checkout_sentinel": (
+            physical
+            / "control/admin-checkout"
+            / ("a" * 40)
+            / ".git/executive-secret-canary"
+        ),
+        "other_worker_home_sentinel": (
+            physical / "canary-fixtures/other-worker-home/sentinel"
+        ),
+        "forbidden_production_sentinel": (
+            physical / "canary-fixtures/production-like/sentinel"
+        ),
+        "codex_home": physical / "workers/codex-01/provider-home",
+    }
 
 
 def test_service_accounts_use_supported_disabled_authentication_policy_check() -> None:
-    for name in ("bootstrap-host.sh", "install.sh", "provision-worker-auth.sh"):
+    for name in (
+        "bootstrap-host.sh",
+        "install.sh",
+        "provision-worker-auth.sh",
+    ):
         source = (OPS / name).read_text(encoding="utf-8")
         assert "/usr/bin/dscl" in source
         assert "-authonly" in source
         assert "-14167" in source
         assert "eDSAuthAccountDisabled" in source
+        assert '-create "/Users/$name" AuthenticationAuthority' not in source
+
+    acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
+    assert '["/usr/bin/dscl", ".", "-authonly"' in acceptance
+    assert "-14167" in acceptance
+    assert "eDSAuthAccountDisabled" in acceptance
+
+
+def test_bootstrap_waits_boundedly_for_disabled_authentication_propagation(
+    tmp_path: Path,
+) -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+    function_body = source.split(
+        "wait_for_authentication_disabled() {", 1
+    )[1].split("\n}", 1)[0]
+    sleep_body = source.split(
+        "sleep_for_authentication_propagation() {", 1
+    )[1].split("\n}", 1)[0]
+    ensure_body = source.split("ensure_authentication_disabled() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "for attempt in 1 2 3 4 5" in function_body
+    assert "sleep_for_authentication_propagation" in function_body
+    assert sleep_body.strip() == "/bin/sleep 1"
+    assert "did not reach authentication-disabled state" in function_body
+    assert "/usr/bin/pwpolicy" not in function_body
+    assert ensure_body.count("/usr/bin/pwpolicy") == 1
+    assert ensure_body.index('if [ "$state" = needs_disable ]; then') < ensure_body.index(
+        "/usr/bin/pwpolicy"
+    ) < ensure_body.index('wait_for_authentication_disabled "$name"')
+
+    def run_wait(case_name: str, states: tuple[str, ...]):
+        case_root = tmp_path / case_name
+        case_root.mkdir()
+        state_file = case_root / "states"
+        probe_counter = case_root / "probes"
+        sleep_counter = case_root / "sleeps"
+        state_file.write_text("".join(f"{state}\n" for state in states), encoding="utf-8")
+        probe_counter.write_text("0\n", encoding="utf-8")
+        sleep_counter.write_text("0\n", encoding="utf-8")
+        script = "\n".join(
+            (
+                "set -euo pipefail",
+                "assert_reviewed_authentication_authority() { :; }",
+                "authentication_state() {",
+                '  observed="$(/bin/cat "$PROBE_COUNTER")"',
+                "  observed=$((observed + 1))",
+                "  /usr/bin/printf '%s\\n' \"$observed\" >\"$PROBE_COUNTER\"",
+                '  state="$(/usr/bin/sed -n "${observed}p" "$PROBE_STATES")"',
+                '  [ -n "$state" ] || return 65',
+                '  [ "$state" != error ] || return 65',
+                '  /bin/echo "$state"',
+                "}",
+                "sleep_for_authentication_propagation() {",
+                '  observed="$(/bin/cat "$SLEEP_COUNTER")"',
+                "  observed=$((observed + 1))",
+                "  /usr/bin/printf '%s\\n' \"$observed\" >\"$SLEEP_COUNTER\"",
+                "}",
+                "wait_for_authentication_disabled() {",
+                function_body,
+                "}",
+                "wait_for_authentication_disabled _synthetic_service",
+            )
+        )
+        completed = subprocess.run(
+            ["/bin/bash", "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PROBE_COUNTER": str(probe_counter),
+                "PROBE_STATES": str(state_file),
+                "SLEEP_COUNTER": str(sleep_counter),
+            },
+        )
+        return (
+            completed,
+            int(probe_counter.read_text(encoding="utf-8")),
+            int(sleep_counter.read_text(encoding="utf-8")),
+        )
+
+    completed, probes, sleeps = run_wait("eventual", ("needs_disable", "disabled"))
+    assert completed.returncode == 0, completed.stderr
+    assert (probes, sleeps) == (2, 1)
+
+    completed, probes, sleeps = run_wait("already", ("disabled",))
+    assert completed.returncode == 0, completed.stderr
+    assert (probes, sleeps) == (1, 0)
+
+    completed, probes, sleeps = run_wait("exhausted", ("needs_disable",) * 5)
+    assert completed.returncode == 65
+    assert (probes, sleeps) == (5, 4)
+    assert "did not reach authentication-disabled state" in completed.stderr
+
+    for case_name, state in (("unexpected", "unexpected"), ("error", "error")):
+        completed, probes, sleeps = run_wait(case_name, (state,))
+        assert completed.returncode == 65
+        assert (probes, sleeps) == (1, 0)
+
+
+def test_disabled_authentication_policy_parser_is_exact() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _authentication_authority_values,
+        _authentication_probe_is_disabled,
+    )
+
+    disabled_stdout = (
+        b"Authentication for node /Local/Default failed. "
+        b"(-14167, eDSAuthAccountDisabled)\n"
+    )
+    disabled_stderr = b"<dscl_cmd> DS Error: -14167 (eDSAuthAccountDisabled)\n"
+    assert _authentication_probe_is_disabled(87, disabled_stdout, disabled_stderr)
+    assert not _authentication_probe_is_disabled(0, disabled_stdout, disabled_stderr)
+    assert not _authentication_probe_is_disabled(
+        87, disabled_stdout, b"<dscl_cmd> DS Error: -14090 (eDSAuthFailed)\n"
+    )
+    assert not _authentication_probe_is_disabled(87, b"unexpected", disabled_stderr)
+    assert _authentication_authority_values(
+        0, b"", b"No such key: AuthenticationAuthority\n"
+    ) == ()
+    assert _authentication_authority_values(
+        0, b"AuthenticationAuthority: ;DisabledUser;\n", b""
+    ) == (";DisabledUser;",)
+    with pytest.raises(AcceptanceError, match="malformed"):
+        _authentication_authority_values(0, b"", b"unexpected\n")
+    with pytest.raises(AcceptanceError, match="exit 77"):
+        _authentication_authority_values(77, b"", b"permission denied\n")
+
+
+def test_directory_attribute_parser_accepts_standard_and_native_keys() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _parse_directory_attribute,
+    )
+
+    assert _parse_directory_attribute("UniqueID", b"UniqueID: 450\n") == "450"
+    assert (
+        _parse_directory_attribute("IsHidden", b"dsAttrTypeNative:IsHidden: 1\n")
+        == "1"
+    )
+    assert (
+        _parse_directory_attribute(
+            "RealName", b"RealName:\n _mastermind_exec service account\n"
+        )
+        == "_mastermind_exec service account"
+    )
+    with pytest.raises(AcceptanceError, match="wrong key"):
+        _parse_directory_attribute("IsHidden", b"Different:IsHidden: 1\n")
+    with pytest.raises(AcceptanceError, match="empty"):
+        _parse_directory_attribute("IsHidden", b"")
+
+
+def test_shell_attribute_parsers_bind_the_requested_key_and_native_prefix() -> None:
+    for name in (
+        "bootstrap-host.sh",
+        "install.sh",
+        "provision-worker-auth.sh",
+    ):
+        source = (OPS / name).read_text(encoding="utf-8")
+        assert '-v attribute="$attribute"' in source
+        assert 'native="dsAttrTypeNative:" attribute ":"' in source
+        assert "if (NR == 0 || malformed) exit 65" in source
+        assert 'sub(/^[^:]*:[[:space:]]*/, "")' not in source
+
+
+def test_bootstrap_uses_supported_user_identity_and_disable_operations() -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+
+    assert '-create "/Users/$name" GeneratedUID' not in source
+    assert 'read_attribute "/Users/$name" GeneratedUID' in source
+    assert (
+        '/usr/bin/pwpolicy -n /Local/Default -u "$name" -disableuser' in source
+    )
+    assert "ensure_authentication_disabled \"$name\"" in source
+    assert "assert_reviewed_authentication_authority \"$name\"" in source
+    assert "eDSAuthMethodNotSupported" in source
+    assert '"$status" -eq 11' in source
+    assert '"$state" = needs_disable' in source
+
+
+def test_bootstrap_provisions_exact_personal_pro_worker_realms_without_activation() -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+
+    assert 'PROVIDER_SLOT_RESOLVER="$SCRIPT_DIR/provider_worker_slots.py"' in source
+    assert 'PERSONAL_PRO_SLOT_IDS=("codex-pro-01" "codex-pro-02" "codex-pro-03")' in source
+    assert '"$SYSTEM_PYTHON" -I -S -B "$PROVIDER_SLOT_RESOLVER"' in source
+    assert 'for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do' in source
+    for field in (
+        "worker_user",
+        "worker_group",
+        "worker_uid",
+        "worker_gid",
+        "provider_home",
+    ):
+        assert f'slot_field "$slot_id" {field}' in source
+    assert 'ensure_group "$slot_group" "$slot_gid"' in source
+    assert 'ensure_user "$slot_user" "$slot_uid" "$slot_gid" "$slot_home"' in source
+    assert '-a "$CONTROL_USER" -t user "$slot_group"' not in source
+    assert 'assert_exact_members "$slot_group" "$slot_gid" "$slot_user" ""' in source
+    assert '-o "$slot_user" -g "$slot_group" -m 0700 "$slot_home"' in source
+    assert '-o "$slot_user" -g "$slot_group" -m 0700 "$slot_root/state"' in source
+    assert "launchctl" not in source
+    assert "service-control.sh" not in source
+    assert "/bin/cp" not in source and "/usr/bin/cp" not in source
+
+
+def test_personal_pro_groups_do_not_widen_existing_control_group_vector() -> None:
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _validate_service_directory_group_sets,
+    )
+
+    system = {
+        "everyone": 12,
+        "localaccounts": 61,
+        "_lpoperator": 100,
+        "com.apple.access_disabled": 396,
+    }
+    with pytest.raises(AcceptanceError, match="control account"):
+        _validate_service_directory_group_sets(
+            system_group_gids=system,
+            control_groups=[450, 451, 454, 12, 61, 100],
+            worker_groups=[451, 12, 61, 100],
+            control_gid=450,
+            worker_gid=451,
+        )
+
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+    assert '-a "$CONTROL_USER" -t user "$slot_group"' not in source
+    assert 'assert_exact_members "$slot_group" "$slot_gid" "$slot_user" ""' in source
+
+
+def test_personal_pro_bootstrap_identity_values_remain_catalog_owned() -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+
+    for private_identity_literal in (
+        "_mastermind_codex_01",
+        "_mastermind_codex_02",
+        "_mastermind_codex_03",
+    ):
+        assert private_identity_literal not in source
+    assert 'slot_field "$slot_id" worker_uid' in source
+    assert 'slot_field "$slot_id" worker_gid' in source
 
 
 def test_host_word_sorting_avoids_bsd_awk_index_builtin() -> None:
@@ -876,13 +1165,317 @@ def test_host_word_sorting_avoids_bsd_awk_index_builtin() -> None:
         assert "for (field_number=1; field_number<=NF; field_number++)" in source
 
 
+def test_acceptance_requires_exact_reviewed_macos_directory_group_sets() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _validate_service_directory_group_sets,
+    )
+
+    system = {
+        "everyone": 12,
+        "localaccounts": 61,
+        "_lpoperator": 100,
+        "com.apple.access_disabled": 396,
+    }
+    worker = _validate_service_directory_group_sets(
+        system_group_gids=system,
+        control_groups=[450, 451, 12, 61, 100],
+        worker_groups=[451, 12, 61, 396, 100],
+        control_gid=450,
+        worker_gid=451,
+    )
+    assert worker == {451, 12, 61, 396, 100}
+    assert _validate_service_directory_group_sets(
+        system_group_gids=system,
+        control_groups=[450, 451, 12, 61, 100, 396],
+        worker_groups=[451, 12, 61, 100],
+        control_gid=450,
+        worker_gid=451,
+    ) == {451, 12, 61, 100}
+    with pytest.raises(AcceptanceError, match="worker account"):
+        _validate_service_directory_group_sets(
+            system_group_gids=system,
+            control_groups=[450, 451, 12, 61, 100],
+            worker_groups=[451, 12, 61, 396, 100, 999],
+            control_gid=450,
+            worker_gid=451,
+        )
+    with pytest.raises(AcceptanceError, match="system group"):
+        _validate_service_directory_group_sets(
+            system_group_gids={**system, "everyone": 999},
+            control_groups=[450, 451, 12, 61, 100],
+            worker_groups=[451, 12, 61, 396, 100],
+            control_gid=450,
+            worker_gid=451,
+        )
+
+
+def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import AcceptanceError, _durable_assignment_paths
+
+    workspace_root = Path("/var/db/mastermind-executive/jobs/workspaces")
+    run_root = Path("/var/db/mastermind-executive/jobs/runs")
+    job = {
+        "job_id": "job-1",
+        "current_attempt_id": "attempt-1",
+        "worktree": str(workspace_root / "proof-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+    }
+    attempt = {
+        "attempt_id": "attempt-1",
+        "job_id": "job-1",
+        "result_path": str(run_root / "attempt-1" / "output" / "result.json"),
+    }
+    assert _durable_assignment_paths(
+        job, attempt, workspace_root=workspace_root, run_root=run_root
+    ) == (Path(job["worktree"]), run_root / "attempt-1")
+
+    drifted = dict(attempt, result_path="/tmp/attempt-1/output/result.json")
+    with pytest.raises(AcceptanceError, match="escaped"):
+        _durable_assignment_paths(
+            job, drifted, workspace_root=workspace_root, run_root=run_root
+        )
+
+
+def _assignment_seal_payload() -> dict:
+    def identity(path: str, mode: int) -> dict:
+        return {
+            "path": path,
+            "device": 7,
+            "inode": 11 if path.endswith("workspace") else 12,
+            "mode": mode,
+            "uid": 450,
+            "gid": 451,
+            "mtime_ns": 1,
+        }
+
+    workspace = "/var/db/mastermind-executive/jobs/workspaces/workspace"
+    run = "/var/db/mastermind-executive/jobs/runs/attempt-1"
+    return {
+        "schema_version": "mastermind.executive_assignment_seal/v1",
+        "attempt_id": "attempt-1",
+        "job_id": "job-1",
+        "sealed_at": "2026-08-11T00:00:00+00:00",
+        "control_uid": 450,
+        "passed": True,
+        "paths": {
+            "workspace": {
+                "before": identity(workspace, 0o750),
+                "after": identity(workspace, 0o700),
+                "worker_traversal_revoked": True,
+            },
+            "run": {
+                "before": identity(run, 0o770),
+                "after": identity(run, 0o700),
+                "worker_traversal_revoked": True,
+            },
+        },
+        "uid_sweep": {
+            "schema_version": "mastermind.executive_uid_sweep/v2",
+            "observed_at": "2026-08-11T00:00:01+00:00",
+            "reason": "run_terminal",
+            "worker_uid": 451,
+            "broker_pid": 42419,
+            "residual_pids_before": [],
+            "residual_pids_after": [],
+            "signal_name": "SIGKILL",
+            "signal_sent": False,
+            "quiescent_observations": 2,
+            "ambient_pids": [],
+            "ambient_identities": [],
+            "ambient_attribution": "absent",
+            "passed": True,
+            "found_residuals": False,
+        },
+    }
+
+
+def test_acceptance_validates_terminal_assignment_seal_identity_and_modes() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _validate_assignment_seal_payload,
+    )
+
+    payload = _assignment_seal_payload()
+    _validate_assignment_seal_payload(
+        payload,
+        job_id="job-1",
+        attempt_id="attempt-1",
+        workspace=Path("/var/db/mastermind-executive/jobs/workspaces/workspace"),
+        run_dir=Path("/var/db/mastermind-executive/jobs/runs/attempt-1"),
+        control_uid=450,
+        worker_gid=451,
+    )
+
+    drifted = copy.deepcopy(payload)
+    drifted["paths"]["run"]["after"]["mode"] = 0o750
+    with pytest.raises(AcceptanceError, match="run"):
+        _validate_assignment_seal_payload(
+            drifted,
+            job_id="job-1",
+            attempt_id="attempt-1",
+            workspace=Path("/var/db/mastermind-executive/jobs/workspaces/workspace"),
+            run_dir=Path("/var/db/mastermind-executive/jobs/runs/attempt-1"),
+            control_uid=450,
+            worker_gid=451,
+        )
+
+
+def _raw_probe_payload(*, allowed: bool) -> dict:
+    operation = {
+        "allowed": allowed,
+        "error_class": None if allowed else "PermissionError",
+        "errno_name": None if allowed else "EACCES",
+    }
+    return {
+        "schema_version": "mastermind.executive_raw_worker_path_probe/v1",
+        "effective_uid": 451,
+        "real_uid": 451,
+        "effective_gid": 451,
+        "real_gid": 451,
+        "supplementary_gids": [451],
+        "results": {
+            "workspace": {
+                "open": dict(operation),
+                "stat": dict(operation),
+                "list": dict(operation),
+            }
+        },
+    }
+
+
+def test_acceptance_raw_worker_probe_requires_eacces_for_every_operation() -> None:
+    import pytest
+
+    from ops.executive_os.acceptance import (
+        AcceptanceError,
+        _validate_raw_worker_probe_payload,
+    )
+
+    denied = _raw_probe_payload(allowed=False)
+    _validate_raw_worker_probe_payload(
+        denied,
+        expected_labels={"workspace"},
+        worker_uid=451,
+        worker_gid=451,
+        expected_supplementary_gids={451},
+        expect_access=False,
+    )
+    allowed = _raw_probe_payload(allowed=True)
+    _validate_raw_worker_probe_payload(
+        allowed,
+        expected_labels={"workspace"},
+        worker_uid=451,
+        worker_gid=451,
+        expected_supplementary_gids={451},
+        expect_access=True,
+    )
+
+    ambient = copy.deepcopy(denied)
+    ambient["supplementary_gids"] = [12, 61, 100, 396, 451]
+    _validate_raw_worker_probe_payload(
+        ambient,
+        expected_labels={"workspace"},
+        worker_uid=451,
+        worker_gid=451,
+        expected_supplementary_gids={12, 61, 100, 396, 451},
+        expect_access=False,
+    )
+    unexpected = copy.deepcopy(ambient)
+    unexpected["supplementary_gids"].append(999)
+    with pytest.raises(AcceptanceError, match="wrong worker principal"):
+        _validate_raw_worker_probe_payload(
+            unexpected,
+            expected_labels={"workspace"},
+            worker_uid=451,
+            worker_gid=451,
+            expected_supplementary_gids={12, 61, 100, 396, 451},
+            expect_access=False,
+        )
+    malformed = copy.deepcopy(denied)
+    malformed["supplementary_gids"] = [{}]
+    with pytest.raises(AcceptanceError, match="wrong worker principal"):
+        _validate_raw_worker_probe_payload(
+            malformed,
+            expected_labels={"workspace"},
+            worker_uid=451,
+            worker_gid=451,
+            expected_supplementary_gids={451},
+            expect_access=False,
+        )
+
+    ambiguous = copy.deepcopy(denied)
+    ambiguous["results"]["workspace"]["stat"]["errno_name"] = "EPERM"
+    with pytest.raises(AcceptanceError, match="EACCES"):
+        _validate_raw_worker_probe_payload(
+            ambiguous,
+            expected_labels={"workspace"},
+            worker_uid=451,
+            worker_gid=451,
+            expected_supplementary_gids={451},
+            expect_access=False,
+        )
+
+
+def test_acceptance_covers_success_lost_rotation_active_and_resealed_boundaries() -> None:
+    source = (OPS / "acceptance.py").read_text(encoding="utf-8")
+    for receipt in (
+        "success-terminal-assignment-boundary.json",
+        "lost-terminal-assignment-boundary.json",
+        "requeue-workspace-rotation-boundary.json",
+        "requeue-active-assignment-boundary.json",
+        "requeued-terminal-assignment-boundary.json",
+        "requeued-archive-still-denied.json",
+    ):
+        assert receipt in source
+    assert '"open"' in source
+    assert '"stat"' in source
+    assert '"list"' in source
+    assert 'os.path.join(path,".")' in source
+
+
+def test_release_manifest_rejects_ownership_and_group_write_drift() -> None:
+    import pytest
+
+    from ops.executive_os.release_manifest import (
+        ReleaseManifestError,
+        _validate_owned_info,
+    )
+
+    _validate_owned_info(
+        SimpleNamespace(st_uid=0, st_gid=0, st_mode=stat.S_IFREG | 0o644),
+        label="safe.py",
+    )
+    with pytest.raises(ReleaseManifestError, match="root:wheel"):
+        _validate_owned_info(
+            SimpleNamespace(st_uid=501, st_gid=20, st_mode=stat.S_IFREG | 0o644),
+            label="mutable.py",
+        )
+    with pytest.raises(ReleaseManifestError, match="writable"):
+        _validate_owned_info(
+            SimpleNamespace(st_uid=0, st_gid=0, st_mode=stat.S_IFREG | 0o664),
+            label="group-write.py",
+        )
+
+
 def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -> None:
     source = (OPS / "install.sh").read_text(encoding="utf-8")
     stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"')
-    control_absent = source.index('if /bin/launchctl print "system/$CONTROL_LABEL"', stop)
-    worker_absent = source.index('if /bin/launchctl print "system/$WORKER_LABEL"', control_absent)
+    control_absent = source.index(
+        'if /bin/launchctl print "system/$CONTROL_LABEL"', stop
+    )
+    worker_absent = source.index(
+        'if /bin/launchctl print "system/$WORKER_LABEL"', control_absent
+    )
     archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
     config_write = source.index('temporary.write_text(', archive)
     plist_install = source.index('/usr/bin/install -o root -g wheel -m 0644')
     assert stop < control_absent < worker_absent < archive < config_write < plist_install
     assert "trap leave_installed_services_stopped EXIT" in source
+    tail_after_plists = source[plist_install:]
+    assert '/bin/launchctl bootstrap' not in tail_after_plists
