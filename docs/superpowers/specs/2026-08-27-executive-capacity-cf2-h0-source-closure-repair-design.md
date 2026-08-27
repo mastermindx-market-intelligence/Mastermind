@@ -21,9 +21,12 @@ The repair restores the promise H0 was meant to make: the fixed installed Macro 
 accepted commit graph is fully present offline, whose only material worktree files are the frozen
 eleven CF1 paths, and whose metadata cannot trigger or conceal lazy acquisition.
 
-The new H0 generation truthfully identifies the exact merged repair/preparer commit as current. It
-retains `e4e44867ace335ac9208a3990a10c163e199492d` only as superseded provenance. Success is still
-not CF2-P0 acceptance. The repair's terminal capability is:
+The repaired H0 generation is deliberately composite. The exact existing commit
+`e4e44867ace335ac9208a3990a10c163e199492d` remains the current inert topology, Mastermind release,
+rollback, and topology-preparer identity because those bytes do not change. The future exact merged
+repair commit becomes `source_closure_repair_commit` and `generation_repair_commit`; it does not
+become a topology release or replace `e4e44867...` as `preparer_source_commit`. Success is still not
+CF2-P0 acceptance. The repair's terminal capability is:
 
 ```text
 H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED
@@ -67,7 +70,7 @@ installed Git object's current promisor or closure state:
 | `rollback-contract.json` | `18d83b0e164ac2e917d84c01fe1d53fc5c1ce0c33ac9580f11d684e16e495093` |
 | `rollback-drill-receipt.json` | `7efba70495cbbf8bcad0c4e47e894a23f4b1618756d8c3e23cae85ad6b7250ba` |
 | Receipt outcome | `H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED` |
-| Prior preparer | `e4e44867ace335ac9208a3990a10c163e199492d` |
+| Current topology/release/preparer | `e4e44867ace335ac9208a3990a10c163e199492d` |
 | Macro commit | `dcdd939c45b23abce5ba04f95e330ac914a3904b` |
 | Material digest | `35931b4ef965c5d67a7e01444dd483804e48671784716ea8196c94e925466650` |
 
@@ -79,8 +82,8 @@ not rewrite the intent around a newly discovered state.
 | Capability | State before repair | State after this carrier's proof |
 |---|---|---|
 | H0 ordinary complete Git object closure | `BROKEN` | `BUILT_NOT_PROVEN` after merge; `PROVEN_LIVE` only after native repair plus two verify-only passes |
-| H0 runtime, telemetry boundary, inert topology, rollback drill | `PARTIAL` as old receipted prerequisites | Preserved and reverified; not rebuilt |
-| Truthful H0 current preparer/source identity | `BROKEN` | New repair merge is current; `e4e44867...` is superseded provenance only |
+| H0 runtime, telemetry boundary, inert topology, rollback drill | `PARTIAL` as old receipted prerequisites | Preserved byte-for-byte and reverified; `e4e44867...` remains their current release/preparer identity |
+| Truthful H0 source-closure identity | `BROKEN` | Future merge is the distinct current `source_closure_repair_commit` and `generation_repair_commit` |
 | CF2-P0 Task 1-3 implementation | `BUILT_NOT_PROVEN` at immutable head `e315ba0...` | Unchanged and still blocked on a separate re-pin/review carrier |
 | CF2-P0 production acceptance | `NOT_BUILT` / no accepted current result | Unchanged |
 | OAuth, provider execution, services, routing, workers, CF2-I | `REJECTED_BY_DESIGN` in H0 | Unchanged |
@@ -115,15 +118,14 @@ The repair extends the existing owners:
 - `capacity_host_artifacts.py` owns data-only transport, materialization, metadata digests, closure
   verification, and resumable intent/receipt publication;
 - the new `repair-capacity-source-closure.sh` owns the one privileged archive/install transition;
-- `prepare-capacity-host.sh` adopts the complete v2 transport and receipt law for future clean H0
-  installations; and
 - `HOST_PREREQUISITES.md` owns the native operator ceremony.
 
 The fixed installed source path, Macro commit, eleven material paths, H0 lock, staging/archive/
 generation roots, runtime, PyYAML, telemetry boundary, three realm identities, topology, rollback
 contract, rollback-drill archive, legacy services, and socket absence remain canonical. The repair
-does not introduce another source root, lifecycle store, queue, retry plane, receipt authority,
-service family, provider normalizer, or P0 gate.
+does not install a new Mastermind release, rerender topology, rewrite broker configs, attestations
+or plists, mutate launchd, rerun the rollback drill, or introduce another source root, lifecycle
+store, queue, retry plane, receipt authority, service family, provider normalizer, or P0 gate.
 
 The successful end state has one visible installed source at the existing path and one visible
 current generation. Superseded source/generation trees exist only as immutable children of the
@@ -168,8 +170,12 @@ network prompts disabled. Any missing object refuses. One object-inventory row i
 Rows are unique and sorted bytewise by OID. `object_count` is the row count and
 `object_inventory_sha256` hashes their concatenation. `payload_sha256` hashes raw pack bytes.
 `material` remains the exact ordered eleven-row v1 structure: `path`, `mode`, `git_blob`, `sha256`,
-`size`. Pack/ZIP hashes bind the delivered carrier; object-inventory and material hashes bind its
-semantic closure even if a later equivalent pack encoding differs.
+`size`. The object inventory is the deterministic semantic identity of the reachable closure;
+`payload_sha256` and the enclosing ZIP SHA-256 are per-carrier integrity identities. Raw pack and
+ZIP bytes are not required to be reproducible across two semantically equivalent builds because
+Git may choose different valid delta layouts. Two accepted carriers for the same commit must have
+the same object count, object-inventory digest, and material rows, while their payload/ZIP hashes
+may differ and remain independently receipted.
 
 ## 7. Ordinary complete installed repository
 
@@ -180,7 +186,9 @@ operator repository. Before installed mutation it must prove:
 - every reachable object is locally readable with the manifest type/size and strict ordinary
   `git fsck --full --strict` succeeds;
 - exactly one ordinary `.pack`/`.idx` pair exists;
-- no `.promisor`, replacement ref, graft, alternate, shallow file, remote, promisor config,
+- direct inspection before `fsck` finds no loose replacement ref under `.git/refs/replace`, packed
+  replacement ref in `.git/packed-refs`, graft row in `.git/info/grafts`, `.promisor`, alternate,
+  shallow file, remote, promisor config,
   partial-clone extension/filter, `filter.*` config, URL rewrite, include, or credential helper;
 - sparse checkout projects only the eleven worktree files but does not filter the complete object
   store; and
@@ -205,9 +213,12 @@ observed from the verified v2 manifest, never accepted as caller assertions.
 
 ## 8. Filesystem and digest law
 
-Every security-relevant path is opened without following links and rebound by descriptor. Regular
-files have link count one. Symlinks, sockets, devices, FIFOs, hard links, ACLs, non-root/non-wheel
-ownership, and group/other-writable objects refuse. Only system-maintained
+Every security-relevant path is opened without following links and rebound by descriptor. This
+includes `.git/config`, `.git/packed-refs`, `.git/info/alternates`, `.git/info/grafts`, shallow and
+promisor markers, their parents, and lock siblings; a symlink, hard link, or pre-existing lock at
+any optional metadata location refuses rather than being treated as absence. Regular files have
+link count one. Symlinks, sockets, devices, FIFOs, hard links, ACLs, non-root/non-wheel ownership,
+wrong expected GID, and group/other-writable objects refuse. Only system-maintained
 `com.apple.provenance` may exist; every other xattr refuses, and provenance bytes are excluded from
 content identity.
 
@@ -215,6 +226,13 @@ Installed source directories are `root:wheel 0555`; ordinary files are `0444`; m
 whose Git mode is `100755` are `0555`. Git config/index/pack/idx/object/info/manifest files are
 single-link `root:wheel 0444`. Staging and repair archive directories are `0700`; durable intent/
 receipt files are `0400`; the new generation directory is `0555` and its six files are `0444`.
+Every publisher and reconciler receives both `expected_uid` and `expected_gid`, verifies both with
+`fstat`, and binds them in its accepted metadata state. Before intent publication, the carrier
+opens the staging, installed-source, generation, and archive parents and proves their `st_dev`
+values are identical. Every transition uses descriptor-relative, no-replace
+`renameatx_np(..., RENAME_EXCL)` semantics. `EXDEV`, an existing destination, or an unavailable
+no-replace primitive refuses before overwriting; copying, deleting, or replacing as fallback is
+forbidden.
 
 The closed tree digest is SHA-256 over canonical compact JSON for rows sorted by UTF-8 POSIX
 relative path. Every row has `path,type,uid,gid,mode,nlink`; file rows also have `size,sha256`.
@@ -228,40 +246,79 @@ topology/rollback retain validated renderer bytes; rollback-drill receipt retain
 
 ## 9. Source and H0 evidence schemas
 
-The source config advances to `mastermind.executive_capacity_source_config/v2` because its
-working-directory identity changes semantically. Executable, entrypoint, inventory, telemetry,
-runtime, topology, and rollback component schemas remain unchanged. The generation still contains
-exactly the same six filenames.
+The repaired generation has one explicit composite identity object with exactly:
+
+```text
+schema_version preparer_source_commit topology_release_commit
+source_closure_repair_commit generation_repair_commit topology_state
+release_install_state rollback_drill_state
+```
+
+Its schema is `mastermind.executive_capacity_h0_generation_identity/v1`.
+`preparer_source_commit` and `topology_release_commit` remain
+`e4e44867ace335ac9208a3990a10c163e199492d`.
+`source_closure_repair_commit` and `generation_repair_commit` both equal the future exact protected
+merge that implements this source-only repair and constructs its new generation evidence. Fixed
+state values are
+`topology_state=preserved_byte_for_byte`, `release_install_state=not_installed`, and
+`rollback_drill_state=preserved_not_rerun`. `components.json` adds this object as
+`h0_generation_identity`; executable, entrypoint, inventory, telemetry, runtime, topology, and
+rollback component schemas and bytes otherwise remain unchanged.
+The top-level `components.json` field set is exactly:
+
+```text
+source_executable_identity source_entrypoint_identity source_working_directory_identity
+inventory_config telemetry_config h0_generation_identity
+```
+
+The source config advances to `mastermind.executive_capacity_source_config/v2` because its working
+directory identity and generation composition change. It has exactly:
+
+```text
+schema_version p0_source_kind source_contract_id source_release_commit
+source_executable_identity_digest source_entrypoint_identity_digest
+source_working_directory_identity_digest allowed_environment_names
+inventory_config_digest telemetry_config_digest timeout_seconds stdout_max_bytes
+stderr_retained_max_bytes no_shell network_denied write_denied preparer_source_commit
+topology_release_commit source_closure_repair_commit generation_repair_commit
+h0_generation_identity_digest
+```
+
+The four commit fields equal the composite identity above and the identity digest hashes its
+canonical compact JSON. The generation still contains exactly the same six filenames.
 
 The host receipt advances to `mastermind.executive_capacity_host_preparation/v2` and has exactly:
 
 ```text
-schema_version outcome preparer_source_commit repair_source_commit source_release_commit
+schema_version outcome preparer_source_commit topology_release_commit
+source_closure_repair_commit generation_repair_commit source_release_commit
 producer_material_source_digest source_config_digest component_manifest_digest
-source_closure_state source_repair_receipt_digest prior_provenance broker_count
+source_closure_state source_repair_receipt_digest prior_generation broker_count
 broker_topology_digest rollback_contract_digest rollback_drill_receipt_digest
 service_state socket_state control_state credential_state worker_execution_state cf2_i_state
 ```
 
-`preparer_source_commit` and `repair_source_commit` both equal the exact merged repair commit.
-`source_closure_state=complete_non_promisor_offline_no_lazy_fetch`. `prior_provenance` has exactly:
-
-```text
-status = superseded_archived_not_current
-preparer_source_commit = e4e44867ace335ac9208a3990a10c163e199492d
-generation_digest = 2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60
-generation_artifact_sha256 = {
-  "broker-topology.json": "981e880ba7d21a0003fe2dd8322c5793f2643b815d094374dd6fad3fed31e453",
-  "components.json": "02886a6c79f22534ac24234d8adb3224329976342393988541c2a50d7e297f29",
-  "host-preparation-receipt.json": "51c58d18869663d90c593e416c7fc7833b3725378870f576abd3647f62f40830",
-  "rollback-contract.json": "18d83b0e164ac2e917d84c01fe1d53fc5c1ce0c33ac9580f11d684e16e495093",
-  "rollback-drill-receipt.json": "7efba70495cbbf8bcad0c4e47e894a23f4b1618756d8c3e23cae85ad6b7250ba",
-  "source-config.json": "2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60"
-}
-```
+The four commit identities equal the source config. `outcome` remains
+`H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED`; `source_release_commit` remains the Macro commit.
+`source_closure_state=complete_non_promisor_offline_no_lazy_fetch`. `prior_generation` has
+exactly `status`, `generation_digest`, and `generation_artifact_sha256`; `status` is
+`archived_superseded_generation_same_current_e4_topology_identity`, the digest is
+`2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60`, and its six-name hash map
+is exactly the table in section 2. The old generation is superseded; `e4e44867...` is not.
 
 The new generation basename is its new canonical source-config digest. The old basename may not
-remain a visible current generation after commit.
+remain a visible current generation after commit. `broker-topology.json`,
+`rollback-contract.json`, and `rollback-drill-receipt.json` in the new generation are byte-for-byte
+copies whose hashes remain the section 2 values; they are not rerendered.
+
+The digest graph is acyclic and one-way. The working-directory identity binds the semantic object
+inventory. `components.json` binds that identity and the composite H0 identity. `source-config.json`
+binds the individual component digests and repeats both commit axes. The repair receipt binds the
+intent, installed/archive tree digests, object inventory, source-config digest, and component-
+manifest digest. Only then does the host receipt bind the repair-receipt digest plus source/config
+and preserved topology/rollback digests. Neither the repair receipt nor any earlier object contains
+the host-receipt digest. The proof packet records the host-receipt and closed-generation hashes
+externally.
 
 ## 10. One durable repair intent and receipt
 
@@ -271,24 +328,31 @@ old-state gates verify, but before installed mutation, it publishes one
 `mastermind.executive_capacity_h0_source_repair_intent/v1` object with exactly:
 
 ```text
-schema_version intent_id operation repair_source_commit macro_release_commit
+schema_version intent_id operation preparer_source_commit topology_release_commit
+source_closure_repair_commit generation_repair_commit source_release_commit expected_uid
+expected_gid filesystem_device
 producer_material_source_digest old_generation observed_old_source_tree_sha256
 candidate_transport_sha256 candidate_transport_manifest_sha256 candidate_object_count
 candidate_object_inventory_sha256 candidate_source_tree_sha256 service_state socket_state
 credential_state worker_execution_state cf2_i_state
 ```
 
-`operation=side_by_side_non_promisor_rematerialization`. `old_generation` contains the exact
-basename, prior preparer, outcome, and six artifact hashes from section 2. `intent_id` is SHA-256
-over canonical compact JSON of every other field. The archive is derived as
+`operation=side_by_side_non_promisor_rematerialization`. `old_generation` has exactly
+`generation_digest`, `preparer_source_commit`, `topology_release_commit`, `outcome`, and
+`generation_artifact_sha256`; their values are the current `e4` identity, old outcome, digest, and
+six artifact hashes from section 2.
+The identity fields equal section 9, `expected_uid=0`, `expected_gid=0`, and `filesystem_device` is
+the common decimal `st_dev` proven for all transition parents. `intent_id` is SHA-256 over canonical
+compact JSON of every other field. The archive is derived as
 `capacity-archive/source-closure-repair-<intent_id>` and is not caller-selected.
 
 After installed verification, the same archive receives one
 `mastermind.executive_capacity_h0_source_repair/v1` receipt with exactly:
 
 ```text
-schema_version outcome intent_id repair_source_commit source_release_commit
-producer_material_source_digest prior_preparer_source_commit prior_generation_digest
+schema_version outcome intent_id preparer_source_commit topology_release_commit
+source_closure_repair_commit generation_repair_commit source_release_commit expected_uid
+expected_gid filesystem_device producer_material_source_digest prior_generation_digest
 archived_source_tree_sha256 archived_generation_tree_sha256 installed_source_tree_sha256
 installed_object_count installed_object_inventory_sha256 new_source_config_digest
 new_component_manifest_digest service_state socket_state
@@ -304,25 +368,62 @@ receipt is not a seventh generation file.
 
 The root carrier performs this exact sequence under the H0 lock:
 
-1. Verify the sealed Mastermind checkout at the exact merged repair commit.
-2. Verify preserved H0 runtime/topology/telemetry/principal/legacy/service/socket invariants.
+1. Parse one of the two exact command forms below, verify effective UID zero, and verify the sealed
+   Mastermind checkout at the exact `source_closure_repair_commit`.
+2. Verify preserved H0 runtime/topology/telemetry/legacy/service/socket invariants and the
+   repair-specific principal facts defined below without provider-home access.
 3. Match the old generation and its six old artifact hashes.
-4. Copy the operator-owned v2 transport by no-follow descriptor and bind its independent SHA-256.
+4. Open all transition parents, prove one `st_dev`, prove every destination absent, copy the
+   operator-owned v2 transport by no-follow descriptor, and bind its independent SHA-256.
 5. Materialize and completely verify the side-by-side source candidate.
 6. Publish and fsync the one durable repair intent.
-7. Move the old source into the intent archive atomically and fsync both parents.
-8. Install the candidate at the fixed source path atomically and fsync both parents.
-9. Move the old generation into the same archive atomically and fsync both parents.
+7. Move the old source into the intent archive with no-replace rename and fsync both parents.
+8. Install the candidate at the fixed source path with no-replace rename and fsync both parents.
+9. Move the old generation into the same archive with no-replace rename and fsync both parents.
 10. Reverify source closure and every preserved invariant.
 11. Publish/fsync the repair receipt, build the new hidden six-file generation candidate, and
-    verify all internal/external digest links.
+    verify all internal/external digest links, including byte equality for preserved topology and
+    rollback artifacts.
 12. Reverify source, repair archive/receipt, generation candidate, runtime, topology, rollback,
     telemetry, services, sockets, legacy files, and principals.
-13. Rename the hidden generation to its digest basename as the last semantic filesystem mutation
-    and sole commit point.
+13. Rename the hidden generation to its digest basename with descriptor-relative no-replace rename
+    as the last semantic filesystem mutation and sole commit point.
+14. `fsync` the open capacity-generations parent directory as the required durability barrier,
+    close descriptors, write the fixed success sentinel, and exit zero.
 
-No correction or verification occurs after the final rename. The script writes only the fixed
-success sentinel and exits. The retained lock file is an exclusion artifact, not a state record.
+No correction, content rewrite, topology render, release install, or rollback occurs after the
+final rename. The parent-directory `fsync`, descriptor closes, and fixed stdout write are durability
+and reporting operations, not semantic filesystem mutations. The retained lock file is an
+exclusion artifact, not a state record.
+
+The repair-specific principal proof is deliberately narrower than P0. It makes attribute-scoped
+directory-service queries for only fixed record names, UIDs, primary GIDs, and fixed group
+membership/nonmembership facts, and verifies the fixed topology labels are disabled/unloaded and
+their socket nodes absent. It does not request a home-directory attribute and never resolves,
+stats, reads, traverses, or enumerates any provider-home path. H0 receipts claim only these fixed
+identity/membership/topology facts.
+The later P0 ceremony separately re-proves provider-home ownership, mode, and non-traversal.
+
+The CLI accepts only these ordered argv forms:
+
+```text
+/bin/bash ops/executive_os/repair-capacity-source-closure.sh repair \
+  --expected-source-closure-repair-commit <40-lower-hex> \
+  --operator-user <local-name> \
+  --macro-transport <absolute-transport-path> \
+  --macro-transport-sha256 <64-lower-hex>
+
+/bin/bash ops/executive_os/repair-capacity-source-closure.sh verify-only \
+  --expected-source-closure-repair-commit <40-lower-hex>
+```
+
+`local-name` matches `[a-z_][a-z0-9._-]{0,63}`. `absolute-transport-path` is one absolute POSIX path
+argument with no empty component, `.` or `..` component, CR, or LF; its single-link regular-file
+metadata and supplied-byte digest are verified later as preflight, with mismatch returning exit 65.
+`generation_repair_commit` must equal the expected source-closure repair commit. Missing, extra,
+reordered, mixed-mode, duplicate, help, empty, malformed, adversarial, relative-path, wrong-case
+digest/commit, or illegal path/digest combinations return exactly exit 64,
+`INVALID_INVOCATION\n` on stdout, and empty stderr without acquiring the lock or reading host state.
 
 ## 12. Crash reconciliation, failure, and rollback
 
@@ -337,9 +438,19 @@ candidate/current trees are archived under the same repair archive; nothing is d
 crash, the same carrier may resume forward from a uniquely valid next position or restore the
 uniquely valid prior position. It never guesses, overwrites, changes an intent, or auto-fails over.
 
-After the new visible generation verifies against the intent and repair receipt, the repair is
-committed. The carrier never restores the superseded promisor source automatically. Later drift is
-a verify-only refusal and requires a new Sol ruling.
+After the final generation rename succeeds, the repair is semantically committed. A failure or
+ambiguous result from the immediately following capacity-generations parent `fsync` returns exit
+70 with no pass sentinel and no automatic rollback: only the same carrier may reconcile. On replay,
+the carrier accepts committed state only after reopening and fully reverifying the visible
+generation, intent, repair receipt, installed source, archived source/generation, identity links,
+and the parent-device law. It then completes the durability barrier if needed and may emit success.
+The carrier never restores the archived promisor source automatically after a visible committed
+generation. Later drift is a verify-only refusal and requires a new Sol ruling.
+
+Crash tests freeze four final-publication boundaries: before rename; after rename but before parent
+`fsync`; after parent `fsync` but before stdout; and after stdout. Each replay must produce exactly
+one verified committed generation or the uniquely verified precommit state, never two visible
+generations, overwrite, deletion, or an inferred pass.
 
 Fixed exits/stdout are:
 
@@ -364,28 +475,40 @@ recorded digest. During the root ceremony there is no network, credential/provid
 service mutation, socket creation/connection, provider call, routing, or worker execution.
 
 One native administrator dialog executes the repair once from the sealed merged checkout. That
-checkout then runs verify-only twice. Each pass independently reopens and verifies complete object
-closure, the six-file generation, repair archive/receipt, runtime, topology, rollback evidence,
-telemetry boundary, fixed principal-directory metadata, disabled/unloaded labels, absent sockets,
-and legacy state. Verify-only does not write the lock, create an intent, or mutate any path.
+checkout then runs verify-only twice using the exact CLI grammar. Each pass independently reopens
+and verifies complete object closure, the six-file generation, repair archive/receipt, runtime,
+byte-preserved topology/rollback evidence, telemetry boundary, fixed directory-service identity
+and membership facts, disabled/unloaded labels, absent sockets, and legacy state. Verify-only does
+not write the lock, create an intent, mutate any path, or access provider homes.
 
-The governed packet records sanitized facts only: repair merge, v2 transport/manifest hashes,
-object count/inventory digest, new generation basename and six hashes, repair receipt hash,
-archived old identities, the repair sentinel, two verify sentinels, and zero scoped mutation for
-each verify pass.
+The governed packet records sanitized facts only: `e4e44867...` as current topology-preparer and
+topology-release identity; the exact source-closure/generation repair merge; v2 ZIP/payload/manifest
+hashes as per-carrier integrity; semantic object count/inventory digest; new generation basename
+and six hashes; unchanged topology/rollback hashes; repair intent and receipt hashes; UID/GID and
+common-device pass facts; archived old generation/source digests; the repair sentinel; two verify
+sentinels; and zero scoped mutation for each verify pass. The packet does not record provider-home
+paths or credential material.
 
 ## 14. Testing and exact stop condition
 
 Tests must prove refusal for marker deletion without complete objects, promisor-enabled `fsck`, a
 fabricated `lazy_fetch_impossible`, v1/stale receipts, missing/extra objects, alternates, shallow
-state, filters, remotes, attached/dirty worktrees, extra worktree files, unsafe Git metadata,
-archive ambiguity, every rename/fsync/receipt crash point, post-candidate drift, and P0 coupling.
+state, filters, remotes, loose replacement refs, packed replacement refs, `.git/info/grafts`, and
+symlinked/hard-linked/locked alternates, shallow, promisor, config, packed-refs, and graft metadata.
+They also cover attached/dirty worktrees, extra worktree files, unsafe Git metadata, wrong UID or
+GID, device mismatch/`EXDEV`, existing rename destination, missing no-replace support, every exact
+CLI refusal, archive ambiguity, every rename/fsync/receipt crash point including the four final
+boundaries, post-candidate drift, equivalent semantic inventories with unequal valid pack bytes,
+provider-home access attempts, topology rerender/release install, and P0 coupling.
 
 Exact-head acceptance requires TDD evidence, focused/full local tests, Apple system-Python and Bash
 3.2 proof, independent adversarial review, hosted CI/CodeQL, merge through protected `master`, one
 native repair, and two verify-only passes.
 
-The carrier then stops and hands off the observed new merge/generation/preparer/closure identities
-to a separate P0 re-pin. P0 must replace its old pins and constant closure assertion with the pure
-verifier, then undergo its own review/merge/native proof. OAuth, services, providers, routing,
-workers, fan-out, failover, and CF2-I remain held.
+The carrier then stops and hands off both identity axes to a separate P0 re-pin:
+`e4e44867...` remains the exact current topology-preparer/topology-release identity, while the
+observed merge is the exact current source-closure/generation-repair identity. P0 updates its
+prerequisite pins only after those merge/install identities and both verify receipts exist, and
+replaces its constant closure assertion with the pure verifier. It separately re-proves provider-
+home metadata/non-traversal and undergoes its own review/merge/native proof. OAuth, services,
+providers, routing, workers, fan-out, failover, and CF2-I remain held.
