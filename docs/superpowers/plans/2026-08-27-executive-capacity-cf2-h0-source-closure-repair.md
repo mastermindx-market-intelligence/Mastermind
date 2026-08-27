@@ -60,7 +60,8 @@ filesystem tools, pytest, GitHub Actions, CodeQL.
 - `ops/executive_os/repair-capacity-source-closure.sh` — privileged repair and verify-only carrier.
 - `tests/test_executive_capacity_source_contract.py` — exact schema/provenance tests.
 - `tests/test_capacity_host_artifacts.py` — transport, closure, metadata, digest/publication tests.
-- `tests/test_executive_capacity_source_closure_repair.py` — order, crash, rollback, no-mutation.
+- `tests/test_executive_capacity_source_closure_repair.py` — order, crash, rollback, no semantic
+  mutation except the sole kernel read-atime observer effect.
 - `tests/test_executive_capacity_python39_compatibility.py` — Apple Python proof.
 - `ops/executive_os/HOST_PREREQUISITES.md` — build, native ceremony, proof, and P0 handoff.
 
@@ -281,8 +282,9 @@ pre-commit point. Add explicit final-boundary crashes: before rename, after rena
 one verified commit or the exact uniquely verified precommit state. Assert all bytes remain
 archived and fsync ambiguity never triggers rollback. Test wrong GID, device mismatch/`EXDEV`,
 existing destination, and unavailable no-replace primitive. Run verify-only twice and prove
-identical scoped pre/post digests, no lock/intent write, no launchd/topology/release change, no
-provider-home access, and no filesystem mutation.
+identical scoped semantic pre/post digests, no lock/intent write, no launchd/topology/release
+change, no provider-home access, and zero program-directed or semantic mutation under the sole
+kernel read-atime exception.
 
 - [ ] **Step 6: Prove green and commit**
 
@@ -307,6 +309,15 @@ git commit -m "feat(exec): add crash-safe H0 source closure repair"
 
 **Interfaces:** Consumes the exact ceremony contract and helper CLIs. Produces one nonprivileged
 build procedure, one offline administrator ceremony, and Apple Python/Bash proof.
+
+Verify-only performs zero program-directed and zero semantic mutation. Kernel-induced access-time
+advancement from required reads is the sole permitted observable metadata delta. Atime is
+non-authoritative, may only remain equal or advance, and is never set, restored, decreased, or used
+to conceal another change. Namespace, bytes/digests, device/inode identity, type, mode, UID/GID,
+links, size, flags, ACLs, xattrs, mtime, ctime, topology/rollback evidence, launchd state, sockets,
+and legacy state remain exact. Tests and proof may admit only that read-atime observer effect; they
+must preserve content verification, identical scoped semantic digests, the no-write law, and every
+lock, intent, publication, P0, provider, service, socket, routing, and worker hold.
 
 - [ ] **Step 1: Add failing runbook/compatibility tests**
 

@@ -32,7 +32,8 @@ CF2-P0 acceptance. The repair's terminal capability is:
 H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED
 ```
 
-followed by two independent zero-mutation verify-only passes, each returning:
+followed by two independent verify-only passes with zero program-directed and zero semantic
+mutation under the sole kernel read-atime exception defined in section 13, each returning:
 
 ```text
 H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED
@@ -488,15 +489,26 @@ checkout then runs verify-only twice using the exact CLI grammar. Each pass inde
 and verifies complete object closure, the six-file generation, repair archive/receipt, runtime,
 byte-preserved topology/rollback evidence, telemetry boundary, fixed directory-service identity
 and membership facts, disabled/unloaded labels, absent sockets, and legacy state. Verify-only does
-not write the lock, create an intent, mutate any path, or access provider homes.
+not write the lock, create an intent, perform program-directed or semantic mutation, or access
+provider homes.
+
+Verify-only performs zero program-directed and zero semantic mutation. Kernel-induced access-time
+advancement from required reads is the sole permitted observable metadata delta. Atime is
+non-authoritative, may only remain equal or advance, and is never set, restored, decreased, or used
+to conceal another change. Namespace, bytes/digests, device/inode identity, type, mode, UID/GID,
+links, size, flags, ACLs, xattrs, mtime, ctime, topology/rollback evidence, launchd state, sockets,
+and legacy state remain exact. This read-atime observer effect does not weaken content verification,
+identical scoped semantic digests, the no-write law, or any lock, intent, publication, P0, provider,
+service, socket, routing, or worker hold.
 
 The governed packet records sanitized facts only: `e4e44867...` as current topology-preparer and
 topology-release identity; the exact source-closure/generation repair merge; v2 ZIP/payload/manifest
 hashes as per-carrier integrity; semantic object count/inventory digest; new generation basename
 and six hashes; unchanged topology/rollback hashes; repair intent and receipt hashes; UID/GID and
 common-device pass facts; archived old generation/source digests; the repair sentinel; two verify
-sentinels; and zero scoped mutation for each verify pass. The packet does not record provider-home
-paths or credential material.
+sentinels; zero program-directed and semantic mutation for each verify pass; and any kernel
+read-atime advancement as the sole non-authoritative observation. The packet does not record
+provider-home paths or credential material.
 
 ## 14. Testing and exact stop condition
 
