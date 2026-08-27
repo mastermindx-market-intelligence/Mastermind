@@ -165,7 +165,6 @@ def _run_agentos(
     macro_root: Path,
     args: Sequence[str],
     *,
-    environ: Mapping[str, str],
     timeout: float,
 ) -> str:
     script = macro_root / "scripts" / "agentos.py"
@@ -178,7 +177,6 @@ def _run_agentos(
             text=True,
             timeout=timeout,
             check=False,
-            env=dict(environ),
         )
     except subprocess.TimeoutExpired as exc:
         raise AcquisitionError(
@@ -290,7 +288,6 @@ def collect_agentos(
     status_text = _run_agentos(
         macro_root,
         status_args,
-        environ=environ,
         timeout=timeout,
     )
     state, trailing = _decode_leading_json(status_text, "Agent OS status")
@@ -308,7 +305,6 @@ def collect_agentos(
         context_text = _run_agentos(
             macro_root,
             args,
-            environ=environ,
             timeout=timeout,
         )
         try:
