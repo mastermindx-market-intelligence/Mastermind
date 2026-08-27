@@ -3,7 +3,7 @@
 **Date:** 2026-08-27  
 **Owner:** Sol, AI CEO  
 **Chairman:** Chris  
-**Status:** CHAIRMAN-APPROVED IN-CHAT ARCHITECTURE / WRITTEN-SPEC REVIEW GATE. Records only. This document creates no Executive Job, Worker, Attempt, provider login, Slack app, wake delivery, host process, tmux session, remote transport, model route, or production authority by itself.  
+**Status:** **CHAIRMAN APPROVED / ARCHITECTURE FREEZE SOURCE CANDIDATE.** Records only. The Chairman approved this checked-in architecture in the governing Sol conversation on 2026-08-27 and directed accelerated implementation planning/fan-out. This document creates no Executive Job, Worker, Attempt, provider login, Slack app, wake delivery, host process, tmux session, remote transport, model route, or production authority by itself.  
 **Operation key:** `hybrid-executive-workforce-topology-20260827-sol-001`  
 **Protected Mastermind / Skillpack basis:** `cef4332d3682991e3e1c3d6160da17cd0a3a8f63`, `mastermind.sol_skillpack.v1` v1.0.0, bootstrap major 1.  
 **Observed Macro main during freeze:** `57b22bb32a56f9b77bf1b55a8cdb8b5605ea3447`.  
@@ -363,167 +363,59 @@ Allowed only as strict-subset delegation:
 - allowed repositories/paths/authorities do not exceed parent;
 - quality/execution class is declared through the accepted router contract;
 - independent review requirements remain intact;
-- parent remains accountable for integration;
-- child result returns through canonical Executive lineage.
+- parent remains accountable for integrating/rejecting the child result;
+- child completion cannot self-accept architecture/product/final program state.
 
-No child worker may infer broader authority from parent prose, Slack identity or native app permissions.
+### 12.4 Return boundaries
+
+Codex-Sol/Fable returns to interactive Sol for material product-thesis changes, canonical ownership/architecture changes, new persistent state/control/identity planes, unresolved security/rights/credential questions, destructive/irreversible actions, material spend, rank/trade/financial authority changes, and final program acceptance.
 
 ---
 
-## 13. Relationship to existing active programs
+## 13. Implementation decomposition
 
-This architecture **does not restart or replace** current lanes.
-
-### Capacity Fabric
-
-Continue current dependency order:
+This architecture is implemented by extending existing owners in dependency-aware waves rather than one monolithic PR:
 
 ```text
-CF2-H0 → CF2-P0 → CF2-I → RF1 / HF1 → PF1 → MH1
+existing CF2-H0 → P0 → CF2-I
+                     │
+            ┌────────┴────────┐
+            ▼                 ▼
+           RF1               HF1
+provider-neutral       common Worker Harness
+suitability tiers            │
+            └────────┬────────┘
+                     ▼
+                    PF1
+             first real Claude Worker
+                     │
+        ┌────────────┼────────────┐
+        ▼            ▼            ▼
+   lower-cost     Wake PR3       MH1
+   providers      native wake    multi-host broker
+        │            │            │
+        └────────────┴──────┬─────┘
+                            ▼
+                   integrated autonomy canary
 ```
 
-This document clarifies the target semantics of RF1/HF1/PF1/MH1 rather than creating a second provider-control program.
+The following checked-in plans implement this freeze:
 
-### Wake Fabric
+- `docs/superpowers/plans/2026-08-27-hybrid-workforce-codex-sol-technical-staff.md`
+- `docs/superpowers/plans/2026-08-27-hybrid-workforce-rf1-provider-neutral-suitability.md`
+- `docs/superpowers/plans/2026-08-27-hybrid-workforce-hf1-common-worker-harness.md`
+- `docs/superpowers/plans/2026-08-27-hybrid-workforce-pf1-claude-worker.md`
+- `docs/superpowers/plans/2026-08-27-hybrid-workforce-wake-pr3-native-transports.md`
+- `docs/superpowers/plans/2026-08-27-hybrid-workforce-mh1-multihost-broker.md`
 
-PR-1/PR-2 contracts remain the sole wake contract/ledger foundation. A future delivery wave adds provider-native Codex/Claude transports through the existing adapter boundary. Do not build another wake registry/daemon/database.
-
-### ASD / Agent Relay
-
-ASD-A2/A3 remains the active worker↔Sol dialogue lane and continues independently.
-
-### CEO ingress
-
-C1/B2/C2 remains the canonical Personal-Pro Sol ↔ Executive admission lane.
-
-### Session Truth / Recovery
-
-Current fresh-Sol grounding and project-recovery work remains independent and should make new Sol/watch executions safer. This role topology does not create another grounding or recovery plane.
-
-### Worker Browser/Resource
-
-Existing governed browser/resource work remains the owner of browser/devserver embodiment. GUI actuator capacity may later become a consumer of that accepted resource law; do not fork a second computer-use scheduler here.
+Current CF2 dependency law remains binding. Read-only archaeology/planning may proceed ahead of a dependency; modifying RF1/HF1/PF1 work may not silently bypass CF2-I acceptance.
 
 ---
 
-## 14. Implementation decomposition after written-spec approval
+## 14. Acceptance
 
-This is one architecture with **parallel bounded implementation waves**, not one giant PR.
+This architecture is successful only when a real Chairman outcome can flow through Sol, Fable/Codex-Sol delegation, provider-neutral child Jobs, quality-before-cost routing, lower-cost workers where appropriate, material Sol escalation, native session continuation, independent review, and multi-host execution without manual prompt carriage or a hidden second control plane.
 
-### Wave A — role/authority conformance
+No one of the following alone counts as completion: a native app exists, a tmux process ran, a Slack message arrived, a provider returned output, CI is green, a Job is QUEUED, one Worker is CLAIMED, or one remote host responded.
 
-Audit existing Executive seat/Worker/Model Router contracts and implement the smallest representation needed to distinguish `ceo` seat + `codex` reasoning surface + `sol_technical_staff` duty without creating a second role authority. Prove ordinary Codex worker mode remains distinct.
-
-### Wave B — RF1 provider-neutral quality classes
-
-Freeze and implement provider-neutral suitability/execution tiers/classes in the existing Model Router. Capacity/cost may choose only within the first lawful tier.
-
-### Wave C — HF1 common Worker Harness
-
-Generalize the existing broker/adapter request/receipt boundary; prove synthetic non-Codex adapter parity without provider-specific lifecycle services.
-
-### Wave D — first heterogeneous real provider
-
-Use current Capacity Fabric PF1 law. Claude remains the preferred first real non-Codex Executive child Job if current availability/collision/rights law still supports it. Do not hard-code Claude as the only non-Codex provider.
-
-### Wave E — lower-cost provider pilots
-
-After RF1/HF1 are accepted, add GLM/Qwen/Grok/DeepSeek-style provider verticals **one at a time** with real task-class qualification, cost/capacity evidence, correction behavior and independent proof. Do not add several unaudited providers behind one generic shell.
-
-### Wave F — Wake delivery transports
-
-Implement provider-native Codex and Claude wake/resume adapters against existing Wake Fabric contracts and runtime bindings. No second scheduler/session registry.
-
-### Wave G — MH1 multi-host
-
-Implement one private authenticated remote Worker Broker transport with one canonical Executive Runtime, local provider credentials and effect-unknown reconciliation. Prove one bounded remote child Job before scaling to all three hosts.
-
-### Wave H — three-host native-harness canary
-
-Where provider-supported surfaces exist, prove M1/M2/PC each exposes one truthful host-bound Codex/worker capacity realm, with GUI actuator isolation and host-local credentials. Exact machine/provider composition may vary without changing architecture.
-
-### Wave I — all-up hierarchy canary
-
-One real program demonstrates:
-
-```text
-Chairman → Sol
-Sol → Fable sustained program
-Sol → Codex-Sol technical staff task
-Fable/Codex-Sol → >=2 lower-cost child workers where lawful
-Executive OS placement across >=2 provider classes and, after MH1, >=2 hosts
-material decision request → Sol ruling → same owner continues
-independent review
-GitHub evidence + Agent OS closeout
-```
-
-Completion is a real operating capability, not green infrastructure alone.
-
----
-
-## 15. Failure and correction law
-
-Fail closed on at least:
-
-- ambiguous seat/role/runtime identity;
-- Slack username treated as Worker;
-- provider/model treated as authority;
-- parent delegation widening child authority;
-- unknown model suitability promoted for cost reasons;
-- quota/health unknown treated as unlimited;
-- two GUI actuators fighting over one interactive desktop;
-- cross-host credential copy;
-- remote timeout followed by blind cross-host/provider retry;
-- tmux process treated as canonical Job completion;
-- native subagent producing material hidden work with no canonical parent/return evidence;
-- provider-specific broker/queue creation;
-- new per-host Executive Runtime/DB;
-- wake delivery inferred from a message notification;
-- new session/watcher DB because provider-native handles rotate;
-- model-generated result self-upgrading completion/authority.
-
-Correction repairs the owning layer only. Provider capacity corrections stay in Provider Control; Job state in Executive OS; workstream conclusions in Agent OS; code evidence in GitHub; Slack history remains transport evidence.
-
----
-
-## 16. Acceptance standard
-
-The architecture is complete only when the company can use native executive/COO cockpits while delegating material child work through one canonical multi-provider, multi-host workforce fabric.
-
-Required end-state qualities:
-
-- **Truth:** one lifecycle and one provider-capacity owner, explicit unknowns and correction-safe receipts.
-- **Authority:** Sol/Fable/Codex-Sol responsibilities are explicit and bounded; provider capability never grants authority.
-- **Economics:** routine eligible work moves to lower marginal-cost capacity without lowering required quality/independence.
-- **Execution:** provider-neutral harnesses return real child Jobs through Executive lineage.
-- **Continuity:** Wake resumes the correct parent reasoning surface without Chairman prompt carriage.
-- **Multi-host:** one Executive Runtime safely drives host-local worker brokers across physical machines without credential copying or duplicate queues.
-- **Product/UX:** ChatGPT, Codex and Claude native interfaces remain usable cockpits rather than being replaced by a headless terminal-only system.
-- **Learning:** placement/reliability/cost/review outcomes can later inform operating policy without model prose gaining authority.
-
----
-
-## 17. No-rebuild boundaries
-
-Do not create:
-
-- another Agent OS or terminal control plane;
-- per-host Executive databases/queues;
-- provider-specific broker lifecycles;
-- tmux lifecycle authority;
-- a Slack worker queue;
-- a second Model Router for cheap providers;
-- a second provider-capacity store;
-- a second Wake/session registry/scheduler;
-- permanent 1:1 `Slack account = Worker = session = host = role` identity;
-- computer-use scheduling independent from accepted Worker/resource lifecycle.
-
-Extend the existing Executive OS, Capacity Fabric, Model Router, Worker Harness, Wake Fabric, ASD, Agent OS and GitHub planes.
-
----
-
-## 18. Written-spec review gate
-
-Chairman approved the architecture direction in chat on 2026-08-27. Per the active architecture-design workflow, this checked-in written spec must now be reviewed/accepted before implementation plans or modifying implementation waves are released from this architecture carrier.
-
-Read-only collision/estate/provider archaeology may proceed in parallel, but it must not modify the governed implementation surfaces or create competing carriers before this written-spec gate is accepted.
+The integrated proof must retain canonical Executive lifecycle, Agent OS durable organizational truth, GitHub implementation evidence, bounded ASD communication, correction-safe Wake semantics, provider-local credentials, and visible Control Room state.
