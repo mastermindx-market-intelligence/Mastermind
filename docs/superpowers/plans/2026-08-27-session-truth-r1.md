@@ -4,9 +4,9 @@
 
 **Goal:** Build a production-relevant, read-only `mastermind.session_truth_receipt.v1` so a fresh Sol can deterministically compare current Agent OS, GitHub, Linear, Slack and Executive observations, surface typed drift, and compute a safe session admission mode without mutating a source or creating another truth store.
 
-**Architecture:** Acquisition and reconciliation stay separate. Mastermind owns stdlib-only reconciliation modules and a thin CLI. Agent OS acquisition calls Macro's canonical zero-network `scripts/agentos.py compile-context`; GitHub, Linear, Slack, Executive and identity observations enter as strict read-only JSON snapshots. The receipt is immutable evidence bound to exact revisions, not a mutable lifecycle, queue, retry, identity, memory or synchronization authority.
+**Architecture:** Acquisition and reconciliation stay separate. Mastermind owns stdlib-only reconciliation modules and a thin CLI. Protected Skillpack identity is read from an exact supplied Git commit object, not from the current branch checkout. Agent OS acquisition calls Macro's canonical zero-network `scripts/agentos.py compile-context`; GitHub, Linear, Slack, Executive and identity observations enter as strict read-only JSON snapshots. The receipt is immutable evidence bound to exact revisions, not a mutable lifecycle, queue, retry, identity, memory or synchronization authority.
 
-**Tech Stack:** Python >=3.11, standard-library-only `control_plane` modules, existing Macro Agent OS CLI, pytest >=8,<10, GitHub Actions hosted CI.
+**Tech Stack:** Python >=3.11, standard-library-only `control_plane` modules, Git CLI for local exact-object reads, existing Macro Agent OS CLI, pytest >=8,<10, GitHub Actions hosted CI.
 
 **Spec:** `docs/superpowers/specs/2026-08-27-cross-plane-reconciliation-design.md`
 
@@ -15,7 +15,7 @@
 - Protected basis at plan authoring: `mastermindx-market-intelligence/Mastermind@be68ec881460aa60d7d77cdb69f7c1cae81f6310`, Skillpack `mastermind.sol_skillpack.v1` v1.0.0, minimum bootstrap major 1.
 - Approved architecture: Mastermind PR #169, spec commit `0aad273340a5f788013d460770feb621ea688846`.
 - R1 is read-only: no Linear, Slack or Executive mutation and no GitHub lifecycle mutation caused by receipt generation.
-- Pure reconciliation performs zero network I/O.
+- Pure reconciliation performs zero network I/O. External source acquisition may be performed before invoking the core, but no hidden network fallback is allowed.
 - `control_plane` remains importable with stdlib only; add no runtime dependency.
 - Agent OS parser/schema ownership remains in Macro. Use `scripts/agentos.py compile-context`; do not parse Agent OS YAML/frontmatter in Mastermind.
 - Do not modify `docs/sol_skills/**`; PR #147 owns the separate Skillpack candidate.
@@ -32,7 +32,7 @@
 Use flat sibling modules under `control_plane/` so no package-discovery change is needed:
 
 - `control_plane/session_truth_contract.py` — schemas, validation, canonical JSON, hashing.
-- `control_plane/session_truth_acquire.py` — Skillpack + Agent OS read acquisition.
+- `control_plane/session_truth_acquire.py` — exact protected Skillpack + Agent OS read acquisition.
 - `control_plane/session_truth_snapshots.py` — strict external snapshot normalization and secret-key rejection.
 - `control_plane/session_truth_rules.py` — exact-key indexes and drift detectors.
 - `control_plane/session_truth.py` — receipt assembly, admission, semantic projection and text rendering.
@@ -158,7 +158,7 @@ def semantic_hash(value: object) -> str:
     return "sha256:" + digest
 ```
 
-`validate_input_document()` must enforce exact top-level keys, the exact schema, `WS:`/`MAS-`/`owner/name` identifier grammar, 40-hex SHA shape, boolean `available`, explicit `reason` when unavailable, and a defensive deep copy. It must not insert a healthy default for any missing source.
+`validate_input_document()` must enforce exact top-level keys, exact schema, `WS:`/`MAS-`/`owner/name` identifier grammar, 40-hex SHA shape, boolean `available`, explicit `reason` when unavailable, and a defensive deep copy. It must not insert a healthy default for any missing source.
 
 - [ ] **Step 4: Add negative-shape tests**
 
@@ -192,45 +192,69 @@ git commit -m "feat(exec): freeze session truth receipt contract"
 
 ---
 
-### Task 2: Protected Skillpack and canonical Agent OS acquisition
+### Task 2: Exact protected Skillpack and canonical Agent OS acquisition
 
 **Files:**
 - Create: `control_plane/session_truth_acquire.py`
 - Create: `tests/test_session_truth_acquire.py`
 
 **Interfaces:**
-- Consume `control_plane.ceo_boot_packet.resolve_macro_root` and `git_sha`.
-- `collect_skillpack(repo_root: Path, expected_sha: str | None, bootstrap_major: int = 1) -> dict[str, Any]`
+- Consume `control_plane.ceo_boot_packet.resolve_macro_root` and `git_sha` for Macro only.
+- `collect_skillpack(repo_root: Path, protected_sha: str, bootstrap_major: int = 1) -> dict[str, Any]`
 - `collect_agentos(macro_root_flag: str | None, workstreams: Sequence[str], *, environ: Mapping[str, str], now: str | None, timeout: float = 60.0) -> dict[str, Any]`
 - `AcquisitionError(RuntimeError)` for malformed canonical output; missing join capability is a valid unavailable observation.
 
-- [ ] **Step 1: Write Skillpack acquisition tests**
+- [ ] **Step 1: Write exact protected-object Skillpack tests**
+
+The implementation must never infer protected identity from the current branch `HEAD`. The test repository has two commits: protected commit A contains Skillpack v1.0.0, branch commit B changes the working-tree INDEX to v9.9.9. `collect_skillpack(repo, protected_sha=A)` must return v1.0.0 from A.
 
 ```python
-from control_plane.session_truth_acquire import collect_skillpack
-
-
-def test_collect_skillpack_requires_exact_sha(tmp_path, monkeypatch):
-    repo = tmp_path / "Mastermind"
-    index = repo / "docs" / "sol_skills" / "INDEX.md"
-    index.parent.mkdir(parents=True)
-    index.write_text(
-        "---\nschema: mastermind.sol_skillpack.v1\n"
-        "skillpack_version: 1.0.0\nminimum_bootstrap_major: 1\nskill: index\n---\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr("control_plane.session_truth_acquire.git_sha", lambda p: "a" * 40)
-    got = collect_skillpack(repo, expected_sha="a" * 40, bootstrap_major=1)
-    assert got["sha"] == "a" * 40
+def test_collect_skillpack_reads_exact_commit_not_branch_head(tmp_path):
+    repo, protected_sha = make_two_commit_skillpack_repo(tmp_path)
+    got = collect_skillpack(repo, protected_sha=protected_sha, bootstrap_major=1)
+    assert got["sha"] == protected_sha
     assert got["schema"] == "mastermind.sol_skillpack.v1"
     assert got["version"] == "1.0.0"
     assert got["minimum_bootstrap_major"] == 1
     assert got["available"] is True
 ```
 
-Add exact-SHA mismatch and incompatible-bootstrap tests; neither may relabel the local checkout as protected truth.
+Add tests for: unknown commit object -> explicit unavailable/blocking result `SKILLPACK_COMMIT_UNAVAILABLE`; incompatible bootstrap major -> `AcquisitionError`; malformed scalar frontmatter -> `AcquisitionError`.
 
-- [ ] **Step 2: Write Agent OS read-only write-trap test**
+- [ ] **Step 2: Run Task 2 tests RED**
+
+Run: `python -m pytest tests/test_session_truth_acquire.py -q`
+
+- [ ] **Step 3: Implement local exact-object Skillpack read**
+
+Use only local Git object reads; do not fetch the network inside the collector.
+
+```python
+def _git_text(repo_root: Path, *args: str) -> str | None:
+    proc = subprocess.run(
+        ["git", "-C", os.fspath(repo_root), *args],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    value = proc.stdout
+    return value if value else None
+
+
+def collect_skillpack(repo_root: Path, protected_sha: str, bootstrap_major: int = 1):
+    exists = _git_text(repo_root, "cat-file", "-t", protected_sha)
+    if exists is None or exists.strip() != "commit":
+        return {"available": False, "reason": "SKILLPACK_COMMIT_UNAVAILABLE", "sha": protected_sha}
+    text = _git_text(repo_root, "show", protected_sha + ":docs/sol_skills/INDEX.md")
+    if text is None:
+        return {"available": False, "reason": "SKILLPACK_INDEX_UNAVAILABLE", "sha": protected_sha}
+    header = _read_scalar_frontmatter_text(text)
+    # validate schema/version/minimum major, then return exact protected_sha
+```
+
+`_read_scalar_frontmatter_text()` parses only the four scalar INDEX fields; it is not a general YAML parser and must never be used for Agent OS.
+
+- [ ] **Step 4: Write Agent OS read-only write-trap test**
 
 Create a temporary Macro fixture whose `scripts/agentos.py` accepts only `compile-context --workstream TARGET --now 2026-08-27T05:00:00Z`, emits `context_bundle.v1`, and creates `.ILLEGAL_WRITE` if any non-read contract is used.
 
@@ -248,14 +272,6 @@ def test_agentos_uses_canonical_compile_context_without_writes(tmp_path):
     assert not (macro / ".ILLEGAL_WRITE").exists()
 ```
 
-- [ ] **Step 3: Run RED**
-
-Run: `python -m pytest tests/test_session_truth_acquire.py -q`
-
-- [ ] **Step 4: Implement the narrow Skillpack scalar-frontmatter reader**
-
-Parse only the four scalar INDEX header fields before the second `---`; reject duplicate/non-scalar/missing fields. This is not a general YAML parser and must never be used for Agent OS.
-
 - [ ] **Step 5: Implement Agent OS acquisition through Macro**
 
 For each exact requested workstream, strip only `WS:` and invoke:
@@ -271,7 +287,7 @@ if now:
     cmd += ["--now", now]
 ```
 
-Use Macro as `cwd`, bounded timeout, `capture_output=True`, `text=True`, `check=False`. Preserve `context_bundle.v1` verbatim. Unknown/malformed requested direct record fails closed with `AcquisitionError`; missing Macro root returns `available=False` plus `reason="AGENTOS_READ_PATH_UNAVAILABLE"`.
+Use Macro as `cwd`, bounded timeout, `capture_output=True`, `text=True`, `check=False`. Preserve `context_bundle.v1` verbatim. Unknown/malformed direct record fails closed with `AcquisitionError`; missing Macro root returns `available=False` plus `reason="AGENTOS_READ_PATH_UNAVAILABLE"`.
 
 - [ ] **Step 6: Run GREEN with existing bridge regression and commit**
 
@@ -281,7 +297,7 @@ Commit:
 
 ```bash
 git add control_plane/session_truth_acquire.py tests/test_session_truth_acquire.py
-git commit -m "feat(exec): add canonical read-only grounding acquisition"
+git commit -m "feat(exec): add exact read-only grounding acquisition"
 ```
 
 ---
@@ -306,7 +322,7 @@ git commit -m "feat(exec): add canonical read-only grounding acquisition"
 - `load_snapshot(path: Path, expected_schema: str) -> dict[str, Any]`
 - `normalize_github`, `normalize_linear`, `normalize_slack`, `normalize_executive`, `normalize_identities`
 
-- [ ] **Step 1: Create exact GitHub fixture and normalization test**
+- [ ] **Step 1: Create exact GitHub fixture and test**
 
 Use this PR row shape:
 
@@ -388,7 +404,7 @@ git commit -m "feat(exec): normalize cross-plane read snapshots"
 - `detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]`
 - Finding keys: `code, severity, canonical_owner, subject, source_a, source_b, repair_owner, modification_consequence, details`.
 
-- [ ] **Step 1: Freeze one registry entry per required finding code**
+- [ ] **Step 1: Freeze the finding registry**
 
 ```python
 FINDING_REGISTRY = {
@@ -423,42 +439,13 @@ FINDING_REGISTRY = {
 }
 ```
 
-If exact implementation evidence shows a fixed severity conflicts with the approved FATAL/BLOCKING definition, stop and return the contradiction to Sol; do not silently alter architecture.
+If implementation evidence shows a fixed severity conflicts with the approved FATAL/BLOCKING definitions, stop and return the contradiction to Sol instead of silently altering architecture.
 
-- [ ] **Step 2: Build `healthy_inputs()` and positive/negative tests for every code**
+- [ ] **Step 2: Build `healthy_inputs()` plus positive and negative cases for every code**
 
-Each positive case changes only the minimum fields needed:
+Positive mutations are fixed as follows: stale Linear revision; false Linear Done with proof open; missing declared MAS projection; Done parent with nonterminal completion child; orphan MAS WS; stale build visibility; unbound material PR; merged non-merge completion with proof open; orphan PR WS; duplicate active operation key; moved carrier head; conflicting PR binding; owner-specific Agent OS/GitHub disagreement; stale handoff; explicitly superseded next action; generated/direct Agent OS divergence; Slack runnable delivery without receiver; required ACK absent; CEO principal used as worker; duplicate operation carrier; post-freeze runnable dispatch; Executive required/unavailable; Executive stale; Slack ACK with no Executive operation; Executive grounding mismatch; required identity binding unknown; required service actor unbound; actor/role collision.
 
-- `STALE_LINEAR_PROJECTION`: projection revision differs from current Agent OS source SHA.
-- `FALSE_LINEAR_COMPLETION`: Linear Done + merged implementation + `proof_state=open` + completion is not merge-is-done.
-- `MISSING_LINEAR_PROJECTION`: scoped Agent OS binding names a MAS ID absent from Linear.
-- `LINEAR_PARENT_CHILD_DIVERGENCE`: parent Done while explicit completion-bearing child remains nonterminal.
-- `ORPHAN_LINEAR_ISSUE`: issue claims scoped WS absent from Agent OS context.
-- `BUILD_VISIBILITY_STALE`: selected GitHub/Linear revision is newer than latest matching build-events observation.
-- `GITHUB_PR_UNBOUND`: materially open PR has no WS/Linear/completion binding.
-- `GITHUB_MERGE_WITH_PROOF_OPEN`: merged PR with non-merge completion and open proof.
-- `ORPHAN_GITHUB_CARRIER`: PR WS binding absent from scoped Agent OS context.
-- `MULTIPLE_ACTIVE_CARRIERS`: two open PRs share the same non-null operation key.
-- `CARRIER_HEAD_MOVED`: current head SHA differs from pickup head SHA.
-- `PR_BINDING_CONFLICT`: PR WS/Linear metadata conflicts with explicit canonical binding.
-- `AGENTOS_GITHUB_DISAGREEMENT`: owner-specific implementation fact disagrees between direct org record and GitHub evidence.
-- `STALE_HANDOFF`: older handoff action is overtaken by newer direct record/decision evidence.
-- `SUPERSEDED_NEXT_ACTION`: current direct action is explicitly superseded by newer accepted Agent OS source.
-- `DIRECT_GENERATED_STATE_DIVERGENCE`: optional generated Agent OS view disagrees with direct context revision/state.
-- `SLACK_TRANSPORT_WITHOUT_RECEIVER`: runnable delivery + `receiver_eligible=false`.
-- `SLACK_TRANSPORT_WITHOUT_ACK`: eligible active-session dialogue + `ack_required=true` + `acked=false`.
-- `CEO_SEAT_USED_AS_WORKER`: runnable worker pickup targets a principal bound only to role `sol_ceo`.
-- `DUPLICATE_OPERATION_CARRIER`: same operation key appears on distinct active carriers.
-- `POST_FREEZE_DISPATCH_VIOLATION`: runnable pickup created after `freeze_at` with unavailable receiver.
-- `RUNTIME_STATE_UNAVAILABLE`: `requires_executive=true` + Executive unavailable.
-- `RUNTIME_STATE_STALE`: Executive available but `fresh=false` for Executive-required scope.
-- `SLACK_ACK_WITHOUT_EXECUTIVE_STATE`: Slack ACK exists for canonical-execution operation but Executive has no matching operation.
-- `EXECUTIVE_GROUNDING_DIVERGED`: Executive grounding SHA differs from required exact Mastermind grounding SHA.
-- `UNKNOWN_SEAT_IDENTITY`: requested action depends on a required null service binding.
-- `SERVICE_ACTOR_UNBOUND`: requested service actor has no exact registry binding.
-- `ACTOR_ROLE_COLLISION`: same principal has conflicting service/human or CEO/worker role bindings.
-
-For every positive test, the unchanged `healthy_inputs()` case must also assert that code is absent.
+For every positive case, unchanged `healthy_inputs()` must assert the same code is absent.
 
 - [ ] **Step 3: Add anti-majority-vote and anti-name-binding regressions**
 
@@ -487,9 +474,9 @@ Run: `python -m pytest tests/test_session_truth_rules.py -q`
 
 - [ ] **Step 5: Implement exact-key indexes and pure detectors**
 
-`_finding()` reads fixed severity/owners from the registry. Severity consequence is fixed: FATAL=`new_modification_refused`, BLOCKING=`requested_modification_blocked`, WARNING=`repair_debt_visible`, INFO=`visibility_only`.
+`_finding()` reads severity/owners from the registry. Severity consequence is fixed: FATAL=`new_modification_refused`, BLOCKING=`requested_modification_blocked`, WARNING=`repair_debt_visible`, INFO=`visibility_only`.
 
-`detect_findings()` sorts by severity order FATAL, BLOCKING, WARNING, INFO; then code; then subject. No detector performs network, filesystem writes, fuzzy title matching or majority voting.
+`detect_findings()` sorts by severity FATAL, BLOCKING, WARNING, INFO; then code; then subject. No detector performs network, filesystem writes, fuzzy title matching or majority voting.
 
 - [ ] **Step 6: Run GREEN and commit**
 
@@ -534,7 +521,7 @@ def test_admission_precedence(findings, requires_exec, expected, healthy_inputs)
     assert compute_admission(doc, findings)["mode"] == expected
 ```
 
-Law: any FATAL => `MODIFICATION_REFUSED`; applicable BLOCKING => `DIALOGUE_ONLY`; no fatal/blocking but optional source unavailable or WARNING => `GROUNDING_PARTIAL`; otherwise `GROUNDING_COMPLETE`.
+Applicable FATAL => `MODIFICATION_REFUSED`; applicable BLOCKING => `DIALOGUE_ONLY`; no fatal/blocking but optional source unavailable or WARNING => `GROUNDING_PARTIAL`; otherwise `GROUNDING_COMPLETE`.
 
 - [ ] **Step 2: Freeze semantic replay test**
 
@@ -547,7 +534,7 @@ def test_envelope_clock_does_not_change_semantic_hash(healthy_inputs):
     assert one["observation"] != two["observation"]
 ```
 
-Only acquisition-envelope clock fields and `semantic_hash` itself are excluded from the semantic projection. Source revisions, source timestamps, facts, findings, admission and scope remain covered.
+Only acquisition-envelope clock fields and `semantic_hash` are excluded from semantic projection. Source revisions, source timestamps, facts, findings, admission and scope remain covered.
 
 - [ ] **Step 3: Run RED**
 
@@ -579,17 +566,7 @@ Do not include raw private message bodies, environment variables, credentials or
 
 - [ ] **Step 5: Implement deterministic text rendering**
 
-A healthy fixture must render exactly the same text across runs except for no observation-envelope timestamps, because text is a semantic view. Example prefix:
-
-```text
-SESSION TRUTH RECEIPT
-mode: GROUNDING_COMPLETE
-semantic_hash: sha256:2f5b0b1df6f4d9cf5b3ff8668c6242478656144339e2411228a017c201f953e2
-findings: 0 (FATAL 0 / BLOCKING 0 / WARNING 0 / INFO 0)
-modification_safe: true
-```
-
-The test computes the actual hash; the literal hash above is only the fixed example string for a dedicated fixture. Never render an unavailable source as healthy or a Slack delivery as execution.
+A healthy fixture renders the header, exact mode, semantic hash, source availability/revisions, finding counts, one line per finding, and `modification_safe`. Never render an unavailable source as healthy or a Slack delivery as execution.
 
 - [ ] **Step 6: Run GREEN and commit**
 
@@ -611,24 +588,13 @@ git commit -m "feat(exec): assemble deterministic session truth receipt"
 - Create: `tests/test_session_truth_cli.py`
 
 **Interfaces:**
-- Stable CLI reads five snapshot files, exact scoped workstreams and protected-SHA expectation, then emits JSON or text.
+- Stable CLI reads five snapshot files, exact scoped workstreams and an exact externally supplied protected Skillpack commit SHA, then emits JSON or text.
 
-- [ ] **Step 1: Freeze CLI contract in tests**
+- [ ] **Step 1: Freeze CLI flags and one literal fixture invocation**
 
-Required flags:
+Required flags: repeatable `--workstream`, repeatable `--repository`, repeatable `--linear`, optional `--operation-key`, `--requires-executive`, five source snapshot paths, optional `--macro-root`, required `--protected-skillpack-sha`, optional `--now`, and `--json`.
 
-- repeatable `--workstream`, at least one;
-- repeatable `--repository`;
-- repeatable `--linear`;
-- optional `--operation-key`;
-- `--requires-executive`;
-- `--github-snapshot`, `--linear-snapshot`, `--slack-snapshot`, `--executive-snapshot`, `--identity-snapshot`;
-- optional `--macro-root` using the existing resolver ladder;
-- required `--expected-skillpack-sha`;
-- optional `--now` for reproducibility;
-- `--json` for JSON, otherwise text.
-
-The test command uses exact synthetic paths and a concrete test SHA:
+Hermetic test invocation:
 
 ```bash
 python3 scripts/session_truth_receipt.py \
@@ -639,30 +605,28 @@ python3 scripts/session_truth_receipt.py \
   --slack-snapshot tests/fixtures/session_truth/slack_minimal.json \
   --executive-snapshot tests/fixtures/session_truth/executive_unavailable.json \
   --identity-snapshot tests/fixtures/session_truth/identity_minimal.json \
-  --expected-skillpack-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  --protected-skillpack-sha aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
   --now 2026-08-27T05:00:00Z \
   --json
 ```
 
-Malformed contracts/snapshots/direct Agent OS requests exit 2 with bounded non-secret stderr. A valid explicit unavailable source still exits 0 and appears degraded in the receipt.
+Tests create a temporary Git repository containing commit `aaaaaaaa...` semantics through fixtures/monkeypatching rather than assuming that SHA exists in the real repository.
 
-- [ ] **Step 2: Add network prohibition test**
+Malformed contracts/snapshots/direct Agent OS requests exit 2 with bounded non-secret stderr. A valid explicit unavailable source exits 0 and appears degraded.
 
-Patch `socket.socket` and `socket.create_connection` to raise `AssertionError("network forbidden")`; run the CLI using local fixtures and the local Agent OS stub. It must exit 0.
+- [ ] **Step 2: Add network prohibition and filesystem mutation tests**
 
-- [ ] **Step 3: Add filesystem mutation test**
+Patch `socket.socket` and `socket.create_connection` to raise `AssertionError("network forbidden")`. Hash every file under the fake Macro checkout and snapshot fixture directory before/after CLI execution. Receipt generation must still exit 0 with byte-identical source trees.
 
-Hash every file under the fake Macro checkout and fixture directory before/after CLI execution. Assert exact equality and no new file.
+- [ ] **Step 3: Add two-run semantic determinism test**
 
-- [ ] **Step 4: Add two-run semantic determinism test**
+Run twice with identical source documents and different `--now`; parsed semantic hashes and semantic projections must match. Change only one GitHub `head_sha`; semantic hash must change without unrelated ordering drift.
 
-Run twice with identical source documents and different `--now`; parsed `semantic_hash` and `semantic_projection()` must match. Change only one GitHub `head_sha`; the semantic hash must change and unrelated ordering must not.
-
-- [ ] **Step 5: Run RED**
+- [ ] **Step 4: Run RED**
 
 Run: `python -m pytest tests/test_session_truth_cli.py -q`
 
-- [ ] **Step 6: Implement CLI with existing script bootstrap idiom**
+- [ ] **Step 5: Implement CLI using existing script bootstrap idiom**
 
 ```python
 _ROOT = Path(__file__).resolve().parents[1]
@@ -670,9 +634,9 @@ if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 ```
 
-Order: build scope -> collect Skillpack -> collect Agent OS -> load/normalize five snapshots -> validate complete input -> build receipt -> emit. There is no retry/failover to another carrier/source.
+Order: build scope -> `collect_skillpack(_ROOT, protected_sha=args.protected_skillpack_sha)` -> collect Agent OS -> normalize five snapshots -> validate full input -> build receipt -> emit. There is no retry/failover to another source.
 
-- [ ] **Step 7: Run focused regression GREEN and commit**
+- [ ] **Step 6: Run focused regression GREEN and commit**
 
 ```bash
 python -m pytest \
@@ -706,31 +670,31 @@ git commit -m "feat(exec): expose read-only session truth CLI"
 - Create: `review_evidence/session_truth/r1/receipt_run2.json`
 - Create: `review_evidence/session_truth/r1/proof.md`
 
-**Interfaces:**
-- Evidence is immutable, sanitized and revision-bound; it never becomes current-state authority.
+**Interfaces:** Evidence is immutable, sanitized and revision-bound; it never becomes current-state authority.
 
-- [ ] **Step 1: Re-pin source law and collision state**
+- [ ] **Step 1: Re-pin protected source and collision state before proof**
 
-Before evidence generation, record the actual outputs of:
+Perform an explicit read-only fetch/pin outside the pure core, then record exact outputs:
 
 ```bash
+git fetch origin master --no-tags
+PROTECTED_SHA="$(git rev-parse origin/master)"
 git rev-parse HEAD
-git rev-parse origin/master
+printf '%s\n' "$PROTECTED_SHA"
 git -C "$MASTERMIND_MACRO_ROOT" rev-parse HEAD
 ```
 
-Also record the exact protected Skillpack schema/version/minimum bootstrap major and implementation PR number from the active GitHub carrier. If material source law moved after pickup, stop and return to Sol before acceptance proof.
+Also record the exact protected INDEX schema/version/minimum bootstrap major and implementation PR number. If material source law moved after pickup, return to Sol before acceptance proof.
 
 - [ ] **Step 2: Create sanitized live observation files**
 
 Populate the five observation JSON files from current read-only owner reads. Include only normalized R1 fields. Never include Slack message bodies, OAuth/API credentials, cookies, Authorization headers, environment secrets or provider credentials.
 
-Current-estate evidence should include, when still current at proof time: architecture PR #169; Macro #6509 if still relevant; one proof-open/false-green representative; current `#agent-dispatch` receiver facts; exact current Executive availability; and any still-current typed unknown identity. If one historical example is no longer true, keep it out of the live snapshot and cover it with the synthetic falsifier tests.
+Include still-current examples of architecture PR #169, Macro #6509 if relevant, one proof-open/false-green family, current `#agent-dispatch` receiver facts, exact Executive availability, and any still-current typed unknown identity. Historical facts that are no longer current stay out of the live snapshot and remain synthetic falsifiers only.
 
 - [ ] **Step 3: Run the real receipt twice with exact commands**
 
 ```bash
-MASTER_SHA="$(git rev-parse origin/master)"
 COMMON=(
   --workstream WS:CHAIRMAN-CONTROL-ROOM
   --repository mastermindx-market-intelligence/Mastermind
@@ -739,14 +703,14 @@ COMMON=(
   --slack-snapshot review_evidence/session_truth/r1/slack_observation.v1.json
   --executive-snapshot review_evidence/session_truth/r1/executive_observation.v1.json
   --identity-snapshot review_evidence/session_truth/r1/identity_observation.v1.json
-  --expected-skillpack-sha "$MASTER_SHA"
+  --protected-skillpack-sha "$PROTECTED_SHA"
   --json
 )
 python3 scripts/session_truth_receipt.py "${COMMON[@]}" --now 2026-08-27T06:00:00Z > review_evidence/session_truth/r1/receipt_run1.json
 python3 scripts/session_truth_receipt.py "${COMMON[@]}" --now 2026-08-27T06:01:00Z > review_evidence/session_truth/r1/receipt_run2.json
 ```
 
-Verify semantic equality with:
+Verify semantic equality:
 
 ```bash
 python3 - <<'PY'
@@ -764,27 +728,18 @@ PY
 
 - [ ] **Step 4: Run R1 adversarial falsifiers**
 
-Required cases:
-
-1. Linear Done while proof remains open -> `FALSE_LINEAR_COMPLETION`.
-2. Slack runnable delivery without eligible receiver -> `SLACK_TRANSPORT_WITHOUT_RECEIVER`.
-3. CEO principal targeted as worker -> `CEO_SEAT_USED_AS_WORKER`.
-4. Executive required but unavailable/stale -> `RUNTIME_STATE_UNAVAILABLE` or `RUNTIME_STATE_STALE`.
-5. same operation key on two carriers -> `DUPLICATE_OPERATION_CARRIER`.
-6. same operation key with changed payload/effect unknown -> refusal-class finding.
-7. optional visibility source unavailable while canonical read-only sources are healthy -> `GROUNDING_PARTIAL`, not blanket refusal.
-8. fully consistent read-only case -> `GROUNDING_COMPLETE`.
+Required cases: false Linear Done with proof open; runnable Slack delivery without receiver; CEO principal targeted as worker; Executive required but unavailable/stale; duplicate operation carriers; same operation key with changed payload/effect unknown; optional visibility source unavailable while canonical read-only sources remain healthy; fully consistent safe read case.
 
 Record exact pytest node IDs and PASS results in `proof.md`.
 
-- [ ] **Step 5: Run local full R1 proof and push exact head**
+- [ ] **Step 5: Run local full proof, push exact head, require hosted CI**
 
 ```bash
 python -m pytest tests/test_session_truth_*.py tests/test_ceo_boot_packet.py -q
 python -m compileall -q control_plane scripts
 ```
 
-Push the exact head. Hosted Mastermind CI must be green on that head before acceptance.
+Hosted Mastermind CI must be green on the exact final head before acceptance.
 
 - [ ] **Step 6: Commit evidence only after proof**
 
@@ -793,26 +748,11 @@ git add review_evidence/session_truth/r1
 git commit -m "evidence(exec): prove deterministic session truth receipt"
 ```
 
-That evidence commit changes no `control_plane/`, `scripts/` or test file. Any later code/test change invalidates affected proof and requires rerun on the new exact head.
+The evidence commit changes no `control_plane/`, `scripts/` or test file. Later code/test changes invalidate affected proof and require rerun.
 
 - [ ] **Step 7: Return the complete Sol review packet**
 
-The return message must report literal values derived from the repository/tools, not guessed values:
-
-- repository name `mastermindx-market-intelligence/Mastermind`;
-- implementation PR number from the active PR carrier;
-- exact result of `git rev-parse HEAD`;
-- exact result of `git rev-parse origin/master` used for the run;
-- exact changed-file list from the PR;
-- hosted CI run ID and conclusion;
-- semantic hash printed by the equality command above, twice;
-- current-estate finding codes and subjects only;
-- exact adversarial pytest node IDs and PASS status;
-- zero-network proof status;
-- zero-Macro-write proof status;
-- statement that receipt generation performed zero external mutations;
-- bounded known gaps;
-- next action: Sol runs adversarial `REVIEW_RETURN` against the approved R1 spec before any R2/R3/R4/R5/R6 mutation begins.
+Report literal values derived from repository/tools: repository name, active implementation PR number, exact implementation head from `git rev-parse HEAD`, exact protected master SHA used, exact PR changed-file list, hosted CI run ID/conclusion, semantic hash from both receipts, current-estate finding codes/subjects, adversarial pytest node IDs/status, zero-network status, zero-Macro-write status, explicit zero external mutations, bounded known gaps, and the continuation statement that Sol must run `REVIEW_RETURN` before any R2/R3/R4/R5/R6 mutation.
 
 ---
 
@@ -821,9 +761,10 @@ The return message must report literal values derived from the repository/tools,
 - Every required R1 finding code has positive and negative tests.
 - No rule uses title similarity or majority voting.
 - Semantic hash excludes only observation-envelope clock fields and itself; source revisions/facts remain covered.
+- Protected Skillpack is read from the exact supplied Git commit object, never inferred from implementation-branch HEAD.
 - Agent OS direct context comes only through Macro `compile-context`.
 - `docs/sol_skills/**` is unchanged.
-- `control_plane/session_truth*.py` and the pure CLI path perform no network I/O.
+- `control_plane/session_truth*.py` and pure CLI reconciliation perform no network I/O.
 - Receipt generation writes nothing into Macro, Linear, Slack, GitHub or Executive OS.
 - No durable current-state DB/cache/cursor/retry ledger exists.
 - Missing optional sources degrade precisely; required Executive absence blocks only scopes that require it.
