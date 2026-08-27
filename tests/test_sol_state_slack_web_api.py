@@ -175,3 +175,27 @@ def test_update_message_uses_chat_update_and_normalizes_exact_write():
         "text": text,
     }
     assert request.headers["authorization"] == f"Bearer {TOKEN}"
+
+
+def test_malformed_slack_response_is_fixed_opaque_error_without_secret_leak():
+    slack_web_api = _module()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=f"malformed payload carrying {TOKEN}",
+            request=request,
+        )
+
+    async def exercise():
+        client = _client(slack_web_api, handler)
+        try:
+            with pytest.raises(RuntimeError) as caught:
+                await client.fetch_history(channel_id=CHANNEL, limit=100)
+            return str(caught.value)
+        finally:
+            await client.aclose()
+
+    message = asyncio.run(exercise())
+    assert message == "SLACK_API_INVALID_RESPONSE"
+    assert TOKEN not in message
