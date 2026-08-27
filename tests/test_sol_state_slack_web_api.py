@@ -223,3 +223,23 @@ def test_http_failure_is_fixed_opaque_unavailable_without_body_leak():
     message = asyncio.run(exercise())
     assert message == "SLACK_API_UNAVAILABLE"
     assert TOKEN not in message
+
+
+def test_transport_failure_is_fixed_opaque_unavailable_without_exception_leak():
+    slack_web_api = _module()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"transport carried {TOKEN}", request=request)
+
+    async def exercise():
+        client = _client(slack_web_api, handler)
+        try:
+            with pytest.raises(RuntimeError) as caught:
+                await client.fetch_history(channel_id=CHANNEL, limit=100)
+            return str(caught.value)
+        finally:
+            await client.aclose()
+
+    message = asyncio.run(exercise())
+    assert message == "SLACK_API_UNAVAILABLE"
+    assert TOKEN not in message
