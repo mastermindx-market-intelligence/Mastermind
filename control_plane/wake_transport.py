@@ -44,8 +44,9 @@ class WakeTransportDescriptor:
     requires_runtime_binding: bool = False
 
 
-#: PR-1: every transport is a descriptor only.  Flip a bit here in a separately
-#: reviewed adapter PR — never by duplicating the flag on a target or router.
+#: Descriptor construction is the single reviewed implementation-state source.
+#: PR3 implements only Codex App Server here; Claude remains false until a real
+#: installed-host preflight proves the exact native-resume contract.
 WAKE_TRANSPORT_DESCRIPTORS: dict[str, WakeTransportDescriptor] = {
     name: WakeTransportDescriptor(
         transport_id=name,
@@ -53,6 +54,10 @@ WAKE_TRANSPORT_DESCRIPTORS: dict[str, WakeTransportDescriptor] = {
     )
     for name in sorted(WAKE_TRANSPORTS)
 }
+WAKE_TRANSPORT_DESCRIPTORS["codex-app-server"] = dataclasses.replace(
+    WAKE_TRANSPORT_DESCRIPTORS["codex-app-server"],
+    transport_implemented=True,
+)
 
 
 def wake_transport_descriptor(transport_id: str) -> WakeTransportDescriptor:
