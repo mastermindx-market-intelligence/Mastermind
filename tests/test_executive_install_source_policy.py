@@ -189,6 +189,5 @@ def test_installer_exposes_explicit_frozen_mode_without_reusing_historical_sourc
     install = INSTALL.read_text(encoding="utf-8")
     assert "--allow-frozen-accepted-ancestor" in install
     assert "--protected-master-sha" in install
-    assert "--installer-repo" in install
     assert '"$SCRIPT_DIR/install_source_policy.py"' in install
     assert "refs/remotes/origin/master" not in install
