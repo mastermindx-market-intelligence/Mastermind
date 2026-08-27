@@ -9,6 +9,7 @@ from control_plane.wake_dispatcher import (
     TransportOutcome,
     TransportReceipt,
     UnsupportedWakeDispatcher,
+    WakeDispatcher,
     WakeDispatchError,
 )
 from control_plane.wake_transport import (
@@ -74,6 +75,17 @@ def test_registry_unimplemented_transport_returns_existing_fail_closed_dispatche
     assert isinstance(dispatcher, UnsupportedWakeDispatcher)
     assert dispatcher.descriptor.transport_id == "claude-code-session"
     assert dispatcher.descriptor.transport_implemented is False
+
+
+def test_wake_dispatcher_protocol_requires_canonical_transport_identity():
+    assert isinstance(_FakeDispatcher(), WakeDispatcher)
+    assert not isinstance(_IdentitylessDispatcher(), WakeDispatcher)
+
+
+def test_unsupported_dispatcher_exposes_canonical_transport_identity():
+    dispatcher = WakeDispatcherRegistry({}).resolve("claude-code-session")
+
+    assert getattr(dispatcher, "transport_id", None) == "claude-code-session"
 
 
 def test_registry_implemented_transport_requires_explicit_registered_dispatcher(monkeypatch):
