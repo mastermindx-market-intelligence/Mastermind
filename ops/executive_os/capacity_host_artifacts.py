@@ -23,6 +23,7 @@ import struct
 import sys
 import tempfile
 import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
@@ -81,6 +82,10 @@ _V2_WORKTREE_CONFIG = (
     b"\tsparseCheckout = true\n"
     b"\tsparseCheckoutCone = false\n"
 )
+_V2_SPARSE_CHECKOUT = b"".join(
+    f"/{path}\n".encode("utf-8") for path in PRODUCER_MATERIAL_PATHS
+)
+_V2_ZIP32_ERROR = "TRANSPORT_V2_ZIP32_LIMIT_EXCEEDED"
 
 
 class CapacityHostArtifactError(ValueError):
@@ -996,7 +1001,11 @@ def extract_source_transport(
         or archive_info.st_size > 65 * 1024 * 1024
     ):
         raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_FILE_INVALID")
-    destination.mkdir(mode=0o700, parents=False, exist_ok=False)
+    try:
+        destination.mkdir(mode=0o700, parents=False, exist_ok=False)
+    except Exception:
+        os.close(archive_descriptor)
+        raise
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
             infos = archive.infolist()
@@ -1375,26 +1384,46 @@ def _zip_info(name: str, *, size: int = 0) -> zipfile.ZipInfo:
     return info
 
 
+def _require_v2_zip32_size(size: int) -> None:
+    # This is the exact preflight used by ZipFile.open(..., force_zip64=False).
+    if size < 0 or size * 1.05 > zipfile.ZIP64_LIMIT:
+        raise CapacityHostArtifactError(_V2_ZIP32_ERROR)
+
+
 def _write_transport_v2_archive(
     output: Path, manifest: Mapping[str, Any], payload_path: Path
 ) -> None:
     payload_size = payload_path.stat().st_size
-    if payload_size > zipfile.ZIP64_LIMIT:
-        raise CapacityHostArtifactError("TRANSPORT_V2_ZIP32_LIMIT_EXCEEDED")
+    manifest_bytes = canonical_json(manifest)
+    _require_v2_zip32_size(len(manifest_bytes))
+    _require_v2_zip32_size(payload_size)
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(output, flags, 0o600)
     try:
         with os.fdopen(descriptor, "w+b", closefd=False) as raw:
-            with zipfile.ZipFile(raw, "w", compression=zipfile.ZIP_STORED) as archive:
-                manifest_bytes = canonical_json(manifest)
-                archive.writestr(_zip_info("manifest.json", size=len(manifest_bytes)), manifest_bytes)
-                with payload_path.open("rb") as source, archive.open(
-                    _zip_info("payload.pack", size=payload_size), "w"
-                ) as target:
-                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                        target.write(chunk)
+            try:
+                with zipfile.ZipFile(
+                    raw,
+                    "w",
+                    compression=zipfile.ZIP_STORED,
+                    allowZip64=False,
+                ) as archive:
+                    archive.writestr(
+                        _zip_info("manifest.json", size=len(manifest_bytes)),
+                        manifest_bytes,
+                    )
+                    with payload_path.open("rb") as source, archive.open(
+                        _zip_info("payload.pack", size=payload_size), "w"
+                    ) as target:
+                        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                            target.write(chunk)
+            except zipfile.LargeZipFile as exc:
+                raise CapacityHostArtifactError(_V2_ZIP32_ERROR) from exc
             raw.flush()
         os.fsync(descriptor)
+    except Exception:
+        output.unlink(missing_ok=True)
+        raise
     finally:
         os.close(descriptor)
 
@@ -1501,49 +1530,100 @@ def validate_transport_manifest_v2(
 
 
 def _validate_transport_v2_zip_layout(
-    archive_path: Path, archive: zipfile.ZipFile, infos: Sequence[zipfile.ZipInfo]
+    descriptor: int,
+    infos: Sequence[zipfile.ZipInfo],
+    *,
+    manifest_bytes: bytes,
+    payload_crc32: int,
 ) -> None:
     if [info.filename for info in infos] != ["manifest.json", "payload.pack"]:
         raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_INVENTORY_INVALID")
-    previous_end = 0
-    for info in infos:
-        encoded_name = info.filename.encode("ascii")
-        mode = info.external_attr >> 16
-        if (
-            info.header_offset != previous_end
-            or info.date_time != (1980, 1, 1, 0, 0, 0)
-            or info.create_system != 3
-            or not stat.S_ISREG(mode)
-            or stat.S_IMODE(mode) != 0o400
-            or info.flag_bits != 0
-            or info.compress_type != zipfile.ZIP_STORED
-            or info.compress_size != info.file_size
-            or info.extra != b""
-            or info.comment != b""
-            or info.file_size > zipfile.ZIP64_LIMIT
-        ):
-            raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_MEMBER_INVALID")
-        previous_end = info.header_offset + 30 + len(encoded_name) + info.compress_size
-    central_size = sum(46 + len(info.filename.encode("ascii")) for info in infos)
-    expected_size = previous_end + central_size + 22
+    crcs = (zlib.crc32(manifest_bytes) & 0xFFFFFFFF, payload_crc32)
+    local_offset = 0
+    central_records: list[bytes] = []
+    for info, expected_crc in zip(infos, crcs):
+        name = info.filename.encode("ascii")
+        _require_v2_zip32_size(info.file_size)
+        local_header = struct.pack(
+            "<IHHHHHIIIHH",
+            0x04034B50,
+            20,
+            0,
+            zipfile.ZIP_STORED,
+            0,
+            33,
+            expected_crc,
+            info.file_size,
+            info.file_size,
+            len(name),
+            0,
+        ) + name
+        if info.header_offset != local_offset or os.pread(
+            descriptor, len(local_header), local_offset
+        ) != local_header:
+            raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
+        data_offset = local_offset + len(local_header)
+        if info.filename == "manifest.json" and os.pread(
+            descriptor, len(manifest_bytes), data_offset
+        ) != manifest_bytes:
+            raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
+        central_records.append(
+            struct.pack(
+                "<IHHHHHHIIIHHHHHII",
+                0x02014B50,
+                (3 << 8) | 20,
+                20,
+                0,
+                zipfile.ZIP_STORED,
+                0,
+                33,
+                expected_crc,
+                info.file_size,
+                info.file_size,
+                len(name),
+                0,
+                0,
+                0,
+                0,
+                (stat.S_IFREG | 0o400) << 16,
+                local_offset,
+            )
+            + name
+        )
+        local_offset = data_offset + info.file_size
+    central = b"".join(central_records)
+    eocd = struct.pack(
+        "<IHHHHIIH",
+        0x06054B50,
+        0,
+        0,
+        len(infos),
+        len(infos),
+        len(central),
+        local_offset,
+        0,
+    )
+    expected_tail = central + eocd
+    before = os.fstat(descriptor)
     if (
-        archive.comment != b""
-        or archive.start_dir != previous_end
-        or archive_path.stat().st_size != expected_size
+        os.pread(descriptor, len(expected_tail), local_offset) != expected_tail
+        or before.st_size != local_offset + len(expected_tail)
     ):
         raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
 
 
 def _stream_zip_member(
     archive: zipfile.ZipFile, name: str, destination: Path
-) -> str:
+) -> tuple[str, int]:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(destination, flags, 0o400)
     digest = hashlib.sha256()
+    crc32 = 0
     try:
         with archive.open(name, "r") as source:
             for chunk in iter(lambda: source.read(1024 * 1024), b""):
                 digest.update(chunk)
+                crc32 = zlib.crc32(chunk, crc32)
                 view = memoryview(chunk)
                 while view:
                     written = os.write(descriptor, view)
@@ -1553,7 +1633,7 @@ def _stream_zip_member(
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    return digest.hexdigest()
+    return digest.hexdigest(), crc32 & 0xFFFFFFFF
 
 
 def extract_source_transport_v2(
@@ -1564,31 +1644,58 @@ def extract_source_transport_v2(
 ) -> dict[str, Any]:
     """Stream and validate the exact two-member complete transport."""
 
-    archive_info = archive_path.lstat()
-    if (
-        not stat.S_ISREG(archive_info.st_mode)
-        or archive_info.st_nlink != 1
-        or stat.S_IMODE(archive_info.st_mode) & 0o022
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    archive_descriptor = os.open(archive_path, flags)
+    archive_info = os.fstat(archive_descriptor)
+    if not stat.S_ISREG(archive_info.st_mode) or archive_info.st_nlink != 1 or (
+        stat.S_IMODE(archive_info.st_mode) & 0o022
     ):
+        os.close(archive_descriptor)
         raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_FILE_INVALID")
     destination.mkdir(mode=0o700, parents=False, exist_ok=False)
     try:
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            infos = archive.infolist()
-            _validate_transport_v2_zip_layout(archive_path, archive, infos)
-            with archive.open("manifest.json", "r") as manifest_source:
-                manifest_bytes = manifest_source.read(_V2_MANIFEST_MAX_BYTES + 1)
-            if len(manifest_bytes) > _V2_MANIFEST_MAX_BYTES:
-                raise CapacityHostArtifactError("TRANSPORT_MANIFEST_TOO_LARGE")
-            manifest = validate_transport_manifest_v2(
-                json.loads(manifest_bytes), expected_commit=expected_commit
-            )
-            if manifest_bytes != canonical_json(manifest):
-                raise CapacityHostArtifactError("TRANSPORT_MANIFEST_NONCANONICAL")
-            _write_bytes_exclusive(destination / "manifest.json", manifest_bytes, 0o400)
-            observed_payload = _stream_zip_member(
-                archive, "payload.pack", destination / "payload.pack"
-            )
+        with os.fdopen(os.dup(archive_descriptor), "rb") as raw:
+            with zipfile.ZipFile(raw, "r") as archive:
+                infos = archive.infolist()
+                if [info.filename for info in infos] != ["manifest.json", "payload.pack"]:
+                    raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_INVENTORY_INVALID")
+                for info in infos:
+                    mode = info.external_attr >> 16
+                    if (
+                        info.date_time != (1980, 1, 1, 0, 0, 0)
+                        or info.create_system != 3
+                        or not stat.S_ISREG(mode)
+                        or stat.S_IMODE(mode) != 0o400
+                        or info.flag_bits != 0
+                        or info.compress_type != zipfile.ZIP_STORED
+                        or info.compress_size != info.file_size
+                        or info.extra != b""
+                        or info.comment != b""
+                    ):
+                        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_MEMBER_INVALID")
+                    _require_v2_zip32_size(info.file_size)
+                with archive.open("manifest.json", "r") as manifest_source:
+                    manifest_bytes = manifest_source.read(_V2_MANIFEST_MAX_BYTES + 1)
+                if len(manifest_bytes) > _V2_MANIFEST_MAX_BYTES:
+                    raise CapacityHostArtifactError("TRANSPORT_MANIFEST_TOO_LARGE")
+                manifest = validate_transport_manifest_v2(
+                    json.loads(manifest_bytes), expected_commit=expected_commit
+                )
+                if manifest_bytes != canonical_json(manifest):
+                    raise CapacityHostArtifactError("TRANSPORT_MANIFEST_NONCANONICAL")
+                _write_bytes_exclusive(destination / "manifest.json", manifest_bytes, 0o400)
+                observed_payload, payload_crc32 = _stream_zip_member(
+                    archive, "payload.pack", destination / "payload.pack"
+                )
+                _validate_transport_v2_zip_layout(
+                    archive_descriptor,
+                    infos,
+                    manifest_bytes=manifest_bytes,
+                    payload_crc32=payload_crc32,
+                )
+        after = os.fstat(archive_descriptor)
+        if _descriptor_directory_state(archive_info) != _descriptor_directory_state(after):
+            raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_FILE_INVALID")
         if observed_payload != manifest["payload_sha256"]:
             raise CapacityHostArtifactError("TRANSPORT_PAYLOAD_DIGEST_MISMATCH")
         _validate_pack_file(
@@ -1601,6 +1708,8 @@ def extract_source_transport_v2(
                 child.unlink(missing_ok=True)
             destination.rmdir()
         raise
+    finally:
+        os.close(archive_descriptor)
 
 
 def _run_git_file_input(repository: Path, input_path: Path, *arguments: str) -> bytes:
@@ -1672,17 +1781,155 @@ def _refuse_optional_lock(path: Path) -> None:
         raise CapacityHostArtifactError("SOURCE_METADATA_LOCK_PRESENT")
 
 
+def _repository_snapshot_state(info: os.stat_result) -> tuple[int, ...]:
+    return _descriptor_directory_state(info) + (info.st_size,)
+
+
+class _RepositoryView:
+    """Retained descriptor graph that makes transient pathname swaps observable."""
+
+    def __init__(self, source_root: Path) -> None:
+        absolute = source_root.absolute()
+        parent_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        self.parent_descriptor = os.open(absolute.parent, parent_flags)
+        self.root_name = absolute.name
+        self.descriptors: dict[str, int] = {}
+        self.states: dict[str, tuple[int, ...]] = {}
+        self.directory_names: dict[str, tuple[str, ...]] = {}
+        self.parents: dict[str, tuple[str, str]] = {}
+        try:
+            root_descriptor = os.open(
+                self.root_name, parent_flags, dir_fd=self.parent_descriptor
+            )
+            self.root_descriptor = root_descriptor
+            self._retain(".", root_descriptor)
+            self.root_relation_state = self.states["."]
+        except Exception:
+            self.close()
+            raise
+
+    def _retain(self, relative: str, descriptor: int) -> None:
+        info = os.fstat(descriptor)
+        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self.descriptors[relative] = descriptor
+        self.states[relative] = _repository_snapshot_state(info)
+        if not stat.S_ISDIR(info.st_mode):
+            return
+        names = tuple(_descriptor_directory_names(descriptor))
+        self.directory_names[relative] = names
+        for name in names:
+            child = name if relative == "." else f"{relative}/{name}"
+            child_info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(child_info.st_mode) or not (
+                stat.S_ISDIR(child_info.st_mode) or stat.S_ISREG(child_info.st_mode)
+            ):
+                raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+            if stat.S_ISDIR(child_info.st_mode):
+                flags |= getattr(os, "O_DIRECTORY", 0)
+            else:
+                flags |= getattr(os, "O_NONBLOCK", 0)
+            child_descriptor = os.open(name, flags, dir_fd=descriptor)
+            self.parents[child] = (relative, name)
+            self._retain(child, child_descriptor)
+
+    def revalidate(self) -> None:
+        try:
+            root_info = os.stat(
+                self.root_name,
+                dir_fd=self.parent_descriptor,
+                follow_symlinks=False,
+            )
+            if _repository_snapshot_state(root_info) != self.root_relation_state:
+                raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+            for relative, descriptor in self.descriptors.items():
+                if _repository_snapshot_state(os.fstat(descriptor)) != self.states[relative]:
+                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+                if relative in self.directory_names and tuple(
+                    _descriptor_directory_names(descriptor)
+                ) != self.directory_names[relative]:
+                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+            for relative, (parent, name) in self.parents.items():
+                observed = os.stat(
+                    name,
+                    dir_fd=self.descriptors[parent],
+                    follow_symlinks=False,
+                )
+                if _repository_snapshot_state(observed) != self.states[relative]:
+                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        except CapacityHostArtifactError:
+            raise
+        except (OSError, UnicodeError) as exc:
+            raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT") from exc
+
+    def close(self) -> None:
+        for descriptor in getattr(self, "descriptors", {}).values():
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        self.descriptors = {}
+        parent_descriptor = getattr(self, "parent_descriptor", None)
+        if parent_descriptor is not None:
+            try:
+                os.close(parent_descriptor)
+            except OSError:
+                pass
+            self.parent_descriptor = None
+
+
+def _run_git_v2(
+    view: _RepositoryView,
+    *arguments: str,
+    input_bytes: bytes | None = None,
+) -> bytes:
+    view.revalidate()
+    root_descriptor = view.root_descriptor
+
+    def enter_retained_root() -> None:
+        os.fchdir(root_descriptor)
+
+    completed = subprocess.run(
+        ["/usr/bin/git", "--no-replace-objects", *arguments],
+        input=input_bytes,
+        capture_output=True,
+        check=False,
+        env=_git_environment(),
+        pass_fds=(root_descriptor,),
+        preexec_fn=enter_retained_root,
+    )
+    view.revalidate()
+    if completed.returncode != 0:
+        raise CapacityHostArtifactError("GIT_MATERIALIZATION_REFUSED")
+    return completed.stdout
+
+
 def _inspect_complete_repository_direct(
-    source_root: Path, manifest: Mapping[str, Any]
-) -> tuple[Path, Path, str]:
-    root_info = source_root.lstat()
-    if not stat.S_ISDIR(root_info.st_mode) or source_root.is_symlink():
+    source_root: Path, manifest: Mapping[str, Any], view: _RepositoryView
+) -> tuple[str, str]:
+    view.revalidate()
+    root_info = os.fstat(view.root_descriptor)
+    if not stat.S_ISDIR(root_info.st_mode):
         raise CapacityHostArtifactError("SOURCE_ROOT_INVALID")
     expected_uid = root_info.st_uid
     expected_gid = root_info.st_gid
-    first_tree_digest = closed_tree_digest(
-        source_root, expected_uid=expected_uid, expected_gid=expected_gid
-    )
+    if any(PurePosixPath(relative).name.endswith(".lock") for relative in view.states):
+        raise CapacityHostArtifactError("SOURCE_METADATA_LOCK_PRESENT")
+    if view.directory_names.get(".git/hooks") != ():
+        raise CapacityHostArtifactError("SOURCE_HOOK_PRESENT")
+    if view.directory_names.get(".git/objects") != ("info", "pack"):
+        raise CapacityHostArtifactError("SOURCE_OBJECT_NAMESPACE_INVALID")
+    if view.directory_names.get(".git/objects/info") != ():
+        raise CapacityHostArtifactError("SOURCE_OBJECT_NAMESPACE_INVALID")
+    expected_info_names = ("exclude", "sparse-checkout")
+    if view.directory_names.get(".git/info") != expected_info_names:
+        raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
     git_dir = source_root / ".git"
     config = git_dir / "config"
     worktree_config = git_dir / "config.worktree"
@@ -1712,6 +1959,13 @@ def _inspect_complete_repository_direct(
         maximum_bytes=_V2_MANIFEST_MAX_BYTES,
     ) != canonical_json(manifest):
         raise CapacityHostArtifactError("SOURCE_MANIFEST_MISMATCH")
+    if _read_verified_metadata_file(
+        git_dir / "info" / "sparse-checkout",
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        maximum_bytes=len(_V2_SPARSE_CHECKOUT),
+    ) != _V2_SPARSE_CHECKOUT:
+        raise CapacityHostArtifactError("SOURCE_SPARSE_CHECKOUT_INVALID")
 
     alternates = git_dir / "objects" / "info" / "alternates"
     shallow = git_dir / "shallow"
@@ -1778,7 +2032,11 @@ def _inspect_complete_repository_direct(
     _refuse_optional_lock(pack_path)
     _refuse_optional_lock(index_path)
     _validate_pack_file(pack_path, expected_count=int(manifest["object_count"]))
-    return pack_path, index_path, first_tree_digest
+    view.revalidate()
+    return (
+        f".git/objects/pack/{packs[0]}",
+        f".git/objects/pack/{indexes[0]}",
+    )
 
 
 def _pack_inventory(repository: Path, index_path: Path) -> tuple[ObjectInventoryRow, ...]:
@@ -1819,6 +2077,106 @@ def _pack_inventory(repository: Path, index_path: Path) -> tuple[ObjectInventory
     return tuple(rows)
 
 
+def _pack_inventory_v2(
+    view: _RepositoryView, index_path: str
+) -> tuple[ObjectInventoryRow, ...]:
+    output = _run_git_v2(view, "verify-pack", "-v", index_path).decode(
+        "ascii", "strict"
+    )
+    object_ids: list[str] = []
+    for line in output.splitlines():
+        fields = line.split()
+        if not fields or _OBJECT_RE.fullmatch(fields[0]) is None:
+            continue
+        if len(fields) < 3 or fields[1] not in _V2_PACK_TYPES:
+            raise CapacityHostArtifactError("SOURCE_PACK_INVENTORY_INVALID")
+        object_ids.append(fields[0])
+    ordered_ids = sorted(object_ids)
+    if not ordered_ids or len(set(ordered_ids)) != len(ordered_ids):
+        raise CapacityHostArtifactError("SOURCE_PACK_INVENTORY_INVALID")
+    checked = _run_git_v2(
+        view,
+        "cat-file",
+        "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        input_bytes=("\n".join(ordered_ids) + "\n").encode("ascii"),
+    ).decode("ascii", "strict").splitlines()
+    rows: list[ObjectInventoryRow] = []
+    if len(checked) != len(ordered_ids):
+        raise CapacityHostArtifactError("SOURCE_PACK_INVENTORY_INVALID")
+    for expected_oid, line in zip(ordered_ids, checked):
+        fields = line.split(" ")
+        if len(fields) != 3 or fields[0] != expected_oid or fields[1] not in _V2_PACK_TYPES:
+            raise CapacityHostArtifactError("SOURCE_PACK_INVENTORY_INVALID")
+        try:
+            size = int(fields[2], 10)
+        except ValueError as exc:
+            raise CapacityHostArtifactError("SOURCE_PACK_INVENTORY_INVALID") from exc
+        if size < 0 or str(size) != fields[2]:
+            raise CapacityHostArtifactError("SOURCE_PACK_INVENTORY_INVALID")
+        rows.append(ObjectInventoryRow(expected_oid, fields[1], size))
+    return tuple(rows)
+
+
+def _enumerate_reachable_objects_v2(
+    view: _RepositoryView, commit: str
+) -> tuple[ObjectInventoryRow, ...]:
+    if _COMMIT_RE.fullmatch(commit) is None:
+        raise CapacityHostArtifactError("COMMIT_INVALID")
+    observed = _run_git_v2(view, "rev-parse", f"{commit}^{{commit}}").decode().strip()
+    if observed != commit:
+        raise CapacityHostArtifactError("COMMIT_MISMATCH")
+    raw_objects = _run_git_v2(
+        view,
+        "rev-list",
+        "--objects",
+        "--no-object-names",
+        "--missing=print",
+        commit,
+    ).decode("ascii", "strict").splitlines()
+    if (
+        not raw_objects
+        or any(value.startswith("?") for value in raw_objects)
+        or any(_OBJECT_RE.fullmatch(value) is None for value in raw_objects)
+        or len(set(raw_objects)) != len(raw_objects)
+    ):
+        raise CapacityHostArtifactError("OBJECT_CLOSURE_MISSING")
+    object_ids = sorted(raw_objects)
+    checked = _run_git_v2(
+        view,
+        "cat-file",
+        "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        input_bytes=("\n".join(object_ids) + "\n").encode("ascii"),
+    ).decode("ascii", "strict").splitlines()
+    if len(checked) != len(object_ids):
+        raise CapacityHostArtifactError("OBJECT_INVENTORY_INVALID")
+    rows: list[ObjectInventoryRow] = []
+    for expected_oid, line in zip(object_ids, checked):
+        fields = line.split(" ")
+        if len(fields) != 3 or fields[0] != expected_oid or fields[1] not in _V2_PACK_TYPES:
+            raise CapacityHostArtifactError("OBJECT_INVENTORY_INVALID")
+        try:
+            size = int(fields[2], 10)
+        except ValueError as exc:
+            raise CapacityHostArtifactError("OBJECT_INVENTORY_INVALID") from exc
+        if size < 0 or str(size) != fields[2]:
+            raise CapacityHostArtifactError("OBJECT_INVENTORY_INVALID")
+        rows.append(ObjectInventoryRow(expected_oid, fields[1], size))
+    return tuple(rows)
+
+
+def _observed_worktree_files_v2(view: _RepositoryView) -> list[str]:
+    return sorted(
+        (
+            relative
+            for relative, state in view.states.items()
+            if relative != "."
+            and not relative.startswith(".git/")
+            and stat.S_ISREG(state[3])
+        ),
+        key=lambda value: value.encode("utf-8"),
+    )
+
+
 def _observed_worktree_files(source_root: Path) -> list[str]:
     output: list[str] = []
     for current, directory_names, file_names in os.walk(source_root, followlinks=False):
@@ -1839,34 +2197,43 @@ def verify_complete_repository(
     validated = validate_transport_manifest_v2(
         manifest, expected_commit=str(manifest.get("commit"))
     )
-    _pack_path, index_path, first_tree_digest = _inspect_complete_repository_direct(
-        source_root, validated
-    )
-    commit = str(validated["commit"])
-    if _run_git(source_root, "rev-parse", "HEAD").decode().strip() != commit:
-        raise CapacityHostArtifactError("SOURCE_HEAD_MISMATCH")
-    if _run_git(source_root, "branch", "--show-current").strip():
-        raise CapacityHostArtifactError("SOURCE_HEAD_ATTACHED")
-    if _run_git(source_root, "remote").strip():
-        raise CapacityHostArtifactError("SOURCE_REMOTE_PRESENT")
-    _run_git(source_root, "fsck", "--full", "--strict", "--no-progress")
-    reachable = enumerate_reachable_objects(source_root, commit)
-    packed = _pack_inventory(source_root, index_path)
-    if reachable != packed:
-        raise CapacityHostArtifactError("SOURCE_PACK_OBJECT_SET_MISMATCH")
-    if (
-        len(reachable) != validated["object_count"]
-        or _inventory_digest(reachable) != validated["object_inventory_sha256"]
-    ):
-        raise CapacityHostArtifactError("SOURCE_OBJECT_INVENTORY_MISMATCH")
-    expected_paths = list(PRODUCER_MATERIAL_PATHS)
-    if _observed_worktree_files(source_root) != expected_paths:
-        raise CapacityHostArtifactError("SOURCE_WORKTREE_INVENTORY_MISMATCH")
-    for row in validated["material"]:
-        path = source_root / str(row["path"])
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-        descriptor = os.open(path, flags)
-        try:
+    view = _RepositoryView(source_root)
+    try:
+        root_info = os.fstat(view.root_descriptor)
+        first_tree_digest = closed_tree_digest(
+            source_root,
+            expected_uid=root_info.st_uid,
+            expected_gid=root_info.st_gid,
+        )
+        view.revalidate()
+        _pack_path, index_path = _inspect_complete_repository_direct(
+            source_root, validated, view
+        )
+        commit = str(validated["commit"])
+        if _run_git_v2(view, "rev-parse", "HEAD").decode().strip() != commit:
+            raise CapacityHostArtifactError("SOURCE_HEAD_MISMATCH")
+        if _run_git_v2(view, "branch", "--show-current").strip():
+            raise CapacityHostArtifactError("SOURCE_HEAD_ATTACHED")
+        if _run_git_v2(view, "remote").strip():
+            raise CapacityHostArtifactError("SOURCE_REMOTE_PRESENT")
+        _run_git_v2(view, "fsck", "--full", "--strict", "--no-progress")
+        reachable = _enumerate_reachable_objects_v2(view, commit)
+        packed = _pack_inventory_v2(view, index_path)
+        if reachable != packed:
+            raise CapacityHostArtifactError("SOURCE_PACK_OBJECT_SET_MISMATCH")
+        if (
+            len(reachable) != validated["object_count"]
+            or _inventory_digest(reachable) != validated["object_inventory_sha256"]
+        ):
+            raise CapacityHostArtifactError("SOURCE_OBJECT_INVENTORY_MISMATCH")
+        expected_paths = list(PRODUCER_MATERIAL_PATHS)
+        if _observed_worktree_files_v2(view) != expected_paths:
+            raise CapacityHostArtifactError("SOURCE_WORKTREE_INVENTORY_MISMATCH")
+        for row in validated["material"]:
+            relative = str(row["path"])
+            descriptor = view.descriptors.get(relative)
+            if descriptor is None:
+                raise CapacityHostArtifactError("SOURCE_WORKTREE_FILE_MISMATCH")
             before = os.fstat(descriptor)
             expected_mode = 0o555 if row["mode"] == "100755" else 0o444
             observed_digest = _descriptor_sha256(descriptor)
@@ -1877,33 +2244,40 @@ def verify_complete_repository(
                 or stat.S_IMODE(before.st_mode) != expected_mode
                 or before.st_size != row["size"]
                 or observed_digest != row["sha256"]
-                or _descriptor_directory_state(before) != _descriptor_directory_state(after)
+                or _repository_snapshot_state(before) != _repository_snapshot_state(after)
             ):
                 raise CapacityHostArtifactError("SOURCE_WORKTREE_FILE_MISMATCH")
-        finally:
-            os.close(descriptor)
-        observed_blob = _run_git(
-            source_root, "hash-object", "--no-filters", os.fspath(path)
-        ).decode().strip()
-        tree_line = _run_git(source_root, "ls-tree", "-z", commit, "--", str(row["path"]))
-        if observed_blob != row["git_blob"] or f" {row['git_blob']}\t".encode() not in tree_line:
-            raise CapacityHostArtifactError("SOURCE_GIT_BLOB_MISMATCH")
-    if _run_git(source_root, "status", "--porcelain=v1", "--untracked-files=all"):
-        raise CapacityHostArtifactError("SOURCE_WORKTREE_DIRTY")
-    final_tree_digest = closed_tree_digest(
-        source_root,
-        expected_uid=source_root.stat().st_uid,
-        expected_gid=source_root.stat().st_gid,
-    )
-    if final_tree_digest != first_tree_digest:
-        raise CapacityHostArtifactError("SOURCE_TREE_DRIFT")
-    return validate_source_closure_evidence(
-        SourceClosureEvidence(
-            object_count=len(reachable),
-            object_inventory_sha256=_inventory_digest(reachable),
-            source_tree_sha256=final_tree_digest,
+            observed_blob = _run_git_v2(
+                view, "hash-object", "--no-filters", relative
+            ).decode().strip()
+            tree_line = _run_git_v2(
+                view, "ls-tree", "-z", commit, "--", relative
+            )
+            if observed_blob != row["git_blob"] or (
+                f" {row['git_blob']}\t".encode() not in tree_line
+            ):
+                raise CapacityHostArtifactError("SOURCE_GIT_BLOB_MISMATCH")
+        if _run_git_v2(
+            view, "status", "--porcelain=v1", "--untracked-files=all"
+        ):
+            raise CapacityHostArtifactError("SOURCE_WORKTREE_DIRTY")
+        final_tree_digest = closed_tree_digest(
+            source_root,
+            expected_uid=root_info.st_uid,
+            expected_gid=root_info.st_gid,
         )
-    )
+        view.revalidate()
+        if final_tree_digest != first_tree_digest:
+            raise CapacityHostArtifactError("SOURCE_TREE_DRIFT")
+        return validate_source_closure_evidence(
+            SourceClosureEvidence(
+                object_count=len(reachable),
+                object_inventory_sha256=_inventory_digest(reachable),
+                source_tree_sha256=final_tree_digest,
+            )
+        )
+    finally:
+        view.close()
 
 
 def materialize_source_transport_v2(
@@ -1944,10 +2318,7 @@ def materialize_source_transport_v2(
         if not pack_base.with_suffix(".pack").is_file() or not pack_base.with_suffix(".idx").is_file():
             raise CapacityHostArtifactError("SOURCE_PACK_INSTALL_INVALID")
         sparse = source_root / ".git" / "info" / "sparse-checkout"
-        sparse.write_text(
-            "".join(f"/{path}\n" for path in PRODUCER_MATERIAL_PATHS),
-            encoding="utf-8",
-        )
+        sparse.write_bytes(_V2_SPARSE_CHECKOUT)
         _run_git(source_root, "checkout", "--detach", expected_commit)
         (source_root / ".git" / "cf2-h0-transport-manifest.json").write_bytes(
             canonical_json(manifest)

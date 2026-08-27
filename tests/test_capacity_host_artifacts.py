@@ -9,6 +9,7 @@ import os
 import pwd
 import re
 import stat
+import struct
 import subprocess
 import sys
 import zipfile
@@ -1222,3 +1223,254 @@ def test_v2_cli_names_are_separate_and_accept_no_material_override() -> None:
             ]
         )
     assert refusal.value.code == 2
+
+
+def test_complete_repository_refuses_dangling_loose_object_before_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, manifest, _commit = _v2_checkout(tmp_path, monkeypatch)
+    objects = checkout / ".git" / "objects"
+    objects.chmod(0o755)
+    subprocess.run(
+        ["/usr/bin/git", "-C", str(checkout), "hash-object", "-w", "--stdin"],
+        input=b"dangling loose object\n",
+        check=True,
+        capture_output=True,
+        env=artifacts._git_environment(),
+    )
+    artifacts._normalize_complete_repository_modes(checkout)
+
+    def git_must_not_run(*args: object, **kwargs: object) -> bytes:
+        raise AssertionError("physical object namespace must refuse before Git")
+
+    monkeypatch.setattr(artifacts, "_run_git", git_must_not_run)
+    monkeypatch.setattr(artifacts, "_run_git_v2", git_must_not_run, raising=False)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="OBJECT_NAMESPACE"):
+        artifacts.verify_complete_repository(checkout, manifest)
+
+
+def test_complete_repository_refuses_transient_restored_index_swap_across_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout, manifest, _commit = _v2_checkout(tmp_path, monkeypatch)
+    index = checkout / ".git" / "index"
+    parked = checkout / ".git" / ".index.parked"
+    original_run = artifacts.subprocess.run
+    swapped = False
+
+    def transient_swap(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        nonlocal swapped
+        command = args[0]
+        if not swapped and isinstance(command, list) and command[:1] == ["/usr/bin/git"]:
+            swapped = True
+            index.parent.chmod(0o755)
+            index.chmod(0o600)
+            index.rename(parked)
+            index.write_bytes(parked.read_bytes())
+            index.chmod(0o444)
+            try:
+                return original_run(*args, **kwargs)  # type: ignore[arg-type]
+            finally:
+                index.chmod(0o600)
+                index.unlink()
+                parked.rename(index)
+                index.chmod(0o444)
+                index.parent.chmod(0o555)
+        return original_run(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(artifacts.subprocess, "run", transient_swap)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_VIEW_DRIFT"):
+        artifacts.verify_complete_repository(checkout, manifest)
+    assert swapped
+
+
+def _zip_offsets(payload: bytes) -> tuple[int, int, int]:
+    local = payload.index(b"PK\x03\x04")
+    central = payload.index(b"PK\x01\x02")
+    eocd = payload.rindex(b"PK\x05\x06")
+    return local, central, eocd
+
+
+def _write_noncanonical_v2_zip(
+    valid: Path, invalid: Path, mutation: str
+) -> None:
+    with zipfile.ZipFile(valid) as archive:
+        manifest = archive.read("manifest.json")
+        pack = archive.read("payload.pack")
+    if mutation in {"archive_comment", "member_comment", "extra", "name", "zip64"}:
+        with zipfile.ZipFile(invalid, "w", allowZip64=True) as archive:
+            if mutation == "archive_comment":
+                archive.comment = b"x"
+            for index, (name, body) in enumerate(
+                (("manifest.json", manifest), ("payload.pack", pack))
+            ):
+                if mutation == "name" and index == 0:
+                    name = "Manifest.json"
+                info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
+                info.compress_type = zipfile.ZIP_STORED
+                info.external_attr = (stat.S_IFREG | 0o400) << 16
+                info.file_size = len(body)
+                if mutation == "member_comment" and index == 0:
+                    info.comment = b"x"
+                if mutation == "extra" and index == 0:
+                    info.extra = b"\x01\x00\x00\x00"
+                if mutation == "zip64" and index == 1:
+                    with archive.open(info, "w", force_zip64=True) as target:
+                        target.write(body)
+                else:
+                    archive.writestr(info, body)
+        return
+    raw = bytearray(valid.read_bytes())
+    local, central, eocd = _zip_offsets(raw)
+    if mutation == "local_version":
+        struct.pack_into("<H", raw, local + 4, 10)
+    elif mutation == "local_flag":
+        struct.pack_into("<H", raw, local + 6, 0x0800)
+    elif mutation == "local_crc":
+        struct.pack_into("<I", raw, local + 14, 0)
+    elif mutation == "local_size":
+        struct.pack_into("<I", raw, local + 18, 1)
+    elif mutation == "central_version":
+        struct.pack_into("<H", raw, central + 4, 20)
+    elif mutation == "central_extract_version":
+        struct.pack_into("<H", raw, central + 6, 10)
+    elif mutation == "central_flag":
+        struct.pack_into("<H", raw, central + 8, 0x0800)
+    elif mutation == "central_crc":
+        struct.pack_into("<I", raw, central + 16, 0)
+    elif mutation == "central_disk":
+        struct.pack_into("<H", raw, central + 34, 1)
+    elif mutation == "central_internal_attributes":
+        struct.pack_into("<H", raw, central + 36, 1)
+    elif mutation == "eocd_disk":
+        struct.pack_into("<H", raw, eocd + 4, 1)
+    elif mutation == "eocd_start_disk":
+        struct.pack_into("<H", raw, eocd + 6, 1)
+    elif mutation == "eocd_count":
+        struct.pack_into("<H", raw, eocd + 8, 1)
+    elif mutation == "prefix":
+        raw = bytearray(b"x") + raw
+    elif mutation == "suffix":
+        raw.extend(b"x")
+    elif mutation in {"encryption", "data_descriptor", "compression"}:
+        flag = 0x0001 if mutation == "encryption" else 0x0008
+        if mutation == "compression":
+            struct.pack_into("<H", raw, local + 8, zipfile.ZIP_DEFLATED)
+            struct.pack_into("<H", raw, central + 10, zipfile.ZIP_DEFLATED)
+        else:
+            struct.pack_into("<H", raw, local + 6, flag)
+            struct.pack_into("<H", raw, central + 8, flag)
+    else:
+        raise AssertionError(f"unknown mutation: {mutation}")
+    invalid.write_bytes(raw)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "local_version",
+        "local_flag",
+        "local_crc",
+        "local_size",
+        "central_version",
+        "central_extract_version",
+        "central_flag",
+        "central_crc",
+        "central_disk",
+        "central_internal_attributes",
+        "eocd_disk",
+        "eocd_start_disk",
+        "eocd_count",
+        "name",
+        "prefix",
+        "suffix",
+        "archive_comment",
+        "member_comment",
+        "extra",
+        "encryption",
+        "compression",
+        "data_descriptor",
+        "zip64",
+    ),
+)
+def test_complete_transport_v2_refuses_every_noncanonical_zip_record_field(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    valid = tmp_path / "canonical.zip"
+    artifacts.build_source_transport_v2(source, valid, commit=commit)
+    invalid = tmp_path / f"noncanonical-{mutation}.zip"
+    _write_noncanonical_v2_zip(valid, invalid, mutation)
+    with pytest.raises(
+        (artifacts.CapacityHostArtifactError, zipfile.BadZipFile, RuntimeError)
+    ):
+        artifacts.extract_source_transport_v2(
+            invalid,
+            tmp_path / f"extract-{mutation}",
+            expected_commit=commit,
+        )
+
+
+def test_v2_zip32_effective_boundary_refuses_before_python_writes_zip64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Keep the artificial limit above the complete small archive framing so this
+    # isolates Python's 1.05 member-size preflight rather than its EOCD offset.
+    monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 10_000)
+    safe_payload = tmp_path / "safe.pack"
+    safe_payload.write_bytes(b"s" * 9_523)
+    safe_output = tmp_path / "safe.zip"
+    artifacts._write_transport_v2_archive(safe_output, {}, safe_payload)
+    with zipfile.ZipFile(safe_output) as archive:
+        assert all(info.extra == b"" for info in archive.infolist())
+
+    unsafe_payload = tmp_path / "unsafe.pack"
+    unsafe_payload.write_bytes(b"u" * 9_524)
+    unsafe_output = tmp_path / "unsafe.zip"
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="TRANSPORT_V2_ZIP32_LIMIT_EXCEEDED",
+    ):
+        artifacts._write_transport_v2_archive(unsafe_output, {}, unsafe_payload)
+    assert not unsafe_output.exists()
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "sparse_content",
+        "sparse_lock",
+        "info_attributes",
+        "hook",
+        "unrelated_lock",
+    ),
+)
+def test_complete_repository_refuses_full_optional_metadata_namespace_before_git(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    checkout, manifest, _commit = _v2_checkout(tmp_path, monkeypatch)
+    git_dir = checkout / ".git"
+    sparse = git_dir / "info" / "sparse-checkout"
+    if case == "sparse_content":
+        _replace_closed_file(sparse, b"/wrong/path\n")
+    elif case == "sparse_lock":
+        _create_closed_file(sparse.with_name("sparse-checkout.lock"))
+    elif case == "info_attributes":
+        _create_closed_file(git_dir / "info" / "attributes", b"* -text\n")
+    elif case == "hook":
+        _create_closed_file(git_dir / "hooks" / "post-checkout", b"#!/bin/sh\n")
+    else:
+        _create_closed_file(git_dir / "unrelated.lock")
+
+    def git_must_not_run(*args: object, **kwargs: object) -> bytes:
+        raise AssertionError("optional metadata namespace must refuse before Git")
+
+    monkeypatch.setattr(artifacts, "_run_git", git_must_not_run)
+    monkeypatch.setattr(artifacts, "_run_git_v2", git_must_not_run, raising=False)
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.verify_complete_repository(checkout, manifest)
