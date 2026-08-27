@@ -16,7 +16,7 @@ def test_one_ceo_job_keeps_authority_across_worker_provider_failover(tmp_path):
     runtime.workers.register_worker(
         "codex-01",
         provider="codex",
-        account_label="ChatGPT1-codex-capacity",
+        account_label="chatgpt1-codex-capacity",
         worker_type="fixture",
         capabilities=["code"],
         quota_classes={"codex-native": ["code"]},
@@ -24,7 +24,7 @@ def test_one_ceo_job_keeps_authority_across_worker_provider_failover(tmp_path):
     runtime.workers.register_worker(
         "claude-01",
         provider="claude",
-        account_label="Claude5-communication-principal",
+        account_label="claude5-communication-principal",
         worker_type="fixture",
         capabilities=["code"],
         quota_classes={"claude-native": ["code"]},
@@ -101,9 +101,9 @@ def test_one_ceo_job_keeps_authority_across_worker_provider_failover(tmp_path):
     ) == authority_snapshot
 
     # Provider/account labels are execution/communication evidence only. Even
-    # deliberately Sol/Slack-looking account labels cannot rewrite the Job's
+    # deliberately Sol/Slack-looking canonical labels cannot rewrite the Job's
     # durable executive authority.
-    assert runtime.workers.get_worker("codex-01").account_label.startswith("ChatGPT1")  # type: ignore[union-attr]
-    assert runtime.workers.get_worker("claude-01").account_label.startswith("Claude5")  # type: ignore[union-attr]
+    assert runtime.workers.get_worker("codex-01").account_label.startswith("chatgpt1")  # type: ignore[union-attr]
+    assert runtime.workers.get_worker("claude-01").account_label.startswith("claude5")  # type: ignore[union-attr]
     assert second.owner_seat == "ceo"
     assert second.escalation_target == "ceo"
