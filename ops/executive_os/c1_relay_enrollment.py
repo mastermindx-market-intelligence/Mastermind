@@ -1,11 +1,11 @@
 """Native, secret-owning enrollment ceremony for the C1 SOL_STATE Relay.
 
 This helper is intentionally *not* a Slack-app provisioner and never starts or
-enables a service.  An operator first creates/selects the dedicated Executive
+enables a service. An operator first creates/selects the dedicated Executive
 Relay app and invites its bot to the already-private ``#sol-runtime`` channel
-using native Slack administration.  This root-only helper then:
+using native Slack administration. This root-only helper then:
 
-1. accepts the bot token only from stdin;
+1. accepts the bot token only as one bounded stdin line;
 2. verifies exact workspace, bot user and OAuth scope identity;
 3. proves the bot can read the fixed private channel;
 4. writes the fixed token/config files with exact ownership/modes; and
@@ -110,12 +110,18 @@ def assert_secret_surfaces_clean(
 ) -> None:
     if any(_TOKEN_SHAPED_RE.search(str(value)) for value in argv):
         raise C1EnrollmentError("C1_ENROLLMENT_SECRET_SURFACE_REFUSED")
-    if any(_TOKEN_SHAPED_RE.search(str(value)) for value in environ.values()):
-        raise C1EnrollmentError("C1_ENROLLMENT_SECRET_SURFACE_REFUSED")
+    for key, value in environ.items():
+        normalized_key = str(key).upper()
+        if (
+            ("SLACK" in normalized_key and "TOKEN" in normalized_key)
+            or normalized_key in {"C1_RELAY_TOKEN", "MASTERMIND_SLACK_TOKEN"}
+            or _TOKEN_SHAPED_RE.search(str(value))
+        ):
+            raise C1EnrollmentError("C1_ENROLLMENT_SECRET_SURFACE_REFUSED")
 
 
 def _decode_token_bytes(raw: bytes) -> str:
-    if not raw or len(raw) > MAX_TOKEN_BYTES:
+    if not raw or len(raw) > MAX_TOKEN_BYTES + 1:
         raise C1EnrollmentError("C1_ENROLLMENT_INPUT_REFUSED")
     if raw.endswith(b"\n"):
         raw = raw[:-1]
@@ -123,6 +129,7 @@ def _decode_token_bytes(raw: bytes) -> str:
             raw = raw[:-1]
     if (
         not raw
+        or len(raw) > MAX_TOKEN_BYTES
         or b"\n" in raw
         or b"\r" in raw
         or any(byte in b" \t\v\f" for byte in raw)
@@ -135,7 +142,9 @@ def _decode_token_bytes(raw: bytes) -> str:
 
 
 def read_token_from_stdin(stream: BinaryIO) -> str:
-    return _decode_token_bytes(stream.read(MAX_TOKEN_BYTES + 1))
+    # readline is load-bearing for a native TTY: Enter completes the ceremony;
+    # BufferedReader.read(N) would wait for EOF after a short token line.
+    return _decode_token_bytes(stream.readline(MAX_TOKEN_BYTES + 2))
 
 
 def build_config_document(*, bot_user_id: str, release_sha: str) -> dict[str, object]:
@@ -182,8 +191,8 @@ async def qualify_token(
     try:
         try:
             # Success itself proves the least-privilege bot can see the exact
-            # private channel.  The message content is discarded and never
-            # appears in the enrollment receipt.
+            # private channel. Message content is discarded and never enters
+            # the enrollment receipt.
             await history_client.fetch_history(
                 channel_id=c1_runtime.SLACK_CHANNEL_ID,
                 limit=1,
@@ -244,7 +253,8 @@ def write_new_private_file(
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED")
-        os.fchown(descriptor, int(uid), int(gid))
+        if info.st_uid != int(uid) or info.st_gid != int(gid):
+            os.fchown(descriptor, int(uid), int(gid))
         os.fchmod(descriptor, int(mode))
         view = memoryview(payload)
         while view:
@@ -334,6 +344,29 @@ def _launchd_loaded(label: str) -> bool:
     return completed.returncode == 0
 
 
+def _exact_file(path: Path, *, uid: int, gid: int, mode: int) -> None:
+    try:
+        info = path.lstat()
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != uid
+        or info.st_gid != gid
+        or stat.S_IMODE(info.st_mode) != mode
+    ):
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    try:
+        if c1_runtime._path_has_acl(path, expected_info=info):  # noqa: SLF001
+            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    except C1EnrollmentError:
+        raise
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+
+
 def _assert_host_prepared() -> str:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
@@ -347,18 +380,15 @@ def _assert_host_prepared() -> str:
         account.pw_uid != RELAY_UID
         or account.pw_gid != RELAY_GID
         or group.gr_gid != RELAY_GID
+        or group.gr_mem
         or account.pw_dir != "/var/db/mastermind-executive/sol-state-relay/home"
         or account.pw_shell != "/usr/bin/false"
     ):
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
 
-    for path in (CONTROL_CONFIG, CONTROL_PLIST, RELAY_PLIST):
-        try:
-            info = path.lstat()
-        except OSError:
-            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-            raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    _exact_file(CONTROL_CONFIG, uid=0, gid=450, mode=0o440)
+    _exact_file(CONTROL_PLIST, uid=0, gid=0, mode=0o644)
+    _exact_file(RELAY_PLIST, uid=0, gid=0, mode=0o644)
 
     try:
         control = json.loads(CONTROL_CONFIG.read_text(encoding="utf-8"))
@@ -384,6 +414,26 @@ def _assert_host_prepared() -> str:
             or sockets["CeoIngress"].get("SockPathMode") != 0o660
         ):
             raise ValueError
+
+        relay_plist = plistlib.loads(RELAY_PLIST.read_bytes())
+        if relay_plist.get("Label") != RELAY_LABEL:
+            raise ValueError
+        if relay_plist.get("UserName") != RELAY_USER or relay_plist.get("GroupName") != RELAY_GROUP:
+            raise ValueError
+        expected_program = [
+            "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+            "-I",
+            "-S",
+            "-B",
+            os.fspath(_ROOT / "scripts" / "c1_sol_state_relay.py"),
+            "--config",
+            os.fspath(c1_runtime.CONFIG_PATH),
+        ]
+        if relay_plist.get("ProgramArguments") != expected_program:
+            raise ValueError
+        environment = relay_plist.get("EnvironmentVariables")
+        if not isinstance(environment, dict) or any("TOKEN" in str(key).upper() for key in environment):
+            raise ValueError
     except Exception:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
 
@@ -394,6 +444,16 @@ def _assert_host_prepared() -> str:
     ):
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
     return release_sha
+
+
+def _path_present(path: Path) -> bool:
+    try:
+        path.lstat()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise C1EnrollmentError("C1_ENROLLMENT_EXISTING_REFUSED") from None
 
 
 def _existing_token() -> str:
@@ -425,7 +485,7 @@ def _canonical_config_bytes(document: Mapping[str, object]) -> bytes:
 
 async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
     release_sha = _assert_host_prepared()
-    if c1_runtime.TOKEN_PATH.exists() or c1_runtime.CONFIG_PATH.exists():
+    if _path_present(c1_runtime.TOKEN_PATH) or _path_present(c1_runtime.CONFIG_PATH):
         raise C1EnrollmentError("C1_ENROLLMENT_COLLISION")
     token = read_token_from_stdin(stdin)
     qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
@@ -444,14 +504,13 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
         gid=RELAY_GID,
         mode=0o440,
     )
-    # Re-read the committed non-secret policy through the same production law.
     c1_runtime.load_config(c1_runtime.CONFIG_PATH, expected_group_gid=RELAY_GID)
     return {**qualification, "action": "enrolled", "release_sha": release_sha}
 
 
 async def _resume(*, bot_user_id: str) -> dict[str, object]:
     release_sha = _assert_host_prepared()
-    if not c1_runtime.TOKEN_PATH.exists() or c1_runtime.CONFIG_PATH.exists():
+    if not _path_present(c1_runtime.TOKEN_PATH) or _path_present(c1_runtime.CONFIG_PATH):
         raise C1EnrollmentError("C1_ENROLLMENT_EXISTING_REFUSED")
     token = _existing_token()
     qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
@@ -469,7 +528,7 @@ async def _resume(*, bot_user_id: str) -> dict[str, object]:
 
 async def _verify(*, bot_user_id: str) -> dict[str, object]:
     release_sha = _assert_host_prepared()
-    if not c1_runtime.TOKEN_PATH.exists() or not c1_runtime.CONFIG_PATH.exists():
+    if not _path_present(c1_runtime.TOKEN_PATH) or not _path_present(c1_runtime.CONFIG_PATH):
         raise C1EnrollmentError("C1_ENROLLMENT_EXISTING_REFUSED")
     config = c1_runtime.load_config(
         c1_runtime.CONFIG_PATH,
@@ -483,7 +542,11 @@ async def _verify(*, bot_user_id: str) -> dict[str, object]:
 
 
 def _fixed_error(code: str) -> dict[str, object]:
-    return {"error": code, "schema": "mastermind.c1_relay_enrollment.v1", "status": "ERROR"}
+    return {
+        "error": code,
+        "schema": "mastermind.c1_relay_enrollment.v1",
+        "status": "ERROR",
+    }
 
 
 def run(
@@ -520,7 +583,14 @@ def run(
         )
         return 0
     except C1EnrollmentError as exc:
-        stdout.write(json.dumps(_fixed_error(exc.code), sort_keys=True, separators=(",", ":")) + "\n")
+        stdout.write(
+            json.dumps(
+                _fixed_error(exc.code),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         return 2
     except Exception:
         stdout.write(
