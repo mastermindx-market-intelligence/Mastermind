@@ -22,6 +22,14 @@ def _module():
         pytest.fail("production Slack Web API state adapter is not implemented")
 
 
+def _client(slack_web_api, handler):
+    return slack_web_api.SlackWebApiStateClient(
+        token=TOKEN,
+        bot_user_id=BOT,
+        transport=httpx.MockTransport(handler),
+    )
+
+
 def test_fetch_history_uses_fixed_slack_origin_and_normalizes_exact_window():
     slack_web_api = _module()
     requests: list[httpx.Request] = []
@@ -46,19 +54,13 @@ def test_fetch_history_uses_fixed_slack_origin_and_normalizes_exact_window():
         )
 
     async def exercise():
-        client = slack_web_api.SlackWebApiStateClient(
-            token=TOKEN,
-            bot_user_id=BOT,
-            transport=httpx.MockTransport(handler),
-        )
+        client = _client(slack_web_api, handler)
         try:
-            page = await client.fetch_history(channel_id=CHANNEL, limit=100)
+            return await client.fetch_history(channel_id=CHANNEL, limit=100)
         finally:
             await client.aclose()
-        return page
 
     page = asyncio.run(exercise())
-
     assert page == sol_state.HistoryPage(
         messages=(
             sol_state.StateMessage(
@@ -103,16 +105,11 @@ def test_create_message_uses_chat_post_message_and_normalizes_exact_write():
         )
 
     async def exercise():
-        client = slack_web_api.SlackWebApiStateClient(
-            token=TOKEN,
-            bot_user_id=BOT,
-            transport=httpx.MockTransport(handler),
-        )
+        client = _client(slack_web_api, handler)
         try:
-            message = await client.create_message(channel_id=CHANNEL, text=text)
+            return await client.create_message(channel_id=CHANNEL, text=text)
         finally:
             await client.aclose()
-        return message
 
     message = asyncio.run(exercise())
     assert message == sol_state.StateMessage(
@@ -127,4 +124,54 @@ def test_create_message_uses_chat_post_message_and_normalizes_exact_write():
     assert request.url.host == "slack.com"
     assert request.url.path == "/api/chat.postMessage"
     assert json.loads(request.content) == {"channel": CHANNEL, "text": text}
+    assert request.headers["authorization"] == f"Bearer {TOKEN}"
+
+
+def test_update_message_uses_chat_update_and_normalizes_exact_write():
+    slack_web_api = _module()
+    requests: list[httpx.Request] = []
+    message_ts = "1787800001.000002"
+    text = f"{sol_state.DISCRIMINATOR}\n{{\"state_hash\":\"def\"}}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "channel": CHANNEL,
+                "ts": message_ts,
+                "text": text,
+            },
+            request=request,
+        )
+
+    async def exercise():
+        client = _client(slack_web_api, handler)
+        try:
+            return await client.update_message(
+                channel_id=CHANNEL,
+                message_ts=message_ts,
+                text=text,
+            )
+        finally:
+            await client.aclose()
+
+    message = asyncio.run(exercise())
+    assert message == sol_state.StateMessage(
+        ts=message_ts,
+        author_user_id=BOT,
+        text=text,
+    )
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == "POST"
+    assert request.url.scheme == "https"
+    assert request.url.host == "slack.com"
+    assert request.url.path == "/api/chat.update"
+    assert json.loads(request.content) == {
+        "channel": CHANNEL,
+        "ts": message_ts,
+        "text": text,
+    }
     assert request.headers["authorization"] == f"Bearer {TOKEN}"
