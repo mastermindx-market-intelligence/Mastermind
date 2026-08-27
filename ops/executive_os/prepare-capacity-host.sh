@@ -272,14 +272,23 @@ label_disabled_unloaded() {
   if /bin/launchctl print "system/$label" >/dev/null 2>&1; then return 1; fi
 }
 
+membership_reports_not_member() {
+  local membership_status="$1" membership="$2" user="$3" group="$4"
+  [ "$membership_status" = "67" ] || return 1
+  [ "$membership" = "no $user is NOT a member of $group" ]
+}
+
 assert_control_isolated() {
-  local slot_id slot_group slot_gid slot_home membership
+  local slot_id slot_group slot_gid slot_home membership membership_status
   for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
     slot_group="$(slot_field "$slot_id" worker_group)"
     slot_gid="$(slot_field "$slot_id" worker_gid)"
     slot_home="$(slot_field "$slot_id" provider_home)"
-    membership="$(/usr/sbin/dseditgroup -o checkmember -m "$CONTROL_USER" "$slot_group" 2>&1 || true)"
-    case "$membership" in *"is not a member"*) ;; *) refuse "control principal is a member of a Personal Pro group" ;; esac
+    membership_status=0
+    membership="$(LC_ALL=C LANG=C /usr/sbin/dseditgroup -o checkmember -m "$CONTROL_USER" "$slot_group" 2>&1)" \
+      || membership_status=$?
+    membership_reports_not_member "$membership_status" "$membership" "$CONTROL_USER" "$slot_group" \
+      || refuse "control principal absence from a Personal Pro group could not be proven"
     case " $(/usr/bin/id -G "$CONTROL_USER") " in *" $slot_gid "*) refuse "control principal resolves a Personal Pro GID" ;; esac
     /usr/bin/sudo -u "$CONTROL_USER" /bin/test ! -r "$slot_home" || refuse "control principal can read a Personal Pro home"
     /usr/bin/sudo -u "$CONTROL_USER" /bin/test ! -x "$slot_home" || refuse "control principal can traverse a Personal Pro home"
