@@ -1001,11 +1001,7 @@ def extract_source_transport(
         or archive_info.st_size > 65 * 1024 * 1024
     ):
         raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_FILE_INVALID")
-    try:
-        destination.mkdir(mode=0o700, parents=False, exist_ok=False)
-    except Exception:
-        os.close(archive_descriptor)
-        raise
+    destination.mkdir(mode=0o700, parents=False, exist_ok=False)
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
             infos = archive.infolist()
@@ -1652,8 +1648,10 @@ def extract_source_transport_v2(
     ):
         os.close(archive_descriptor)
         raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_FILE_INVALID")
-    destination.mkdir(mode=0o700, parents=False, exist_ok=False)
+    destination_created = False
     try:
+        destination.mkdir(mode=0o700, parents=False, exist_ok=False)
+        destination_created = True
         with os.fdopen(os.dup(archive_descriptor), "rb") as raw:
             with zipfile.ZipFile(raw, "r") as archive:
                 infos = archive.infolist()
@@ -1703,7 +1701,7 @@ def extract_source_transport_v2(
         )
         return manifest
     except Exception:
-        if destination.exists():
+        if destination_created and destination.exists():
             for child in destination.iterdir():
                 child.unlink(missing_ok=True)
             destination.rmdir()

@@ -1474,3 +1474,54 @@ def test_complete_repository_refuses_full_optional_metadata_namespace_before_git
     monkeypatch.setattr(artifacts, "_run_git_v2", git_must_not_run, raising=False)
     with pytest.raises(artifacts.CapacityHostArtifactError):
         artifacts.verify_complete_repository(checkout, manifest)
+
+
+def test_v1_extract_existing_destination_preserves_file_exists_refusal(
+    tmp_path: Path,
+) -> None:
+    source, commit, paths = _repository(tmp_path)
+    archive = tmp_path / "v1-existing-destination.zip"
+    artifacts.build_source_transport(
+        source, archive, commit=commit, material_paths=paths
+    )
+    destination = tmp_path / "v1-existing-destination"
+    destination.mkdir()
+    sentinel = destination / "sentinel"
+    sentinel.write_bytes(b"retain-v1-destination")
+
+    with pytest.raises(FileExistsError):
+        artifacts.extract_source_transport(
+            archive,
+            destination,
+            expected_commit=commit,
+            material_paths=paths,
+        )
+    assert sentinel.read_bytes() == b"retain-v1-destination"
+
+
+def test_v2_extract_closes_archive_descriptor_when_destination_mkdir_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    archive = tmp_path / "v2-existing-destination.zip"
+    artifacts.build_source_transport_v2(source, archive, commit=commit)
+    destination = tmp_path / "v2-existing-destination"
+    destination.mkdir()
+    opened_descriptors: list[int] = []
+    original_open = artifacts.os.open
+
+    def record_archive_open(path: object, *args: object, **kwargs: object) -> int:
+        descriptor = original_open(path, *args, **kwargs)  # type: ignore[arg-type]
+        if os.fspath(path) == os.fspath(archive):
+            opened_descriptors.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(artifacts.os, "open", record_archive_open)
+    with pytest.raises(FileExistsError):
+        artifacts.extract_source_transport_v2(
+            archive, destination, expected_commit=commit
+        )
+
+    assert len(opened_descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(opened_descriptors[0])
