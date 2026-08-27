@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import errno
 import hashlib
 import io
 import json
@@ -1804,6 +1805,242 @@ def _scoped_tree_snapshot(root: Path) -> list[tuple[object, ...]]:
     return rows
 
 
+def _repair_arguments(
+    system_root: Path, transport: Path, commit: str
+) -> dict[str, object]:
+    return {
+        "mode": "repair",
+        "system_root": system_root,
+        "lock_file": system_root / "locks" / "cf2-h0.lock",
+        "expected_repair_commit": "d" * 40,
+        "expected_source_commit": commit,
+        "operator_uid": os.getuid(),
+        "transport": transport,
+        "transport_sha256": hashlib.sha256(transport.read_bytes()).hexdigest(),
+        "test_adapter": True,
+    }
+
+
+def _verify_arguments(system_root: Path, commit: str) -> dict[str, object]:
+    return {
+        "mode": "verify-only",
+        "system_root": system_root,
+        "lock_file": system_root / "locks" / "cf2-h0.lock",
+        "expected_repair_commit": "d" * 40,
+        "expected_source_commit": commit,
+        "transport": None,
+        "transport_sha256": None,
+        "test_adapter": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "crash_at",
+    (
+        "after_intent_fsync",
+        "after_old_source_move",
+        "after_candidate_install",
+        "after_old_generation_move",
+        "after_repair_receipt_fsync",
+        "after_generation_file_1_fsync",
+    ),
+)
+def test_verify_only_refuses_every_incomplete_position_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    with pytest.raises(artifacts.SourceRepairIncomplete):
+        artifacts.run_source_repair_host(
+            **_repair_arguments(system_root, transport, commit),
+            crash_at=crash_at,
+        )
+    before = _scoped_tree_snapshot(system_root)
+
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.run_source_repair_host(**_verify_arguments(system_root, commit))
+    assert _scoped_tree_snapshot(system_root) == before
+
+
+@pytest.mark.parametrize(
+    "crash_at",
+    (
+        "after_archive_create_intent",
+        "fail_archive_parent_fsync_intent",
+        *tuple(
+            f"{boundary}_{kind}"
+            for kind in ("intent", "receipt")
+            for boundary in (
+                "after_candidate_create",
+                "after_candidate_partial_write",
+                "after_candidate_file_fsync",
+                "after_candidate_rename",
+                "before_parent_fsync",
+                "after_parent_fsync",
+            )
+        ),
+    ),
+)
+def test_publication_prefix_crashes_replay_to_one_exact_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    with pytest.raises(artifacts.SourceRepairIncomplete):
+        artifacts.run_source_repair_host(**arguments, crash_at=crash_at)
+
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    archive = next((system_root / "capacity-archive").iterdir())
+    assert not any(path.name.startswith(".") for path in archive.iterdir())
+    assert (archive / "source-repair-intent.json").is_file()
+    assert (archive / "source-repair-receipt.json").is_file()
+
+
+@pytest.mark.parametrize(
+    "crash_at",
+    tuple(
+        f"fail_{move}_{parent}_parent_fsync"
+        for move in ("old_source", "candidate_install", "old_generation")
+        for parent in ("source", "destination")
+    ),
+)
+def test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    with pytest.raises(artifacts.SourceRepairIncomplete):
+        artifacts.run_source_repair_host(**arguments, crash_at=crash_at)
+
+    archive = next((system_root / "capacity-archive").iterdir())
+    assert not any(path.name.startswith("failure-") for path in archive.iterdir())
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+
+
+def test_visible_commit_normalizes_structural_refusal_to_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+
+    def refuse_visible_generation(*args: object, **kwargs: object) -> None:
+        raise artifacts.CapacityHostArtifactError("INJECTED_VISIBLE_REFUSAL")
+
+    monkeypatch.setattr(
+        artifacts, "_verify_repaired_generation", refuse_visible_generation
+    )
+    with pytest.raises(
+        artifacts.SourceRepairIncomplete,
+        match="POST_COMMIT_RECONCILIATION_REQUIRED",
+    ) as raised:
+        artifacts.run_source_repair_host(**arguments)
+    assert isinstance(raised.value.__cause__, artifacts.CapacityHostArtifactError)
+
+
+def test_visible_commit_normalizes_cleanup_failure_to_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    original_close = artifacts.SourceRepairParents.close
+
+    def fail_after_close(parents: artifacts.SourceRepairParents) -> None:
+        original_close(parents)
+        raise OSError(errno.EIO, "injected retained-parent close failure")
+
+    monkeypatch.setattr(artifacts.SourceRepairParents, "close", fail_after_close)
+    with pytest.raises(
+        artifacts.SourceRepairIncomplete,
+        match="POST_COMMIT_RECONCILIATION_REQUIRED",
+    ) as raised:
+        artifacts.run_source_repair_host(**arguments)
+    assert isinstance(raised.value.__cause__, OSError)
+
+
+def test_every_forward_rename_uses_the_retained_parent_descriptors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    retained: set[int] = set()
+    original_open_parents = artifacts._open_source_repair_parents
+    original_attach_archive = artifacts._attach_source_repair_archive_parent
+    original_rename = artifacts._rename_exclusive
+
+    def record_fixed_parents(*args: object, **kwargs: object) -> object:
+        parents = original_open_parents(*args, **kwargs)
+        retained.update(
+            {parents.source, parents.generation, parents.staging, parents.archive}
+        )
+        return parents
+
+    def record_intent_archive(*args: object, **kwargs: object) -> None:
+        original_attach_archive(*args, **kwargs)
+        parents = args[0]
+        assert isinstance(parents, artifacts.SourceRepairParents)
+        assert parents.intent_archive is not None
+        retained.add(parents.intent_archive)
+
+    def require_retained(
+        source_parent: int,
+        source_name: str,
+        destination_parent: int,
+        destination_name: str,
+    ) -> None:
+        assert source_parent in retained
+        assert destination_parent in retained
+        original_rename(
+            source_parent, source_name, destination_parent, destination_name
+        )
+
+    monkeypatch.setattr(
+        artifacts, "_open_source_repair_parents", record_fixed_parents
+    )
+    monkeypatch.setattr(
+        artifacts, "_attach_source_repair_archive_parent", record_intent_archive
+    )
+    monkeypatch.setattr(artifacts, "_rename_exclusive", require_retained)
+    assert artifacts.run_source_repair_host(
+        **_repair_arguments(system_root, transport, commit)
+    ) == "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+
+
+def test_source_repair_transition_table_is_exhaustive_and_terminal_states_are_distinct() -> None:
+    table = artifacts.SOURCE_REPAIR_TRANSITION_TABLE
+    assert set(table) == set(artifacts.SourceRepairPhase)
+    assert table[artifacts.SourceRepairPhase.COMMITTED] is None
+    assert table[artifacts.SourceRepairPhase.ROLLED_BACK] is None
+    assert table[artifacts.SourceRepairPhase.INTENT_PREFIX] == (
+        artifacts.SourceRepairPhase.INTENT_DURABLE
+    )
+    assert table[artifacts.SourceRepairPhase.RECEIPT_PREFIX] == (
+        artifacts.SourceRepairPhase.RECEIPT_DURABLE
+    )
+    assert table[artifacts.SourceRepairPhase.GENERATION_ARCHIVED] == (
+        artifacts.SourceRepairPhase.RECEIPT_PREFIX
+    )
+
+
 def test_source_repair_host_commits_generation_last_and_verify_is_zero_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2022,6 +2259,72 @@ def test_definite_precommit_failure_restores_only_digest_bound_old_state(
     assert (restored_source / "promisor-source").is_file()
     assert (system_root / "capacity-generations" / artifacts.PRIOR_GENERATION_DIGEST).is_dir()
     archive = next((system_root / "capacity-archive").iterdir())
-    assert (archive / "failed-installed-source").is_dir()
+    failure_namespace = archive / f"failure-{archive.name.removeprefix('source-closure-repair-')}"
+    assert (failure_namespace / "installed-source").is_dir()
     assert not (archive / "archived-source").exists()
     assert not (archive / "archived-generation").exists()
+    position = artifacts.reconcile_source_repair(
+        archive,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    assert position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+
+
+@pytest.mark.parametrize(
+    "crash_at",
+    (
+        "after_failure_namespace_parent_fsync",
+        "after_rollback_installed_rename",
+        "after_rollback_installed_source_parent_fsync",
+        "after_rollback_installed_destination_parent_fsync",
+        "after_rollback_generation_rename",
+        "after_rollback_generation_source_parent_fsync",
+        "after_rollback_generation_destination_parent_fsync",
+        "after_rollback_source_rename",
+        "after_rollback_source_source_parent_fsync",
+        "after_rollback_source_destination_parent_fsync",
+    ),
+)
+def test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    original_publish = artifacts.publish_source_repair_receipt
+
+    def refuse_receipt(*args: object, **kwargs: object) -> str:
+        raise artifacts.CapacityHostArtifactError("INJECTED_RECEIPT_REFUSAL")
+
+    monkeypatch.setattr(artifacts, "publish_source_repair_receipt", refuse_receipt)
+    with pytest.raises(artifacts.SourceRepairIncomplete):
+        artifacts.run_source_repair_host(**arguments, crash_at=crash_at)
+    monkeypatch.setattr(artifacts, "publish_source_repair_receipt", original_publish)
+
+    before_replay = _scoped_tree_snapshot(system_root)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_PRECOMMIT_RESTORED",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+    after_replay = _scoped_tree_snapshot(system_root)
+    if crash_at.endswith("destination_parent_fsync") and crash_at.startswith(
+        "after_rollback_source_"
+    ):
+        assert after_replay == before_replay
+    restored_source = system_root / "capacity-sources" / "macro" / commit
+    assert (restored_source / "promisor-source").is_file()
+    assert (
+        system_root / "capacity-generations" / artifacts.PRIOR_GENERATION_DIGEST
+    ).is_dir()
+    archive = next((system_root / "capacity-archive").iterdir())
+    failure_namespace = archive / f"failure-{archive.name.removeprefix('source-closure-repair-')}"
+    assert (failure_namespace / "installed-source").is_dir()
+    position = artifacts.reconcile_source_repair(
+        archive,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    assert position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
