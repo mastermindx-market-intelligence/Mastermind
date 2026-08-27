@@ -3,20 +3,33 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from integrations.slack_executive.c1_cycle import C1RelayService
-from integrations.slack_executive.c1_runtime import (
+# Production launch is intentionally ``python -I -S -B``.  Under isolated
+# mode the script/repository directory is not an ambient import path, so bind
+# exactly this immutable release root before importing first-party packages.
+_ROOT = Path(__file__).resolve().parents[1]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
+from integrations.slack_executive.c1_cycle import C1RelayService  # noqa: E402
+from integrations.slack_executive.c1_runtime import (  # noqa: E402
     assert_relay_principal,
     load_config,
     read_token_file,
     verify_slack_identity,
 )
-from integrations.slack_executive.executive_state_reader import CeoIngressStateReader
-from integrations.slack_executive.slack_web_api import SlackWebApiStateClient
-from integrations.slack_executive.sol_state import SolStatePublisher
+from integrations.slack_executive.executive_state_reader import (  # noqa: E402
+    CeoIngressStateReader,
+)
+from integrations.slack_executive.slack_web_api import (  # noqa: E402
+    SlackWebApiStateClient,
+)
+from integrations.slack_executive.sol_state import SolStatePublisher  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
