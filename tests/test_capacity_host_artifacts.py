@@ -386,6 +386,37 @@ def test_recovery_v1_digest_preserves_exact_pre_flags_canonical_rows(
     ) == _legacy_recovery_v1_file_tree_digest(source)
 
 
+def test_recovery_v1_digest_preserves_committed_nested_pre_flags_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "legacy-tree"
+    nested = root / "nested"
+    root.mkdir(mode=0o700)
+    nested.mkdir(mode=0o700)
+    payload = nested / "payload"
+    payload.write_bytes(b"payload\n")
+    root.chmod(0o700)
+    nested.chmod(0o700)
+    payload.chmod(0o400)
+    original_lstat = Path.lstat
+    fixed_metadata = {
+        root: {"st_uid": 1234, "st_gid": 5678, "st_nlink": 3, "st_flags": 0},
+        nested: {"st_uid": 1234, "st_gid": 5678, "st_nlink": 2, "st_flags": 0},
+        payload: {"st_uid": 1234, "st_gid": 5678, "st_nlink": 1, "st_flags": 0},
+    }
+
+    def fixed_lstat(path: Path) -> os.stat_result | _StatOverlay:
+        info = original_lstat(path)
+        changes = fixed_metadata.get(path)
+        return _StatOverlay(info, **changes) if changes is not None else info
+
+    monkeypatch.setattr(Path, "lstat", fixed_lstat)
+
+    assert artifacts._closed_tree_digest(root, expected_uid=1234) == (
+        "1da4f381e08384e9cc388a87d845788a08cfafb12c0f1c76a1218ffb737c3e70"
+    )
+
+
 def test_recovery_v1_digest_keeps_flags_as_fail_closed_non_identity_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2349,6 +2380,93 @@ def _ancestor_overlay_changes(drift: str, info: os.stat_result) -> dict[str, int
     if drift == "link-count":
         return {"st_nlink": 0}
     return {}
+
+
+def _overlay_stable_ancestor_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    ancestor: Path,
+    flags: int,
+) -> None:
+    ancestor_info = ancestor.stat()
+    ancestor_identity = (ancestor_info.st_dev, ancestor_info.st_ino)
+    original_fstat = os.fstat
+    original_stat = os.stat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if (info.st_dev, info.st_ino) == ancestor_identity:
+            return _StatOverlay(info, st_flags=flags)
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs))
+    )
+
+
+@pytest.mark.skipif(
+    not hasattr(stat, "UF_NODUMP"), reason="BSD user flag constant is unavailable"
+)
+def test_source_repair_traversal_ancestor_refuses_stable_user_flag_at_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    _overlay_stable_ancestor_flags(monkeypatch, tmp_path, stat.UF_NODUMP)
+    parents: artifacts.SourceRepairParents | None = None
+    try:
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError,
+            match="SOURCE_REPAIR_PARENT_INVALID",
+        ):
+            parents = artifacts._open_source_repair_parents(
+                system_root,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+    finally:
+        if parents is not None:
+            parents.close()
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin", reason="observed platform flags are macOS-specific"
+)
+@pytest.mark.parametrize(
+    "platform_flags",
+    (
+        pytest.param(
+            getattr(stat, "SF_NOUNLINK", 0x00100000),
+            id="root-var-folders-library",
+        ),
+        pytest.param(
+            getattr(stat, "SF_RESTRICTED", 0x00080000)
+            | getattr(stat, "UF_HIDDEN", 0x00008000),
+            id="var",
+        ),
+        pytest.param(
+            getattr(stat, "SF_NOUNLINK", 0x00100000)
+            | getattr(stat, "UF_HIDDEN", 0x00008000),
+            id="private",
+        ),
+    ),
+)
+def test_source_repair_traversal_ancestor_accepts_observed_platform_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform_flags: int,
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    _overlay_stable_ancestor_flags(monkeypatch, tmp_path, platform_flags)
+    parents = artifacts._open_source_repair_parents(
+        system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    try:
+        parents.revalidate()
+    finally:
+        parents.close()
 
 
 @pytest.mark.parametrize(

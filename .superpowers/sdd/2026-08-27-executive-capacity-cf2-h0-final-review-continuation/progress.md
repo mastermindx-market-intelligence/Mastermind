@@ -133,3 +133,105 @@ Result: exit 0; no output.
 - No provider home, credential, service, OAuth, routing, WP/C1/Slack Relay, native/root, launchd, or host state was read or modified as part of the implementation.
 - No branch, worktree, PR, push, deployment, or native install ceremony was created or performed.
 - This is repository implementation and local verification evidence only; it is not an H0 native-host pass or CF2-P0 acceptance receipt.
+
+## Task 1 independent-review follow-up
+
+### Review finding and re-pin
+
+- Re-pinned clean carrier HEAD `6dd8125edf1f2561e5c5a9c1c7f2115b5206a075` on `codex/cf2-h0-source-closure-20260827`; protected `origin/master` remained `af43f356f4f7f34cb3514d1d1099b50444af8487`.
+- Independent review reproduced that a stable arbitrary user `stat.UF_NODUMP` bit on a traversal-only ancestor was accepted at initial open. The cause was that `_require_source_repair_ancestor()` enforced type, owner, mode, device, positive link count, and ACL rules but no initial flag allow-policy; the later exact snapshot therefore legitimized every initially observed bit.
+
+### Review-fix RED
+
+The behavioral tests were added before the production allow-policy. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'traversal_ancestor_refuses_stable_user_flag_at_open or traversal_ancestor_accepts_observed_platform_flags'
+```
+
+Result: exit 1; `F... [100%]`. `test_source_repair_traversal_ancestor_refuses_stable_user_flag_at_open` failed with `Failed: DID NOT RAISE CapacityHostArtifactError`; the three positive cases for the actually observed macOS platform flag combinations passed.
+
+### Bounded review fix
+
+- Traversal-only ancestors now permit only the union of the platform-managed bits required by the observed native states: `SF_NOUNLINK` (`0x00100000`), `SF_RESTRICTED` (`0x00080000`), and `UF_HIDDEN` (`0x00008000`). Any other initial bit, including stable `UF_NODUMP`, refuses with `SOURCE_REPAIR_PARENT_INVALID`.
+- Each stat constant is loaded through `getattr`; Darwin-only numeric fallbacks preserve Apple system-Python compatibility where `stat.SF_RESTRICTED` is absent. Non-Darwin platforms use a zero allowed mask.
+- The allowed initial value is still exactly snapshotted, so any later flag drift refuses. The fixed H0 system-root zero-flags law and all H0-owned zero-flags laws remain unchanged.
+- `_APPROVED_SYSTEM_XATTRS` and the traversal-local xattr-name policy are unchanged.
+
+### Added legacy-v1 directory fixture
+
+Final spec review requested an exact nested recovery-v1 identity fixture in addition to the flat-file cases. A real nested directory/file tree is observed through deterministic fixed UID/GID/link metadata and asserted against the literal pre-flags v1 digest `1da4f381e08384e9cc388a87d845788a08cfafb12c0f1c76a1218ffb737c3e70`.
+
+Exact characterization command before any further source change:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery_v1_digest_preserves_committed_nested_pre_flags_fixture'
+```
+
+Result: exit 0; `. [100%]`. The implementation already preserved nested legacy-v1 byte identity, so this addition was test-only.
+
+### Review-fix GREEN
+
+Expanded Task 1 focused selector:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'pre_flags_recovery_v1 or recovery_v1_digest_preserves_exact_pre_flags or recovery_v1_digest_keeps_flags or committed_nested_pre_flags or complete_post_read_file_state_drift or rechecks_descriptor_security_after_file_read or true_traversal_ancestor_obeys_complete_security_law or traversal_ancestor_tolerates_positive_link_count_churn or fixed_system_root_freezes_exact_link_count or traversal_ancestor_refuses_stable_user_flag_at_open or traversal_ancestor_accepts_observed_platform_flags'
+```
+
+Result: exit 0; `.................................. [100%]` (34 selected cases passed).
+
+Recovery/crash selector, now including the nested recovery fixture:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery or crash'
+```
+
+Result: exit 0; 48 selected cases reached `[100%]` with no failures.
+
+Complete module:
+
+```text
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; `tests/test_capacity_host_artifacts.py: 279`.
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; all 279 collected cases reached `[100%]` with no failures.
+
+Apple system-Python compilation and guarded-mask proof:
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; no output.
+
+```text
+/usr/bin/python3 -c 'from ops.executive_os import capacity_host_artifacts as artifacts; print(artifacts._TRAVERSAL_ANCESTOR_ALLOWED_FLAGS)'
+```
+
+Result: exit 0; `1605632`, exactly `0x00100000 | 0x00080000 | 0x00008000`.
+
+```text
+git diff --check
+```
+
+Result: exit 0; no output.
+
+### Review-fix files and commit identity
+
+- Modified: `ops/executive_os/capacity_host_artifacts.py`
+- Modified: `tests/test_capacity_host_artifacts.py`
+- Appended: `.superpowers/sdd/2026-08-27-executive-capacity-cf2-h0-final-review-continuation/progress.md`
+- Narrow follow-up message: `fix(exec): restrict H0 traversal ancestor flags`
+- Commit identity: the follow-up commit containing this appended ledger. Its exact SHA is reported after commit because embedding a commit's own SHA changes that SHA.
+
+### Review-fix scope boundary
+
+- Task 2 and Task 3 were not started.
+- No native/root/provider/service/credential/OAuth/routing/WP/C1/Slack Relay state was touched.
+- No new native flag bit was observed or silently added; the live full-module path completed under the explicit reviewed mask.

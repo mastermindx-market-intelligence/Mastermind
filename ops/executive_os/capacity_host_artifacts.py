@@ -131,6 +131,13 @@ _SOURCE_REPAIR_RECEIPT_NAME = "source-repair-receipt.json"
 _ARCHIVED_SOURCE_NAME = "archived-source"
 _ARCHIVED_GENERATION_NAME = "archived-generation"
 _ALLOWED_BSD_FLAGS = 0
+_TRAVERSAL_ANCESTOR_ALLOWED_FLAGS = (
+    int(getattr(stat, "SF_NOUNLINK", 0x00100000))
+    | int(getattr(stat, "SF_RESTRICTED", 0x00080000))
+    | int(getattr(stat, "UF_HIDDEN", 0x00008000))
+    if sys.platform == "darwin"
+    else 0
+)
 _RELEASE_MANIFEST_SCHEMA = "mastermind.executive_release_manifest/v1"
 _RELEASE_MANIFEST_NAME = ".executive-release-manifest.json"
 _REPAIR_CARRIER_FILES = {
@@ -936,6 +943,8 @@ def _require_source_repair_ancestor(
         or info.st_nlink < 1
         or info.st_dev != expected_device
         or stat.S_IMODE(info.st_mode) & 0o022
+        or int(getattr(info, "st_flags", 0))
+        & ~_TRAVERSAL_ANCESTOR_ALLOWED_FLAGS
         or not (
             info.st_uid == 0
             or (info.st_uid == expected_uid and info.st_gid == expected_gid)
