@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -171,6 +172,35 @@ def test_qualify_token_proves_identity_scopes_and_private_channel_access():
     ]
 
 
+def test_validate_host_relay_groups_reuses_runtime_allowlist(monkeypatch):
+    enrollment = _module()
+    reviewed = {
+        452: "_mastermind_sol_relay",
+        12: "everyone",
+        61: "localaccounts",
+        100: "_lpoperator",
+        396: "com.apple.access_disabled",
+    }
+    monkeypatch.setattr(enrollment.os, "getgrouplist", lambda _name, _gid: list(reviewed))
+    monkeypatch.setattr(
+        enrollment.grp,
+        "getgrgid",
+        lambda gid: SimpleNamespace(gr_name=reviewed[gid]),
+    )
+    enrollment.validate_host_relay_groups()
+
+    drifted = dict(reviewed)
+    drifted[80] = "admin"
+    monkeypatch.setattr(enrollment.os, "getgrouplist", lambda _name, _gid: list(drifted))
+    monkeypatch.setattr(
+        enrollment.grp,
+        "getgrgid",
+        lambda gid: SimpleNamespace(gr_name=drifted[gid]),
+    )
+    with pytest.raises(enrollment.C1EnrollmentError, match="C1_ENROLLMENT_HOST_REFUSED"):
+        enrollment.validate_host_relay_groups()
+
+
 def test_write_new_private_file_is_no_overwrite_exact_metadata(tmp_path: Path):
     enrollment = _module()
     path = tmp_path / "private"
@@ -212,3 +242,4 @@ def test_source_has_no_service_arm_or_secret_argv_environment_path():
         assert forbidden not in source
     assert "termios.ECHO" in source
     assert "tcsetattr" in source
+    assert "validate_relay_group_names" in source
