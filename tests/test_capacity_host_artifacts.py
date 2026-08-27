@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pwd
+import re
 import stat
 import subprocess
 import sys
@@ -608,3 +609,616 @@ def test_closed_tree_digest_refuses_extended_acl(tmp_path: Path) -> None:
         artifacts.closed_tree_digest(
             root, expected_uid=os.getuid(), expected_gid=os.getgid()
         )
+
+
+def _complete_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, str, str]:
+    """Create one commit whose closure is strictly wider than the CF1 projection."""
+
+    root = tmp_path / "complete-source"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.name", "Fixture")
+    _git(root, "config", "user.email", "fixture@example.invalid")
+    for index, relative in enumerate(contract.PRODUCER_MATERIAL_PATHS):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"material-{index}\n", encoding="utf-8")
+        if relative.startswith("scripts/"):
+            path.chmod(0o755)
+    history = root / "docs" / "nonmaterial-history.txt"
+    history.parent.mkdir(parents=True)
+    history.write_bytes((b"old nonmaterial payload\n" * 4096) + b"old\n")
+    _git(root, "add", *contract.PRODUCER_MATERIAL_PATHS, history.relative_to(root).as_posix())
+    _git(root, "commit", "-qm", "fixture parent")
+    history.write_bytes((b"new nonmaterial payload\n" * 4096) + b"new\n")
+    _git(root, "add", history.relative_to(root).as_posix())
+    _git(root, "commit", "-qm", "fixture complete")
+    commit = _git(root, "rev-parse", "HEAD")
+    nonmaterial_oid = _git(root, "rev-parse", f"{commit}:docs/nonmaterial-history.txt")
+    monkeypatch.setattr(artifacts, "PRODUCER_COMMIT", commit, raising=False)
+    return root, commit, nonmaterial_oid
+
+
+def _inventory_bytes(rows: object) -> bytes:
+    return b"".join(
+        f"{row.oid} {row.object_type} {row.size}\n".encode("ascii")
+        for row in rows  # type: ignore[union-attr]
+    )
+
+
+def _write_v2_archive(path: Path, manifest: dict[str, object], payload: bytes) -> None:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
+        for name, body in (
+            ("manifest.json", artifacts.canonical_json(manifest)),
+            ("payload.pack", payload),
+        ):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            info.compress_type = zipfile.ZIP_STORED
+            info.external_attr = (stat.S_IFREG | 0o400) << 16
+            archive.writestr(info, body)
+
+
+def _v2_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, dict[str, object], str]:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    archive = tmp_path / "complete-transport.zip"
+    manifest = artifacts.build_source_transport_v2(
+        source, archive, commit=commit
+    )
+    checkout = tmp_path / "complete-checkout"
+    artifacts.materialize_source_transport_v2(
+        archive, checkout, expected_commit=commit
+    )
+    return checkout, manifest, commit
+
+
+def _replace_closed_file(path: Path, payload: bytes) -> None:
+    parent = path.parent
+    parent.chmod(0o755)
+    if path.exists() or path.is_symlink():
+        path.chmod(0o600, follow_symlinks=False)
+        path.unlink()
+    path.write_bytes(payload)
+    path.chmod(0o444)
+    parent.chmod(0o555)
+
+
+def _create_closed_file(path: Path, payload: bytes = b"") -> None:
+    parents: list[Path] = []
+    current = path.parent
+    while not current.exists():
+        parents.append(current)
+        current = current.parent
+    current.chmod(0o755)
+    for parent in reversed(parents):
+        parent.mkdir(mode=0o755)
+    path.write_bytes(payload)
+    path.chmod(0o444)
+    for parent in [path.parent, *reversed(parents[:-1])]:
+        parent.chmod(0o555)
+    current.chmod(0o555)
+
+
+def test_complete_transport_v2_binds_nonmaterial_closure_and_exact_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    archive_path = tmp_path / "complete-v2.zip"
+
+    manifest = artifacts.build_source_transport_v2(
+        source, archive_path, commit=commit
+    )
+    rows = artifacts.enumerate_reachable_objects(source, commit)
+    inventory_bytes = _inventory_bytes(rows)
+    assert nonmaterial_oid in {row.oid for row in rows}
+    assert manifest == {
+        "schema_version": "mastermind.capacity_source_transport/v2",
+        "repository": "mastermindx-market-intelligence/macro",
+        "commit": commit,
+        "object_format": "sha1",
+        "closure_kind": "complete_reachable_commit_graph",
+        "payload_sha256": manifest["payload_sha256"],
+        "object_count": len(rows),
+        "object_inventory_sha256": hashlib.sha256(inventory_bytes).hexdigest(),
+        "material": manifest["material"],
+    }
+    assert [row["path"] for row in manifest["material"]] == list(
+        contract.PRODUCER_MATERIAL_PATHS
+    )
+
+    with zipfile.ZipFile(archive_path) as archive:
+        infos = archive.infolist()
+        assert [info.filename for info in infos] == ["manifest.json", "payload.pack"]
+        assert archive.comment == b""
+        for info in infos:
+            assert info.date_time == (1980, 1, 1, 0, 0, 0)
+            assert info.create_system == 3
+            assert info.compress_type == zipfile.ZIP_STORED
+            assert info.flag_bits & 0x1 == 0
+            assert info.extra == b""
+            assert info.comment == b""
+            assert stat.S_IMODE(info.external_attr >> 16) == 0o400
+
+    extracted = tmp_path / "complete-extracted"
+    assert artifacts.extract_source_transport_v2(
+        archive_path, extracted, expected_commit=commit
+    ) == manifest
+    checkout = tmp_path / "complete-installed"
+    assert artifacts.materialize_source_transport_v2(
+        archive_path, checkout, expected_commit=commit
+    ) == manifest
+    evidence = artifacts.verify_complete_repository(checkout, manifest)
+    assert evidence.object_count == manifest["object_count"]
+    assert evidence.object_inventory_sha256 == manifest["object_inventory_sha256"]
+    assert re.fullmatch(r"[0-9a-f]{64}", evidence.source_tree_sha256)
+    assert not list((checkout / ".git" / "objects" / "pack").glob("*.promisor"))
+    assert "partialclone" not in _git(checkout, "config", "--local", "--list").lower()
+
+
+def test_complete_transport_v2_semantic_inventory_survives_different_pack_layouts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    first_path = tmp_path / "first.zip"
+    first = artifacts.build_source_transport_v2(source, first_path, commit=commit)
+    rows = artifacts.enumerate_reachable_objects(source, commit)
+    object_input = b"".join(f"{row.oid}\n".encode("ascii") for row in rows)
+    alternate_payload = subprocess.run(
+        [
+            "/usr/bin/git",
+            "--no-replace-objects",
+            "-C",
+            str(source),
+            "pack-objects",
+            "--stdout",
+            "--window=0",
+            "--depth=0",
+        ],
+        input=object_input,
+        check=True,
+        capture_output=True,
+        env=artifacts._git_environment(),
+    ).stdout
+    with zipfile.ZipFile(first_path) as archive:
+        first_payload = archive.read("payload.pack")
+    assert alternate_payload != first_payload
+
+    second = dict(first)
+    second["payload_sha256"] = hashlib.sha256(alternate_payload).hexdigest()
+    second_path = tmp_path / "second.zip"
+    _write_v2_archive(second_path, second, alternate_payload)
+    first_checkout = tmp_path / "first-checkout"
+    second_checkout = tmp_path / "second-checkout"
+    artifacts.materialize_source_transport_v2(first_path, first_checkout, expected_commit=commit)
+    artifacts.materialize_source_transport_v2(second_path, second_checkout, expected_commit=commit)
+    first_evidence = artifacts.verify_complete_repository(first_checkout, first)
+    second_evidence = artifacts.verify_complete_repository(second_checkout, second)
+    assert first_evidence.object_count == second_evidence.object_count
+    assert (
+        first_evidence.object_inventory_sha256
+        == second_evidence.object_inventory_sha256
+    )
+    assert first["payload_sha256"] != second["payload_sha256"]
+    assert hashlib.sha256(first_path.read_bytes()).hexdigest() != hashlib.sha256(
+        second_path.read_bytes()
+    ).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (
+        ("object_count", 1),
+        ("object_inventory_sha256", "f" * 64),
+    ),
+)
+def test_complete_materializer_refuses_manifest_object_inventory_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    valid_path = tmp_path / "valid.zip"
+    manifest = artifacts.build_source_transport_v2(source, valid_path, commit=commit)
+    with zipfile.ZipFile(valid_path) as archive:
+        payload = archive.read("payload.pack")
+    drifted = dict(manifest)
+    drifted[field] = value
+    drifted_path = tmp_path / f"drifted-{field}.zip"
+    _write_v2_archive(drifted_path, drifted, payload)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="OBJECT_INVENTORY"):
+        artifacts.materialize_source_transport_v2(
+            drifted_path,
+            tmp_path / f"drifted-{field}",
+            expected_commit=commit,
+        )
+
+
+@pytest.mark.parametrize("mutation", ("type", "size"))
+def test_complete_materializer_refuses_semantic_object_type_or_size_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    valid_path = tmp_path / "semantic-valid.zip"
+    manifest = artifacts.build_source_transport_v2(source, valid_path, commit=commit)
+    rows = artifacts.enumerate_reachable_objects(source, commit)
+    with zipfile.ZipFile(valid_path) as archive:
+        payload = archive.read("payload.pack")
+    drifted_rows: list[bytes] = []
+    for index, row in enumerate(rows):
+        object_type = row.object_type
+        size = row.size
+        if index == 0 and mutation == "type":
+            object_type = "blob" if object_type != "blob" else "tree"
+        if index == 0 and mutation == "size":
+            size += 1
+        drifted_rows.append(f"{row.oid} {object_type} {size}\n".encode("ascii"))
+    drifted = dict(manifest)
+    drifted["object_inventory_sha256"] = hashlib.sha256(
+        b"".join(drifted_rows)
+    ).hexdigest()
+    drifted_path = tmp_path / f"semantic-{mutation}.zip"
+    _write_v2_archive(drifted_path, drifted, payload)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="OBJECT_INVENTORY"):
+        artifacts.materialize_source_transport_v2(
+            drifted_path,
+            tmp_path / f"semantic-{mutation}",
+            expected_commit=commit,
+        )
+
+
+def test_complete_transport_v2_streams_pack_and_refuses_pack_trailer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    valid_path = tmp_path / "valid.zip"
+    manifest = artifacts.build_source_transport_v2(source, valid_path, commit=commit)
+    with zipfile.ZipFile(valid_path) as archive:
+        payload = archive.read("payload.pack") + b"trailer"
+    invalid = dict(manifest)
+    invalid["payload_sha256"] = hashlib.sha256(payload).hexdigest()
+    invalid_path = tmp_path / "trailer.zip"
+    _write_v2_archive(invalid_path, invalid, payload)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="PACK"):
+        artifacts.extract_source_transport_v2(
+            invalid_path, tmp_path / "trailer-extract", expected_commit=commit
+        )
+
+
+def test_complete_transport_v2_does_not_full_buffer_pack_or_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    archive_path = tmp_path / "streamed.zip"
+    manifest = artifacts.build_source_transport_v2(source, archive_path, commit=commit)
+    original_read_bytes = Path.read_bytes
+    original_zip_read = zipfile.ZipFile.read
+
+    def reject_full_buffer(path: Path) -> bytes:
+        if path.suffix in {".zip", ".pack"}:
+            raise AssertionError("v2 transport pack/archive must be streamed")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_full_buffer)
+
+    def reject_archive_read(
+        archive: zipfile.ZipFile,
+        name: object,
+        password: bytes | None = None,
+    ) -> bytes:
+        if name == "payload.pack" or getattr(name, "filename", None) == "payload.pack":
+            raise AssertionError("v2 payload must use bounded ZipExtFile reads")
+        return original_zip_read(archive, name, password)
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", reject_archive_read)
+    artifacts.extract_source_transport_v2(
+        archive_path, tmp_path / "streamed-extract", expected_commit=commit
+    )
+    checkout = tmp_path / "streamed-checkout"
+    artifacts.materialize_source_transport_v2(
+        archive_path, checkout, expected_commit=commit
+    )
+    assert artifacts.verify_complete_repository(checkout, manifest).object_count == manifest[
+        "object_count"
+    ]
+
+
+def test_complete_materializer_refuses_removed_nonmaterial_blob_without_promisor_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    valid_path = tmp_path / "complete-valid.zip"
+    manifest = artifacts.build_source_transport_v2(source, valid_path, commit=commit)
+    rows = tuple(
+        row
+        for row in artifacts.enumerate_reachable_objects(source, commit)
+        if row.oid != nonmaterial_oid
+    )
+    payload = subprocess.run(
+        [
+            "/usr/bin/git",
+            "--no-replace-objects",
+            "-C",
+            str(source),
+            "pack-objects",
+            "--stdout",
+        ],
+        input=b"".join(f"{row.oid}\n".encode("ascii") for row in rows),
+        check=True,
+        capture_output=True,
+        env=artifacts._git_environment(),
+    ).stdout
+    incomplete = dict(manifest)
+    incomplete["payload_sha256"] = hashlib.sha256(payload).hexdigest()
+    incomplete["object_count"] = len(rows)
+    incomplete["object_inventory_sha256"] = hashlib.sha256(
+        _inventory_bytes(rows)
+    ).hexdigest()
+    incomplete_path = tmp_path / "incomplete-nonmaterial.zip"
+    _write_v2_archive(incomplete_path, incomplete, payload)
+
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.materialize_source_transport_v2(
+            incomplete_path,
+            tmp_path / "incomplete-nonmaterial",
+            expected_commit=commit,
+        )
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "promisor",
+        "alternate",
+        "shallow",
+        "remote",
+        "partial_clone",
+        "filter",
+        "loose_replace",
+        "packed_replace",
+        "graft",
+        "attached",
+        "dirty",
+        "twelfth_file",
+        "linked_material",
+        "wrong_mode",
+    ),
+)
+def test_complete_repository_refuses_forbidden_or_unsafe_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    checkout, manifest, commit = _v2_checkout(tmp_path, monkeypatch)
+    git_dir = checkout / ".git"
+    pack_dir = git_dir / "objects" / "pack"
+    if case == "promisor":
+        pack = next(pack_dir.glob("*.pack"))
+        _create_closed_file(pack.with_suffix(".promisor"))
+    elif case == "alternate":
+        _create_closed_file(git_dir / "objects" / "info" / "alternates", b"/tmp/objects\n")
+    elif case == "shallow":
+        _create_closed_file(git_dir / "shallow", f"{commit}\n".encode("ascii"))
+    elif case in {"remote", "partial_clone", "filter"}:
+        config = (git_dir / "config").read_bytes()
+        addition = {
+            "remote": b'[remote "origin"]\n\turl = file:///tmp/source\n',
+            "partial_clone": b"[extensions]\n\tpartialClone = origin\n",
+            "filter": b'[filter "unsafe"]\n\tclean = /bin/false\n',
+        }[case]
+        _replace_closed_file(git_dir / "config", config + addition)
+    elif case == "loose_replace":
+        _create_closed_file(git_dir / "refs" / "replace" / commit, f"{commit}\n".encode("ascii"))
+    elif case == "packed_replace":
+        _create_closed_file(git_dir / "packed-refs", f"{commit} refs/replace/{commit}\n".encode("ascii"))
+    elif case == "graft":
+        _create_closed_file(git_dir / "info" / "grafts", f"{commit}\n".encode("ascii"))
+    elif case == "attached":
+        _create_closed_file(git_dir / "refs" / "heads" / "fixture", f"{commit}\n".encode("ascii"))
+        _replace_closed_file(git_dir / "HEAD", b"ref: refs/heads/fixture\n")
+    elif case == "dirty":
+        material = checkout / contract.PRODUCER_MATERIAL_PATHS[0]
+        _replace_closed_file(material, b"dirty\n")
+    elif case == "twelfth_file":
+        _create_closed_file(checkout / "unexpected.txt", b"unexpected\n")
+    elif case == "linked_material":
+        material = checkout / contract.PRODUCER_MATERIAL_PATHS[0]
+        outside = tmp_path / "outside-link"
+        outside.write_bytes(material.read_bytes())
+        material.parent.chmod(0o755)
+        material.chmod(0o600)
+        material.unlink()
+        os.link(outside, material)
+        material.chmod(0o444)
+        material.parent.chmod(0o555)
+    else:
+        (checkout / contract.PRODUCER_MATERIAL_PATHS[0]).chmod(0o644)
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.verify_complete_repository(checkout, manifest)
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "alternate_symlink",
+        "alternate_hardlink",
+        "alternate_lock",
+        "shallow_symlink",
+        "shallow_hardlink",
+        "shallow_lock",
+        "promisor_symlink",
+        "promisor_hardlink",
+        "promisor_lock",
+        "config_symlink",
+        "config_hardlink",
+        "config_lock",
+        "packed_refs_symlink",
+        "packed_refs_hardlink",
+        "packed_refs_lock",
+        "graft_symlink",
+        "graft_hardlink",
+        "graft_lock",
+        "pack_symlink",
+        "pack_hardlink",
+        "pack_lock",
+        "index_symlink",
+        "index_hardlink",
+        "index_lock",
+    ),
+)
+def test_complete_repository_direct_metadata_refusal_precedes_git_fsck(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    checkout, manifest, _commit = _v2_checkout(tmp_path, monkeypatch)
+    git_dir = checkout / ".git"
+    pack_dir = git_dir / "objects" / "pack"
+    pack = next(pack_dir.glob("*.pack"))
+    index = next(pack_dir.glob("*.idx"))
+    base_case, mutation = case.rsplit("_", 1)
+    target = {
+        "alternate": git_dir / "objects" / "info" / "alternates",
+        "shallow": git_dir / "shallow",
+        "promisor": pack.with_suffix(".promisor"),
+        "config": git_dir / "config",
+        "packed_refs": git_dir / "packed-refs",
+        "graft": git_dir / "info" / "grafts",
+        "pack": pack,
+        "index": index,
+    }[base_case]
+    if mutation == "lock":
+        _create_closed_file(target.with_name(f"{target.name}.lock"))
+    elif mutation == "hardlink":
+        outside = tmp_path / f"{base_case}-outside"
+        if target.exists():
+            outside.write_bytes(target.read_bytes())
+            target.parent.chmod(0o755)
+            target.chmod(0o600)
+            target.unlink()
+        else:
+            outside.write_bytes(b"unsafe\n")
+            target.parent.chmod(0o755)
+        os.link(outside, target)
+        target.chmod(0o444)
+        target.parent.chmod(0o555)
+    else:
+        outside = tmp_path / f"{base_case}-symlink-target"
+        outside.write_bytes(target.read_bytes() if target.exists() else b"unsafe\n")
+        target.parent.chmod(0o755)
+        if target.exists():
+            target.chmod(0o600)
+            target.unlink()
+        target.symlink_to(outside)
+        target.parent.chmod(0o555)
+
+    def git_must_not_run(*args: object, **kwargs: object) -> bytes:
+        raise AssertionError("descriptor-first refusal must precede Git")
+
+    monkeypatch.setattr(artifacts, "_run_git", git_must_not_run)
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.verify_complete_repository(checkout, manifest)
+
+
+def test_complete_repository_refuses_incomplete_v1_after_promisor_marker_deletion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    v2_archive = tmp_path / "complete.zip"
+    v2_manifest = artifacts.build_source_transport_v2(source, v2_archive, commit=commit)
+    v1_archive = tmp_path / "incomplete.zip"
+    artifacts.build_source_transport(
+        source,
+        v1_archive,
+        commit=commit,
+        material_paths=contract.PRODUCER_MATERIAL_PATHS,
+    )
+    checkout = tmp_path / "incomplete-checkout"
+    artifacts.materialize_source_transport(
+        v1_archive,
+        checkout,
+        expected_commit=commit,
+        material_paths=contract.PRODUCER_MATERIAL_PATHS,
+    )
+    promisor = next((checkout / ".git" / "objects" / "pack").glob("*.promisor"))
+    promisor.unlink()
+    _git(checkout, "config", "--unset", "extensions.partialClone")
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.verify_complete_repository(checkout, v2_manifest)
+
+
+def test_v2_cli_names_are_separate_and_accept_no_material_override() -> None:
+    parser = artifacts._parser()
+    build = parser.parse_args(
+        [
+            "build-source-transport-v2",
+            "--source-repository",
+            "/operator/macro",
+            "--output",
+            "/operator/transport.zip",
+            "--commit",
+            "a" * 40,
+        ]
+    )
+    assert build.command == "build-source-transport-v2"
+    assert not hasattr(build, "material_path")
+    materialize = parser.parse_args(
+        [
+            "materialize-source-transport-v2",
+            "--archive",
+            "/stage/transport.zip",
+            "--destination",
+            "/stage/source",
+            "--commit",
+            "a" * 40,
+        ]
+    )
+    assert materialize.command == "materialize-source-transport-v2"
+    assert not hasattr(materialize, "material_path")
+    extract = parser.parse_args(
+        [
+            "extract-source-transport-v2",
+            "--archive",
+            "/stage/transport.zip",
+            "--destination",
+            "/stage/extracted",
+            "--commit",
+            "a" * 40,
+        ]
+    )
+    assert extract.command == "extract-source-transport-v2"
+    assert not hasattr(extract, "material_path")
+    verify = parser.parse_args(
+        [
+            "verify-complete-repository",
+            "--source-root",
+            "/installed/source",
+            "--manifest",
+            "/installed/source/.git/cf2-h0-transport-manifest.json",
+            "--commit",
+            "a" * 40,
+        ]
+    )
+    assert verify.command == "verify-complete-repository"
+    assert not hasattr(verify, "material_path")
+    with pytest.raises(SystemExit) as refusal:
+        parser.parse_args(
+            [
+                "build-source-transport-v2",
+                "--source-repository",
+                "/operator/macro",
+                "--output",
+                "/operator/transport.zip",
+                "--commit",
+                "a" * 40,
+                "--material-path",
+                "attacker-selected.py",
+            ]
+        )
+    assert refusal.value.code == 2
