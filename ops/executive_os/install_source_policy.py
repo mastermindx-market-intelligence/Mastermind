@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Sequence
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_INSTALLER_REPO = Path(__file__).resolve().parents[2]
 
 
 class InstallSourcePolicyError(RuntimeError):
@@ -199,7 +200,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-repo", required=True)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--protected-master-sha")
-    parser.add_argument("--installer-repo")
     parser.add_argument("--allow-frozen-accepted-ancestor", action="store_true")
     return parser
 
@@ -207,16 +207,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.allow_frozen_accepted_ancestor and not args.installer_repo:
-            raise InstallSourcePolicyError(
-                "frozen accepted ancestor mode requires installer checkout"
-            )
         receipt = validate_install_source(
             source_repo=Path(args.source_repo),
             expected_sha=args.expected_sha,
             protected_master_sha=args.protected_master_sha,
             allow_frozen_accepted_ancestor=args.allow_frozen_accepted_ancestor,
-            installer_repo=(Path(args.installer_repo) if args.installer_repo else None),
+            installer_repo=(
+                _INSTALLER_REPO if args.allow_frozen_accepted_ancestor else None
+            ),
         )
     except InstallSourcePolicyError as exc:
         print(str(exc), file=sys.stderr)
