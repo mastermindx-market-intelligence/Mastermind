@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,3 +85,31 @@ def test_read_token_file_rejects_group_or_world_permissions(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
         c1_runtime.read_token_file(path)
+
+
+def test_assert_relay_principal_refuses_root(monkeypatch):
+    c1_runtime = _module()
+    monkeypatch.setattr(c1_runtime.os, "geteuid", lambda: 0)
+
+    with pytest.raises(RuntimeError, match="C1_RELAY_PRINCIPAL_REFUSED"):
+        c1_runtime.assert_relay_principal()
+
+
+def test_assert_relay_principal_accepts_exact_user_and_rejects_worker_group(monkeypatch):
+    c1_runtime = _module()
+    monkeypatch.setattr(c1_runtime.os, "geteuid", lambda: 451)
+    monkeypatch.setattr(c1_runtime.pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_name="_mastermind_sol_relay", pw_gid=451))
+    monkeypatch.setattr(c1_runtime.os, "getgroups", lambda: [451])
+    monkeypatch.setattr(c1_runtime.grp, "getgrgid", lambda _gid: SimpleNamespace(gr_name="_mastermind_sol_relay"))
+    c1_runtime.assert_relay_principal()
+
+    monkeypatch.setattr(c1_runtime.os, "getgroups", lambda: [451, 452])
+    monkeypatch.setattr(
+        c1_runtime.grp,
+        "getgrgid",
+        lambda gid: SimpleNamespace(
+            gr_name="_mastermind_sol_relay" if gid == 451 else "_mastermind_worker"
+        ),
+    )
+    with pytest.raises(RuntimeError, match="C1_RELAY_PRINCIPAL_REFUSED"):
+        c1_runtime.assert_relay_principal()
