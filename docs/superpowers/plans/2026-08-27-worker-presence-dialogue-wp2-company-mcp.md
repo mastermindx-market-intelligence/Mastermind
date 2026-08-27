@@ -4,9 +4,9 @@
 
 **Goal:** Build one production-inert Mastermind company-dialogue MCP facade whose exact six worker-facing tools can operate only on an already-bound Agent Dialogue V2 context, while reusing the existing Executive MCP capability-attestation law and exposing no generic Slack authority.
 
-**Architecture:** Follow the hardened `integrations/executive_mcp` pattern: schemas and adapter remain stdlib/first-party only; exactly one `server.py` imports the MCP SDK; tool census and schema digest are static and mutation-tested. The adapter talks only to the existing Agent Dialogue AF_UNIX client/service and obtains identity/thread/context from an injected `DialogueBindingResolver`; none of those privileged fields exists in MCP tool input. WP-2 proves the facade and the existing `ExecutionCapabilityRegistry`/`McpServerGrant` compatibility using a production-inert fixture policy. It deliberately does **not** invent a long-lived token, actor registry, default production endpoint or runtime binding store. If no already-accepted host-owned exact Attempt/session binding seam exists at implementation time, that live binding remains `NOT_BUILT` and is returned to Sol as the WP-3 prerequisite rather than bypassed.
+**Architecture:** Follow the hardened `integrations/executive_mcp` pattern: schemas and adapter remain stdlib/first-party only; exactly one `server.py` imports the MCP SDK; tool census and schema digest are static and mutation-tested. The adapter talks only to the existing Agent Dialogue AF_UNIX client/service and obtains identity/thread/context from an injected `DialogueBindingResolver`; none of those privileged fields exists in MCP tool input. WP-2 proves the facade and the existing `ExecutionCapabilityRegistry`/`McpServerGrant` compatibility using a production-inert policy constructed inside tests. It deliberately does **not** invent a long-lived token, actor registry, default production endpoint or runtime binding store. If no already-accepted host-owned exact Attempt/session binding seam exists at implementation time, that live binding remains `NOT_BUILT` and is returned to Sol as the WP-3 prerequisite rather than bypassed.
 
-**Tech Stack:** Python 3.11+, existing MCP SDK dev dependency, existing `integrations.executive_mcp` security pattern, existing `integrations.slack_agent_dialogue.service.call_service`, existing `ExecutionCapabilityRegistry` / `McpServerGrant`, pytest.
+**Tech Stack:** Python 3.11+, existing MCP SDK dev dependency, existing `integrations/executive_mcp` security pattern, existing `integrations.slack_agent_dialogue.service.call_service`, existing `ExecutionCapabilityRegistry` / `McpServerGrant`, pytest.
 
 **Spec:** `docs/superpowers/specs/2026-08-27-worker-presence-dialogue-gateway-design.md`
 
@@ -34,8 +34,8 @@
 - Create `integrations/mastermind_company_mcp/server.py` — the only module in this package importing `mcp`; tools-only low-level MCP server.
 - Create `tests/test_mastermind_company_mcp.py` — tool census, schema snapshot, SDK isolation, no-privileged-input, binding injection, service-call, redaction/bounds and no-generic-Slack tests.
 - Create `tests/test_mastermind_company_mcp_mutation.py` — authority/persistence/tool-widening mutation kills.
-- Modify `tests/test_executive_agent_capabilities.py` only to prove an exact **fixture policy** containing the future company-dialogue MCP server/profile compiles through the existing registry; do not add a dead/placeholder server to production `config/executive_agent_capabilities.json` without a real reviewed endpoint/transport identity.
-- Add `tests/fixtures/executive_agent_capabilities_company_dialogue.json` only if a fixture file is clearer than constructing the policy in test code; the fixture must be explicitly production-inert and contain no credential/token/live endpoint claim.
+- Modify `tests/test_executive_agent_capabilities.py` only to prove an exact **in-test fixture policy** containing the future company-dialogue MCP server/profile compiles through the existing registry; do not add a dead/placeholder server to production `config/executive_agent_capabilities.json` without a real reviewed endpoint/transport identity.
+- Do not create another capability-policy file or fixture JSON. Construct the production-inert test policy by copying the current canonical policy in test memory/tempfile exactly as existing capability tests do.
 - Do not add a runtime launcher/service installer in WP-2 unless current archaeology proves an already-accepted exact binding mechanism and endpoint. The default plan intentionally stops before live composition.
 
 ---
@@ -189,7 +189,7 @@ The gateway must not interpret a result and automatically call a second tool, re
 
 - [ ] **Step 4: Implement trusted message composition**
 
-Create the V2 message using binding-owned fields plus validated semantic args. Generate a bounded deterministic message key using a caller-independent random/UUID source injected into the gateway for tests; the worker does not choose the key.
+Create the V2 message using binding-owned fields plus validated semantic args. Generate a bounded message key using a caller-independent UUID source injected into the gateway for tests; the worker does not choose the key.
 
 Derive summaries mechanically, e.g.:
 
@@ -282,14 +282,13 @@ git commit -m "feat(mcp): expose company dialogue through tools-only MCP server"
 
 **Files:**
 - Modify: `tests/test_executive_agent_capabilities.py`
-- Optional create: `tests/fixtures/executive_agent_capabilities_company_dialogue.json`
 - Do not modify production `config/executive_agent_capabilities.json` unless a real reviewed endpoint/transport identity and safe binding seam exist at current head.
 
 **Interfaces:** existing `ExecutionCapabilityRegistry`, `McpServerGrant`, capability manifest/config projection.
 
-- [ ] **Step 1: Build a production-inert fixture policy from current canonical policy**
+- [ ] **Step 1: Build a production-inert policy in test memory/tempfile**
 
-In test code, copy `_raw_policy()` and add a company-dialogue server row that uses the **currently supported** registry transport shape only for parsing/attestation proof. Use a reserved non-routable test hostname under `.invalid`, for example `https://company-dialogue.test.invalid/mcp`, and mark the fixture clearly non-production. It must never enter the checked-in production default policy.
+In test code, copy `_raw_policy()` and add a company-dialogue server row that uses the **currently supported** registry transport shape only for parsing/attestation proof. Use a reserved non-routable test hostname under `.invalid`, for example `https://company-dialogue.test.invalid/mcp`. Write the mutated dictionary only to the test's `tmp_path` using the existing `_write()` helper. It must never enter the checked-in production default policy.
 
 The test row has exact server identity/version/tool digest matching WP-2:
 
@@ -301,7 +300,7 @@ tool_schema_digest = <frozen digest from WP-2>
 required = true
 ```
 
-Add one fixture profile such as `operator.appserver.readonly.company-dialogue.fixture.v1` referencing only that server. Keep `production_armed=false`.
+Add one in-memory fixture profile such as `operator.appserver.readonly.company-dialogue.fixture.v1` referencing only that server. Keep `production_armed=false`.
 
 - [ ] **Step 2: Prove existing registry compiles exact manifest/config**
 
@@ -317,7 +316,7 @@ widened seventh tool changes digest/refuses
 production_armed=true refuses under current law
 ```
 
-- [ ] **Step 3: Record the live-binding falsifier explicitly in tests/docs comments**
+- [ ] **Step 3: Record the live-binding falsifier explicitly in tests/comments**
 
 The production default policy remains unchanged because neither a real endpoint nor exact Attempt/session authentication seam is accepted in this wave. Add a test asserting production `config/executive_agent_capabilities.json` contains no `mastermind-company-dialogue` server/profile after WP-2. This is intentional negative proof, not missing implementation.
 
@@ -333,11 +332,9 @@ python -m pytest \
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_executive_agent_capabilities.py tests/fixtures/executive_agent_capabilities_company_dialogue.json 2>/dev/null || true
+git add tests/test_executive_agent_capabilities.py
 git commit -m "test(exec): prove company dialogue MCP capability-profile contract"
 ```
-
-Do not use the `|| true` pattern if the fixture does not exist in the actual carrier; stage only the files that exist.
 
 ---
 
@@ -367,7 +364,7 @@ add persistent actor/binding registry
 seventh tool appears without snapshot change
 server.py dynamically registers a tool
 schemas/adapter imports MCP SDK
-fixture MCP tool allowlist widens without digest change
+in-test MCP tool allowlist widens without digest change
 production default capability config gains fake company-dialogue endpoint/profile
 ```
 
@@ -426,7 +423,7 @@ Return exact head, changed files, tests/CI/CodeQL, schema snapshot, mutation res
 
 ```text
 MCP facade + trusted-binding interface = BUILT_NOT_PROVEN / PRODUCTION_INERT
-Executive capability-profile compatibility = BUILT_NOT_PROVEN via fixture proof
+Executive capability-profile compatibility = BUILT_NOT_PROVEN via in-test policy proof
 real production MCP endpoint/auth + exact Attempt/session binding = NOT_BUILT
 Slack Agent Relay production = owned by ASD-A2, unchanged
 WP-3 remains gated
