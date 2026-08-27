@@ -474,9 +474,7 @@ def already_delivered_receipt(
         obligation_id=obligation.obligation_id,
         attempt_n=parsed.attempt_n or 0,
         attempt_command_id=ledger_command_id(
-            obligation.obligation_id,
-            LedgerPhase.DELIVERY_ATTEMPT,
-            attempt_n=parsed.attempt_n,
+            obligation.obligation_id, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=parsed.attempt_n,
         ),
         destination_digest=str(parsed.destination_digest),
         route_digest=str(parsed.route_digest),
@@ -510,12 +508,15 @@ def already_delivered_receipt(
 
 @runtime_checkable
 class WakeDispatcher(Protocol):
+    transport_id: str
+
     async def nudge(self, wake: WakeNudge) -> TransportReceipt: ...
 
 
 class UnsupportedWakeDispatcher:
     def __init__(self, transport_id: str) -> None:
         self.descriptor = _descriptor(transport_id)
+        self.transport_id = self.descriptor.transport_id
 
     async def nudge(self, wake: WakeNudge) -> TransportReceipt:
         if wake.wake_transport != self.descriptor.transport_id:
