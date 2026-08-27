@@ -51,6 +51,11 @@ class WakeDispatcherRegistry:
                 raise WakeDispatchError(
                     f"wake transport {transport_id!r} has no dispatcher instance"
                 )
+            dispatcher_id = str(getattr(dispatcher, "transport_id", "") or "").strip()
+            if dispatcher_id != descriptor.transport_id:
+                raise WakeDispatchError(
+                    "dispatcher transport identity does not match the canonical descriptor"
+                )
             resolved[transport_id] = dispatcher
         self._dispatchers = resolved
 
