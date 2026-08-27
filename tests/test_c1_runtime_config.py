@@ -198,7 +198,7 @@ def test_assert_relay_principal_refuses_root(monkeypatch):
         c1_runtime.assert_relay_principal()
 
 
-def test_assert_relay_principal_accepts_exact_user_and_rejects_broad_groups(monkeypatch):
+def test_assert_relay_principal_accepts_only_reviewed_groups(monkeypatch):
     c1_runtime = _module()
     monkeypatch.setattr(c1_runtime.os, "geteuid", lambda: 452)
     monkeypatch.setattr(
@@ -206,27 +206,37 @@ def test_assert_relay_principal_accepts_exact_user_and_rejects_broad_groups(monk
         "getpwuid",
         lambda _uid: SimpleNamespace(pw_name="_mastermind_sol_relay", pw_gid=452),
     )
-    monkeypatch.setattr(c1_runtime.os, "getgroups", lambda: [452])
+
+    reviewed = {
+        452: "_mastermind_sol_relay",
+        12: "everyone",
+        61: "localaccounts",
+        100: "_lpoperator",
+        396: "com.apple.access_disabled",
+    }
+    monkeypatch.setattr(c1_runtime.os, "getgroups", lambda: list(reviewed))
     monkeypatch.setattr(
         c1_runtime.grp,
         "getgrgid",
-        lambda _gid: SimpleNamespace(gr_name="_mastermind_sol_relay"),
+        lambda gid: SimpleNamespace(gr_name=reviewed[gid]),
     )
     c1_runtime.assert_relay_principal()
 
-    for forbidden in (
+    for unexpected in (
+        "admin",
+        "wheel",
         "_mastermind_worker",
         "_mastermind_exec",
         "_mastermind_ops",
         "_mastermind_codex_01",
     ):
-        monkeypatch.setattr(c1_runtime.os, "getgroups", lambda: [452, 499])
+        group_names = dict(reviewed)
+        group_names[499] = unexpected
+        monkeypatch.setattr(c1_runtime.os, "getgroups", lambda: list(group_names))
         monkeypatch.setattr(
             c1_runtime.grp,
             "getgrgid",
-            lambda gid, forbidden=forbidden: SimpleNamespace(
-                gr_name="_mastermind_sol_relay" if gid == 452 else forbidden
-            ),
+            lambda gid, group_names=group_names: SimpleNamespace(gr_name=group_names[gid]),
         )
         with pytest.raises(RuntimeError, match="C1_RELAY_PRINCIPAL_REFUSED"):
             c1_runtime.assert_relay_principal()
