@@ -19,7 +19,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .slack_web_api import (
     SLACK_API_ROOT,
@@ -251,6 +251,19 @@ def load_config(
     )
 
 
+def validate_relay_group_names(group_names: Iterable[str]) -> frozenset[str]:
+    """Return the exact reviewed group-name set or refuse any unexpected group."""
+
+    observed = frozenset(str(name) for name in group_names)
+    if (
+        RELAY_USERNAME not in observed
+        or not observed
+        or not observed.issubset(_REVIEWED_RELAY_GROUP_NAMES)
+    ):
+        raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
+    return observed
+
+
 def assert_relay_principal() -> None:
     """Fail closed unless the process is the exact dedicated non-root Relay."""
 
@@ -268,11 +281,7 @@ def assert_relay_principal() -> None:
     except (KeyError, OSError):
         raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED") from None
 
-    if (
-        RELAY_USERNAME not in group_names
-        or not group_names.issubset(_REVIEWED_RELAY_GROUP_NAMES)
-    ):
-        raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
+    validate_relay_group_names(group_names)
 
 
 def read_token_file(
@@ -390,5 +399,6 @@ __all__ = [
     "assert_relay_principal",
     "load_config",
     "read_token_file",
+    "validate_relay_group_names",
     "verify_slack_identity",
 ]
