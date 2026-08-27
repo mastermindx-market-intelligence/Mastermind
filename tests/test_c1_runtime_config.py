@@ -40,9 +40,16 @@ def _document() -> dict[str, object]:
 
 def _write_test_config(tmp_path: Path, document: dict[str, object]) -> Path:
     path = tmp_path / "relay.json"
+    path.unlink(missing_ok=True)
     path.write_text(json.dumps(document), encoding="utf-8")
     path.chmod(0o440)
     return path
+
+
+def _write_token(path: Path, text: str, mode: int) -> None:
+    path.unlink(missing_ok=True)
+    path.write_text(text, encoding="utf-8")
+    path.chmod(mode)
 
 
 def _load_for_test(c1_runtime, path: Path):
@@ -132,8 +139,7 @@ def test_load_config_rejects_symlink_even_when_target_metadata_is_private(tmp_pa
 def test_read_token_file_accepts_exact_same_uid_gid_mode0400_single_link(tmp_path: Path):
     c1_runtime = _module()
     path = tmp_path / "relay.token"
-    path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
-    path.chmod(0o400)
+    _write_token(path, "INERT-C1-TOKEN-FIXTURE\n", 0o400)
 
     token = _read_token_for_test(c1_runtime, path)
 
@@ -151,14 +157,11 @@ def test_read_token_file_distinguishes_missing_from_unsafe_and_invalid(tmp_path:
         _read_token_for_test(c1_runtime, missing)
 
     path = tmp_path / "relay.token"
-    path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
-    path.chmod(0o600)
+    _write_token(path, "INERT-C1-TOKEN-FIXTURE\n", 0o600)
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
         _read_token_for_test(c1_runtime, path)
 
-    path.chmod(0o400)
-    path.write_text("has whitespace inside\n", encoding="utf-8")
-    path.chmod(0o400)
+    _write_token(path, "has whitespace inside\n", 0o400)
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_INVALID"):
         _read_token_for_test(c1_runtime, path)
 
@@ -166,8 +169,7 @@ def test_read_token_file_distinguishes_missing_from_unsafe_and_invalid(tmp_path:
 def test_read_token_file_rejects_symlink_and_hardlink(tmp_path: Path):
     c1_runtime = _module()
     path = tmp_path / "relay.token"
-    path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
-    path.chmod(0o400)
+    _write_token(path, "INERT-C1-TOKEN-FIXTURE\n", 0o400)
     link = tmp_path / "relay-link.token"
     link.symlink_to(path)
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
@@ -182,8 +184,7 @@ def test_read_token_file_rejects_symlink_and_hardlink(tmp_path: Path):
 def test_read_token_file_refuses_path_override_even_if_private(tmp_path: Path):
     c1_runtime = _module()
     path = tmp_path / "relay.token"
-    path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
-    path.chmod(0o400)
+    _write_token(path, "INERT-C1-TOKEN-FIXTURE\n", 0o400)
 
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
         c1_runtime.read_token_file(path)
