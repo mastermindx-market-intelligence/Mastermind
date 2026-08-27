@@ -2,9 +2,10 @@
 
 This integrations-layer reader has exactly one operation: send the accepted
 no-input ``mastermind.executive_ceo_ingress_state.v1`` frame to the already
-owned CeoIngress AF_UNIX listener and return its successful result.  It owns no
-Runtime, listener, retry queue, discovery path, submit/status request, or
-business mutation authority.
+owned CeoIngress AF_UNIX listener and return one validated
+``mastermind.executive_hot_state.v1`` result. It owns no Runtime, listener,
+retry queue, discovery path, submit/status request, or business mutation
+authority.
 """
 from __future__ import annotations
 
@@ -13,7 +14,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from common.executive_hot_state_contract import STATE_REQUEST_SCHEMA
+from common.executive_hot_state_contract import (
+    STATE_REQUEST_SCHEMA,
+    validate_hot_state_document,
+)
 
 _DEFAULT_TIMEOUT_SECONDS = 5.0
 _MAX_RESPONSE_BYTES = 32768
@@ -29,8 +33,8 @@ class CeoIngressStateReader:
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         path = Path(socket_path)
-        if not str(path):
-            raise ValueError("socket_path must be non-empty")
+        if not path.is_absolute():
+            raise ValueError("socket_path must be absolute")
         if not isinstance(timeout_seconds, (int, float)) or isinstance(
             timeout_seconds, bool
         ):
@@ -42,9 +46,13 @@ class CeoIngressStateReader:
 
     async def read_state(self) -> dict[str, Any]:
         writer: asyncio.StreamWriter | None = None
+        raw: bytes
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_unix_connection(str(self._socket_path)),
+                asyncio.open_unix_connection(
+                    str(self._socket_path),
+                    limit=_MAX_RESPONSE_BYTES + 1,
+                ),
                 timeout=self._timeout_seconds,
             )
             request = json.dumps(
@@ -54,9 +62,14 @@ class CeoIngressStateReader:
             ).encode("utf-8") + b"\n"
             writer.write(request)
             await asyncio.wait_for(writer.drain(), timeout=self._timeout_seconds)
-            raw = await asyncio.wait_for(
-                reader.readline(), timeout=self._timeout_seconds
-            )
+            try:
+                raw = await asyncio.wait_for(
+                    reader.readuntil(b"\n"), timeout=self._timeout_seconds
+                )
+            except (asyncio.LimitOverrunError, asyncio.IncompleteReadError):
+                raise RuntimeError("EXECUTIVE_STATE_INVALID_RESPONSE") from None
+        except RuntimeError:
+            raise
         except (OSError, asyncio.TimeoutError, ConnectionError):
             raise RuntimeError("EXECUTIVE_STATE_UNAVAILABLE") from None
         finally:
@@ -76,6 +89,6 @@ class CeoIngressStateReader:
         if not isinstance(response, dict) or response.get("ok") is not True:
             raise RuntimeError("EXECUTIVE_STATE_INVALID_RESPONSE")
         result = response.get("result")
-        if not isinstance(result, dict):
+        if not isinstance(result, dict) or not validate_hot_state_document(result):
             raise RuntimeError("EXECUTIVE_STATE_INVALID_RESPONSE")
         return result
