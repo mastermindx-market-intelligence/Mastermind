@@ -63,7 +63,7 @@ def _available(source: Any) -> bool:
 
 
 def _rows(source: Any, key: str) -> list[dict[str, Any]]:
-    if not isinstance(source, Mapping) or not source.get("available"):
+    if not _available(source):
         return []
     value = source.get(key)
     if not isinstance(value, list):

@@ -2,16 +2,26 @@
 
 The receipt is a deterministic comparison artifact, not a lifecycle, queue, retry,
 identity, transport, projection or persistence authority. Inputs are already-normalized
-owner observations. The receipt's own observation window and the Agent OS
-acquisition-envelope ``generated_at`` stamps are deliberately excluded from the semantic
+owner observations. The receipt's own observation window and the named Agent OS
+acquisition-envelope fields in ``_AGENTOS_ACQUISITION_*`` are excluded from the semantic
 hash; source revisions, owner source timestamps, facts, findings, admission and scope
 remain covered.
+
+That exclusion is a NAMED LIST, not a general law, and it does not yet make semantic
+identity clock-independent. Macro derives further fields from the same ``--now`` that
+this layer still hashes: ``state.inputs.degraded`` embeds the build age as prose, and
+``state.workstreams[*].stale_days``/``claim.stale`` plus a context bundle's expiry-driven
+``excluded``/``degraded`` entries are day-granular, so two receipts of identical records
+taken either side of a rounding boundary can still disagree. Closing that class needs a
+positive projection of named semantic fields, or a records hash emitted by Macro itself;
+excluding fields one at a time from this side loses the race. Do not read a matching
+semantic hash as proof that no clock moved.
 """
 from __future__ import annotations
 
 import copy
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -178,21 +188,22 @@ def _strip_agentos_acquisition_clocks(agentos: Any) -> None:
 
     Measured against real canonical output taken 40 minutes apart, dropping the two
     ``generated_at`` stamps alone still left ``inputs.active_builds_age_hours`` (76.7 vs
-    77.4) diverging, so the semantic hash still disagreed for identical records.
+    77.4) diverging, so the semantic hash still disagreed for identical records. Other
+    ``--now``-derived fields remain hashed; see the module docstring.
     """
 
-    if not isinstance(agentos, dict):
+    if not isinstance(agentos, MutableMapping):
         return
     state = agentos.get("state")
-    if isinstance(state, dict):
+    if isinstance(state, MutableMapping):
         state.pop(_AGENTOS_ACQUISITION_CLOCK, None)
         envelope = state.get(_AGENTOS_ACQUISITION_AGE[0])
-        if isinstance(envelope, dict):
+        if isinstance(envelope, MutableMapping):
             envelope.pop(_AGENTOS_ACQUISITION_AGE[1], None)
     contexts = agentos.get("contexts")
-    if isinstance(contexts, list):
+    if isinstance(contexts, Sequence) and not isinstance(contexts, (str, bytes)):
         for context in contexts:
-            if isinstance(context, dict):
+            if isinstance(context, MutableMapping):
                 context.pop(_AGENTOS_ACQUISITION_CLOCK, None)
 
 
@@ -207,7 +218,7 @@ def semantic_projection(receipt: Mapping[str, Any]) -> dict[str, Any]:
         if key not in {"observation", "semantic_hash"}
     }
     observations = projection.get("observations")
-    if isinstance(observations, dict):
+    if isinstance(observations, Mapping):
         _strip_agentos_acquisition_clocks(observations.get("agentos"))
     return projection
 
