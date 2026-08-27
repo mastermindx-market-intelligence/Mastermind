@@ -109,3 +109,37 @@ class SlackWebApiStateClient:
         ):
             raise RuntimeError("SLACK_API_INVALID_RESPONSE")
         return StateMessage(ts=ts, author_user_id=self._bot_user_id, text=text)
+
+    async def update_message(
+        self,
+        *,
+        channel_id: str,
+        message_ts: str,
+        text: str,
+    ) -> StateMessage:
+        if not isinstance(channel_id, str) or not channel_id:
+            raise ValueError("channel_id must be a non-empty string")
+        if not isinstance(message_ts, str) or not message_ts:
+            raise ValueError("message_ts must be a non-empty string")
+        if not isinstance(text, str) or not text:
+            raise ValueError("text must be a non-empty string")
+
+        response = await self._client.post(
+            "chat.update",
+            json={"channel": channel_id, "ts": message_ts, "text": text},
+        )
+        response.raise_for_status()
+        payload: Any = response.json()
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise RuntimeError("SLACK_API_REFUSED")
+        if (
+            payload.get("channel") != channel_id
+            or payload.get("ts") != message_ts
+            or payload.get("text") != text
+        ):
+            raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+        return StateMessage(
+            ts=message_ts,
+            author_user_id=self._bot_user_id,
+            text=text,
+        )
