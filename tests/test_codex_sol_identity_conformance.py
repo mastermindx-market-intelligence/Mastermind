@@ -21,7 +21,14 @@ from control_plane.executive_runtime import (
     WorkerQuotaClass,
 )
 from control_plane.model_router import RoutingDecision, WorkRequest
-from control_plane.session_targets import RuntimeBinding, SessionTarget
+from control_plane.session_targets import (
+    RuntimeBinding,
+    SessionTarget,
+    SessionTargetError,
+    SessionTargetRegistry,
+    route_obligation,
+)
+from control_plane.wake_events import mint_obligation
 
 
 _CEO_PROVENANCE = {"schema": "mastermind.ceo_intent.v1", "actor": "sol"}
@@ -37,6 +44,45 @@ _FORBIDDEN_DURABLE_ROLE_FIELDS = {
 
 def _field_names(value: type[object]) -> set[str]:
     return {field.name for field in dataclasses.fields(value)}
+
+
+def _routing_registry(*, ceo_target: SessionTarget) -> SessionTargetRegistry:
+    chairman_target = SessionTarget(
+        session_alias="EXECUTIVE-CHAIRMAN-A",
+        target_seat="chairman",
+        reasoning_surface="human",
+        wake_transport="human",
+        allowed_transports=("human",),
+        workstream=None,
+        target_enabled=False,
+    )
+    coo_target = SessionTarget(
+        session_alias="EXECUTIVE-COO-A",
+        target_seat="coo",
+        reasoning_surface="workspace-agent",
+        wake_transport="chatgpt-gui",
+        allowed_transports=("chatgpt-gui",),
+        workstream=None,
+        target_enabled=False,
+    )
+    return SessionTargetRegistry(
+        schema="mastermind.wake_session_targets.v2",
+        lifecycle_authority="executive_os",
+        production_armed=False,
+        policy_version="codex-sol-conformance-v1",
+        default_alias_by_seat={
+            "chairman": chairman_target.session_alias,
+            "ceo": ceo_target.session_alias,
+            "coo": coo_target.session_alias,
+        },
+        workstream_alias_by_seat={},
+        root_job_bindings={},
+        targets={
+            chairman_target.session_alias: chairman_target,
+            ceo_target.session_alias: ceo_target,
+            coo_target.session_alias: coo_target,
+        },
+    )
 
 
 def test_codex_reasoning_surface_does_not_change_accountable_ceo_seat():
@@ -78,6 +124,92 @@ def test_codex_reasoning_surface_does_not_change_accountable_ceo_seat():
     assert resumed_binding.native_handle != first_binding.native_handle
     assert not hasattr(first_binding, "target_seat")
     assert codex_target.target_seat == "ceo"
+
+
+def test_same_ceo_obligation_routes_to_chatgpt_or_codex_without_changing_authority():
+    obligation = mint_obligation(
+        wake_kind="ceo_decision_pending",
+        source_kind="executive_inbox_attention",
+        source_ref="eia-0123456789ab",
+        declared_target_seat="ceo",
+        emitted_at="2026-08-27T09:50:00Z",
+    )
+    chatgpt_target = SessionTarget(
+        session_alias="EXECUTIVE-CEO-A",
+        target_seat="ceo",
+        reasoning_surface="chatgpt-sol",
+        wake_transport="chatgpt-gui",
+        allowed_transports=("chatgpt-gui",),
+        workstream=None,
+        target_enabled=False,
+    )
+    codex_target = dataclasses.replace(
+        chatgpt_target,
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+    )
+    chatgpt_binding = RuntimeBinding(
+        session_alias=chatgpt_target.session_alias,
+        binding_id="bind-chatgptsol-a1",
+        binding_generation=1,
+        native_handle="chatgpt-thread-a",
+        account_label="chatgpt-pro-01",
+        reasoning_surface="chatgpt-sol",
+    )
+    codex_binding = RuntimeBinding(
+        session_alias=codex_target.session_alias,
+        binding_id="bind-codexsol-a1",
+        binding_generation=1,
+        native_handle="codex-thread-a",
+        account_label="codex-pro-01",
+        reasoning_surface="codex",
+    )
+
+    route_chatgpt = route_obligation(
+        obligation,
+        _routing_registry(ceo_target=chatgpt_target),
+        binding=chatgpt_binding,
+    )
+    codex_registry = _routing_registry(ceo_target=codex_target)
+    route_codex = route_obligation(
+        obligation,
+        codex_registry,
+        binding=codex_binding,
+    )
+
+    assert route_chatgpt.obligation_id == route_codex.obligation_id == obligation.obligation_id
+    assert route_chatgpt.target_seat == route_codex.target_seat == "ceo"
+    assert route_chatgpt.reasoning_surface == "chatgpt-sol"
+    assert route_codex.reasoning_surface == "codex"
+    assert route_chatgpt.destination_digest != route_codex.destination_digest
+
+    resumed_codex_binding = dataclasses.replace(
+        codex_binding,
+        binding_generation=2,
+        native_handle="codex-thread-b",
+    )
+    route_resumed_codex = route_obligation(
+        obligation,
+        codex_registry,
+        binding=resumed_codex_binding,
+    )
+    assert route_resumed_codex.obligation_id == obligation.obligation_id
+    assert route_resumed_codex.target_seat == "ceo"
+    assert route_resumed_codex.reasoning_surface == "codex"
+    assert route_resumed_codex.binding_generation == 2
+    assert route_resumed_codex.destination_digest != route_codex.destination_digest
+    assert resumed_codex_binding.native_handle != codex_binding.native_handle
+
+    codex_binding_for_coo_alias = RuntimeBinding(
+        session_alias="EXECUTIVE-COO-A",
+        binding_id="bind-codexcoo-a1",
+        binding_generation=1,
+        native_handle="codex-thread-coo",
+        reasoning_surface="codex",
+    )
+    with pytest.raises(SessionTargetError, match="reasoning_surface does not match target"):
+        codex_registry.resolve("coo", binding=codex_binding_for_coo_alias)
 
 
 def test_ceo_accountability_requires_typed_provenance_not_codex_identity(tmp_path):
