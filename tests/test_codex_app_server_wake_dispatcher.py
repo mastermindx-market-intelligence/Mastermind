@@ -1,16 +1,19 @@
 """RED-first contract for Wake PR3 Codex App Server delivery."""
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 
 import pytest
 
 from control_plane.wake_dispatcher import TransportOutcome, WakeNudge
+from control_plane.wake_transport import transport_implemented
 from integrations.executive_wake.codex_app_server import (
     CODEX_WAKE_INSTRUCTION,
     CodexAppServerWakeDispatcher,
     CodexWakeDeliveryObservation,
 )
+from integrations.executive_wake.registry import WakeDispatcherRegistry
 
 
 def _wake(**overrides) -> WakeNudge:
@@ -53,19 +56,30 @@ def _observation(*, accepted=True, delivered=False, native_handle="thread-opaque
     )
 
 
-@pytest.mark.asyncio
-async def test_missing_native_handle_is_target_unavailable_without_provider_call():
+def _nudge(dispatcher, wake):
+    return asyncio.run(dispatcher.nudge(wake))
+
+
+def test_codex_descriptor_is_implemented_but_registry_requires_explicit_composition():
+    dispatcher = CodexAppServerWakeDispatcher(_FakeClient(_observation()))
+    registry = WakeDispatcherRegistry({"codex-app-server": dispatcher})
+
+    assert transport_implemented("codex-app-server") is True
+    assert registry.resolve("codex-app-server") is dispatcher
+    assert transport_implemented("claude-code-session") is False
+
+
+def test_missing_native_handle_is_target_unavailable_without_provider_call():
     client = _FakeClient(_observation())
     dispatcher = CodexAppServerWakeDispatcher(client)
 
-    receipt = await dispatcher.nudge(_wake(native_handle=None))
+    receipt = _nudge(dispatcher, _wake(native_handle=None))
 
     assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
     assert receipt.reason_code == "target_unavailable"
     assert client.calls == []
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -73,23 +87,22 @@ async def test_missing_native_handle_is_target_unavailable_without_provider_call
         {"wake_transport": "claude-code-session"},
     ],
 )
-async def test_surface_or_transport_mismatch_refuses_before_provider_call(overrides):
+def test_surface_or_transport_mismatch_refuses_before_provider_call(overrides):
     client = _FakeClient(_observation())
     dispatcher = CodexAppServerWakeDispatcher(client)
 
-    receipt = await dispatcher.nudge(_wake(**overrides))
+    receipt = _nudge(dispatcher, _wake(**overrides))
 
     assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
     assert receipt.reason_code == "target_unavailable"
     assert client.calls == []
 
 
-@pytest.mark.asyncio
-async def test_accepted_but_not_observed_is_accepted_not_delivered():
+def test_accepted_but_not_observed_is_accepted_not_delivered():
     client = _FakeClient(_observation(accepted=True, delivered=False))
     dispatcher = CodexAppServerWakeDispatcher(client)
 
-    receipt = await dispatcher.nudge(_wake())
+    receipt = _nudge(dispatcher, _wake())
 
     assert receipt.outcome is TransportOutcome.ACCEPTED
     assert receipt.reason_code == "accepted"
@@ -97,49 +110,45 @@ async def test_accepted_but_not_observed_is_accepted_not_delivered():
     assert len(client.calls) == 1
 
 
-@pytest.mark.asyncio
-async def test_exact_bound_thread_confirmation_is_delivered():
+def test_exact_bound_thread_confirmation_is_delivered():
     client = _FakeClient(_observation(accepted=True, delivered=True))
     dispatcher = CodexAppServerWakeDispatcher(client)
 
-    receipt = await dispatcher.nudge(_wake())
+    receipt = _nudge(dispatcher, _wake())
 
     assert receipt.outcome is TransportOutcome.DELIVERED
     assert receipt.reason_code == "delivered"
     assert len(client.calls) == 1
 
 
-@pytest.mark.asyncio
-async def test_provider_echo_mismatch_fails_closed_and_never_retries():
+def test_provider_echo_mismatch_fails_closed_and_never_retries():
     client = _FakeClient(_observation(native_handle="wrong-thread"))
     dispatcher = CodexAppServerWakeDispatcher(client)
 
-    receipt = await dispatcher.nudge(_wake())
+    receipt = _nudge(dispatcher, _wake())
 
     assert receipt.outcome is TransportOutcome.FAILED
     assert receipt.reason_code == "transport_failed"
     assert len(client.calls) == 1
 
 
-@pytest.mark.asyncio
-async def test_provider_timeout_is_failed_and_never_causes_second_call():
+def test_provider_timeout_is_failed_and_never_causes_second_call():
     client = _FakeClient(_observation(), fail=TimeoutError("provider timeout"))
     dispatcher = CodexAppServerWakeDispatcher(client)
 
-    receipt = await dispatcher.nudge(_wake())
+    receipt = _nudge(dispatcher, _wake())
 
     assert receipt.outcome is TransportOutcome.FAILED
     assert receipt.reason_code == "transport_failed"
     assert len(client.calls) == 1
 
 
-@pytest.mark.asyncio
-async def test_payload_is_fixed_bounded_instruction_plus_opaque_wake_ids_only():
+def test_payload_is_fixed_bounded_instruction_plus_opaque_wake_ids_only():
     client = _FakeClient(_observation())
     dispatcher = CodexAppServerWakeDispatcher(client)
     wake = _wake(account_label="must-not-enter-prompt")
 
-    await dispatcher.nudge(wake)
+    _nudge(dispatcher, wake)
 
     assert len(client.calls) == 1
     native_handle, nudge_id, opaque_ids, instruction = client.calls[0]
