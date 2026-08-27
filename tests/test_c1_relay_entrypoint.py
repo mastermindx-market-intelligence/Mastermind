@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ENTRYPOINT = ROOT / "scripts" / "c1_sol_state_relay.py"
 
 
 def _module():
@@ -34,3 +41,17 @@ def test_parser_exposes_only_config_and_no_secret_or_identity_overrides():
         parser.parse_args(
             ["--config", "/etc/mastermind/sol-relay.json", "--token", "FORBIDDEN"]
         )
+
+
+def test_entrypoint_imports_under_production_isolated_stdlib_runtime():
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", str(ENTRYPOINT), "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Mastermind C1 SOL_STATE Relay" in completed.stdout
