@@ -43,6 +43,11 @@ class _Transport:
         self.closed = True
 
 
+class _LineOnlyInput(io.BytesIO):
+    def read(self, *args, **kwargs):  # pragma: no cover - must never be called
+        raise AssertionError("native token input must use readline, not read-to-EOF")
+
+
 def _response(path: str, payload, *, scopes=None):
     headers = {"content-type": "application/json; charset=utf-8"}
     if scopes is not None:
@@ -80,9 +85,11 @@ def test_parser_never_accepts_token_or_channel_workspace_overrides():
     assert "--config" not in options
 
 
-def test_token_is_read_only_from_bounded_stdin():
+def test_token_is_read_only_from_one_bounded_line():
     enrollment = _module()
-    assert enrollment.read_token_from_stdin(io.BytesIO((TOKEN + "\n").encode())) == TOKEN
+    stream = _LineOnlyInput((TOKEN + "\nSECOND-LINE-MUST-NOT-BE-CONSUMED\n").encode())
+    assert enrollment.read_token_from_stdin(stream) == TOKEN
+    assert stream.readline() == b"SECOND-LINE-MUST-NOT-BE-CONSUMED\n"
 
     with pytest.raises(enrollment.C1EnrollmentError, match="C1_ENROLLMENT_INPUT_REFUSED"):
         enrollment.read_token_from_stdin(io.BytesIO(b""))
@@ -203,3 +210,5 @@ def test_source_has_no_service_arm_or_secret_argv_environment_path():
         "os.getenv(\"SLACK",
     ):
         assert forbidden not in source
+    assert "termios.ECHO" in source
+    assert "tcsetattr" in source
