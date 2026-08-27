@@ -186,6 +186,7 @@ class SourceRepairFailureLayout(str, Enum):
 class SourceRepairMode(str, Enum):
     REPAIR = "repair"
     VERIFY_ONLY = "verify-only"
+    RECOVERY = "recovery"
 
 
 class SourceRepairAction(str, Enum):
@@ -200,23 +201,56 @@ class SourceRepairAction(str, Enum):
     REFUSE_UNKNOWN = "refuse_unknown"
 
 
+@dataclass(frozen=True)
+class SourceRepairTransition:
+    """One executable action and the complete durable states it may produce."""
+
+    action: SourceRepairAction
+    permitted_next_states: frozenset[
+        tuple[SourceRepairPhase, SourceRepairFailureLayout]
+    ]
+
+
+def _source_repair_transition(
+    action: SourceRepairAction,
+    *next_states: tuple[SourceRepairPhase, SourceRepairFailureLayout],
+) -> SourceRepairTransition:
+    return SourceRepairTransition(action, frozenset(next_states))
+
+
 _FORWARD_FAILURE_LAYOUT = SourceRepairFailureLayout.NONE
+_ROLLBACK_NEXT_STATES = tuple(
+    (phase, layout)
+    for phase in (
+        SourceRepairPhase.ROLLBACK_STARTED,
+        SourceRepairPhase.ROLLBACK_GENERATION_RESTORED,
+        SourceRepairPhase.ROLLED_BACK,
+    )
+    for layout in (
+        SourceRepairFailureLayout.EMPTY,
+        SourceRepairFailureLayout.INSTALLED_SOURCE,
+        SourceRepairFailureLayout.STAGED_SOURCE,
+    )
+)
 SOURCE_REPAIR_TRANSITIONS: Mapping[
     tuple[SourceRepairMode, SourceRepairPhase, SourceRepairFailureLayout],
-    SourceRepairAction,
+    SourceRepairTransition,
 ] = {
-    (SourceRepairMode.REPAIR, SourceRepairPhase.INTENT_PREFIX, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.PUBLISH_INTENT,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.INTENT_DURABLE, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_SOURCE,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.SOURCE_ARCHIVED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_SOURCE,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.SOURCE_INSTALLED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_GENERATION,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.GENERATION_ARCHIVED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_RECEIPT,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.RECEIPT_PREFIX, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_RECEIPT,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.RECEIPT_DURABLE, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.COMMIT_GENERATION,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.GENERATION_PREFIX, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.COMMIT_GENERATION,
-    (SourceRepairMode.REPAIR, SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.VERIFY_COMMITTED,
-    (SourceRepairMode.VERIFY_ONLY, SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.VERIFY_COMMITTED,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.INTENT_PREFIX, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.PUBLISH_INTENT, (SourceRepairPhase.INTENT_DURABLE, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.INTENT_DURABLE, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.ADVANCE_SOURCE, (SourceRepairPhase.SOURCE_INSTALLED, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.SOURCE_ARCHIVED, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.ADVANCE_SOURCE, (SourceRepairPhase.SOURCE_INSTALLED, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.SOURCE_INSTALLED, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.ADVANCE_GENERATION, (SourceRepairPhase.GENERATION_ARCHIVED, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.GENERATION_ARCHIVED, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.ADVANCE_RECEIPT, (SourceRepairPhase.RECEIPT_DURABLE, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.RECEIPT_PREFIX, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.ADVANCE_RECEIPT, (SourceRepairPhase.RECEIPT_DURABLE, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.RECEIPT_DURABLE, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.COMMIT_GENERATION, (SourceRepairPhase.GENERATION_PREFIX, _FORWARD_FAILURE_LAYOUT), (SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.GENERATION_PREFIX, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.COMMIT_GENERATION, (SourceRepairPhase.GENERATION_PREFIX, _FORWARD_FAILURE_LAYOUT), (SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.REPAIR, SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.VERIFY_COMMITTED, (SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.VERIFY_ONLY, SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.VERIFY_COMMITTED, (SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT)),
+    (SourceRepairMode.RECOVERY, SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.VERIFY_COMMITTED, (SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT)),
     **{
-        (SourceRepairMode.VERIFY_ONLY, phase, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.REFUSE_UNKNOWN
+        (SourceRepairMode.RECOVERY, phase, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(
+            SourceRepairAction.RECOVER_PRECOMMIT, *_ROLLBACK_NEXT_STATES
+        )
         for phase in SourceRepairPhase
         if phase not in {
             SourceRepairPhase.COMMITTED,
@@ -226,19 +260,30 @@ SOURCE_REPAIR_TRANSITIONS: Mapping[
         }
     },
     **{
-        (mode, phase, layout): (
-            SourceRepairAction.RECOVER_PRECOMMIT
-            if mode is SourceRepairMode.REPAIR
+        (SourceRepairMode.VERIFY_ONLY, phase, _FORWARD_FAILURE_LAYOUT): _source_repair_transition(SourceRepairAction.REFUSE_UNKNOWN)
+        for phase in SourceRepairPhase
+        if phase not in {
+            SourceRepairPhase.COMMITTED,
+            SourceRepairPhase.ROLLBACK_STARTED,
+            SourceRepairPhase.ROLLBACK_GENERATION_RESTORED,
+            SourceRepairPhase.ROLLED_BACK,
+        }
+    },
+    **{
+        (mode, phase, layout): _source_repair_transition(
+            SourceRepairAction.RECOVER_PRECOMMIT,
+            *_ROLLBACK_NEXT_STATES,
+        )
+            if mode in {SourceRepairMode.REPAIR, SourceRepairMode.RECOVERY}
             and not (
                 phase is SourceRepairPhase.ROLLED_BACK
                 and layout is not SourceRepairFailureLayout.EMPTY
             )
-            else (
+            else _source_repair_transition(
                 SourceRepairAction.REFUSE_ROLLED_BACK
-                if mode is SourceRepairMode.REPAIR
+                if mode in {SourceRepairMode.REPAIR, SourceRepairMode.RECOVERY}
                 else SourceRepairAction.REFUSE_UNKNOWN
             )
-        )
         for mode in SourceRepairMode
         for phase in (
             SourceRepairPhase.ROLLBACK_STARTED,
@@ -702,12 +747,13 @@ def _descriptor_directory_state(info: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def closed_tree_digest(
+def _descriptor_closed_tree_digest(
     root: Path,
     *,
     expected_uid: int,
     expected_gid: int,
     approved_xattrs: frozenset[bytes] = frozenset({b"com.apple.provenance"}),
+    root_mode_override: int | None = None,
 ) -> str:
     """Hash one closed tree through no-follow descriptors and exact metadata rows."""
 
@@ -744,13 +790,18 @@ def closed_tree_digest(
         if stat.S_ISDIR(before.st_mode):
             if mode not in _CLOSED_DIRECTORY_MODES:
                 raise CapacityHostArtifactError("CLOSURE_MODE_INVALID")
+            row_mode = (
+                root_mode_override
+                if relative == "." and root_mode_override is not None
+                else mode
+            )
             rows.append(
                 {
                     "path": relative,
                     "type": "directory",
                     "uid": before.st_uid,
                     "gid": before.st_gid,
-                    "mode": f"{mode:04o}",
+                    "mode": f"{row_mode:04o}",
                     "nlink": before.st_nlink,
                 }
             )
@@ -818,6 +869,23 @@ def closed_tree_digest(
         os.close(descriptor)
     rows.sort(key=lambda row: row["path"].encode("utf-8"))
     return hashlib.sha256(canonical_json(rows)).hexdigest()
+
+
+def closed_tree_digest(
+    root: Path,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+    approved_xattrs: frozenset[bytes] = frozenset({b"com.apple.provenance"}),
+) -> str:
+    """Hash one closed tree through no-follow descriptors and exact metadata rows."""
+
+    return _descriptor_closed_tree_digest(
+        root,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+        approved_xattrs=approved_xattrs,
+    )
 
 
 def _old_generation_provenance() -> dict[str, Any]:
@@ -1395,6 +1463,17 @@ def _validate_source_repair_failure_namespace(
                 raise CapacityHostArtifactError(
                     "SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID"
                 ) from exc
+            observed_tree_digest = closed_tree_digest(
+                child_path,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+            )
+            intent_bound_tree_digest = _descriptor_closed_tree_digest(
+                child_path,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+                root_mode_override=0o555 if expected_uid != 0 else None,
+            )
             after = os.fstat(child_descriptor)
             path_after = child_path.lstat()
             if (
@@ -1405,6 +1484,9 @@ def _validate_source_repair_failure_namespace(
                 or evidence.object_count != intent["candidate_object_count"]
                 or evidence.object_inventory_sha256
                 != intent["candidate_object_inventory_sha256"]
+                or evidence.source_tree_sha256 != observed_tree_digest
+                or intent_bound_tree_digest
+                != intent["candidate_source_tree_sha256"]
             ):
                 raise CapacityHostArtifactError(
                     "SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID"
@@ -1663,19 +1745,36 @@ def _classify_source_repair_position(
     return SourceRepairPhase.RECEIPT_DURABLE
 
 
+def _source_repair_transition_for(
+    mode: SourceRepairMode,
+    phase: SourceRepairPhase,
+    failure_layout: SourceRepairFailureLayout,
+) -> SourceRepairTransition:
+    key = (mode, phase, failure_layout)
+    try:
+        transition = SOURCE_REPAIR_TRANSITIONS[key]
+    except KeyError as exc:
+        raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_UNKNOWN") from exc
+    if transition.action is SourceRepairAction.REFUSE_UNKNOWN:
+        raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_REFUSED")
+    return transition
+
+
 def _source_repair_action(
     mode: SourceRepairMode,
     phase: SourceRepairPhase,
     failure_layout: SourceRepairFailureLayout,
 ) -> SourceRepairAction:
-    key = (mode, phase, failure_layout)
-    try:
-        action = SOURCE_REPAIR_TRANSITIONS[key]
-    except KeyError as exc:
-        raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_UNKNOWN") from exc
-    if action is SourceRepairAction.REFUSE_UNKNOWN:
-        raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_REFUSED")
-    return action
+    return _source_repair_transition_for(mode, phase, failure_layout).action
+
+
+def _require_permitted_next_state(
+    transition: SourceRepairTransition,
+    phase: SourceRepairPhase,
+    failure_layout: SourceRepairFailureLayout,
+) -> None:
+    if (phase, failure_layout) not in transition.permitted_next_states:
+        raise SourceRepairTransitionError("SOURCE_REPAIR_NEXT_STATE_REFUSED")
 
 
 def _path_lexists(path: Path) -> bool:
@@ -1725,7 +1824,13 @@ def _open_source_repair_parents(
         )
     except Exception:
         for descriptor in reversed(descriptors):
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError:
+                # An already-active open/validation error is authoritative.
+                # Cleanup is best-effort across every descriptor and may not
+                # mask that initial failure.
+                pass
         raise
 
 
@@ -2736,6 +2841,7 @@ def _restore_digest_bound_precommit_state(
     test_adapter: bool,
     parents: SourceRepairParents,
     crash_at: str | None,
+    transition: SourceRepairTransition,
 ) -> None:
     """Restore only a uniquely proven prior source/generation before commit."""
 
@@ -2753,6 +2859,20 @@ def _restore_digest_bound_precommit_state(
             expected_gid=expected_gid,
         )
     if not _path_lexists(failure_namespace):
+        initial_rollback_phase = (
+            SourceRepairPhase.ROLLBACK_STARTED
+            if _path_lexists(archived_generation)
+            else (
+                SourceRepairPhase.ROLLBACK_GENERATION_RESTORED
+                if _path_lexists(archived_source)
+                else SourceRepairPhase.ROLLED_BACK
+            )
+        )
+        _require_permitted_next_state(
+            transition,
+            initial_rollback_phase,
+            SourceRepairFailureLayout.EMPTY,
+        )
         _require_descriptor_absent(parents.intent_archive, failure_name)
         os.mkdir(failure_name, 0o700, dir_fd=parents.intent_archive)
         try:
@@ -2763,6 +2883,12 @@ def _restore_digest_bound_precommit_state(
             ) from exc
         if crash_at == "after_failure_namespace_parent_fsync":
             raise SourceRepairIncomplete(crash_at)
+        created_position = reconcile_source_repair(
+            archive, expected_uid=expected_uid, expected_gid=expected_gid
+        )
+        _require_permitted_next_state(
+            transition, created_position.phase, created_position.failure_layout
+        )
     failure_descriptor = os.open(
         failure_name,
         os.O_RDONLY
@@ -2800,6 +2926,11 @@ def _restore_digest_bound_precommit_state(
                     raise CapacityHostArtifactError(
                         "SOURCE_REPAIR_ROLLBACK_POSITION_AMBIGUOUS"
                     )
+                _require_permitted_next_state(
+                    transition,
+                    SourceRepairPhase.ROLLBACK_STARTED,
+                    SourceRepairFailureLayout.INSTALLED_SOURCE,
+                )
                 if test_adapter:
                     source_root.chmod(0o700)
                 _durable_source_repair_rename(
@@ -2810,6 +2941,14 @@ def _restore_digest_bound_precommit_state(
                     move_name="rollback_installed",
                     crash_at=crash_at,
                 )
+                installed_position = reconcile_source_repair(
+                    archive, expected_uid=expected_uid, expected_gid=expected_gid
+                )
+                _require_permitted_next_state(
+                    transition,
+                    installed_position.phase,
+                    installed_position.failure_layout,
+                )
 
         if _path_lexists(staged_source) and _descriptor_entry_info(
             failure_descriptor, "staged-source"
@@ -2819,6 +2958,11 @@ def _restore_digest_bound_precommit_state(
             )
             if evidence.source_tree_sha256 != intent["candidate_source_tree_sha256"]:
                 raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_DIGEST_MISMATCH")
+            _require_permitted_next_state(
+                transition,
+                SourceRepairPhase.ROLLBACK_STARTED,
+                SourceRepairFailureLayout.STAGED_SOURCE,
+            )
             if test_adapter:
                 staged_source.chmod(0o700)
             _durable_source_repair_rename(
@@ -2828,6 +2972,12 @@ def _restore_digest_bound_precommit_state(
                 destination_name="staged-source",
                 move_name="rollback_staged",
                 crash_at=crash_at,
+            )
+            staged_position = reconcile_source_repair(
+                archive, expected_uid=expected_uid, expected_gid=expected_gid
+            )
+            _require_permitted_next_state(
+                transition, staged_position.phase, staged_position.failure_layout
             )
 
         # Generation is restored before source so every durable rollback prefix
@@ -2842,6 +2992,19 @@ def _restore_digest_bound_precommit_state(
                 raise CapacityHostArtifactError(
                     "SOURCE_REPAIR_ROLLBACK_POSITION_AMBIGUOUS"
                 )
+            failure_layout = _validate_source_repair_failure_namespace(
+                archive,
+                parents.intent_archive,
+                failure_name,
+                intent=intent,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+            )
+            _require_permitted_next_state(
+                transition,
+                SourceRepairPhase.ROLLBACK_GENERATION_RESTORED,
+                failure_layout,
+            )
             _durable_source_repair_rename(
                 source_parent=parents.intent_archive,
                 source_name=_ARCHIVED_GENERATION_NAME,
@@ -2850,12 +3013,33 @@ def _restore_digest_bound_precommit_state(
                 move_name="rollback_generation",
                 crash_at=crash_at,
             )
+            generation_position = reconcile_source_repair(
+                archive, expected_uid=expected_uid, expected_gid=expected_gid
+            )
+            _require_permitted_next_state(
+                transition,
+                generation_position.phase,
+                generation_position.failure_layout,
+            )
 
         if _path_lexists(archived_source):
             if _path_lexists(source_root):
                 raise CapacityHostArtifactError(
                     "SOURCE_REPAIR_ROLLBACK_POSITION_AMBIGUOUS"
                 )
+            failure_layout = _validate_source_repair_failure_namespace(
+                archive,
+                parents.intent_archive,
+                failure_name,
+                intent=intent,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+            )
+            _require_permitted_next_state(
+                transition,
+                SourceRepairPhase.ROLLED_BACK,
+                failure_layout,
+            )
             _durable_source_repair_rename(
                 source_parent=parents.intent_archive,
                 source_name=_ARCHIVED_SOURCE_NAME,
@@ -2863,6 +3047,12 @@ def _restore_digest_bound_precommit_state(
                 destination_name=source_root.name,
                 move_name="rollback_source",
                 crash_at=crash_at,
+            )
+            source_position = reconcile_source_repair(
+                archive, expected_uid=expected_uid, expected_gid=expected_gid
+            )
+            _require_permitted_next_state(
+                transition, source_position.phase, source_position.failure_layout
             )
     finally:
         os.close(failure_descriptor)
@@ -3181,15 +3371,18 @@ def run_source_repair_host(
             else:
                 prefix_phase = SourceRepairPhase.INTENT_PREFIX
                 prefix_layout = SourceRepairFailureLayout.NONE
-            if (
-                _source_repair_action(
-                    SourceRepairMode.REPAIR,
-                    prefix_phase,
-                    prefix_layout,
-                )
-                is not SourceRepairAction.PUBLISH_INTENT
-            ):
+            prefix_transition = _source_repair_transition_for(
+                SourceRepairMode.REPAIR,
+                prefix_phase,
+                prefix_layout,
+            )
+            if prefix_transition.action is not SourceRepairAction.PUBLISH_INTENT:
                 raise CapacityHostArtifactError("SOURCE_REPAIR_TRANSITION_REFUSED")
+            _require_permitted_next_state(
+                prefix_transition,
+                SourceRepairPhase.INTENT_DURABLE,
+                SourceRepairFailureLayout.NONE,
+            )
             publish_source_repair_intent(
                 prefix_archive,
                 prefix_intent,
@@ -3197,6 +3390,16 @@ def run_source_repair_host(
                 expected_gid=expected_gid,
                 crash_at=crash_at,
                 archive_descriptor=parents.intent_archive,
+            )
+            published_prefix = reconcile_source_repair(
+                prefix_archive,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+            )
+            _require_permitted_next_state(
+                prefix_transition,
+                published_prefix.phase,
+                published_prefix.failure_layout,
             )
         existing = _existing_repair_archive(
             archive_root,
@@ -3296,6 +3499,18 @@ def run_source_repair_host(
             _require_descriptor_absent(
                 parents.generation, f".candidate-{precommit_generation_digest}"
             )
+            intent_transition = _source_repair_transition_for(
+                SourceRepairMode.REPAIR,
+                SourceRepairPhase.INTENT_PREFIX,
+                SourceRepairFailureLayout.NONE,
+            )
+            if intent_transition.action is not SourceRepairAction.PUBLISH_INTENT:
+                raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_REFUSED")
+            _require_permitted_next_state(
+                intent_transition,
+                SourceRepairPhase.INTENT_DURABLE,
+                SourceRepairFailureLayout.NONE,
+            )
             archive = archive_root / f"source-closure-repair-{intent['intent_id']}"
             _require_descriptor_absent(parents.archive, archive.name)
             os.mkdir(archive.name, 0o700, dir_fd=parents.archive)
@@ -3329,6 +3544,14 @@ def run_source_repair_host(
                 expected_gid=expected_gid,
                 crash_at=crash_at,
                 archive_descriptor=parents.intent_archive,
+            )
+            published_intent = reconcile_source_repair(
+                archive, expected_uid=expected_uid, expected_gid=expected_gid
+            )
+            _require_permitted_next_state(
+                intent_transition,
+                published_intent.phase,
+                published_intent.failure_layout,
             )
             if crash_at == "after_intent_fsync":
                 raise SourceRepairIncomplete(crash_at)
@@ -3364,6 +3587,16 @@ def run_source_repair_host(
                 current_phase is SourceRepairPhase.RECEIPT_DURABLE
                 and position.receipt_digest is not None
             ):
+                # The final generation digest depends on fallible semantic
+                # observations below.  First establish, from the retained
+                # generation-parent descriptor, whether a non-prefix child is
+                # already visible.  From that point rollback is categorically
+                # unsafe even when the later observations cannot identify or
+                # verify that child.
+                semantic_commit_visible = any(
+                    not name.startswith(".")
+                    for name in _descriptor_directory_names(parents.generation)
+                )
                 evidence = _observe_source_repair_source(
                     source_root,
                     intent=intent,
@@ -3402,13 +3635,18 @@ def run_source_repair_host(
                     staged_source_name=staged_source.name,
                     generation_digest=generation_digest,
                 )
-            current_action = _source_repair_action(
+            current_transition = _source_repair_transition_for(
                 SourceRepairMode.REPAIR,
                 current_phase,
                 position.failure_layout,
             )
+            current_action = current_transition.action
 
             if current_action is SourceRepairAction.RECOVER_PRECOMMIT:
+                if not current_transition.permitted_next_states:
+                    raise SourceRepairTransitionError(
+                        "SOURCE_REPAIR_NEXT_STATE_REFUSED"
+                    )
                 _restore_digest_bound_precommit_state(
                     archive=archive,
                     source_root=source_root,
@@ -3420,11 +3658,17 @@ def run_source_repair_host(
                     test_adapter=test_adapter,
                     parents=parents,
                     crash_at=crash_at,
+                    transition=current_transition,
                 )
                 raise CapacityHostArtifactError("SOURCE_REPAIR_PRECOMMIT_RESTORED")
             if current_action is SourceRepairAction.REFUSE_ROLLED_BACK:
                 raise CapacityHostArtifactError("SOURCE_REPAIR_PRECOMMIT_RESTORED")
             if current_action is SourceRepairAction.ADVANCE_SOURCE:
+                _require_permitted_next_state(
+                    current_transition,
+                    SourceRepairPhase.SOURCE_INSTALLED,
+                    SourceRepairFailureLayout.NONE,
+                )
                 _advance_source_repair_source_phase(
                     parents=parents,
                     archive=archive,
@@ -3437,8 +3681,25 @@ def run_source_repair_host(
                     test_adapter=test_adapter,
                     crash_at=crash_at,
                 )
+                next_position = reconcile_source_repair(
+                    archive, expected_uid=expected_uid, expected_gid=expected_gid
+                )
+                next_phase = _classify_source_repair_position(
+                    archive_position=next_position,
+                    parents=parents,
+                    source_name=source_root.name,
+                    staged_source_name=staged_source.name,
+                )
+                _require_permitted_next_state(
+                    current_transition, next_phase, next_position.failure_layout
+                )
                 continue
             if current_action is SourceRepairAction.ADVANCE_GENERATION:
+                _require_permitted_next_state(
+                    current_transition,
+                    SourceRepairPhase.GENERATION_ARCHIVED,
+                    SourceRepairFailureLayout.NONE,
+                )
                 _advance_source_repair_source_phase(
                     parents=parents,
                     archive=archive,
@@ -3460,8 +3721,25 @@ def run_source_repair_host(
                     test_adapter=test_adapter,
                     crash_at=crash_at,
                 )
+                next_position = reconcile_source_repair(
+                    archive, expected_uid=expected_uid, expected_gid=expected_gid
+                )
+                next_phase = _classify_source_repair_position(
+                    archive_position=next_position,
+                    parents=parents,
+                    source_name=source_root.name,
+                    staged_source_name=staged_source.name,
+                )
+                _require_permitted_next_state(
+                    current_transition, next_phase, next_position.failure_layout
+                )
                 continue
             if current_action is SourceRepairAction.ADVANCE_RECEIPT:
+                _require_permitted_next_state(
+                    current_transition,
+                    SourceRepairPhase.RECEIPT_DURABLE,
+                    SourceRepairFailureLayout.NONE,
+                )
                 evidence = _observe_source_repair_source(
                     source_root,
                     intent=intent,
@@ -3487,6 +3765,18 @@ def run_source_repair_host(
                     expected_gid=expected_gid,
                     crash_at=crash_at,
                 )
+                next_position = reconcile_source_repair(
+                    archive, expected_uid=expected_uid, expected_gid=expected_gid
+                )
+                next_phase = _classify_source_repair_position(
+                    archive_position=next_position,
+                    parents=parents,
+                    source_name=source_root.name,
+                    staged_source_name=staged_source.name,
+                )
+                _require_permitted_next_state(
+                    current_transition, next_phase, next_position.failure_layout
+                )
                 continue
             if current_action not in {
                 SourceRepairAction.COMMIT_GENERATION,
@@ -3511,9 +3801,19 @@ def run_source_repair_host(
                     expected_gid=expected_gid,
                     expected_mode=0o700 if test_adapter else 0o555,
                 )
+                _require_permitted_next_state(
+                    current_transition,
+                    SourceRepairPhase.COMMITTED,
+                    SourceRepairFailureLayout.NONE,
+                )
                 os.fsync(parents.generation)
                 return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
 
+            _require_permitted_next_state(
+                current_transition,
+                SourceRepairPhase.GENERATION_PREFIX,
+                SourceRepairFailureLayout.NONE,
+            )
             hidden_generation = _build_repaired_generation_candidate(
                 generation_root,
                 generation_parent_descriptor=parents.generation,
@@ -3523,6 +3823,19 @@ def run_source_repair_host(
                 expected_gid=expected_gid,
                 crash_at=crash_at,
                 test_adapter=test_adapter,
+            )
+            prefix_position = reconcile_source_repair(
+                archive, expected_uid=expected_uid, expected_gid=expected_gid
+            )
+            prefix_phase = _classify_source_repair_position(
+                archive_position=prefix_position,
+                parents=parents,
+                source_name=source_root.name,
+                staged_source_name=staged_source.name,
+                generation_digest=generation_digest,
+            )
+            _require_permitted_next_state(
+                current_transition, prefix_phase, prefix_position.failure_layout
             )
             final_evidence = _observe_source_repair_source(
                 source_root,
@@ -3539,6 +3852,11 @@ def run_source_repair_host(
             )
             if crash_at == "before_final_rename":
                 raise SourceRepairIncomplete(crash_at)
+            _require_permitted_next_state(
+                current_transition,
+                SourceRepairPhase.COMMITTED,
+                SourceRepairFailureLayout.NONE,
+            )
             generation_parent_descriptor = _rename_final_generation(
                 hidden_generation,
                 target_generation,
@@ -3552,6 +3870,21 @@ def run_source_repair_host(
             finally:
                 if generation_parent_descriptor != parents.generation:
                     os.close(generation_parent_descriptor)
+            committed_position = reconcile_source_repair(
+                archive, expected_uid=expected_uid, expected_gid=expected_gid
+            )
+            committed_phase = _classify_source_repair_position(
+                archive_position=committed_position,
+                parents=parents,
+                source_name=source_root.name,
+                staged_source_name=staged_source.name,
+                generation_digest=generation_digest,
+            )
+            _require_permitted_next_state(
+                current_transition,
+                committed_phase,
+                committed_position.failure_layout,
+            )
             if crash_at == "after_parent_fsync_before_stdout":
                 raise SourceRepairIncomplete(crash_at)
             return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
@@ -3571,18 +3904,40 @@ def run_source_repair_host(
                 and staged_source is not None
                 and _path_lexists(archive / _SOURCE_REPAIR_INTENT_NAME)
             ):
-                _restore_digest_bound_precommit_state(
-                    archive=archive,
-                    source_root=source_root,
-                    generation_root=generation_root,
-                    staged_source=staged_source,
-                    intent=intent,
-                    expected_uid=expected_uid,
-                    expected_gid=expected_gid,
-                    test_adapter=test_adapter,
-                    parents=parents,
-                    crash_at=crash_at,
+                recovery_position = reconcile_source_repair(
+                    archive, expected_uid=expected_uid, expected_gid=expected_gid
                 )
+                recovery_phase = _classify_source_repair_position(
+                    archive_position=recovery_position,
+                    parents=parents,
+                    source_name=source_root.name,
+                    staged_source_name=staged_source.name,
+                )
+                recovery_transition = _source_repair_transition_for(
+                    SourceRepairMode.RECOVERY,
+                    recovery_phase,
+                    recovery_position.failure_layout,
+                )
+                if recovery_transition.action is SourceRepairAction.REFUSE_ROLLED_BACK:
+                    recovery_transition = None
+                elif recovery_transition.action is not SourceRepairAction.RECOVER_PRECOMMIT:
+                    raise SourceRepairTransitionError(
+                        "SOURCE_REPAIR_TRANSITION_REFUSED"
+                    )
+                if recovery_transition is not None:
+                    _restore_digest_bound_precommit_state(
+                        archive=archive,
+                        source_root=source_root,
+                        generation_root=generation_root,
+                        staged_source=staged_source,
+                        intent=intent,
+                        expected_uid=expected_uid,
+                        expected_gid=expected_gid,
+                        test_adapter=test_adapter,
+                        parents=parents,
+                        crash_at=crash_at,
+                        transition=recovery_transition,
+                    )
         finally:
             cleanup_error: OSError | None = None
             if parents is not None:

@@ -2044,6 +2044,50 @@ def test_visible_commit_normalizes_structural_refusal_to_incomplete(
     assert isinstance(raised.value.__cause__, artifacts.CapacityHostArtifactError)
 
 
+@pytest.mark.parametrize(
+    "observation_name",
+    (
+        "_observe_source_repair_source",
+        "_observe_source_repair_archived_generation",
+        "_expected_source_repair_receipt",
+        "_generation_values",
+    ),
+)
+def test_committed_replay_early_observation_failure_never_rolls_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    observation_name: str,
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    archive = next((system_root / "capacity-archive").iterdir())
+
+    def fail_committed_observation(*args: object, **kwargs: object) -> object:
+        raise artifacts.CapacityHostArtifactError("INJECTED_COMMITTED_OBSERVATION")
+
+    monkeypatch.setattr(artifacts, observation_name, fail_committed_observation)
+    with pytest.raises(
+        artifacts.SourceRepairIncomplete,
+        match="POST_COMMIT_RECONCILIATION_REQUIRED",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+
+    visible_generations = [
+        child
+        for child in (system_root / "capacity-generations").iterdir()
+        if not child.name.startswith(".")
+    ]
+    assert len(visible_generations) == 1
+    assert not any(child.name.startswith("failure-") for child in archive.iterdir())
+    assert (archive / "archived-source").is_dir()
+    assert (archive / "archived-generation").is_dir()
+
+
 def test_visible_commit_normalizes_cleanup_failure_to_incomplete(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2198,6 +2242,47 @@ def test_source_repair_archive_attachment_closes_new_descriptor_when_fstat_fails
         parents.close()
 
 
+@pytest.mark.parametrize("failed_close_index", (0, 1))
+def test_partial_parent_open_cleanup_preserves_initial_error_and_attempts_all_closes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_close_index: int,
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    original_open = os.open
+    original_fstat = os.fstat
+    original_close = os.close
+    opened: list[int] = []
+    attempted: list[int] = []
+
+    def observed_open(*args: object, **kwargs: object) -> int:
+        descriptor = original_open(*args, **kwargs)
+        opened.append(descriptor)
+        return descriptor
+
+    def fail_second_parent_validation(descriptor: int) -> os.stat_result:
+        if len(opened) >= 2 and descriptor == opened[1]:
+            raise OSError(errno.EIO, "initial parent validation failure")
+        return original_fstat(descriptor)
+
+    def fail_one_close(descriptor: int) -> None:
+        attempted.append(descriptor)
+        original_close(descriptor)
+        if descriptor == opened[failed_close_index]:
+            raise OSError(errno.EBADF, "injected cleanup close failure")
+
+    monkeypatch.setattr(os, "open", observed_open)
+    monkeypatch.setattr(os, "fstat", fail_second_parent_validation)
+    monkeypatch.setattr(os, "close", fail_one_close)
+    with pytest.raises(OSError, match="initial parent validation failure"):
+        artifacts._open_source_repair_parents(
+            system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+    assert attempted == list(reversed(opened[:2]))
+
+
 def test_source_repair_transition_table_is_exhaustive_and_terminal_states_are_distinct() -> None:
     table = artifacts.SOURCE_REPAIR_TRANSITIONS
     for mode in artifacts.SourceRepairMode:
@@ -2206,7 +2291,13 @@ def test_source_repair_transition_table_is_exhaustive_and_terminal_states_are_di
             for table_mode, phase, _failure_layout in table
             if table_mode is mode
         } == set(artifacts.SourceRepairPhase)
-    assert set(table.values()) == set(artifacts.SourceRepairAction)
+    assert {transition.action for transition in table.values()} == set(
+        artifacts.SourceRepairAction
+    )
+    assert all(
+        isinstance(transition.permitted_next_states, frozenset)
+        for transition in table.values()
+    )
     for mode in artifacts.SourceRepairMode:
         for phase in (
             artifacts.SourceRepairPhase.ROLLBACK_STARTED,
@@ -2225,14 +2316,14 @@ def test_source_repair_transition_table_is_exhaustive_and_terminal_states_are_di
             artifacts.SourceRepairPhase.ROLLED_BACK,
             artifacts.SourceRepairFailureLayout.INSTALLED_SOURCE,
         )
-    ] is artifacts.SourceRepairAction.REFUSE_ROLLED_BACK
+    ].action is artifacts.SourceRepairAction.REFUSE_ROLLED_BACK
     assert table[
         (
             artifacts.SourceRepairMode.VERIFY_ONLY,
             artifacts.SourceRepairPhase.COMMITTED,
             artifacts.SourceRepairFailureLayout.NONE,
         )
-    ] is artifacts.SourceRepairAction.VERIFY_COMMITTED
+    ].action is artifacts.SourceRepairAction.VERIFY_COMMITTED
 
 
 @pytest.mark.parametrize("authority_change", ("removed", "refused"))
@@ -2257,12 +2348,84 @@ def test_repair_transition_table_is_the_executable_authority_before_mutation(
     if authority_change == "removed":
         transitions.pop(key)
     else:
-        transitions[key] = artifacts.SourceRepairAction.REFUSE_UNKNOWN
+        transitions[key] = artifacts.SourceRepairTransition(
+            artifacts.SourceRepairAction.REFUSE_UNKNOWN, frozenset()
+        )
     monkeypatch.setattr(artifacts, "SOURCE_REPAIR_TRANSITIONS", transitions)
 
     with pytest.raises(
         artifacts.CapacityHostArtifactError,
         match="SOURCE_REPAIR_TRANSITION_(UNKNOWN|REFUSED)",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+    assert _scoped_tree_snapshot(system_root) == before
+
+
+def test_transition_permitted_next_states_refuse_forward_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    with pytest.raises(artifacts.SourceRepairIncomplete):
+        artifacts.run_source_repair_host(**arguments, crash_at="after_intent_fsync")
+    before = _scoped_tree_snapshot(system_root)
+    key = (
+        artifacts.SourceRepairMode.REPAIR,
+        artifacts.SourceRepairPhase.INTENT_DURABLE,
+        artifacts.SourceRepairFailureLayout.NONE,
+    )
+    transitions = dict(artifacts.SOURCE_REPAIR_TRANSITIONS)
+    transitions[key] = artifacts.SourceRepairTransition(
+        artifacts.SourceRepairAction.ADVANCE_SOURCE, frozenset()
+    )
+    monkeypatch.setattr(artifacts, "SOURCE_REPAIR_TRANSITIONS", transitions)
+
+    with pytest.raises(
+        artifacts.SourceRepairTransitionError,
+        match="SOURCE_REPAIR_NEXT_STATE_REFUSED",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+    assert _scoped_tree_snapshot(system_root) == before
+
+
+def test_transition_permitted_next_states_refuse_rollback_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+
+    def refuse_receipt(*args: object, **kwargs: object) -> str:
+        raise artifacts.CapacityHostArtifactError("INJECTED_RECEIPT_REFUSAL")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(artifacts, "publish_source_repair_receipt", refuse_receipt)
+        with pytest.raises(artifacts.SourceRepairIncomplete):
+            artifacts.run_source_repair_host(
+                **arguments, crash_at="after_failure_namespace_parent_fsync"
+            )
+    archive = next((system_root / "capacity-archive").iterdir())
+    position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    before = _scoped_tree_snapshot(system_root)
+    key = (
+        artifacts.SourceRepairMode.REPAIR,
+        position.phase,
+        position.failure_layout,
+    )
+    transitions = dict(artifacts.SOURCE_REPAIR_TRANSITIONS)
+    transitions[key] = artifacts.SourceRepairTransition(
+        artifacts.SourceRepairAction.RECOVER_PRECOMMIT, frozenset()
+    )
+    monkeypatch.setattr(artifacts, "SOURCE_REPAIR_TRANSITIONS", transitions)
+
+    with pytest.raises(
+        artifacts.SourceRepairTransitionError,
+        match="SOURCE_REPAIR_NEXT_STATE_REFUSED",
     ):
         artifacts.run_source_repair_host(**arguments)
     assert _scoped_tree_snapshot(system_root) == before
@@ -2325,13 +2488,17 @@ def test_repair_transition_table_refusal_controls_each_forward_position(
         artifacts.SourceRepairFailureLayout.NONE,
     )
     transitions = dict(artifacts.SOURCE_REPAIR_TRANSITIONS)
-    transitions[key] = artifacts.SourceRepairAction.REFUSE_UNKNOWN
+    transitions[key] = artifacts.SourceRepairTransition(
+        artifacts.SourceRepairAction.REFUSE_UNKNOWN, frozenset()
+    )
     monkeypatch.setattr(artifacts, "SOURCE_REPAIR_TRANSITIONS", transitions)
 
-    with pytest.raises(
-        artifacts.SourceRepairTransitionError,
-        match="SOURCE_REPAIR_TRANSITION_REFUSED",
-    ):
+    expected_error = (
+        artifacts.SourceRepairIncomplete
+        if phase is artifacts.SourceRepairPhase.COMMITTED
+        else artifacts.SourceRepairTransitionError
+    )
+    with pytest.raises(expected_error):
         artifacts.run_source_repair_host(**arguments)
     assert _scoped_tree_snapshot(system_root) == before
 
@@ -2785,6 +2952,36 @@ def test_failure_evidence_layouts_refuse_every_semantic_mutation(
         )
 
 
+def test_failure_evidence_binds_exact_intent_source_tree_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _system_root, archive, _evidence_path = _terminal_failure_evidence_fixture(
+        tmp_path, monkeypatch, "installed-source"
+    )
+    original_verify = artifacts._verify_installed_repair_source
+
+    def unequal_tree_with_same_inventory(
+        *args: object, **kwargs: object
+    ) -> tuple[dict[str, object], artifacts.SourceClosureEvidence]:
+        manifest, evidence = original_verify(*args, **kwargs)
+        return manifest, artifacts.SourceClosureEvidence(
+            object_count=evidence.object_count,
+            object_inventory_sha256=evidence.object_inventory_sha256,
+            source_tree_sha256="0" * 64,
+        )
+
+    monkeypatch.setattr(
+        artifacts, "_verify_installed_repair_source", unequal_tree_with_same_inventory
+    )
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID",
+    ):
+        artifacts.reconcile_source_repair(
+            archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
 def test_empty_failure_namespace_is_an_explicit_recovery_child_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2906,3 +3103,64 @@ def test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state
         expected_gid=os.getgid(),
     )
     assert position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+
+
+@pytest.mark.parametrize(
+    "crash_at",
+    (
+        "after_rollback_staged_rename",
+        "fail_rollback_staged_source_parent_fsync",
+        "after_rollback_staged_source_parent_fsync",
+        "fail_rollback_staged_destination_parent_fsync",
+        "after_rollback_staged_destination_parent_fsync",
+    ),
+)
+def test_rollback_staged_every_durability_boundary_replays_exactly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+
+    def fail_before_forward_source(*args: object, **kwargs: object) -> object:
+        raise artifacts.CapacityHostArtifactError("INJECTED_PRE_SOURCE_FAILURE")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(
+            artifacts,
+            "_advance_source_repair_source_phase",
+            fail_before_forward_source,
+        )
+        with pytest.raises(artifacts.SourceRepairIncomplete):
+            artifacts.run_source_repair_host(**arguments, crash_at=crash_at)
+
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_PRECOMMIT_RESTORED",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+
+    archive = next((system_root / "capacity-archive").iterdir())
+    failure_namespace = archive / (
+        f"failure-{archive.name.removeprefix('source-closure-repair-')}"
+    )
+    assert (failure_namespace / "staged-source").is_dir()
+    assert not (failure_namespace / "installed-source").exists()
+    assert (system_root / "capacity-sources" / "macro" / commit).is_dir()
+    visible_generations = [
+        child
+        for child in (system_root / "capacity-generations").iterdir()
+        if not child.name.startswith(".")
+    ]
+    assert [child.name for child in visible_generations] == [
+        artifacts.PRIOR_GENERATION_DIGEST
+    ]
+    position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+    assert (
+        position.failure_layout
+        is artifacts.SourceRepairFailureLayout.STAGED_SOURCE
+    )
