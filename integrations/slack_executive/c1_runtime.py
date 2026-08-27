@@ -1,8 +1,9 @@
-"""Closed non-secret production configuration for the C1 SOL_STATE Relay.
+"""Closed production configuration and startup guards for C1 SOL_STATE.
 
-Secrets never belong in this JSON contract. The configuration names the
-root-managed credential file and the already-owned CeoIngress socket, plus the
-fixed Slack workspace/channel/bot identity and reviewed timing bounds.
+The production Relay runs under the sealed Executive Python invocation
+``-I -S -B``.  This module therefore remains standard-library-only apart from
+C1-local first-party imports. Secrets never belong in the JSON config: it names
+the dedicated credential file and fixed Executive/Slack identities only.
 """
 from __future__ import annotations
 
@@ -15,10 +16,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
+from .slack_web_api import (
+    SLACK_API_ROOT,
+    SlackHttpTransport,
+    UrllibSlackHttpTransport,
+    decode_slack_json,
+)
 
 CONFIG_SCHEMA = "mastermind.sol_state_relay_config.v1"
-SLACK_API_ROOT = "https://slack.com/api/"
 RELAY_USERNAME = "_mastermind_sol_relay"
 _CONFIG_KEYS = frozenset(
     {
@@ -144,7 +149,7 @@ def assert_relay_principal() -> None:
         for name in group_names
         if name.startswith("_mastermind_worker")
         or name.startswith("_mastermind_codex")
-        or name == "_mastermind_exec"
+        or name in {"_mastermind_exec", "_mastermind_ops"}
     }
     if forbidden:
         raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
@@ -161,6 +166,7 @@ def read_token_file(path: str | Path) -> str:
     if (
         not stat.S_ISREG(info.st_mode)
         or info.st_uid != os.geteuid()
+        or info.st_nlink != 1
         or info.st_mode & 0o077
     ):
         raise RuntimeError("C1_TOKEN_FILE_UNSAFE")
@@ -178,30 +184,32 @@ async def verify_slack_identity(
     token: str,
     expected_workspace_id: str,
     expected_bot_user_id: str,
-    transport: httpx.AsyncBaseTransport | None = None,
+    transport: SlackHttpTransport | None = None,
 ) -> SlackIdentityReceipt:
-    """Qualify the production token against the fixed workspace/bot identity."""
+    """Qualify the credential against the fixed workspace and bot identity."""
 
     if not token or not expected_workspace_id or not expected_bot_user_id:
         raise ValueError("invalid C1 Slack identity inputs")
-    client = httpx.AsyncClient(
-        base_url=SLACK_API_ROOT,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=httpx.Timeout(10.0),
-        follow_redirects=False,
-        transport=transport,
-    )
+    client = transport or UrllibSlackHttpTransport()
     try:
         try:
-            response = await client.post("auth.test")
-            response.raise_for_status()
-        except httpx.HTTPError:
+            response = await client.request(
+                method="POST",
+                path="auth.test",
+                token=token,
+            )
+        except Exception:
             raise RuntimeError("C1_SLACK_IDENTITY_UNAVAILABLE") from None
+        if (
+            response.status_code != 200
+            or response.final_url != SLACK_API_ROOT + "auth.test"
+        ):
+            raise RuntimeError("C1_SLACK_IDENTITY_UNAVAILABLE")
         try:
-            payload: Any = response.json()
-        except ValueError:
+            payload = decode_slack_json(response)
+        except RuntimeError:
             raise RuntimeError("C1_SLACK_IDENTITY_REFUSED") from None
-        if not isinstance(payload, dict) or payload.get("ok") is not True:
+        if payload.get("ok") is not True:
             raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
         workspace_id = payload.get("team_id")
         bot_user_id = payload.get("user_id")
@@ -216,3 +224,15 @@ async def verify_slack_identity(
         )
     finally:
         await client.aclose()
+
+
+__all__ = [
+    "CONFIG_SCHEMA",
+    "C1RuntimeConfig",
+    "RELAY_USERNAME",
+    "SlackIdentityReceipt",
+    "assert_relay_principal",
+    "load_config",
+    "read_token_file",
+    "verify_slack_identity",
+]
