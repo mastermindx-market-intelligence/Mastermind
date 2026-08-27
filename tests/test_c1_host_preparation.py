@@ -45,6 +45,20 @@ def test_c1_host_preparation_is_fixed_credential_free_and_non_arming():
     assert 'launchctl bootout "system/$RELAY_LABEL"' in text
 
 
+def test_c1_host_preparation_verifies_exact_release_and_unarmed_control_config():
+    text = PREP.read_text(encoding="utf-8")
+
+    assert 'RELEASE_MANIFEST="$RELEASE_ROOT/.executive-release-manifest.json"' in text
+    assert '"mastermind.executive_release_manifest/v1"' in text
+    assert 'value.get("commit_sha") != expected_commit' in text
+    assert 'release_manifest.py" verify' in text
+    assert '"proof_base_sha": release_sha' in text
+    assert '"ceo_ingress_peer_uid": 452' in text
+    assert '"ceo_ingress_launchd_socket_name": "CeoIngress"' in text
+    assert 'if "ceo_ingress_armed" in value' in text
+    assert "0000000000000000000000000000000000000000" not in text
+
+
 def test_c1_host_preparation_patches_only_dedicated_ceo_socket_boundary():
     text = PREP.read_text(encoding="utf-8")
 
