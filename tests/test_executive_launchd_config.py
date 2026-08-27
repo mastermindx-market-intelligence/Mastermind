@@ -220,7 +220,7 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
             "/release/scripts/executive_os_phase1c_worker.py",
             "serve",
             "--config",
-            "/config/worker-codex.json",
+            "/config/worker.json",
         ],
     )
     plutil("-replace", "WorkingDirectory", "-string", "/release", str(worker))
@@ -810,13 +810,12 @@ def test_host_scripts_census_all_directory_membership_representations() -> None:
 
 
 def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() -> None:
-    install = (OPS / "install.sh").read_text(encoding="utf-8")
+    source_policy = (OPS / "install_source_policy.py").read_text(encoding="utf-8")
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
-    assert (
-        '/usr/bin/git --no-optional-locks -C "$SOURCE_REPO" status '
-        "--porcelain=v1 --untracked-files=normal"
-    ) in install
+    assert '["/usr/bin/git", "--no-optional-locks", "-C", str(repo), *args]' in source_policy
+    assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
+    assert "--refresh" not in source_policy
     assert (
         '"/usr/bin/git",\n'
         '                "--no-optional-locks",\n'
