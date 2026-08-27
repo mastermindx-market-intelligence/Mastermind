@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 import csv
+import errno
 import hashlib
 import io
 import json
@@ -24,6 +26,7 @@ from typing import Any, Mapping, Sequence
 
 
 TRANSPORT_SCHEMA = "mastermind.capacity_source_transport/v1"
+TRANSPORT_SCHEMA_V2 = "mastermind.capacity_source_transport/v2"
 RECOVERY_INTENT_SCHEMA = "mastermind.executive_capacity_h0_recovery_intent/v1"
 RECOVERY_RECEIPT_SCHEMA = "mastermind.executive_capacity_h0_recovery/v1"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -34,6 +37,8 @@ _MATERIAL_MODES = frozenset({"100644", "100755"})
 _TRANSPORT_MEMBERS = frozenset({"manifest.json", "payload.pack"})
 _WHEEL_PREFIXES = ("yaml/", "_yaml/", "pyyaml-6.0.3.dist-info/")
 _APPROVED_SYSTEM_XATTRS = frozenset({b"com.apple.provenance"})
+_CLOSED_DIRECTORY_MODES = frozenset({0o555, 0o700})
+_CLOSED_FILE_MODES = frozenset({0o400, 0o444, 0o555})
 
 
 class CapacityHostArtifactError(ValueError):
@@ -303,6 +308,192 @@ def _extended_attribute_names(path: Path) -> frozenset[bytes]:
     if completed.returncode != 0:
         raise CapacityHostArtifactError("RECOVERY_XATTR_INSPECTION_FAILED")
     return frozenset(name for name in completed.stdout.splitlines() if name)
+
+
+def _descriptor_extended_attribute_names(descriptor: int) -> frozenset[bytes]:
+    listxattr = getattr(os, "listxattr", None)
+    if listxattr is not None:
+        try:
+            return frozenset(os.fsencode(name) for name in listxattr(descriptor))
+        except (OSError, TypeError, ValueError) as exc:
+            raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_FAILED") from exc
+    if sys.platform != "darwin":
+        raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_UNAVAILABLE")
+    completed = subprocess.run(
+        ["/usr/bin/xattr", f"/dev/fd/{descriptor}"],
+        capture_output=True,
+        check=False,
+        env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"},
+        pass_fds=(descriptor,),
+        timeout=5,
+    )
+    if completed.returncode != 0:
+        raise CapacityHostArtifactError("CLOSURE_XATTR_INSPECTION_FAILED")
+    return frozenset(name for name in completed.stdout.splitlines() if name)
+
+
+def _descriptor_has_extended_acl(descriptor: int) -> bool:
+    if sys.platform != "darwin":
+        return False
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        acl_get_fd_np = libc.acl_get_fd_np
+        acl_get_entry = libc.acl_get_entry
+        acl_free = libc.acl_free
+    except (AttributeError, OSError) as exc:
+        raise CapacityHostArtifactError("CLOSURE_ACL_INSPECTION_UNAVAILABLE") from exc
+    acl_get_fd_np.argtypes = [ctypes.c_int, ctypes.c_int]
+    acl_get_fd_np.restype = ctypes.c_void_p
+    acl_get_entry.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    acl_get_entry.restype = ctypes.c_int
+    acl_free.argtypes = [ctypes.c_void_p]
+    acl_free.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    acl = acl_get_fd_np(descriptor, 0x00000100)
+    if not acl:
+        if ctypes.get_errno() == errno.ENOENT:
+            return False
+        raise CapacityHostArtifactError("CLOSURE_ACL_INSPECTION_UNAVAILABLE")
+    try:
+        entry = ctypes.c_void_p()
+        result = acl_get_entry(acl, 0, ctypes.byref(entry))
+        if result == 0:
+            return True
+        if result == 1:
+            return False
+        raise CapacityHostArtifactError("CLOSURE_ACL_INSPECTION_FAILED")
+    finally:
+        if acl_free(acl) != 0:
+            raise CapacityHostArtifactError("CLOSURE_ACL_INSPECTION_FAILED")
+
+
+def _descriptor_sha256(descriptor: int) -> str:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: os.read(descriptor, 1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def closed_tree_digest(
+    root: Path,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+    approved_xattrs: frozenset[bytes] = frozenset({b"com.apple.provenance"}),
+) -> str:
+    """Hash one closed tree through no-follow descriptors and exact metadata rows."""
+
+    if (
+        isinstance(expected_uid, bool)
+        or not isinstance(expected_uid, int)
+        or expected_uid < 0
+        or isinstance(expected_gid, bool)
+        or not isinstance(expected_gid, int)
+        or expected_gid < 0
+        or not isinstance(approved_xattrs, frozenset)
+        or any(not isinstance(name, bytes) for name in approved_xattrs)
+        or not approved_xattrs.issubset(_APPROVED_SYSTEM_XATTRS)
+    ):
+        raise CapacityHostArtifactError("CLOSURE_ARGUMENT_INVALID")
+
+    open_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    rows: list[dict[str, Any]] = []
+
+    def visit(descriptor: int, relative: str) -> None:
+        before = os.fstat(descriptor)
+        if before.st_uid != expected_uid or before.st_gid != expected_gid:
+            raise CapacityHostArtifactError("CLOSURE_OWNER_INVALID")
+        if _descriptor_extended_attribute_names(descriptor) - approved_xattrs:
+            raise CapacityHostArtifactError("CLOSURE_XATTR_INVALID")
+        if _descriptor_has_extended_acl(descriptor):
+            raise CapacityHostArtifactError("CLOSURE_ACL_INVALID")
+        mode = stat.S_IMODE(before.st_mode)
+        if stat.S_ISDIR(before.st_mode):
+            if mode not in _CLOSED_DIRECTORY_MODES:
+                raise CapacityHostArtifactError("CLOSURE_MODE_INVALID")
+            rows.append(
+                {
+                    "path": relative,
+                    "type": "directory",
+                    "uid": before.st_uid,
+                    "gid": before.st_gid,
+                    "mode": f"{mode:04o}",
+                    "nlink": before.st_nlink,
+                }
+            )
+            try:
+                with os.scandir(descriptor) as entries:
+                    names = [entry.name for entry in entries]
+            except OSError as exc:
+                raise CapacityHostArtifactError("CLOSURE_DIRECTORY_UNREADABLE") from exc
+            try:
+                ordered_names = sorted(names, key=lambda name: name.encode("utf-8", "strict"))
+            except UnicodeEncodeError as exc:
+                raise CapacityHostArtifactError("CLOSURE_PATH_INVALID") from exc
+            for name in ordered_names:
+                if name in {"", ".", ".."} or "/" in name:
+                    raise CapacityHostArtifactError("CLOSURE_PATH_INVALID")
+                child_relative = name if relative == "." else f"{relative}/{name}"
+                try:
+                    child_descriptor = os.open(
+                        name, open_flags, dir_fd=descriptor
+                    )
+                except OSError as exc:
+                    raise CapacityHostArtifactError("CLOSURE_TYPE_INVALID") from exc
+                try:
+                    visit(child_descriptor, child_relative)
+                finally:
+                    os.close(child_descriptor)
+        elif stat.S_ISREG(before.st_mode):
+            if before.st_nlink != 1:
+                raise CapacityHostArtifactError("CLOSURE_LINK_INVALID")
+            if mode not in _CLOSED_FILE_MODES:
+                raise CapacityHostArtifactError("CLOSURE_MODE_INVALID")
+            digest = _descriptor_sha256(descriptor)
+            after = os.fstat(descriptor)
+            if (
+                after.st_dev != before.st_dev
+                or after.st_ino != before.st_ino
+                or after.st_size != before.st_size
+                or after.st_mtime_ns != before.st_mtime_ns
+                or after.st_ctime_ns != before.st_ctime_ns
+            ):
+                raise CapacityHostArtifactError("CLOSURE_FILE_DRIFT")
+            rows.append(
+                {
+                    "path": relative,
+                    "type": "file",
+                    "uid": before.st_uid,
+                    "gid": before.st_gid,
+                    "mode": f"{mode:04o}",
+                    "nlink": 1,
+                    "size": before.st_size,
+                    "sha256": digest,
+                }
+            )
+        else:
+            raise CapacityHostArtifactError("CLOSURE_TYPE_INVALID")
+
+    try:
+        descriptor = os.open(root, open_flags)
+    except OSError as exc:
+        raise CapacityHostArtifactError("CLOSURE_TYPE_INVALID") from exc
+    try:
+        visit(descriptor, ".")
+    finally:
+        os.close(descriptor)
+    rows.sort(key=lambda row: row["path"].encode("utf-8"))
+    return hashlib.sha256(canonical_json(rows)).hexdigest()
 
 
 def verify_approved_xattrs(path: Path) -> dict[str, Any]:

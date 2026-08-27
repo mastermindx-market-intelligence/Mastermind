@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import pwd
 import stat
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from ops.executive_os import capacity_host_artifacts as artifacts
+from ops.executive_os import capacity_source_contract as contract
 
 
 def _git(repository: Path, *arguments: str) -> str:
@@ -401,3 +403,151 @@ def test_runtime_tree_digest_rejects_symlinks_and_hardlinks(tmp_path: Path) -> N
     (runtime / "link").symlink_to(payload)
     with pytest.raises(artifacts.CapacityHostArtifactError, match="SYMLINK"):
         artifacts.runtime_tree_digest(runtime)
+
+
+def test_v2_transport_schema_is_explicit_and_does_not_reinterpret_v1() -> None:
+    assert artifacts.TRANSPORT_SCHEMA == "mastermind.capacity_source_transport/v1"
+    assert artifacts.TRANSPORT_SCHEMA_V2 == "mastermind.capacity_source_transport/v2"
+
+
+def test_closed_tree_digest_uses_exact_canonical_rows_and_descriptor_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "alpha.txt"
+    payload.write_bytes(b"alpha\n")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+    root_info = root.stat()
+    payload_info = payload.stat()
+    rows = [
+        {
+            "path": ".",
+            "type": "directory",
+            "uid": root_info.st_uid,
+            "gid": root_info.st_gid,
+            "mode": "0700",
+            "nlink": root_info.st_nlink,
+        },
+        {
+            "path": "alpha.txt",
+            "type": "file",
+            "uid": payload_info.st_uid,
+            "gid": payload_info.st_gid,
+            "mode": "0400",
+            "nlink": 1,
+            "size": 6,
+            "sha256": hashlib.sha256(b"alpha\n").hexdigest(),
+        },
+    ]
+    expected = hashlib.sha256(
+        json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    def pathname_access_forbidden(*args: object, **kwargs: object) -> object:
+        raise AssertionError("public v2 closure must not use pathname tree reads")
+
+    monkeypatch.setattr(Path, "rglob", pathname_access_forbidden)
+    monkeypatch.setattr(Path, "lstat", pathname_access_forbidden)
+    monkeypatch.setattr(Path, "read_bytes", pathname_access_forbidden)
+    assert artifacts.closed_tree_digest(
+        root,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    ) == expected
+
+
+def test_closed_tree_digest_refuses_wrong_owner_group_mode_links_and_types(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="OWNER_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid() + 1, expected_gid=os.getgid()
+        )
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="OWNER_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid() + 1
+        )
+
+    payload.chmod(0o600)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="MODE_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+    payload.chmod(0o400)
+
+    hardlink = root / "hardlink"
+    os.link(payload, hardlink)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="LINK_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+    hardlink.unlink()
+
+    symlink = root / "symlink"
+    symlink.symlink_to(payload)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="TYPE_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+    symlink.unlink()
+
+    fifo = root / "fifo"
+    os.mkfifo(fifo, 0o400)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="TYPE_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
+def test_closed_tree_digest_refuses_unapproved_xattrs(tmp_path: Path) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    root.chmod(0o700)
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["/usr/bin/xattr", "-w", "com.mastermind.test", "unsafe", payload],
+                check=True,
+                capture_output=True,
+            )
+        elif hasattr(os, "setxattr"):
+            os.setxattr(payload, b"user.mastermind-test", b"unsafe", follow_symlinks=False)
+        else:
+            pytest.skip("extended attribute fixture is unavailable")
+    except OSError:
+        pytest.skip("test filesystem does not support extended attributes")
+    payload.chmod(0o400)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="XATTR_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS ACL contract")
+def test_closed_tree_digest_refuses_extended_acl(tmp_path: Path) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+    subprocess.run(
+        ["/bin/chmod", "+a", f"{pwd.getpwuid(os.getuid()).pw_name} allow read", payload],
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="ACL_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
