@@ -10,6 +10,7 @@ import pytest
 TOKEN = "INERT-C1-IDENTITY-TOKEN"
 WORKSPACE = "T-C1-WORKSPACE-FIXTURE"
 BOT = "U-C1-BOT-FIXTURE"
+SCOPES = ("chat:write", "groups:history")
 
 
 def _module():
@@ -33,29 +34,31 @@ class _Transport:
         self.closed = True
 
 
-def _response(c1_runtime, payload, *, status: int = 200):
+def _response(payload, *, status: int = 200, scopes=SCOPES):
     from integrations.slack_executive import slack_web_api
 
+    headers = {"content-type": "application/json; charset=utf-8"}
+    if scopes is not None:
+        headers["x-oauth-scopes"] = ",".join(scopes)
     return slack_web_api.SlackHttpResponse(
         status_code=status,
         final_url=slack_web_api.SLACK_API_ROOT + "auth.test",
-        headers={"content-type": "application/json; charset=utf-8"},
+        headers=headers,
         body=json.dumps(payload).encode("utf-8"),
     )
 
 
-def test_verify_slack_identity_uses_auth_test_and_matches_workspace_and_bot():
+def test_verify_slack_identity_uses_auth_test_and_matches_workspace_bot_and_scopes():
     c1_runtime = _module()
     transport = _Transport(
         lambda call: _response(
-            c1_runtime,
             {
                 "ok": True,
                 "team_id": WORKSPACE,
                 "user_id": BOT,
                 "team": "Fixture Workspace",
                 "user": "relay-fixture",
-            },
+            }
         )
     )
 
@@ -70,6 +73,7 @@ def test_verify_slack_identity_uses_auth_test_and_matches_workspace_and_bot():
 
     assert receipt.workspace_id == WORKSPACE
     assert receipt.bot_user_id == BOT
+    assert receipt.scopes == SCOPES
     assert transport.closed is True
     assert transport.calls == [
         {
@@ -84,7 +88,6 @@ def test_verify_slack_identity_rejects_wrong_workspace_without_raw_payload():
     c1_runtime = _module()
     transport = _Transport(
         lambda call: _response(
-            c1_runtime,
             {"ok": True, "team_id": "T-WRONG", "user_id": BOT},
         )
     )
@@ -100,3 +103,30 @@ def test_verify_slack_identity_rejects_wrong_workspace_without_raw_payload():
         return str(caught.value)
 
     assert asyncio.run(exercise()) == "C1_SLACK_IDENTITY_REFUSED"
+
+
+def test_verify_slack_identity_rejects_missing_or_extra_scope():
+    c1_runtime = _module()
+
+    async def result_for(scopes):
+        transport = _Transport(
+            lambda call: _response(
+                {"ok": True, "team_id": WORKSPACE, "user_id": BOT},
+                scopes=scopes,
+            )
+        )
+        with pytest.raises(RuntimeError) as caught:
+            await c1_runtime.verify_slack_identity(
+                token=TOKEN,
+                expected_workspace_id=WORKSPACE,
+                expected_bot_user_id=BOT,
+                transport=transport,
+            )
+        return str(caught.value)
+
+    assert asyncio.run(result_for(("chat:write",))) == "C1_SLACK_IDENTITY_REFUSED"
+    assert (
+        asyncio.run(result_for(("chat:write", "groups:history", "groups:read")))
+        == "C1_SLACK_IDENTITY_REFUSED"
+    )
+    assert asyncio.run(result_for(None)) == "C1_SLACK_IDENTITY_REFUSED"
