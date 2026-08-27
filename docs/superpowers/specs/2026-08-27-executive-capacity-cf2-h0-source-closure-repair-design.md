@@ -366,29 +366,37 @@ receipt is not a seventh generation file.
 
 ## 11. Ordered transition and commit point
 
-The root carrier performs this exact sequence under the H0 lock:
+The carrier performs this exact sequence. Only steps 1 and 2 precede lock acquisition, and neither
+may inspect installed host state:
 
-1. Parse one of the two exact command forms below, verify effective UID zero, and verify the sealed
-   Mastermind checkout at the exact `source_closure_repair_commit`.
-2. Verify preserved H0 runtime/topology/telemetry/legacy/service/socket invariants and the
+1. Parse and completely validate one of the two exact command forms below without reading host
+   state or acquiring the lock.
+2. Perform only the allowed preflight: verify effective UID zero and verify the sealed Mastermind
+   checkout at the exact `source_closure_repair_commit`.
+3. Acquire the existing H0 lock. From this point through exit, every reconciliation, installed-host
+   observation, candidate operation, publication, transition, commit, and proof runs while holding
+   that lock.
+4. Reconcile any exact prior intent before observing or constructing a new operation. Ambiguous or
+   nonmatching prior state refuses under the section 12 law.
+5. Verify preserved H0 runtime/topology/telemetry/legacy/service/socket invariants and the
    repair-specific principal facts defined below without provider-home access.
-3. Match the old generation and its six old artifact hashes.
-4. Open all transition parents, prove one `st_dev`, prove every destination absent, copy the
+6. Match the old generation and its six old artifact hashes.
+7. Open all transition parents, prove one `st_dev`, prove every destination absent, copy the
    operator-owned v2 transport by no-follow descriptor, and bind its independent SHA-256.
-5. Materialize and completely verify the side-by-side source candidate.
-6. Publish and fsync the one durable repair intent.
-7. Move the old source into the intent archive with no-replace rename and fsync both parents.
-8. Install the candidate at the fixed source path with no-replace rename and fsync both parents.
-9. Move the old generation into the same archive with no-replace rename and fsync both parents.
-10. Reverify source closure and every preserved invariant.
-11. Publish/fsync the repair receipt, build the new hidden six-file generation candidate, and
+8. Materialize and completely verify the side-by-side source candidate.
+9. Publish and fsync the one durable repair intent.
+10. Move the old source into the intent archive with no-replace rename and fsync both parents.
+11. Install the candidate at the fixed source path with no-replace rename and fsync both parents.
+12. Move the old generation into the same archive with no-replace rename and fsync both parents.
+13. Reverify source closure and every preserved invariant.
+14. Publish/fsync the repair receipt, build the new hidden six-file generation candidate, and
     verify all internal/external digest links, including byte equality for preserved topology and
     rollback artifacts.
-12. Reverify source, repair archive/receipt, generation candidate, runtime, topology, rollback,
+15. Reverify source, repair archive/receipt, generation candidate, runtime, topology, rollback,
     telemetry, services, sockets, legacy files, and principals.
-13. Rename the hidden generation to its digest basename with descriptor-relative no-replace rename
+16. Rename the hidden generation to its digest basename with descriptor-relative no-replace rename
     as the last semantic filesystem mutation and sole commit point.
-14. `fsync` the open capacity-generations parent directory as the required durability barrier,
+17. `fsync` the open capacity-generations parent directory as the required durability barrier,
     close descriptors, write the fixed success sentinel, and exit zero.
 
 No correction, content rewrite, topology render, release install, or rollback occurs after the
@@ -419,7 +427,8 @@ The CLI accepts only these ordered argv forms:
 
 `local-name` matches `[a-z_][a-z0-9._-]{0,63}`. `absolute-transport-path` is one absolute POSIX path
 argument with no empty component, `.` or `..` component, CR, or LF; its single-link regular-file
-metadata and supplied-byte digest are verified later as preflight, with mismatch returning exit 65.
+metadata and supplied-byte digest are verified only after lock acquisition as a host-state gate,
+with mismatch returning exit 65.
 `generation_repair_commit` must equal the expected source-closure repair commit. Missing, extra,
 reordered, mixed-mode, duplicate, help, empty, malformed, adversarial, relative-path, wrong-case
 digest/commit, or illegal path/digest combinations return exactly exit 64,
