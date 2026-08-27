@@ -16,6 +16,7 @@ WAKE_TRANSPORTS = frozenset(
         "grok-computer",
         "chatgpt-gui",
         "codex-app-server",
+        "claude-code-session",
         "human",
     }
 )
@@ -24,6 +25,7 @@ _REQUIRES_BINDING = frozenset(
         "grok-computer",
         "chatgpt-gui",
         "codex-app-server",
+        "claude-code-session",
     }
 )
 
@@ -34,7 +36,7 @@ class WakeTransportError(ValueError):
 
 @dataclasses.dataclass(frozen=True)
 class WakeTransportDescriptor:
-    """Non-secret facts about one reviewed wake transport."""
+    """Non-secret facts about one reviewed execution interface."""
 
     transport_id: str
     interface_version: str = DISPATCHER_INTERFACE_VERSION
