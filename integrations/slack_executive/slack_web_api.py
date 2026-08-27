@@ -59,17 +59,25 @@ class SlackWebApiStateClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        try:
+            response = await self._client.request(method, path, **kwargs)
+        except httpx.HTTPError:
+            raise RuntimeError("SLACK_API_UNAVAILABLE") from None
+        _require_success(response)
+        return response
+
     async def fetch_history(self, *, channel_id: str, limit: int) -> HistoryPage:
         if not isinstance(channel_id, str) or not channel_id:
             raise ValueError("channel_id must be a non-empty string")
         if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
             raise ValueError("limit must be a positive integer")
 
-        response = await self._client.get(
+        response = await self._request(
+            "GET",
             "conversations.history",
             params={"channel": channel_id, "limit": limit},
         )
-        _require_success(response)
         payload = _decode_payload(response)
         if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
@@ -105,11 +113,11 @@ class SlackWebApiStateClient:
         if not isinstance(text, str) or not text:
             raise ValueError("text must be a non-empty string")
 
-        response = await self._client.post(
+        response = await self._request(
+            "POST",
             "chat.postMessage",
             json={"channel": channel_id, "text": text},
         )
-        _require_success(response)
         payload = _decode_payload(response)
         if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
@@ -141,11 +149,11 @@ class SlackWebApiStateClient:
         if not isinstance(text, str) or not text:
             raise ValueError("text must be a non-empty string")
 
-        response = await self._client.post(
+        response = await self._request(
+            "POST",
             "chat.update",
             json={"channel": channel_id, "ts": message_ts, "text": text},
         )
-        _require_success(response)
         payload = _decode_payload(response)
         if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
