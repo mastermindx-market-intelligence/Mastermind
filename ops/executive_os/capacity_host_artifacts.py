@@ -95,6 +95,9 @@ _MATERIAL_MODES = frozenset({"100644", "100755"})
 _TRANSPORT_MEMBERS = frozenset({"manifest.json", "payload.pack"})
 _WHEEL_PREFIXES = ("yaml/", "_yaml/", "pyyaml-6.0.3.dist-info/")
 _APPROVED_SYSTEM_XATTRS = frozenset({b"com.apple.provenance"})
+_APPROVED_TRAVERSAL_ANCESTOR_XATTRS = _APPROVED_SYSTEM_XATTRS | frozenset(
+    {b"com.apple.rootless"}
+)
 _CLOSED_DIRECTORY_MODES = frozenset({0o555, 0o700})
 _CLOSED_FILE_MODES = frozenset({0o400, 0o444, 0o500, 0o555})
 _DARWIN_XATTR_LIST_MAX_BYTES = 64 * 1024
@@ -352,15 +355,58 @@ class SourceRepairParents:
     guard_descriptors: tuple[int, ...] = ()
     guard_names: tuple[str, ...] = ()
     system_root: int | None = None
+    system_root_state: tuple[int, ...] | None = None
+    system_root_parent: int | None = None
+    system_root_name: str | None = None
     capacity_sources: int | None = None
     locks: int | None = None
     relations: tuple[tuple[int, str, int], ...] = ()
     security_states: tuple[tuple[int, tuple[int, ...]], ...] = ()
+    ancestor_states: tuple[tuple[int, tuple[int, ...]], ...] = ()
+    ancestor_xattr_states: tuple[tuple[int, frozenset[bytes]], ...] = ()
+    ancestor_expected_uid: int = 0
+    ancestor_expected_gid: int = 0
 
     def revalidate(self) -> None:
         """Refuse descriptor or pathname-relation drift across the operation."""
 
         try:
+            for descriptor, expected in self.ancestor_states:
+                info = os.fstat(descriptor)
+                if _descriptor_ancestor_state(info) != expected:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
+                _require_source_repair_ancestor(
+                    descriptor,
+                    info,
+                    expected_uid=self.ancestor_expected_uid,
+                    expected_gid=self.ancestor_expected_gid,
+                    expected_device=self.device,
+                    reason="SOURCE_REPAIR_PARENT_DRIFT",
+                )
+            for descriptor, expected in self.ancestor_xattr_states:
+                if _descriptor_extended_attribute_names(descriptor) != expected:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
+            if (
+                self.system_root is not None
+                and self.system_root_state is not None
+                and self.system_root_parent is not None
+                and self.system_root_name is not None
+            ):
+                root_info = os.fstat(self.system_root)
+                if _descriptor_directory_state(root_info) != self.system_root_state:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
+                _require_secure_descriptor(
+                    self.system_root,
+                    root_info,
+                    reason="SOURCE_REPAIR_PARENT_DRIFT",
+                )
+                observed_root = os.stat(
+                    self.system_root_name,
+                    dir_fd=self.system_root_parent,
+                    follow_symlinks=False,
+                )
+                if _descriptor_directory_state(observed_root) != self.system_root_state:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
             for descriptor, expected in self.security_states:
                 info = os.fstat(descriptor)
                 if _descriptor_security_state(info) != expected:
@@ -380,8 +426,12 @@ class SourceRepairParents:
                     dir_fd=self.guard_descriptors[index - 1],
                     follow_symlinks=False,
                 )
-                if _descriptor_security_state(observed) != _descriptor_security_state(
+                if (
+                    observed.st_nlink < 1
+                    or _descriptor_ancestor_state(observed)
+                    != _descriptor_ancestor_state(
                     os.fstat(self.guard_descriptors[index])
+                    )
                 ):
                     raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
         except CapacityHostArtifactError:
@@ -808,6 +858,34 @@ def _descriptor_directory_state(info: os.stat_result) -> tuple[int, ...]:
     )
 
 
+def _descriptor_ancestor_state(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        stat.S_IFMT(info.st_mode),
+        stat.S_IMODE(info.st_mode),
+        info.st_uid,
+        info.st_gid,
+        int(getattr(info, "st_flags", 0)),
+    )
+
+
+def _descriptor_regular_file_state(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        stat.S_IFMT(info.st_mode),
+        stat.S_IMODE(info.st_mode),
+        info.st_uid,
+        info.st_gid,
+        info.st_nlink,
+        int(getattr(info, "st_flags", 0)),
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 def _require_allowed_bsd_flags(
     info: os.stat_result, reason: str = "CLOSURE_FLAGS_INVALID"
 ) -> None:
@@ -842,6 +920,39 @@ def _require_secure_descriptor(
         or _descriptor_has_extended_acl(descriptor)
     ):
         raise CapacityHostArtifactError(reason)
+
+
+def _require_source_repair_ancestor(
+    descriptor: int,
+    info: os.stat_result,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+    expected_device: int,
+    reason: str,
+) -> None:
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_nlink < 1
+        or info.st_dev != expected_device
+        or stat.S_IMODE(info.st_mode) & 0o022
+        or not (
+            info.st_uid == 0
+            or (info.st_uid == expected_uid and info.st_gid == expected_gid)
+        )
+    ):
+        raise CapacityHostArtifactError(reason)
+    if _descriptor_has_extended_acl(descriptor):
+        raise CapacityHostArtifactError(reason)
+
+
+def _source_repair_ancestor_xattrs(
+    descriptor: int, *, reason: str
+) -> frozenset[bytes]:
+    observed = _descriptor_extended_attribute_names(descriptor)
+    if observed - _APPROVED_TRAVERSAL_ANCESTOR_XATTRS:
+        raise CapacityHostArtifactError(reason)
+    return observed
 
 
 def _descriptor_closed_tree_digest(
@@ -935,16 +1046,17 @@ def _descriptor_closed_tree_digest(
                 raise CapacityHostArtifactError("CLOSURE_LINK_INVALID")
             if mode not in _CLOSED_FILE_MODES:
                 raise CapacityHostArtifactError("CLOSURE_MODE_INVALID")
+            before_state = _descriptor_regular_file_state(before)
             digest = _descriptor_sha256(descriptor)
             after = os.fstat(descriptor)
-            if (
-                after.st_dev != before.st_dev
-                or after.st_ino != before.st_ino
-                or after.st_size != before.st_size
-                or after.st_mtime_ns != before.st_mtime_ns
-                or after.st_ctime_ns != before.st_ctime_ns
-            ):
+            if _descriptor_regular_file_state(after) != before_state:
                 raise CapacityHostArtifactError("CLOSURE_FILE_DRIFT")
+            _require_secure_descriptor(
+                descriptor,
+                after,
+                reason="CLOSURE_FILE_DRIFT",
+                approved_xattrs=approved_xattrs,
+            )
             rows.append(
                 {
                     "path": relative,
@@ -1920,6 +2032,27 @@ def _open_source_repair_parents(
         guard_descriptors = [os.open("/", directory_flags)]
         descriptors.extend(guard_descriptors)
         guard_names = ["/"]
+        root_guard_info = os.fstat(guard_descriptors[0])
+        ancestor_device = root_guard_info.st_dev
+        _require_source_repair_ancestor(
+            guard_descriptors[0],
+            root_guard_info,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            expected_device=ancestor_device,
+            reason="SOURCE_REPAIR_PARENT_INVALID",
+        )
+        ancestor_states = [
+            (guard_descriptors[0], _descriptor_ancestor_state(root_guard_info))
+        ]
+        ancestor_xattr_states = [
+            (
+                guard_descriptors[0],
+                _source_repair_ancestor_xattrs(
+                    guard_descriptors[0], reason="SOURCE_REPAIR_PARENT_INVALID"
+                ),
+            )
+        ]
         for component in absolute.parent.parts[1:]:
             child = os.open(
                 component, directory_flags, dir_fd=guard_descriptors[-1]
@@ -1927,13 +2060,65 @@ def _open_source_repair_parents(
             descriptors.append(child)
             guard_descriptors.append(child)
             guard_names.append(component)
-            if not stat.S_ISDIR(os.fstat(child).st_mode):
-                raise CapacityHostArtifactError("SOURCE_REPAIR_ROOT_INVALID")
+            child_info = os.fstat(child)
+            _require_source_repair_ancestor(
+                child,
+                child_info,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+                expected_device=ancestor_device,
+                reason="SOURCE_REPAIR_PARENT_INVALID",
+            )
+            observed = os.stat(
+                component,
+                dir_fd=guard_descriptors[-2],
+                follow_symlinks=False,
+            )
+            if (
+                observed.st_nlink < 1
+                or _descriptor_ancestor_state(observed)
+                != _descriptor_ancestor_state(child_info)
+            ):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
+            ancestor_states.append((child, _descriptor_ancestor_state(child_info)))
+            ancestor_xattr_states.append(
+                (
+                    child,
+                    _source_repair_ancestor_xattrs(
+                        child, reason="SOURCE_REPAIR_PARENT_INVALID"
+                    ),
+                )
+            )
 
         root_descriptor = os.open(
             absolute.name, directory_flags, dir_fd=guard_descriptors[-1]
         )
         descriptors.append(root_descriptor)
+        root_info = os.fstat(root_descriptor)
+        _require_source_repair_ancestor(
+            root_descriptor,
+            root_info,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            expected_device=ancestor_device,
+            reason="SOURCE_REPAIR_PARENT_INVALID",
+        )
+        _require_allowed_bsd_flags(root_info, "SOURCE_REPAIR_PARENT_INVALID")
+        _require_secure_descriptor(
+            root_descriptor,
+            root_info,
+            reason="SOURCE_REPAIR_PARENT_INVALID",
+        )
+        observed_root = os.stat(
+            absolute.name,
+            dir_fd=guard_descriptors[-1],
+            follow_symlinks=False,
+        )
+        if _descriptor_ancestor_state(observed_root) != _descriptor_ancestor_state(
+            root_info
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
+        system_root_parent = guard_descriptors[-1]
         capacity_sources = os.open(
             "capacity-sources", directory_flags, dir_fd=root_descriptor
         )
@@ -1994,10 +2179,12 @@ def _open_source_repair_parents(
             guard_descriptors=tuple(guard_descriptors),
             guard_names=tuple(guard_names),
             system_root=root_descriptor,
+            system_root_state=_descriptor_directory_state(root_info),
+            system_root_parent=system_root_parent,
+            system_root_name=absolute.name,
             capacity_sources=capacity_sources,
             locks=locks_descriptor,
             relations=(
-                (guard_descriptors[-1], absolute.name, root_descriptor),
                 (root_descriptor, "capacity-sources", capacity_sources),
                 (capacity_sources, "macro", source_descriptor),
                 (root_descriptor, "capacity-generations", generation_descriptor),
@@ -2009,6 +2196,10 @@ def _open_source_repair_parents(
                 (descriptor, _descriptor_security_state(os.fstat(descriptor)))
                 for descriptor, _mode in secured
             ),
+            ancestor_states=tuple(ancestor_states),
+            ancestor_xattr_states=tuple(ancestor_xattr_states),
+            ancestor_expected_uid=expected_uid,
+            ancestor_expected_gid=expected_gid,
         )
         parents.revalidate()
         descriptors.clear()
@@ -4688,7 +4879,6 @@ def _closed_tree_digest(path: Path, *, expected_uid: int) -> str:
                 "gid": info.st_gid,
                 "mode": f"{stat.S_IMODE(info.st_mode):04o}",
                 "nlink": info.st_nlink,
-                "flags": _ALLOWED_BSD_FLAGS,
                 "path": relative,
                 "type": "directory",
                 "uid": info.st_uid,
@@ -4698,7 +4888,6 @@ def _closed_tree_digest(path: Path, *, expected_uid: int) -> str:
                 "gid": info.st_gid,
                 "mode": f"{stat.S_IMODE(info.st_mode):04o}",
                 "nlink": 1,
-                "flags": _ALLOWED_BSD_FLAGS,
                 "path": relative,
                 "sha256": sha256_file(candidate),
                 "size": info.st_size,

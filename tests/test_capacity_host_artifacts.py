@@ -23,6 +23,17 @@ from ops.executive_os import capacity_host_artifacts as artifacts
 from ops.executive_os import capacity_source_contract as contract
 
 
+class _StatOverlay:
+    def __init__(self, value: os.stat_result, **changes: int) -> None:
+        self._value = value
+        self._changes = changes
+
+    def __getattr__(self, name: str) -> object:
+        if name in self._changes:
+            return self._changes[name]
+        return getattr(self._value, name)
+
+
 def _git(repository: Path, *arguments: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(repository), *arguments],
@@ -258,6 +269,144 @@ def test_recovery_intent_resumes_after_interruption_and_is_idempotent(tmp_path: 
     assert artifacts.resume_recovery_archive(archive, expected_uid=os.getuid()) == receipt
 
 
+def _legacy_recovery_v1_file_tree_digest(path: Path) -> str:
+    info = path.lstat()
+    rows = [
+        {
+            "gid": info.st_gid,
+            "mode": f"{stat.S_IMODE(info.st_mode):04o}",
+            "nlink": 1,
+            "path": ".",
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "size": info.st_size,
+            "type": "file",
+            "uid": info.st_uid,
+        }
+    ]
+    return hashlib.sha256(
+        json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _write_pre_flags_recovery_v1_intent(
+    archive: Path, sources: tuple[Path, ...]
+) -> tuple[dict[str, object], bytes]:
+    targets = [
+        {
+            "destination_name": f"{index}-{source.name}",
+            "source_path": os.fspath(source),
+            "tree_sha256": _legacy_recovery_v1_file_tree_digest(source),
+        }
+        for index, source in enumerate(sorted(sources, key=os.fspath), start=1)
+    ]
+    intent: dict[str, object] = {
+        "schema_version": artifacts.RECOVERY_INTENT_SCHEMA,
+        "targets": targets,
+    }
+    encoded = json.dumps(
+        intent, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    path = archive / "recovery-intent.json"
+    path.write_bytes(encoded)
+    path.chmod(0o400)
+    return intent, encoded
+
+
+def test_pre_flags_recovery_v1_intent_replays_after_partial_move(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "worker-codex-pro-01.json"
+    second = tmp_path / "worker-codex-pro-02.json"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    first.chmod(0o400)
+    second.chmod(0o400)
+    archive = tmp_path / "recovered-carrier"
+    archive.mkdir(mode=0o700)
+    intent, _intent_bytes = _write_pre_flags_recovery_v1_intent(
+        archive, (first, second)
+    )
+
+    first_target = intent["targets"][0]
+    assert isinstance(first_target, dict)
+    first.rename(archive / str(first_target["destination_name"]))
+
+    receipt = artifacts.resume_recovery_archive(
+        archive, expected_uid=os.getuid()
+    )
+    assert receipt["outcome"] == "INTERRUPTED_H0_PARTIAL_RECOVERED"
+    assert receipt["recovered_targets"] == intent["targets"]
+    assert not first.exists() and not second.exists()
+
+
+def test_completed_pre_flags_recovery_v1_receipt_replays_idempotently(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "worker-codex-pro-01.json"
+    source.write_bytes(b"first")
+    source.chmod(0o400)
+    archive = tmp_path / "recovered-carrier"
+    archive.mkdir(mode=0o700)
+    intent, intent_bytes = _write_pre_flags_recovery_v1_intent(archive, (source,))
+    target = intent["targets"][0]
+    assert isinstance(target, dict)
+    source.rename(archive / str(target["destination_name"]))
+    receipt = {
+        "schema_version": artifacts.RECOVERY_RECEIPT_SCHEMA,
+        "outcome": "INTERRUPTED_H0_PARTIAL_RECOVERED",
+        "intent_sha256": hashlib.sha256(intent_bytes).hexdigest(),
+        "recovered_target_count": 1,
+        "recovered_targets": intent["targets"],
+        "service_state": "labels_disabled_unloaded",
+        "socket_state": "nodes_absent",
+        "credential_state": "not_read_or_changed",
+        "continuation": "same_carrier_preparation_resumed",
+    }
+    receipt_path = archive / "recovery-receipt.json"
+    receipt_path.write_bytes(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+    )
+    receipt_path.chmod(0o400)
+
+    assert artifacts.resume_recovery_archive(
+        archive, expected_uid=os.getuid()
+    ) == receipt
+
+
+def test_recovery_v1_digest_preserves_exact_pre_flags_canonical_rows(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "worker-codex-pro-01.json"
+    source.write_bytes(b"first")
+    source.chmod(0o400)
+
+    assert artifacts._closed_tree_digest(
+        source, expected_uid=os.getuid()
+    ) == _legacy_recovery_v1_file_tree_digest(source)
+
+
+def test_recovery_v1_digest_keeps_flags_as_fail_closed_non_identity_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "worker-codex-pro-01.json"
+    source.write_bytes(b"first")
+    source.chmod(0o400)
+    original_lstat = Path.lstat
+
+    def flagged_lstat(path: Path) -> os.stat_result | _StatOverlay:
+        info = original_lstat(path)
+        if path == source:
+            return _StatOverlay(info, st_flags=1)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", flagged_lstat)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError, match="RECOVERY_OBJECT_INVALID"
+    ):
+        artifacts._closed_tree_digest(source, expected_uid=os.getuid())
+
+
 def test_recovery_publications_resume_partial_candidates_and_fsync_moves(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -486,6 +635,119 @@ def test_closed_tree_digest_refuses_nonzero_mocked_fstat_flags(
 
     monkeypatch.setattr(os, "fstat", lambda descriptor: FlaggedStat(original_fstat(descriptor)))
     with pytest.raises(artifacts.CapacityHostArtifactError, match="FLAGS_INVALID"):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
+@pytest.mark.parametrize(
+    ("drift", "replacement"),
+    (
+        ("file-type", stat.S_IFDIR | 0o400),
+        ("mode", stat.S_IFREG | 0o600),
+        ("uid", os.getuid() + 10000),
+        ("gid", os.getgid() + 10000),
+        ("link-count", 2),
+        ("flags", 1),
+    ),
+)
+def test_closed_tree_digest_refuses_complete_post_read_file_state_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+    replacement: int,
+) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+    payload_info = payload.stat()
+    payload_identity = (payload_info.st_dev, payload_info.st_ino)
+    original_fstat = os.fstat
+    original_sha256 = artifacts._descriptor_sha256
+    read_complete = False
+
+    def track_read(descriptor: int) -> str:
+        nonlocal read_complete
+        digest = original_sha256(descriptor)
+        read_complete = True
+        return digest
+
+    def drifted_fstat(descriptor: int) -> os.stat_result | _StatOverlay:
+        info = original_fstat(descriptor)
+        if read_complete and (info.st_dev, info.st_ino) == payload_identity:
+            field = {
+                "file-type": "st_mode",
+                "mode": "st_mode",
+                "uid": "st_uid",
+                "gid": "st_gid",
+                "link-count": "st_nlink",
+                "flags": "st_flags",
+            }[drift]
+            return _StatOverlay(info, **{field: replacement})
+        return info
+
+    monkeypatch.setattr(artifacts, "_descriptor_sha256", track_read)
+    monkeypatch.setattr(os, "fstat", drifted_fstat)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError, match="CLOSURE_FILE_DRIFT"
+    ):
+        artifacts.closed_tree_digest(
+            root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+
+@pytest.mark.parametrize("security_drift", ("acl", "xattr"))
+def test_closed_tree_digest_rechecks_descriptor_security_after_file_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    security_drift: str,
+) -> None:
+    root = tmp_path / "closed"
+    root.mkdir(mode=0o700)
+    payload = root / "payload"
+    payload.write_bytes(b"value")
+    payload.chmod(0o400)
+    root.chmod(0o700)
+    payload_info = payload.stat()
+    payload_identity = (payload_info.st_dev, payload_info.st_ino)
+    original_fstat = os.fstat
+    original_sha256 = artifacts._descriptor_sha256
+    original_xattrs = artifacts._descriptor_extended_attribute_names
+    original_acl = artifacts._descriptor_has_extended_acl
+    read_complete = False
+
+    def is_payload(descriptor: int) -> bool:
+        info = original_fstat(descriptor)
+        return (info.st_dev, info.st_ino) == payload_identity
+
+    def track_read(descriptor: int) -> str:
+        nonlocal read_complete
+        digest = original_sha256(descriptor)
+        read_complete = True
+        return digest
+
+    def drifted_xattrs(descriptor: int) -> frozenset[bytes]:
+        observed = original_xattrs(descriptor)
+        if security_drift == "xattr" and read_complete and is_payload(descriptor):
+            return observed | frozenset({b"com.mastermind.test"})
+        return observed
+
+    def drifted_acl(descriptor: int) -> bool:
+        if security_drift == "acl" and read_complete and is_payload(descriptor):
+            return True
+        return original_acl(descriptor)
+
+    monkeypatch.setattr(artifacts, "_descriptor_sha256", track_read)
+    monkeypatch.setattr(
+        artifacts, "_descriptor_extended_attribute_names", drifted_xattrs
+    )
+    monkeypatch.setattr(artifacts, "_descriptor_has_extended_acl", drifted_acl)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError, match="CLOSURE_FILE_DRIFT"
+    ):
         artifacts.closed_tree_digest(
             root, expected_uid=os.getuid(), expected_gid=os.getgid()
         )
@@ -2068,6 +2330,160 @@ def test_source_repair_parent_graph_detects_synchronized_system_root_swap(
         system_root.rename(retained)
         system_root.mkdir(mode=0o755)
         with pytest.raises(artifacts.CapacityHostArtifactError, match="PARENT_DRIFT"):
+            parents.revalidate()
+    finally:
+        parents.close()
+
+
+def _ancestor_overlay_changes(drift: str, info: os.stat_result) -> dict[str, int]:
+    if drift == "flags":
+        return {"st_flags": 1}
+    if drift == "uid":
+        return {"st_uid": os.getuid() + 10000}
+    if drift == "gid":
+        return {"st_gid": os.getgid() + 10000}
+    if drift == "mode":
+        return {"st_mode": stat.S_IFDIR | 0o777}
+    if drift == "device":
+        return {"st_dev": info.st_dev + 1}
+    if drift == "link-count":
+        return {"st_nlink": 0}
+    return {}
+
+
+@pytest.mark.parametrize(
+    ("phase", "drift"),
+    (
+        *(("open", drift) for drift in ("uid", "gid", "mode", "device", "link-count", "acl", "xattr")),
+        *(("revalidation", drift) for drift in ("flags", "uid", "gid", "mode", "device", "link-count", "acl", "xattr")),
+    ),
+)
+def test_source_repair_true_traversal_ancestor_obeys_complete_security_law(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    drift: str,
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    ancestor_info = tmp_path.stat()
+    ancestor_identity = (ancestor_info.st_dev, ancestor_info.st_ino)
+    parents: artifacts.SourceRepairParents | None = None
+    if phase == "revalidation":
+        parents = artifacts._open_source_repair_parents(
+            system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+    original_fstat = os.fstat
+    original_stat = os.stat
+    original_xattrs = artifacts._descriptor_extended_attribute_names
+    original_acl = artifacts._descriptor_has_extended_acl
+
+    def is_ancestor(info: os.stat_result) -> bool:
+        return (info.st_dev, info.st_ino) == ancestor_identity
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        changes = _ancestor_overlay_changes(drift, info)
+        return _StatOverlay(info, **changes) if changes and is_ancestor(info) else info
+
+    def stable_fstat(descriptor: int) -> os.stat_result | _StatOverlay:
+        return overlay(original_fstat(descriptor))
+
+    def stable_stat(*args: object, **kwargs: object) -> os.stat_result | _StatOverlay:
+        return overlay(original_stat(*args, **kwargs))
+
+    def ancestor_xattrs(descriptor: int) -> frozenset[bytes]:
+        observed = original_xattrs(descriptor)
+        if drift == "xattr" and is_ancestor(original_fstat(descriptor)):
+            return observed | frozenset({b"com.mastermind.test"})
+        return observed
+
+    def ancestor_acl(descriptor: int) -> bool:
+        if drift == "acl" and is_ancestor(original_fstat(descriptor)):
+            return True
+        return original_acl(descriptor)
+
+    monkeypatch.setattr(os, "fstat", stable_fstat)
+    monkeypatch.setattr(os, "stat", stable_stat)
+    monkeypatch.setattr(
+        artifacts, "_descriptor_extended_attribute_names", ancestor_xattrs
+    )
+    monkeypatch.setattr(artifacts, "_descriptor_has_extended_acl", ancestor_acl)
+    try:
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError,
+            match="SOURCE_REPAIR_PARENT_(INVALID|DRIFT)",
+        ):
+            if phase == "open":
+                parents = artifacts._open_source_repair_parents(
+                    system_root,
+                    expected_uid=os.getuid(),
+                    expected_gid=os.getgid(),
+                )
+            else:
+                assert parents is not None
+                parents.revalidate()
+    finally:
+        if parents is not None:
+            parents.close()
+
+
+def test_source_repair_traversal_ancestor_tolerates_positive_link_count_churn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    ancestor_info = tmp_path.stat()
+    ancestor_identity = (ancestor_info.st_dev, ancestor_info.st_ino)
+    parents = artifacts._open_source_repair_parents(
+        system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    original_fstat = os.fstat
+    original_stat = os.stat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if (info.st_dev, info.st_ino) == ancestor_identity:
+            return _StatOverlay(info, st_nlink=info.st_nlink + 1)
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs))
+    )
+    try:
+        parents.revalidate()
+    finally:
+        parents.close()
+
+
+def test_source_repair_fixed_system_root_freezes_exact_link_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    root_info = system_root.stat()
+    root_identity = (root_info.st_dev, root_info.st_ino)
+    parents = artifacts._open_source_repair_parents(
+        system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    original_fstat = os.fstat
+    original_stat = os.stat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if (info.st_dev, info.st_ino) == root_identity:
+            return _StatOverlay(info, st_nlink=info.st_nlink + 1)
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs))
+    )
+    try:
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError, match="SOURCE_REPAIR_PARENT_DRIFT"
+        ):
             parents.revalidate()
     finally:
         parents.close()
