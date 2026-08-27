@@ -1,20 +1,15 @@
 """Native, secret-owning enrollment ceremony for the C1 SOL_STATE Relay.
 
-This helper is intentionally *not* a Slack-app provisioner and never starts or
-enables a service. An operator first creates/selects the dedicated Executive
-Relay app and invites its bot to the already-private ``#sol-runtime`` channel
-using native Slack administration. This root-only helper then:
+This helper does not provision a Slack app and never starts or enables a service.
+A native operator first creates/selects the dedicated Executive Relay app and
+invites its bot to the private ``#sol-runtime`` channel.  This root-only helper
+then validates the prepared host, accepts one no-echo token line from stdin,
+qualifies the exact Slack identity/scopes/channel, writes the fixed private
+files, and stops with the Relay disabled and unloaded.
 
-1. accepts the bot token only as one bounded, no-echo stdin line;
-2. verifies exact workspace, bot user and OAuth scope identity;
-3. proves the bot can read the fixed private channel;
-4. writes the fixed token/config files with exact ownership/modes; and
-5. stops while the Relay remains persistently disabled and unloaded.
-
-No token is accepted in argv, environment, repository config, output or receipt.
-``resume`` reconciles the one reviewed crash window (token file committed but
-config not yet committed) by validating the existing token before finishing the
-same carrier. ``verify`` is read-only with respect to local enrollment files.
+``resume`` is limited to the one reviewed crash state where the token file was
+committed but config was not. ``verify`` is read-only with respect to enrollment
+files. No operation overwrites ambiguous existing state.
 """
 from __future__ import annotations
 
@@ -34,7 +29,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
-# Production invocation is ``python -I -S -B`` from the immutable release.
 _ROOT = Path(__file__).resolve().parents[2]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
@@ -93,7 +87,7 @@ class C1EnrollmentError(RuntimeError):
 
 
 class _OpaqueParser(argparse.ArgumentParser):
-    def error(self, message: str) -> None:  # pragma: no cover - exercised through run
+    def error(self, message: str) -> None:  # pragma: no cover - argparse path
         raise C1EnrollmentError("C1_ENROLLMENT_ARGUMENTS_REFUSED")
 
 
@@ -112,10 +106,10 @@ def assert_secret_surfaces_clean(
     if any(_TOKEN_SHAPED_RE.search(str(value)) for value in argv):
         raise C1EnrollmentError("C1_ENROLLMENT_SECRET_SURFACE_REFUSED")
     for key, value in environ.items():
-        normalized_key = str(key).upper()
+        normalized = str(key).upper()
         if (
-            ("SLACK" in normalized_key and "TOKEN" in normalized_key)
-            or normalized_key in {"C1_RELAY_TOKEN", "MASTERMIND_SLACK_TOKEN"}
+            ("SLACK" in normalized and "TOKEN" in normalized)
+            or normalized in {"C1_RELAY_TOKEN", "MASTERMIND_SLACK_TOKEN"}
             or _TOKEN_SHAPED_RE.search(str(value))
         ):
             raise C1EnrollmentError("C1_ENROLLMENT_SECRET_SURFACE_REFUSED")
@@ -147,18 +141,15 @@ def _tty_fd(stream: BinaryIO) -> int | None:
         descriptor = stream.fileno()
     except (AttributeError, OSError, ValueError):
         return None
-    if not isinstance(descriptor, int) or not os.isatty(descriptor):
-        return None
-    return descriptor
+    return descriptor if os.isatty(descriptor) else None
 
 
 def read_token_from_stdin(stream: BinaryIO) -> str:
-    # readline is load-bearing for a native TTY: Enter completes the ceremony;
-    # BufferedReader.read(N) would wait for EOF after a short token line.
+    """Read exactly one bounded token line; suppress terminal echo when native."""
+
     descriptor = _tty_fd(stream)
     if descriptor is None:
         return _decode_token_bytes(stream.readline(MAX_TOKEN_BYTES + 2))
-
     try:
         original = termios.tcgetattr(descriptor)
         muted = list(original)
@@ -212,25 +203,21 @@ async def qualify_token(
     except Exception:
         raise C1EnrollmentError("C1_ENROLLMENT_IDENTITY_REFUSED") from None
 
-    history_client = SlackWebApiStateClient(
+    history = SlackWebApiStateClient(
         token=token,
         bot_user_id=bot_user_id,
         transport=history_transport,
     )
     try:
         try:
-            # Success itself proves the least-privilege bot can see the exact
-            # private channel. Message content is discarded and never enters
-            # the enrollment receipt.
-            await history_client.fetch_history(
+            await history.fetch_history(
                 channel_id=c1_runtime.SLACK_CHANNEL_ID,
                 limit=1,
             )
         except Exception:
             raise C1EnrollmentError("C1_ENROLLMENT_CHANNEL_REFUSED") from None
     finally:
-        await history_client.aclose()
-
+        await history.aclose()
     return {
         "bot_user_id": identity.bot_user_id,
         "channel_id": c1_runtime.SLACK_CHANNEL_ID,
@@ -255,16 +242,16 @@ def write_new_private_file(
     gid: int,
     mode: int,
 ) -> None:
-    """Create one final file with O_EXCL; never overwrite ambiguous state."""
+    """Create a new final file with O_EXCL; never overwrite existing state."""
 
     path = Path(path)
     if not path.is_absolute() or not payload or len(payload) > 64 * 1024:
         raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED")
     try:
-        parent_info = path.parent.lstat()
+        parent = path.parent.lstat()
     except OSError:
         raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED") from None
-    if stat.S_ISLNK(parent_info.st_mode) or not stat.S_ISDIR(parent_info.st_mode):
+    if stat.S_ISLNK(parent.st_mode) or not stat.S_ISDIR(parent.st_mode):
         raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED")
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
@@ -277,7 +264,6 @@ def write_new_private_file(
         raise C1EnrollmentError("C1_ENROLLMENT_COLLISION") from None
     except OSError:
         raise C1EnrollmentError("C1_ENROLLMENT_WRITE_REFUSED") from None
-
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
@@ -327,11 +313,11 @@ def _release_identity() -> str:
     release_sha = root.name
     if _RELEASE_RE.fullmatch(release_sha) is None:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
-    manifest_path = root / release_manifest.MANIFEST_NAME
+    manifest = root / release_manifest.MANIFEST_NAME
     try:
-        document = json.loads(manifest_path.read_text(encoding="utf-8"))
-        tree_sha = document["tree_sha"]
-        if document.get("commit_sha") != release_sha or _RELEASE_RE.fullmatch(tree_sha) is None:
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        tree_sha = value["tree_sha"]
+        if value.get("commit_sha") != release_sha or _RELEASE_RE.fullmatch(tree_sha) is None:
             raise ValueError
         release_manifest.verify(root, release_sha, tree_sha)
     except Exception:
@@ -354,8 +340,11 @@ def _launchd_disabled(label: str) -> bool:
         return False
     if completed.returncode != 0:
         return False
-    pattern = re.compile(rf'^\s*"{re.escape(label)}"\s*=>\s*true\s*$', re.MULTILINE)
-    return pattern.search(completed.stdout) is not None
+    return re.search(
+        rf'^\s*"{re.escape(label)}"\s*=>\s*true\s*$',
+        completed.stdout,
+        re.MULTILINE,
+    ) is not None
 
 
 def _launchd_loaded(label: str) -> bool:
@@ -396,6 +385,17 @@ def _exact_file(path: Path, *, uid: int, gid: int, mode: int) -> None:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
 
 
+def validate_host_relay_groups() -> None:
+    """Resolve the Relay account's full group vector and apply shared C1 law."""
+
+    try:
+        gids = os.getgrouplist(RELAY_USER, RELAY_GID)
+        names = {grp.getgrgid(gid).gr_name for gid in gids}
+        c1_runtime.validate_relay_group_names(names)
+    except Exception:
+        raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
+
+
 def _assert_host_prepared() -> str:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
@@ -414,6 +414,9 @@ def _assert_host_prepared() -> str:
         or account.pw_shell != "/usr/bin/false"
     ):
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED")
+    # This runs before any token is read. A prepared host with admin/wheel or
+    # any other unreviewed supplementary group is not eligible for enrollment.
+    validate_host_relay_groups()
 
     _exact_file(CONTROL_CONFIG, uid=0, gid=450, mode=0o440)
     _exact_file(CONTROL_PLIST, uid=0, gid=0, mode=0o644)
@@ -430,8 +433,8 @@ def _assert_host_prepared() -> str:
             or "ceo_ingress_armed" in control
         ):
             raise ValueError
-        plist = plistlib.loads(CONTROL_PLIST.read_bytes())
-        sockets = plist["Sockets"]
+        control_plist = plistlib.loads(CONTROL_PLIST.read_bytes())
+        sockets = control_plist["Sockets"]
         if set(sockets) != {"Operator", "CeoIngress"}:
             raise ValueError
         if (
@@ -447,7 +450,10 @@ def _assert_host_prepared() -> str:
         relay_plist = plistlib.loads(RELAY_PLIST.read_bytes())
         if relay_plist.get("Label") != RELAY_LABEL:
             raise ValueError
-        if relay_plist.get("UserName") != RELAY_USER or relay_plist.get("GroupName") != RELAY_GROUP:
+        if (
+            relay_plist.get("UserName") != RELAY_USER
+            or relay_plist.get("GroupName") != RELAY_GROUP
+        ):
             raise ValueError
         expected_program = [
             "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
@@ -461,7 +467,9 @@ def _assert_host_prepared() -> str:
         if relay_plist.get("ProgramArguments") != expected_program:
             raise ValueError
         environment = relay_plist.get("EnvironmentVariables")
-        if not isinstance(environment, dict) or any("TOKEN" in str(key).upper() for key in environment):
+        if not isinstance(environment, dict) or any(
+            "TOKEN" in str(key).upper() for key in environment
+        ):
             raise ValueError
     except Exception:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
@@ -557,7 +565,9 @@ async def _resume(*, bot_user_id: str) -> dict[str, object]:
 
 async def _verify(*, bot_user_id: str) -> dict[str, object]:
     release_sha = _assert_host_prepared()
-    if not _path_present(c1_runtime.TOKEN_PATH) or not _path_present(c1_runtime.CONFIG_PATH):
+    if not _path_present(c1_runtime.TOKEN_PATH) or not _path_present(
+        c1_runtime.CONFIG_PATH
+    ):
         raise C1EnrollmentError("C1_ENROLLMENT_EXISTING_REFUSED")
     config = c1_runtime.load_config(
         c1_runtime.CONFIG_PATH,
@@ -657,5 +667,6 @@ __all__ = [
     "qualify_token",
     "read_token_from_stdin",
     "run",
+    "validate_host_relay_groups",
     "write_new_private_file",
 ]
