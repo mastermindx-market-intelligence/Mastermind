@@ -915,6 +915,99 @@ def test_service_accounts_use_supported_disabled_authentication_policy_check() -
     assert "eDSAuthAccountDisabled" in acceptance
 
 
+def test_bootstrap_waits_boundedly_for_disabled_authentication_propagation(
+    tmp_path: Path,
+) -> None:
+    source = (OPS / "bootstrap-host.sh").read_text(encoding="utf-8")
+    function_body = source.split(
+        "wait_for_authentication_disabled() {", 1
+    )[1].split("\n}", 1)[0]
+    sleep_body = source.split(
+        "sleep_for_authentication_propagation() {", 1
+    )[1].split("\n}", 1)[0]
+    ensure_body = source.split("ensure_authentication_disabled() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "for attempt in 1 2 3 4 5" in function_body
+    assert "sleep_for_authentication_propagation" in function_body
+    assert sleep_body.strip() == "/bin/sleep 1"
+    assert "did not reach authentication-disabled state" in function_body
+    assert "/usr/bin/pwpolicy" not in function_body
+    assert ensure_body.count("/usr/bin/pwpolicy") == 1
+    assert ensure_body.index('if [ "$state" = needs_disable ]; then') < ensure_body.index(
+        "/usr/bin/pwpolicy"
+    ) < ensure_body.index('wait_for_authentication_disabled "$name"')
+
+    def run_wait(case_name: str, states: tuple[str, ...]):
+        case_root = tmp_path / case_name
+        case_root.mkdir()
+        state_file = case_root / "states"
+        probe_counter = case_root / "probes"
+        sleep_counter = case_root / "sleeps"
+        state_file.write_text("".join(f"{state}\n" for state in states), encoding="utf-8")
+        probe_counter.write_text("0\n", encoding="utf-8")
+        sleep_counter.write_text("0\n", encoding="utf-8")
+        script = "\n".join(
+            (
+                "set -euo pipefail",
+                "assert_reviewed_authentication_authority() { :; }",
+                "authentication_state() {",
+                '  observed="$(/bin/cat "$PROBE_COUNTER")"',
+                "  observed=$((observed + 1))",
+                "  /usr/bin/printf '%s\\n' \"$observed\" >\"$PROBE_COUNTER\"",
+                '  state="$(/usr/bin/sed -n "${observed}p" "$PROBE_STATES")"',
+                '  [ -n "$state" ] || return 65',
+                '  [ "$state" != error ] || return 65',
+                '  /bin/echo "$state"',
+                "}",
+                "sleep_for_authentication_propagation() {",
+                '  observed="$(/bin/cat "$SLEEP_COUNTER")"',
+                "  observed=$((observed + 1))",
+                "  /usr/bin/printf '%s\\n' \"$observed\" >\"$SLEEP_COUNTER\"",
+                "}",
+                "wait_for_authentication_disabled() {",
+                function_body,
+                "}",
+                "wait_for_authentication_disabled _synthetic_service",
+            )
+        )
+        completed = subprocess.run(
+            ["/bin/bash", "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PROBE_COUNTER": str(probe_counter),
+                "PROBE_STATES": str(state_file),
+                "SLEEP_COUNTER": str(sleep_counter),
+            },
+        )
+        return (
+            completed,
+            int(probe_counter.read_text(encoding="utf-8")),
+            int(sleep_counter.read_text(encoding="utf-8")),
+        )
+
+    completed, probes, sleeps = run_wait("eventual", ("needs_disable", "disabled"))
+    assert completed.returncode == 0, completed.stderr
+    assert (probes, sleeps) == (2, 1)
+
+    completed, probes, sleeps = run_wait("already", ("disabled",))
+    assert completed.returncode == 0, completed.stderr
+    assert (probes, sleeps) == (1, 0)
+
+    completed, probes, sleeps = run_wait("exhausted", ("needs_disable",) * 5)
+    assert completed.returncode == 65
+    assert (probes, sleeps) == (5, 4)
+    assert "did not reach authentication-disabled state" in completed.stderr
+
+    for case_name, state in (("unexpected", "unexpected"), ("error", "error")):
+        completed, probes, sleeps = run_wait(case_name, (state,))
+        assert completed.returncode == 65
+        assert (probes, sleeps) == (1, 0)
+
+
 def test_disabled_authentication_policy_parser_is_exact() -> None:
     import pytest
 
