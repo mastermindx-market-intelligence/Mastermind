@@ -4,7 +4,7 @@
 
 **Goal:** Remove Codex-only types and provider-home mechanics from the common Executive worker boundary so one existing Job/Attempt/Worker lifecycle can execute Codex and later Claude/GLM/Grok/Qwen/DeepSeek adapters without provider-specific brokers, queues, retries, or lifecycle state.
 
-**Architecture:** HF1 extracts genuinely provider-neutral launch/process/result/cancel/validation contracts from `codex_worker.py` into `worker_execution_contract.py`. Provider authentication/home/session mechanics move into adapter construction, not the durable Job or common launch request. `ExecutiveSupervisor` and the existing worker broker consume only `WorkerExecutionAdapter`; the broker remains one fixed, typed service with one configured adapter identity per worker realm. Codex is migrated first and must remain byte-for-byte equivalent at its security/receipt boundaries. A synthetic non-Codex adapter proves the common broker/supervisor path before PF1 adds real Claude.
+**Architecture:** HF1 extracts genuinely provider-neutral launch/process/result/cancel/validation contracts from `codex_worker.py` into `worker_execution_contract.py`. Provider authentication/home/session mechanics move into adapter construction, not the durable Job or common launch request. `ExecutiveSupervisor` and the existing worker broker consume only `WorkerExecutionAdapter`; the broker remains one fixed, typed service with one configured adapter identity per worker realm. Codex is migrated first and must remain behaviorally equivalent at its security/receipt boundaries. A synthetic non-Codex adapter proves the common broker/supervisor path before PF1 adds real Claude.
 
 **Tech Stack:** Python 3.11+, asyncio, dataclasses, existing Executive SQLite Runtime, AF_UNIX broker, pytest.
 
@@ -75,16 +75,43 @@ Expected: import failure because the common contract module does not exist.
 
 - [ ] **Step 3: Create the common dataclasses and enum**
 
-Move the listed provider-neutral dataclasses/enum from `codex_worker.py` into `worker_execution_contract.py` without changing their serialized field meanings, except:
+Move the listed provider-neutral dataclasses/enum from `codex_worker.py` into `worker_execution_contract.py` without changing their serialized field meanings. Define `WorkerLaunchSpec` exactly as:
 
 ```python
 @dataclasses.dataclass(frozen=True)
 class WorkerLaunchSpec:
-    # fields listed above; deliberately no provider home/session/credential
-    ...
+    run_id: str
+    job_id: str
+    worker_id: str
+    workspace_path: Path
+    run_dir: Path
+    prompt: str
+    result_schema_path: Path
+    authorities: tuple[str, ...] = ()
+    authority: str | None = None
+    model: str = "gpt-5.6-sol"
+    reasoning_effort: str = "xhigh"
+    timeout_seconds: float = 1800.0
+    cancel_grace_seconds: float = 10.0
+    worker_user: str = "mastermind-worker"
+    expected_base_sha: str | None = None
+    allowed_artifact_paths: tuple[str, ...] = ()
+    isolation_roots: tuple[Path, ...] = ()
+    isolation_denied_paths: tuple[Path, ...] = ()
+    isolation_manifest: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    isolation_manifest_sha256: str | None = None
+    forbidden_paths: tuple[Path, ...] = ()
+    max_artifacts: int = 32
+    max_artifact_bytes: int = 8 * 1024 * 1024
+    max_artifact_total_bytes: int = 32 * 1024 * 1024
+    expected_worker_uid: int | None = None
+    expected_worker_gid: int | None = None
+    shared_run_gid: int | None = None
+    secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    require_secret_canary: bool = False
 ```
 
-Keep `provider_session_id` on `WorkerProcessRef` and `WorkerResult` because it is non-secret execution evidence produced after launch; it is not a launch authority or persisted provider-home locator.
+Use named common constants for the three artifact defaults instead of duplicating magic numbers once the module is created. Keep `provider_session_id` on `WorkerProcessRef` and `WorkerResult` because it is non-secret execution evidence produced after launch; it is not a launch authority or persisted provider-home locator.
 
 - [ ] **Step 4: Re-export compatibility names from `codex_worker.py`**
 
@@ -111,24 +138,7 @@ Do not duplicate dataclass definitions after the move.
 
 - [ ] **Step 5: Make `worker_adapter.py` Codex-import-free**
 
-Replace all imports from `control_plane.codex_worker` with imports from `worker_execution_contract`. The protocol becomes:
-
-```python
-@runtime_checkable
-class WorkerExecutionAdapter(Protocol):
-    inspector: ProcessInspector
-
-    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef: ...
-    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt: ...
-    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt: ...
-    async def run_validation_argv(
-        self,
-        spec: WorkerLaunchSpec,
-        argv: Sequence[str],
-        *,
-        timeout_seconds: float = 300.0,
-    ) -> ValidationReceipt: ...
-```
+Replace all imports from `control_plane.codex_worker` with imports from `worker_execution_contract`. The protocol becomes the normal structural Python `Protocol` for these four operations: `start(WorkerLaunchSpec) -> WorkerProcessRef`, `collect_result(WorkerProcessRef) -> CollectionReceipt`, `cancel(WorkerProcessRef, reason) -> CancelReceipt`, and `run_validation_argv(WorkerLaunchSpec, argv, timeout_seconds=300.0) -> ValidationReceipt`. Keep method bodies as protocol stubs only; no provider implementation lives here.
 
 Move/define the structural `ProcessInspector` protocol in the common contract if it is currently Codex-owned; Codex's concrete inspector must satisfy it structurally.
 
