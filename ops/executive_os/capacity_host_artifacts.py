@@ -137,6 +137,10 @@ class SourceRepairIncomplete(RuntimeError):
     """The semantic commit may be visible and needs same-carrier reconciliation."""
 
 
+class SourceRepairTransitionError(CapacityHostArtifactError):
+    """The executable transition authority refused the observed position."""
+
+
 class RenameDurability(str, Enum):
     """Typed outcome for one exclusive rename and both parent barriers."""
 
@@ -170,19 +174,83 @@ class SourceRepairPhase(str, Enum):
     ROLLED_BACK = "rolled_back"
 
 
-SOURCE_REPAIR_TRANSITION_TABLE: Mapping[SourceRepairPhase, SourceRepairPhase | None] = {
-    SourceRepairPhase.INTENT_PREFIX: SourceRepairPhase.INTENT_DURABLE,
-    SourceRepairPhase.INTENT_DURABLE: SourceRepairPhase.SOURCE_ARCHIVED,
-    SourceRepairPhase.SOURCE_ARCHIVED: SourceRepairPhase.SOURCE_INSTALLED,
-    SourceRepairPhase.SOURCE_INSTALLED: SourceRepairPhase.GENERATION_ARCHIVED,
-    SourceRepairPhase.GENERATION_ARCHIVED: SourceRepairPhase.RECEIPT_PREFIX,
-    SourceRepairPhase.RECEIPT_PREFIX: SourceRepairPhase.RECEIPT_DURABLE,
-    SourceRepairPhase.RECEIPT_DURABLE: SourceRepairPhase.GENERATION_PREFIX,
-    SourceRepairPhase.GENERATION_PREFIX: SourceRepairPhase.COMMITTED,
-    SourceRepairPhase.COMMITTED: None,
-    SourceRepairPhase.ROLLBACK_STARTED: SourceRepairPhase.ROLLBACK_GENERATION_RESTORED,
-    SourceRepairPhase.ROLLBACK_GENERATION_RESTORED: SourceRepairPhase.ROLLED_BACK,
-    SourceRepairPhase.ROLLED_BACK: None,
+class SourceRepairFailureLayout(str, Enum):
+    """Exact semantic inventory below the intent-bound failure namespace."""
+
+    NONE = "none"
+    EMPTY = "empty"
+    INSTALLED_SOURCE = "installed_source"
+    STAGED_SOURCE = "staged_source"
+
+
+class SourceRepairMode(str, Enum):
+    REPAIR = "repair"
+    VERIFY_ONLY = "verify-only"
+
+
+class SourceRepairAction(str, Enum):
+    PUBLISH_INTENT = "publish_intent"
+    ADVANCE_SOURCE = "advance_source"
+    ADVANCE_GENERATION = "advance_generation"
+    ADVANCE_RECEIPT = "advance_receipt"
+    COMMIT_GENERATION = "commit_generation"
+    VERIFY_COMMITTED = "verify_committed"
+    RECOVER_PRECOMMIT = "recover_precommit"
+    REFUSE_ROLLED_BACK = "refuse_rolled_back"
+    REFUSE_UNKNOWN = "refuse_unknown"
+
+
+_FORWARD_FAILURE_LAYOUT = SourceRepairFailureLayout.NONE
+SOURCE_REPAIR_TRANSITIONS: Mapping[
+    tuple[SourceRepairMode, SourceRepairPhase, SourceRepairFailureLayout],
+    SourceRepairAction,
+] = {
+    (SourceRepairMode.REPAIR, SourceRepairPhase.INTENT_PREFIX, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.PUBLISH_INTENT,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.INTENT_DURABLE, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_SOURCE,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.SOURCE_ARCHIVED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_SOURCE,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.SOURCE_INSTALLED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_GENERATION,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.GENERATION_ARCHIVED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_RECEIPT,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.RECEIPT_PREFIX, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.ADVANCE_RECEIPT,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.RECEIPT_DURABLE, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.COMMIT_GENERATION,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.GENERATION_PREFIX, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.COMMIT_GENERATION,
+    (SourceRepairMode.REPAIR, SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.VERIFY_COMMITTED,
+    (SourceRepairMode.VERIFY_ONLY, SourceRepairPhase.COMMITTED, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.VERIFY_COMMITTED,
+    **{
+        (SourceRepairMode.VERIFY_ONLY, phase, _FORWARD_FAILURE_LAYOUT): SourceRepairAction.REFUSE_UNKNOWN
+        for phase in SourceRepairPhase
+        if phase not in {
+            SourceRepairPhase.COMMITTED,
+            SourceRepairPhase.ROLLBACK_STARTED,
+            SourceRepairPhase.ROLLBACK_GENERATION_RESTORED,
+            SourceRepairPhase.ROLLED_BACK,
+        }
+    },
+    **{
+        (mode, phase, layout): (
+            SourceRepairAction.RECOVER_PRECOMMIT
+            if mode is SourceRepairMode.REPAIR
+            and not (
+                phase is SourceRepairPhase.ROLLED_BACK
+                and layout is not SourceRepairFailureLayout.EMPTY
+            )
+            else (
+                SourceRepairAction.REFUSE_ROLLED_BACK
+                if mode is SourceRepairMode.REPAIR
+                else SourceRepairAction.REFUSE_UNKNOWN
+            )
+        )
+        for mode in SourceRepairMode
+        for phase in (
+            SourceRepairPhase.ROLLBACK_STARTED,
+            SourceRepairPhase.ROLLBACK_GENERATION_RESTORED,
+            SourceRepairPhase.ROLLED_BACK,
+        )
+        for layout in (
+            SourceRepairFailureLayout.EMPTY,
+            SourceRepairFailureLayout.INSTALLED_SOURCE,
+            SourceRepairFailureLayout.STAGED_SOURCE,
+        )
+    },
 }
 
 
@@ -209,6 +277,7 @@ class SourceRepairPosition:
     intent_candidate: bool = False
     receipt_candidate: bool = False
     failure_namespace: str | None = None
+    failure_layout: SourceRepairFailureLayout = SourceRepairFailureLayout.NONE
 
 
 @dataclass
@@ -231,8 +300,15 @@ class SourceRepairParents:
         descriptors = [self.source, self.generation, self.staging, self.archive]
         if self.intent_archive is not None:
             descriptors.append(self.intent_archive)
+        first_error: OSError | None = None
         for descriptor in reversed(descriptors):
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
 
 def canonical_json(value: Any) -> bytes:
@@ -1234,6 +1310,121 @@ def publish_source_repair_receipt(
     )
 
 
+def _validate_source_repair_failure_namespace(
+    archive: Path,
+    archive_descriptor: int,
+    failure_name: str,
+    *,
+    intent: Mapping[str, Any],
+    expected_uid: int,
+    expected_gid: int,
+) -> SourceRepairFailureLayout:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        failure_descriptor = os.open(
+            failure_name, flags, dir_fd=archive_descriptor
+        )
+    except OSError as exc:
+        raise CapacityHostArtifactError(
+            "SOURCE_REPAIR_FAILURE_NAMESPACE_INVALID"
+        ) from exc
+    try:
+        failure_info = os.fstat(failure_descriptor)
+        if (
+            not stat.S_ISDIR(failure_info.st_mode)
+            or failure_info.st_uid != expected_uid
+            or failure_info.st_gid != expected_gid
+            or failure_info.st_dev != intent["filesystem_device"]
+            or stat.S_IMODE(failure_info.st_mode) != 0o700
+            or _descriptor_extended_attribute_names(failure_descriptor)
+            - _APPROVED_SYSTEM_XATTRS
+            or _descriptor_has_extended_acl(failure_descriptor)
+        ):
+            raise CapacityHostArtifactError(
+                "SOURCE_REPAIR_FAILURE_NAMESPACE_INVALID"
+            )
+        names = tuple(_descriptor_directory_names(failure_descriptor))
+        layouts = {
+            (): SourceRepairFailureLayout.EMPTY,
+            ("installed-source",): SourceRepairFailureLayout.INSTALLED_SOURCE,
+            ("staged-source",): SourceRepairFailureLayout.STAGED_SOURCE,
+        }
+        layout = layouts.get(names)
+        if layout is None:
+            raise CapacityHostArtifactError(
+                "SOURCE_REPAIR_FAILURE_NAMESPACE_INVALID"
+            )
+        if layout is SourceRepairFailureLayout.EMPTY:
+            return layout
+        child_name = names[0]
+        try:
+            child_descriptor = os.open(
+                child_name, flags, dir_fd=failure_descriptor
+            )
+        except OSError as exc:
+            raise CapacityHostArtifactError(
+                "SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID"
+            ) from exc
+        try:
+            before = os.fstat(child_descriptor)
+            expected_mode = 0o700 if expected_uid != 0 else 0o555
+            if (
+                not stat.S_ISDIR(before.st_mode)
+                or before.st_uid != expected_uid
+                or before.st_gid != expected_gid
+                or before.st_dev != intent["filesystem_device"]
+                or stat.S_IMODE(before.st_mode) != expected_mode
+                or _descriptor_extended_attribute_names(child_descriptor)
+                - _APPROVED_SYSTEM_XATTRS
+                or _descriptor_has_extended_acl(child_descriptor)
+            ):
+                raise CapacityHostArtifactError(
+                    "SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID"
+                )
+            child_path = archive / failure_name / child_name
+            try:
+                _manifest, evidence = _verify_installed_repair_source(
+                    child_path, PRODUCER_COMMIT
+                )
+            except (CapacityHostArtifactError, OSError) as exc:
+                raise CapacityHostArtifactError(
+                    "SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID"
+                ) from exc
+            after = os.fstat(child_descriptor)
+            path_after = child_path.lstat()
+            if (
+                _descriptor_directory_state(after)
+                != _descriptor_directory_state(before)
+                or path_after.st_dev != before.st_dev
+                or path_after.st_ino != before.st_ino
+                or evidence.object_count != intent["candidate_object_count"]
+                or evidence.object_inventory_sha256
+                != intent["candidate_object_inventory_sha256"]
+            ):
+                raise CapacityHostArtifactError(
+                    "SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID"
+                )
+        finally:
+            os.close(child_descriptor)
+        final_failure_info = os.fstat(failure_descriptor)
+        if (
+            _descriptor_directory_state(final_failure_info)
+            != _descriptor_directory_state(failure_info)
+            or tuple(_descriptor_directory_names(failure_descriptor)) != names
+        ):
+            raise CapacityHostArtifactError(
+                "SOURCE_REPAIR_FAILURE_NAMESPACE_INVALID"
+            )
+        return layout
+    finally:
+        os.close(failure_descriptor)
+
+
 def reconcile_source_repair(
     archive: Path,
     *,
@@ -1379,20 +1570,17 @@ def reconcile_source_repair(
                 if digest != receipt["archived_generation_tree_sha256"]:
                     raise CapacityHostArtifactError("SOURCE_REPAIR_TREE_DIGEST_MISMATCH")
         failure_namespace: str | None = None
+        failure_layout = SourceRepairFailureLayout.NONE
         if failure_name in names:
             failure_namespace = failure_name
-            failure_path = archive / failure_name
-            failure_info = failure_path.lstat()
-            if (
-                not stat.S_ISDIR(failure_info.st_mode)
-                or failure_path.is_symlink()
-                or failure_info.st_uid != expected_uid
-                or failure_info.st_gid != expected_gid
-                or stat.S_IMODE(failure_info.st_mode) != 0o700
-                or {path.name for path in failure_path.iterdir()}
-                - {"installed-source", "staged-source"}
-            ):
-                raise CapacityHostArtifactError("SOURCE_REPAIR_FAILURE_NAMESPACE_INVALID")
+            failure_layout = _validate_source_repair_failure_namespace(
+                archive,
+                parent,
+                failure_name,
+                intent=intent,
+                expected_uid=expected_uid,
+                expected_gid=expected_gid,
+            )
             if archived_generation and not archived_source:
                 raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_POSITION_AMBIGUOUS")
             if archived_generation:
@@ -1420,6 +1608,7 @@ def reconcile_source_repair(
             phase=phase,
             receipt_candidate=receipt_candidate,
             failure_namespace=failure_namespace,
+            failure_layout=failure_layout,
         )
     finally:
         os.close(parent)
@@ -1472,6 +1661,21 @@ def _classify_source_repair_position(
     if visible_present:
         return SourceRepairPhase.COMMITTED
     return SourceRepairPhase.RECEIPT_DURABLE
+
+
+def _source_repair_action(
+    mode: SourceRepairMode,
+    phase: SourceRepairPhase,
+    failure_layout: SourceRepairFailureLayout,
+) -> SourceRepairAction:
+    key = (mode, phase, failure_layout)
+    try:
+        action = SOURCE_REPAIR_TRANSITIONS[key]
+    except KeyError as exc:
+        raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_UNKNOWN") from exc
+    if action is SourceRepairAction.REFUSE_UNKNOWN:
+        raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_REFUSED")
+    return action
 
 
 def _path_lexists(path: Path) -> bool:
@@ -1542,19 +1746,24 @@ def _attach_source_repair_archive_parent(
         | getattr(os, "O_CLOEXEC", 0),
         dir_fd=parents.archive,
     )
-    info = os.fstat(descriptor)
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != expected_uid
-        or info.st_gid != expected_gid
-        or info.st_dev != parents.device
-        or stat.S_IMODE(info.st_mode) != 0o700
-    ):
-        os.close(descriptor)
-        raise CapacityHostArtifactError("SOURCE_REPAIR_ARCHIVE_INVALID")
-    if parents.intent_archive is not None:
-        os.close(descriptor)
-        raise CapacityHostArtifactError("SOURCE_REPAIR_ARCHIVE_ALREADY_ATTACHED")
+    try:
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != expected_uid
+            or info.st_gid != expected_gid
+            or info.st_dev != parents.device
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ARCHIVE_INVALID")
+        if parents.intent_archive is not None:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ARCHIVE_ALREADY_ATTACHED")
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
     parents.intent_archive_path = archive
     parents.intent_archive = descriptor
 
@@ -2426,19 +2635,11 @@ def _advance_source_repair_receipt_phase(
 ) -> str:
     """Advance only GENERATION_ARCHIVED through RECEIPT_DURABLE."""
 
-    components = build_component_objects_v2(
-        material_source_digest=PRODUCER_MATERIAL_SOURCE_DIGEST,
-        pyyaml_record_sha256=PYYAML_RECORD_SHA256,
-        runtime_tree_sha256=RUNTIME_TREE_SHA256,
-        closure_evidence=evidence,
-        source_closure_repair_commit=expected_repair_commit,
-    )
-    config = build_source_config_v2(component_objects=components)
-    receipt = build_source_repair_receipt(
+    receipt = _expected_source_repair_receipt(
         intent=intent,
-        archived_generation_tree_sha256=archived_generation_digest,
-        new_source_config_digest=source_contract_digest(config),
-        new_component_manifest_digest=source_contract_digest(components),
+        evidence=evidence,
+        archived_generation_digest=archived_generation_digest,
+        expected_repair_commit=expected_repair_commit,
     )
     digest = publish_source_repair_receipt(
         archive,
@@ -2451,6 +2652,76 @@ def _advance_source_repair_receipt_phase(
     if crash_at == "after_repair_receipt_fsync":
         raise SourceRepairIncomplete(crash_at)
     return digest
+
+
+def _expected_source_repair_receipt(
+    *,
+    intent: Mapping[str, Any],
+    evidence: SourceClosureEvidence,
+    archived_generation_digest: str,
+    expected_repair_commit: str,
+) -> dict[str, Any]:
+    """Build the canonical receipt without publishing or mutating host state."""
+
+    components = build_component_objects_v2(
+        material_source_digest=PRODUCER_MATERIAL_SOURCE_DIGEST,
+        pyyaml_record_sha256=PYYAML_RECORD_SHA256,
+        runtime_tree_sha256=RUNTIME_TREE_SHA256,
+        closure_evidence=evidence,
+        source_closure_repair_commit=expected_repair_commit,
+    )
+    config = build_source_config_v2(component_objects=components)
+    return build_source_repair_receipt(
+        intent=intent,
+        archived_generation_tree_sha256=archived_generation_digest,
+        new_source_config_digest=source_contract_digest(config),
+        new_component_manifest_digest=source_contract_digest(components),
+    )
+
+
+def _observe_source_repair_source(
+    source_root: Path,
+    *,
+    intent: Mapping[str, Any],
+    expected_source_commit: str,
+) -> SourceClosureEvidence:
+    """Read and bind the installed candidate to the durable intent."""
+
+    _manifest, evidence = _verify_installed_repair_source(
+        source_root, expected_source_commit
+    )
+    if (
+        evidence.source_tree_sha256 != intent["candidate_source_tree_sha256"]
+        or evidence.object_count != intent["candidate_object_count"]
+        or evidence.object_inventory_sha256
+        != intent["candidate_object_inventory_sha256"]
+    ):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_SOURCE_DIGEST_MISMATCH")
+    return evidence
+
+
+def _observe_source_repair_archived_generation(
+    *,
+    system_root: Path,
+    archive: Path,
+    expected_uid: int,
+    expected_gid: int,
+    test_adapter: bool,
+) -> tuple[Path, str]:
+    """Read and validate the archived generation without advancing a phase."""
+
+    archived_generation = archive / _ARCHIVED_GENERATION_NAME
+    _validate_prior_generation(
+        archived_generation,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+    )
+    _verify_preserved_h0_invariants(
+        system_root, archived_generation, test_adapter=test_adapter
+    )
+    return archived_generation, closed_tree_digest(
+        archived_generation, expected_uid=expected_uid, expected_gid=expected_gid
+    )
 
 
 def _restore_digest_bound_precommit_state(
@@ -2604,6 +2875,20 @@ def _restore_digest_bound_precommit_state(
     _validate_prior_generation(
         old_generation, expected_uid=expected_uid, expected_gid=expected_gid
     )
+    terminal_position = reconcile_source_repair(
+        archive, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+    if (
+        terminal_position.phase is not SourceRepairPhase.ROLLED_BACK
+        or terminal_position.failure_layout
+        not in {
+            SourceRepairFailureLayout.INSTALLED_SOURCE,
+            SourceRepairFailureLayout.STAGED_SOURCE,
+        }
+    ):
+        raise CapacityHostArtifactError(
+            "SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID"
+        )
 
 
 def _verify_committed_source_repair(
@@ -2646,6 +2931,11 @@ def _verify_committed_source_repair(
         or position.receipt_candidate
         or position.failure_namespace is not None
     ):
+        _source_repair_action(
+            SourceRepairMode.VERIFY_ONLY,
+            position.phase,
+            position.failure_layout,
+        )
         raise CapacityHostArtifactError("SOURCE_REPAIR_COMMIT_INCOMPLETE")
     intent = _read_repair_intent_from_archive(
         archive, expected_uid=expected_uid, expected_gid=expected_gid
@@ -2721,6 +3011,15 @@ def _verify_committed_source_repair(
     )
     if _descriptor_entry_info(parents.staging, f"source-candidate-{expected_repair_commit}") is not None:
         raise CapacityHostArtifactError("SOURCE_REPAIR_COMMIT_INCOMPLETE")
+    if (
+        _source_repair_action(
+            SourceRepairMode.VERIFY_ONLY,
+            SourceRepairPhase.COMMITTED,
+            SourceRepairFailureLayout.NONE,
+        )
+        is not SourceRepairAction.VERIFY_COMMITTED
+    ):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_TRANSITION_REFUSED")
     return "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED"
 
 
@@ -2871,12 +3170,26 @@ def run_source_repair_host(
             if prefix_names not in (set(), {intent_candidate_name}):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_INTENT_INCOMPLETE")
             if prefix_names:
-                reconcile_source_repair(
+                prefix_position = reconcile_source_repair(
                     prefix_archive,
                     expected_uid=expected_uid,
                     expected_gid=expected_gid,
                     expected_intent=prefix_intent,
                 )
+                prefix_phase = prefix_position.phase
+                prefix_layout = prefix_position.failure_layout
+            else:
+                prefix_phase = SourceRepairPhase.INTENT_PREFIX
+                prefix_layout = SourceRepairFailureLayout.NONE
+            if (
+                _source_repair_action(
+                    SourceRepairMode.REPAIR,
+                    prefix_phase,
+                    prefix_layout,
+                )
+                is not SourceRepairAction.PUBLISH_INTENT
+            ):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_TRANSITION_REFUSED")
             publish_source_repair_intent(
                 prefix_archive,
                 prefix_intent,
@@ -3028,22 +3341,74 @@ def run_source_repair_host(
                     expected_uid=expected_uid,
                     expected_gid=expected_gid,
                 )
-            existing_position = reconcile_source_repair(
+        if archive is None or intent is None:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_INTENT_ABSENT")
+        for _transition_count in range(8):
+            position = reconcile_source_repair(
                 archive,
                 expected_uid=expected_uid,
                 expected_gid=expected_gid,
             )
+            generation_digest: str | None = None
+            payloads: dict[str, bytes] | None = None
+            evidence: SourceClosureEvidence | None = None
+            archived_generation: Path | None = None
+            archived_generation_digest: str | None = None
             current_phase = _classify_source_repair_position(
-                archive_position=existing_position,
+                archive_position=position,
                 parents=parents,
                 source_name=source_root.name,
                 staged_source_name=staged_source.name,
             )
-            if current_phase in {
-                SourceRepairPhase.ROLLBACK_STARTED,
-                SourceRepairPhase.ROLLBACK_GENERATION_RESTORED,
-                SourceRepairPhase.ROLLED_BACK,
-            }:
+            if (
+                current_phase is SourceRepairPhase.RECEIPT_DURABLE
+                and position.receipt_digest is not None
+            ):
+                evidence = _observe_source_repair_source(
+                    source_root,
+                    intent=intent,
+                    expected_source_commit=expected_source_commit,
+                )
+                archived_generation, archived_generation_digest = (
+                    _observe_source_repair_archived_generation(
+                        system_root=system_root,
+                        archive=archive,
+                        expected_uid=expected_uid,
+                        expected_gid=expected_gid,
+                        test_adapter=test_adapter,
+                    )
+                )
+                expected_receipt = _expected_source_repair_receipt(
+                    intent=intent,
+                    evidence=evidence,
+                    archived_generation_digest=archived_generation_digest,
+                    expected_repair_commit=expected_repair_commit,
+                )
+                expected_receipt_digest = hashlib.sha256(
+                    canonical_json(expected_receipt) + b"\n"
+                ).hexdigest()
+                if position.receipt_digest != expected_receipt_digest:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_RECEIPT_MISMATCH")
+                generation_digest, payloads = _generation_values(
+                    evidence=evidence,
+                    repair_commit=expected_repair_commit,
+                    repair_receipt_digest=expected_receipt_digest,
+                    archived_generation=archived_generation,
+                )
+                current_phase = _classify_source_repair_position(
+                    archive_position=position,
+                    parents=parents,
+                    source_name=source_root.name,
+                    staged_source_name=staged_source.name,
+                    generation_digest=generation_digest,
+                )
+            current_action = _source_repair_action(
+                SourceRepairMode.REPAIR,
+                current_phase,
+                position.failure_layout,
+            )
+
+            if current_action is SourceRepairAction.RECOVER_PRECOMMIT:
                 _restore_digest_bound_precommit_state(
                     archive=archive,
                     source_root=source_root,
@@ -3057,121 +3422,146 @@ def run_source_repair_host(
                     crash_at=crash_at,
                 )
                 raise CapacityHostArtifactError("SOURCE_REPAIR_PRECOMMIT_RESTORED")
-        evidence = _advance_source_repair_source_phase(
-            parents=parents,
-            archive=archive,
-            source_root=source_root,
-            staged_source=staged_source,
-            intent=intent,
-            expected_source_commit=expected_source_commit,
-            expected_uid=expected_uid,
-            expected_gid=expected_gid,
-            test_adapter=test_adapter,
-            crash_at=crash_at,
-        )
-        archived_generation, archived_generation_digest = (
-            _advance_source_repair_generation_phase(
-                system_root=system_root,
-                parents=parents,
-                archive=archive,
+            if current_action is SourceRepairAction.REFUSE_ROLLED_BACK:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_PRECOMMIT_RESTORED")
+            if current_action is SourceRepairAction.ADVANCE_SOURCE:
+                _advance_source_repair_source_phase(
+                    parents=parents,
+                    archive=archive,
+                    source_root=source_root,
+                    staged_source=staged_source,
+                    intent=intent,
+                    expected_source_commit=expected_source_commit,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    test_adapter=test_adapter,
+                    crash_at=crash_at,
+                )
+                continue
+            if current_action is SourceRepairAction.ADVANCE_GENERATION:
+                _advance_source_repair_source_phase(
+                    parents=parents,
+                    archive=archive,
+                    source_root=source_root,
+                    staged_source=staged_source,
+                    intent=intent,
+                    expected_source_commit=expected_source_commit,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    test_adapter=test_adapter,
+                    crash_at=crash_at,
+                )
+                _advance_source_repair_generation_phase(
+                    system_root=system_root,
+                    parents=parents,
+                    archive=archive,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    test_adapter=test_adapter,
+                    crash_at=crash_at,
+                )
+                continue
+            if current_action is SourceRepairAction.ADVANCE_RECEIPT:
+                evidence = _observe_source_repair_source(
+                    source_root,
+                    intent=intent,
+                    expected_source_commit=expected_source_commit,
+                )
+                archived_generation, archived_generation_digest = (
+                    _observe_source_repair_archived_generation(
+                        system_root=system_root,
+                        archive=archive,
+                        expected_uid=expected_uid,
+                        expected_gid=expected_gid,
+                        test_adapter=test_adapter,
+                    )
+                )
+                _advance_source_repair_receipt_phase(
+                    parents=parents,
+                    archive=archive,
+                    intent=intent,
+                    evidence=evidence,
+                    archived_generation_digest=archived_generation_digest,
+                    expected_repair_commit=expected_repair_commit,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    crash_at=crash_at,
+                )
+                continue
+            if current_action not in {
+                SourceRepairAction.COMMIT_GENERATION,
+                SourceRepairAction.VERIFY_COMMITTED,
+            }:
+                raise SourceRepairTransitionError("SOURCE_REPAIR_TRANSITION_REFUSED")
+            if (
+                evidence is None
+                or archived_generation is None
+                or generation_digest is None
+                or payloads is None
+            ):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_POSITION_AMBIGUOUS")
+            target_generation = generation_root / generation_digest
+            if current_action is SourceRepairAction.VERIFY_COMMITTED:
+                semantic_commit_visible = True
+                _verify_repaired_generation(
+                    target_generation,
+                    expected_payloads=payloads,
+                    expected_digest=generation_digest,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    expected_mode=0o700 if test_adapter else 0o555,
+                )
+                os.fsync(parents.generation)
+                return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+
+            hidden_generation = _build_repaired_generation_candidate(
+                generation_root,
+                generation_parent_descriptor=parents.generation,
+                generation_digest=generation_digest,
+                payloads=payloads,
                 expected_uid=expected_uid,
                 expected_gid=expected_gid,
-                test_adapter=test_adapter,
                 crash_at=crash_at,
+                test_adapter=test_adapter,
             )
-        )
-        receipt_digest = _advance_source_repair_receipt_phase(
-            parents=parents,
-            archive=archive,
-            intent=intent,
-            evidence=evidence,
-            archived_generation_digest=archived_generation_digest,
-            expected_repair_commit=expected_repair_commit,
-            expected_uid=expected_uid,
-            expected_gid=expected_gid,
-            crash_at=crash_at,
-        )
-        generation_digest, payloads = _generation_values(
-            evidence=evidence,
-            repair_commit=expected_repair_commit,
-            repair_receipt_digest=receipt_digest,
-            archived_generation=archived_generation,
-        )
-        committable_position = reconcile_source_repair(
-            archive,
-            expected_uid=expected_uid,
-            expected_gid=expected_gid,
-        )
-        current_phase = _classify_source_repair_position(
-            archive_position=committable_position,
-            parents=parents,
-            source_name=source_root.name,
-            staged_source_name=staged_source.name,
-            generation_digest=generation_digest,
-        )
-        target_generation = generation_root / generation_digest
-        hidden_generation = generation_root / f".candidate-{generation_digest}"
-        if current_phase is SourceRepairPhase.COMMITTED:
-            semantic_commit_visible = True
-            _verify_repaired_generation(
-                target_generation,
-                expected_payloads=payloads,
-                expected_digest=generation_digest,
-                expected_uid=expected_uid,
-                expected_gid=expected_gid,
-                expected_mode=0o700 if test_adapter else 0o555,
+            final_evidence = _observe_source_repair_source(
+                source_root,
+                intent=intent,
+                expected_source_commit=expected_source_commit,
             )
-            os.fsync(parents.generation)
-            return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
-        if current_phase not in {
-            SourceRepairPhase.RECEIPT_DURABLE,
-            SourceRepairPhase.GENERATION_PREFIX,
-        }:
-            raise CapacityHostArtifactError("SOURCE_REPAIR_POSITION_AMBIGUOUS")
-        hidden_generation = _build_repaired_generation_candidate(
-            generation_root,
-            generation_parent_descriptor=parents.generation,
-            generation_digest=generation_digest,
-            payloads=payloads,
-            expected_uid=expected_uid,
-            expected_gid=expected_gid,
-            crash_at=crash_at,
-            test_adapter=test_adapter,
-        )
-        _manifest, final_evidence = _verify_installed_repair_source(
-            source_root, expected_source_commit
-        )
-        if final_evidence != evidence:
-            raise CapacityHostArtifactError("SOURCE_REPAIR_SOURCE_DRIFT")
-        reconcile_source_repair(
-            archive, expected_uid=expected_uid, expected_gid=expected_gid
-        )
-        _verify_preserved_h0_invariants(
-            system_root, archived_generation, test_adapter=test_adapter
-        )
-        if crash_at == "before_final_rename":
-            raise SourceRepairIncomplete(crash_at)
-        generation_parent_descriptor = _rename_final_generation(
-            hidden_generation,
-            target_generation,
-            parent_descriptor=parents.generation,
-        )
-        semantic_commit_visible = True
-        try:
-            if crash_at == "after_final_rename_before_parent_fsync":
+            if final_evidence != evidence:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_SOURCE_DRIFT")
+            reconcile_source_repair(
+                archive, expected_uid=expected_uid, expected_gid=expected_gid
+            )
+            _verify_preserved_h0_invariants(
+                system_root, archived_generation, test_adapter=test_adapter
+            )
+            if crash_at == "before_final_rename":
                 raise SourceRepairIncomplete(crash_at)
-            os.fsync(generation_parent_descriptor)
-        finally:
-            if generation_parent_descriptor != parents.generation:
-                os.close(generation_parent_descriptor)
-        if crash_at == "after_parent_fsync_before_stdout":
-            raise SourceRepairIncomplete(crash_at)
-        return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+            generation_parent_descriptor = _rename_final_generation(
+                hidden_generation,
+                target_generation,
+                parent_descriptor=parents.generation,
+            )
+            semantic_commit_visible = True
+            try:
+                if crash_at == "after_final_rename_before_parent_fsync":
+                    raise SourceRepairIncomplete(crash_at)
+                os.fsync(generation_parent_descriptor)
+            finally:
+                if generation_parent_descriptor != parents.generation:
+                    os.close(generation_parent_descriptor)
+            if crash_at == "after_parent_fsync_before_stdout":
+                raise SourceRepairIncomplete(crash_at)
+            return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+        raise CapacityHostArtifactError("SOURCE_REPAIR_TRANSITION_LOOP")
     finally:
         active_error = sys.exc_info()[1]
         try:
             if (
                 isinstance(active_error, (CapacityHostArtifactError, OSError))
+                and not isinstance(active_error, SourceRepairTransitionError)
                 and mode == "repair"
                 and not semantic_commit_visible
                 and archive is not None
