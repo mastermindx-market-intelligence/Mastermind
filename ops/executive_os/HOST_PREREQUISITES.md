@@ -123,7 +123,7 @@ verify-only passes from that same checkout.
 ```bash
 (
   cd "$REPAIR_CHECKOUT"
-  sudo /bin/bash -s -- \
+  /usr/bin/sudo /bin/bash -s -- \
     "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" <<'H0_SOURCE_REPAIR'
 set -euo pipefail
 REPAIR_MERGE_SHA="$1"
@@ -196,6 +196,11 @@ to conceal another change. Namespace, bytes/digests, device/inode identity, type
 links, size, flags, ACLs, xattrs, mtime, ctime, topology/rollback evidence, launchd state, sockets,
 and legacy state remain exact. The shared lock is opened read-only and is neither created nor
 written by verify-only.
+
+This exception applies only to the fixed installed H0 root. Primary host evidence proves that root
+is on writable APFS, is not mounted `MNT_RDONLY`, and its mount does not expose `MNT_NOATIME`;
+mandatory full independent content verification necessarily reads installed bytes. The exception
+does not apply to any other filesystem, root, provider, or worker surface.
 
 The sanitized proof packet preserves two distinct identity axes:
 

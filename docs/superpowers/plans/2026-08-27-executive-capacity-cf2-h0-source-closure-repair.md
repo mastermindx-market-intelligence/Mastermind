@@ -319,6 +319,11 @@ and legacy state remain exact. Tests and proof may admit only that read-atime ob
 must preserve content verification, identical scoped semantic digests, the no-write law, and every
 lock, intent, publication, P0, provider, service, socket, routing, and worker hold.
 
+This exception applies only to the fixed installed H0 root. Primary host evidence proves that root
+is on writable APFS, is not mounted `MNT_RDONLY`, and its mount does not expose `MNT_NOATIME`;
+mandatory full independent content verification necessarily reads installed bytes. The exception
+does not apply to any other filesystem, root, provider, or worker surface.
+
 - [ ] **Step 1: Add failing runbook/compatibility tests**
 
 Require the runbook to name alternative B, exact old gates, complete v2 transport, no root network,

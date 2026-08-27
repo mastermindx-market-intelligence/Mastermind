@@ -32,6 +32,21 @@ def _run(*arguments: str, environment: dict[str, str] | None = None) -> tuple[in
     return completed.returncode, completed.stdout, completed.stderr
 
 
+def _run_script(
+    script: Path,
+    *arguments: str,
+    environment: dict[str, str] | None = None,
+) -> tuple[int, str, str]:
+    completed = subprocess.run(
+        ["/bin/bash", str(script), *arguments],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+    return completed.returncode, completed.stdout, completed.stderr
+
+
 @pytest.mark.parametrize(
     "arguments",
     (
@@ -113,6 +128,7 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'",
         "checkout --detach",
         "one native administrator dialog",
+        "/usr/bin/sudo /bin/bash -s --",
         "No network command runs as root",
         "2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60",
         "02886a6c79f22534ac24234d8adb3224329976342393988541c2a50d7e297f29",
@@ -138,6 +154,7 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
   --expected-source-closure-repair-commit \"$REPAIR_MERGE_SHA\""""
     assert repair in runbook
     assert runbook.count(verify) == 2
+    assert "\n  sudo /bin/bash -s -- \\" not in runbook
 
 
 def test_runbook_fixes_output_recovery_two_axis_proof_and_all_holds() -> None:
@@ -182,6 +199,12 @@ def test_runbook_design_and_plan_preserve_only_kernel_read_atime_exception() -> 
         "Kernel-induced access-time advancement from required reads is the sole permitted observable metadata delta",
         "Atime is non-authoritative, may only remain equal or advance",
         "never set, restored, decreased, or used to conceal another change",
+        "applies only to the fixed installed H0 root",
+        "writable APFS",
+        "not mounted `MNT_RDONLY`",
+        "does not expose `MNT_NOATIME`",
+        "mandatory full independent content verification",
+        "does not apply to any other filesystem, root, provider, or worker surface",
         "Namespace",
         "bytes/digests",
         "device/inode identity",
@@ -204,6 +227,109 @@ def test_runbook_design_and_plan_preserve_only_kernel_read_atime_exception() -> 
         content = " ".join(authority.read_text(encoding="utf-8").split())
         for value in required:
             assert value in content, f"{authority}: missing {value}"
+
+
+def _runtime_wrapper_with_bounded_lower_carrier(tmp_path: Path) -> Path:
+    script_dir = tmp_path / "ops" / "executive_os"
+    script_dir.mkdir(parents=True)
+    wrapper = script_dir / SCRIPT.name
+    wrapper.write_bytes(SCRIPT.read_bytes())
+    wrapper.chmod(0o755)
+    (script_dir / "capacity_host_artifacts.py").write_text(
+        """
+import os
+import sys
+
+arguments = sys.argv[1:]
+expected_mode = os.environ["MMX_CAPACITY_REPAIR_EXPECTED_MODE"]
+if (
+    not arguments
+    or arguments[0] != "source-repair-host"
+    or arguments[1:3] != ["--mode", expected_mode]
+    or "--system-root" not in arguments
+    or "--lock-file" not in arguments
+    or "--expected-repair-commit" not in arguments
+    or "--expected-source-commit" not in arguments
+    or arguments[-1] != "--test-adapter"
+):
+    raise SystemExit(64)
+repair_only = {"--operator-user", "--transport", "--transport-sha256"}
+observed_repair_only = repair_only.intersection(arguments)
+if (
+    (expected_mode == "repair" and observed_repair_only != repair_only)
+    or (expected_mode == "verify-only" and observed_repair_only)
+):
+    raise SystemExit(64)
+raise SystemExit(int(os.environ["MMX_CAPACITY_REPAIR_FAKE_EXIT"]))
+""",
+        encoding="utf-8",
+    )
+    return wrapper
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root-required is a non-root boundary")
+def test_bash_wrapper_renders_root_required_runtime_tuple() -> None:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "MMX_CAPACITY_REPAIR_TEST_ROOT"
+    }
+    assert _run(
+        "verify-only",
+        "--expected-source-closure-repair-commit",
+        "d" * 40,
+        environment=environment,
+    ) == (77, "ROOT_REQUIRED\n", "")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="test adapter is confined to non-root")
+@pytest.mark.parametrize(
+    "mode,lower_exit,expected",
+    (
+        ("refusal", 65, (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")),
+        ("lock-held", 75, (75, "H0_LOCK_HELD\n", "")),
+        (
+            "incomplete",
+            70,
+            (70, "H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER\n", ""),
+        ),
+        ("repair", 0, (0, "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED\n", "")),
+        ("verify-only", 0, (0, "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED\n", "")),
+    ),
+)
+def test_bash_wrapper_runtime_output_tuples_use_existing_adapter_boundary(
+    tmp_path: Path,
+    mode: str,
+    lower_exit: int,
+    expected: tuple[int, str, str],
+) -> None:
+    wrapper = _runtime_wrapper_with_bounded_lower_carrier(tmp_path)
+    environment = dict(os.environ)
+    environment["MMX_CAPACITY_REPAIR_TEST_ROOT"] = str(tmp_path / "host")
+    environment["MMX_CAPACITY_REPAIR_FAKE_EXIT"] = str(lower_exit)
+    environment["MMX_CAPACITY_REPAIR_EXPECTED_MODE"] = (
+        "repair" if mode == "repair" else "verify-only"
+    )
+    arguments = (
+        (
+            "repair",
+            "--expected-source-closure-repair-commit",
+            "d" * 40,
+            "--operator-user",
+            "operator",
+            "--macro-transport",
+            "/tmp/carrier.zip",
+            "--macro-transport-sha256",
+            "a" * 64,
+        )
+        if mode == "repair"
+        else (
+            "verify-only",
+            "--expected-source-closure-repair-commit",
+            "d" * 40,
+        )
+    )
+    assert _run_script(wrapper, *arguments, environment=environment) == expected
 
 
 def test_bash32_empty_array_and_fixed_output_rendering() -> None:

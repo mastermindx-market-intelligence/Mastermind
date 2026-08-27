@@ -501,6 +501,11 @@ and legacy state remain exact. This read-atime observer effect does not weaken c
 identical scoped semantic digests, the no-write law, or any lock, intent, publication, P0, provider,
 service, socket, routing, or worker hold.
 
+This exception applies only to the fixed installed H0 root. Primary host evidence proves that root
+is on writable APFS, is not mounted `MNT_RDONLY`, and its mount does not expose `MNT_NOATIME`;
+mandatory full independent content verification necessarily reads installed bytes. The exception
+does not apply to any other filesystem, root, provider, or worker surface.
+
 The governed packet records sanitized facts only: `e4e44867...` as current topology-preparer and
 topology-release identity; the exact source-closure/generation repair merge; v2 ZIP/payload/manifest
 hashes as per-carrier integrity; semantic object count/inventory digest; new generation basename
