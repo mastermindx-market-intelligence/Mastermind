@@ -184,7 +184,7 @@ def _commit(value: Any) -> str:
 
 def _inventory_realms() -> list[dict[str, str]]:
     slots = all_slots()[1:]
-    if len(slots) != 3:
+    if len(slots) != 3 or len(slots) != len(CAPACITY_CAPABILITY_IDS):
         raise CapacitySourceContractError("REALM_INVENTORY_INVALID")
     return [
         {
@@ -192,7 +192,7 @@ def _inventory_realms() -> list[dict[str, str]]:
             "slot_id": slot.slot_id,
             "provider_home": str(slot.provider_home),
         }
-        for slot, capability_id in zip(slots, CAPACITY_CAPABILITY_IDS, strict=True)
+        for slot, capability_id in zip(slots, CAPACITY_CAPABILITY_IDS)
     ]
 
 
