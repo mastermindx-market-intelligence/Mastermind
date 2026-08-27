@@ -270,14 +270,20 @@ def assert_relay_principal() -> None:
         raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
 
 
-def read_token_file(path: str | Path) -> str:
+def read_token_file(
+    path: str | Path,
+    *,
+    expected_path: str | Path = TOKEN_PATH,
+) -> str:
     """Read the exact private credential inode without a path-reopen race."""
 
     token_path = Path(path)
-    if token_path != TOKEN_PATH and token_path.is_absolute() is False:
-        # Tests may exercise a private temporary absolute file. Production
-        # configuration itself is already pinned to TOKEN_PATH above.
+    if token_path != Path(expected_path):
         raise RuntimeError("C1_TOKEN_FILE_UNSAFE")
+    try:
+        token_path.lstat()
+    except OSError:
+        raise RuntimeError("C1_TOKEN_FILE_UNAVAILABLE") from None
     try:
         raw = _read_exact_private_bytes(
             token_path,
