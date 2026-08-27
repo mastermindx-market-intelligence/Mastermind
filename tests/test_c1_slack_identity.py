@@ -8,8 +8,8 @@ import pytest
 
 
 TOKEN = "INERT-C1-IDENTITY-TOKEN"
-WORKSPACE = "T-C1-WORKSPACE-FIXTURE"
-BOT = "U-C1-BOT-FIXTURE"
+WORKSPACE = "T0BRD2AQXQV"
+BOT = "U0C1BOTFIX1"
 SCOPES = ("chat:write", "groups:history")
 
 
@@ -84,11 +84,11 @@ def test_verify_slack_identity_uses_auth_test_and_matches_workspace_bot_and_scop
     ]
 
 
-def test_verify_slack_identity_rejects_wrong_workspace_without_raw_payload():
+def test_verify_slack_identity_rejects_wrong_observed_workspace_without_raw_payload():
     c1_runtime = _module()
     transport = _Transport(
         lambda call: _response(
-            {"ok": True, "team_id": "T-WRONG", "user_id": BOT},
+            {"ok": True, "team_id": "T000WRONG1", "user_id": BOT},
         )
     )
 
@@ -103,6 +103,26 @@ def test_verify_slack_identity_rejects_wrong_workspace_without_raw_payload():
         return str(caught.value)
 
     assert asyncio.run(exercise()) == "C1_SLACK_IDENTITY_REFUSED"
+
+
+def test_verify_slack_identity_rejects_caller_workspace_override():
+    c1_runtime = _module()
+    transport = _Transport(
+        lambda call: _response(
+            {"ok": True, "team_id": WORKSPACE, "user_id": BOT},
+        )
+    )
+
+    with pytest.raises(ValueError, match="invalid C1 Slack identity inputs"):
+        asyncio.run(
+            c1_runtime.verify_slack_identity(
+                token=TOKEN,
+                expected_workspace_id="T000WRONG1",
+                expected_bot_user_id=BOT,
+                transport=transport,
+            )
+        )
+    assert transport.calls == []
 
 
 def test_verify_slack_identity_rejects_missing_or_extra_scope():
