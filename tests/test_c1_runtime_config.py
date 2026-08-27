@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,25 @@ def test_load_config_rejects_inline_token_and_unknown_fields(tmp_path: Path):
 
     with pytest.raises(ValueError, match="invalid C1 config"):
         c1_runtime.load_config(path)
+
+
+def test_read_token_file_accepts_same_uid_private_regular_file(tmp_path: Path):
+    c1_runtime = _module()
+    path = tmp_path / "relay.token"
+    path.write_text("xoxb-c1-fixture-token\n", encoding="utf-8")
+    path.chmod(0o600)
+
+    token = c1_runtime.read_token_file(path)
+
+    assert token == "xoxb-c1-fixture-token"
+    assert path.stat().st_uid == os.geteuid()
+
+
+def test_read_token_file_rejects_group_or_world_permissions(tmp_path: Path):
+    c1_runtime = _module()
+    path = tmp_path / "relay.token"
+    path.write_text("xoxb-c1-fixture-token\n", encoding="utf-8")
+    path.chmod(0o640)
+
+    with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
+        c1_runtime.read_token_file(path)
