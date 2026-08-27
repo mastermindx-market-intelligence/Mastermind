@@ -3269,6 +3269,12 @@ def run_source_repair_host(
     staged_source: Path | None = None
     parents: SourceRepairParents | None = None
     semantic_commit_visible = False
+    repair_effect_unknown = False
+    authorized_precommit_recovery: tuple[
+        SourceRepairPhase,
+        SourceRepairFailureLayout,
+        SourceRepairTransition,
+    ] | None = None
     try:
         root_info = system_root.lstat()
         if (
@@ -3567,6 +3573,11 @@ def run_source_repair_host(
         if archive is None or intent is None:
             raise CapacityHostArtifactError("SOURCE_REPAIR_INTENT_ABSENT")
         for _transition_count in range(8):
+            # Recovery is fail-closed.  Each loop must earn a fresh grant from
+            # one exact descriptor-bound classification; an earlier grant may
+            # not survive an unclassified durable position.
+            repair_effect_unknown = True
+            authorized_precommit_recovery = None
             position = reconcile_source_repair(
                 archive,
                 expected_uid=expected_uid,
@@ -3635,12 +3646,34 @@ def run_source_repair_host(
                     staged_source_name=staged_source.name,
                     generation_digest=generation_digest,
                 )
+            repair_effect_unknown = False
             current_transition = _source_repair_transition_for(
                 SourceRepairMode.REPAIR,
                 current_phase,
                 position.failure_layout,
             )
             current_action = current_transition.action
+            recovery_transition = _source_repair_transition_for(
+                SourceRepairMode.RECOVERY,
+                current_phase,
+                position.failure_layout,
+            )
+            if recovery_transition.action is SourceRepairAction.RECOVER_PRECOMMIT:
+                if not recovery_transition.permitted_next_states:
+                    raise SourceRepairTransitionError(
+                        "SOURCE_REPAIR_NEXT_STATE_REFUSED"
+                    )
+                authorized_precommit_recovery = (
+                    current_phase,
+                    position.failure_layout,
+                    recovery_transition,
+                )
+            elif recovery_transition.action is SourceRepairAction.VERIFY_COMMITTED:
+                semantic_commit_visible = True
+            elif recovery_transition.action is not SourceRepairAction.REFUSE_ROLLED_BACK:
+                raise SourceRepairTransitionError(
+                    "SOURCE_REPAIR_TRANSITION_REFUSED"
+                )
 
             if current_action is SourceRepairAction.RECOVER_PRECOMMIT:
                 if not current_transition.permitted_next_states:
@@ -3903,41 +3936,24 @@ def run_source_repair_host(
                 and generation_root is not None
                 and staged_source is not None
                 and _path_lexists(archive / _SOURCE_REPAIR_INTENT_NAME)
+                and authorized_precommit_recovery is not None
             ):
-                recovery_position = reconcile_source_repair(
-                    archive, expected_uid=expected_uid, expected_gid=expected_gid
+                _recovery_phase, _recovery_layout, recovery_transition = (
+                    authorized_precommit_recovery
                 )
-                recovery_phase = _classify_source_repair_position(
-                    archive_position=recovery_position,
+                _restore_digest_bound_precommit_state(
+                    archive=archive,
+                    source_root=source_root,
+                    generation_root=generation_root,
+                    staged_source=staged_source,
+                    intent=intent,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    test_adapter=test_adapter,
                     parents=parents,
-                    source_name=source_root.name,
-                    staged_source_name=staged_source.name,
+                    crash_at=crash_at,
+                    transition=recovery_transition,
                 )
-                recovery_transition = _source_repair_transition_for(
-                    SourceRepairMode.RECOVERY,
-                    recovery_phase,
-                    recovery_position.failure_layout,
-                )
-                if recovery_transition.action is SourceRepairAction.REFUSE_ROLLED_BACK:
-                    recovery_transition = None
-                elif recovery_transition.action is not SourceRepairAction.RECOVER_PRECOMMIT:
-                    raise SourceRepairTransitionError(
-                        "SOURCE_REPAIR_TRANSITION_REFUSED"
-                    )
-                if recovery_transition is not None:
-                    _restore_digest_bound_precommit_state(
-                        archive=archive,
-                        source_root=source_root,
-                        generation_root=generation_root,
-                        staged_source=staged_source,
-                        intent=intent,
-                        expected_uid=expected_uid,
-                        expected_gid=expected_gid,
-                        test_adapter=test_adapter,
-                        parents=parents,
-                        crash_at=crash_at,
-                        transition=recovery_transition,
-                    )
         finally:
             cleanup_error: OSError | None = None
             if parents is not None:
@@ -3964,7 +3980,7 @@ def run_source_repair_host(
                     "SOURCE_REPAIR_CLEANUP_INCOMPLETE"
                 ) from cleanup_error
         if (
-            semantic_commit_visible
+            (semantic_commit_visible or repair_effect_unknown)
             and isinstance(active_error, Exception)
             and not isinstance(active_error, SourceRepairIncomplete)
         ):
