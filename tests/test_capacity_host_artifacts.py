@@ -1525,3 +1525,503 @@ def test_v2_extract_closes_archive_descriptor_when_destination_mkdir_fails(
     assert len(opened_descriptors) == 1
     with pytest.raises(OSError):
         os.fstat(opened_descriptors[0])
+
+
+def _source_repair_intent_fields(*, filesystem_device: int = 1) -> dict[str, object]:
+    return {
+        "source_closure_repair_commit": "d" * 40,
+        "generation_repair_commit": "d" * 40,
+        "expected_uid": 0,
+        "expected_gid": 0,
+        "filesystem_device": filesystem_device,
+        "observed_old_source_tree_sha256": "3" * 64,
+        "candidate_transport_sha256": "4" * 64,
+        "candidate_transport_manifest_sha256": "5" * 64,
+        "candidate_object_count": 17,
+        "candidate_object_inventory_sha256": "1" * 64,
+        "candidate_source_tree_sha256": "2" * 64,
+    }
+
+
+def test_source_repair_intent_builder_owns_fixed_fields_and_identity() -> None:
+    intent = artifacts.build_source_repair_intent(**_source_repair_intent_fields())
+    assert contract.validate_source_repair_intent(intent) == intent
+    identity = dict(intent)
+    intent_id = identity.pop("intent_id")
+    assert intent_id == hashlib.sha256(artifacts.canonical_json(identity)).hexdigest()
+
+
+def test_source_repair_intent_publication_is_canonical_lf_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    intent = artifacts.build_source_repair_intent(
+        **_source_repair_intent_fields(filesystem_device=tmp_path.stat().st_dev)
+    )
+    archive = tmp_path / f"source-closure-repair-{intent['intent_id']}"
+    archive.mkdir(mode=0o700)
+    observed = artifacts.publish_source_repair_intent(
+        archive,
+        intent,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    payload = artifacts.canonical_json(intent) + b"\n"
+    assert observed == hashlib.sha256(payload).hexdigest()
+    assert (archive / "source-repair-intent.json").read_bytes() == payload
+    assert artifacts.publish_source_repair_intent(
+        archive,
+        intent,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    ) == observed
+
+
+def test_source_repair_intent_publication_refuses_prefix_or_changed_same_id(
+    tmp_path: Path,
+) -> None:
+    intent = artifacts.build_source_repair_intent(
+        **_source_repair_intent_fields(filesystem_device=tmp_path.stat().st_dev)
+    )
+    archive = tmp_path / f"source-closure-repair-{intent['intent_id']}"
+    archive.mkdir(mode=0o700)
+    candidate = archive / ".source-repair-intent.json.candidate"
+    candidate.write_bytes(b"attacker-prefix")
+    candidate.chmod(0o400)
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.publish_source_repair_intent(
+            archive,
+            intent,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+    candidate.unlink()
+    artifacts.publish_source_repair_intent(
+        archive,
+        intent,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    changed = dict(intent)
+    changed["candidate_transport_sha256"] = "6" * 64
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.publish_source_repair_intent(
+            archive,
+            changed,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def test_source_repair_publication_refuses_device_mismatch(tmp_path: Path) -> None:
+    intent = artifacts.build_source_repair_intent(
+        **_source_repair_intent_fields(
+            filesystem_device=tmp_path.stat().st_dev + 1
+        )
+    )
+    archive = tmp_path / f"source-closure-repair-{intent['intent_id']}"
+    archive.mkdir(mode=0o700)
+
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_DEVICE_MISMATCH",
+    ):
+        artifacts.publish_source_repair_intent(
+            archive,
+            intent,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+    assert list(archive.iterdir()) == []
+
+
+def test_source_repair_move_refuses_existing_destination_without_fallback(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    (source / "source-evidence").write_bytes(b"source\n")
+    (destination / "destination-evidence").write_bytes(b"destination\n")
+
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_DESTINATION_EXISTS",
+    ):
+        artifacts._move_source_repair_tree(source, destination)
+    assert (source / "source-evidence").read_bytes() == b"source\n"
+    assert (destination / "destination-evidence").read_bytes() == b"destination\n"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ("SOURCE_REPAIR_DEVICE_MISMATCH", "NO_REPLACE_RENAME_UNAVAILABLE"),
+)
+def test_source_repair_move_has_no_exdev_or_unavailable_rename_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    (source / "evidence").write_bytes(b"preserved\n")
+
+    def refuse_rename(*_arguments: object) -> None:
+        raise artifacts.CapacityHostArtifactError(reason)
+
+    monkeypatch.setattr(artifacts, "_rename_exclusive", refuse_rename)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match=reason):
+        artifacts._move_source_repair_tree(source, destination)
+    assert (source / "evidence").read_bytes() == b"preserved\n"
+    assert not destination.exists()
+
+
+def test_source_repair_reconcile_refuses_wrong_gid_extra_member_and_two_intents(
+    tmp_path: Path,
+) -> None:
+    intent = artifacts.build_source_repair_intent(
+        **_source_repair_intent_fields(filesystem_device=tmp_path.stat().st_dev)
+    )
+    archive = tmp_path / f"source-closure-repair-{intent['intent_id']}"
+    archive.mkdir(mode=0o700)
+    artifacts.publish_source_repair_intent(
+        archive,
+        intent,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    position = artifacts.reconcile_source_repair(
+        archive,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    assert position.intent_id == intent["intent_id"]
+    assert position.archived_source is False
+    assert position.archived_generation is False
+    assert position.receipt_digest is None
+
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.reconcile_source_repair(
+            archive,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid() + 1,
+        )
+    (archive / "extra").write_bytes(b"unexpected")
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.reconcile_source_repair(
+            archive,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+    (archive / "extra").unlink()
+    (archive / "second-source-repair-intent.json").write_bytes(
+        (archive / "source-repair-intent.json").read_bytes()
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.reconcile_source_repair(
+            archive,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def _repair_host_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, str, dict[str, object]]:
+    source, commit, _ = _complete_repository(tmp_path, monkeypatch)
+    monkeypatch.setattr(contract, "PRODUCER_COMMIT", commit)
+    transport = tmp_path / "operator-transport.zip"
+    manifest = artifacts.build_source_transport_v2(source, transport, commit=commit)
+    system_root = tmp_path / "host"
+    for relative, mode in (
+        ("capacity-sources/macro", 0o755),
+        ("capacity-generations", 0o755),
+        ("capacity-staging", 0o700),
+        ("capacity-archive", 0o700),
+        ("locks", 0o700),
+    ):
+        path = system_root / relative
+        path.mkdir(parents=True, mode=mode, exist_ok=True)
+        path.chmod(mode)
+    lock = system_root / "locks" / "cf2-h0.lock"
+    lock.write_bytes(b"")
+    lock.chmod(0o600)
+
+    old_source = system_root / "capacity-sources" / "macro" / commit
+    old_source.mkdir(mode=0o700)
+    old_payload = old_source / "promisor-source"
+    old_payload.write_bytes(b"old incomplete source remains evidence\n")
+    old_payload.chmod(0o444)
+    old_source.chmod(0o700)
+
+    old_generation_payloads = {
+        "broker-topology.json": b'{"preserved":"topology"}',
+        "components.json": b'{"old":"components"}',
+        "host-preparation-receipt.json": b'{"old":"receipt"}',
+        "rollback-contract.json": b'{"preserved":"rollback"}',
+        "rollback-drill-receipt.json": b'{"preserved":"drill"}\n',
+        "source-config.json": b'{"old":"source-config"}',
+    }
+    old_digest = hashlib.sha256(old_generation_payloads["source-config.json"]).hexdigest()
+    old_hashes = {
+        name: hashlib.sha256(payload).hexdigest()
+        for name, payload in old_generation_payloads.items()
+    }
+    monkeypatch.setattr(artifacts, "PRIOR_GENERATION_DIGEST", old_digest)
+    monkeypatch.setattr(contract, "PRIOR_GENERATION_DIGEST", old_digest)
+    monkeypatch.setattr(artifacts, "PRIOR_GENERATION_ARTIFACT_SHA256", old_hashes)
+    monkeypatch.setattr(contract, "PRIOR_GENERATION_ARTIFACT_SHA256", old_hashes)
+    generation = system_root / "capacity-generations" / old_digest
+    generation.mkdir(mode=0o700)
+    for name, payload in old_generation_payloads.items():
+        path = generation / name
+        path.write_bytes(payload)
+        path.chmod(0o444)
+    generation.chmod(0o700)
+    return system_root, transport, commit, manifest
+
+
+def _scoped_tree_snapshot(root: Path) -> list[tuple[object, ...]]:
+    rows: list[tuple[object, ...]] = []
+    for path in (root, *sorted(root.rglob("*"))):
+        info = path.lstat()
+        relative = "." if path == root else path.relative_to(root).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        rows.append(
+            (
+                relative,
+                stat.S_IFMT(info.st_mode),
+                stat.S_IMODE(info.st_mode),
+                info.st_uid,
+                info.st_gid,
+                info.st_nlink,
+                info.st_size,
+                info.st_mtime_ns,
+                info.st_ctime_ns,
+                digest,
+            )
+        )
+    return rows
+
+
+def test_source_repair_host_commits_generation_last_and_verify_is_zero_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    lock_events: list[str] = []
+    original_lock = artifacts._source_repair_lock
+
+    def observed_lock(*args: object, **kwargs: object) -> int:
+        descriptor = original_lock(*args, **kwargs)
+        lock_events.append("locked")
+        return descriptor
+
+    def resolve_after_lock(operator_user: str) -> int:
+        assert operator_user == "operator"
+        assert lock_events == ["locked"]
+        return os.getuid()
+
+    monkeypatch.setattr(artifacts, "_source_repair_lock", observed_lock)
+    monkeypatch.setattr(
+        artifacts, "_resolve_source_repair_operator_uid", resolve_after_lock
+    )
+    result = artifacts.run_source_repair_host(
+        mode="repair",
+        system_root=system_root,
+        lock_file=system_root / "locks" / "cf2-h0.lock",
+        expected_repair_commit="d" * 40,
+        expected_source_commit=commit,
+        operator_user="operator",
+        transport=transport,
+        transport_sha256=hashlib.sha256(transport.read_bytes()).hexdigest(),
+        test_adapter=True,
+    )
+    assert result == "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    archives = list((system_root / "capacity-archive").iterdir())
+    assert len(archives) == 1
+    assert (archives[0] / "archived-source" / "promisor-source").read_bytes().startswith(
+        b"old incomplete"
+    )
+    assert (archives[0] / "archived-generation").is_dir()
+    assert (archives[0] / "source-repair-receipt.json").is_file()
+    visible = [path for path in (system_root / "capacity-generations").iterdir()]
+    assert len(visible) == 1
+    assert not visible[0].name.startswith(".")
+    assert sorted(path.name for path in visible[0].iterdir()) == [
+        "broker-topology.json",
+        "components.json",
+        "host-preparation-receipt.json",
+        "rollback-contract.json",
+        "rollback-drill-receipt.json",
+        "source-config.json",
+    ]
+
+    before = _scoped_tree_snapshot(system_root)
+    for _ in range(2):
+        assert artifacts.run_source_repair_host(
+            mode="verify-only",
+            system_root=system_root,
+            lock_file=system_root / "locks" / "cf2-h0.lock",
+            expected_repair_commit="d" * 40,
+            expected_source_commit=commit,
+            transport=None,
+            transport_sha256=None,
+            test_adapter=True,
+        ) == "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED"
+    assert _scoped_tree_snapshot(system_root) == before
+
+
+def test_source_repair_replays_forward_after_visible_final_rename_without_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    with pytest.raises(artifacts.SourceRepairIncomplete):
+        artifacts.run_source_repair_host(
+            mode="repair",
+            system_root=system_root,
+            lock_file=system_root / "locks" / "cf2-h0.lock",
+            expected_repair_commit="d" * 40,
+            expected_source_commit=commit,
+            operator_uid=os.getuid(),
+            transport=transport,
+            transport_sha256=hashlib.sha256(transport.read_bytes()).hexdigest(),
+            test_adapter=True,
+            crash_at="after_final_rename_before_parent_fsync",
+        )
+    archive = next((system_root / "capacity-archive").iterdir())
+    assert (archive / "archived-source").is_dir()
+    assert not (system_root / "capacity-generations" / artifacts.PRIOR_GENERATION_DIGEST).exists()
+    assert artifacts.run_source_repair_host(
+        mode="repair",
+        system_root=system_root,
+        lock_file=system_root / "locks" / "cf2-h0.lock",
+        expected_repair_commit="d" * 40,
+        expected_source_commit=commit,
+        operator_uid=os.getuid(),
+        transport=transport,
+        transport_sha256=hashlib.sha256(transport.read_bytes()).hexdigest(),
+        test_adapter=True,
+    ) == "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    assert (archive / "archived-source").is_dir()
+
+
+def test_source_repair_replay_after_success_stdout_is_exactly_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = {
+        "mode": "repair",
+        "system_root": system_root,
+        "lock_file": system_root / "locks" / "cf2-h0.lock",
+        "expected_repair_commit": "d" * 40,
+        "expected_source_commit": commit,
+        "operator_uid": os.getuid(),
+        "transport": transport,
+        "transport_sha256": hashlib.sha256(transport.read_bytes()).hexdigest(),
+        "test_adapter": True,
+    }
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    committed = _scoped_tree_snapshot(system_root)
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    assert _scoped_tree_snapshot(system_root) == committed
+
+
+@pytest.mark.parametrize(
+    "crash_at",
+    (
+        "after_transport_fsync",
+        "after_candidate_verify",
+        "after_intent_fsync",
+        "after_old_source_move",
+        "after_candidate_install",
+        "after_old_generation_move",
+        "after_repair_receipt_fsync",
+        "after_generation_file_1_fsync",
+        "after_generation_file_2_fsync",
+        "after_generation_file_3_fsync",
+        "after_generation_file_4_fsync",
+        "after_generation_file_5_fsync",
+        "after_generation_file_6_fsync",
+        "after_hidden_generation_directory_fsync",
+        "before_final_rename",
+        "after_final_rename_before_parent_fsync",
+        "after_parent_fsync_before_stdout",
+    ),
+)
+def test_every_repair_crash_position_replays_to_one_verified_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = {
+        "mode": "repair",
+        "system_root": system_root,
+        "lock_file": system_root / "locks" / "cf2-h0.lock",
+        "expected_repair_commit": "d" * 40,
+        "expected_source_commit": commit,
+        "operator_uid": os.getuid(),
+        "transport": transport,
+        "transport_sha256": hashlib.sha256(transport.read_bytes()).hexdigest(),
+        "test_adapter": True,
+    }
+    with pytest.raises(artifacts.SourceRepairIncomplete):
+        artifacts.run_source_repair_host(**arguments, crash_at=crash_at)
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    visible = [
+        path
+        for path in (system_root / "capacity-generations").iterdir()
+        if not path.name.startswith(".")
+    ]
+    assert len(visible) == 1
+    archive = next((system_root / "capacity-archive").iterdir())
+    assert (archive / "archived-source" / "promisor-source").is_file()
+    assert (archive / "archived-generation").is_dir()
+
+
+def test_definite_precommit_failure_restores_only_digest_bound_old_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    original_publish = artifacts.publish_source_repair_receipt
+
+    def refuse_receipt(*args: object, **kwargs: object) -> str:
+        raise artifacts.CapacityHostArtifactError("INJECTED_RECEIPT_REFUSAL")
+
+    monkeypatch.setattr(artifacts, "publish_source_repair_receipt", refuse_receipt)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError, match="INJECTED_RECEIPT_REFUSAL"
+    ):
+        artifacts.run_source_repair_host(
+            mode="repair",
+            system_root=system_root,
+            lock_file=system_root / "locks" / "cf2-h0.lock",
+            expected_repair_commit="d" * 40,
+            expected_source_commit=commit,
+            operator_uid=os.getuid(),
+            transport=transport,
+            transport_sha256=hashlib.sha256(transport.read_bytes()).hexdigest(),
+            test_adapter=True,
+        )
+    monkeypatch.setattr(artifacts, "publish_source_repair_receipt", original_publish)
+    restored_source = system_root / "capacity-sources" / "macro" / commit
+    assert (restored_source / "promisor-source").is_file()
+    assert (system_root / "capacity-generations" / artifacts.PRIOR_GENERATION_DIGEST).is_dir()
+    archive = next((system_root / "capacity-archive").iterdir())
+    assert (archive / "failed-installed-source").is_dir()
+    assert not (archive / "archived-source").exists()
+    assert not (archive / "archived-generation").exists()
