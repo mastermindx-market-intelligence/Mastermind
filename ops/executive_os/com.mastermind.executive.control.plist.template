@@ -81,6 +81,21 @@
       <key>SockPathMode</key>
       <integer>432</integer>
     </dict>
+    <key>CeoIngress</key>
+    <dict>
+      <key>SockPathName</key>
+      <string>__CEO_INGRESS_SOCKET__</string>
+      <key>SockType</key>
+      <string>stream</string>
+      <key>SockPassive</key>
+      <true/>
+      <key>SockPathOwner</key>
+      <integer>450</integer>
+      <key>SockPathGroup</key>
+      <integer>452</integer>
+      <key>SockPathMode</key>
+      <integer>432</integer>
+    </dict>
   </dict>
   <key>StandardOutPath</key>
   <string>__CONTROL_STDOUT__</string>
