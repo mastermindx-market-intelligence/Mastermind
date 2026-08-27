@@ -1092,10 +1092,13 @@ def test_sibling_review_pointer_suppresses_duplicate_wake():
 
 
 def test_one_transport_implementation_authority():
-    assert all(
-        descriptor.transport_implemented is False
-        for descriptor in WAKE_TRANSPORT_DESCRIPTORS.values()
-    )
+    implemented = {
+        transport_id
+        for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
+        if descriptor.transport_implemented
+    }
+    assert implemented == {"codex-app-server"}
+    assert WAKE_TRANSPORT_DESCRIPTORS["claude-code-session"].transport_implemented is False
     sources = []
     for path in _WAKE_MODULES:
         text = path.read_text(encoding="utf-8")
