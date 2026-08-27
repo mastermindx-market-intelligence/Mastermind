@@ -14,7 +14,7 @@ import pwd
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from .slack_web_api import (
     SLACK_API_ROOT,
@@ -25,6 +25,7 @@ from .slack_web_api import (
 
 CONFIG_SCHEMA = "mastermind.sol_state_relay_config.v1"
 RELAY_USERNAME = "_mastermind_sol_relay"
+REQUIRED_SLACK_SCOPES = ("chat:write", "groups:history")
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -58,6 +59,7 @@ class C1RuntimeConfig:
 class SlackIdentityReceipt:
     workspace_id: str
     bot_user_id: str
+    scopes: tuple[str, ...]
 
 
 def _positive_int(value: Any, *, name: str) -> int:
@@ -179,6 +181,19 @@ def read_token_file(path: str | Path) -> str:
     return token
 
 
+def _parse_scope_header(headers: Mapping[str, str]) -> tuple[str, ...]:
+    raw = headers.get("x-oauth-scopes")
+    if not isinstance(raw, str):
+        raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
+    values = tuple(part.strip() for part in raw.split(",") if part.strip())
+    if not values or len(values) != len(set(values)):
+        raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
+    normalized = tuple(sorted(values))
+    if normalized != REQUIRED_SLACK_SCOPES:
+        raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
+    return REQUIRED_SLACK_SCOPES
+
+
 async def verify_slack_identity(
     *,
     token: str,
@@ -186,7 +201,7 @@ async def verify_slack_identity(
     expected_bot_user_id: str,
     transport: SlackHttpTransport | None = None,
 ) -> SlackIdentityReceipt:
-    """Qualify the credential against the fixed workspace and bot identity."""
+    """Qualify credential identity and exact least-privilege scope set."""
 
     if not token or not expected_workspace_id or not expected_bot_user_id:
         raise ValueError("invalid C1 Slack identity inputs")
@@ -218,9 +233,11 @@ async def verify_slack_identity(
             or bot_user_id != expected_bot_user_id
         ):
             raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
+        scopes = _parse_scope_header(response.headers)
         return SlackIdentityReceipt(
             workspace_id=expected_workspace_id,
             bot_user_id=expected_bot_user_id,
+            scopes=scopes,
         )
     finally:
         await client.aclose()
@@ -230,6 +247,7 @@ __all__ = [
     "CONFIG_SCHEMA",
     "C1RuntimeConfig",
     "RELAY_USERNAME",
+    "REQUIRED_SLACK_SCOPES",
     "SlackIdentityReceipt",
     "assert_relay_principal",
     "load_config",
