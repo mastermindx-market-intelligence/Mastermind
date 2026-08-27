@@ -306,11 +306,15 @@ def read_token_file(
             expected_mode=0o400,
             max_bytes=_TOKEN_MAX_BYTES,
         )
-        token = raw.decode("utf-8").strip()
+        token = raw.decode("utf-8")
     except _PrivateFileError:
         raise RuntimeError("C1_TOKEN_FILE_UNSAFE") from None
     except UnicodeDecodeError:
         raise RuntimeError("C1_TOKEN_FILE_INVALID") from None
+    # Native enrollment writes exactly one terminal LF. Remove only that byte;
+    # never normalize or repair other whitespace in credential material.
+    if token.endswith("\n"):
+        token = token[:-1]
     if not token or "\n" in token or "\r" in token or any(ch.isspace() for ch in token):
         raise RuntimeError("C1_TOKEN_FILE_INVALID")
     return token
