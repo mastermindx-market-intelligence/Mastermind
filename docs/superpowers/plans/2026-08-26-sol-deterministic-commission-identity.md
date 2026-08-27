@@ -350,11 +350,16 @@ Run:
 
 ```bash
 git fetch origin master
+PICKUP_BASE_SHA=$(git merge-base origin/master HEAD)
 git log -1 --format=%H origin/master
-git diff --name-only <A2_PICKUP_BASE_SHA>..origin/master -- docs/sol_skills/ control_plane/ceo_request.py
+git diff --name-only "$PICKUP_BASE_SHA"..origin/master -- \
+  docs/sol_skills/INDEX.md \
+  docs/sol_skills/COMMISSION_WAVE.md \
+  docs/sol_skills/RECONCILE_STATE.md \
+  control_plane/ceo_request.py
 ```
 
-`<A2_PICKUP_BASE_SHA>` is the exact SHA printed and recorded when the implementer starts the branch. If `COMMISSION_WAVE.md`, `RECONCILE_STATE.md`, `INDEX.md`, or the shared CEO-request identity law moved materially after pickup, stop for Sol reconciliation instead of rebasing through a semantic collision.
+The merge base is the exact branch pickup base as long as the implementation branch has not been rebased. If `COMMISSION_WAVE.md`, `RECONCILE_STATE.md`, `INDEX.md`, or the shared CEO-request identity law moved materially after pickup, stop for Sol reconciliation instead of rebasing through a semantic collision.
 
 - [ ] **Step 4: Push/open the A2 PR and let hosted checks conclude**
 
