@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -32,9 +32,27 @@ class _Reader:
         return self.value
 
 
+class _SequenceReader:
+    def __init__(self, values):
+        self.values = list(values)
+        self.calls = 0
+
+    async def read_state(self):
+        value = self.values[self.calls]
+        self.calls += 1
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
 class _Publisher:
     def __init__(self):
         self.calls = []
+        self.recover_calls = 0
+
+    async def recover(self):
+        self.recover_calls += 1
+        return "1787800000.000001"
 
     async def publish(self, executive_state, *, relay_checked_at):
         self.calls.append((executive_state, relay_checked_at))
@@ -73,3 +91,45 @@ def test_run_once_publishes_degraded_none_when_executive_read_is_unavailable():
     assert reader.calls == 1
     assert publisher.calls == [(None, NOW)]
     assert receipt.state_hash == "a" * 64
+
+
+def test_service_recovers_once_then_change_immediate_and_unchanged_heartbeat_only():
+    c1_cycle = _module()
+    reader = _SequenceReader(
+        [
+            RuntimeError("EXECUTIVE_STATE_UNAVAILABLE"),
+            RuntimeError("EXECUTIVE_STATE_UNAVAILABLE"),
+            RuntimeError("EXECUTIVE_STATE_UNAVAILABLE"),
+            {"schema": "wrong-shape"},
+        ]
+    )
+    publisher = _Publisher()
+
+    async def exercise():
+        service = c1_cycle.C1RelayService(
+            reader=reader,
+            publisher=publisher,
+            heartbeat_seconds=60,
+            max_executive_age_seconds=120,
+            relay_version="c1-test",
+        )
+        await service.recover()
+        first = await service.poll_once(checked_at=NOW)
+        skipped = await service.poll_once(checked_at=NOW + timedelta(seconds=30))
+        heartbeat = await service.poll_once(checked_at=NOW + timedelta(seconds=60))
+        changed = await service.poll_once(checked_at=NOW + timedelta(seconds=75))
+        return first, skipped, heartbeat, changed
+
+    first, skipped, heartbeat, changed = asyncio.run(exercise())
+
+    assert publisher.recover_calls == 1
+    assert first is not None
+    assert skipped is None
+    assert heartbeat is not None
+    assert changed is not None
+    assert [state for state, _when in publisher.calls] == [None, None, {"schema": "wrong-shape"}]
+    assert [when for _state, when in publisher.calls] == [
+        NOW,
+        NOW + timedelta(seconds=60),
+        NOW + timedelta(seconds=75),
+    ]
