@@ -147,9 +147,48 @@ def test_frozen_mode_rejects_non_ancestor_and_dirty_source(tmp_path: Path) -> No
         )
 
 
+def test_frozen_mode_binds_the_installer_checkout_to_current_protected_master(
+    tmp_path: Path,
+) -> None:
+    installer, accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    source = tmp_path / "frozen-source"
+    _git(installer, "worktree", "add", "--detach", str(source), accepted)
+
+    receipt = validate_install_source(
+        source_repo=source,
+        expected_sha=accepted,
+        protected_master_sha=protected,
+        allow_frozen_accepted_ancestor=True,
+        installer_repo=installer,
+    )
+    assert receipt["mode"] == "frozen_accepted_ancestor"
+
+    _git(installer, "checkout", "--detach", accepted)
+    with pytest.raises(InstallSourcePolicyError, match="installer checkout HEAD"):
+        validate_install_source(
+            source_repo=source,
+            expected_sha=accepted,
+            protected_master_sha=protected,
+            allow_frozen_accepted_ancestor=True,
+            installer_repo=installer,
+        )
+
+    _git(installer, "checkout", "--detach", protected)
+    (installer / "dirty-installer.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(InstallSourcePolicyError, match="installer checkout is not clean"):
+        validate_install_source(
+            source_repo=source,
+            expected_sha=accepted,
+            protected_master_sha=protected,
+            allow_frozen_accepted_ancestor=True,
+            installer_repo=installer,
+        )
+
+
 def test_installer_exposes_explicit_frozen_mode_without_reusing_historical_source_law() -> None:
     install = INSTALL.read_text(encoding="utf-8")
     assert "--allow-frozen-accepted-ancestor" in install
     assert "--protected-master-sha" in install
+    assert "--installer-repo" in install
     assert '"$SCRIPT_DIR/install_source_policy.py"' in install
     assert "refs/remotes/origin/master" not in install
