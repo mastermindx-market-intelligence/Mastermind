@@ -2,89 +2,84 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the approved “Codex as a technical/CTO arm of Sol” role recoverable and testable without creating a fourth executive seat, a new lifecycle role enum, or model-derived authority.
+**Goal:** Make the approved “Codex as a technical/CTO arm of Sol” role mechanically testable without creating a fourth executive seat, a new lifecycle role enum, model-derived authority, or a path collision with Wake PR3.
 
-**Architecture:** `sol_technical_staff` is deliberately **not** a new durable executive identity. A Codex-Sol continuation is the composition of existing facts: `owner_seat="ceo"` for accountability, an existing bounded orchestration duty (`plan`, `work`, `review`, `repair`, or `aggregation`) where applicable, `reasoning_surface="codex"` in Wake/session routing, and an explicit parent commission/effective grant that limits the work. ChatGPT Sol and Codex-Sol can therefore be two reasoning surfaces for the same CEO seat. The provider/model never mints the seat or authority. Wake PR3 later makes the Codex surface resumable; this wave pins the identity/authority law first.
+**Architecture:** `sol_technical_staff` is deliberately not a new durable executive identity. A Codex-Sol continuation composes existing facts: `owner_seat="ceo"` for accountability; an existing bounded orchestration duty (`plan`, `work`, `review`, `repair`, or `aggregation`) where applicable; `reasoning_surface="codex"` as execution/runtime evidence; and an explicit parent commission/effective grant that limits authority. This carrier proves that composition through new isolated conformance tests and existing Runtime/Router/OHF contracts. It **does not edit Wake Fabric implementation/tests/docs**; Wake PR3 exclusively owns those paths and later provides actual delivery/resume.
 
-**Tech Stack:** Existing Executive Runtime v4, Model Router, Wake SessionTarget/RuntimeBinding, pytest, docs.
+**Tech Stack:** Existing Executive Runtime v4, Model Router, OHF/App Server test fixtures, pytest, docs.
 
 **Spec:** `docs/superpowers/specs/2026-08-27-executive-workforce-hybrid-role-topology-design.md`
 
 ## Global Constraints
 
-- No new executive seat, `SOL_TECHNICAL_STAFF` database column, role table, lifecycle store, or provider-specific authority enum.
+- Protected pickup: `Mastermind@6f1bc3dd39f1ebecd3c22e44aa11ca7a13fa5182`; re-pin before first implementation write and again before push.
+- No new executive seat, `SOL_TECHNICAL_STAFF` database column, role table, lifecycle store, provider-specific authority enum, or Slack identity registry.
 - Existing seats remain exactly `coo | ceo | chairman`.
-- Existing orchestration roles remain the bounded work-duty vocabulary unless a concrete code path proves it insufficient.
-- Codex model/provider identity, ChatGPT/Codex account identity, Slack principal, host, or native thread never grants `ceo` authority.
-- A Codex-Sol technical continuation may exercise only the authority explicitly delegated by the current Chairman/Sol commission and accepted Executive grant.
-- Material product thesis, architecture/owner changes, rights/security/spend/destructive actions and final acceptance remain Sol/Chairman return boundaries per current law.
+- Existing orchestration roles remain the bounded work-duty vocabulary unless a concrete falsifier proves them insufficient; this carrier may not widen them merely for naming convenience.
+- Codex model/provider/account/host/native thread/Slack principal never grants `ceo` authority.
+- A Codex-Sol technical continuation may exercise only authority explicitly present in current Chairman/Sol intent, parent commission and accepted effective grant.
+- Product-thesis change, canonical owner/architecture change, rights/security/spend/destructive action and final acceptance remain Sol/Chairman return boundaries.
+- **Collision fence:** do not modify `control_plane/wake_*`, `control_plane/session_targets.py`, `control_plane/wake_transport.py`, `docs/EXECUTIVE_WAKE_FABRIC.md`, or `tests/test_executive_wake_fabric*.py`. Wake PR3 owns them.
+- No production/provider/host arming. This is conformance + source-law proof only.
 
 ---
 
-### Task 1: Pin “same CEO seat, different reasoning surface” in Wake/session law
+### Task 1: Add an isolated Codex-Sol identity conformance suite
 
 **Files:**
-- Modify: `tests/test_executive_wake_fabric.py`
-- Modify: `tests/test_executive_wake_fabric_hardening.py`
-- Modify: `docs/EXECUTIVE_WAKE_FABRIC.md`
+- Create: `tests/test_codex_sol_identity_conformance.py`
+- Create: `docs/CODEX_SOL_TECHNICAL_STAFF.md`
 
 **Interfaces:**
-- Existing `SessionTarget.target_seat="ceo"`.
-- Existing `reasoning_surface="chatgpt-sol" | "codex"`.
-- Existing `RuntimeBinding` remains runtime-only.
+- Consumes existing `SessionTarget`, `RuntimeBinding`, `WakeObligation`/route primitives read-only; no Wake production code changes.
+- Consumes existing Runtime Job/Worker/Attempt structures.
+- Produces no new production interface.
 
-- [ ] **Step 1: Add same-obligation/two-surface test**
+- [ ] **Step 1: Write RED/characterization tests for CEO accountability vs reasoning surface**
 
-Create one admitted CEO wake source fact and mint one `WakeObligation`. Resolve it against two otherwise equivalent registries/bindings:
+Create `tests/test_codex_sol_identity_conformance.py`. Build one admitted/synthetic CEO attention fact using existing test helpers, mint the existing obligation/route objects, then construct two otherwise equivalent routing scenarios in-memory:
 
 ```text
-CEO target A -> reasoning_surface=chatgpt-sol, wake_transport=chatgpt-gui
-CEO target B -> reasoning_surface=codex, wake_transport=codex-app-server
+accountable seat = ceo, reasoning surface = chatgpt-sol
+accountable seat = ceo, reasoning surface = codex
 ```
 
-Assert:
+Assert the canonical executive accountability/source identity is unchanged while destination/runtime evidence differs. If the current Wake constructors require different fixture plumbing than assumed, adapt only the test to the accepted public API; do not edit Wake production code.
 
-```python
-assert route_a.obligation_id == route_b.obligation_id
-assert route_a.target_seat == route_b.target_seat == "ceo"
-assert route_a.reasoning_surface != route_b.reasoning_surface
-assert route_a.destination_digest != route_b.destination_digest
+Also assert:
+
+```text
+reasoning_surface=codex + target_seat=coo does not upgrade the seat
+changing native RuntimeBinding generation/handle cannot change owner_seat
+ChatGPT1/ChatGPT2/ChatGPT3-like strings in metadata/prose cannot select executive seat
 ```
 
-This proves “Codex-Sol” is route/runtime embodiment of the same accountable CEO seat, not another executive identity.
-
-- [ ] **Step 2: Add ABA/authority falsifiers**
-
-A changed Codex App Server thread/native handle changes `RuntimeBinding`/destination evidence but does not change the CEO obligation or owner seat. A `RuntimeBinding(reasoning_surface="codex")` supplied to a COO target must refuse rather than upgrade the seat.
-
-- [ ] **Step 3: Run tests**
+- [ ] **Step 2: Run characterization tests**
 
 ```bash
-python -m pytest \
-  tests/test_executive_wake_fabric.py \
-  tests/test_executive_wake_fabric_hardening.py \
-  -q
+python -m pytest tests/test_codex_sol_identity_conformance.py -q
 ```
 
-- [ ] **Step 4: Update Wake docs**
+If accepted current contracts already satisfy the law, these tests may pass immediately. That is valid characterization evidence; do not force a production change merely to manufacture RED.
 
-Add a concise identity example:
+- [ ] **Step 3: Add the role/identity document**
+
+`docs/CODEX_SOL_TECHNICAL_STAFF.md` must state exactly:
 
 ```text
 accountable executive seat: ceo
-current reasoning surface: codex
-current duty: plan/review/technical continuation
-runtime binding: rotating App Server session/thread
-provider/model: execution evidence only
+technical duty: existing orchestration role + bounded commission/effective grant
+reasoning surface: codex when so routed
+Worker/provider/model/session/Slack identity: execution or communication evidence only
 ```
 
-State explicitly that changing reasoning surface never changes authority.
+Include the authority boundary: Codex-Sol can perform architecture-preserving technical continuation and strict-subset delegation, but cannot change Chairman intent/product thesis/canonical ownership/new control planes/rights/security/spend/destructive authority/final acceptance without return.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add tests/test_executive_wake_fabric.py tests/test_executive_wake_fabric_hardening.py docs/EXECUTIVE_WAKE_FABRIC.md
-git commit -m "test(exec): pin Codex as a CEO reasoning surface"
+git add tests/test_codex_sol_identity_conformance.py docs/CODEX_SOL_TECHNICAL_STAFF.md
+git commit -m "test(exec): define Codex-Sol technical staff identity"
 ```
 
 ---
@@ -97,73 +92,87 @@ git commit -m "test(exec): pin Codex as a CEO reasoning surface"
 - Modify: `research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md`
 
 **Interfaces:**
-- Existing `owner_seat` is the durable accountability identity.
+- Existing `owner_seat` is durable executive accountability.
 - Existing orchestration roles remain `plan | work | review | repair | aggregation`.
+- Existing grant/subset law controls delegation.
 
-- [ ] **Step 1: Add CEO-owned technical-child tests**
+- [ ] **Step 1: Add CEO-owned technical-work characterization**
 
-Use the existing authorized root/child constructors to prove a bounded Job can be `owner_seat="ceo"` while its orchestration duty remains one of the existing roles and its Worker/provider remains independently selected. Assert the Job/Attempt does not persist `sol_technical_staff`, `codex_sol`, Slack username, native thread id or provider account as authority fields.
+Using existing authorized Runtime constructors/test fixtures, prove a bounded Job can remain `owner_seat="ceo"` while its technical duty is represented by an existing orchestration role and its eventual Worker/provider is independently selected. Assert no Job/Attempt/Event field persists any of:
 
-- [ ] **Step 2: Add shrink-only delegation falsifiers**
+```text
+sol_technical_staff
+codex_sol
+ChatGPT1/2/3 Slack principal
+native Codex thread id
+provider account as authority
+```
 
-A CEO-owned parent may create/delegate an architecture-preserving child only through the existing effective-grant/subset law. Tests must refuse child authority/path/capability expansion beyond the parent and refuse a worker/model field attempting to alter `owner_seat` or escalation target.
+- [ ] **Step 2: Add strict-subset delegation falsifiers**
 
-- [ ] **Step 3: Prove provider/model changes do not change seat**
+A CEO-owned technical parent may create/delegate a child only through current effective-grant/subset law. Add negative cases for repository/path/authority/capability widening and for Worker/model input attempting to alter `owner_seat`, escalation target, merge/deploy authority, or review independence.
 
-Using synthetic Worker/provider identities, prove the same CEO-owned Job remains CEO-owned whether the eventual Worker is Codex or another eligible provider. Worker replacement across separate lawful Attempts cannot mutate the Job's owner seat.
+- [ ] **Step 3: Prove provider replacement cannot mutate executive ownership**
 
-- [ ] **Step 4: Run runtime/orchestration tests**
+Using synthetic Worker/provider identities, prove the same CEO-owned Job remains CEO-owned whether a lawful Attempt runs on Codex or a different eligible Worker. Separate lawful Attempts may change Worker execution identity but not Job owner seat/effective grant.
+
+- [ ] **Step 4: Run focused runtime/orchestration tests**
 
 ```bash
 python -m pytest \
+  tests/test_codex_sol_identity_conformance.py \
   tests/test_executive_os_runtime.py \
   tests/test_executive_os_phase1fb.py \
   -q
 ```
 
-- [ ] **Step 5: Update orchestration contract**
+- [ ] **Step 5: Update orchestration source law**
 
-Record the ruling:
+Append a bounded section to `research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md`:
 
 ```text
 Sol technical staff is a duty/embodiment, not a new executive seat.
 Durable accountability = owner_seat=ceo.
 Bounded technical duty = existing orchestration role + commission/effective grant.
-Reasoning surface/provider = execution/runtime evidence only.
+Reasoning surface/provider = runtime/execution evidence only.
 ```
+
+Do not change existing schema definitions unless a failing accepted invariant proves they cannot represent this law.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tests/test_executive_os_runtime.py tests/test_executive_os_phase1fb.py research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md
+git add tests/test_codex_sol_identity_conformance.py tests/test_executive_os_runtime.py tests/test_executive_os_phase1fb.py research/EXECUTIVE_OS_PHASE1F_ORCHESTRATION_CONTRACT.md
 git commit -m "test(exec): pin Codex-Sol authority composition"
 ```
 
 ---
 
-### Task 3: Prevent Model Router/Slack/provider identity from laundering CEO authority
+### Task 3: Prevent Model Router, provider and Slack identity from laundering CEO authority
 
 **Files:**
 - Modify: `tests/test_executive_model_router.py`
-- Modify: `tests/test_executive_os_runtime.py`
+- Modify: `tests/test_codex_sol_identity_conformance.py`
 - Modify: `docs/EXECUTIVE_WORKER_ROUTING.md`
 
 **Interfaces:**
-- Model Router continues to return suitability/execution shape only.
-- Slack remains communication transport.
+- Model Router continues to answer suitability/execution shape only.
+- Slack remains communication transport only.
+- No RF1 tier implementation belongs in this carrier.
 
-- [ ] **Step 1: Add model-authority negative tests**
+- [ ] **Step 1: Add model/provider authority negatives**
 
-Pin that `frontier.orchestrator` or any `gpt-5.6-sol` alias cannot be converted directly into a Worker Job with `owner_seat="ceo"` absent the existing typed CEO provenance/authorized constructor path. Changing a model alias from Luna/Terra to Sol never changes owner seat or effective grant.
+Pin that `frontier.orchestrator`, `gpt-5.6-sol`, `codex`, or any future provider/model alias cannot by itself mint or mutate a CEO-owned Job/effective grant. High ambiguity may return `FRONTIER_LEAD`; that result does not itself create a CEO Job or grant authority.
 
-- [ ] **Step 2: Add Slack identity negative fixture**
+- [ ] **Step 2: Add Slack-principal negatives**
 
-At the contract level, supply strings resembling `ChatGPT1`, `Claude5`, or other Slack principals in objective/metadata/prose fields and prove no parser/router/runtime constructor uses them to select Worker, seat, authority, provider account or session target.
+Feed strings resembling `ChatGPT1`, `ChatGPT2`, `Claude5`, or other communication principals through objective/metadata/prose locations accepted by test fixtures and prove no Router/Runtime authority constructor uses them to select Worker, seat, provider account or effective grant.
 
 - [ ] **Step 3: Run focused tests**
 
 ```bash
 python -m pytest \
+  tests/test_codex_sol_identity_conformance.py \
   tests/test_executive_model_router.py \
   tests/test_executive_os_runtime.py \
   -q
@@ -171,62 +180,62 @@ python -m pytest \
 
 - [ ] **Step 4: Update routing docs**
 
-Document:
+Document the identity split:
 
 ```text
-provider/model answers: what reasoning/execution surface ran?
-worker answers: what governed execution identity handled the Attempt?
-owner_seat answers: which executive role is accountable?
-commission/effective grant answers: what authority was delegated?
-Slack answers: who communicated?
+provider/model -> which reasoning/execution implementation ran?
+Worker -> which governed execution identity handled an Attempt?
+owner_seat -> which executive role is accountable?
+commission/effective grant -> what authority was delegated?
+Slack principal -> who communicated?
 ```
 
-No field substitutes for another.
+No field substitutes for another. Explicitly defer quality-equivalence tiers to RF1.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_executive_model_router.py tests/test_executive_os_runtime.py docs/EXECUTIVE_WORKER_ROUTING.md
+git add tests/test_codex_sol_identity_conformance.py tests/test_executive_model_router.py docs/EXECUTIVE_WORKER_ROUTING.md
 git commit -m "test(exec): refuse model or Slack authority laundering"
 ```
 
 ---
 
-### Task 4: End-to-end production-inert Codex-Sol composition proof
+### Task 4: Production-inert Codex-Sol composition proof using existing OHF fixtures
 
 **Files:**
 - Modify: `tests/test_ohf_p1b_orchestrator.py`
-- Modify: `tests/test_executive_wake_fabric.py`
-- Add sanitized proof artifact only if current review convention requires it.
+- Modify: `tests/test_codex_sol_identity_conformance.py`
 
-- [ ] **Step 1: Create one synthetic CEO technical continuation**
+**Interfaces:**
+- Uses current OHF/App Server test fixtures only.
+- Does not add/arm Wake delivery.
 
-Using current in-memory/test Runtime + OHF fixtures, create an authorized CEO-owned bounded technical continuation whose reasoning surface is Codex. Prove:
+- [ ] **Step 1: Add one synthetic CEO technical continuation**
+
+Using in-memory/test Runtime + existing OHF fixtures, construct an authorized bounded CEO-owned technical continuation that is executed/reasoned on a Codex surface. Prove:
 
 ```text
-same CEO seat
-→ bounded current commission/effective grant
-→ Codex App Server reasoning surface
-→ technical plan/review duty
+same CEO accountability
+→ bounded existing commission/effective grant
+→ Codex reasoning/process evidence
+→ existing technical plan/review duty
 → no Worker/provider-derived authority
 → exact return/escalation boundary preserved
 ```
 
-No live Wake delivery is required in this conformance wave; Wake PR3 owns transport.
+- [ ] **Step 2: Add prohibited architecture-widening result**
 
-- [ ] **Step 2: Add a prohibited architecture-widening case**
+Have the synthetic Codex result propose authority outside the grant (for example a new lifecycle plane or deploy authority). Prove existing validation/adjudication does not self-apply it, widen the grant, or convert model prose into canonical source law.
 
-Have the synthetic Codex result propose a new lifecycle/state plane or authority outside the grant. The existing result/adjudication path must not self-apply that proposal or terminalize it as accepted architecture.
-
-- [ ] **Step 3: Run combined suite**
+- [ ] **Step 3: Run combined conformance gate**
 
 ```bash
 python -m pytest \
+  tests/test_codex_sol_identity_conformance.py \
   tests/test_executive_os_runtime.py \
   tests/test_executive_os_phase1fb.py \
   tests/test_executive_model_router.py \
-  tests/test_executive_wake_fabric.py \
-  tests/test_executive_wake_fabric_hardening.py \
   tests/test_ohf_p1b_orchestrator.py \
   -q
 python -m compileall -q control_plane
@@ -236,12 +245,19 @@ git diff --check
 
 - [ ] **Step 4: Independent adversarial review**
 
-Reviewer attacks: model name grants CEO, Codex thread becomes canonical Sol identity, Slack sender grants authority, provider replacement mutates owner seat, technical-staff label creates a fourth seat, or technical child widens the parent's grant.
+Reviewer attacks: model name grants CEO; Codex thread becomes canonical Sol identity; Slack sender grants authority; provider replacement mutates owner seat; a fourth executive seat/role store appears; technical child widens parent grant; or this carrier edits Wake PR3-owned paths.
 
-- [ ] **Step 5: Return to Sol**
+- [ ] **Step 5: Hosted CI/CodeQL and return**
 
-Return exact head, tests/hosted CI, adversarial verdict, and confirmation that this wave introduced **zero new durable seat/role/lifecycle fields**. Wake PR3 remains the transport implementation owner.
+Push the same carrier, require exact-head hosted gates, then return base/head SHA, changed-file census, test receipts, adversarial verdict and explicit proof of:
+
+```text
+zero new durable executive seat/role/lifecycle fields
+zero Wake transport arming
+zero provider/routing change
+zero overlap with Wake PR3 paths
+```
 
 ## Stop Condition
 
-This wave stops when current Executive/Wake/Router contracts mechanically prove Codex can embody a bounded CEO technical continuation without creating a new executive identity or provider-derived authority. It does not arm Codex Wake, create a Codex app, or change CF2/RF1/HF1 provider placement.
+Stop when current Executive/Router/OHF contracts mechanically prove Codex can embody a bounded CEO technical continuation without creating a new executive identity or provider-derived authority. Wake PR3 remains the sole transport/resume implementation owner; RF1/HF1 remain separate Capacity Fabric waves.
