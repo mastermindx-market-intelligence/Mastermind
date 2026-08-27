@@ -29,7 +29,7 @@ def _document() -> dict[str, object]:
         "executive_socket": EXECUTIVE_SOCKET,
         "slack_workspace_id": WORKSPACE,
         "slack_channel_id": CHANNEL,
-        "slack_bot_user_id": "U-SOL-RELAY-FIXTURE",
+        "slack_bot_user_id": "U0C1BOTFIX1",
         "slack_token_file": TOKEN_FILE,
         "poll_seconds": 30,
         "heartbeat_seconds": 60,
@@ -48,6 +48,7 @@ def _write_test_config(tmp_path: Path, document: dict[str, object]) -> Path:
 def _load_for_test(c1_runtime, path: Path):
     return c1_runtime.load_config(
         path,
+        expected_path=path,
         expected_owner_uid=os.geteuid(),
         expected_group_gid=os.getegid(),
     )
@@ -116,7 +117,12 @@ def test_load_config_rejects_symlink_even_when_target_metadata_is_private(tmp_pa
     link.symlink_to(target)
 
     with pytest.raises(ValueError, match="invalid C1 config"):
-        _load_for_test(c1_runtime, link)
+        c1_runtime.load_config(
+            link,
+            expected_path=link,
+            expected_owner_uid=os.geteuid(),
+            expected_group_gid=os.getegid(),
+        )
 
 
 def test_read_token_file_accepts_exact_same_uid_gid_mode0400_single_link(tmp_path: Path):
@@ -178,7 +184,12 @@ def test_assert_relay_principal_accepts_exact_user_and_rejects_broad_groups(monk
     )
     c1_runtime.assert_relay_principal()
 
-    for forbidden in ("_mastermind_worker", "_mastermind_exec", "_mastermind_ops", "_mastermind_codex_01"):
+    for forbidden in (
+        "_mastermind_worker",
+        "_mastermind_exec",
+        "_mastermind_ops",
+        "_mastermind_codex_01",
+    ):
         monkeypatch.setattr(c1_runtime.os, "getgroups", lambda: [452, 499])
         monkeypatch.setattr(
             c1_runtime.grp,
