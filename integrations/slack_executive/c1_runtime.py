@@ -47,6 +47,15 @@ _CONFIG_MAX_BYTES = 8192
 _TOKEN_MAX_BYTES = 2048
 _BOT_USER_RE = re.compile(r"^U[A-Z0-9]{8,31}$")
 _RELAY_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_REVIEWED_RELAY_GROUP_NAMES = frozenset(
+    {
+        RELAY_USERNAME,
+        "everyone",
+        "localaccounts",
+        "_lpoperator",
+        "com.apple.access_disabled",
+    }
+)
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -259,14 +268,10 @@ def assert_relay_principal() -> None:
     except (KeyError, OSError):
         raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED") from None
 
-    forbidden = {
-        name
-        for name in group_names
-        if name.startswith("_mastermind_worker")
-        or name.startswith("_mastermind_codex")
-        or name in {"_mastermind_exec", "_mastermind_ops"}
-    }
-    if forbidden:
+    if (
+        RELAY_USERNAME not in group_names
+        or not group_names.issubset(_REVIEWED_RELAY_GROUP_NAMES)
+    ):
         raise RuntimeError("C1_RELAY_PRINCIPAL_REFUSED")
 
 
