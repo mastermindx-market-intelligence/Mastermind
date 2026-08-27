@@ -16,6 +16,16 @@ SLACK_API_ROOT = "https://slack.com/api/"
 _DEFAULT_TIMEOUT_SECONDS = 10.0
 
 
+def _decode_payload(response: httpx.Response) -> dict[str, Any]:
+    try:
+        payload: Any = response.json()
+    except ValueError:
+        raise RuntimeError("SLACK_API_INVALID_RESPONSE") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+    return payload
+
+
 class SlackWebApiStateClient:
     """`SlackStateClient` implementation over the fixed Slack Web API origin."""
 
@@ -53,8 +63,8 @@ class SlackWebApiStateClient:
             params={"channel": channel_id, "limit": limit},
         )
         response.raise_for_status()
-        payload: Any = response.json()
-        if not isinstance(payload, dict) or payload.get("ok") is not True:
+        payload = _decode_payload(response)
+        if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
         raw_messages = payload.get("messages")
         if not isinstance(raw_messages, list):
@@ -93,8 +103,8 @@ class SlackWebApiStateClient:
             json={"channel": channel_id, "text": text},
         )
         response.raise_for_status()
-        payload: Any = response.json()
-        if not isinstance(payload, dict) or payload.get("ok") is not True:
+        payload = _decode_payload(response)
+        if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
         if payload.get("channel") != channel_id:
             raise RuntimeError("SLACK_API_INVALID_RESPONSE")
@@ -129,8 +139,8 @@ class SlackWebApiStateClient:
             json={"channel": channel_id, "ts": message_ts, "text": text},
         )
         response.raise_for_status()
-        payload: Any = response.json()
-        if not isinstance(payload, dict) or payload.get("ok") is not True:
+        payload = _decode_payload(response)
+        if payload.get("ok") is not True:
             raise RuntimeError("SLACK_API_REFUSED")
         if (
             payload.get("channel") != channel_id
