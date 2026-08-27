@@ -491,3 +491,67 @@ def test_rules_never_mutate_input(healthy):
     build_indexes(healthy)
     detect_findings(healthy)
     assert healthy == before
+
+
+UNAVAILABLE_LINEAR = {"available": False, "reason": "LINEAR_READ_PATH_UNAVAILABLE"}
+
+
+def _linear_unavailable(doc: dict) -> dict:
+    doc["linear"] = copy.deepcopy(UNAVAILABLE_LINEAR)
+    return doc
+
+
+def test_unavailable_linear_never_fabricates_a_binding_conflict(healthy):
+    """D2: inability to look up MAS-10 is unknown, not proof the issue is absent."""
+
+    changed = _linear_unavailable(copy.deepcopy(healthy))
+    assert changed["github"]["pull_requests"][0]["linear"] == "MAS-10"
+    codes = _codes(changed)
+    assert "PR_BINDING_CONFLICT" not in codes
+    assert "MISSING_LINEAR_PROJECTION" not in codes
+
+
+def test_unavailable_linear_never_fabricates_a_missing_projection(healthy):
+    changed = _linear_unavailable(copy.deepcopy(healthy))
+    changed["scope"]["linear"] = ["MAS-10", "MAS-11"]
+    assert "MISSING_LINEAR_PROJECTION" not in _codes(changed)
+
+
+def test_available_linear_with_genuinely_absent_issue_is_still_fatal(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["github"]["pull_requests"][0]["linear"] = "MAS-11"
+    findings = [f for f in detect_findings(changed) if f["code"] == "PR_BINDING_CONFLICT"]
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "FATAL"
+    assert findings[0]["subject"] == f"{MASTER}#170"
+
+
+def test_available_linear_with_mismatched_relation_is_still_fatal(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["github_relations"] = [
+        {"repository": MASTER, "number": 171, "relation": "program_gate"}
+    ]
+    findings = [f for f in detect_findings(changed) if f["code"] == "PR_BINDING_CONFLICT"]
+    assert len(findings) == 1
+    assert findings[0]["severity"] == "FATAL"
+
+
+def test_available_linear_with_absent_scope_issue_is_still_reported(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["scope"]["linear"] = ["MAS-10", "MAS-11"]
+    codes = _codes(changed)
+    assert "MISSING_LINEAR_PROJECTION" in codes
+
+
+def test_unavailable_linear_does_not_silence_non_linear_findings(healthy):
+    changed = _linear_unavailable(copy.deepcopy(healthy))
+    changed["github"]["pull_requests"][0]["head_sha"] = SHA_C
+    assert "CARRIER_HEAD_MOVED" in _codes(changed)
+
+
+def test_unavailable_linear_is_typed_unknown_in_indexes(healthy):
+    changed = _linear_unavailable(copy.deepcopy(healthy))
+    indexes = build_indexes(changed)
+    assert indexes["linear"] == {}
+    assert indexes["linear_available"] is False
+    assert build_indexes(healthy)["linear_available"] is True

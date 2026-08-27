@@ -2,9 +2,10 @@
 
 The receipt is a deterministic comparison artifact, not a lifecycle, queue, retry,
 identity, transport, projection or persistence authority. Inputs are already-normalized
-owner observations. Acquisition-envelope clocks are deliberately excluded from the
-semantic hash; source revisions, source timestamps, facts, findings, admission and
-scope remain covered.
+owner observations. The receipt's own observation window and the Agent OS
+acquisition-envelope ``generated_at`` stamps are deliberately excluded from the semantic
+hash; source revisions, owner source timestamps, facts, findings, admission and scope
+remain covered.
 """
 from __future__ import annotations
 
@@ -43,6 +44,8 @@ _REVISION_FIELDS = {
     "identities": ("observed_at",),
 }
 _SAFE_MODES = frozenset({"GROUNDING_COMPLETE", "GROUNDING_PARTIAL"})
+# The one Agent OS envelope field that records the read, not the records.
+_AGENTOS_ACQUISITION_CLOCK = "generated_at"
 
 
 def _source_available(value: object) -> bool:
@@ -158,16 +161,43 @@ def _observation_time(value: object, label: str) -> datetime:
     return parsed
 
 
+def _strip_agentos_acquisition_clocks(agentos: Any) -> None:
+    """Drop the Agent OS acquisition-envelope clocks from an already-copied observation.
+
+    ``collect_agentos()`` forwards the caller ``--now`` to both canonical Macro reads, so
+    the ``agent_os_state.v1`` and ``context_bundle.v1`` envelopes record when the read
+    happened rather than what the records say. Macro itself declares that stamp volatile
+    and excludes it from its own byte-identity comparison. Only those exact envelope
+    fields are removed here: ``source_sha``, owner record clocks, context targets and
+    sections, facts, findings, scope and admission all remain covered by the hash.
+    """
+
+    if not isinstance(agentos, dict):
+        return
+    state = agentos.get("state")
+    if isinstance(state, dict):
+        state.pop(_AGENTOS_ACQUISITION_CLOCK, None)
+    contexts = agentos.get("contexts")
+    if isinstance(contexts, list):
+        for context in contexts:
+            if isinstance(context, dict):
+                context.pop(_AGENTOS_ACQUISITION_CLOCK, None)
+
+
 def semantic_projection(receipt: Mapping[str, Any]) -> dict[str, Any]:
     """Project only semantic receipt state, excluding acquisition envelope clocks/hash."""
 
     if not isinstance(receipt, Mapping):
         raise SessionTruthContractError("receipt must be an object")
-    return {
+    projection = {
         key: copy.deepcopy(value)
         for key, value in receipt.items()
         if key not in {"observation", "semantic_hash"}
     }
+    observations = projection.get("observations")
+    if isinstance(observations, dict):
+        _strip_agentos_acquisition_clocks(observations.get("agentos"))
+    return projection
 
 
 def build_receipt(

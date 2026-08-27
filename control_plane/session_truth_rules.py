@@ -56,6 +56,12 @@ _TERMINAL_PROOF = frozenset({"complete", "proven_live", "not_required"})
 _RUNNABLE_SLACK_CLASSES = frozenset({"PICKUP", "COMMISSION", "READ_ONLY_COMMISSION"})
 
 
+def _available(source: Any) -> bool:
+    """True only for a source that positively reported itself readable."""
+
+    return isinstance(source, Mapping) and source.get("available") is True
+
+
 def _rows(source: Any, key: str) -> list[dict[str, Any]]:
     if not isinstance(source, Mapping) or not source.get("available"):
         return []
@@ -131,6 +137,8 @@ def build_indexes(inputs: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "workstreams": workstreams,
         "linear": linear,
+        # An empty index means "no issues"; it never means "Linear said nothing exists".
+        "linear_available": _available(inputs.get("linear")),
         "github": github,
         "github_by_operation": dict(github_by_operation),
         "slack_by_operation": dict(slack_by_operation),
@@ -222,6 +230,7 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
     indexes = build_indexes(inputs)
     workstreams = indexes["workstreams"]
     linear = indexes["linear"]
+    linear_available = indexes["linear_available"]
     github = indexes["github"]
     executive_ops = indexes["executive_operations"]
     findings: list[dict[str, Any]] = []
@@ -229,7 +238,8 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
     scope = inputs.get("scope") if isinstance(inputs.get("scope"), Mapping) else {}
 
     for issue_id in scope.get("linear") or []:
-        if isinstance(issue_id, str) and issue_id not in linear:
+        # Absence is testimony only when Linear was actually read.
+        if linear_available and isinstance(issue_id, str) and issue_id not in linear:
             _append(
                 findings,
                 seen,
@@ -372,14 +382,16 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
         if isinstance(linear_id, str) and linear_id:
             issue = linear.get(linear_id)
             if issue is None:
-                _append(
-                    findings,
-                    seen,
-                    "PR_BINDING_CONFLICT",
-                    subject,
-                    source_a={"pr_linear": linear_id},
-                    source_b=None,
-                )
+                # An unreadable Linear cannot testify that the bound issue is absent.
+                if linear_available:
+                    _append(
+                        findings,
+                        seen,
+                        "PR_BINDING_CONFLICT",
+                        subject,
+                        source_a={"pr_linear": linear_id},
+                        source_b=None,
+                    )
             else:
                 relations = issue.get("github_relations") or []
                 exact_relation = any(
