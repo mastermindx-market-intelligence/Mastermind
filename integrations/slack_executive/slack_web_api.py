@@ -1,0 +1,83 @@
+"""Narrow production Slack Web API adapter for outbound SOL_STATE transport.
+
+C1 keeps this boundary deliberately small: fixed Slack HTTPS origin, bounded
+history reads/writes, normalized B1 dataclasses, and no Socket Mode or inbound
+command behavior. Executive OS remains the sole lifecycle authority.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+from .sol_state import HistoryPage, StateMessage
+
+SLACK_API_ROOT = "https://slack.com/api/"
+_DEFAULT_TIMEOUT_SECONDS = 10.0
+
+
+class SlackWebApiStateClient:
+    """`SlackStateClient` implementation over the fixed Slack Web API origin."""
+
+    def __init__(
+        self,
+        *,
+        token: str,
+        bot_user_id: str,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        if not isinstance(token, str) or not token:
+            raise ValueError("token must be a non-empty string")
+        if not isinstance(bot_user_id, str) or not bot_user_id:
+            raise ValueError("bot_user_id must be a non-empty string")
+        self._bot_user_id = bot_user_id
+        self._client = httpx.AsyncClient(
+            base_url=SLACK_API_ROOT,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=httpx.Timeout(_DEFAULT_TIMEOUT_SECONDS),
+            follow_redirects=False,
+            transport=transport,
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def fetch_history(self, *, channel_id: str, limit: int) -> HistoryPage:
+        if not isinstance(channel_id, str) or not channel_id:
+            raise ValueError("channel_id must be a non-empty string")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise ValueError("limit must be a positive integer")
+
+        response = await self._client.get(
+            "conversations.history",
+            params={"channel": channel_id, "limit": limit},
+        )
+        response.raise_for_status()
+        payload: Any = response.json()
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise RuntimeError("SLACK_API_REFUSED")
+        raw_messages = payload.get("messages")
+        if not isinstance(raw_messages, list):
+            raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+
+        messages: list[StateMessage] = []
+        for raw in raw_messages:
+            if not isinstance(raw, dict):
+                raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+            ts = raw.get("ts")
+            author_user_id = raw.get("user")
+            text = raw.get("text")
+            if not all(isinstance(value, str) for value in (ts, author_user_id, text)):
+                raise RuntimeError("SLACK_API_INVALID_RESPONSE")
+            messages.append(
+                StateMessage(
+                    ts=ts,
+                    author_user_id=author_user_id,
+                    text=text,
+                )
+            )
+
+        metadata = payload.get("response_metadata")
+        next_cursor = metadata.get("next_cursor") if isinstance(metadata, dict) else None
+        complete = payload.get("has_more") is False and not next_cursor
+        return HistoryPage(messages=tuple(messages), complete=complete)
