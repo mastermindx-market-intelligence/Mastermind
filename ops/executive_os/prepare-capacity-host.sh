@@ -245,8 +245,8 @@ for module in (yaml, _yaml):
         raise RuntimeError("PyYAML import escapes the runtime")
 PY
   evidence="$(/usr/bin/python3 -I -S -B "$ARTIFACTS" verify-runtime-tree --runtime-root "$root")" || return 1
-  record_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')" || return 1
-  tree_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')" || return 1
+  record_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')" || return 1
+  tree_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')" || return 1
   [ "$record_digest" = "$PYYAML_RECORD_SHA256" ] || return 1
   [ "$tree_digest" = "$RUNTIME_TREE_SHA256" ] || return 1
   /bin/echo "$evidence"
@@ -841,8 +841,8 @@ install_topology_artifacts
 verify_topology "$TOPOLOGY_STAGE/broker-topology.json" || refuse "reinstalled inert topology did not verify after rollback drill"
 verify_legacy_files_unchanged || refuse "legacy Executive files changed during rollback drill"
 
-RUNTIME_RECORD_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')"
-RUNTIME_TREE_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')"
+RUNTIME_RECORD_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')"
+RUNTIME_TREE_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')"
 TOPOLOGY_DIGEST="$(/usr/bin/shasum -a 256 "$TOPOLOGY_STAGE/broker-topology.json" | /usr/bin/awk '{print $1}')"
 ROLLBACK_CONTRACT_DIGEST="$(/usr/bin/shasum -a 256 "$TOPOLOGY_STAGE/rollback-contract.json" | /usr/bin/awk '{print $1}')"
 
