@@ -71,7 +71,10 @@ def test_one_ceo_job_keeps_authority_across_worker_provider_failover(tmp_path):
         quota_class="codex-native",
     )
     requeued = runtime.jobs.requeue_job(job.job_id)
-    assert requeued.current_attempt_id == first_attempt_id
+    # Detached requeue clears the current Attempt pointer. The historical
+    # Codex Attempt remains distinct evidence, and the next dispatch must mint
+    # a fresh Attempt without changing the durable CEO authority snapshot.
+    assert requeued.current_attempt_id is None
     assert requeued.assigned_worker_id is None
     assert (
         requeued.owner_seat,
