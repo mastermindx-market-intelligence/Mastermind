@@ -228,6 +228,148 @@ def test_write_new_private_file_is_no_overwrite_exact_metadata(tmp_path: Path):
         )
 
 
+def _install_enrollment_fakes(monkeypatch, enrollment, *, present=None):
+    release_sha = "b" * 40
+    present_paths = set(present or ())
+    writes = []
+    qualifications = []
+
+    monkeypatch.setattr(enrollment, "_assert_host_prepared", lambda: release_sha)
+    monkeypatch.setattr(enrollment, "_path_present", lambda path: path in present_paths)
+
+    async def qualify_token(*, token, bot_user_id, **_kwargs):
+        qualifications.append((token, bot_user_id))
+        return {
+            "bot_user_id": bot_user_id,
+            "channel_id": CHANNEL,
+            "scopes": list(SCOPES),
+            "workspace_id": WORKSPACE,
+        }
+
+    def write_new_private_file(path, payload, *, uid, gid, mode):
+        assert path not in present_paths
+        writes.append((path, payload, uid, gid, mode))
+        present_paths.add(path)
+
+    monkeypatch.setattr(enrollment, "qualify_token", qualify_token)
+    monkeypatch.setattr(enrollment, "write_new_private_file", write_new_private_file)
+    return release_sha, present_paths, writes, qualifications
+
+
+def test_enroll_qualifies_before_committing_token_then_config(monkeypatch):
+    enrollment = _module()
+    release_sha, _present, writes, qualifications = _install_enrollment_fakes(
+        monkeypatch, enrollment
+    )
+    monkeypatch.setattr(
+        enrollment.c1_runtime,
+        "load_config",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            slack_bot_user_id=BOT,
+            relay_version=release_sha,
+        ),
+    )
+
+    receipt = asyncio.run(
+        enrollment._enroll(  # noqa: SLF001 - adversarial state-machine test
+            bot_user_id=BOT,
+            stdin=io.BytesIO((TOKEN + "\n").encode("ascii")),
+        )
+    )
+
+    assert qualifications == [(TOKEN, BOT)]
+    assert [row[0] for row in writes] == [
+        enrollment.c1_runtime.TOKEN_PATH,
+        enrollment.c1_runtime.CONFIG_PATH,
+    ]
+    token_write, config_write = writes
+    assert token_write[1:] == ((TOKEN + "\n").encode("ascii"), 452, 452, 0o400)
+    config_doc = json.loads(config_write[1])
+    assert config_doc["slack_bot_user_id"] == BOT
+    assert config_doc["relay_version"] == release_sha
+    assert config_write[2:] == (0, 452, 0o440)
+    assert receipt["action"] == "enrolled"
+    assert receipt["release_sha"] == release_sha
+    assert TOKEN not in json.dumps(receipt)
+
+
+def test_token_only_crash_state_requires_resume_and_never_blind_reenroll(monkeypatch):
+    enrollment = _module()
+    token_path = enrollment.c1_runtime.TOKEN_PATH
+    release_sha, _present, writes, qualifications = _install_enrollment_fakes(
+        monkeypatch,
+        enrollment,
+        present={token_path},
+    )
+    monkeypatch.setattr(enrollment, "_existing_token", lambda: TOKEN)
+    monkeypatch.setattr(
+        enrollment.c1_runtime,
+        "load_config",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            slack_bot_user_id=BOT,
+            relay_version=release_sha,
+        ),
+    )
+
+    with pytest.raises(enrollment.C1EnrollmentError, match="C1_ENROLLMENT_COLLISION"):
+        asyncio.run(
+            enrollment._enroll(  # noqa: SLF001
+                bot_user_id=BOT,
+                stdin=io.BytesIO((TOKEN + "\n").encode("ascii")),
+            )
+        )
+
+    receipt = asyncio.run(enrollment._resume(bot_user_id=BOT))  # noqa: SLF001
+    assert qualifications == [(TOKEN, BOT)]
+    assert [row[0] for row in writes] == [enrollment.c1_runtime.CONFIG_PATH]
+    assert receipt["action"] == "resumed"
+    assert receipt["release_sha"] == release_sha
+
+
+def test_resume_refuses_any_state_except_exact_token_only(monkeypatch):
+    enrollment = _module()
+    token_path = enrollment.c1_runtime.TOKEN_PATH
+    config_path = enrollment.c1_runtime.CONFIG_PATH
+
+    for present in ({config_path}, {token_path, config_path}, set()):
+        _release_sha, _paths, _writes, _qualifications = _install_enrollment_fakes(
+            monkeypatch,
+            enrollment,
+            present=present,
+        )
+        with pytest.raises(
+            enrollment.C1EnrollmentError,
+            match="C1_ENROLLMENT_EXISTING_REFUSED",
+        ):
+            asyncio.run(enrollment._resume(bot_user_id=BOT))  # noqa: SLF001
+
+
+def test_verify_is_read_only_and_requalifies_exact_existing_identity(monkeypatch):
+    enrollment = _module()
+    release_sha, _present, writes, qualifications = _install_enrollment_fakes(
+        monkeypatch,
+        enrollment,
+        present={enrollment.c1_runtime.TOKEN_PATH, enrollment.c1_runtime.CONFIG_PATH},
+    )
+    monkeypatch.setattr(enrollment, "_existing_token", lambda: TOKEN)
+    monkeypatch.setattr(
+        enrollment.c1_runtime,
+        "load_config",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            slack_bot_user_id=BOT,
+            relay_version=release_sha,
+        ),
+    )
+
+    receipt = asyncio.run(enrollment._verify(bot_user_id=BOT))  # noqa: SLF001
+
+    assert writes == []
+    assert qualifications == [(TOKEN, BOT)]
+    assert receipt["action"] == "verified"
+    assert receipt["release_sha"] == release_sha
+    assert TOKEN not in json.dumps(receipt)
+
+
 def test_source_has_no_service_arm_or_secret_argv_environment_path():
     enrollment = _module()
     source = Path(enrollment.__file__).read_text(encoding="utf-8")
