@@ -3680,6 +3680,7 @@ def run_source_repair_host(
                     raise SourceRepairTransitionError(
                         "SOURCE_REPAIR_NEXT_STATE_REFUSED"
                     )
+                authorized_precommit_recovery = None
                 _restore_digest_bound_precommit_state(
                     archive=archive,
                     source_root=source_root,
@@ -3941,6 +3942,7 @@ def run_source_repair_host(
                 _recovery_phase, _recovery_layout, recovery_transition = (
                     authorized_precommit_recovery
                 )
+                authorized_precommit_recovery = None
                 _restore_digest_bound_precommit_state(
                     archive=archive,
                     source_root=source_root,

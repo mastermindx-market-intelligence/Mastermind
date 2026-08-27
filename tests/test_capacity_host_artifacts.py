@@ -1927,6 +1927,39 @@ def _verify_arguments(system_root: Path, commit: str) -> dict[str, object]:
     }
 
 
+def _rollback_started_empty_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, dict[str, object], Path]:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+
+    def refuse_receipt(*args: object, **kwargs: object) -> str:
+        raise artifacts.CapacityHostArtifactError("INJECTED_RECEIPT_REFUSAL")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(
+            artifacts, "publish_source_repair_receipt", refuse_receipt
+        )
+        with pytest.raises(
+            artifacts.SourceRepairIncomplete,
+            match="after_failure_namespace_parent_fsync",
+        ):
+            artifacts.run_source_repair_host(
+                **arguments,
+                crash_at="after_failure_namespace_parent_fsync",
+            )
+
+    archive = next((system_root / "capacity-archive").iterdir())
+    position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert position.phase is artifacts.SourceRepairPhase.ROLLBACK_STARTED
+    assert position.failure_layout is artifacts.SourceRepairFailureLayout.EMPTY
+    return system_root, arguments, archive
+
+
 @pytest.mark.parametrize(
     "crash_at",
     (
@@ -2310,8 +2343,175 @@ def test_exact_precommit_classification_pre_authorizes_table_recovery(
     assert isinstance(recovery_transition, artifacts.SourceRepairTransition)
     assert recovery_transition.action is artifacts.SourceRepairAction.RECOVER_PRECOMMIT
     assert events[restore_index][1] is recovery_transition
+    assert sum(event[0] == "restore" for event in events) == 1
     restored_source = system_root / "capacity-sources" / "macro" / commit
     assert restored_source.is_dir()
+    assert (
+        system_root
+        / "capacity-generations"
+        / artifacts.PRIOR_GENERATION_DIGEST
+    ).is_dir()
+
+
+def test_direct_recovery_consumes_grant_before_single_restore_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, arguments, archive = _rollback_started_empty_fixture(
+        tmp_path, monkeypatch
+    )
+    original_restore = artifacts._restore_digest_bound_precommit_state
+    restore_transitions: list[artifacts.SourceRepairTransition] = []
+
+    def observed_restore(*args: object, **kwargs: object) -> None:
+        transition = kwargs["transition"]
+        assert isinstance(transition, artifacts.SourceRepairTransition)
+        restore_transitions.append(transition)
+        original_restore(*args, **kwargs)
+
+    monkeypatch.setattr(
+        artifacts, "_restore_digest_bound_precommit_state", observed_restore
+    )
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_PRECOMMIT_RESTORED",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+
+    assert len(restore_transitions) == 1
+    direct_transition = artifacts.SOURCE_REPAIR_TRANSITIONS[
+        (
+            artifacts.SourceRepairMode.REPAIR,
+            artifacts.SourceRepairPhase.ROLLBACK_STARTED,
+            artifacts.SourceRepairFailureLayout.EMPTY,
+        )
+    ]
+    assert restore_transitions[0] is direct_transition
+    position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+    assert (
+        position.failure_layout
+        is artifacts.SourceRepairFailureLayout.INSTALLED_SOURCE
+    )
+    assert (
+        system_root
+        / "capacity-generations"
+        / artifacts.PRIOR_GENERATION_DIGEST
+    ).is_dir()
+
+
+def test_direct_recovery_typed_incomplete_is_single_attempt_and_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, arguments, archive = _rollback_started_empty_fixture(
+        tmp_path, monkeypatch
+    )
+    restore_calls = 0
+    injected_cause = OSError(errno.EIO, "injected recovery interruption")
+    injected = artifacts.SourceRepairIncomplete(
+        "INJECTED_RECOVERY_INCOMPLETE"
+    )
+
+    def interrupt_restore(*args: object, **kwargs: object) -> None:
+        nonlocal restore_calls
+        restore_calls += 1
+        raise injected from injected_cause
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(
+            artifacts, "_restore_digest_bound_precommit_state", interrupt_restore
+        )
+        with pytest.raises(
+            artifacts.SourceRepairIncomplete,
+            match="INJECTED_RECOVERY_INCOMPLETE",
+        ) as raised:
+            artifacts.run_source_repair_host(**arguments)
+
+    assert raised.value is injected
+    assert raised.value.__cause__ is injected_cause
+    assert restore_calls == 1
+    interrupted_position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert interrupted_position.phase is artifacts.SourceRepairPhase.ROLLBACK_STARTED
+    assert (
+        interrupted_position.failure_layout
+        is artifacts.SourceRepairFailureLayout.EMPTY
+    )
+
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_PRECOMMIT_RESTORED",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+    replayed_position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert replayed_position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+    assert (
+        replayed_position.failure_layout
+        is artifacts.SourceRepairFailureLayout.INSTALLED_SOURCE
+    )
+    assert (
+        system_root
+        / "capacity-generations"
+        / artifacts.PRIOR_GENERATION_DIGEST
+    ).is_dir()
+
+
+def test_direct_recovery_durability_uncertain_is_single_attempt_and_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, arguments, archive = _rollback_started_empty_fixture(
+        tmp_path, monkeypatch
+    )
+    restore_calls = 0
+    injected_cause = OSError(errno.EIO, "injected recovery durability")
+    injected = artifacts.SourceRepairRenameDurabilityUncertain(
+        "INJECTED_RECOVERY_DURABILITY_UNCERTAIN"
+    )
+
+    def interrupt_restore(*args: object, **kwargs: object) -> None:
+        nonlocal restore_calls
+        restore_calls += 1
+        raise injected from injected_cause
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(
+            artifacts, "_restore_digest_bound_precommit_state", interrupt_restore
+        )
+        with pytest.raises(
+            artifacts.SourceRepairRenameDurabilityUncertain,
+            match="INJECTED_RECOVERY_DURABILITY_UNCERTAIN",
+        ) as raised:
+            artifacts.run_source_repair_host(**arguments)
+
+    assert raised.value is injected
+    assert raised.value.__cause__ is injected_cause
+    assert restore_calls == 1
+    interrupted_position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert interrupted_position.phase is artifacts.SourceRepairPhase.ROLLBACK_STARTED
+    assert (
+        interrupted_position.failure_layout
+        is artifacts.SourceRepairFailureLayout.EMPTY
+    )
+
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_PRECOMMIT_RESTORED",
+    ):
+        artifacts.run_source_repair_host(**arguments)
+    replayed_position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert replayed_position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+    assert (
+        replayed_position.failure_layout
+        is artifacts.SourceRepairFailureLayout.INSTALLED_SOURCE
+    )
     assert (
         system_root
         / "capacity-generations"
