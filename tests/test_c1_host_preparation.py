@@ -51,7 +51,7 @@ def test_c1_host_preparation_verifies_exact_release_and_unarmed_control_config()
     assert 'RELEASE_MANIFEST="$RELEASE_ROOT/.executive-release-manifest.json"' in text
     assert '"mastermind.executive_release_manifest/v1"' in text
     assert 'value.get("commit_sha") != expected_commit' in text
-    assert 'release_manifest.py" verify' in text
+    assert '"$RELEASE_VERIFIER" verify' in text
     assert '"proof_base_sha": release_sha' in text
     assert '"ceo_ingress_peer_uid": 452' in text
     assert '"ceo_ingress_launchd_socket_name": "CeoIngress"' in text
