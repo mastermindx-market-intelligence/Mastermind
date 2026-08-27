@@ -54,6 +54,10 @@ def _load_for_test(c1_runtime, path: Path):
     )
 
 
+def _read_token_for_test(c1_runtime, path: Path):
+    return c1_runtime.read_token_file(path, expected_path=path)
+
+
 def test_load_config_accepts_only_exact_nonsecret_runtime_policy(tmp_path: Path):
     c1_runtime = _module()
     document = _document()
@@ -131,7 +135,7 @@ def test_read_token_file_accepts_exact_same_uid_gid_mode0400_single_link(tmp_pat
     path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
     path.chmod(0o400)
 
-    token = c1_runtime.read_token_file(path)
+    token = _read_token_for_test(c1_runtime, path)
 
     assert token == "INERT-C1-TOKEN-FIXTURE"
     info = path.stat()
@@ -140,22 +144,47 @@ def test_read_token_file_accepts_exact_same_uid_gid_mode0400_single_link(tmp_pat
     assert info.st_nlink == 1
 
 
-def test_read_token_file_rejects_permissions_symlink_and_hardlink(tmp_path: Path):
+def test_read_token_file_distinguishes_missing_from_unsafe_and_invalid(tmp_path: Path):
     c1_runtime = _module()
+    missing = tmp_path / "missing.token"
+    with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNAVAILABLE"):
+        _read_token_for_test(c1_runtime, missing)
+
     path = tmp_path / "relay.token"
     path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
     path.chmod(0o600)
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
-        c1_runtime.read_token_file(path)
+        _read_token_for_test(c1_runtime, path)
 
+    path.chmod(0o400)
+    path.write_text("has whitespace inside\n", encoding="utf-8")
+    path.chmod(0o400)
+    with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_INVALID"):
+        _read_token_for_test(c1_runtime, path)
+
+
+def test_read_token_file_rejects_symlink_and_hardlink(tmp_path: Path):
+    c1_runtime = _module()
+    path = tmp_path / "relay.token"
+    path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
     path.chmod(0o400)
     link = tmp_path / "relay-link.token"
     link.symlink_to(path)
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
-        c1_runtime.read_token_file(link)
+        c1_runtime.read_token_file(link, expected_path=link)
 
     hard = tmp_path / "relay-hard.token"
     os.link(path, hard)
+    with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
+        _read_token_for_test(c1_runtime, path)
+
+
+def test_read_token_file_refuses_path_override_even_if_private(tmp_path: Path):
+    c1_runtime = _module()
+    path = tmp_path / "relay.token"
+    path.write_text("INERT-C1-TOKEN-FIXTURE\n", encoding="utf-8")
+    path.chmod(0o400)
+
     with pytest.raises(RuntimeError, match="C1_TOKEN_FILE_UNSAFE"):
         c1_runtime.read_token_file(path)
 
