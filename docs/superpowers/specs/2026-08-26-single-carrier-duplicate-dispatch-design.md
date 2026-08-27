@@ -3,8 +3,10 @@
 **Date:** 2026-08-26  
 **Owner:** Sol / Executive architecture  
 **Status:** DESIGN FREEZE CANDIDATE — no implementation or runtime authority is created by this document  
-**Protected Mastermind basis:** `98f60ddcd2e387ea42c23f64b66933650c4f2e19`  
-**Macro basis observed during design:** `93472e2397e1d4e931c59cf0c6c5b2b2d4b5668f`
+**Protected Mastermind authoring basis:** `98f60ddcd2e387ea42c23f64b66933650c4f2e19`  
+**Macro authoring basis:** `93472e2397e1d4e931c59cf0c6c5b2b2d4b5668f`
+
+**Current-source reconciliation:** protected Mastermind advanced during authoring to `e5cc1a5ea519a922fdeb9878834245e63208927d`. The intervening changes are confined to Executive host bootstrap/preparation scripts and their tests; current `docs/sol_skills/INDEX.md` and `RECONCILE_STATE.md` remain byte-identical to the loaded Skillpack blobs. Macro advanced to `4e38b388cfc4292390b65eff86042cfe2df2a126`; the intervening changes are unrelated Earnings Agent OS records and generated/data/site outputs. The Macro worker-hook/worktree surfaces used by this design did not move in that interval. Current live source continues to outrank these pins at implementation time.
 
 ## 0. Outcome
 
@@ -200,7 +202,23 @@ The implementation tests the exact Git version/lease behavior against a local ba
 
 The claim commit is implementation-carrier provenance only. With normal squash merge it does not enter default-branch history.
 
-### 4.3 Collision classification
+### 4.3 Carrier-creation side-effect fence
+
+Claiming a carrier must not accidentally start a product deployment, renderer, nightly, publisher or other high-impact workflow merely because a remote branch was created/pushed.
+
+At design time, inspected high-value Macro push workflows such as `fences.yml`, `public-render.yml` and `integration-baseline.yml` restrict their `push` event to `branches: [main]`, so the proposed `claude/op-*` carrier namespace is outside those triggers. That sample is evidence, not a permanent assumption.
+
+A3 implementation must:
+
+1. census **all current workflow triggers** before choosing the final remote-ref creation mechanism;
+2. prove the carrier namespace is excluded from every product/deploy/publish push path;
+3. add a regression test/guard for any workflow family whose trigger could widen accidentally;
+4. make the disposable two-session canary confirm that carrier creation caused zero unintended high-impact workflow runs;
+5. fail closed or revise the carrier mechanism if current workflow topology cannot make branch creation inert.
+
+This is a carrier-integrity feature; it must not become a hidden production trigger.
+
+### 4.4 Collision classification
 
 The script returns stable machine-readable states and a human-readable explanation:
 
@@ -217,7 +235,7 @@ The script returns stable machine-readable states and a human-readable explanati
 
 A duplicate worker may run `review` mode against the existing branch/PR, but `review` never changes the branch, creates a PR, pushes a ref, or mutates Agent OS.
 
-### 4.4 No automatic takeover
+### 4.5 No automatic takeover
 
 A stale-looking carrier is not automatically reusable.
 
@@ -231,7 +249,7 @@ A stale-looking carrier is not automatically reusable.
 
 No worker may resolve ambiguity by deleting the remote branch and trying again.
 
-### 4.5 Resume law
+### 4.6 Resume law
 
 A same-worktree resume on the canonical carrier may return `CLAIMED_SELF`.
 
@@ -312,7 +330,7 @@ Therefore V0 Codex enforcement is explicitly limited:
 
 1. `AGENTS.md` requires preflight as the first modifying step.
 2. the canonical branch/PR/return packet makes a skipped claim detectable before acceptance/merge.
-3. a second properly behaving Codex session cannot acquire the same carrier even if it runs from another clone.
+3. a second correctly-behaving Codex session cannot acquire the same carrier even if it runs from another clone.
 
 This strongly reduces duplicate work and prevents duplicate canonical delivery, but it is not described as perfect pre-edit prevention for a manually launched Codex session that ignores repository law.
 
@@ -501,7 +519,8 @@ Required tests use local temporary Git repositories/bare remotes; no live GitHub
 14. no Agent OS state is consulted as a permission gate;
 15. `CLAUDE.md` and `AGENTS.md` carry parity wording for the commission law;
 16. current sparse-worktree/GC/branch behavior remains green;
-17. real harmless canary: launch two disposable worker worktrees with the same work identity and prove only one can claim the remote carrier while the loser returns a collision receipt before project modification.
+17. workflow-trigger census proves `claude/op-*` carrier creation starts zero unintended product/deploy/publish jobs and pins any necessary trigger exclusions;
+18. real harmless canary: launch two disposable worker worktrees with the same work identity and prove only one can claim the remote carrier while the loser returns a collision receipt before project modification.
 
 The canary cleanup is an explicit bounded cleanup step; failure/timeout does not imply permission to delete an ambiguous carrier.
 
@@ -545,6 +564,7 @@ One bounded Macro PR:
 - `scripts/commission_preflight.py`;
 - focused tests;
 - minimal `CLAUDE.md` + `AGENTS.md` parity update;
+- workflow-trigger census/regression protection for carrier creation;
 - only the smallest hook/context integration currently supported and provable without disrupting existing active sessions.
 
 Non-goals: Executive runtime, Agent OS schema, Linear, Slack, provider routing, worker lifecycle, automatic dispatch.
@@ -591,7 +611,7 @@ After Executive logical admission + worker launch is `PROVEN_LIVE`, manual Git c
 
 ### Manual guard complete
 
-The manual transition capability is complete only when a real two-session collision can be induced deliberately and the second correctly-behaving modifying session is prevented from acquiring another implementation carrier, with no new control plane and with the first carrier still usable through the normal PR flow.
+The manual transition capability is complete only when a real two-session collision can be induced deliberately and the second correctly-behaving modifying session is prevented from acquiring another implementation carrier, with no new control plane, zero unintended workflow side effects from the claim itself, and the first carrier still usable through the normal PR flow.
 
 Manual V0 does not claim to stop a manually launched worker that deliberately ignores repository law before running preflight. The final Executive design removes that dependency by performing admission before worker launch.
 
