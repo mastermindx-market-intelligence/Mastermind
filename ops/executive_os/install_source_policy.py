@@ -1,16 +1,16 @@
 """Fail-closed source identity policy for Executive OS installation.
 
-The ordinary installer law remains exact protected-head installation.  A
+The ordinary installer law remains exact protected-head installation. A
 separate, explicit frozen-accepted-ancestor mode exists only for production
-proof or recovery that is already bound to an older accepted release: the
-source checkout must be exactly that release, its ``origin/master`` tracking
-ref must equal a separately supplied protected-master SHA, and the release must
-be a strict ancestor of that protected head.
+proof or recovery already bound to an older accepted release: the source
+checkout must be exactly that release, its ``origin/master`` tracking ref must
+equal a separately supplied protected-master SHA, and the release must be a
+strict ancestor of that protected head.
 
-This module performs no fetch and no mutation.  The operator runbook is
-responsible for refreshing ``origin/master`` immediately before invoking the
-root installer; this policy verifies the resulting identities without rewriting
-refs or creating another source-of-truth plane.
+For the privileged installer path, frozen mode also binds the installer code to
+one clean checkout whose HEAD and ``origin/master`` are that same protected
+master SHA. This module performs no fetch and no mutation; the operator runbook
+must refresh ``origin/master`` immediately before invoking the root installer.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -52,12 +53,56 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     return completed
 
 
+def _require_checkout(
+    repo: Path,
+    *,
+    label: str,
+    expected_head: str,
+    expected_remote: str,
+) -> None:
+    repo = Path(repo)
+    if not repo.is_absolute() or not repo.is_dir():
+        raise InstallSourcePolicyError(f"{label} must be an absolute directory")
+
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    if head != expected_head:
+        raise InstallSourcePolicyError(
+            f"{label} HEAD is not the exact expected SHA"
+        )
+
+    dirty = _git(
+        repo,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=normal",
+    ).stdout
+    if dirty:
+        raise InstallSourcePolicyError(f"{label} is not clean")
+
+    remote = _git(
+        repo,
+        "rev-parse",
+        "refs/remotes/origin/master",
+        check=False,
+    )
+    if remote.returncode != 0:
+        raise InstallSourcePolicyError(
+            f"{label} has no exact protected origin/master ref"
+        )
+    remote_sha = _require_sha(remote.stdout.strip(), f"{label} origin/master SHA")
+    if remote_sha != expected_remote:
+        raise InstallSourcePolicyError(
+            f"{label} origin/master differs from the attested protected master SHA"
+        )
+
+
 def validate_install_source(
     *,
     source_repo: Path,
     expected_sha: str,
     protected_master_sha: str | None,
     allow_frozen_accepted_ancestor: bool,
+    installer_repo: Path | None = None,
 ) -> dict[str, str]:
     """Validate one immutable install source without mutating Git state."""
 
@@ -87,13 +132,12 @@ def validate_install_source(
     )
     if remote.returncode != 0:
         raise InstallSourcePolicyError("checkout has no exact protected origin/master ref")
-    remote_sha = remote.stdout.strip()
-    _require_sha(remote_sha, "origin/master SHA")
+    remote_sha = _require_sha(remote.stdout.strip(), "origin/master SHA")
 
     if not allow_frozen_accepted_ancestor:
-        if protected_master_sha is not None:
+        if protected_master_sha is not None or installer_repo is not None:
             raise InstallSourcePolicyError(
-                "protected master SHA is only valid in frozen accepted ancestor mode"
+                "frozen install arguments are only valid in frozen accepted ancestor mode"
             )
         if remote_sha != expected_sha:
             raise InstallSourcePolicyError(
@@ -135,6 +179,14 @@ def validate_install_source(
             "frozen accepted release is not an ancestor of protected master"
         )
 
+    if installer_repo is not None:
+        _require_checkout(
+            Path(installer_repo),
+            label="installer checkout",
+            expected_head=protected_master_sha,
+            expected_remote=protected_master_sha,
+        )
+
     return {
         "expected_sha": expected_sha,
         "mode": "frozen_accepted_ancestor",
@@ -147,6 +199,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-repo", required=True)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--protected-master-sha")
+    parser.add_argument("--installer-repo")
     parser.add_argument("--allow-frozen-accepted-ancestor", action="store_true")
     return parser
 
@@ -154,14 +207,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.allow_frozen_accepted_ancestor and not args.installer_repo:
+            raise InstallSourcePolicyError(
+                "frozen accepted ancestor mode requires installer checkout"
+            )
         receipt = validate_install_source(
             source_repo=Path(args.source_repo),
             expected_sha=args.expected_sha,
             protected_master_sha=args.protected_master_sha,
             allow_frozen_accepted_ancestor=args.allow_frozen_accepted_ancestor,
+            installer_repo=(Path(args.installer_repo) if args.installer_repo else None),
         )
     except InstallSourcePolicyError as exc:
-        print(str(exc), file=__import__("sys").stderr)
+        print(str(exc), file=sys.stderr)
         return 65
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
     return 0
