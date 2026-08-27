@@ -7,6 +7,8 @@ fixed private Slack identity/channel and reviewed timing bounds.
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -101,3 +103,26 @@ def load_config(path: str | Path) -> C1RuntimeConfig:
     if config.max_executive_age_seconds < config.heartbeat_seconds:
         raise ValueError("invalid C1 config: max_executive_age_seconds")
     return config
+
+
+def read_token_file(path: str | Path) -> str:
+    """Read one private token file without leaking filesystem or secret detail."""
+
+    token_path = Path(path)
+    try:
+        info = token_path.stat(follow_symlinks=False)
+    except OSError:
+        raise RuntimeError("C1_TOKEN_FILE_UNAVAILABLE") from None
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_mode & 0o077
+    ):
+        raise RuntimeError("C1_TOKEN_FILE_UNSAFE")
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        raise RuntimeError("C1_TOKEN_FILE_UNAVAILABLE") from None
+    if not token or "\n" in token or "\r" in token:
+        raise RuntimeError("C1_TOKEN_FILE_INVALID")
+    return token
