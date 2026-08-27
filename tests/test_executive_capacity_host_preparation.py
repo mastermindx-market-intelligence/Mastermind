@@ -40,6 +40,72 @@ def test_capacity_preparer_inventory_renderer_is_native_and_executable() -> None
     assert completed.stdout == "z\na\n"
 
 
+def test_capacity_preparer_accepts_only_exact_negative_group_membership_reports() -> None:
+    source = _source()
+    isolation = source.split("assert_control_isolated() {", 1)[1].split("\n}", 1)[0]
+    assert (
+        'membership_reports_not_member "$membership_status" "$membership" '
+        '"$CONTROL_USER" "$slot_group"'
+        in isolation
+    )
+    assert 'LC_ALL=C LANG=C /usr/sbin/dseditgroup -o checkmember' in isolation
+    assert '|| membership_status=$?' in isolation
+    assert '|| true' not in isolation
+    assert (
+        'refuse "control principal absence from a Personal Pro group could not be proven"'
+        in isolation
+    )
+    membership_check = isolation.index("membership_reports_not_member")
+    assert isolation.index('/usr/bin/id -G "$CONTROL_USER"') > membership_check
+    assert isolation.index('/bin/test ! -r "$slot_home"') > membership_check
+    assert isolation.index('/bin/test ! -x "$slot_home"') > membership_check
+    helper_body = source.split("membership_reports_not_member() {", 1)[1].split(
+        "\n}", 1
+    )[0]
+    program = (
+        "membership_reports_not_member() {"
+        f"{helper_body}\n"
+        "}\n"
+        'membership_reports_not_member "$1" "$2" "$3" "$4"'
+    )
+
+    def reports_not_member(
+        report: str, status: int = 67, user: str = "control", group: str = "pro"
+    ) -> bool:
+        completed = subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                program,
+                "membership-test",
+                str(status),
+                report,
+                user,
+                group,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return completed.returncode == 0
+
+    assert reports_not_member("no control is NOT a member of pro")
+    for refused in (
+        "yes control is a member of pro",
+        "no control is not a member of pro",
+        "no other is NOT a member of pro",
+        "no control is NOT a member of other",
+        "no control is NOT a member of pro\nunexpected output",
+        "group record unavailable",
+        "",
+    ):
+        assert not reports_not_member(refused)
+    for refused_status in (0, 1, 64, 77):
+        assert not reports_not_member(
+            "no control is NOT a member of pro", status=refused_status
+        )
+
+
 def test_capacity_preparer_pins_exact_source_runtime_and_entrypoint_inputs() -> None:
     source = _source()
     for exact in (
