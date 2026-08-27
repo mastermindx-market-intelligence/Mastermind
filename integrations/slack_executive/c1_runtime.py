@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 CONFIG_SCHEMA = "mastermind.sol_state_relay_config.v1"
+SLACK_API_ROOT = "https://slack.com/api/"
 _CONFIG_KEYS = frozenset(
     {
         "schema",
@@ -41,6 +44,12 @@ class C1RuntimeConfig:
     heartbeat_seconds: int
     max_executive_age_seconds: int
     relay_version: str
+
+
+@dataclass(frozen=True)
+class SlackIdentityReceipt:
+    workspace_id: str
+    bot_user_id: str
 
 
 def _positive_int(value: Any, *, name: str) -> int:
@@ -131,3 +140,48 @@ def read_token_file(path: str | Path) -> str:
     if not token or "\n" in token or "\r" in token:
         raise RuntimeError("C1_TOKEN_FILE_INVALID")
     return token
+
+
+async def verify_slack_identity(
+    *,
+    token: str,
+    expected_workspace_id: str,
+    expected_bot_user_id: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> SlackIdentityReceipt:
+    """Qualify the production token against the fixed workspace/bot identity."""
+
+    if not token or not expected_workspace_id or not expected_bot_user_id:
+        raise ValueError("invalid C1 Slack identity inputs")
+    client = httpx.AsyncClient(
+        base_url=SLACK_API_ROOT,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=httpx.Timeout(10.0),
+        follow_redirects=False,
+        transport=transport,
+    )
+    try:
+        try:
+            response = await client.post("auth.test")
+            response.raise_for_status()
+        except httpx.HTTPError:
+            raise RuntimeError("C1_SLACK_IDENTITY_UNAVAILABLE") from None
+        try:
+            payload: Any = response.json()
+        except ValueError:
+            raise RuntimeError("C1_SLACK_IDENTITY_REFUSED") from None
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
+        workspace_id = payload.get("team_id")
+        bot_user_id = payload.get("user_id")
+        if (
+            workspace_id != expected_workspace_id
+            or bot_user_id != expected_bot_user_id
+        ):
+            raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
+        return SlackIdentityReceipt(
+            workspace_id=expected_workspace_id,
+            bot_user_id=expected_bot_user_id,
+        )
+    finally:
+        await client.aclose()
