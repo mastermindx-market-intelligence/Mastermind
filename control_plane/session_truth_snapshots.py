@@ -260,6 +260,12 @@ def _error(message: str) -> SessionTruthContractError:
     return SessionTruthContractError(message)
 
 
+def _reject_non_finite_constant(name: str) -> Any:
+    """Refuse NaN/Infinity/-Infinity at parse time (owner-record amendment §5)."""
+
+    raise _error(f"snapshot contains forbidden non-finite number {name}")
+
+
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise _error(f"{label} must be an object")
@@ -450,7 +456,7 @@ def load_snapshot(path: Path | str, expected_schema: str) -> dict[str, Any]:
     except OSError as exc:
         raise _error(f"snapshot could not be read: {exc}") from exc
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(text, parse_constant=_reject_non_finite_constant)
     except json.JSONDecodeError as exc:
         raise _error("snapshot is not valid JSON") from exc
     root = _mapping(parsed, "snapshot")

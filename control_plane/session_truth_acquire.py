@@ -38,6 +38,12 @@ class AcquisitionError(RuntimeError):
     """Raised when a canonical read path returns malformed or incompatible data."""
 
 
+def _reject_non_finite_constant(name: str) -> Any:
+    """Refuse NaN/Infinity/-Infinity in canonical output (owner-record amendment §5)."""
+
+    raise AcquisitionError(f"Agent OS output contains forbidden non-finite number {name}")
+
+
 def _git_text(repo_root: Path, *args: str) -> str | None:
     """Return stdout from one bounded local Git read, or ``None`` on read failure."""
 
@@ -198,7 +204,9 @@ def _decode_leading_json(text: str, label: str) -> tuple[dict[str, Any], str]:
     if not stripped:
         raise AcquisitionError(f"{label} emitted empty output")
     try:
-        value, end = json.JSONDecoder().raw_decode(stripped)
+        value, end = json.JSONDecoder(
+            parse_constant=_reject_non_finite_constant
+        ).raw_decode(stripped)
     except json.JSONDecodeError as exc:
         raise AcquisitionError(f"{label} emitted malformed JSON") from exc
     if not isinstance(value, dict):
@@ -308,7 +316,9 @@ def collect_agentos(
             timeout=timeout,
         )
         try:
-            context = json.loads(context_text)
+            context = json.loads(
+                context_text, parse_constant=_reject_non_finite_constant
+            )
         except json.JSONDecodeError as exc:
             raise AcquisitionError("Agent OS compile-context emitted malformed JSON") from exc
         if not isinstance(context, dict):

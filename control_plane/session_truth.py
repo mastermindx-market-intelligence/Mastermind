@@ -2,20 +2,27 @@
 
 The receipt is a deterministic comparison artifact, not a lifecycle, queue, retry,
 identity, transport, projection or persistence authority. Inputs are already-normalized
-owner observations. The receipt's own observation window and the named Agent OS
-acquisition-envelope fields in ``_AGENTOS_ACQUISITION_*`` are excluded from the semantic
+owner observations. The receipt's own observation window is excluded from the semantic
 hash; source revisions, owner source timestamps, facts, findings, admission and scope
 remain covered.
 
-That exclusion is a NAMED LIST, not a general law, and it does not yet make semantic
-identity clock-independent. Macro derives further fields from the same ``--now`` that
-this layer still hashes: ``state.inputs.degraded`` embeds the build age as prose, and
-``state.workstreams[*].stale_days``/``claim.stale`` plus a context bundle's expiry-driven
-``excluded``/``degraded`` entries are day-granular, so two receipts of identical records
-taken either side of a rounding boundary can still disagree. Closing that class needs a
-positive projection of named semantic fields, or a records hash emitted by Macro itself;
-excluding fields one at a time from this side loses the race. Do not read a matching
-semantic hash as proof that no clock moved.
+Agent OS semantic identity is digest-backed when the owner supplies it (owner-record
+amendment, 2026-08-28): a valid ``source_records_digest`` on the state and on every
+context reduces the hashed Agent OS observation to ``source_sha`` plus per-document
+schema/target/sections/digest, so unchanged authored records keep one identity no
+matter when or where the read happened. The full raw observation stays in the
+immutable receipt for diagnosis.
+
+Without a complete owner digest set, the legacy named-list stripping in
+``_AGENTOS_ACQUISITION_*`` remains as a display/fallback observation only. That
+exclusion is a NAMED LIST, not a general law, and it does not make semantic identity
+clock-independent: Macro derives further fields from the same ``--now`` that this
+layer still hashes (``state.inputs.degraded`` prose, day-granular ``stale_days`` and
+expiry-driven context entries), so two fallback receipts of identical records can
+still disagree. The fallback therefore cannot authorize modification — when the
+requested scope requires Agent OS and the owner digest is absent,
+``session_truth_rules`` emits blocking ``AGENTOS_RECORD_IDENTITY_UNAVAILABLE``. Do
+not read a matching fallback hash as proof that no clock moved.
 """
 from __future__ import annotations
 
@@ -30,6 +37,7 @@ from control_plane.session_truth_contract import (
     RECEIPT_SCHEMA,
     SessionTruthContractError,
     semantic_hash,
+    valid_source_records_digest,
     validate_input_document,
 )
 from control_plane.session_truth_rules import detect_findings
@@ -89,6 +97,22 @@ def _required_sources(inputs: Mapping[str, Any]) -> set[str]:
         required.add("linear")
     if scope.get("requires_executive") is True:
         required.add("executive")
+    # Amendment §4: a positive in-scope PR Linear binding makes Linear required
+    # even when scope.linear names no exact identity. A declared binding that
+    # cannot be read may never resolve to an empty index or negative testimony.
+    if "linear" not in required:
+        github = inputs.get("github")
+        if _source_available(github):
+            pull_requests = github.get("pull_requests")
+            if isinstance(pull_requests, Sequence) and not isinstance(
+                pull_requests, (str, bytes)
+            ):
+                for pull_request in pull_requests:
+                    if isinstance(pull_request, Mapping):
+                        declared = pull_request.get("linear")
+                        if isinstance(declared, str) and declared:
+                            required.add("linear")
+                            break
     return required
 
 
@@ -207,6 +231,60 @@ def _strip_agentos_acquisition_clocks(agentos: Any) -> None:
                 context.pop(_AGENTOS_ACQUISITION_CLOCK, None)
 
 
+def _digest_backed_agentos(agentos: Any) -> dict[str, Any] | None:
+    """Return the owner-digest-backed Agent OS projection, or ``None`` when absent.
+
+    Amendment §3.1: with a valid owner ``source_records_digest`` on the state and on
+    every context, semantic identity is ``source_sha`` plus per-document
+    schema/target/sections/digest. Any missing or invalid digest returns ``None`` —
+    there is no half-digest identity; the caller falls back to the legacy
+    display-only stripping and ``session_truth_rules`` decides whether that blocks.
+    """
+
+    if not isinstance(agentos, Mapping) or agentos.get("available") is not True:
+        return None
+    state = agentos.get("state")
+    if not isinstance(state, Mapping):
+        return None
+    state_digest = state.get("source_records_digest")
+    if not valid_source_records_digest(state_digest):
+        return None
+    raw_contexts = agentos.get("contexts")
+    if not isinstance(raw_contexts, Sequence) or isinstance(raw_contexts, (str, bytes)):
+        return None
+    contexts: list[dict[str, Any]] = []
+    for context in raw_contexts:
+        if not isinstance(context, Mapping):
+            return None
+        context_digest = context.get("source_records_digest")
+        if not valid_source_records_digest(context_digest):
+            return None
+        sections = context.get("sections")
+        section_ids: list[Any] = []
+        if isinstance(sections, Sequence) and not isinstance(sections, (str, bytes)):
+            section_ids = [
+                section.get("id") if isinstance(section, Mapping) else None
+                for section in sections
+            ]
+        contexts.append(
+            {
+                "schema": context.get("schema"),
+                "target": copy.deepcopy(context.get("target")),
+                "sections": section_ids,
+                "source_records_digest": context_digest,
+            }
+        )
+    return {
+        "available": True,
+        "source_sha": agentos.get("source_sha"),
+        "state": {
+            "schema": state.get("schema"),
+            "source_records_digest": state_digest,
+        },
+        "contexts": contexts,
+    }
+
+
 def semantic_projection(receipt: Mapping[str, Any]) -> dict[str, Any]:
     """Project only semantic receipt state, excluding acquisition envelope clocks/hash."""
 
@@ -218,8 +296,12 @@ def semantic_projection(receipt: Mapping[str, Any]) -> dict[str, Any]:
         if key not in {"observation", "semantic_hash"}
     }
     observations = projection.get("observations")
-    if isinstance(observations, Mapping):
-        _strip_agentos_acquisition_clocks(observations.get("agentos"))
+    if isinstance(observations, MutableMapping):
+        digest_backed = _digest_backed_agentos(observations.get("agentos"))
+        if digest_backed is not None:
+            observations["agentos"] = digest_backed
+        else:
+            _strip_agentos_acquisition_clocks(observations.get("agentos"))
     return projection
 
 

@@ -13,7 +13,10 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any
 
+from control_plane.session_truth_contract import valid_source_records_digest
+
 FINDING_REGISTRY = {
+    "AGENTOS_RECORD_IDENTITY_UNAVAILABLE": ("BLOCKING", "agentos", "agentos"),
     "STALE_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
     "FALSE_LINEAR_COMPLETION": ("BLOCKING", "declared_completion_owner", "linear"),
     "MISSING_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
@@ -423,6 +426,18 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                 source_b=None,
             )
 
+    # A bare Agent OS PR number carries no repository. It may be qualified only by
+    # a requested scope naming exactly one repository; with several repositories in
+    # scope the citation is AMBIGUOUS/UNBOUND and never joins by number, title,
+    # workstream similarity or first match (owner-record amendment §7).
+    scope_repositories = [
+        repository
+        for repository in (scope.get("repositories") or [])
+        if isinstance(repository, str) and repository
+    ]
+    qualified_repository = (
+        scope_repositories[0] if len(scope_repositories) == 1 else None
+    )
     for workstream_key, workstream in workstreams.items():
         for agentos_pr in workstream.get("prs") or []:
             if not isinstance(agentos_pr, Mapping) or type(agentos_pr.get("number")) is not int:
@@ -430,6 +445,8 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             number = agentos_pr["number"]
             for (repository, github_number), pr in github.items():
                 if github_number != number or pr.get("workstream") != workstream_key:
+                    continue
+                if repository != qualified_repository:
                     continue
                 direct_state = agentos_pr.get("state")
                 github_state = pr.get("state")
@@ -448,6 +465,40 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                     )
 
     agentos = inputs.get("agentos")
+    # Owner record identity (amendment §3.2): when the requested scope requires
+    # Agent OS, a readable observation without a complete set of valid owner
+    # ``source_records_digest`` values cannot authorize modification. Absence of
+    # the owner digest is typed and blocking, never silently healthy.
+    if bool(scope.get("workstreams")) and isinstance(agentos, Mapping) and agentos.get(
+        "available"
+    ):
+        state = agentos.get("state")
+        state_digest_valid = isinstance(state, Mapping) and valid_source_records_digest(
+            state.get("source_records_digest")
+        )
+        raw_contexts = agentos.get("contexts")
+        contexts_missing: list[int] | None
+        if isinstance(raw_contexts, list):
+            contexts_missing = [
+                index
+                for index, context in enumerate(raw_contexts)
+                if not (
+                    isinstance(context, Mapping)
+                    and valid_source_records_digest(context.get("source_records_digest"))
+                )
+            ]
+        else:
+            contexts_missing = None
+        if not state_digest_valid or contexts_missing is None or contexts_missing:
+            _append(
+                findings,
+                seen,
+                "AGENTOS_RECORD_IDENTITY_UNAVAILABLE",
+                "agentos",
+                source_a={"state_source_records_digest_valid": state_digest_valid},
+                source_b={"contexts_missing_source_records_digest": contexts_missing},
+            )
+
     if isinstance(agentos, Mapping) and agentos.get("available"):
         state = agentos.get("state")
         if isinstance(state, Mapping):
@@ -679,8 +730,15 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                 )
 
             operation_key = message.get("operation_key")
+            # Amendment §6: only a scope that positively owes Executive state, with
+            # Executive itself readable, can testify that an acked operation is
+            # absent from Executive observations. An unreadable Executive defers to
+            # the required-source path; a read-only/active-session ACK owes nothing.
             if (
-                message.get("acked") is True
+                requires_executive
+                and isinstance(executive, Mapping)
+                and executive.get("available") is True
+                and message.get("acked") is True
                 and message.get("ack_required") is True
                 and isinstance(operation_key, str)
                 and operation_key

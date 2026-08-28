@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -44,16 +45,69 @@ _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _WS_RE = re.compile(r"^WS:[A-Z0-9][A-Z0-9-]*$")
 _MAS_RE = re.compile(r"^MAS-[0-9]+$")
 _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
+RECORDS_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class SessionTruthContractError(ValueError):
     """Raised when an observation envelope violates the frozen R1 contract."""
 
 
-def canonical_json(value: object) -> str:
-    """Return stable compact JSON suitable for semantic hashing."""
+def valid_source_records_digest(value: object) -> bool:
+    """True only for an exact owner-produced ``sha256:<64 lowercase hex>`` digest."""
 
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return isinstance(value, str) and bool(RECORDS_DIGEST_RE.fullmatch(value))
+
+
+def _ensure_json_tree(value: object, label: str) -> None:
+    """Recursively bound ``value`` to string-keyed, finite, JSON-compatible content.
+
+    Invalid mapping keys or non-JSON values fail through the typed R1 error path
+    instead of being coerced by the serializer (amendment §5: no coercion to
+    null/string/zero).
+    """
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise SessionTruthContractError(
+                    f"{label} contains a non-string mapping key: {key!r}"
+                )
+            _ensure_json_tree(item, f"{label}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _ensure_json_tree(item, f"{label}[{index}]")
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            raise SessionTruthContractError(
+                f"{label} contains a forbidden non-finite number"
+            )
+    elif value is not None and not isinstance(value, (str, int, bool)):
+        raise SessionTruthContractError(
+            f"{label} contains a non-JSON value of type {type(value).__name__}"
+        )
+
+
+def canonical_json(value: object) -> str:
+    """Return stable compact JSON suitable for semantic hashing.
+
+    Serialization is strict: non-finite numbers, non-string mapping keys and
+    non-JSON values raise :class:`SessionTruthContractError` rather than being
+    coerced or emitted as non-RFC JSON.
+    """
+
+    _ensure_json_tree(value, "value")
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise SessionTruthContractError(
+            f"value is not strict-JSON serializable: {exc}"
+        ) from exc
 
 
 def semantic_hash(value: object) -> str:
@@ -175,6 +229,13 @@ def _validate_skillpack(raw: Any) -> None:
         )
 
 
+def _records_digest(value: Any, label: str) -> None:
+    if not valid_source_records_digest(value):
+        raise SessionTruthContractError(
+            f"{label} must be an exact sha256:<64 lowercase hex> digest"
+        )
+
+
 def _validate_source(raw: Any, label: str) -> None:
     source = _mapping(raw, label)
     available = _availability(source, label)
@@ -184,6 +245,23 @@ def _validate_source(raw: Any, label: str) -> None:
             raise SessionTruthContractError("agentos.source_sha is required when available")
         if source_sha is not None:
             _sha(source_sha, "agentos.source_sha")
+        # Agent OS interior values are owner passthrough: bound them to strict
+        # JSON up front and validate any present owner record digest exactly.
+        state = source.get("state")
+        _ensure_json_tree(state, "agentos.state")
+        if isinstance(state, Mapping) and "source_records_digest" in state:
+            _records_digest(
+                state["source_records_digest"], "agentos.state.source_records_digest"
+            )
+        contexts = source.get("contexts")
+        _ensure_json_tree(contexts, "agentos.contexts")
+        if isinstance(contexts, list):
+            for index, context in enumerate(contexts):
+                if isinstance(context, Mapping) and "source_records_digest" in context:
+                    _records_digest(
+                        context["source_records_digest"],
+                        f"agentos.contexts[{index}].source_records_digest",
+                    )
 
 
 def validate_input_document(doc: Mapping[str, Any]) -> dict[str, Any]:
