@@ -894,6 +894,7 @@ def test_service_wires_fixed_root_caddy_artifact_boundary(monkeypatch, tmp_path)
     ]) == 0
 
     collector = captured["collector"]
+    assert collector.repo_root == server._RELEASE_ROOT
     assert collector.active_builds_path == remote.ACTIVE_BUILDS_ARTIFACT
     assert collector.active_builds_directory_owner_uid == 0
     assert collector.active_builds_owner_uid == 0

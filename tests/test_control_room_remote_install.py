@@ -225,6 +225,188 @@ def _stage_release(repo: Path, commit: str, tree: str, destination: Path, *, env
     )
 
 
+def _probe_entrypoint_identity(
+    entrypoint: Path,
+    *,
+    repo_root: Path,
+    build_metadata: Path,
+    expected_commit: str,
+    redirect_repo_root_to: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Load the exact installed entrypoint under isolated Python and attest it."""
+
+    harness = r"""
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+
+entrypoint = Path(sys.argv[1])
+repo_root = Path(sys.argv[2])
+build_metadata = Path(sys.argv[3])
+expected_commit = sys.argv[4]
+spec = importlib.util.spec_from_file_location("installed_control_room_entrypoint", entrypoint)
+if spec is None or spec.loader is None:
+    raise SystemExit("entrypoint_import_unavailable")
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+if len(sys.argv) == 6:
+    repo_root.unlink()
+    repo_root.symlink_to(Path(sys.argv[5]))
+try:
+    identity = module._load_build_identity(
+        repo_root, build_metadata, expected_commit
+    )
+except RuntimeError as exc:
+    print(getattr(exc.__cause__, "code", "unknown_release_error"))
+    raise SystemExit(65)
+print(json.dumps({
+    "artifact_digest": identity.artifact_digest,
+    "commit": identity.commit,
+    "tree": identity.tree,
+}, sort_keys=True))
+"""
+    argv = [
+        sys.executable,
+        "-I",
+        "-B",
+        "-c",
+        harness,
+        os.fspath(entrypoint),
+        os.fspath(repo_root),
+        os.fspath(build_metadata),
+        expected_commit,
+    ]
+    if redirect_repo_root_to is not None:
+        argv.append(os.fspath(redirect_repo_root_to))
+    return subprocess.run(
+        argv,
+        cwd=entrypoint.parents[2],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+
+def _stage_installed_release(tmp_path: Path) -> tuple[Path, Path, Path, str, str]:
+    source = tmp_path / "runtime-source"
+    commit, tree = _copy_runtime_source_repo(source)
+    installation = tmp_path / "installed"
+    releases = installation / "releases"
+    releases.mkdir(parents=True)
+    release = releases / commit
+    staged = _stage_release(source, commit, tree, release)
+    assert staged.returncode == 0, staged.stderr
+    current = installation / "current"
+    current.symlink_to(Path("releases") / commit)
+    return installation, release, current, commit, tree
+
+
+def _clone_release_with_identity(
+    source: Path, destination: Path, *, commit: str, tree: str
+) -> None:
+    shutil.copytree(source, destination)
+    metadata = destination / remote.BUILD_METADATA_FILENAME
+    metadata.unlink()
+    manifest = remote.build_release_manifest(destination, commit=commit, tree=tree)
+    remote.write_release_manifest(metadata, manifest)
+
+
+def test_installed_current_symlink_launch_attests_the_immutable_release(tmp_path):
+    _installation, release, current, commit, tree = _stage_installed_release(tmp_path)
+    metadata = current / remote.BUILD_METADATA_FILENAME
+
+    # The low-level verifier's no-symlink law remains security-load-bearing.
+    with pytest.raises(remote.ReleaseError) as exc:
+        remote.verify_release_identity(
+            current, expected_commit=commit, build_metadata=metadata
+        )
+    assert exc.value.code == "release_root_invalid"
+
+    result = _probe_entrypoint_identity(
+        current / "scripts/chairman_control_room_remote.py",
+        repo_root=current,
+        build_metadata=metadata,
+        expected_commit=commit,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "artifact_digest": json.loads(
+            (release / remote.BUILD_METADATA_FILENAME).read_text(encoding="utf-8")
+        )["artifact_digest"],
+        "commit": commit,
+        "tree": tree,
+    }
+
+
+def test_entrypoint_refuses_repo_root_for_a_different_release(tmp_path):
+    installation, release, _current, _commit, _tree = _stage_installed_release(
+        tmp_path
+    )
+    other_commit = "c" * 40
+    other_tree = "d" * 40
+    other_release = installation / "releases" / other_commit
+    _clone_release_with_identity(
+        release, other_release, commit=other_commit, tree=other_tree
+    )
+
+    result = _probe_entrypoint_identity(
+        release / "scripts/chairman_control_room_remote.py",
+        repo_root=other_release,
+        build_metadata=other_release / remote.BUILD_METADATA_FILENAME,
+        expected_commit=other_commit,
+    )
+
+    assert result.returncode == 65
+    assert result.stdout.strip() == "release_root_mismatch"
+
+
+def test_entrypoint_refuses_metadata_from_a_different_release(tmp_path):
+    installation, release, _current, commit, _tree = _stage_installed_release(
+        tmp_path
+    )
+    other_release = installation / "releases" / ("c" * 40)
+    _clone_release_with_identity(
+        release, other_release, commit="c" * 40, tree="d" * 40
+    )
+
+    result = _probe_entrypoint_identity(
+        release / "scripts/chairman_control_room_remote.py",
+        repo_root=release,
+        build_metadata=other_release / remote.BUILD_METADATA_FILENAME,
+        expected_commit=commit,
+    )
+
+    assert result.returncode == 65
+    assert result.stdout.strip() == "build_metadata_path_mismatch"
+
+
+def test_entrypoint_refuses_current_symlink_redirected_after_import(tmp_path):
+    installation, release, current, _commit, _tree = _stage_installed_release(
+        tmp_path
+    )
+    other_commit = "c" * 40
+    other_tree = "d" * 40
+    other_release = installation / "releases" / other_commit
+    _clone_release_with_identity(
+        release, other_release, commit=other_commit, tree=other_tree
+    )
+
+    result = _probe_entrypoint_identity(
+        current / "scripts/chairman_control_room_remote.py",
+        repo_root=current,
+        build_metadata=current / remote.BUILD_METADATA_FILENAME,
+        expected_commit=other_commit,
+        redirect_repo_root_to=Path("releases") / other_commit,
+    )
+
+    assert result.returncode == 65
+    assert result.stdout.strip() == "release_root_mismatch"
+
+
 def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_path):
     source = tmp_path / "runtime-source"
     commit, tree = _copy_runtime_source_repo(source)
