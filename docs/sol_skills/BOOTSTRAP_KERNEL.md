@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.0.1
 minimum_bootstrap_major: 1
 skill: bootstrap_kernel
 ---
@@ -32,6 +32,8 @@ For substantial Mastermind work:
 11. Never create a duplicate lifecycle, queue, identity, memory, grounding, retry or control plane.
 12. Green CI, merge, Slack delivery and QUEUED admission are distinct from execution, production proof and final acceptance.
 13. After material work, update the correct durable records so the next fresh session does not need this chat to recover the ruling.
+14. In watcher-enabled Sol/worker dialogue, every return receives an explicit CONTINUE or terminal STOP in the same lawful carrier. Silence is never terminal; terminal STOP closes that watcher cycle and any independent next wave requires fresh authorization/setup.
+15. Fable is scarce principal capacity, not the default worker. Route each bounded mission to the cheapest/least-scarce worker that can reliably meet the required quality, and record WHY NOT FABLE or WHY FABLE for every meaningful commission.
 ```
 
 ## Project configuration law
