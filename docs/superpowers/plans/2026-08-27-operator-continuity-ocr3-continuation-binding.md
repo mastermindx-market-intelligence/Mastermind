@@ -2,201 +2,146 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give a newly claimed Operator Harness Attempt a deterministic, source-grounded continuation packet and derive the exact current Wake `RuntimeBinding` from existing Executive/Operator Harness state without creating another session or memory store.
+**Goal:** Give a newly claimed Operator Harness Attempt one immutable, source-grounded continuation capsule and derive its exact current Wake `RuntimeBinding` from existing Executive/Operator Harness state without creating another session, retry or memory store.
 
-**Architecture:** Add a pure closed `mastermind.operator_continuation.v1` contract plus a runtime projection module. The capsule is rebuilt from typed Executive facts and exact external source references, hashed canonically, and supplied transiently to the provider adapter. Preparation/ACK evidence is appended only to the existing Executive Event table. RuntimeBinding is derived from the current session epoch/process generation/provider session + accepted placement evidence; no new SQLite table or Git configuration is introduced.
+**Architecture:** Split continuation into a pure `OperatorContinuationDraft` containing semantic current-source material and a finalized `OperatorContinuation` whose `generated_at` and `capsule_id` are minted atomically by the fenced Executive PREPARE transaction. The existing Executive Event table is the idempotency authority: one target Attempt gets at most one prepared capsule, and every retry/reconciliation reuses those exact bytes. RuntimeBinding remains a read-only projection of the current OHF epoch/generation/provider session + accepted placement evidence; no new SQLite table or Git runtime registry is introduced.
 
-**Tech Stack:** Python 3.12, existing `control_plane.executive_runtime`, `control_plane.operator_harness_contract`, `control_plane.session_targets.RuntimeBinding`, canonical JSON/SHA-256, pytest.
+**Tech Stack:** Python 3.12, existing `control_plane.executive_runtime`, `control_plane.operator_harness_contract`, `control_plane.executive_operator_harness_port`, `control_plane.session_targets.RuntimeBinding`, canonical JSON/SHA-256, pytest.
 
-**Spec:** `docs/superpowers/specs/2026-08-27-operator-continuity-realm-rebinding-design.md`
+**Specs:**
+- `docs/superpowers/specs/2026-08-27-operator-continuity-realm-rebinding-design.md`
+- `docs/superpowers/specs/2026-08-27-operator-continuation-idempotency-amendment.md`
 
 ## Global Constraints
 
-- This wave starts only after active Wake PR #174 no longer owns a colliding `session_targets.py`/RuntimeBinding surface. Do not edit #174's branch or widen its completion law.
-- No new SQLite table, session database, memory/RAG store, replay cursor, queue or scheduler.
-- `capsule_id` is deterministic over a closed contract. Provider/model prose cannot alter source identities, Attempt IDs, authority digest or Slack/GitHub/Agent OS refs.
-- The capsule contains references and bounded checkpoint/current-action material, not credentials, raw Slack history, full Agent OS databases or hidden provider transcripts.
-- A cross-realm provider/account/placement change is already a new Attempt before this wave runs.
-- Continuation ACK is evidence that the target provider session consumed the exact capsule; it is not Job completion or Wake `TARGET_ACKNOWLEDGED` unless a separately accepted Wake ingress establishes that mapping.
-- `RuntimeBinding` stays a projection. Native handles/account labels remain runtime evidence and must not be checked into `config/wake_session_targets.json`.
+- Do not start colliding RuntimeBinding/session-target implementation while active Wake PR #174 owns the same source path. Reconcile/merge/rebase rather than editing #174's carrier.
+- No new SQLite table, capsule cache/file, session database, memory/RAG store, replay cursor, retry registry, queue or scheduler.
+- External caller/model/adapter/Slack/OpenClaw may not author `generated_at` or `capsule_id`.
+- `build_current_continuation_draft()` returns semantic draft material only. Finalization and durable PREPARE happen together under the current target Attempt lease/fence.
+- One target Attempt has at most one `OPERATOR_CONTINUATION_PREPARED`. Same semantic replay returns byte-identical finalized capsule; changed semantic draft or provider session conflicts.
+- Before PREPARE, source facts may move and the draft may be rebuilt. After PREPARE, source movement never mutates the prepared capsule; if it invalidates safety/authority, refuse/cancel/reconcile the target Attempt rather than preparing capsule #2.
+- The capsule contains bounded canonical refs/checkpoint/current-action material, not credentials, raw provider transcripts, raw Slack history or complete Agent OS databases.
+- Cross-realm provider/account/placement change has already created a new Attempt before this wave prepares continuation.
+- Continuation ACK proves the exact bound provider session accepted/consumed the exact prepared continuation-bearing turn. It is not Job completion and not automatically Wake `TARGET_ACKNOWLEDGED`.
+- `RuntimeBinding` stays a projection. Native handles/account labels remain runtime evidence and never enter `config/wake_session_targets.json`.
 
 ---
 
-### Task 1: Freeze the continuation wire contract
+### Task 1: Implement closed draft, finalized capsule and ACK contracts
 
 **Files:**
 - Create: `control_plane/operator_continuation.py`
-- Test: `tests/test_operator_continuation.py`
+- Create: `tests/test_operator_continuation.py`
 
 **Interfaces:**
-- Produces: `OPERATOR_CONTINUATION_SCHEMA`, `OperatorContinuation`, `ContinuationAck`, `build_continuation()`, `validate_continuation()`, `validate_continuation_ack()`.
+- Produces: `OPERATOR_CONTINUATION_SCHEMA`, `OPERATOR_CONTINUATION_ACK_SCHEMA`, `OperatorContinuationDraft`, `OperatorContinuation`, `ContinuationAck`, `semantic_draft_digest()`, `finalize_continuation()`, `validate_continuation()`, `validate_continuation_ack()`.
+- `finalize_continuation()` is pure but accepts `generated_at` only from the trusted Executive PREPARE implementation; it is not exposed as the normal current-source builder API.
 
-- [ ] **Step 1: Write failing closed-shape/digest tests**
+- [ ] **Step 1: Write RED-first draft/finalized closed-shape tests**
 
-```python
-from control_plane.operator_continuation import (
-    OPERATOR_CONTINUATION_SCHEMA,
-    build_continuation,
-    validate_continuation,
-)
+Draft semantic fields are exactly:
 
+```text
+root_job_id
+job_id
+source_attempt_id
+target_attempt_id
+operation_key
+target_seat
+session_alias
+effective_grant_digest
+source_authority_refs
+agentos_refs
+github_state
+prior_attempt_receipt
+checkpoint
+slack_dialogue_ref
+accepted_ruling_refs
+next_action
+known_unknowns
+source_revisions
+```
 
-def _base():
-    return {
-        "root_job_id": "JOB-001",
-        "job_id": "JOB-004",
-        "source_attempt_id": "ATT-source",
-        "target_attempt_id": "ATT-target",
-        "operation_key": "operator-continuity-example-001",
-        "target_seat": "coo",
-        "session_alias": "EXECUTIVE-COO-A",
-        "effective_grant_digest": "a" * 64,
-        "source_authority_refs": ["github:Mastermind@" + "b" * 40],
-        "agentos_refs": ["WS:EXECUTIVE-CAPACITY-FABRIC"],
-        "github_state": {
-            "repository": "mastermindx-market-intelligence/Mastermind",
-            "base_sha": "c" * 40,
-            "head_sha": "d" * 40,
-            "branch": "sol/example",
-            "pr": 999,
-        },
-        "prior_attempt_receipt": {
-            "status": "RATE_LIMITED",
-            "attempt_id": "ATT-source",
-        },
-        "checkpoint": {
-            "summary": "bounded",
-            "completed_steps": [],
-            "current_state": "ready",
-            "artifacts": [],
-            "next_actions": ["continue bounded work"],
-            "errors": [],
-        },
-        "slack_dialogue_ref": {
-            "channel_id": "C0BSBM78V1N",
-            "thread_ts": "1787871000.000001",
-            "session_ref": "asd-session-example01",
-        },
-        "accepted_ruling_refs": [],
-        "next_action": "continue bounded work",
-        "known_unknowns": [],
-        "generated_at": "2026-08-27T23:30:00Z",
-        "source_revisions": {
-            "mastermind": "e" * 40,
-            "macro": "f" * 40,
-        },
-    }
+Draft rejects `generated_at`, `capsule_id`, provider account labels, native session ids other than the separately bound current provider session, unknown fields and secret-shaped leaves.
 
+Finalized wire adds only:
 
-def test_capsule_is_closed_and_digest_is_deterministic():
-    first = build_continuation(_base())
-    second = build_continuation(_base())
-    assert first == second
-    assert first["schema"] == OPERATOR_CONTINUATION_SCHEMA
-    assert len(first["capsule_id"]) == 64
-    assert validate_continuation(first) == first
-
-
-def test_unknown_field_refuses():
-    value = build_continuation(_base())
-    value["provider_account"] = "claude5"
-    with pytest.raises(ContinuationError, match="CONTINUATION_INVALID"):
-        validate_continuation(value)
+```text
+schema = mastermind.operator_continuation.v1
+generated_at
+capsule_id
 ```
 
 - [ ] **Step 2: Run RED**
 
-Run: `pytest -q tests/test_operator_continuation.py`
-
-- [ ] **Step 3: Implement strict canonical JSON + validators**
-
-Use a closed top-level shape exactly matching the spec. Validate:
-
-- bounded IDs and strings;
-- lowercase SHA-256 grant/capsule digests;
-- full Git object IDs;
-- target seat in `chairman|ceo|coo`;
-- bounded unique reference arrays;
-- strict UTC timestamp;
-- no control characters;
-- secret-shaped-value rejection using the same families already used by Agent Relay tests.
-
-`capsule_id` is:
-
-```python
-sha256(canonical_json({all fields except capsule_id}).encode()).hexdigest()
+```bash
+pytest -q tests/test_operator_continuation.py
 ```
 
-- [ ] **Step 4: Add ACK contract tests and implementation**
+- [ ] **Step 3: Implement canonical validation and semantic digest**
 
-Closed ACK wire:
+Use strict closed JSON, bounded IDs/strings, strict UTC, full Git object ids, lowercase SHA-256 digests, bounded unique refs, no control characters and the existing secret-shaped-value families.
+
+```python
+def semantic_draft_digest(draft: OperatorContinuationDraft) -> str:
+    return sha256(canonical_json(draft.to_dict()).encode("utf-8")).hexdigest()
+```
+
+- [ ] **Step 4: Implement trusted finalization**
+
+```python
+def finalize_continuation(
+    draft: OperatorContinuationDraft,
+    *,
+    generated_at: str,
+) -> OperatorContinuation:
+    final_without_id = {
+        "schema": OPERATOR_CONTINUATION_SCHEMA,
+        **draft.to_dict(),
+        "generated_at": generated_at,
+    }
+    capsule_id = sha256(canonical_json(final_without_id).encode("utf-8")).hexdigest()
+    return OperatorContinuation.from_dict({**final_without_id, "capsule_id": capsule_id})
+```
+
+Tests prove same draft + same Executive timestamp gives exact bytes/id and any semantic field change changes the semantic digest.
+
+- [ ] **Step 5: Implement closed ACK validation**
+
+ACK wire:
 
 ```python
 {
     "schema": "mastermind.operator_continuation_ack.v1",
     "target_attempt_id": "ATT-target",
-    "capsule_id": "<64 hex>",
+    "capsule_id": "<64hex>",
     "provider_session_id": "provider-session-opaque",
     "accepted": True,
 }
 ```
 
-Reject wrong Attempt, wrong capsule, blank provider session and `accepted != True` at the admission layer.
+Reject wrong/blank Attempt, capsule, session or `accepted != True`.
 
-- [ ] **Step 5: Run tests and compile**
-
-Run:
+- [ ] **Step 6: Run tests/compile and commit**
 
 ```bash
 pytest -q tests/test_operator_continuation.py
 python3 -m compileall -q control_plane/operator_continuation.py
-```
 
-- [ ] **Step 6: Commit**
-
-```bash
 git add control_plane/operator_continuation.py tests/test_operator_continuation.py
-git commit -m "feat(exec): add operator continuation contract"
+git commit -m "feat(exec): add idempotent continuation contracts"
 ```
 
 ---
 
-### Task 2: Build a capsule only from typed current Executive facts
+### Task 2: Build semantic drafts only from current typed canonical sources
 
 **Files:**
 - Create: `control_plane/operator_continuation_sources.py`
+- Create: `tests/test_operator_continuation_sources.py`
 - Modify: `tests/test_operator_continuation.py`
-- Test: `tests/test_operator_continuation_sources.py`
 
 **Interfaces:**
-- Consumes: `Runtime`, exact source/target Job + Attempt ids, typed external reference bundle.
-- Produces: `build_current_continuation(runtime, request) -> dict[str, Any]`.
-
-- [ ] **Step 1: Write failing fixture-runtime tests**
-
-The test must create a Runtime fixture with:
-
-1. one Job with attempt limit >=2;
-2. Attempt 1 terminal `RATE_LIMITED` with a checkpoint;
-3. the Job requeued;
-4. Attempt 2 claimed on a different worker/account label;
-5. a request naming Attempt 1 as source and Attempt 2 as target.
-
-Assert the builder refuses when:
-
-- source Attempt is not terminal;
-- target Attempt is not current;
-- both Attempts belong to different Jobs;
-- target Attempt reuses the same account while caller claims a cross-realm move only in prose;
-- effective grant digest is absent for an orchestration Attempt;
-- supplied GitHub head/base refs are malformed;
-- external source revisions are missing.
-
-- [ ] **Step 2: Run RED**
-
-Run: `pytest -q tests/test_operator_continuation_sources.py`
-
-- [ ] **Step 3: Implement typed request + Runtime reads**
 
 ```python
 @dataclass(frozen=True)
@@ -212,106 +157,87 @@ class ContinuationExternalRefs:
     source_revisions: Mapping[str, str]
 
 
-def build_current_continuation(
+def build_current_continuation_draft(
     runtime: Runtime,
     *,
     source_attempt_id: str,
     target_attempt_id: str,
     refs: ContinuationExternalRefs,
-    generated_at: str,
-) -> dict[str, Any]:
+) -> OperatorContinuationDraft:
     ...
 ```
 
-Use existing `JobPayload` checkpoint material directly. Do not invent a summary when the prior checkpoint lacks one; represent missing material truthfully.
+No timestamp/capsule id parameter is accepted.
 
-- [ ] **Step 4: Prove stale source facts refuse**
+- [ ] **Step 1: Write RED-first Runtime fixture tests**
 
-After building a request, mutate the target Job/Attempt fixture so it is no longer current. A second build must refuse rather than return the old capsule.
+Create one Job with attempt limit >=2; Attempt 1 terminal `RATE_LIMITED` with checkpoint; requeue; Attempt 2 current on a different Worker/account placement. Build a draft P1 -> P2.
 
-- [ ] **Step 5: Run tests**
+Refuse when source Attempt is nonterminal, target is noncurrent, Jobs differ, cross-realm claim is false, effective grant is absent where required, Git refs/source revisions malformed or missing, or an external ref attempts to carry provider credential/session authority.
 
-Run:
+- [ ] **Step 2: Run RED**
+
+```bash
+pytest -q tests/test_operator_continuation_sources.py
+```
+
+- [ ] **Step 3: Implement current Runtime reads**
+
+Use existing typed Job/Attempt/checkpoint/placement/grant records. `prior_attempt_receipt` is a closed machine-derived status/identity receipt; do not copy arbitrary provider error prose. `checkpoint` uses existing `JobPayload` material truthfully, including null/empty state when absent.
+
+- [ ] **Step 4: Prove pre-PREPARE source movement rebuilds the draft**
+
+Change a material source ref before PREPARE and require a different semantic draft digest. Change target currentness/authority and require refusal. No durable event is written by draft building.
+
+- [ ] **Step 5: Run tests and commit**
 
 ```bash
 pytest -q tests/test_operator_continuation.py tests/test_operator_continuation_sources.py
-```
 
-- [ ] **Step 6: Commit**
-
-```bash
 git add control_plane/operator_continuation_sources.py tests/test_operator_continuation.py tests/test_operator_continuation_sources.py
-git commit -m "feat(exec): derive continuation from current runtime facts"
+git commit -m "feat(exec): derive continuation draft from current facts"
 ```
 
 ---
 
-### Task 3: Derive RuntimeBinding from the current Operator Harness writer
+### Task 3: Derive ABA-safe RuntimeBinding from the current OHF writer
 
 **Files:**
 - Create: `control_plane/runtime_binding_projection.py`
-- Modify: `control_plane/executive_runtime.py` only to add a read-only typed query if no current public query can provide the exact active epoch/generation/principal facts.
-- Test: `tests/test_runtime_binding_projection.py`
+- Modify: `control_plane/executive_runtime.py` only if one read-only typed query is required.
+- Create: `tests/test_runtime_binding_projection.py`
 
 **Interfaces:**
-- Consumes: current active OPERATOR_HARNESS Attempt + accepted logical `SessionTarget`.
-- Produces: `project_runtime_binding(runtime, attempt_id, target) -> RuntimeBinding`.
+- Produces: `ActiveOperatorBindingFacts` (if needed) and `project_runtime_binding(runtime, attempt_id, target) -> RuntimeBinding`.
 
-- [ ] **Step 1: Write failing projection tests**
+- [ ] **Step 1: Write RED-first projection tests**
 
-Create a fixture Attempt with one CURRENT epoch, one current writer generation, bound `provider_session_id`, accepted placement/account label and reasoning surface.
+Fixture has one current active OPERATOR_HARNESS Attempt, one CURRENT epoch, one Executive writer generation, bound `provider_session_id` and accepted placement/account/provider evidence.
 
-Expected:
+Require projected:
 
-```python
-binding = project_runtime_binding(runtime, attempt_id=attempt_id, target=target)
-assert binding.session_alias == target.session_alias
-assert binding.native_handle == "provider-session-1"
-assert binding.account_label == "claude-pro-02"
-assert binding.binding_generation == 1
-assert binding.binding_id.startswith("bind-")
+```text
+session_alias = target.session_alias
+native_handle = current provider_session_id
+account_label = accepted placement account_label
+binding_generation = current process generation_number
+binding_id = deterministic opaque bind-* derived from Attempt + session_epoch identity
+reasoning_surface = target/current accepted provider surface
 ```
 
-Also assert refusal for:
-
-- multiple/no current writers;
-- epoch not CURRENT;
-- provider session unbound;
-- Attempt not current/active;
-- target seat/reasoning surface inconsistent with placement;
-- missing placement/account evidence;
-- non-OHF Attempt.
+Refuse no/multiple writers, noncurrent epoch/Attempt, unbound provider session, missing placement/principal evidence, seat/surface mismatch, or non-OHF Attempt.
 
 - [ ] **Step 2: Run RED**
 
-Run: `pytest -q tests/test_runtime_binding_projection.py`
-
-- [ ] **Step 3: Add one read-only registry query if required**
-
-Preferred shape:
-
-```python
-@dataclass(frozen=True)
-class ActiveOperatorBindingFacts:
-    attempt_id: str
-    worker_id: str
-    session_epoch_id: str
-    process_generation_id: str
-    generation_number: int
-    provider_session_id: str
-    provider: str
-    account_label: str
-
-
-def active_binding_facts(self, attempt_id: str) -> ActiveOperatorBindingFacts:
-    ...
+```bash
+pytest -q tests/test_runtime_binding_projection.py
 ```
 
-The query runs under `store.read()` and derives exactly one current writer. It writes no state.
+- [ ] **Step 3: Add a read-only exact-current query only if needed**
 
-- [ ] **Step 4: Implement ABA-safe projection**
+Any new Runtime method uses `store.read()` only and returns the one current OHF epoch/generation plus already-accepted provider/account placement facts. It may not persist RuntimeBinding.
 
-Derive:
+- [ ] **Step 4: Implement ABA-safe binding id**
 
 ```python
 binding_id = "bind-" + sha256(
@@ -319,155 +245,146 @@ binding_id = "bind-" + sha256(
 ).hexdigest()[:40]
 ```
 
-Use `generation_number` as `binding_generation` and `provider_session_id` as `native_handle`. The session epoch is UUID-based Executive identity, so a restarted/new epoch cannot reuse the old binding ID.
+Same epoch/process replacement -> same binding id, higher generation. New epoch or Attempt -> different binding id. Illegal provider-session drift -> refuse.
 
-- [ ] **Step 5: Mutation tests**
-
-Change only the process generation: same binding ID, higher generation. Change the session epoch or Attempt: different binding ID. Change provider session without a legal Executive transition: query/projection must refuse.
-
-- [ ] **Step 6: Run relevant suites**
+- [ ] **Step 5: Run regression/commit**
 
 ```bash
 pytest -q tests/test_runtime_binding_projection.py tests/test_operator_harness_contract.py tests/test_executive_runtime.py
-```
 
-- [ ] **Step 7: Commit**
-
-```bash
 git add control_plane/runtime_binding_projection.py control_plane/executive_runtime.py tests/test_runtime_binding_projection.py
-git commit -m "feat(exec): project Wake runtime binding from Operator Harness"
+git commit -m "feat(exec): project Wake binding from Operator Harness"
 ```
 
 ---
 
-### Task 4: Persist preparation and ACK only through the existing Executive Event plane
+### Task 4: Make Executive PREPARE the sole continuation identity/idempotency authority
 
 **Files:**
 - Modify: `control_plane/executive_runtime.py`
 - Modify: `control_plane/executive_operator_harness_port.py`
 - Modify: `control_plane/operator_continuation.py`
-- Test: `tests/test_operator_continuation_events.py`
+- Create: `tests/test_operator_continuation_events.py`
 
 **Interfaces:**
-- Produces: `prepare_operator_continuation(...)` and `acknowledge_operator_continuation(...)` on the existing Attempt-bound port.
-- No new SQLite schema object.
+- Produces on the Attempt-bound port:
 
-- [ ] **Step 1: Write failing Event-plane tests**
+```python
+prepare_operator_continuation(
+    attempt_id: str,
+    draft: OperatorContinuationDraft,
+) -> OperatorContinuation
 
-Preparation event:
-
-```text
-event_type = OPERATOR_CONTINUATION_PREPARED
-aggregate_type = attempt
-aggregate_id = target_attempt_id
-attempt_id = target_attempt_id
-payload = {
-  schema_version,
-  capsule_id,
-  source_attempt_id,
-  provider_session_id
-}
+acknowledge_operator_continuation(
+    attempt_id: str,
+    ack: ContinuationAck,
+) -> None
 ```
 
-ACK event:
+- [ ] **Step 1: Write RED-first PREPARE replay tests**
+
+PREPARE requires the active target Attempt lease/fence, exact current provider session and canonical source/target facts. Its deterministic command id is:
 
 ```text
-event_type = OPERATOR_CONTINUATION_ACKNOWLEDGED
-aggregate_type = attempt
-aggregate_id = target_attempt_id
-attempt_id = target_attempt_id
-payload = {
-  schema_version,
-  capsule_id,
-  provider_session_id
-}
+operator-continuation:prepare:<target_attempt_id>
 ```
 
-Require exactly one semantic preparation and one exact ACK. Same capsule replay is idempotent; changed capsule/provider session conflicts.
+subject to current command-id law.
 
-- [ ] **Step 2: Run RED**
+First PREPARE:
 
-Run: `pytest -q tests/test_operator_continuation_events.py`
+1. re-read source terminal / target current / current provider session;
+2. revalidate the supplied semantic draft against current facts;
+3. mint `generated_at` from `RuntimeStore.now_ms()`;
+4. finalize capsule and semantic digest;
+5. append exactly one `OPERATOR_CONTINUATION_PREPARED` Event.
 
-- [ ] **Step 3: Implement fenced registry mutations**
+PREPARED event payload contains the complete bounded finalized capsule plus at least explicit semantic digest/provider session fields so exact reconstruction is possible without a new store.
 
-Both calls must use the active Attempt lease/fence. Preparation requires:
+- [ ] **Step 2: Prove byte-identical replay**
 
-- target Attempt is current and RUNNING/CHECKPOINTED;
-- current Operator Harness generation is admitted/attested;
-- capsule target Attempt matches;
-- capsule provider session is not model-authored and is matched against the current binding.
+Call PREPARE twice with same target Attempt, same semantic draft and same current provider session. Require:
 
-ACK additionally validates `ContinuationAck` against the prepared capsule and current provider session.
+```text
+returned canonical bytes identical
+capsule_id identical
+generated_at identical
+exactly one PREPARED Event
+```
 
-- [ ] **Step 4: Prove zero schema/table change**
+- [ ] **Step 3: Prove conflicts refuse capsule #2**
 
-Test `sqlite_master` before/after and assert identical schema digest. Events are the only durable addition.
+Same target Attempt + changed semantic draft, source Attempt, authority/source ref or provider session -> conflict/reconciliation. No new PREPARED event and no new capsule id.
 
-- [ ] **Step 5: Run runtime + port suites**
+- [ ] **Step 4: Implement deterministic ACK Event**
+
+ACK command id derives from target Attempt. It validates exact prepared capsule + exact current provider session. Matching replay is idempotent; changed capsule/session conflicts. Event is `OPERATOR_CONTINUATION_ACKNOWLEDGED` and does not mutate Job completion/Wake ACK.
+
+- [ ] **Step 5: Prove zero schema change**
+
+Compare SQLite schema digest before/after. Existing Event rows are the only durable addition.
+
+- [ ] **Step 6: Run Runtime/port tests and commit**
 
 ```bash
 pytest -q tests/test_operator_continuation_events.py tests/test_executive_runtime.py tests/test_executive_operator_harness_port.py
+
+git add control_plane/executive_runtime.py control_plane/executive_operator_harness_port.py control_plane/operator_continuation.py tests/test_operator_continuation_events.py
+git commit -m "feat(exec): prepare continuation in Executive event plane"
+```
+
+---
+
+### Task 5: End-to-end hermetic two-Attempt preparation, binding and ACK proof
+
+**Files:**
+- Create: `tests/test_operator_continuation_integration.py`
+
+- [ ] **Step 1: Build the fixture**
+
+Create two workers/account labels, one Job with attempt limit >=2, P1 terminal `RATE_LIMITED` with checkpoint, requeue, P2 claim on other placement, then create/bind/attest one current OHF P2 session.
+
+- [ ] **Step 2: Assert the positive chain**
+
+```python
+draft = build_current_continuation_draft(...)
+capsule = port.prepare_operator_continuation(p2, draft)
+replay = port.prepare_operator_continuation(p2, build_current_continuation_draft(...))
+binding = project_runtime_binding(...)
+assert replay == capsule
+assert binding.account_label == second_account
+```
+
+Simulate exact first provider turn acceptance carrying the prepared capsule, then ACK and require exactly one PREPARED + one ACKNOWLEDGED Event.
+
+- [ ] **Step 3: Assert post-PREPARE source movement does not rewrite capsule**
+
+Move a Git/Agent OS reference after PREPARE. A new draft may differ, but PREPARE for the same P2 must conflict rather than update the existing capsule. If the source movement invalidates safety, the test uses existing cancel/reconcile law; no capsule mutation occurs.
+
+- [ ] **Step 4: Assert timeout/effect-uncertain dispatch reuses the same capsule**
+
+After PREPARE, simulate provider-dispatch uncertainty. The recovery path may reconcile/retry only with the exact prepared capsule identity/bytes for P2; it cannot mint another continuation.
+
+- [ ] **Step 5: Run focused/full relevant suite**
+
+```bash
+pytest -q \
+  tests/test_operator_continuation.py \
+  tests/test_operator_continuation_sources.py \
+  tests/test_operator_continuation_events.py \
+  tests/test_operator_continuation_integration.py \
+  tests/test_runtime_binding_projection.py \
+  tests/test_executive_operator_harness_port.py \
+  tests/test_executive_runtime.py
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add control_plane/executive_runtime.py control_plane/executive_operator_harness_port.py control_plane/operator_continuation.py tests/test_operator_continuation_events.py
-git commit -m "feat(exec): bind continuation ACK to existing Event plane"
+git add tests/test_operator_continuation_integration.py
+git commit -m "test(exec): prove idempotent two-Attempt continuation"
 ```
-
----
-
-### Task 5: End-to-end hermetic two-Attempt continuation proof
-
-**Files:**
-- Create: `tests/test_operator_continuation_integration.py`
-- Documentation update only if test exposes a real contract clarification.
-
-**Interfaces:**
-- Proves: old Attempt terminal -> requeue -> new Attempt/current realm -> capsule -> provider session -> ACK -> RuntimeBinding projection.
-
-- [ ] **Step 1: Build the integration fixture**
-
-Create two workers with distinct account labels, one Job with attempt limit >=2, Attempt 1 `RATE_LIMITED` with checkpoint, requeue, claim Attempt 2, then create/bind/attest one OHF session for Attempt 2.
-
-- [ ] **Step 2: Assert the complete positive chain**
-
-```python
-capsule = build_current_continuation(...)
-port.prepare_operator_continuation(...)
-binding = project_runtime_binding(...)
-port.acknowledge_operator_continuation(...)
-assert binding.account_label == second_account
-assert runtime.events contains exactly one PREPARED and one ACKNOWLEDGED event
-```
-
-- [ ] **Step 3: Assert adverse fences**
-
-Separate tests must kill these mutations:
-
-- source Attempt still active;
-- target Attempt from another Job;
-- target realm equals stale/wrong placement evidence;
-- wrong provider session ACK;
-- stale target Attempt after another claim;
-- duplicate changed capsule;
-- an existing `OPERATOR_OPERATION_EFFECT_UNKNOWN` on the source work path treated as safe rollover.
-
-The final adverse case must refuse before continuation preparation.
-
-- [ ] **Step 4: Run full focused suite + compile**
-
-```bash
-pytest -q tests/test_operator_continuation*.py tests/test_runtime_binding_projection.py
-python3 -m compileall -q control_plane
-```
-
-- [ ] **Step 5: Return for Sol review**
-
-Return exact head, changed paths, schema-digest proof, focused/full CI, no-new-table scan, hostile/mutation proof, and confirmation that no Wake/Slack/provider production action occurred.
 
 ## Stop Condition
 
-OCR-3 stops at `BUILT_NOT_PROVEN / PRODUCTION_INERT` after the hermetic two-Attempt continuation chain passes. It does not implement the Claude adapter, live provider call, cross-account selection, Worker Presence, Slack posting, Steward UI or MH1. Those are separately gated waves.
+OCR-3 stops at `BUILT_NOT_PROVEN / PRODUCTION_INERT` when one target Attempt can prepare exactly one immutable continuation capsule, exact replay returns identical bytes/id with one Event, changed semantics/session refuse, ACK binds the exact provider session/capsule, RuntimeBinding is derived ABA-safely from OHF state, and zero new lifecycle/session/memory store exists. OCR-3 does not perform provider placement, provider failover, Slack projection or production arming.
