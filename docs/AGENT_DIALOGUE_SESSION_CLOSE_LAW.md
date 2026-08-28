@@ -63,7 +63,23 @@ After a nonterminal return, a watcher-enabled worker/COO must enter the approved
 
 An approved continuation path may be the production-proven canonical Worker Presence / Turn-Watcher path, an accepted already-live exact-carrier waiter, or—while the canonical path is not production-proven—a temporary host-native Task/Automation/scheduled condition watcher that periodically reads the exact carrier. **A Slack connector lacking push/webhook subscriptions does not by itself make watching unavailable.** If the current reasoning surface can create a native scheduled/condition watcher that reads the exact thread, that is a lawful non-authoritative continuity bridge under the commission procedure.
 
-Before returning `WATCH_UNAVAILABLE`, the worker/session must check the applicable canonical watcher, any accepted live exact-carrier waiter and its own host-native scheduling/automation surface. If no path is usable, state which mechanisms were checked instead of disappearing or silently assuming Slack push capability is required.
+Watcher setup is a **bounded tool action**, not an architecture discussion. Use this order:
+
+```text
+1. canonical watcher PROVEN_LIVE? -> arm/use it now
+2. accepted live exact-carrier waiter exists? -> register/use it now
+3. otherwise inspect the current host tool surface once for Task/Automation/schedule/condition-watch
+   -> present: invoke its CREATE/ARM action now for the exact carrier/current operation
+   -> absent: return WATCH_UNAVAILABLE and name the checked surface
+   -> valid create call fails on permission/runtime/unavailability: return WATCH_UNAVAILABLE + exact error
+   -> schema/argument error: correct once and retry once, then return the exact failure
+```
+
+Do not end the turn saying the watcher is “planned,” “should be possible,” “needs Slack push,” or “is being investigated.” A successful registration produces the required `WATCH_ARMED` receipt. A concrete failed/absent capability produces `WATCH_UNAVAILABLE`. No third speculative setup loop.
+
+The temporary scheduled watcher must remain bounded to the exact current operation/carrier. On each run it reads that exact carrier using the scheduled surface's available connector/read capability, ignores the baseline and older messages, and reacts only to the first qualifying opposite-side reply for the current operation. If that scheduled execution surface cannot access the carrier at run time, report that concrete limitation; do not infer it merely from the interactive connector lacking push.
+
+Before returning `WATCH_UNAVAILABLE`, the worker/session must therefore reach an actual absent-tool or failed-create result under the sequence above. State which mechanism/surface was checked and the exact failure instead of disappearing.
 
 After receiving a nonterminal Sol continuation, the worker must reread the lawful thread/context, continue only the same authorized child operation, and re-arm its watcher after its next nonterminal return.
 
@@ -157,7 +173,7 @@ It does not by itself prove that every provider, Slack contract, managed-browser
 
 This law exists because a returned worker result was left waiting after Sol decided that final adjudication belonged to Sol and therefore sent no further message. The worker had correctly re-armed its watcher and remained indefinitely blocked on Sol silence.
 
-A later production incident exposed the reciprocal arming ambiguity: a session equated “Slack has no push subscription” with “watching is unavailable” even though its host surface could create a native scheduled watcher. That distinction is now explicit: transport push capability and host-native continuation watching are separate capabilities.
+A later production incident exposed the reciprocal arming ambiguity: a session equated “Slack has no push subscription” with “watching is unavailable” even though its host surface could create a native scheduled watcher. A second session then stalled while reasoning about how to create that watcher instead of invoking the available host-native create/arm path. The universal repair is tool-first and bounded: attempt the actual capability, then return a concrete receipt or failure.
 
 Universal repair:
 
