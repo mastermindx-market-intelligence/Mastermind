@@ -105,6 +105,40 @@ def test_auth_status_normalizes_only_native_subscription_selection():
     assert "NATIVE_AUTH_NOT_SELECTED" in not_native.reason_codes
 
 
+def test_native_login_managed_key_source_does_not_override_selected_native_auth():
+    module = _load()
+    normalized = module.normalize_auth_status(
+        {
+            "loggedIn": True,
+            "authMethod": "claude.ai",
+            "apiProvider": "firstParty",
+            "subscriptionType": None,
+            "apiKeySource": "/login managed key",
+        }
+    )
+    assert normalized == module.AuthObservation(
+        auth_ready=True,
+        auth_method="claudeai",
+        api_provider="first_party",
+        reason_codes=(),
+    )
+
+
+def test_unknown_selected_auth_values_fail_closed():
+    module = _load()
+    normalized = module.normalize_auth_status(
+        {
+            "loggedIn": True,
+            "authMethod": "future_auth_surface",
+            "apiProvider": "futureProvider",
+        }
+    )
+    assert normalized.auth_ready is False
+    assert normalized.auth_method == "non_native"
+    assert normalized.api_provider == "non_native"
+    assert normalized.reason_codes == ("NATIVE_AUTH_NOT_SELECTED",)
+
+
 def test_auth_status_fails_closed_on_unknown_wire_and_discards_pii():
     module = _load()
     with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
@@ -153,6 +187,118 @@ def test_auth_status_exit_one_is_logged_out_not_transport_failure(
         api_provider="unknown",
         reason_codes=("LOGIN_REQUIRED",),
     )
+
+
+def test_auth_status_rejects_malformed_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 0, stdout="not-json", stderr="provider prose"
+        ),
+    )
+    with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
+        module.observe_auth(binary)
+
+
+def test_auth_status_rejects_unexpected_nonzero_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv,
+            2,
+            stdout='{"loggedIn":false}',
+            stderr="provider failed with private@example.com",
+        ),
+    )
+    with pytest.raises(module.PreflightError, match="PROVIDER_COMMAND_FAILED") as exc:
+        module.observe_auth(binary)
+    assert "private@example.com" not in str(exc.value)
+
+
+def test_auth_status_timeout_is_typed_and_does_not_echo_provider_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+
+    def timeout(argv, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=argv,
+            timeout=kwargs.get("timeout", 1),
+            output="private@example.com",
+            stderr="sk-" + "x" * 30,
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", timeout)
+    with pytest.raises(module.PreflightError, match="PROVIDER_TIMEOUT") as exc:
+        module.observe_auth(binary)
+    assert "private@example.com" not in str(exc.value)
+    assert "sk-" not in str(exc.value)
+
+
+def test_auth_status_exit_code_must_match_logged_in_boolean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv,
+            1,
+            stdout='{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}',
+            stderr="",
+        ),
+    )
+    with pytest.raises(module.PreflightError, match="AUTH_STATUS_UNSUPPORTED"):
+        module.observe_auth(binary)
+
+
+def test_auth_status_discards_known_pii_and_raw_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    secretish = "Bearer " + "x" * 24
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=json.dumps(
+                {
+                    "loggedIn": True,
+                    "authMethod": "claude.ai",
+                    "apiProvider": "firstParty",
+                    "email": "private@example.com",
+                    "organization": "private-org",
+                }
+            ),
+            stderr=secretish,
+        ),
+    )
+    observed = module.observe_auth(binary)
+    rendered = repr(observed)
+    assert observed.auth_ready is True
+    assert "private@example.com" not in rendered
+    assert "private-org" not in rendered
+    assert secretish not in rendered
 
 
 def test_receipt_is_closed_secret_free_and_context_bound():
@@ -260,6 +406,12 @@ def test_binary_observation_is_size_bounded_before_execution(
     monkeypatch.setattr(module, "_run", provider_must_not_run)
     with pytest.raises(module.PreflightError, match="BINARY_INVALID"):
         module.observe_binary(binary)
+
+
+def test_missing_binary_is_typed_refusal(tmp_path: Path):
+    module = _load()
+    with pytest.raises(module.PreflightError, match="BINARY_UNAVAILABLE"):
+        module.observe_binary((tmp_path / "missing-claude").resolve())
 
 
 def test_host_and_principal_refs_fail_closed_instead_of_being_invented():
