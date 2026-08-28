@@ -538,6 +538,21 @@ def _reject_sensitive_values(value: Any) -> None:
         raise RemoteProjectionError("sensitive_value")
 
 
+def _project_agent_os_freeform(value: Any) -> str | None:
+    """Redact private prose while preserving the closed projection shape."""
+
+    accepted = _optional_string(value)
+    if accepted is None:
+        return None
+    try:
+        _reject_sensitive_values(accepted)
+    except RemoteProjectionError as exc:
+        if exc.code != "sensitive_value":
+            raise
+        return "agent_os_detail_redacted"
+    return accepted
+
+
 def _project_pr(value: Any) -> dict[str, Any]:
     row = _require_exact_keys(value, _PR_KEYS)
     url = _string(row["url"])
@@ -592,13 +607,13 @@ def _project_agent_os(value: Any) -> dict[str, Any] | None:
     row = _require_exact_keys(value, _AGENT_OS_KEYS)
     return {
         "workstream": _string(row["workstream"]),
-        "title": _optional_string(row["title"]),
+        "title": _project_agent_os_freeform(row["title"]),
         "status": _optional_string(row["status"]),
-        "program": _optional_string(row["program"]),
-        "next_action": _optional_string(row["next_action"]),
+        "program": _project_agent_os_freeform(row["program"]),
+        "next_action": _project_agent_os_freeform(row["next_action"]),
         "state": _optional_string(row["state"]),
         "reason_code": _optional_string(row["reason_code"]),
-        "reason": _optional_string(row["reason"]),
+        "reason": _project_agent_os_freeform(row["reason"]),
         "depends_on": _string_list(row["depends_on"]),
         "unmet_dependencies": _string_list(row["unmet_dependencies"]),
     }
