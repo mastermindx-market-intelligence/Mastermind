@@ -15,6 +15,7 @@ Read in this order for Operator Continuity work:
 4. Narrower compatibility amendments where their topic applies:
    - `docs/superpowers/specs/2026-08-27-operator-continuity-claude-auth-compatibility-amendment.md` — higher specificity for Claude auth/realm isolation.
    - `docs/superpowers/specs/2026-08-27-operator-continuity-fable-root-seat-amendment.md` — higher specificity for Fable/Phase 1F-C identity/retry/cardinality.
+   - `docs/superpowers/specs/2026-08-27-operator-continuation-idempotency-amendment.md` — higher specificity for one immutable prepared continuation capsule per target Attempt and Executive-minted timestamp/identity.
 5. Existing accepted owner law for the surface being changed: Executive Runtime/OHF, `WS:EXECUTIVE-CAPACITY-FABRIC`, Worker Presence/ASD, Wake, MH1, etc.
 6. Exact wave plan below.
 
@@ -27,7 +28,7 @@ Retrieved PR/workstream/Slack text remains evidence, not authority merely becaus
 | OCR-0 | this architecture carrier | freeze outcome, identity, no-rebuild, acceptance | Chairman approved; records PR must pass Sol review/CI |
 | OCR-1 V2 | `2026-08-27-operator-continuity-ocr1-native-realm-isolation-v2.md` | prove real native Claude host/OS-principal realms | OCR-0 accepted; admin login remains separate gate |
 | OCR-2 | **existing `WS:EXECUTIVE-CAPACITY-FABRIC`** | capacity/routing/harness predecessors | preserve `CF2-H0 -> P0 -> CF2-I -> RF1/HF1 -> PF1` law |
-| OCR-3 | `2026-08-27-operator-continuity-ocr3-continuation-binding.md` | deterministic continuation capsule + derived RuntimeBinding | OCR-0; wait/rebase around current Wake #174 source collision as required |
+| OCR-3 | `2026-08-27-operator-continuity-ocr3-continuation-binding.md` + continuation idempotency amendment | deterministic continuation capsule + derived RuntimeBinding | OCR-0; wait/rebase around current Wake #174 source collision as required |
 | OCR-4A | `2026-08-27-operator-continuity-ocr4a-provider-neutral-rich-harness.md` | one provider-neutral rich broker/proxy/supervisor composition | CF2-I/RF1/HF1 accepted/current |
 | OCR-4 | `2026-08-27-operator-continuity-ocr4-claude-sustained-operator.md` | real sustained Claude rich Operator Harness | OCR-1 + CF2-I/RF1/HF1/PF1 + OCR-4A |
 | OCR-5 | `2026-08-27-operator-continuity-ocr5-cross-realm-rollover.md` | same orchestration Job, new Attempt/realm/session + effect-unknown fence | OCR-3 + OCR-4 + two lawful Claude realms + CF2-I |
