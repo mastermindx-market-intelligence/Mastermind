@@ -154,3 +154,101 @@ def test_unavailable_sources_require_explicit_reason():
     validated = module.validate_input_document(doc)
     assert validated["linear"]["available"] is False
     assert validated["linear"]["reason"] == "LINEAR_READ_UNAVAILABLE"
+
+
+# --- Owner-record identity amendment falsifiers (2026-08-28, Sol) -----------------
+#
+# §5: canonical JSON refuses non-finite numbers, non-string keys and non-JSON values
+# through the typed R1 error path; no coercion to null/string/zero is permitted.
+# §2.1: a present owner digest must be an exact sha256:<64 lowercase hex> value.
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        {"x": float("nan")},
+        [1.0, float("inf")],
+        {"nested": {"deep": [float("-inf")]}},
+    ],
+)
+def test_canonical_json_rejects_non_finite_numbers(bad_value):
+    module = _contract()
+    with pytest.raises(module.SessionTruthContractError):
+        module.canonical_json(bad_value)
+    with pytest.raises(module.SessionTruthContractError):
+        module.semantic_hash(bad_value)
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        {1: "x"},
+        {"a": {2: "y"}},
+        {"a": [{None: "z"}]},
+        {("t",): "w"},
+    ],
+)
+def test_canonical_json_rejects_non_string_keys_without_coercion(bad_value):
+    module = _contract()
+    with pytest.raises(module.SessionTruthContractError):
+        module.canonical_json(bad_value)
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        {"a": {1, 2}},
+        {"a": b"bytes"},
+        {"a": [object()]},
+    ],
+)
+def test_canonical_json_rejects_non_json_values_with_typed_error(bad_value):
+    module = _contract()
+    with pytest.raises(module.SessionTruthContractError):
+        module.canonical_json(bad_value)
+
+
+@pytest.mark.parametrize(
+    "bad_digest",
+    ["sha256:" + "G" * 64, "sha256:" + "9" * 63, "sha1:" + "9" * 64, 9, False],
+)
+def test_validate_rejects_malformed_agentos_state_digest(bad_digest):
+    module = _contract()
+    doc = _minimal_input(module)
+    doc["agentos"]["state"]["source_records_digest"] = bad_digest
+    with pytest.raises(module.SessionTruthContractError):
+        module.validate_input_document(doc)
+
+
+def test_validate_rejects_malformed_agentos_context_digest():
+    module = _contract()
+    doc = _minimal_input(module)
+    doc["agentos"]["contexts"] = [
+        {"schema": "context_bundle.v1", "source_records_digest": "not-a-digest"}
+    ]
+    with pytest.raises(module.SessionTruthContractError):
+        module.validate_input_document(doc)
+
+
+def test_validate_accepts_wellformed_agentos_digests():
+    module = _contract()
+    doc = _minimal_input(module)
+    doc["agentos"]["state"]["source_records_digest"] = "sha256:" + "3" * 64
+    doc["agentos"]["contexts"] = [
+        {"schema": "context_bundle.v1", "source_records_digest": "sha256:" + "4" * 64}
+    ]
+    validated = module.validate_input_document(doc)
+    assert validated["agentos"]["state"]["source_records_digest"] == "sha256:" + "3" * 64
+
+
+def test_validate_rejects_non_string_keys_inside_agentos_interior():
+    """Invalid Agent OS interior keys fail typed at the contract, not at json.dumps."""
+
+    module = _contract()
+    doc = _minimal_input(module)
+    doc["agentos"]["state"]["workstreams"] = [{1: "not-a-string-key"}]
+    with pytest.raises(module.SessionTruthContractError):
+        module.validate_input_document(doc)

@@ -288,3 +288,27 @@ def test_load_snapshot_rejects_wrong_schema(tmp_path):
     path.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(SessionTruthContractError, match="schema"):
         load_snapshot(path, GITHUB_SCHEMA)
+
+
+# --- Owner-record identity amendment falsifiers (2026-08-28, Sol) -----------------
+#
+# §5: snapshot loading rejects NaN / Infinity / -Infinity through ``parse_constant``;
+# Python's default ``json.loads`` would otherwise admit them silently.
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_load_snapshot_rejects_non_finite_numbers(tmp_path, constant):
+    doc = _fixture("github_minimal.json")
+    text = json.dumps(doc)[:-1] + f', "observed_delay_hours": {constant}}}'
+    path = tmp_path / "non-finite.json"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(SessionTruthContractError):
+        load_snapshot(path, GITHUB_SCHEMA)
+
+
+def test_load_snapshot_still_accepts_finite_numbers(tmp_path):
+    doc = _fixture("github_minimal.json")
+    text = json.dumps(doc)[:-1] + ', "observed_delay_hours": 1.5}'
+    path = tmp_path / "finite.json"
+    path.write_text(text, encoding="utf-8")
+    assert load_snapshot(path, GITHUB_SCHEMA)["observed_delay_hours"] == 1.5

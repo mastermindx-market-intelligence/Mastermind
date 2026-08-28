@@ -28,6 +28,8 @@ MASTER = "mastermindx-market-intelligence/Mastermind"
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 NOW = "2026-08-27T08:00:00Z"
+STATE_DIGEST = "sha256:" + "3" * 64
+CONTEXT_DIGEST = "sha256:" + "4" * 64
 
 
 def healthy_inputs() -> dict:
@@ -54,6 +56,7 @@ def healthy_inputs() -> dict:
             "state": {
                 "schema": "agent_os_state.v1",
                 "generated_at": NOW,
+                "source_records_digest": STATE_DIGEST,
                 "workstreams": [],
                 "warnings": [],
             },
@@ -483,3 +486,200 @@ def test_agentos_owner_build_stamp_is_still_semantic():
     assert projected["active_builds"].endswith("2026-08-24T01:18:31.138716+00:00")
     assert projected["workstreams"] == 1
     assert "active_builds_age_hours" not in projected
+
+
+# --- Owner-record identity amendment falsifiers (2026-08-28, Sol) -----------------
+#
+# docs/superpowers/specs/2026-08-28-session-truth-r1-owner-record-identity-amendment.md
+# §3: valid owner digests give a digest-backed positive semantic projection; a missing
+# digest blocks modification whenever Agent OS is required by the requested scope.
+# §4: a positive in-scope PR Linear binding makes Linear a required source.
+
+
+def digest_backed_inputs(
+    acquisition_clock: str,
+    *,
+    state_digest: str = STATE_DIGEST,
+    context_digest: str = CONTEXT_DIGEST,
+    builds_age_hours: float = 76.7,
+    stale_days: int = 1,
+    live_worktrees: int = 3,
+) -> dict:
+    """Owner-digest-carrying acquisition with distinct volatile clock/census fields."""
+
+    inputs = acquired_inputs(acquisition_clock, builds_age_hours=builds_age_hours)
+    state = inputs["agentos"]["state"]
+    state["source_records_digest"] = state_digest
+    state["workstreams"][0]["stale_days"] = stale_days
+    state["inputs"]["live_worktrees"] = live_worktrees
+    inputs["agentos"]["contexts"][0]["source_records_digest"] = context_digest
+    return inputs
+
+
+def test_digest_backed_projection_ignores_volatile_clocks_and_census():
+    """Unchanged records may never read different because the clock or host census moved."""
+
+    one = build_receipt(
+        digest_backed_inputs(
+            CLOCK_ONE, builds_age_hours=76.7, stale_days=1, live_worktrees=3
+        ),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    two = build_receipt(
+        digest_backed_inputs(
+            CLOCK_TWO, builds_age_hours=77.4, stale_days=2, live_worktrees=9
+        ),
+        observed_started_at=CLOCK_TWO,
+        observed_ended_at=CLOCK_TWO,
+    )
+    assert semantic_projection(one) == semantic_projection(two)
+    assert one["semantic_hash"] == two["semantic_hash"]
+    # The immutable receipt still preserves the raw owner observations for diagnosis.
+    assert one["observations"]["agentos"]["state"]["generated_at"] == CLOCK_ONE
+    assert two["observations"]["agentos"]["state"]["inputs"]["live_worktrees"] == 9
+
+
+def test_digest_backed_projection_uses_owner_identity_fields():
+    receipt = build_receipt(
+        digest_backed_inputs(CLOCK_ONE),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    projected = semantic_projection(receipt)["observations"]["agentos"]
+    assert projected["available"] is True
+    assert projected["source_sha"] == SHA_B
+    assert projected["state"] == {
+        "schema": "agent_os_state.v1",
+        "source_records_digest": STATE_DIGEST,
+    }
+    assert projected["contexts"][0]["schema"] == "context_bundle.v1"
+    assert projected["contexts"][0]["target"]["workstream"] == "WS:TARGET"
+    assert projected["contexts"][0]["source_records_digest"] == CONTEXT_DIGEST
+
+
+def test_real_digest_change_changes_semantic_hash():
+    one = build_receipt(
+        digest_backed_inputs(CLOCK_ONE),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    two = build_receipt(
+        digest_backed_inputs(CLOCK_ONE, state_digest="sha256:" + "5" * 64),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    three = build_receipt(
+        digest_backed_inputs(CLOCK_ONE, context_digest="sha256:" + "6" * 64),
+        observed_started_at=CLOCK_ONE,
+        observed_ended_at=CLOCK_ONE,
+    )
+    assert one["semantic_hash"] != two["semantic_hash"]
+    assert one["semantic_hash"] != three["semantic_hash"]
+
+
+def test_missing_owner_digest_blocks_when_agentos_required():
+    """Digest-less Agent OS cannot authorize modification for an Agent OS-scoped request."""
+
+    inputs = acquired_inputs(CLOCK_ONE)
+    assert inputs["scope"]["workstreams"], "fixture must keep Agent OS in scope"
+    receipt = build_receipt(inputs, observed_started_at=CLOCK_ONE, observed_ended_at=CLOCK_ONE)
+    findings = {
+        finding["code"]: finding["severity"] for finding in receipt["findings"]
+    }
+    assert findings.get("AGENTOS_RECORD_IDENTITY_UNAVAILABLE") == "BLOCKING"
+    admission = receipt["admission"]
+    assert admission["mode"] == "DIALOGUE_ONLY"
+    assert admission["modification_safe"] is False
+    assert "AGENTOS_RECORD_IDENTITY_UNAVAILABLE" in admission["blocking_codes"]
+
+
+def test_missing_owner_digest_with_optional_agentos_never_blocks():
+    inputs = acquired_inputs(CLOCK_ONE)
+    inputs["scope"]["workstreams"] = []
+    receipt = build_receipt(inputs, observed_started_at=CLOCK_ONE, observed_ended_at=CLOCK_ONE)
+    codes = {finding["code"] for finding in receipt["findings"]}
+    assert "AGENTOS_RECORD_IDENTITY_UNAVAILABLE" not in codes
+    assert receipt["admission"]["modification_safe"] is True
+
+
+def test_partial_context_digest_still_blocks_and_falls_back():
+    """One digest-less context keeps the whole observation on the legacy fallback path."""
+
+    inputs = digest_backed_inputs(CLOCK_ONE)
+    del inputs["agentos"]["contexts"][0]["source_records_digest"]
+    receipt = build_receipt(inputs, observed_started_at=CLOCK_ONE, observed_ended_at=CLOCK_ONE)
+    codes = {finding["code"] for finding in receipt["findings"]}
+    assert "AGENTOS_RECORD_IDENTITY_UNAVAILABLE" in codes
+    projected = semantic_projection(receipt)["observations"]["agentos"]
+    # Fallback projection, never a half-digest identity.
+    assert projected["state"]["workstreams"][0]["updated"] == "2026-08-26"
+    assert "generated_at" not in projected["state"]
+
+
+@pytest.mark.parametrize(
+    "bad_digest",
+    [
+        "sha256:" + "Z" * 64,
+        "sha256:" + "3" * 63,
+        "md5:" + "3" * 64,
+        "3" * 64,
+        7,
+        True,
+    ],
+)
+def test_malformed_owner_digest_is_a_typed_contract_error(bad_digest):
+    from control_plane.session_truth_contract import SessionTruthContractError
+
+    inputs = digest_backed_inputs(CLOCK_ONE)
+    inputs["agentos"]["state"]["source_records_digest"] = bad_digest
+    with pytest.raises(SessionTruthContractError):
+        build_receipt(inputs, observed_started_at=CLOCK_ONE, observed_ended_at=CLOCK_ONE)
+
+
+def test_positive_pr_linear_binding_makes_linear_required():
+    """scope.linear=[] + declared PR binding + unreadable Linear may never read safe."""
+
+    inputs = healthy_inputs()
+    assert inputs["scope"]["linear"] == []
+    inputs["github"]["pull_requests"] = [
+        {
+            "repository": MASTER,
+            "number": 170,
+            "state": "open",
+            "workstream": "WS:TARGET",
+            "linear": "MAS-109",
+        }
+    ]
+    inputs["linear"] = {"available": False, "reason": "LINEAR_READ_PATH_UNAVAILABLE"}
+    receipt = build_receipt(inputs, observed_started_at=NOW, observed_ended_at=NOW)
+    admission = receipt["admission"]
+    assert "linear" in admission["required_sources_unavailable"]
+    assert admission["mode"] == "DIALOGUE_ONLY"
+    assert admission["modification_safe"] is False
+
+
+def test_optional_linear_without_any_binding_stays_partial():
+    inputs = healthy_inputs()
+    inputs["github"]["pull_requests"] = [
+        {
+            "repository": MASTER,
+            "number": 170,
+            "state": "open",
+            "workstream": "WS:TARGET",
+            "linear": None,
+        }
+    ]
+    inputs["linear"] = {"available": False, "reason": "LINEAR_READ_PATH_UNAVAILABLE"}
+    receipt = build_receipt(inputs, observed_started_at=NOW, observed_ended_at=NOW)
+    admission = receipt["admission"]
+    assert "linear" in admission["optional_sources_unavailable"]
+    assert admission["mode"] == "GROUNDING_PARTIAL"
+    assert admission["modification_safe"] is True
+
+
+def test_digest_backed_build_receipt_never_mutates_caller_input():
+    inputs = digest_backed_inputs(CLOCK_ONE)
+    before = copy.deepcopy(inputs)
+    build_receipt(inputs, observed_started_at=CLOCK_ONE, observed_ended_at=CLOCK_ONE)
+    assert inputs == before

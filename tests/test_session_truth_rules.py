@@ -30,7 +30,11 @@ HASH_1 = "sha256:" + "1" * 64
 HASH_2 = "sha256:" + "2" * 64
 NOW = "2026-08-27T08:00:00Z"
 
+STATE_DIGEST = "sha256:" + "7" * 64
+CONTEXT_DIGEST = "sha256:" + "8" * 64
+
 EXPECTED_REGISTRY = {
+    "AGENTOS_RECORD_IDENTITY_UNAVAILABLE": ("BLOCKING", "agentos", "agentos"),
     "STALE_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
     "FALSE_LINEAR_COMPLETION": ("BLOCKING", "declared_completion_owner", "linear"),
     "MISSING_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
@@ -113,6 +117,7 @@ def _handoff_context() -> dict:
         "excluded": [],
         "omitted_due_to_budget": [],
         "degraded": [],
+        "source_records_digest": CONTEXT_DIGEST,
     }
 
 
@@ -198,6 +203,7 @@ def healthy_inputs() -> dict:
             "state": {
                 "schema": "agent_os_state.v1",
                 "generated_at": NOW,
+                "source_records_digest": STATE_DIGEST,
                 "direct_state_hash": HASH_1,
                 "generated_state_hash": HASH_1,
                 "workstreams": [_workstream()],
@@ -292,7 +298,9 @@ def _codes(doc: dict) -> set[str]:
 
 
 def _mutate(code: str, doc: dict) -> None:
-    if code == "STALE_LINEAR_PROJECTION":
+    if code == "AGENTOS_RECORD_IDENTITY_UNAVAILABLE":
+        del doc["agentos"]["state"]["source_records_digest"]
+    elif code == "STALE_LINEAR_PROJECTION":
         doc["linear"]["issues"][0]["projection_revision"] = 6
     elif code == "FALSE_LINEAR_COMPLETION":
         doc["linear"]["issues"][0]["status"] = "Done"
@@ -356,6 +364,9 @@ def _mutate(code: str, doc: dict) -> None:
         doc["scope"]["requires_executive"] = True
         doc["executive"]["fresh"] = False
     elif code == "SLACK_ACK_WITHOUT_EXECUTIVE_STATE":
+        # The amendment gates this finding on a scope that positively owes Executive
+        # state, with Executive itself readable.
+        doc["scope"]["requires_executive"] = True
         doc["executive"]["operations"] = []
     elif code == "EXECUTIVE_GROUNDING_DIVERGED":
         doc["executive"]["grounding_sha"] = SHA_C
@@ -555,3 +566,81 @@ def test_unavailable_linear_is_typed_unknown_in_indexes(healthy):
     assert indexes["linear"] == {}
     assert indexes["linear_available"] is False
     assert build_indexes(healthy)["linear_available"] is True
+
+
+# --- Owner-record identity amendment falsifiers (2026-08-28, Sol) -----------------
+#
+# §6: SLACK_ACK_WITHOUT_EXECUTIVE_STATE fires only for a scope that positively owes
+# Executive state while Executive itself is readable.
+# §7: a bare Agent OS PR number never binds across multiple repositories.
+
+OTHER_REPO = "mastermindx-market-intelligence/macro"
+
+
+def test_ack_without_executive_scope_creates_no_executive_finding(healthy):
+    """A lawful read-only/active-session ACK owes no Executive operation record."""
+
+    doc = copy.deepcopy(healthy)
+    assert doc["scope"]["requires_executive"] is False
+    doc["executive"]["operations"] = []
+    assert "SLACK_ACK_WITHOUT_EXECUTIVE_STATE" not in _codes(doc)
+
+
+def test_ack_with_executive_unavailable_defers_to_required_source_path(healthy):
+    """An unreadable Executive cannot testify that the operation record is absent."""
+
+    doc = copy.deepcopy(healthy)
+    doc["scope"]["requires_executive"] = True
+    doc["executive"] = {
+        "available": False,
+        "reason": "EXECUTIVE_READ_PATH_UNAVAILABLE",
+    }
+    codes = _codes(doc)
+    assert "SLACK_ACK_WITHOUT_EXECUTIVE_STATE" not in codes
+    assert "RUNTIME_STATE_UNAVAILABLE" in codes
+
+
+def test_ack_with_executive_required_and_available_still_fires(healthy):
+    doc = copy.deepcopy(healthy)
+    doc["scope"]["requires_executive"] = True
+    doc["executive"]["operations"] = []
+    assert "SLACK_ACK_WITHOUT_EXECUTIVE_STATE" in _codes(doc)
+
+
+def _two_repo_same_number(doc: dict) -> None:
+    """Two repositories carry the same PR number bound to the same workstream."""
+
+    other = _pr(170, operation_key="op-other")
+    other["repository"] = OTHER_REPO
+    other["state"] = "merged"
+    other["merge_sha"] = SHA_C
+    other["completion"] = "merge-is-done"
+    other["linear"] = None
+    other["wave"] = "R1-OTHER"
+    doc["github"]["pull_requests"].append(other)
+
+
+def test_bare_agentos_pr_number_never_binds_across_repositories(healthy):
+    doc = copy.deepcopy(healthy)
+    doc["scope"]["repositories"] = [MASTER, OTHER_REPO]
+    _two_repo_same_number(doc)
+    # The Agent OS record says #170 is open; the foreign repository's #170 is merged.
+    # With two repositories in scope the bare number is AMBIGUOUS/UNBOUND: no join,
+    # so no disagreement may be fabricated from the foreign repository's state.
+    assert "AGENTOS_GITHUB_DISAGREEMENT" not in _codes(doc)
+
+
+def test_single_repository_scope_qualifies_bare_pr_number(healthy):
+    doc = copy.deepcopy(healthy)
+    assert doc["scope"]["repositories"] == [MASTER]
+    doc["agentos"]["state"]["workstreams"][0]["prs"][0]["state"] = "merged"
+    assert "AGENTOS_GITHUB_DISAGREEMENT" in _codes(doc)
+
+
+def test_single_repository_scope_never_joins_the_foreign_repository(healthy):
+    doc = copy.deepcopy(healthy)
+    assert doc["scope"]["repositories"] == [MASTER]
+    _two_repo_same_number(doc)
+    # The scoped repository's #170 agrees with the Agent OS record; only the foreign
+    # repository's #170 disagrees, and it is outside the one-repository qualification.
+    assert "AGENTOS_GITHUB_DISAGREEMENT" not in _codes(doc)

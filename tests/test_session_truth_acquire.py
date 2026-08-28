@@ -229,3 +229,29 @@ def test_collect_agentos_rejects_non_workstream_identity(tmp_path):
             now="2026-08-27T05:00:00Z",
             timeout=5,
         )
+
+
+# --- Owner-record identity amendment falsifiers (2026-08-28, Sol) -----------------
+#
+# §5: canonical Agent OS output parsing rejects NaN / Infinity / -Infinity through
+# ``parse_constant`` on the typed acquisition error path.
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_decode_leading_json_rejects_non_finite_numbers(constant):
+    module = _acquire()
+    with pytest.raises(module.AcquisitionError):
+        module._decode_leading_json(
+            '{"schema": "agent_os_state.v1", "age": ' + constant + "}",
+            "Agent OS status",
+        )
+
+
+def test_decode_leading_json_still_accepts_finite_numbers():
+    module = _acquire()
+    value, trailing = module._decode_leading_json(
+        '{"schema": "agent_os_state.v1", "age": 1.5}\ntrailing',
+        "Agent OS status",
+    )
+    assert value["age"] == 1.5
+    assert trailing == "trailing"

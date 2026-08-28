@@ -228,7 +228,11 @@ def test_literal_fixture_invocation_emits_degraded_json(tmp_path):
         "available": False,
         "reason": "EXECUTIVE_READ_PATH_UNAVAILABLE",
     }
-    assert receipt["admission"]["mode"] == "GROUNDING_PARTIAL"
+    # The current estate carries no Macro owner digest, so an Agent OS-scoped request
+    # is truthfully blocked rather than modification-capable (amendment §3.2).
+    assert receipt["admission"]["mode"] == "DIALOGUE_ONLY"
+    assert receipt["admission"]["modification_safe"] is False
+    assert "AGENTOS_RECORD_IDENTITY_UNAVAILABLE" in receipt["admission"]["blocking_codes"]
 
 
 def test_plan_literal_protected_sha_is_passed_exactly(tmp_path, monkeypatch):
@@ -407,3 +411,145 @@ def test_text_mode_uses_bounded_renderer(tmp_path):
     assert stdout.startswith("Session Truth Receipt\n")
     assert "source.executive: available=false reason=EXECUTIVE_READ_PATH_UNAVAILABLE" in stdout
     assert "DELIVERY_ONLY" not in stdout
+
+
+# --- Owner-record identity amendment falsifiers (2026-08-28, Sol) -----------------
+#
+# Synthetic digest-backed two-clock proof (§3.1, migration step 4 SYNTHETIC ONLY):
+# a stub canonical reader emits owner digests plus --now-derived volatile fields, so
+# only a digest-backed positive projection can keep the semantic identity stable.
+# This is NOT the real current-estate Task 7 acceptance; canonical Macro does not yet
+# emit ``source_records_digest``.
+
+STATE_DIGEST = "sha256:" + "3" * 64
+CONTEXT_DIGEST = "sha256:" + "4" * 64
+
+
+def _digest_macro_repo(tmp_path: Path) -> Path:
+    macro = tmp_path / "macro-digest"
+    _init_git(macro)
+    ws = macro / "agentos" / "workstreams" / "WS-CHAIRMAN-CONTROL-ROOM.md"
+    ws.parent.mkdir(parents=True)
+    ws.write_text("# fixture\n", encoding="utf-8")
+    script = macro / "scripts" / "agentos.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+now = args[args.index("--now") + 1] if "--now" in args else "unset"
+
+if args and args[0] == "status" and "--dry-run" in args:
+    payload = {
+        "schema": "agent_os_state.v1",
+        "generated_at": now,
+        "source_records_digest": "sha256:" + "3" * 64,
+        "inputs": {
+            "workstreams": 1,
+            "active_builds": "data/governance/active_builds.json@2026-08-24T01:18:31+00:00",
+            "active_builds_age_hours": float(now[14:16] or 0) + 76.0,
+            "degraded": ["stale probe measured at " + now],
+        },
+        "workstreams": [
+            {
+                "key": "CHAIRMAN-CONTROL-ROOM",
+                "status": "active",
+                "stale_days": int(now[15:16] or 0),
+                "next_action": "prove session truth",
+                "updated": "2026-08-27",
+                "prs": [],
+                "warnings": [],
+                "source": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md"
+            }
+        ],
+        "warnings": []
+    }
+    sys.stdout.write(json.dumps(payload, sort_keys=True))
+    raise SystemExit(0)
+
+if args and args[0] == "compile-context" and "--workstream" in args:
+    value = args[args.index("--workstream") + 1]
+    payload = {
+        "schema": "context_bundle.v1",
+        "generated_at": now,
+        "source_records_digest": "sha256:" + "4" * 64,
+        "target": {"workstream": "WS:" + value, "resolution": "explicit"},
+        "sections": [{"id": "handoff", "items": []}],
+        "excluded": [],
+        "omitted_due_to_budget": [],
+        "degraded": []
+    }
+    sys.stdout.write(json.dumps(payload, sort_keys=True))
+    raise SystemExit(0)
+
+raise SystemExit(7)
+""",
+        encoding="utf-8",
+    )
+    _commit_all(macro, "digest fixture")
+    return macro
+
+
+def test_synthetic_digest_backed_two_clock_proof(tmp_path):
+    """Same records + owner digests at two acquisition clocks -> one semantic identity."""
+
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _digest_macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+
+    one_code, one_stdout, _ = _run(
+        cli,
+        _argv(snapshots, macro, protected, now="2026-08-27T05:00:00Z"),
+        repo,
+    )
+    two_code, two_stdout, _ = _run(
+        cli,
+        _argv(snapshots, macro, protected, now="2026-08-27T06:11:00Z"),
+        repo,
+    )
+    one = json.loads(one_stdout)
+    two = json.loads(two_stdout)
+
+    assert one_code == two_code == 0
+    # The volatile fields really did move between the two observations...
+    assert (
+        one["observations"]["agentos"]["state"]["inputs"]["degraded"]
+        != two["observations"]["agentos"]["state"]["inputs"]["degraded"]
+    )
+    assert (
+        one["observations"]["agentos"]["state"]["workstreams"][0]["stale_days"]
+        != two["observations"]["agentos"]["state"]["workstreams"][0]["stale_days"]
+    )
+    # ...yet unchanged direct records keep one digest-backed semantic identity.
+    assert one["semantic_hash"] == two["semantic_hash"]
+    assert semantic_projection(one) == semantic_projection(two)
+    codes = {finding["code"] for finding in one["findings"]}
+    assert "AGENTOS_RECORD_IDENTITY_UNAVAILABLE" not in codes
+
+
+def test_synthetic_digest_change_moves_semantic_hash(tmp_path):
+    cli = _cli()
+    repo, protected = _skillpack_repo(tmp_path)
+    macro = _digest_macro_repo(tmp_path)
+    snapshots = _snapshot_dir(tmp_path)
+
+    one_code, one_stdout, _ = _run(
+        cli,
+        _argv(snapshots, macro, protected, now="2026-08-27T05:00:00Z"),
+        repo,
+    )
+    script = macro / "scripts" / "agentos.py"
+    script.write_text(
+        script.read_text(encoding="utf-8").replace('"sha256:" + "3" * 64', '"sha256:" + "5" * 64'),
+        encoding="utf-8",
+    )
+    two_code, two_stdout, _ = _run(
+        cli,
+        _argv(snapshots, macro, protected, now="2026-08-27T05:00:00Z"),
+        repo,
+    )
+    assert one_code == two_code == 0
+    assert json.loads(one_stdout)["semantic_hash"] != json.loads(two_stdout)["semantic_hash"]
