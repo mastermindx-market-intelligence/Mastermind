@@ -88,6 +88,7 @@ def _synthetic_release_schema(
     release_root = tmp_path / "release"
     scripts = release_root / "scripts"
     scripts.mkdir(parents=True)
+    (scripts / "__init__.py").write_text("", encoding="utf-8")
     template_keys = set(json.loads(TEMPLATE.read_text(encoding="utf-8")))
     base_keys = template_keys - set(C1_FIELDS)
     optional_keys = sorted(base_keys | c1_keys)
