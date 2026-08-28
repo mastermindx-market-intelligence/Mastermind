@@ -674,3 +674,49 @@ the exact prior source/generation layout.
   latter and `git diff b901dee..e2092cb -- docs/sol_skills` is empty, so the
   protected procedure used for this bounded work is unchanged. No fetch into,
   merge from, or rebase onto protected master was performed.
+
+## Task 2 fix round 4 commissioned (2026-08-28)
+
+- Chairman continuation remains active for end-to-end completion on the same carrier.
+- The H0 continuation heartbeat was paused before this mutation turn to prevent a duplicate wake.
+- Protected master and the compatible Skillpack were re-pinned at
+  `e80e9aea894c758ae7a95720ab56c9cbc868b1ba` (`mastermind.sol_skillpack.v1`,
+  version `1.0.1`, bootstrap major `1`).
+- Current protected master was merged without conflict into the same H0 carrier at
+  `4edd434e64dc23d5796b996fe9389d6ac1f3818c`; parent identities are the prior H0
+  head `21d423fa1d02c0046b09de121ecb18d5a6df0942` and protected master `e80e9aea...`.
+- Wake #174 and protected installer/source-law movement have zero direct changed-path overlap with
+  the H0 Task 2 owner/test paths. Wake remains held and is not folded into this carrier.
+- Controller reinspection reproduced two still-open lifecycle defects that a broad reconciliation
+  audit had mistakenly conflated with the already-fixed receipt-durable observer defects:
+  `before_final_rename` can leave `.candidate-*` after rollback, and generation-parent namespace
+  drift after the initial scan can be missed before rollback.
+- Exact requirements are frozen in `task-2-fix-round-4-generation-parent-findings.md`.
+- Route: Sol + Codex for subtle fail-closed lifecycle repair. WHY NOT FABLE: architecture and the
+  minimal repair boundary are frozen; principal cross-repository continuity is unnecessary.
+
+## Task 2 fix round 4 — corrected RED, repair, and proof (2026-08-28)
+
+- Source archaeology corrected the initial review premise: the real
+  `crash_at="before_final_rename"` raises `SourceRepairIncomplete` and already
+  preserves the exact hidden candidate for successful forward replay. It is a
+  positive guard, not a RED. The two true RED cases inject a rollback-eligible
+  final semantic-observer failure after the hidden candidate exists, with and
+  without a new non-prefix visible child.
+- Corrected RED selector: exit 1; `.FF [100%]`. The real crash guard passed;
+  both final-observer cases observed one stale rollback consumption instead of
+  zero.
+- The minimal repair binds the existing receipt-durable recovery grant to the
+  exact byte-encoded empty generation-parent child-name snapshot, prevents
+  receipt/generation-prefix reminting, and re-reads the same retained descriptor
+  immediately before grant consumption. Any child, drift, or scan error revokes
+  rollback and preserves effect-unknown same-carrier reconciliation.
+- Corrected GREEN selector: 3 passed. Focused lifecycle selector: 17 passed.
+  Recovery/crash: 50 passed. `recovery_v1`: 5 passed.
+  Visible/ambiguous/postcommit: 17 passed. Complete module: 358 passed,
+  `real 1373.46`, `user 540.14`, `sys 598.49`.
+- Apple `/usr/bin/python3 -m py_compile` and `git diff --check` passed before
+  the evidence append and are repeated on the committed head. Protected
+  `master` remained exactly `e80e9aea894c758ae7a95720ab56c9cbc868b1ba`.
+- Task 3 and all host/native/credential/service/PR/Slack/Linear/Wake/OCR/OAuth/
+  provider/P0/routing/publication/other-worktree surfaces remained held.

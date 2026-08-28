@@ -4615,6 +4615,138 @@ def test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_st
     assert not (archive / "archived-generation").exists()
 
 
+def test_before_final_rename_crash_preserves_candidate_and_replays_forward(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    generation_root = system_root / "capacity-generations"
+    original_restore = artifacts._restore_digest_bound_precommit_state
+    restore_calls = 0
+
+    def observed_restore(*args: object, **kwargs: object) -> None:
+        nonlocal restore_calls
+        restore_calls += 1
+        original_restore(*args, **kwargs)
+
+    monkeypatch.setattr(
+        artifacts, "_restore_digest_bound_precommit_state", observed_restore
+    )
+    with pytest.raises(
+        artifacts.SourceRepairIncomplete, match="before_final_rename"
+    ):
+        artifacts.run_source_repair_host(
+            **arguments, crash_at="before_final_rename"
+        )
+
+    archive = next((system_root / "capacity-archive").iterdir())
+    assert restore_calls == 0
+    assert not any(child.name.startswith("failure-") for child in archive.iterdir())
+    assert (archive / "archived-source").is_dir()
+    assert (archive / "archived-generation").is_dir()
+    assert not (
+        system_root / "capacity-sources" / "macro" / commit / "promisor-source"
+    ).exists()
+    assert not (generation_root / artifacts.PRIOR_GENERATION_DIGEST).exists()
+    hidden_generations = list(generation_root.iterdir())
+    assert len(hidden_generations) == 1
+    assert hidden_generations[0].name.startswith(".candidate-")
+
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    generations = list(generation_root.iterdir())
+    assert len(generations) == 1
+    assert not generations[0].name.startswith(".")
+    assert artifacts.run_source_repair_host(
+        **_verify_arguments(system_root, commit)
+    ) == "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED"
+
+
+@pytest.mark.parametrize(
+    "add_visible_drift",
+    (
+        pytest.param(False, id="hidden-candidate"),
+        pytest.param(True, id="hidden-candidate-plus-visible-child"),
+    ),
+)
+def test_final_observer_failure_revokes_generation_parent_rollback_grant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    add_visible_drift: bool,
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    generation_root = system_root / "capacity-generations"
+    with pytest.raises(
+        artifacts.SourceRepairIncomplete, match="after_repair_receipt_fsync"
+    ):
+        artifacts.run_source_repair_host(
+            **arguments, crash_at="after_repair_receipt_fsync"
+        )
+
+    archive = next((system_root / "capacity-archive").iterdir())
+    injected = artifacts.CapacityHostArtifactError("INJECTED_FINAL_OBSERVER_FAILURE")
+    visible_drift = generation_root / "non-prefix-visible-drift"
+    restore_calls = 0
+    original_restore = artifacts._restore_digest_bound_precommit_state
+    original_observer = artifacts._observe_source_repair_source
+    observer_calls = 0
+
+    def fail_after_candidate(*args: object, **kwargs: object) -> object:
+        nonlocal observer_calls
+        observer_calls += 1
+        if observer_calls == 1:
+            return original_observer(*args, **kwargs)
+        hidden_generations = [
+            child
+            for child in generation_root.iterdir()
+            if child.name.startswith(".candidate-")
+        ]
+        assert len(hidden_generations) == 1
+        if add_visible_drift:
+            visible_drift.mkdir(mode=0o700)
+        raise injected
+
+    def observed_restore(*args: object, **kwargs: object) -> None:
+        nonlocal restore_calls
+        restore_calls += 1
+        original_restore(*args, **kwargs)
+
+    monkeypatch.setattr(
+        artifacts, "_observe_source_repair_source", fail_after_candidate
+    )
+    monkeypatch.setattr(
+        artifacts, "_restore_digest_bound_precommit_state", observed_restore
+    )
+    with pytest.raises(Exception) as raised:
+        artifacts.run_source_repair_host(**arguments)
+
+    assert observer_calls == 2
+    assert restore_calls == 0
+    assert not any(child.name.startswith("failure-") for child in archive.iterdir())
+    assert (archive / "archived-source").is_dir()
+    assert (archive / "archived-generation").is_dir()
+    assert not (
+        system_root / "capacity-sources" / "macro" / commit / "promisor-source"
+    ).exists()
+    assert visible_drift.is_dir() is add_visible_drift
+    assert not (generation_root / artifacts.PRIOR_GENERATION_DIGEST).exists()
+    hidden_generations = [
+        child
+        for child in generation_root.iterdir()
+        if child.name.startswith(".candidate-")
+    ]
+    assert len(hidden_generations) == 1
+    assert type(raised.value) is artifacts.SourceRepairIncomplete
+    assert str(raised.value) == "POST_COMMIT_RECONCILIATION_REQUIRED"
+    assert raised.value.__cause__ is injected
+
+
 def test_postcommit_subprocess_timeout_requires_same_carrier_reconciliation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -306,3 +306,105 @@ the current commit and the exact `docs/sol_skills` diff is empty. The carrier wa
 not fetched into, merged, or rebased. Task 3 and native/root/provider/Slack/OAuth,
 services, routing, worker, PR, push, merge, and publication surfaces remained
 held.
+
+## Task 2 fix round 4 — corrected premise and RED (2026-08-28)
+
+Protected `master` and the Skillpack were read from exact commit
+`e80e9aea894c758ae7a95720ab56c9cbc868b1ba`. The index and `COLD_START.md`
+both declared `mastermind.sol_skillpack.v1`, Skillpack version `1.0.1`, and
+minimum bootstrap major `1`; the project bootstrap major is `1`. A final
+`git ls-remote origin refs/heads/master` returned the same commit.
+
+Source archaeology corrected one review premise before production edits.
+`SourceRepairIncomplete` is a `RuntimeError`, while the rollback-consuming
+`finally` branch accepts only `CapacityHostArtifactError` or `OSError`. The real
+`crash_at="before_final_rename"` therefore already preserved the verified
+hidden candidate, minted no failure namespace, and replayed forward to one
+verified visible generation. That behavior remains a positive real-path guard.
+The rollback-eligible defect is a fallible final semantic observation after the
+hidden candidate exists.
+
+The first diagnostic selector, with production untouched, returned `.F`: the
+real crash guard passed while the initial-scan child-drift case failed because
+rollback ran once. The controller reconciled the premise and froze the two true
+RED cases at the same final observation point: hidden candidate alone, and
+hidden candidate plus a non-prefix visible child.
+
+Exact corrected RED command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'before_final_rename_crash_preserves_candidate_and_replays_forward or final_observer_failure_revokes_generation_parent_rollback_grant'
+```
+
+Result: exit 1; `.FF [100%]`. The positive real-crash case passed. Both
+rollback-eligible final-observer cases failed at `assert restore_calls == 0`
+with `1 == 0`, proving that the stale precommit grant was consumed after the
+generation-parent child set changed.
+
+## Task 2 fix round 4 — minimal repair and GREEN
+
+The existing `RECOVERY/RECEIPT_DURABLE/NONE` grant now carries the exact sorted,
+UTF-8 byte-encoded generation-parent child-name snapshot observed by the
+retained descriptor. The grant is minted only for the structurally precommit
+empty snapshot. Receipt-durable and generation-prefix classification cannot
+overwrite or remint it. Immediately before the existing `finally` path may
+consume the grant, the same retained generation-parent descriptor is re-read.
+Any hidden candidate, non-prefix child, unexpected child, name-set drift, or
+scan error revokes the grant and leaves `repair_effect_unknown` true. The
+existing transition table, rollback helper, archive/failure namespace family,
+receipt/source/generation identities, and exact-candidate forward replay remain
+unchanged.
+
+Exact corrected GREEN command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'before_final_rename_crash_preserves_candidate_and_replays_forward or final_observer_failure_revokes_generation_parent_rollback_grant'
+```
+
+Result: exit 0; `... [100%]` (3 collected cases: one positive crash guard and
+the two required final-observer regressions).
+
+Exact focused lifecycle command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'receipt_durable_precommit_observer_subprocess_failure_restores_exact_state or precommit_subprocess_timeout_uses_authorized_recovery or before_final_rename_crash_preserves_candidate_and_replays_forward or final_observer_failure_revokes_generation_parent_rollback_grant or committed_replay_early_observation_failure_never_rolls_back or committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown or postcommit_subprocess_timeout_requires_same_carrier_reconciliation'
+```
+
+Result: exit 0; 17 collected cases passed.
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery or crash'
+```
+
+Result: exit 0; 50 collected cases passed; `real 428.26`, `user 172.21`,
+`sys 191.56`.
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery_v1'
+```
+
+Result: exit 0; `..... [100%]` (5 passed); `real 1.90`, `user 0.95`,
+`sys 0.58`.
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'visible or ambiguous or postcommit'
+```
+
+Result: exit 0; `................. [100%]` (17 passed); `real 91.25`,
+`user 38.09`, `sys 40.53`.
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; all 358 collected cases reached `[100%]`; `real 1373.46`,
+`user 540.14`, `sys 598.49`.
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+git diff --check
+```
+
+Result before evidence append: both exited 0 with no output. They are repeated
+on the committed head below. No host, credential, service, PR, Slack, Linear,
+Wake, OCR, OAuth, provider, P0, routing, or other-worktree surface was touched.

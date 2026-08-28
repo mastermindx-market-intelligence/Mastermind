@@ -4632,6 +4632,7 @@ def run_source_repair_host(
         SourceRepairPhase,
         SourceRepairFailureLayout,
         SourceRepairTransition,
+        tuple[bytes, ...] | None,
     ] | None = None
     try:
         parents = _open_source_repair_parents(
@@ -4971,12 +4972,18 @@ def run_source_repair_host(
                 # already visible.  From that point rollback is categorically
                 # unsafe even when the later observations cannot identify or
                 # verify that child.
+                generation_parent_names = _descriptor_directory_names(
+                    parents.generation
+                )
+                generation_parent_snapshot = tuple(
+                    name.encode("utf-8", "strict")
+                    for name in generation_parent_names
+                )
                 semantic_commit_visible = any(
-                    not name.startswith(".")
-                    for name in _descriptor_directory_names(parents.generation)
+                    not name.startswith(".") for name in generation_parent_names
                 )
                 if (
-                    not semantic_commit_visible
+                    not generation_parent_snapshot
                     and position.failure_layout
                     is SourceRepairFailureLayout.NONE
                 ):
@@ -4999,6 +5006,7 @@ def run_source_repair_host(
                         current_phase,
                         position.failure_layout,
                         structural_recovery_transition,
+                        generation_parent_snapshot,
                     )
                     repair_effect_unknown = False
                 evidence = _observe_source_repair_source(
@@ -5058,11 +5066,18 @@ def run_source_repair_host(
                     raise SourceRepairTransitionError(
                         "SOURCE_REPAIR_NEXT_STATE_REFUSED"
                     )
-                authorized_precommit_recovery = (
-                    current_phase,
-                    position.failure_layout,
-                    recovery_transition,
-                )
+                if current_phase not in {
+                    SourceRepairPhase.RECEIPT_DURABLE,
+                    SourceRepairPhase.GENERATION_PREFIX,
+                }:
+                    authorized_precommit_recovery = (
+                        current_phase,
+                        position.failure_layout,
+                        recovery_transition,
+                        None,
+                    )
+                elif authorized_precommit_recovery is None:
+                    repair_effect_unknown = True
             elif recovery_transition.action is SourceRepairAction.VERIFY_COMMITTED:
                 semantic_commit_visible = True
             elif recovery_transition.action is not SourceRepairAction.REFUSE_ROLLED_BACK:
@@ -5346,23 +5361,46 @@ def run_source_repair_host(
                 and _path_lexists(archive / _SOURCE_REPAIR_INTENT_NAME)
                 and authorized_precommit_recovery is not None
             ):
-                _recovery_phase, _recovery_layout, recovery_transition = (
-                    authorized_precommit_recovery
-                )
+                (
+                    _recovery_phase,
+                    _recovery_layout,
+                    recovery_transition,
+                    generation_parent_snapshot,
+                ) = authorized_precommit_recovery
                 authorized_precommit_recovery = None
-                _restore_digest_bound_precommit_state(
-                    archive=archive,
-                    source_root=source_root,
-                    generation_root=generation_root,
-                    staged_source=staged_source,
-                    intent=intent,
-                    expected_uid=expected_uid,
-                    expected_gid=expected_gid,
-                    test_adapter=test_adapter,
-                    parents=parents,
-                    crash_at=crash_at,
-                    transition=recovery_transition,
-                )
+                generation_parent_unchanged = True
+                if generation_parent_snapshot is not None:
+                    try:
+                        final_generation_parent_snapshot = tuple(
+                            name.encode("utf-8", "strict")
+                            for name in _descriptor_directory_names(
+                                parents.generation
+                            )
+                        )
+                    except (CapacityHostArtifactError, OSError):
+                        generation_parent_unchanged = False
+                    else:
+                        generation_parent_unchanged = (
+                            not final_generation_parent_snapshot
+                            and final_generation_parent_snapshot
+                            == generation_parent_snapshot
+                        )
+                if generation_parent_unchanged:
+                    _restore_digest_bound_precommit_state(
+                        archive=archive,
+                        source_root=source_root,
+                        generation_root=generation_root,
+                        staged_source=staged_source,
+                        intent=intent,
+                        expected_uid=expected_uid,
+                        expected_gid=expected_gid,
+                        test_adapter=test_adapter,
+                        parents=parents,
+                        crash_at=crash_at,
+                        transition=recovery_transition,
+                    )
+                else:
+                    repair_effect_unknown = True
         finally:
             cleanup_error: OSError | None = None
             if parents is not None:
