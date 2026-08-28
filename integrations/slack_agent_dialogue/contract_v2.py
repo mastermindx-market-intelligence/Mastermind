@@ -41,6 +41,7 @@ _SECRET_SHAPED_RE = re.compile(
     r"github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
     r"sk-[A-Za-z0-9_-]{20,})"
 )
+_SLACK_MENTION_SHAPED_RE = re.compile(r"<@[UW][A-Z0-9]{8,31}(?:\|[^>\r\n]{1,80})?>")
 
 PARENT_KEYS_V2 = frozenset(
     {
@@ -126,7 +127,12 @@ def _strict_loads(value: str) -> Any:
 
 def _reject_secret_shaped_leaves(value: Any, *, code: str) -> None:
     if isinstance(value, str):
-        if _SECRET_SHAPED_RE.search(value) is not None:
+        if (
+            _SECRET_SHAPED_RE.search(value) is not None
+            or "\u2028" in value
+            or "\u2029" in value
+            or _SLACK_MENTION_SHAPED_RE.search(value) is not None
+        ):
             raise DialogueContractError(code)
         return
     if isinstance(value, Mapping):
@@ -520,6 +526,14 @@ def parse_message_frame_v2(raw: str | bytes) -> dict[str, Any]:
         raise DialogueContractError("FRAME_TOO_LARGE")
     document = _strict_loads(lines[1])
     normalized = validate_message_v2(document)
+    if len(lines) == 3:
+        actor = normalized["actor_ref"]
+        if not (
+            actor["kind"] == "executive_surface"
+            and actor["seat"] in {"ceo", "chairman"}
+            and actor["reasoning_surface"].lower() == "chatgpt"
+        ):
+            raise DialogueContractError("TRAILER_REFUSED")
     if lines[1] != _canonical_json(normalized):
         raise DialogueContractError("FRAME_INVALID")
     return normalized
