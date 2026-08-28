@@ -493,3 +493,119 @@ Result: exit 0; no output.
 - Task 3 remains held. No native/root/provider/service/credential/OAuth/routing,
   WP/C1/Slack Relay, PR, merge, push, deployment, or installed payload execution
   occurred. This is repository implementation proof only.
+
+## Task 2 fix round 2 commissioned (2026-08-27)
+
+- Exact clean reviewed pickup: `c14422ab27857eae89566a5e7a716dc67080c54b`, parent `c1eb17720054e8b538250af8d875b3968b5921f3`, tree `f3b2b636b6814b3e6b1e6f4205ebf6dda5510143`.
+- Live protected master and compatible Skillpack re-pinned to `b901dee0272a99b8a1d60385848b99b7273e8261` immediately before modification.
+- Loaded from that exact pin: `INDEX`, `REVIEW_RETURN`, `RECONCILE_STATE`, and `COMMISSION_WAVE`; schema `mastermind.sol_skillpack.v1`, version `1.0.0`, minimum bootstrap major `1`.
+- Both independent exact-head reviewers returned `REQUEST_CHANGES`. Confirmed findings are recorded in `task-2-fix-round-2-findings.md` and cover exact per-object producer metadata, typed subprocess timeouts, first-guard descriptor ownership, and positive role-directory link count.
+- Ruling: treat the broad topology/rollback/legacy role tuples as a root-cause compatibility defect and replace them with exact per-object policies derived from already-authenticated canonical producer facts. This preserves the one retained graph and costs a larger test matrix; if wrong, valid native H0 evidence would remain falsely refused or an unbound metadata union could weaken substitution resistance.
+- Collision ruling: Task 2 remains disjoint from protected-master movement and the separately owned Slack Agent Relay/autonomy lanes. No protected path from those lanes may enter this fix round.
+- Task 3, publication, native ceremony, P0, provider/OAuth, services, routing, workers, and fan-out remain held pending fresh dual PASS.
+
+## Task 2 fix round 2 — Finding A RED
+
+Tests were added before production changes for the three canonical heterogeneous
+producer surfaces. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'retained_topology_accepts_exact_per_row_producer_metadata or retained_rollback_accepts_exact_moved_artifact_metadata or retained_legacy_accepts_each_canonical_producer_metadata'
+```
+
+Result: exit 1; `FFF [100%]` (3 selected failures). Each faithful
+root-owned producer fixture failed because the retained graph had no exact
+per-object policy derivation: `_topology_object_security_policy`,
+`_rollback_object_security_policy`, and `_legacy_object_security_policy` were
+absent. The fixtures encode config/attestation `root:<row worker_gid> 0440`,
+plist `root:wheel 0644`, moved-artifact metadata, rollback receipt
+`root:wheel 0400`, and the two distinct legacy group identities. Their paired
+negative cases exchange two otherwise admitted GIDs, so an unbound UID/GID/mode
+union cannot satisfy GREEN.
+
+## Task 2 fix round 2 — Finding B RED
+
+Timeout behavior was injected before production normalization at launchctl
+`print-disabled`, each of the five fixed label `print` calls, `dscl`,
+`dsmemberutil`, `dseditgroup`, `id -G`, the source-repair CLI boundary, and a
+precommit preserved-invariant gate. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved_native_command_timeout or source_repair_cli_normalizes_subprocess_timeout or precommit_subprocess_timeout or postcommit_subprocess_timeout'
+```
+
+Result: exit 1; 12 failed and 1 passed. All ten command-stage cases leaked raw
+`subprocess.TimeoutExpired`; the CLI case also leaked the raw exception with
+argv rather than returning exit 65 with a closed reason; and the precommit case
+escaped raw instead of entering authorized recovery. The postcommit replay
+already became `SourceRepairIncomplete(POST_COMMIT_RECONCILIATION_REQUIRED)`,
+which is the frozen same-carrier behavior and remained as a positive guard.
+
+## Task 2 fix round 2 — Finding C RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'owns_every_guard_before_each_admission_failure or closes_after_one_close_refuses'
+```
+
+Result: exit 1; `F...... [100%]` (1 failed, 6 passed). The first guard
+`fstat` case opened descriptor 11 but observed no close (`[] != [11]`), proving
+the descriptor was not owned before the first fallible audit. The other five
+admission stages and the close-refusal case already retained exact one-close or
+close-all behavior and remain positive guards.
+
+## Task 2 fix round 2 — Finding D RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'repository_role_directory_refuses_stable_zero_link_count or repository_role_directory_freezes_each_admitted_positive_link_count'
+```
+
+Result: exit 1; `F. [100%]` (1 failed, 1 passed). A stable synthetic role
+directory `st_nlink == 0` was admitted; the paired positive-count case already
+froze and rejected later drift from one admitted positive value to another.
+
+## Task 2 fix round 2 — focused GREEN
+
+- Finding A exact metadata policies: exit 0; 3 passed.
+- Finding B typed subprocess/lifecycle handling: exit 0; 13 passed.
+- Finding C guard ownership/close behavior: exit 0; 7 passed.
+- Finding D positive directory link count: exit 0; 2 passed.
+
+Exact commands are recorded in `task-2-report.md`. All four focused selectors
+were re-run after the complete bounded production repair, and all passed.
+
+Consolidated new selector: exit 0; 25 passed. Prior review selector
+`python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery or crash'`:
+exit 0; 47 passed. Legacy-v1 selector
+`python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery_v1'`:
+exit 0; 5 passed. The exact consolidated command is preserved in
+`task-2-report.md`.
+
+## Task 2 fix round 2 — Finding A self-review type RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'exact_topology_policy_refuses_directory_substitution'
+```
+
+Result: exit 1; `F [100%]` (1 failed). A stable directory substitution with
+the exact config UID/GID/mode was admitted, proving the per-object tuple also
+needed to bind `S_IFREG`/`S_IFDIR` before snapshot.
+
+## Task 2 fix round 2 — final GREEN and proof
+
+- Self-review type selector: exit 0; 1 passed.
+- Complete Finding A selector: exit 0; 4 passed.
+- Consolidated new selector: exit 0; 26 passed.
+- Prior review selector `-k 'recovery or crash'`: exit 0; 47 passed.
+- Legacy-v1 selector `-k 'recovery_v1'`: exit 0; 5 passed.
+- Preserved/source-repair selector: exit 0; 67 passed; `real 78.78`,
+  `user 33.08`, `sys 35.59`.
+- Complete module: exit 0; all 351 collected cases reached `[100%]`;
+  `real 1167.21`, `user 492.10`, `sys 512.08`.
+- Apple `/usr/bin/python3` compilation: exit 0; no output.
+- `git diff --check`: exit 0; no output.
+- Final protected master re-pin remained
+  `b901dee0272a99b8a1d60385848b99b7273e8261`.
+
+Every exact command and RED/GREEN receipt is recorded in `task-2-report.md`.
+Task 3 and all native/provider/Slack/OAuth/service/routing/publication surfaces
+remained held; no installed preserved payload was executed.

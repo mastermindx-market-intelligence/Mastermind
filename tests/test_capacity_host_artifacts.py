@@ -29,6 +29,35 @@ def _open_fd_inventory() -> frozenset[int]:
     return frozenset(int(name) for name in os.listdir("/dev/fd") if name.isdecimal())
 
 
+def _overlay_fixture_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[Path, tuple[int, int] | tuple[int, int, int]],
+) -> None:
+    """Represent fixture inodes with exact producer UID/GID identities."""
+
+    identities = {
+        (path.stat().st_dev, path.stat().st_ino): expected
+        for path, expected in metadata.items()
+    }
+    original_fstat = os.fstat
+    original_stat = os.stat
+    original_lstat = os.lstat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        expected = identities.get((info.st_dev, info.st_ino))
+        if expected is None:
+            return info
+        return _StatOverlay(info, st_uid=expected[0], st_gid=expected[1])
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs))
+    )
+    monkeypatch.setattr(
+        os, "lstat", lambda *args, **kwargs: overlay(original_lstat(*args, **kwargs))
+    )
+
+
 def _overlay_fixture_identity_as_root(
     monkeypatch: pytest.MonkeyPatch, *, device: int
 ) -> None:
@@ -57,6 +86,12 @@ class _StatOverlay:
         if name in self._changes:
             return self._changes[name]
         return getattr(self._value, name)
+
+
+def _write_metadata_fixture(path: Path, payload: bytes, mode: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    path.chmod(mode)
 
 
 def _git(repository: Path, *arguments: str) -> str:
@@ -3258,6 +3293,244 @@ def test_repository_view_closes_guard_descriptor_when_initial_guard_audit_refuse
     assert closed_root == opened_root
 
 
+@pytest.mark.parametrize(
+    "failure_stage",
+    (
+        "first-fstat",
+        "ancestor-validation",
+        "xattr-audit",
+        "acl-audit",
+        "relation-observation",
+        "later-guard-open",
+    ),
+)
+def test_repository_view_owns_every_guard_before_each_admission_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    evidence = tmp_path / "guard-admission" / "evidence.json"
+    evidence.parent.mkdir()
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(0o444)
+    before = _open_fd_inventory()
+    opened_guards: list[int] = []
+    closed_guards: list[int] = []
+    original_open = os.open
+    original_close = os.close
+    original_fstat = os.fstat
+    original_stat = os.stat
+    original_acl = artifacts._descriptor_has_extended_acl
+
+    def observed_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        is_guard = bool(flags & getattr(os, "O_DIRECTORY", 0))
+        if (
+            failure_stage == "later-guard-open"
+            and is_guard
+            and "dir_fd" in kwargs
+            and kwargs["dir_fd"] in opened_guards
+        ):
+            raise OSError(errno.EIO, "injected later guard open failure")
+        descriptor = original_open(path, flags, *args, **kwargs)
+        if is_guard and (
+            os.fspath(path) == "/"
+            or (
+                "dir_fd" in kwargs
+                and kwargs["dir_fd"] in opened_guards
+            )
+        ):
+            opened_guards.append(descriptor)
+        return descriptor
+
+    def observed_close(descriptor: int) -> None:
+        if descriptor in opened_guards:
+            closed_guards.append(descriptor)
+        original_close(descriptor)
+
+    def observed_fstat(descriptor: int) -> os.stat_result:
+        if failure_stage == "first-fstat" and descriptor in opened_guards:
+            raise OSError(errno.EIO, "injected first guard fstat failure")
+        return original_fstat(descriptor)
+
+    def observed_stat(*args: object, **kwargs: object) -> os.stat_result | _StatOverlay:
+        info = original_stat(*args, **kwargs)
+        if (
+            failure_stage == "relation-observation"
+            and kwargs.get("dir_fd") in opened_guards
+            and kwargs.get("follow_symlinks") is False
+        ):
+            return _StatOverlay(info, st_ino=info.st_ino + 1)
+        return info
+
+    def refuse_ancestor(*args: object, **kwargs: object) -> None:
+        raise artifacts.CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+
+    def refuse_xattrs(*args: object, **kwargs: object) -> frozenset[bytes]:
+        raise artifacts.CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+
+    def observed_acl(descriptor: int) -> bool:
+        if failure_stage == "acl-audit" and descriptor in opened_guards:
+            return True
+        return original_acl(descriptor)
+
+    monkeypatch.setattr(os, "open", observed_open)
+    monkeypatch.setattr(os, "close", observed_close)
+    monkeypatch.setattr(os, "fstat", observed_fstat)
+    monkeypatch.setattr(os, "stat", observed_stat)
+    monkeypatch.setattr(artifacts, "_descriptor_has_extended_acl", observed_acl)
+    if failure_stage == "ancestor-validation":
+        monkeypatch.setattr(
+            artifacts, "_require_source_repair_ancestor", refuse_ancestor
+        )
+    if failure_stage == "xattr-audit":
+        monkeypatch.setattr(
+            artifacts, "_source_repair_ancestor_xattrs", refuse_xattrs
+        )
+
+    with pytest.raises((artifacts.CapacityHostArtifactError, OSError)):
+        artifacts._RepositoryView(evidence)
+    assert opened_guards
+    assert closed_guards == list(reversed(opened_guards))
+    assert len(closed_guards) == len(set(closed_guards))
+    assert _open_fd_inventory() == before
+
+
+def test_repository_view_attempts_all_guard_closes_after_one_close_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence = tmp_path / "guard-close" / "evidence.json"
+    evidence.parent.mkdir()
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(0o444)
+    before = _open_fd_inventory()
+    opened_guards: list[int] = []
+    close_attempts: list[int] = []
+    original_open = os.open
+    original_close = os.close
+    original_stat = os.stat
+    injected_close_failure = False
+
+    def observed_open(
+        path: object, flags: int, *args: object, **kwargs: object
+    ) -> int:
+        descriptor = original_open(path, flags, *args, **kwargs)
+        if flags & getattr(os, "O_DIRECTORY", 0) and (
+            os.fspath(path) == "/"
+            or (
+                "dir_fd" in kwargs
+                and kwargs["dir_fd"] in opened_guards
+            )
+        ):
+            opened_guards.append(descriptor)
+        return descriptor
+
+    def observed_close(descriptor: int) -> None:
+        nonlocal injected_close_failure
+        if descriptor in opened_guards:
+            close_attempts.append(descriptor)
+            original_close(descriptor)
+            if not injected_close_failure:
+                injected_close_failure = True
+                raise OSError(errno.EIO, "injected guard close failure")
+            return
+        original_close(descriptor)
+
+    def mismatched_relation(
+        *args: object, **kwargs: object
+    ) -> os.stat_result | _StatOverlay:
+        info = original_stat(*args, **kwargs)
+        if (
+            kwargs.get("dir_fd") in opened_guards
+            and kwargs.get("follow_symlinks") is False
+        ):
+            return _StatOverlay(info, st_ino=info.st_ino + 1)
+        return info
+
+    monkeypatch.setattr(os, "open", observed_open)
+    monkeypatch.setattr(os, "close", observed_close)
+    monkeypatch.setattr(os, "stat", mismatched_relation)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"
+    ):
+        artifacts._RepositoryView(evidence)
+    assert len(opened_guards) >= 2
+    assert close_attempts == list(reversed(opened_guards))
+    assert len(close_attempts) == len(set(close_attempts))
+    assert _open_fd_inventory() == before
+
+
+def _repository_role_directory_policy(root: Path) -> artifacts._RepositorySecurityPolicy:
+    info = root.stat()
+    return artifacts._RepositorySecurityPolicy(
+        role="test-role-directory",
+        expected_uid=info.st_uid,
+        expected_gid=info.st_gid,
+        expected_device=info.st_dev,
+        directory_modes=frozenset({0o755}),
+        file_modes=frozenset({0o444}),
+    )
+
+
+def test_repository_role_directory_refuses_stable_zero_link_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "zero-link-role"
+    root.mkdir(mode=0o755)
+    root.chmod(0o755)
+    policy = _repository_role_directory_policy(root)
+    identity = (root.stat().st_dev, root.stat().st_ino)
+    original_fstat = os.fstat
+    original_stat = os.stat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if (info.st_dev, info.st_ino) == identity:
+            return _StatOverlay(info, st_nlink=0)
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs))
+    )
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"
+    ):
+        artifacts._RepositoryView(root, security_policy=policy)
+
+
+def test_repository_role_directory_freezes_each_admitted_positive_link_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "positive-link-role"
+    root.mkdir(mode=0o755)
+    root.chmod(0o755)
+    policy = _repository_role_directory_policy(root)
+    identity = (root.stat().st_dev, root.stat().st_ino)
+    original_fstat = os.fstat
+    original_stat = os.stat
+    observed_nlink = 7
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if (info.st_dev, info.st_ino) == identity:
+            return _StatOverlay(info, st_nlink=observed_nlink)
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs))
+    )
+    view = artifacts._RepositoryView(root, security_policy=policy)
+    try:
+        observed_nlink = 8
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError, match="SOURCE_VIEW_DRIFT"
+        ):
+            view.revalidate()
+    finally:
+        view.close()
+
+
 def test_preserved_fd_budget_uplifts_soft_limit_in_subprocess() -> None:
     script = """
 import json, resource, tempfile
@@ -3836,6 +4109,388 @@ def test_real_mode_archived_and_verify_only_receive_same_retained_archive_parent
         )
     if isinstance(caught.value, artifacts.SourceRepairIncomplete):
         assert isinstance(caught.value.__cause__, Observed)
+
+
+def _producer_topology_rows(root: Path) -> tuple[list[dict[str, object]], dict[Path, tuple[int, int, int]]]:
+    rows: list[dict[str, object]] = []
+    metadata: dict[Path, tuple[int, int, int]] = {}
+    for index, worker_gid in enumerate((454, 455, 456), start=1):
+        slot = f"codex-pro-0{index}"
+        config = root / "config" / f"worker-{slot}.json"
+        attestation = root / f"codex-attestation-1.0.0-{slot}.json"
+        plist = root / "LaunchDaemons" / f"com.mastermind.executive.worker.{slot}.plist"
+        for path, mode in ((config, 0o440), (attestation, 0o440), (plist, 0o644)):
+            _write_metadata_fixture(path, f"{path.name}\n".encode("ascii"), mode)
+        metadata[config] = (0, worker_gid, 0o440)
+        metadata[attestation] = (0, worker_gid, 0o440)
+        metadata[plist] = (0, 0, 0o644)
+        rows.append(
+            {
+                "slot_id": slot,
+                "worker_gid": worker_gid,
+                "config_path": str(config),
+                "attestation_path": str(attestation),
+                "plist_path": str(plist),
+            }
+        )
+    return rows, metadata
+
+
+def test_retained_topology_accepts_exact_per_row_producer_metadata_and_rejects_gid_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows, metadata = _producer_topology_rows(tmp_path / "topology")
+    _overlay_fixture_metadata(monkeypatch, metadata)
+    views: list[artifacts._RepositoryView] = []
+    try:
+        for row in rows:
+            for path_key in ("config_path", "attestation_path", "plist_path"):
+                path = Path(str(row[path_key]))
+                views.append(
+                    artifacts._RepositoryView(
+                        path,
+                        security_policy=artifacts._topology_object_security_policy(
+                            row,
+                            path_key=path_key,
+                            expected_device=path.stat().st_dev,
+                        ),
+                    )
+                )
+        for view in views:
+            view.revalidate()
+    finally:
+        for view in reversed(views):
+            view.close()
+
+    first = Path(str(rows[0]["config_path"]))
+    wrong = {**metadata, first: (0, int(rows[1]["worker_gid"]), 0o440)}
+    with monkeypatch.context() as swapped:
+        _overlay_fixture_metadata(swapped, wrong)
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+            artifacts._RepositoryView(
+                first,
+                security_policy=artifacts._topology_object_security_policy(
+                    rows[0],
+                    path_key="config_path",
+                    expected_device=first.stat().st_dev,
+                ),
+            )
+
+
+def test_exact_topology_policy_refuses_directory_substitution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    substituted = tmp_path / "worker-codex-pro-01.json"
+    substituted.mkdir(mode=0o755)
+    identity = (substituted.stat().st_dev, substituted.stat().st_ino)
+    expected_device = substituted.stat().st_dev
+    original_fstat = os.fstat
+    original_stat = os.stat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if (info.st_dev, info.st_ino) == identity:
+            return _StatOverlay(
+                info,
+                st_mode=stat.S_IFDIR | 0o440,
+                st_uid=0,
+                st_gid=454,
+            )
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs))
+    )
+    policy = artifacts._topology_object_security_policy(
+        {
+            "worker_gid": 454,
+            "config_path": str(substituted),
+        },
+        path_key="config_path",
+        expected_device=expected_device,
+    )
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"
+    ):
+        artifacts._RepositoryView(substituted, security_policy=policy)
+
+
+def test_retained_rollback_accepts_exact_moved_artifact_metadata_and_rejects_substitution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows, topology_metadata = _producer_topology_rows(tmp_path / "topology")
+    archive = tmp_path / "rollback-drill-fixture"
+    archive.mkdir(mode=0o700)
+    metadata: dict[Path, tuple[int, int, int]] = {archive: (0, 0, 0o700)}
+    artifacts_rows: list[dict[str, str]] = []
+    ordered_paths = [
+        Path(str(row[path_key]))
+        for row in rows
+        for path_key in ("config_path", "attestation_path", "plist_path")
+    ]
+    for index, original in enumerate(ordered_paths, start=1):
+        child = archive / f"{index}-{original.name}"
+        expected = topology_metadata[original]
+        _write_metadata_fixture(child, original.read_bytes(), expected[2])
+        metadata[child] = expected
+        artifacts_rows.append(
+            {"name": child.name, "sha256": hashlib.sha256(child.read_bytes()).hexdigest()}
+        )
+    receipt = archive / "rollback-receipt.json"
+    _write_metadata_fixture(receipt, b'{"outcome":"SHRINK_ONLY_ROLLBACK_PASS"}\n', 0o400)
+    metadata[receipt] = (0, 0, 0o400)
+    drill = {"artifacts": artifacts_rows}
+    _overlay_fixture_metadata(monkeypatch, metadata)
+    policy = artifacts._rollback_object_security_policy(
+        rows,
+        drill,
+        expected_device=archive.stat().st_dev,
+    )
+    view = artifacts._RepositoryView(archive, security_policy=policy)
+    try:
+        view.revalidate()
+    finally:
+        view.close()
+
+    first = archive / artifacts_rows[0]["name"]
+    wrong = {**metadata, first: (0, 455, 0o440)}
+    with monkeypatch.context() as substituted:
+        _overlay_fixture_metadata(substituted, wrong)
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+            artifacts._RepositoryView(archive, security_policy=policy)
+
+
+def test_retained_legacy_accepts_each_canonical_producer_metadata_and_rejects_union(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixtures = (
+        ("control-config", tmp_path / "config" / "control.json", 0, 450, 0o440),
+        ("worker-config", tmp_path / "config" / "worker-codex.json", 0, 451, 0o440),
+        (
+            "control-plist",
+            tmp_path / "LaunchDaemons" / "com.mastermind.executive.control.plist",
+            0,
+            0,
+            0o644,
+        ),
+        (
+            "worker-plist",
+            tmp_path / "LaunchDaemons" / "com.mastermind.executive.worker.codex.plist",
+            0,
+            0,
+            0o644,
+        ),
+    )
+    metadata = {path: (uid, gid, mode) for _role, path, uid, gid, mode in fixtures}
+    for _role, path, _uid, _gid, mode in fixtures:
+        _write_metadata_fixture(path, f"{path.name}\n".encode("ascii"), mode)
+    _overlay_fixture_metadata(monkeypatch, metadata)
+    views: list[artifacts._RepositoryView] = []
+    try:
+        for role, path, _uid, _gid, _mode in fixtures:
+            views.append(
+                artifacts._RepositoryView(
+                    path,
+                    security_policy=artifacts._legacy_object_security_policy(
+                        role, expected_device=path.stat().st_dev
+                    ),
+                )
+            )
+        for view in views:
+            view.revalidate()
+    finally:
+        for view in reversed(views):
+            view.close()
+
+    worker = fixtures[1][1]
+    wrong = {**metadata, worker: (0, 450, 0o440)}
+    with monkeypatch.context() as substituted:
+        _overlay_fixture_metadata(substituted, wrong)
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+            artifacts._RepositoryView(
+                worker,
+                security_policy=artifacts._legacy_object_security_policy(
+                    "worker-config", expected_device=worker.stat().st_dev
+                ),
+            )
+
+
+_PRESERVED_LABELS = (
+    "com.mastermind.executive.control",
+    "com.mastermind.executive.worker.codex",
+    "com.mastermind.executive.worker.codex-pro-01",
+    "com.mastermind.executive.worker.codex-pro-02",
+    "com.mastermind.executive.worker.codex-pro-03",
+)
+
+
+@pytest.mark.parametrize(
+    "timeout_target,expected_reason",
+    (
+        ("print-disabled", "SOURCE_REPAIR_SERVICE_STATE_INVALID"),
+        *((label, "SOURCE_REPAIR_SERVICE_STATE_INVALID") for label in _PRESERVED_LABELS),
+        ("dscl", "SOURCE_REPAIR_PRINCIPAL_INVALID"),
+        ("dsmemberutil", "SOURCE_REPAIR_PRINCIPAL_INVALID"),
+        ("dseditgroup", "SOURCE_REPAIR_PRINCIPAL_INVALID"),
+        ("id", "SOURCE_REPAIR_PRINCIPAL_INVALID"),
+    ),
+)
+def test_preserved_native_command_timeout_is_typed_at_each_semantic_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_target: str,
+    expected_reason: str,
+) -> None:
+    disabled = (
+        "disabled services = {\n"
+        + "".join(f'    "{label}" => true\n' for label in _PRESERVED_LABELS)
+        + "}\n"
+    ).encode("utf-8")
+
+    def completed(
+        arguments: list[str], *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        executable = Path(arguments[0]).name
+        target = (
+            arguments[-1].removeprefix("system/")
+            if arguments[:2] == ["/bin/launchctl", "print"]
+            else arguments[1] if arguments[:2] == ["/bin/launchctl", "print-disabled"]
+            else executable
+        )
+        if target == timeout_target:
+            raise subprocess.TimeoutExpired(
+                arguments,
+                5,
+                output=b"/private/secret-output",
+                stderr=b"secret-error",
+            )
+        if arguments[:2] == ["/bin/launchctl", "print-disabled"]:
+            return subprocess.CompletedProcess(arguments, 0, disabled, b"")
+        if arguments[:2] == ["/bin/launchctl", "print"]:
+            return subprocess.CompletedProcess(arguments, 113, b"", b"")
+        if executable == "dscl":
+            field = arguments[-1]
+            record = Path(arguments[-2]).name
+            expected = {
+                "_mastermind_exec": 450,
+                "_mastermind_codex_01": 454,
+                "_mastermind_codex_02": 455,
+                "_mastermind_codex_03": 456,
+            }[record]
+            return subprocess.CompletedProcess(
+                arguments, 0, f"{field}: {expected}\n".encode("ascii"), b""
+            )
+        if executable == "dsmemberutil":
+            return subprocess.CompletedProcess(
+                arguments, 0, b"user is a member of the group\n", b""
+            )
+        if executable == "dseditgroup":
+            group = arguments[-1]
+            return subprocess.CompletedProcess(
+                arguments,
+                67,
+                f"no _mastermind_exec is NOT a member of {group}\n".encode("ascii"),
+                b"",
+            )
+        if executable == "id":
+            return subprocess.CompletedProcess(arguments, 0, b"12 61 100 450\n", b"")
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(artifacts.subprocess, "run", completed)
+    with pytest.raises(artifacts.CapacityHostArtifactError) as caught:
+        artifacts._verify_preserved_service_principal_state(_PRESERVED_LABELS)
+    assert str(caught.value) == expected_reason
+    assert "/private" not in str(caught.value)
+    assert "secret" not in str(caught.value)
+
+
+def test_source_repair_cli_normalizes_subprocess_timeout_without_argv_leak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def timed_out(**kwargs: object) -> str:
+        raise subprocess.TimeoutExpired(
+            ["/bin/launchctl", "print", "system/private-secret-label"],
+            5,
+            output=b"private output",
+            stderr=b"private error",
+        )
+
+    monkeypatch.setattr(artifacts, "run_source_repair_host", timed_out)
+    code = artifacts.main(
+        [
+            "source-repair-host",
+            "--mode",
+            "verify-only",
+            "--system-root",
+            str(tmp_path),
+            "--lock-file",
+            str(tmp_path / "locks" / "cf2-h0.lock"),
+            "--expected-repair-commit",
+            "d" * 40,
+            "--expected-source-commit",
+            artifacts.PRODUCER_COMMIT,
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 65
+    assert captured.out == ""
+    assert captured.err == (
+        "capacity host artifact refused: "
+        "SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID\n"
+    )
+
+
+def test_precommit_subprocess_timeout_uses_authorized_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    calls = 0
+
+    def timeout_at_final_precommit_check(*args: object, **kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise subprocess.TimeoutExpired(
+                ["/bin/launchctl", "print-disabled", "system"], 5
+            )
+
+    monkeypatch.setattr(
+        artifacts, "_verify_preserved_h0_invariants", timeout_at_final_precommit_check
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError) as caught:
+        artifacts.run_source_repair_host(**arguments)
+    assert str(caught.value) == "SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID"
+    archive = next((system_root / "capacity-archive").iterdir())
+    position = artifacts.reconcile_source_repair(
+        archive, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    assert position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+
+
+def test_postcommit_subprocess_timeout_requires_same_carrier_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+
+    def timed_out(*args: object, **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(
+            ["/bin/launchctl", "print-disabled", "system"], 5
+        )
+
+    monkeypatch.setattr(artifacts, "_verify_preserved_h0_invariants", timed_out)
+    with pytest.raises(artifacts.SourceRepairIncomplete) as caught:
+        artifacts.run_source_repair_host(**arguments)
+    assert str(caught.value) == "POST_COMMIT_RECONCILIATION_REQUIRED"
 
 
 class _FakePreservedView:

@@ -2869,10 +2869,24 @@ def _resolve_source_repair_operator_uid(operator_user: str) -> int:
     return value
 
 
+def _run_preserved_subprocess(
+    arguments: Sequence[str],
+    *,
+    reason: str,
+    **kwargs: Any,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run one fixed native observer without exposing subprocess failure detail."""
+
+    try:
+        return subprocess.run(list(arguments), **kwargs)
+    except subprocess.SubprocessError as exc:
+        raise CapacityHostArtifactError(reason) from exc
+
+
 def _read_directory_service_identity(
     record_kind: str, name: str, *, identity_field: str, expected: int
 ) -> None:
-    completed = subprocess.run(
+    completed = _run_preserved_subprocess(
         [
             "/usr/bin/dscl",
             ".",
@@ -2880,6 +2894,7 @@ def _read_directory_service_identity(
             f"/{record_kind}/{name}",
             identity_field,
         ],
+        reason="SOURCE_REPAIR_PRINCIPAL_INVALID",
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -2894,8 +2909,9 @@ def _read_directory_service_identity(
 
 def _verify_disabled_unloaded_label(label: str, disabled_output: str) -> None:
     parse_launchctl_disabled(disabled_output, label)
-    completed = subprocess.run(
+    completed = _run_preserved_subprocess(
         ["/bin/launchctl", "print", f"system/{label}"],
+        reason="SOURCE_REPAIR_SERVICE_STATE_INVALID",
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -3287,8 +3303,9 @@ def _verify_telemetry_view(view: "_RepositoryView") -> None:
 
 
 def _verify_preserved_service_principal_state(labels: Sequence[str]) -> None:
-    disabled = subprocess.run(
+    disabled = _run_preserved_subprocess(
         ["/bin/launchctl", "print-disabled", "system"],
+        reason="SOURCE_REPAIR_SERVICE_STATE_INVALID",
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -3323,8 +3340,9 @@ def _verify_preserved_service_principal_state(labels: Sequence[str]) -> None:
         _read_directory_service_identity(
             "Groups", name, identity_field="PrimaryGroupID", expected=gid
         )
-        membership = subprocess.run(
+        membership = _run_preserved_subprocess(
             ["/usr/bin/dsmemberutil", "checkmembership", "-U", name, "-G", name],
+            reason="SOURCE_REPAIR_PRINCIPAL_INVALID",
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -3334,7 +3352,7 @@ def _verify_preserved_service_principal_state(labels: Sequence[str]) -> None:
         )
         if membership.returncode != 0 or membership.stdout != b"user is a member of the group\n":
             raise CapacityHostArtifactError("SOURCE_REPAIR_PRINCIPAL_INVALID")
-        nonmembership = subprocess.run(
+        nonmembership = _run_preserved_subprocess(
             [
                 "/usr/sbin/dseditgroup",
                 "-o",
@@ -3343,6 +3361,7 @@ def _verify_preserved_service_principal_state(labels: Sequence[str]) -> None:
                 "_mastermind_exec",
                 name,
             ],
+            reason="SOURCE_REPAIR_PRINCIPAL_INVALID",
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -3355,8 +3374,9 @@ def _verify_preserved_service_principal_state(labels: Sequence[str]) -> None:
         )
         if nonmembership.returncode != 67 or nonmembership.stdout != expected_nonmembership:
             raise CapacityHostArtifactError("SOURCE_REPAIR_PRINCIPAL_INVALID")
-    control_groups = subprocess.run(
+    control_groups = _run_preserved_subprocess(
         ["/usr/bin/id", "-G", "_mastermind_exec"],
+        reason="SOURCE_REPAIR_PRINCIPAL_INVALID",
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -3538,6 +3558,114 @@ def _verify_preserved_h0_invariants_body(
     return
 
 
+def _topology_object_security_policy(
+    row: Mapping[str, Any],
+    *,
+    path_key: str,
+    expected_device: int,
+) -> "_RepositorySecurityPolicy":
+    """Bind one authenticated topology row to its exact producer metadata."""
+
+    worker_gid = row.get("worker_gid")
+    if (
+        path_key not in {"config_path", "attestation_path", "plist_path"}
+        or isinstance(worker_gid, bool)
+        or not isinstance(worker_gid, int)
+        or worker_gid <= 0
+    ):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+    gid, mode = (0, 0o644) if path_key == "plist_path" else (worker_gid, 0o440)
+    exact = (stat.S_IFREG, 0, gid, mode)
+    return _RepositorySecurityPolicy(
+        role=f"topology-{path_key}",
+        expected_uid=exact[1],
+        expected_gid=exact[2],
+        expected_device=expected_device,
+        directory_modes=frozenset(),
+        file_modes=frozenset({exact[3]}),
+        object_metadata={".": exact},
+    )
+
+
+def _rollback_object_security_policy(
+    rows: Sequence[Mapping[str, Any]],
+    drill: Mapping[str, Any],
+    *,
+    expected_device: int,
+) -> "_RepositorySecurityPolicy":
+    """Bind every moved rollback child to its authenticated original object."""
+
+    artifacts = drill.get("artifacts")
+    if len(rows) != 3 or not isinstance(artifacts, list) or len(artifacts) != 9:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+    object_metadata: dict[str, tuple[int, int, int, int]] = {
+        ".": (stat.S_IFDIR, 0, 0, 0o700),
+        "rollback-receipt.json": (stat.S_IFREG, 0, 0, 0o400),
+    }
+    expected_names: list[str] = []
+    indexed_paths = (
+        (row, path_key)
+        for row in rows
+        for path_key in ("config_path", "attestation_path", "plist_path")
+    )
+    for index, (row, path_key) in enumerate(indexed_paths, start=1):
+        raw_path = row.get(path_key)
+        if not isinstance(raw_path, str):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+        path = _absolute_evidence_path(
+            raw_path, reason="SOURCE_REPAIR_ROLLBACK_INVALID"
+        )
+        name = f"{index}-{path.name}"
+        expected_names.append(name)
+        topology_policy = _topology_object_security_policy(
+            row, path_key=path_key, expected_device=expected_device
+        )
+        if topology_policy.object_metadata is None:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+        object_metadata[name] = topology_policy.object_metadata["."]
+    observed_names: list[str] = []
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping) or not isinstance(artifact.get("name"), str):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+        observed_names.append(str(artifact["name"]))
+    if sorted(observed_names) != sorted(expected_names):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+    return _RepositorySecurityPolicy(
+        role="rollback",
+        expected_uid=0,
+        expected_gid=0,
+        expected_device=expected_device,
+        directory_modes=frozenset({0o700}),
+        file_modes=frozenset({0o400, 0o440, 0o644}),
+        object_metadata=object_metadata,
+    )
+
+
+def _legacy_object_security_policy(
+    role: str, *, expected_device: int
+) -> "_RepositorySecurityPolicy":
+    """Return the sole admitted metadata identity for a preserved legacy object."""
+
+    identities = {
+        "control-config": (stat.S_IFREG, 0, 450, 0o440),
+        "worker-config": (stat.S_IFREG, 0, 451, 0o440),
+        "control-plist": (stat.S_IFREG, 0, 0, 0o644),
+        "worker-plist": (stat.S_IFREG, 0, 0, 0o644),
+    }
+    exact = identities.get(role)
+    if exact is None:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_LEGACY_STATE_INVALID")
+    return _RepositorySecurityPolicy(
+        role=f"legacy-{role}",
+        expected_uid=exact[1],
+        expected_gid=exact[2],
+        expected_device=expected_device,
+        directory_modes=frozenset(),
+        file_modes=frozenset({exact[3]}),
+        object_metadata={".": exact},
+    )
+
+
 def _verify_preserved_h0_invariants(
     system_root: Path,
     generation: Path,
@@ -3660,6 +3788,18 @@ def _verify_preserved_h0_invariants(
                 "rollback-drill-receipt.json", maximum_bytes=1024 * 1024
             )
         )
+        topology = json.loads(
+            generation_view.read_bytes(
+                "broker-topology.json", maximum_bytes=1024 * 1024
+            )
+        )
+        rows = topology.get("brokers")
+        if (
+            not isinstance(rows, list)
+            or len(rows) != 3
+            or any(not isinstance(row, Mapping) for row in rows)
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
         drill_archive = _absolute_evidence_path(
             drill.get("archive_root"), reason="SOURCE_REPAIR_ROLLBACK_INVALID"
         )
@@ -3673,21 +3813,13 @@ def _verify_preserved_h0_invariants(
                 drill_archive,
                 parent_descriptor=parents.archive,
                 root_name=drill_archive.name,
-                security_policy=role_policy(
-                    "rollback",
-                    directory_modes=frozenset({0o700}),
-                    file_modes=frozenset({0o444}),
+                security_policy=_rollback_object_security_policy(
+                    rows,
+                    drill,
+                    expected_device=parents.device,
                 ),
             )
         )
-        topology = json.loads(
-            generation_view.read_bytes(
-                "broker-topology.json", maximum_bytes=1024 * 1024
-            )
-        )
-        rows = topology.get("brokers")
-        if not isinstance(rows, list):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
         topology_views: dict[Path, _RepositoryView] = {}
         for row in rows:
             if not isinstance(row, Mapping):
@@ -3701,8 +3833,10 @@ def _verify_preserved_h0_invariants(
                 topology_views[path] = retain(
                     _RepositoryView(
                         path,
-                        security_policy=role_policy(
-                            "topology", file_modes=frozenset({0o444})
+                        security_policy=_topology_object_security_policy(
+                            row,
+                            path_key=key,
+                            expected_device=parents.device,
                         ),
                     )
                 )
@@ -3722,18 +3856,28 @@ def _verify_preserved_h0_invariants(
             _RepositoryView(Path("/Library/LaunchDaemons"), recursive=False)
         )
         legacy: dict[Path, _RepositoryView | None] = {}
-        for parent_view, path in (
-            (config_parent, system_root / "config" / "control.json"),
-            (config_parent, system_root / "config" / "worker-codex.json"),
+        for parent_view, path, legacy_role in (
+            (
+                config_parent,
+                system_root / "config" / "control.json",
+                "control-config",
+            ),
+            (
+                config_parent,
+                system_root / "config" / "worker-codex.json",
+                "worker-config",
+            ),
             (
                 launchd_parent,
                 Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist"),
+                "control-plist",
             ),
             (
                 launchd_parent,
                 Path(
                     "/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"
                 ),
+                "worker-plist",
             ),
         ):
             if parent_view.contains(path.name):
@@ -3742,8 +3886,8 @@ def _verify_preserved_h0_invariants(
                         path,
                         parent_descriptor=parent_view.root_descriptor,
                         root_name=path.name,
-                        security_policy=role_policy(
-                            "legacy", file_modes=frozenset({0o444})
+                        security_policy=_legacy_object_security_policy(
+                            legacy_role, expected_device=parents.device
                         ),
                     )
                 )
@@ -5153,6 +5297,10 @@ def run_source_repair_host(
             parents.revalidate()
             return "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
         raise CapacityHostArtifactError("SOURCE_REPAIR_TRANSITION_LOOP")
+    except subprocess.SubprocessError as exc:
+        raise CapacityHostArtifactError(
+            "SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID"
+        ) from exc
     finally:
         active_error = sys.exc_info()[1]
         try:
@@ -6421,6 +6569,7 @@ class _RepositorySecurityPolicy:
     file_modes: frozenset[int]
     allow_symlinks: bool = False
     approved_xattrs: frozenset[bytes] = _APPROVED_SYSTEM_XATTRS
+    object_metadata: Mapping[str, tuple[int, int, int, int]] | None = None
 
 
 class _RepositoryView:
@@ -6627,13 +6776,13 @@ class _RepositoryView:
         observed: os.stat_result | None = None,
         native_tmp: bool = False,
     ) -> None:
+        self.guard_descriptors.append(descriptor)
         info = os.fstat(descriptor)
         root_device = (
             info.st_dev
-            if not self.guard_descriptors
+            if len(self.guard_descriptors) == 1
             else os.fstat(self.guard_descriptors[0]).st_dev
         )
-        self.guard_descriptors.append(descriptor)
         if native_tmp:
             if (
                 not stat.S_ISDIR(info.st_mode)
@@ -6712,29 +6861,41 @@ class _RepositoryView:
             policy_invalid = False
             if policy is not None:
                 mode = stat.S_IMODE(info.st_mode)
-                policy_invalid = (
-                    info.st_uid != policy.expected_uid
-                    or info.st_gid != policy.expected_gid
-                    or (
-                        policy.expected_device is not None
-                        and info.st_dev != policy.expected_device
+                if policy.object_metadata is not None:
+                    exact = policy.object_metadata.get(relative)
+                    policy_invalid = exact is None or (
+                        stat.S_IFMT(info.st_mode),
+                        info.st_uid,
+                        info.st_gid,
+                        mode,
+                    ) != exact
+                else:
+                    policy_invalid = (
+                        info.st_uid != policy.expected_uid
+                        or info.st_gid != policy.expected_gid
+                        or (
+                            stat.S_ISDIR(info.st_mode)
+                            and mode not in policy.directory_modes
+                        )
+                        or (
+                            stat.S_ISREG(info.st_mode)
+                            and mode not in policy.file_modes
+                        )
                     )
-                    or (
-                        stat.S_ISDIR(info.st_mode)
-                        and mode not in policy.directory_modes
-                    )
-                    or (
-                        stat.S_ISREG(info.st_mode)
-                        and mode not in policy.file_modes
-                    )
-                    or (
-                        stat.S_ISLNK(info.st_mode)
-                        and not policy.allow_symlinks
-                    )
+                policy_invalid = policy_invalid or (
+                    policy.expected_device is not None
+                    and info.st_dev != policy.expected_device
+                ) or (
+                    stat.S_ISLNK(info.st_mode) and not policy.allow_symlinks
                 )
             if (
                 policy_invalid
                 or stat.S_IMODE(info.st_mode) & 0o022
+                or (
+                    policy is not None
+                    and stat.S_ISDIR(info.st_mode)
+                    and info.st_nlink < 1
+                )
                 or (stat.S_ISREG(info.st_mode) and info.st_nlink != 1)
                 or (stat.S_ISLNK(info.st_mode) and info.st_nlink != 1)
                 or xattrs
@@ -7974,6 +8135,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", reason) is None:
             reason = type(exc).__name__
         print(f"capacity host artifact refused: {reason}", file=sys.stderr)
+        return 65
+    except subprocess.SubprocessError:
+        print(
+            "capacity host artifact refused: "
+            "SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID",
+            file=sys.stderr,
+        )
         return 65
     except (OSError, UnicodeError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
         print(f"capacity host artifact refused: {type(exc).__name__}", file=sys.stderr)
