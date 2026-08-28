@@ -13,6 +13,7 @@ def test_watcher_action_loop_is_canonical_and_action_oriented() -> None:
     assert skill_path.exists(), "watcher action-loop law must be a canonical Sol skill"
 
     skill = skill_path.read_text(encoding="utf-8")
+    normalized_skill = " ".join(skill.split())
     index = _read("docs/sol_skills/INDEX.md")
     kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
 
@@ -29,7 +30,7 @@ def test_watcher_action_loop_is_canonical_and_action_oriented() -> None:
         "never creates or mutates Executive Job/Attempt/Worker/Event state",
     )
     for phrase in required_skill_phrases:
-        assert phrase in skill, f"missing watcher action-loop law: {phrase}"
+        assert phrase in normalized_skill, f"missing watcher action-loop law: {phrase}"
 
     assert "notification-only watcher" in index
     assert "detect -> re-pin -> adjudicate -> act -> report" in kernel.lower()
