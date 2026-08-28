@@ -7,14 +7,21 @@ field, and emits a deliberately smaller versioned contract.
 from __future__ import annotations
 
 import math
+import json
+import os
 import re
+import subprocess
+import sys
+import threading
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from control_plane import chairman_control_room as ccr
+from control_plane import ceo_boot_packet, chairman_control_room as ccr, executive_inbox
 
 
 REMOTE_SCHEMA = "mastermind.chairman_control_room_remote.v1"
@@ -81,6 +88,44 @@ class BuildIdentity:
     commit: str
     tree: str
     artifact_digest: str
+
+
+@dataclass
+class CollectorConfig:
+    repo_root: Path
+    macro_root: Path
+    interval_seconds: float = 300.0
+    stale_after_seconds: float = 900.0
+    timeout_seconds: float = 60.0
+    max_output_bytes: int = 4 * 1024 * 1024
+    runner: Any = None
+    environ: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        self.repo_root = Path(self.repo_root)
+        self.macro_root = Path(self.macro_root)
+        if self.runner is None:
+            self.runner = default_runner
+        if self.environ is None:
+            self.environ = os.environ
+        for value in (
+            self.interval_seconds, self.stale_after_seconds, self.timeout_seconds
+        ):
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                raise ValueError("collector bounds must be finite and positive")
+        if type(self.max_output_bytes) is not int or self.max_output_bytes <= 0:
+            raise ValueError("max_output_bytes must be a positive integer")
+
+
+@dataclass(frozen=True)
+class CollectedInputs:
+    inbox: dict[str, Any]
+    boot_packet: dict[str, Any]
+    active_builds: dict[str, Any]
+    agent_os_state: dict[str, Any] | None
+    runtime_jobs: list[dict[str, Any]] | None
+    observed_at: str
+    freshness: Mapping[str, SourceFreshness]
 
 
 def _require_mapping(value: Any) -> Mapping[str, Any]:
@@ -329,3 +374,275 @@ def project_remote_document(
     }
     _reject_sensitive_values(projected)
     return projected
+
+
+def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[str, Any]:
+    """Run one read-only collector command with bounded captured output."""
+    try:
+        proc = subprocess.Popen(
+            [os.fspath(item) for item in argv],
+            cwd=os.fspath(cwd),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False,
+            close_fds=True,
+        )
+    except OSError:
+        return {"code": None, "stdout": "", "stderr": "", "timed_out": False}
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+        timed_out = True
+    stdout = stdout[: max_bytes + 1]
+    stderr = stderr[: max_bytes + 1]
+    return {
+        "code": proc.returncode,
+        "stdout": stdout.decode("utf-8", errors="strict") if stdout else "",
+        "stderr": stderr.decode("utf-8", errors="replace") if stderr else "",
+        "timed_out": timed_out,
+    }
+
+
+def _reject_duplicate_pairs(pairs):
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise RemoteProjectionError("duplicate_json_key")
+        out[key] = value
+    return out
+
+
+def _reject_json_constant(_value: str):
+    raise RemoteProjectionError("non_finite_number")
+
+
+def run_json_document(
+    runner,
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: float,
+    max_bytes: int,
+    expected_schema: str,
+) -> dict[str, Any]:
+    """Run and strictly decode one bounded stdout-only JSON document."""
+    try:
+        result = runner(
+            list(argv), cwd=cwd, timeout=timeout, max_bytes=max_bytes
+        )
+    except Exception as exc:  # noqa: BLE001 - converted to a stable boundary code
+        raise RemoteProjectionError("active_builds_command_unavailable") from exc
+    if not isinstance(result, Mapping):
+        raise RemoteProjectionError("active_builds_command_failed")
+    if result.get("timed_out") is True:
+        raise RemoteProjectionError("active_builds_command_timed_out")
+    if result.get("code") != 0:
+        raise RemoteProjectionError("active_builds_command_failed")
+    stdout = result.get("stdout")
+    if type(stdout) is not str:
+        raise RemoteProjectionError("invalid_collector_output")
+    try:
+        size = len(stdout.encode("utf-8"))
+    except UnicodeError as exc:
+        raise RemoteProjectionError("invalid_collector_output") from exc
+    if size > max_bytes:
+        raise RemoteProjectionError("collector_output_too_large")
+    try:
+        loaded = json.loads(
+            stdout,
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_json_constant,
+        )
+    except RemoteProjectionError:
+        raise
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RemoteProjectionError("invalid_json") from exc
+    document = _require_mapping(loaded)
+    _reject_non_finite(document)
+    if document.get("schema") != expected_schema:
+        raise RemoteProjectionError("active_builds_schema_mismatch")
+    return dict(document)
+
+
+def _freshness_entry(
+    present: bool,
+    *,
+    observed_at: str,
+    source_time: Any,
+    unavailable_reason: str,
+) -> SourceFreshness:
+    if not present:
+        return SourceFreshness("unavailable", observed_at, None, unavailable_reason)
+    valid_source_time = source_time if type(source_time) is str else None
+    return SourceFreshness("fresh", observed_at, valid_source_time, None)
+
+
+def collect_once(config: CollectorConfig, *, now: str) -> CollectedInputs:
+    """Collect one generation without reading the stale active-build artifact."""
+    observed_at = _zulu(now)
+    packet = ceo_boot_packet.build_packet(
+        repo_root=config.repo_root,
+        macro_root_flag=os.fspath(config.macro_root),
+        environ=config.environ,
+        now=observed_at,
+        timeout=config.timeout_seconds,
+    )
+    inbox = executive_inbox.build_inbox(
+        repo_root=config.repo_root,
+        boot_packet=packet,
+        environ=config.environ,
+        now=observed_at,
+        timeout=config.timeout_seconds,
+    )
+    active_builds = run_json_document(
+        config.runner,
+        [
+            sys.executable,
+            os.fspath(config.macro_root / "scripts" / "build_project_active_build_map.py"),
+            "--json-stdout",
+        ],
+        cwd=config.macro_root,
+        timeout=config.timeout_seconds,
+        max_bytes=config.max_output_bytes,
+        expected_schema=ccr.ACTIVE_BUILDS_SCHEMA,
+    )
+    agent_os_state, agent_os_error = ccr._read_agent_os_state(os.fspath(config.macro_root))
+    runtime_jobs, runtime_error = ccr._read_runtime_jobs(config.repo_root)
+
+    brief = packet.get("brief") if isinstance(packet, Mapping) else None
+    brief_ok = isinstance(brief, Mapping) and brief.get("schema") == ccr.AGENT_OS_BRIEF_SCHEMA
+    agent_state_ok = (
+        isinstance(agent_os_state, Mapping)
+        and agent_os_state.get("schema") == ccr.AGENT_OS_STATE_SCHEMA
+    )
+    freshness = {
+        SOURCE_AGENT_OS_BRIEF: _freshness_entry(
+            brief_ok,
+            observed_at=observed_at,
+            source_time=packet.get("generated_at") if isinstance(packet, Mapping) else None,
+            unavailable_reason="agent_os_brief_unavailable",
+        ),
+        SOURCE_AGENT_OS_STATE: _freshness_entry(
+            agent_state_ok,
+            observed_at=observed_at,
+            source_time=agent_os_state.get("generated_at") if agent_state_ok else None,
+            unavailable_reason="agent_os_state_unavailable" if agent_os_error else "agent_os_state_invalid",
+        ),
+        SOURCE_ACTIVE_BUILDS: _freshness_entry(
+            True,
+            observed_at=observed_at,
+            source_time=active_builds.get("collected_at"),
+            unavailable_reason="active_builds_unavailable",
+        ),
+        SOURCE_EXECUTIVE_RUNTIME: _freshness_entry(
+            runtime_jobs is not None,
+            observed_at=observed_at,
+            source_time=observed_at if runtime_jobs is not None else None,
+            unavailable_reason="executive_runtime_unavailable" if runtime_error else "executive_runtime_invalid",
+        ),
+    }
+    if not isinstance(packet, dict) or not isinstance(inbox, dict):
+        raise RemoteProjectionError("collector_document_invalid")
+    return CollectedInputs(
+        inbox=inbox,
+        boot_packet=packet,
+        active_builds=active_builds,
+        agent_os_state=dict(agent_os_state) if isinstance(agent_os_state, Mapping) else None,
+        runtime_jobs=runtime_jobs,
+        observed_at=observed_at,
+        freshness=freshness,
+    )
+
+
+def compose_collected(inputs: CollectedInputs, build_identity: BuildIdentity) -> dict[str, Any]:
+    """Call the canonical pure compositor exactly once for one collection."""
+    canonical = ccr.compose_control_room(
+        inbox=inputs.inbox,
+        boot_packet=inputs.boot_packet,
+        active_builds=inputs.active_builds,
+        agent_os_state=inputs.agent_os_state,
+        runtime_jobs=inputs.runtime_jobs,
+        bindings=None,
+        binding_problems=(),
+        generated_at=inputs.observed_at,
+    )
+    return project_remote_document(
+        canonical,
+        observed_at=inputs.observed_at,
+        freshness=inputs.freshness,
+        build_identity=build_identity,
+    )
+
+
+class RemoteStateCache:
+    """Single-flight, process-memory-only cache with a hard last-good bound."""
+
+    def __init__(
+        self,
+        config: CollectorConfig,
+        build_identity: BuildIdentity,
+        *,
+        monotonic_fn=time.monotonic,
+        now_fn=ccr._utc_now_z,
+    ) -> None:
+        self.config = config
+        self.build_identity = build_identity
+        self._monotonic_fn = monotonic_fn
+        self._now_fn = now_fn
+        self._lock = threading.Lock()
+        self._refreshing = False
+        self._accepted_bytes: bytes | None = None
+        self._accepted_monotonic: float | None = None
+        self.last_error: str | None = None
+
+    def refresh(self) -> bool:
+        with self._lock:
+            if self._refreshing:
+                return False
+            self._refreshing = True
+        try:
+            inputs = collect_once(self.config, now=self._now_fn())
+            document = compose_collected(inputs, self.build_identity)
+            encoded = json.dumps(
+                document, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+            accepted_at = self._monotonic_fn()
+        except RemoteProjectionError as exc:
+            with self._lock:
+                self.last_error = exc.code
+            return False
+        except Exception:  # noqa: BLE001 - never expose source or exception text
+            with self._lock:
+                self.last_error = "refresh_failed"
+            return False
+        else:
+            with self._lock:
+                self._accepted_bytes = encoded
+                self._accepted_monotonic = accepted_at
+                self.last_error = None
+            return True
+        finally:
+            with self._lock:
+                self._refreshing = False
+
+    def snapshot(self) -> dict[str, Any] | None:
+        now = self._monotonic_fn()
+        with self._lock:
+            encoded = self._accepted_bytes
+            accepted_at = self._accepted_monotonic
+            if encoded is None or accepted_at is None:
+                return None
+            if now - accepted_at > self.config.stale_after_seconds:
+                return None
+            copied = bytes(encoded)
+        return json.loads(copied)
+
+    def run(self, stop_event: threading.Event) -> None:
+        """Refresh immediately, then at the configured 300-second cadence."""
+        self.refresh()
+        while not stop_event.wait(self.config.interval_seconds):
+            self.refresh()
