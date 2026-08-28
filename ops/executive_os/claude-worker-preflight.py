@@ -90,6 +90,17 @@ _PRINCIPAL_RE = re.compile(r"^principal-[A-Za-z0-9][A-Za-z0-9._-]{7,63}$")
 _WORKER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _QUOTA_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_CLAUDE_VERSION_RE = re.compile(
+    r"^(?:0|[1-9][0-9]{0,3})\."
+    r"(?:0|[1-9][0-9]{0,3})\."
+    r"(?:0|[1-9][0-9]{0,7})$"
+)
+_CLAUDE_VERSION_OUTPUT_RE = re.compile(
+    r"^(?P<version>(?:0|[1-9][0-9]{0,3})\."
+    r"(?:0|[1-9][0-9]{0,3})\."
+    r"(?:0|[1-9][0-9]{0,7}))"
+    r"(?: \(Claude Code\))?$"
+)
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _SECRET_RE = re.compile(
     r"(?i)(?:xox[a-z]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|"
@@ -173,6 +184,17 @@ def _require_utc(value: Any) -> str:
     if parsed.tzinfo is None or parsed.utcoffset() != datetime.now(UTC).utcoffset():
         _raise("RECEIPT_INVALID")
     return text
+
+
+def _normalize_claude_version(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or len(text) > 128 or _CONTROL_RE.search(text):
+        _raise("BINARY_INVALID")
+    _reject_secret_shaped(text)
+    match = _CLAUDE_VERSION_OUTPUT_RE.fullmatch(text)
+    if match is None:
+        _raise("BINARY_INVALID")
+    return match.group("version")
 
 
 def now_iso() -> str:
@@ -292,7 +314,9 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     digest = result["claude_binary_sha256"]
     if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
         _raise("RECEIPT_INVALID")
-    _bounded_text(result["claude_version"], maximum=128)
+    version = result["claude_version"]
+    if not isinstance(version, str) or _CLAUDE_VERSION_RE.fullmatch(version) is None:
+        _raise("RECEIPT_INVALID")
     if type(result["auth_ready"]) is not bool:
         _raise("RECEIPT_INVALID")
     if result["auth_method"] not in AUTH_METHODS:
@@ -301,7 +325,8 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
         _raise("RECEIPT_INVALID")
     if result["auth_identity_confidence"] not in AUTH_IDENTITY_CONFIDENCE:
         _raise("RECEIPT_INVALID")
-    if result["macos_credential_isolation_basis"] not in ISOLATION_BASES:
+    isolation_basis = result["macos_credential_isolation_basis"]
+    if isolation_basis not in ISOLATION_BASES:
         _raise("RECEIPT_INVALID")
 
     context = result["execution_context"]
@@ -330,6 +355,8 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     ):
         _raise("RECEIPT_INVALID")
     if result["auth_ready"]:
+        if isolation_basis == "UNKNOWN":
+            _raise("RECEIPT_INVALID")
         if (
             result["auth_method"] != "claudeai"
             or result["api_provider"] != "first_party"
@@ -397,10 +424,7 @@ def observe_binary(binary: Path) -> tuple[str, str]:
     resolved = _require_binary(binary)
     digest = _sha256_bounded(resolved)
     observed = _run(build_allowed_argv(resolved, "version"))
-    version = observed.stdout.strip()
-    if not version or len(version) > 128 or _CONTROL_RE.search(version):
-        _raise("BINARY_INVALID")
-    _reject_secret_shaped(version)
+    version = _normalize_claude_version(observed.stdout)
     return digest, version
 
 
@@ -519,6 +543,7 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except PreflightError as exc:
-        # Stable low-cardinality refusal only. Never echo provider stdout/stderr.
-        print(json.dumps({"schema": SCHEMA, "error": str(exc)}, sort_keys=True))
+        # Stable low-cardinality refusal only. Never echo provider stdout/stderr
+        # or advertise the closed receipt schema on a non-receipt object.
+        print(json.dumps({"error": str(exc)}, sort_keys=True))
         raise SystemExit(2) from None
