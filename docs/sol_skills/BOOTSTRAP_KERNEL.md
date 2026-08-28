@@ -35,6 +35,7 @@ For substantial Mastermind work:
 14. In watcher-enabled Sol/worker dialogue, every return receives an explicit CONTINUE or terminal STOP in the same lawful carrier. Silence is never terminal; terminal STOP closes that watcher cycle and any independent next wave requires fresh authorization/setup.
 15. Fable is scarce principal capacity, not the default worker. Route each bounded mission to the cheapest/least-scarce worker that can reliably meet the required quality, and record WHY NOT FABLE or WHY FABLE for every meaningful commission.
 16. Watcher/capability disputes are tool-first: inspect the actual current surface and attempt the bounded native Task/Automation/condition-watch create/arm action before declaring the capability unavailable. Slack push/webhook limitations alone do not prove a host-native scheduled watcher is unavailable.
+17. Watcher execution uses docs/sol_skills/WATCHER_ACTION_LOOP.md: detect -> re-pin -> adjudicate -> act -> report. A Sol-owned watcher is not notification-only when current Chairman-authorized scope and gates permit same-carrier action; escalate without acting only at a genuine Chairman-only/new-authority/missing-gate boundary.
 ```
 
 ## Project configuration law

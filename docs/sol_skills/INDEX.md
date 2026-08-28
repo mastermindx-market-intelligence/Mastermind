@@ -80,6 +80,11 @@ completion. Reviews against original outcome, not merely implementation quality.
 Use when Chairman intent authorizes Sol to send bounded work to Fable/another operator or,
 once production-proven, to create one Executive CEO request.
 
+### `WATCHER_ACTION_LOOP.md`
+Use whenever Sol arms/operates a watcher/condition-watch for a worker or COO dialogue, or a
+scheduled watcher detects a material return. It prevents a notification-only watcher from stopping
+at “Sol action required” when current authority and gates already permit same-carrier CEO action.
+
 ### `RECONCILE_STATE.md`
 Use when sources disagree, a modifying response is ambiguous, transport reconnects, state is
 stale, a duplicate appears, or a projection may be false-green.
@@ -136,6 +141,10 @@ universal source laws at the same protected commit. Do not substitute older past
 16. Capability disputes are tool-first. When a procedure requires an available native watcher/task/
     automation, inspect the actual current tool surface and attempt the bounded create/arm action
     before declaring the capability unavailable; connector push limitations alone are not proof.
+17. A Sol-owned watcher is not a notification-only watcher when current Chairman-authorized scope
+    and gates permit action. On a qualifying return, re-pin current procedure, adjudicate the return,
+    execute the lawful same-carrier Sol edge, then report; escalate without acting only at a genuine
+    Chairman-only/new-authority/missing-gate boundary.
 
 ## Modification handshake
 
