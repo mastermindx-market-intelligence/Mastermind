@@ -1,9 +1,9 @@
 # Session Truth R1 — Owner Record Identity & Required-Source Amendment
 
-**Date:** 2026-08-28  
-**Owner:** Sol, AI CEO  
-**Existing carrier:** Mastermind PR #170 / `sol/session-truth-r1-20260827`  
-**Repair operation key:** `session-truth-r1-owner-record-identity-repair-20260828-sol-001`  
+**Date:** 2026-08-28
+**Owner:** Sol, AI CEO
+**Existing carrier:** Mastermind PR #170 / `sol/session-truth-r1-20260827`
+**Repair operation key:** `session-truth-r1-owner-record-identity-repair-20260828-sol-001`
 **Authority:** narrow amendment to the accepted Cross-Plane Reconciliation design and R1 plan. It governs only the exact R1 defects below. It does not authorize R2-R7, mutation, a second truth store, a new Agent OS parser, or a new runtime.
 
 ## 1. Problem statement
