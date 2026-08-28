@@ -39,6 +39,7 @@ REPO = "mastermindx-market-intelligence/Mastermind"
 BOT = "U0BST4WG996"
 SOL = "U0BRETDUAS2"
 THREAD_TS = "1787471000.000001"
+CONTROL_VERSION_V2_TEXT = "mastermind.agent_dialogue_control.v2"
 
 
 class ExactServiceAuthorityPolicy:
@@ -61,6 +62,80 @@ class ExactServiceAuthorityPolicy:
 
     def allows_continuation(self, *, request, reply) -> bool:
         return False
+
+
+class FakeV2Engine:
+    """Capture service-to-engine V2 dispatch without any Slack or lifecycle effect."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    def status(self) -> dict[str, object]:
+        self.calls.append(("status", None))
+        return {
+            "schema": "mastermind.agent_dialogue_status.v2",
+            "status": "DEVELOPMENT_UNARMED",
+            "production_armed": False,
+        }
+
+    async def bind_or_verify_thread(self, context) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(("bind_or_verify_thread", normalized))
+        return {
+            "thread_ts": THREAD_TS,
+            "operation_key": normalized["operation_key"],
+        }
+
+    async def send_message(self, *, thread_ts: str, context, message) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "send_message",
+                {
+                    "thread_ts": thread_ts,
+                    "context": normalized,
+                    "message": dict(message),
+                },
+            )
+        )
+        return {"action": "DUPLICATE", "message_key": message["message_key"]}
+
+    async def read_thread(self, *, thread_ts: str, context) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "read_thread",
+                {"thread_ts": thread_ts, "context": normalized},
+            )
+        )
+        return {"thread_ts": thread_ts, "messages": []}
+
+    async def wait_for_reply(
+        self,
+        *,
+        thread_ts: str,
+        context,
+        request_message_key: str,
+        expected_types,
+        max_attempts: int,
+    ) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "wait_for_reply",
+                {
+                    "thread_ts": thread_ts,
+                    "context": normalized,
+                    "request_message_key": request_message_key,
+                    "expected_types": list(expected_types),
+                    "max_attempts": max_attempts,
+                },
+            )
+        )
+        return {
+            "reply": {"message_type": "STOP"},
+            "authority": {"disposition": "STOP", "executable": True},
+        }
 
 
 def run(coro):
@@ -143,6 +218,55 @@ def context_dict() -> dict[str, object]:
         "commission_ref": commission(),
         "session_ref": "asd-session-fable0001",
         "applies_to": applies(),
+    }
+
+
+def applies_v2() -> dict[str, object]:
+    return {
+        "kind": "repository",
+        "repository": REPO,
+        "head_sha": "c" * 40,
+        "pr": f"{REPO}#178",
+    }
+
+
+def context_v2_dict() -> dict[str, object]:
+    return {
+        "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+        "commission_ref": commission(),
+        "session_ref": "asd-session-fable0001",
+        "operation_key": "worker-presence-dialogue-service-20260827-001",
+        "watch_mode": "turn_watch_v1",
+        "actor_ref": {
+            "kind": "executive_surface",
+            "seat": "coo",
+            "reasoning_surface": "claude",
+        },
+        "applies_to": applies_v2(),
+    }
+
+
+def v2_message_dict() -> dict[str, object]:
+    return {
+        "schema": "mastermind.agent_dialogue.v2",
+        "message_key": "asd-ack-service-v2-dispatch",
+        "message_type": "ACK",
+        "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+        "commission_ref": commission(),
+        "session_ref": "asd-session-fable0001",
+        "actor_ref": {
+            "kind": "executive_surface",
+            "seat": "coo",
+            "reasoning_surface": "claude",
+        },
+        "reply_to_message_key": None,
+        "applies_to": applies_v2(),
+        "summary": "V2 service dispatch probe.",
+        "body": {"acknowledged": True},
+        "evidence_refs": [],
+        "requires_response": False,
+        "created_at": "2026-08-27T13:05:00Z",
+        "fingerprint": "0" * 64,
     }
 
 
@@ -257,8 +381,31 @@ def service(
     )
 
 
+def service_with_v2(
+    socket_root: Path,
+) -> tuple[AgentDialogueService, FakeV2Engine]:
+    engine, _client = engine_and_client()
+    engine_v2 = FakeV2Engine()
+    return (
+        AgentDialogueService(
+            ServiceConfig(
+                socket_path=socket_root / "dialogue.sock",
+                allowed_peer_uids=(os.geteuid(),),
+                request_timeout_seconds=1,
+            ),
+            engine,
+            engine_v2=engine_v2,
+        ),
+        engine_v2,
+    )
+
+
 def request_envelope(operation: str, args: dict[str, object]) -> dict[str, object]:
     return {"version": CONTROL_VERSION, "operation": operation, "args": args}
+
+
+def request_envelope_v2(operation: str, args: dict[str, object]) -> dict[str, object]:
+    return {"version": CONTROL_VERSION_V2_TEXT, "operation": operation, "args": args}
 
 
 def test_real_unix_status_and_one_shot_cleanup(socket_root: Path) -> None:
@@ -512,3 +659,237 @@ def test_relative_client_socket_and_oversize_request_refuse() -> None:
     with pytest.raises(DialogueServiceError) as exc:
         run(call_service(Path("/tmp/unused.sock"), {"payload": "x" * 40000}))
     assert exc.value.code == "REQUEST_TOO_LARGE"
+
+
+def test_v1_two_argument_constructor_and_status_are_unchanged(socket_root: Path) -> None:
+    srv, _client = service(socket_root)
+    result = run(srv._dispatch(request_envelope("status", {})))
+    assert result["status"] == "DEVELOPMENT_UNARMED"
+
+
+def test_v2_without_engine_returns_existing_fixed_request_invalid(socket_root: Path) -> None:
+    srv, _client = service(socket_root)
+    with pytest.raises(DialogueServiceError) as exc:
+        run(srv._dispatch(request_envelope_v2("status", {})))
+    assert exc.value.code == "REQUEST_INVALID"
+    assert str(exc.value) == "REQUEST_INVALID"
+
+
+def test_v2_dispatches_only_the_five_closed_operations(socket_root: Path) -> None:
+    srv, fake = service_with_v2(socket_root)
+    context = context_v2_dict()
+    message = v2_message_dict()
+
+    status = run(srv._dispatch(request_envelope_v2("status", {})))
+    assert status["schema"] == "mastermind.agent_dialogue_status.v2"
+
+    bound = run(
+        srv._dispatch(
+            request_envelope_v2("bind_or_verify_thread", {"context": context})
+        )
+    )
+    assert bound == {
+        "thread_ts": THREAD_TS,
+        "operation_key": context["operation_key"],
+    }
+
+    sent = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "send_message",
+                {"context": context, "thread_ts": THREAD_TS, "message": message},
+            )
+        )
+    )
+    assert sent == {
+        "action": "DUPLICATE",
+        "message_key": message["message_key"],
+    }
+
+    read = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "read_thread", {"context": context, "thread_ts": THREAD_TS}
+            )
+        )
+    )
+    assert read == {"thread_ts": THREAD_TS, "messages": []}
+
+    waited = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "wait_for_reply",
+                {
+                    "context": context,
+                    "thread_ts": THREAD_TS,
+                    "request_message_key": "asd-request-v2-service-wait",
+                    "expected_types": ["STOP"],
+                    "max_attempts": 1,
+                },
+            )
+        )
+    )
+    assert waited["authority"] == {"disposition": "STOP", "executable": True}
+    assert [call[0] for call in fake.calls] == [
+        "status",
+        "bind_or_verify_thread",
+        "send_message",
+        "read_thread",
+        "wait_for_reply",
+    ]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["create_job", "create_worker", "create_thread", "post_message", "wake"],
+)
+def test_v2_forbidden_operations_remain_request_invalid(
+    operation: str, socket_root: Path
+) -> None:
+    srv, _fake = service_with_v2(socket_root)
+    with pytest.raises(DialogueServiceError) as exc:
+        run(srv._dispatch(request_envelope_v2(operation, {})))
+    assert exc.value.code == "REQUEST_INVALID"
+
+
+def test_v2_context_and_operation_args_are_closed(socket_root: Path) -> None:
+    srv, _fake = service_with_v2(socket_root)
+    changed = context_v2_dict()
+    changed["provider_account"] = "claude3"
+    with pytest.raises(DialogueServiceError) as exc:
+        run(
+            srv._dispatch(
+                request_envelope_v2("bind_or_verify_thread", {"context": changed})
+            )
+        )
+    assert exc.value.code == "REQUEST_INVALID"
+
+    with pytest.raises(DialogueServiceError) as exc:
+        run(srv._dispatch(request_envelope_v2("status", {"extra": True})))
+    assert exc.value.code == "REQUEST_INVALID"
+
+    with pytest.raises(DialogueServiceError) as exc:
+        run(
+            srv._dispatch(
+                request_envelope_v2(
+                    "send_message",
+                    {"context": context_v2_dict(), "thread_ts": THREAD_TS, "message": "not-a-map"},
+                )
+            )
+        )
+    assert exc.value.code == "REQUEST_INVALID"
+
+
+def test_v2_bool_max_attempts_refuses_at_service_boundary(socket_root: Path) -> None:
+    srv, _fake = service_with_v2(socket_root)
+    with pytest.raises(DialogueServiceError) as exc:
+        run(
+            srv._dispatch(
+                request_envelope_v2(
+                    "wait_for_reply",
+                    {
+                        "context": context_v2_dict(),
+                        "thread_ts": THREAD_TS,
+                        "request_message_key": "asd-request-v2-service-bool",
+                        "expected_types": ["STOP"],
+                        "max_attempts": True,
+                    },
+                )
+            )
+        )
+    assert exc.value.code == "REQUEST_INVALID"
+
+
+def test_v2_real_unix_status_uses_same_one_shot_boundary(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, _fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_one())
+        await wait_for_service_start(task, srv.config.socket_path)
+        response = await call_service(
+            srv.config.socket_path,
+            request_envelope_v2("status", {}),
+        )
+        assert response == {
+            "ok": True,
+            "result": {
+                "schema": "mastermind.agent_dialogue_status.v2",
+                "status": "DEVELOPMENT_UNARMED",
+                "production_armed": False,
+            },
+        }
+        await task
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_v2_control_version_constant_is_explicit() -> None:
+    assert service_module.CONTROL_VERSION_V2 == CONTROL_VERSION_V2_TEXT
+
+
+def test_v2_peer_denial_happens_before_dispatch(monkeypatch, socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 999999)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "PEER_DENIED"}}
+            assert fake.calls == []
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
+
+    run(scenario())
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"version":"mastermind.agent_dialogue_control.v2","operation":"status","args":{},"args":{}}\n',
+        b'{"version":"mastermind.agent_dialogue_control.v2","operation":"status","args":{"x":NaN}}\n',
+    ],
+)
+def test_v2_malformed_json_refuses_before_dispatch(raw: bytes, socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+            writer.write(raw)
+            await writer.drain()
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+            assert fake.calls == []
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
+
+    run(scenario())
+
+
+def test_v2_oversize_request_refuses_before_dispatch(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+            raw = (
+                b'{"version":"mastermind.agent_dialogue_control.v2","operation":"status","args":{"payload":"'
+                + b"x" * 40000
+                + b'"}}\n'
+            )
+            writer.write(raw)
+            await writer.drain()
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "REQUEST_TOO_LARGE"}}
+            assert fake.calls == []
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
+
+    run(scenario())
