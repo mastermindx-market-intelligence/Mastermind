@@ -147,6 +147,29 @@ def _messages_share_context(left: Mapping[str, Any], right: Mapping[str, Any]) -
     )
 
 
+def _reply_direction_is_valid(
+    request: Mapping[str, Any], reply: Mapping[str, Any]
+) -> bool:
+    """Keep Sol reply authority on the opposite, lawful side of a contributor turn."""
+
+    request_actor = request["actor_ref"]
+    reply_actor = reply["actor_ref"]
+    if (
+        reply_actor["kind"] != "executive_surface"
+        or reply_actor["seat"] not in {"ceo", "chairman"}
+    ):
+        return False
+    if request_actor["kind"] == "worker_attempt":
+        return True
+    if request_actor["kind"] != "executive_surface":
+        return False
+    if request_actor["seat"] == "coo":
+        return True
+    if request_actor["seat"] == "ceo":
+        return reply_actor["seat"] == "chairman"
+    return False
+
+
 def _adjudicate_ruling_v2(
     request: Mapping[str, Any],
     reply: Mapping[str, Any],
@@ -243,6 +266,7 @@ def _adjudicate_reply_v2(
     if (
         reply_message["reply_to_message_key"] != request_message["message_key"]
         or not _messages_share_context(request_message, reply_message)
+        or not _reply_direction_is_valid(request_message, reply_message)
     ):
         raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
 
