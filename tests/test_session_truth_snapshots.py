@@ -101,15 +101,67 @@ def test_github_snapshot_normalizes_exact_fields_and_order(tmp_path):
         ("number", "169"),
         ("draft", 1),
         ("ci", "mystery"),
-        ("portfolio_mode", "pretend_valid"),
-        ("completion", "done-ish"),
     ],
 )
-def test_github_rejects_coercion_and_unknown_enums(field, bad_value):
+def test_github_rejects_coercion_and_owner_independent_enum_drift(field, bad_value):
     doc = _fixture("github_minimal.json")
     doc["pull_requests"][0][field] = bad_value
     with pytest.raises(SessionTruthContractError):
         normalize_github(doc)
+
+
+@pytest.mark.parametrize(
+    ("portfolio_mode", "authority", "completion", "proof_state"),
+    [
+        (
+            "architecture",
+            "chairman-approved architecture + implementation plans",
+            "records-only-plan-freeze-merged",
+            "complete",
+        ),
+        (
+            "implementation",
+            "implementation+conformance",
+            "hosted-ci+adversarial-review+sol-acceptance",
+            "proven_live",
+        ),
+        (
+            "implementation",
+            "implementation+production-proof",
+            "hosted-ci+security+adversarial-review+claude-preflight+codex-delivery-canary+sol-acceptance",
+            "future_owner_state",
+        ),
+    ],
+)
+def test_github_preserves_repository_owned_pr_metadata_as_opaque_strings(
+    portfolio_mode,
+    authority,
+    completion,
+    proof_state,
+):
+    """PRs #171/#173/#174 and future owner values remain observable verbatim."""
+
+    doc = _fixture("github_minimal.json")
+    doc["pull_requests"][0].update(
+        {
+            "portfolio_mode": portfolio_mode,
+            "authority": authority,
+            "completion": completion,
+            "proof_state": proof_state,
+        }
+    )
+    normalized = normalize_github(doc)["pull_requests"][0]
+    assert normalized["portfolio_mode"] == portfolio_mode
+    assert normalized["authority"] == authority
+    assert normalized["completion"] == completion
+    assert normalized["proof_state"] == proof_state
+
+
+def test_linear_preserves_repository_owned_completion_as_an_opaque_string():
+    doc = _fixture("linear_minimal.json")
+    doc["issues"][0]["completion"] = "future-owner-completion-v2"
+    normalized = normalize_linear(doc)
+    assert normalized["issues"][0]["completion"] == "future-owner-completion-v2"
 
 
 def test_linear_normalizes_relation_class_and_rejects_bad_revision():

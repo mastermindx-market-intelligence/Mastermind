@@ -65,6 +65,12 @@ EXPECTED_REGISTRY = {
     "ACTOR_ROLE_COLLISION": ("FATAL", "identity_registry", "identity_registry"),
 }
 
+# Owner-record identity amendment §8 freezes ``pickup_head_sha`` as provenance,
+# not an expected immutable carrier head.  The V1 envelope has no exact
+# expected/prior-observed head fact, so this registry code remains public but no
+# V1 detector may fabricate it from ordinary implementation progress.
+V1_EMITTABLE_REGISTRY = frozenset(EXPECTED_REGISTRY) - {"CARRIER_HEAD_MOVED"}
+
 
 def _workstream() -> dict:
     return {
@@ -328,8 +334,6 @@ def _mutate(code: str, doc: dict) -> None:
         second["head_sha"] = SHA_C
         second["pickup_head_sha"] = SHA_C
         doc["github"]["pull_requests"].append(second)
-    elif code == "CARRIER_HEAD_MOVED":
-        doc["github"]["pull_requests"][0]["head_sha"] = SHA_C
     elif code == "PR_BINDING_CONFLICT":
         doc["github"]["pull_requests"][0]["linear"] = "MAS-11"
     elif code == "AGENTOS_GITHUB_DISAGREEMENT":
@@ -386,7 +390,7 @@ def test_finding_registry_is_exact_and_frozen():
     assert FINDING_REGISTRY == EXPECTED_REGISTRY
 
 
-@pytest.mark.parametrize("code", sorted(EXPECTED_REGISTRY))
+@pytest.mark.parametrize("code", sorted(V1_EMITTABLE_REGISTRY))
 def test_every_required_finding_has_positive_and_negative_case(code, healthy):
     assert code not in _codes(healthy), f"healthy fixture unexpectedly emits {code}"
     changed = copy.deepcopy(healthy)
@@ -449,6 +453,47 @@ def test_two_projections_cannot_outvote_owner(healthy):
     )
     changed["slack"]["messages"].append(visibility)
     assert "FALSE_LINEAR_COMPLETION" in _codes(changed)
+
+
+def test_non_merge_linear_done_with_exact_terminal_proof_is_not_false_completion(healthy):
+    """A terminal owner proof, not completion-string spelling, decides validity."""
+
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["proof_state"] = "proven_live"
+    assert "FALSE_LINEAR_COMPLETION" not in _codes(changed)
+
+
+def test_linear_done_with_unknown_owner_proof_stays_unknown(healthy):
+    """A future owner value is opaque; R1 must not invent false completion."""
+
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["proof_state"] = "future_owner_state"
+    assert "FALSE_LINEAR_COMPLETION" not in _codes(changed)
+
+
+def test_merged_pr_with_unknown_owner_proof_stays_unknown(healthy):
+    """Unknown proof metadata is observable, not synonymous with proof-open."""
+
+    changed = copy.deepcopy(healthy)
+    changed["github"]["pull_requests"][0].update(
+        {
+            "state": "merged",
+            "merge_sha": SHA_C,
+            "proof_state": "future_owner_state",
+        }
+    )
+    assert "GITHUB_MERGE_WITH_PROOF_OPEN" not in _codes(changed)
+
+
+def test_ordinary_open_carrier_progress_is_not_unexpected_head_movement(healthy):
+    """The original pickup SHA is provenance and may differ after lawful commits."""
+
+    changed = copy.deepcopy(healthy)
+    changed["github"]["pull_requests"][0]["head_sha"] = SHA_C
+    assert changed["github"]["pull_requests"][0]["pickup_head_sha"] == SHA_B
+    assert "CARRIER_HEAD_MOVED" not in _codes(changed)
 
 
 def test_name_similarity_never_binds_ceo_to_worker(healthy):
@@ -556,8 +601,8 @@ def test_available_linear_with_absent_scope_issue_is_still_reported(healthy):
 
 def test_unavailable_linear_does_not_silence_non_linear_findings(healthy):
     changed = _linear_unavailable(copy.deepcopy(healthy))
-    changed["github"]["pull_requests"][0]["head_sha"] = SHA_C
-    assert "CARRIER_HEAD_MOVED" in _codes(changed)
+    changed["github"]["pull_requests"][0]["workstream"] = None
+    assert "GITHUB_PR_UNBOUND" in _codes(changed)
 
 
 def test_unavailable_linear_is_typed_unknown_in_indexes(healthy):
