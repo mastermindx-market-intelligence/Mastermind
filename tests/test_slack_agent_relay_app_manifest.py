@@ -72,3 +72,29 @@ def test_transport_surface_widening_is_refused(tmp_path: Path) -> None:
         "schema": SCHEMA,
         "status": "ERROR",
     }
+
+
+def test_duplicate_mapping_key_is_refused(tmp_path: Path) -> None:
+    malicious_settings = """settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+  is_hosted: false
+"""
+    text = MANIFEST.read_text(encoding="utf-8").replace(
+        "settings:\n",
+        malicious_settings + "settings:\n",
+        1,
+    )
+    path = tmp_path / "duplicate-key.yaml"
+    path.write_text(text, encoding="utf-8")
+
+    completed = _run(path)
+
+    assert completed.returncode == 2
+    assert completed.stderr == ""
+    assert json.loads(completed.stdout) == {
+        "error": "MANIFEST_INVALID",
+        "schema": SCHEMA,
+        "status": "ERROR",
+    }
