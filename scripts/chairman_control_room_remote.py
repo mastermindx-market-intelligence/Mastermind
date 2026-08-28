@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import grp
+import importlib
 import json
 import os
 import re
 import socket
 import socketserver
 import stat
+import sys
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler
@@ -17,7 +19,12 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import unquote_to_bytes
 
-from control_plane import chairman_control_room_remote as remote
+# ``python -I`` intentionally removes the script directory and working
+# directory from sys.path. The unit starts this exact immutable entrypoint, so
+# bootstrap only its enclosing, release-attested repository root.
+_RELEASE_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, os.fspath(_RELEASE_ROOT))
+remote = importlib.import_module("control_plane.chairman_control_room_remote")
 
 
 REMOTE_SOCKET = Path("/run/mastermind-control-room/remote.sock")
@@ -224,26 +231,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_build_identity(path: Path, expected_commit: str) -> remote.BuildIdentity:
+def _load_build_identity(
+    repo_root: Path, path: Path, expected_commit: str
+) -> remote.BuildIdentity:
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        return remote.verify_release_identity(
+            repo_root,
+            expected_commit=expected_commit,
+            build_metadata=path,
+        )
+    except remote.ReleaseError as exc:
         raise RuntimeError("build_identity_unavailable") from exc
-    if not isinstance(document, dict) or document.get("commit") != expected_commit:
-        raise RuntimeError("build_identity_mismatch")
-    return remote.BuildIdentity(
-        commit=document.get("commit", ""),
-        tree=document.get("tree", ""),
-        artifact_digest=document.get("artifact_digest", ""),
-    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    identity = _load_build_identity(args.build_metadata, args.expected_commit)
-    # Validate the identity through the same boundary used by projection before
-    # any socket is created. Task 5 adds whole-release file re-attestation.
-    remote._project_identity(identity)
+    identity = _load_build_identity(
+        args.repo_root, args.build_metadata, args.expected_commit
+    )
     collector = remote.CollectorConfig(
         repo_root=args.repo_root,
         macro_root=args.macro_root,

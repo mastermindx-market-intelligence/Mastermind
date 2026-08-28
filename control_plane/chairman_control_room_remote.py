@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import math
 import json
+import hashlib
 import os
 import re
 import subprocess
+import stat
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -25,6 +28,16 @@ from control_plane import ceo_boot_packet, chairman_control_room as ccr, executi
 
 
 REMOTE_SCHEMA = "mastermind.chairman_control_room_remote.v1"
+RELEASE_SCHEMA = "mastermind.control_room_build.v1"
+BUILD_METADATA_FILENAME = "control_room_build.json"
+REQUIRED_RUNTIME_PATHS = frozenset({
+    "app/static/chairman_control/control_room.css",
+    "app/static/chairman_control/control_room.js",
+    "app/static/chairman_control/remote.html",
+    "control_plane/chairman_control_room.py",
+    "control_plane/chairman_control_room_remote.py",
+    "scripts/chairman_control_room_remote.py",
+})
 SOURCE_AGENT_OS_BRIEF = "agent_os_brief"
 SOURCE_AGENT_OS_STATE = "agent_os_state"
 SOURCE_ACTIVE_BUILDS = "active_builds"
@@ -75,6 +88,14 @@ class RemoteProjectionError(ValueError):
         self.code = code
 
 
+class ReleaseError(ValueError):
+    """A stable release-attestation failure safe to expose in receipts."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
 @dataclass(frozen=True)
 class SourceFreshness:
     state: Literal["fresh", "stale", "unavailable"]
@@ -88,6 +109,227 @@ class BuildIdentity:
     commit: str
     tree: str
     artifact_digest: str
+
+
+def _release_identity(value: Any) -> str:
+    if type(value) is not str or _SHA_RE.fullmatch(value) is None:
+        raise ReleaseError("release_manifest_identity_invalid")
+    return value
+
+
+def _release_digest(value: Any) -> str:
+    if type(value) is not str or _DIGEST_RE.fullmatch(value) is None:
+        raise ReleaseError("release_manifest_digest_invalid")
+    return value
+
+
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _release_relative_path(value: Any) -> str:
+    if type(value) is not str or not value or "\\" in value or "\x00" in value:
+        raise ReleaseError("release_path_invalid")
+    path = Path(value)
+    if path.is_absolute() or value != path.as_posix() or any(
+        part in ("", ".", "..") for part in path.parts
+    ):
+        raise ReleaseError("release_path_invalid")
+    return value
+
+
+def _release_file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ReleaseError("release_file_unavailable") from exc
+    return "sha256:" + digest.hexdigest()
+
+
+def _attestable_release_file(path: Path) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise ReleaseError("release_file_unavailable") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise ReleaseError("release_symlink_forbidden")
+    if not stat.S_ISREG(info.st_mode):
+        raise ReleaseError("release_non_regular_file_forbidden")
+    if info.st_nlink != 1:
+        raise ReleaseError("release_hardlink_forbidden")
+    if info.st_mode & 0o022:
+        raise ReleaseError("release_writable_by_group_or_other")
+    return info
+
+
+def _release_files(root: Path) -> dict[str, str]:
+    if not root.is_dir() or root.is_symlink():
+        raise ReleaseError("release_root_invalid")
+    files: dict[str, str] = {}
+    try:
+        members = sorted(root.rglob("*"), key=lambda path: path.relative_to(root).as_posix())
+    except OSError as exc:
+        raise ReleaseError("release_root_invalid") from exc
+    for path in members:
+        relative = path.relative_to(root).as_posix()
+        if relative == BUILD_METADATA_FILENAME:
+            continue
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise ReleaseError("release_file_unavailable") from exc
+        if stat.S_ISDIR(info.st_mode):
+            continue
+        _release_relative_path(relative)
+        _attestable_release_file(path)
+        files[relative] = _release_file_digest(path)
+    return {relative: files[relative] for relative in sorted(files)}
+
+
+def build_release_manifest(root: Path, *, commit: str, tree: str) -> dict[str, Any]:
+    """Attest every regular file in a freshly extracted release archive."""
+
+    accepted_commit = _release_identity(commit)
+    accepted_tree = _release_identity(tree)
+    files = _release_files(Path(root))
+    if not REQUIRED_RUNTIME_PATHS.issubset(files):
+        raise ReleaseError("required_runtime_path_missing")
+    artifact_digest = "sha256:" + hashlib.sha256(_canonical_json(files)).hexdigest()
+    return {
+        "artifact_digest": artifact_digest,
+        "commit": accepted_commit,
+        "files": files,
+        "schema": RELEASE_SCHEMA,
+        "tree": accepted_tree,
+    }
+
+
+def write_release_manifest(path: Path, manifest: Mapping[str, Any]) -> None:
+    """Atomically write deterministic manifest bytes without following links."""
+
+    destination = Path(path)
+    if os.path.lexists(destination):
+        _attestable_release_file(destination)
+    if not destination.parent.is_dir() or destination.parent.is_symlink():
+        raise ReleaseError("build_metadata_parent_invalid")
+    payload = _canonical_json(manifest) + b"\n"
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{destination.name}.", dir=destination.parent
+    )
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as handle:
+            descriptor = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        directory_fd = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        raise ReleaseError("build_metadata_write_failed") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _strict_manifest(path: Path) -> Mapping[str, Any]:
+    if path.is_symlink():
+        raise ReleaseError("build_metadata_unsafe")
+    _attestable_release_file(path)
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ReleaseError("build_metadata_unavailable") from exc
+    if len(payload) > 1024 * 1024:
+        raise ReleaseError("build_metadata_too_large")
+
+    def closed_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        document: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in document:
+                raise ReleaseError("release_manifest_duplicate_key")
+            document[key] = value
+        return document
+
+    try:
+        document = json.loads(
+            payload,
+            object_pairs_hook=closed_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ReleaseError("release_manifest_non_finite")
+            ),
+        )
+    except ReleaseError:
+        raise
+    except (UnicodeError, ValueError) as exc:
+        raise ReleaseError("release_manifest_invalid_json") from exc
+    if not isinstance(document, Mapping):
+        raise ReleaseError("release_manifest_invalid_json")
+    return document
+
+
+def verify_release_identity(
+    root: Path,
+    *,
+    expected_commit: str,
+    build_metadata: Path,
+) -> BuildIdentity:
+    """Re-hash an immutable release before any service socket is created."""
+
+    release_root = Path(root)
+    metadata = Path(build_metadata)
+    _release_identity(expected_commit)
+    if metadata.parent != release_root or metadata.name != BUILD_METADATA_FILENAME:
+        raise ReleaseError("build_metadata_path_mismatch")
+    document = _strict_manifest(metadata)
+    if set(document) != {"schema", "commit", "tree", "artifact_digest", "files"}:
+        raise ReleaseError("release_manifest_keys_mismatch")
+    if document["schema"] != RELEASE_SCHEMA:
+        raise ReleaseError("release_manifest_schema_mismatch")
+    commit = _release_identity(document["commit"])
+    tree = _release_identity(document["tree"])
+    if commit != expected_commit:
+        raise ReleaseError("release_commit_mismatch")
+    artifact_digest = _release_digest(document["artifact_digest"])
+    raw_files = document["files"]
+    if not isinstance(raw_files, Mapping) or not all(type(key) is str for key in raw_files):
+        raise ReleaseError("release_files_invalid")
+    files: dict[str, str] = {}
+    for relative in sorted(raw_files):
+        safe_relative = _release_relative_path(relative)
+        files[safe_relative] = _release_digest(raw_files[relative])
+    if not REQUIRED_RUNTIME_PATHS.issubset(files):
+        raise ReleaseError("required_runtime_path_missing")
+    for relative, expected_digest in files.items():
+        candidate = release_root / relative
+        try:
+            _attestable_release_file(candidate)
+        except ReleaseError as exc:
+            if exc.code == "release_file_unavailable":
+                raise ReleaseError("release_file_digest_mismatch") from exc
+            raise
+        if _release_file_digest(candidate) != expected_digest:
+            raise ReleaseError("release_file_digest_mismatch")
+    computed_artifact = "sha256:" + hashlib.sha256(_canonical_json(files)).hexdigest()
+    if artifact_digest != computed_artifact:
+        raise ReleaseError("release_artifact_digest_mismatch")
+    return BuildIdentity(commit=commit, tree=tree, artifact_digest=artifact_digest)
 
 
 @dataclass

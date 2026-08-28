@@ -1,0 +1,24 @@
+[Unit]
+Description=Mastermind Chairman Control Room remote read projection
+After=local-fs.target
+
+[Service]
+Type=simple
+User=mastermind-control-room
+Group=caddy
+RuntimeDirectory=mastermind-control-room
+RuntimeDirectoryMode=0750
+UMask=0007
+Environment=CONTROL_ROOM_EXPECTED_COMMIT=@EXPECTED_COMMIT@
+ExecStart=/opt/mastermind-control-room/current/venv/bin/python -I -B /opt/mastermind-control-room/current/scripts/chairman_control_room_remote.py --repo-root /opt/mastermind-control-room/current --macro-root /opt/macro --expected-commit ${CONTROL_ROOM_EXPECTED_COMMIT} --build-metadata /opt/mastermind-control-room/current/control_room_build.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/run/mastermind-control-room
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
