@@ -87,17 +87,28 @@ terminate_active_child() {
   fi
   wait "$ACTIVE_CHILD_PID" || true
 
-  attempts=0
-  while active_child_group_exists && [ "$attempts" -lt 50 ]; do
+  # A terminal receipt is not lawful while the tracked process group may
+  # still exist. Keep applying the non-catchable signal until absence is
+  # proven; the direct child has already been waited exactly once above.
+  while active_child_group_exists; do
+    run_root /bin/kill -KILL -- "-$ACTIVE_CHILD_PGID" || true
     /bin/sleep 0.1
-    attempts=$((attempts + 1))
   done
-  if active_child_group_exists; then
-    return 1
-  fi
   ACTIVE_CHILD_PID=""
   ACTIVE_CHILD_PGID=""
   return 0
+}
+
+refuse_gate_release() {
+  # Keep signals deferred while the already registered but still-gated group
+  # is terminated. This prevents a nested signal from entering a second wait.
+  CHILD_REGISTRATION_ACTIVE=1
+  terminate_active_child
+  CHILD_REGISTRATION_ACTIVE=0
+  if [ "$PENDING_INTERRUPT" -eq 1 ]; then
+    finish 70 "$INTERRUPTED_OUTPUT"
+  fi
+  finish 65 "$REFUSED_OUTPUT"
 }
 
 run_authenticated_carrier_tracked() {
@@ -135,8 +146,12 @@ run_authenticated_carrier_tracked() {
   if [ "$PENDING_INTERRUPT" -eq 1 ]; then
     interrupted
   fi
-  /bin/rm -f "$CHILD_GATE" || finish 65 "$REFUSED_OUTPUT"
-  [ ! -e "$CHILD_GATE" ] || finish 65 "$REFUSED_OUTPUT"
+  if [ "$TEST_ADAPTER" = "true" ] \
+    && [ "${MMX_H0_BOOTSTRAP_TEST_GATE_RELEASE_FAIL:-}" = "1" ]; then
+    refuse_gate_release
+  fi
+  /bin/rm -f "$CHILD_GATE" || refuse_gate_release
+  [ ! -e "$CHILD_GATE" ] || refuse_gate_release
   CHILD_GATE=""
   wait "$ACTIVE_CHILD_PID"
   child_status=$?
@@ -208,15 +223,23 @@ finish() {
 
 unexpected_exit() {
   if [ "$FINISHED" -eq 0 ]; then
-    terminate_active_child || true
+    CHILD_REGISTRATION_ACTIVE=1
+    terminate_active_child
+    CHILD_REGISTRATION_ACTIVE=0
+    if [ "$PENDING_INTERRUPT" -eq 1 ]; then
+      finish 70 "$INTERRUPTED_OUTPUT"
+    fi
     finish 65 "$REFUSED_OUTPUT"
   fi
 }
 
 interrupted() {
-  trap - HUP INT TERM
+  # A second signal must not restore the shell default and escape the
+  # terminate/reap boundary. Defer it until the first terminal path proves
+  # the complete tracked group absent.
+  CHILD_REGISTRATION_ACTIVE=1
+  terminate_active_child
   CHILD_REGISTRATION_ACTIVE=0
-  terminate_active_child || true
   finish 70 "$INTERRUPTED_OUTPUT"
 }
 

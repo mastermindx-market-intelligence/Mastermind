@@ -169,10 +169,22 @@ exit-70 receipt. A preexisting fixed namespace is unknown residue: the no-replac
 it and does not delete it.
 
 ```bash
-/bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \
+/usr/bin/env -i \
+  HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \
   "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \
   "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"
 ```
+
+The closed launch environment is part of the ceremony boundary. In particular, ambient
+`BASH_ENV`, shell startup files, functions, aliases, and test scheduler hooks are not inherited by
+the noninteractive bootstrap. If execution-gate removal fails after child registration, the still-
+gated process group is terminated and reaped before namespace cleanup and the fixed refusal is
+emitted. An interrupt received during that teardown retains the fixed incomplete/reconcile receipt.
+No post-spawn refusal, interrupt, or unexpected-exit receipt is emitted until the direct child has
+been waited exactly once and absence of the complete process group is proven. The exclusive root
+namespace remains in place while termination proof is unavailable. Additional HUP, INT, or TERM
+signals during this proof are deferred; they cannot restore default signal behavior or bypass reap.
 
 The copied bundle remains inert data. An initially observed symlink refuses before privileged
 namespace creation and source-path metadata is never changed. A pre-opened writable descriptor or

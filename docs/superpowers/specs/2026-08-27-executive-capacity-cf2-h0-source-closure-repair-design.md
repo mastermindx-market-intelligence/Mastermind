@@ -507,13 +507,21 @@ binds every path and Git mode to the exact commit, verifies every retained file 
 framing, and writes them into new root-owned single-link inodes. The authenticated Python verifier
 independently repeats the exact commit/mode/blob checks from the root-created bare repository before
 the carrier shell runs. Root never executes an operator-created inode and performs no network
-access. Each authenticated repair or verify-only child begins behind an unreleased execution gate
-and runs as one tracked process group. HUP, INT, and TERM are deferred to a pending flag while the
-bootstrap registers both the child PID and process-group ID. If a signal is pending after complete
-registration, the gate is never released; the gated group is terminated and reaped. Otherwise the
-gate is removed and steady-state signal handling begins. A signal delivered only to the bootstrap
+access. The native ceremony launches the unprivileged bootstrap through `/usr/bin/env -i` with
+only fixed `HOME`, `PATH`, `LANG`, and `LC_ALL`, so ambient `BASH_ENV` and other startup state cannot
+execute before the bootstrap boundary. Each authenticated repair or verify-only child begins behind
+an unreleased execution gate and runs as one tracked process group. HUP, INT, and TERM are deferred
+to a pending flag while the bootstrap registers both the child PID and process-group ID. If a signal
+is pending after complete registration, the gate is never released; the gated group is terminated
+and reaped. Gate-release failure follows that same terminate-and-reap boundary before a fixed
+refusal; an interrupt during teardown retains the incomplete/reconcile receipt. Otherwise the gate
+is removed and steady-state signal handling begins. A signal delivered only to the bootstrap
 terminates the active child and its descendants and reaps the group before namespace cleanup; no
-descendant can mutate after the exit-70 receipt. The
+descendant can mutate after the exit-70 receipt. No post-spawn refusal, interrupt, or unexpected-
+exit receipt is emitted until the direct child has been waited exactly once and absence of the
+complete process group is proven; the namespace remains while that proof is unavailable. Additional
+HUP, INT, or TERM signals during termination proof remain deferred and cannot restore default signal
+behavior or bypass reap. The
 fixed namespace is created no-replace, is removed on refusal, success, HUP, INT, and TERM, and is
 never auto-removed when found preexisting. Cleanup failure is a typed non-success and all three
 pass sentinels remain buffered until cleanup succeeds.

@@ -25,6 +25,13 @@ PLAN = (
 )
 INVALID = (64, "INVALID_INVOCATION\n", "")
 
+CLOSED_BOOTSTRAP_ENVIRONMENT = (
+    "HOME=/var/empty",
+    "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+    "LANG=C",
+    "LC_ALL=C",
+)
+
 REPAIR_CARRIER_PATHS = (
     "ops/executive_os/repair-capacity-source-closure.sh",
     "ops/executive_os/capacity_host_artifacts.py",
@@ -176,16 +183,79 @@ def _run_bootstrap(
     *arguments: str,
     environment: dict[str, str],
     stdin: str = "",
+    scheduler_probe: bool = False,
 ) -> tuple[int, str, str]:
+    command = _test_bootstrap_command(
+        arguments,
+        environment,
+        scheduler_probe=scheduler_probe,
+    )
     completed = subprocess.run(
-        ["/bin/bash", str(BOOTSTRAP), *arguments],
+        command,
         input=stdin,
         text=True,
         capture_output=True,
         check=False,
-        env=environment,
     )
     return completed.returncode, completed.stdout, completed.stderr
+
+
+def _test_bootstrap_command(
+    arguments: tuple[str, ...],
+    environment: dict[str, str],
+    *,
+    scheduler_probe: bool = False,
+) -> list[str]:
+    explicit_test_environment = {
+        key: value
+        for key, value in environment.items()
+        if key.startswith("MMX_H0_BOOTSTRAP_TEST_")
+        or (
+            scheduler_probe
+            and (key == "BASH_ENV" or key.startswith("MMX_H0_SIGNAL_"))
+        )
+    }
+    return [
+        "/usr/bin/env",
+        "-i",
+        *CLOSED_BOOTSTRAP_ENVIRONMENT,
+        *(f"{key}={explicit_test_environment[key]}" for key in sorted(explicit_test_environment)),
+        "/bin/bash",
+        str(BOOTSTRAP),
+        *arguments,
+    ]
+
+
+def _native_ceremony_command_from_runbook(
+    *,
+    repair_checkout: Path,
+    repair_merge_sha: str,
+    operator_user: str,
+    macro_transport: Path,
+    repair_carrier: Path,
+) -> list[str]:
+    command = next(
+        block.split("```", 1)[0]
+        for block in RUNBOOK.read_text(encoding="utf-8").split("```bash\n")[1:]
+        if "bootstrap-capacity-source-closure.sh" in block
+    )
+    replacements = {
+        "$REPAIR_CHECKOUT": str(repair_checkout),
+        "$REPAIR_MERGE_SHA": repair_merge_sha,
+        "$OPERATOR_USER": operator_user,
+        "$MACRO_TRANSPORT": str(macro_transport),
+        "$MACRO_TRANSPORT_SHA256": hashlib.sha256(
+            macro_transport.read_bytes()
+        ).hexdigest(),
+        "$REPAIR_CARRIER": str(repair_carrier),
+        "$REPAIR_CARRIER_SHA256": hashlib.sha256(
+            repair_carrier.read_bytes()
+        ).hexdigest(),
+    }
+    for variable in sorted(replacements, key=len, reverse=True):
+        value = replacements[variable]
+        command = command.replace(variable, value)
+    return shlex.split(command.replace("\\\n", " "))
 
 
 def _bootstrap_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
@@ -202,12 +272,23 @@ def _signal_registration_probe(tmp_path: Path) -> Path:
         """set -T
 __H0_DEBUG_ACTIVE=0
 __H0_CHILD_TRAP_ARMED=0
+__H0_CHECKPOINT_EMITTED=0
 
 __h0_record_child_signal() {
   if [ -d "${ROOT_NAMESPACE:-/nonexistent}" ]; then
     /usr/bin/touch "$MMX_H0_SIGNAL_CHILD_TERMINATED_MARKER"
   fi
   exit 143
+}
+
+__h0_install_termination_proof_hold() {
+  active_child_group_exists() {
+    if [ -e "$MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD" ]; then
+      return 0
+    fi
+    [ -n "$ACTIVE_CHILD_PGID" ] \
+      && run_root /bin/kill -0 -- "-$ACTIVE_CHILD_PGID"
+  }
 }
 
 __h0_debug_checkpoint() {
@@ -226,6 +307,16 @@ __h0_debug_checkpoint() {
     return 0
   fi
 
+  if [ "$observed_command" = "active_child_group_exists" ] \
+    && [ -n "${MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD:-}" ]; then
+    __h0_install_termination_proof_hold
+  fi
+
+  if [ "$__H0_CHECKPOINT_EMITTED" -eq 1 ]; then
+    __H0_DEBUG_ACTIVE=0
+    return 0
+  fi
+
   case "$MMX_H0_SIGNAL_REGISTRATION_PHASE:$observed_command" in
     'after-spawn-before-pid:ACTIVE_CHILD_PID=$!')
       checkpoint_pid="$!"
@@ -233,16 +324,31 @@ __h0_debug_checkpoint() {
     'after-pid-before-pgid:ACTIVE_CHILD_PGID=$ACTIVE_CHILD_PID')
       checkpoint_pid="$ACTIVE_CHILD_PID"
       ;;
+    'gate-release:CHILD_REGISTRATION_ACTIVE=0')
+      checkpoint_pid="$ACTIVE_CHILD_PGID"
+      ;;
     'steady-state:wait "$ACTIVE_CHILD_PID"')
+      checkpoint_pid="$ACTIVE_CHILD_PGID"
+      ;;
+    'unexpected-exit:wait "$ACTIVE_CHILD_PID"')
       checkpoint_pid="$ACTIVE_CHILD_PGID"
       ;;
   esac
   if [ -n "$checkpoint_pid" ]; then
+    if [ -n "${MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD:-}" ]; then
+      __h0_install_termination_proof_hold
+    fi
+    __H0_CHECKPOINT_EMITTED=1
     /usr/bin/printf '%s\n' "$checkpoint_pid" \
       > "$MMX_H0_SIGNAL_REGISTRATION_MARKER"
     while [ -e "$MMX_H0_SIGNAL_REGISTRATION_MARKER" ]; do
       /bin/sleep 0.01
     done
+    if [ "$MMX_H0_SIGNAL_REGISTRATION_PHASE" = "unexpected-exit" ]; then
+      __h0_install_termination_proof_hold
+      trap - DEBUG
+      exit 99
+    fi
   fi
   __H0_DEBUG_ACTIVE=0
 }
@@ -364,6 +470,59 @@ def test_invalid_bundle_cannot_interpret_hostile_stdin_before_authentication(
     assert not root_namespace.exists()
 
 
+def test_native_runbook_command_closes_ambient_bash_env_before_line_one(
+    tmp_path: Path,
+) -> None:
+    sentinel = tmp_path / "ambient-bash-env-ran"
+    startup = tmp_path / "ambient-bash-env.bash"
+    startup.write_text(
+        f"/usr/bin/touch {shlex.quote(str(sentinel))}\n"
+        "/usr/bin/printf '%s\\n' AMBIENT_STARTUP_RAN >&2\n",
+        encoding="utf-8",
+    )
+    repair_checkout = tmp_path / "repair-checkout"
+    bootstrap = repair_checkout / "ops/executive_os" / BOOTSTRAP.name
+    bootstrap.parent.mkdir(parents=True)
+    bootstrap.write_bytes(BOOTSTRAP.read_bytes())
+    bootstrap.chmod(0o755)
+    bundle_target = tmp_path / "bundle-target"
+    bundle_target.write_bytes(b"inert bundle target\n")
+    repair_carrier = tmp_path / "repair.bundle"
+    repair_carrier.symlink_to(bundle_target)
+    macro_transport = tmp_path / "macro.zip"
+    macro_transport.write_bytes(b"inert macro transport\n")
+    operator_user = subprocess.run(
+        ["/usr/bin/id", "-un"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    command = _native_ceremony_command_from_runbook(
+        repair_checkout=repair_checkout,
+        repair_merge_sha="d" * 40,
+        operator_user=operator_user,
+        macro_transport=macro_transport,
+        repair_carrier=repair_carrier,
+    )
+    environment = dict(os.environ)
+    environment["BASH_ENV"] = str(startup)
+
+    completed = subprocess.run(
+        command,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert (completed.returncode, completed.stdout, completed.stderr) == (
+        65,
+        "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n",
+        "",
+    )
+    assert not sentinel.exists()
+
+
 def test_symlink_bundle_refuses_without_touching_target(
     tmp_path: Path,
 ) -> None:
@@ -468,6 +627,160 @@ def test_cleanup_failure_cannot_emit_clean_success(tmp_path: Path) -> None:
     assert not root_namespace.exists()
 
 
+def test_gate_release_failure_reaps_gated_group_before_refusal_cleanup(
+    tmp_path: Path,
+) -> None:
+    registration_marker = tmp_path / "gate-release-checkpoint"
+    carrier_started = tmp_path / "carrier-started"
+    child_terminated = tmp_path / "carrier-terminated-before-cleanup"
+    gated_child_terminated = tmp_path / "gated-child-terminated-before-cleanup"
+    post_signal_sentinel = tmp_path / "post-refusal-mutation"
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(
+        tmp_path,
+        mid_carrier_marker=carrier_started,
+        child_terminated_marker=child_terminated,
+        post_signal_sentinel=post_signal_sentinel,
+    )
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    environment.update(
+        {
+            "BASH_ENV": str(_signal_registration_probe(tmp_path)),
+            "MMX_H0_BOOTSTRAP_TEST_GATE_RELEASE_FAIL": "1",
+            "MMX_H0_SIGNAL_REGISTRATION_PHASE": "gate-release",
+            "MMX_H0_SIGNAL_REGISTRATION_MARKER": str(registration_marker),
+            "MMX_H0_SIGNAL_CHILD_TERMINATED_MARKER": str(gated_child_terminated),
+        }
+    )
+    process = subprocess.Popen(
+        _test_bootstrap_command(
+            _bootstrap_arguments(commit, bundle, macro_transport),
+            environment,
+            scheduler_probe=True,
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deadline = time.monotonic() + 10
+    registration_payload = ""
+    while time.monotonic() < deadline and not registration_payload:
+        if registration_marker.exists():
+            registration_payload = registration_marker.read_text(
+                encoding="utf-8"
+            ).strip()
+        time.sleep(0.01)
+    assert registration_payload, process.communicate(timeout=1)
+    process_group = int(registration_payload)
+    registration_marker.unlink()
+
+    stdout, stderr = process.communicate(timeout=15)
+
+    assert (process.returncode, stdout, stderr) == (
+        65,
+        "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n",
+        "",
+    )
+    time.sleep(3.2)
+    assert gated_child_terminated.exists()
+    assert _process_group_members(process_group) == ()
+    assert not carrier_started.exists()
+    assert not child_terminated.exists()
+    assert not post_signal_sentinel.exists()
+    assert not root_namespace.exists()
+
+
+@pytest.mark.parametrize(
+    "terminal_path,expected",
+    (
+        (
+            "signal",
+            (
+                70,
+                "H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER\n",
+                "",
+            ),
+        ),
+        ("unexpected-exit", (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")),
+    ),
+)
+def test_post_spawn_terminal_receipt_waits_for_termination_proof(
+    tmp_path: Path,
+    terminal_path: str,
+    expected: tuple[int, str, str],
+) -> None:
+    registration_marker = tmp_path / "terminal-checkpoint"
+    termination_proof_hold = tmp_path / "hold-termination-proof"
+    termination_proof_hold.touch()
+    carrier_started = tmp_path / "carrier-started"
+    child_terminated = tmp_path / "child-terminated-before-cleanup"
+    post_signal_sentinel = tmp_path / "post-terminal-mutation"
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(
+        tmp_path,
+        mid_carrier_marker=carrier_started,
+        child_terminated_marker=child_terminated,
+        post_signal_sentinel=post_signal_sentinel,
+    )
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    environment.update(
+        {
+            "BASH_ENV": str(_signal_registration_probe(tmp_path)),
+            "MMX_H0_SIGNAL_REGISTRATION_PHASE": (
+                "steady-state" if terminal_path == "signal" else "unexpected-exit"
+            ),
+            "MMX_H0_SIGNAL_REGISTRATION_MARKER": str(registration_marker),
+            "MMX_H0_SIGNAL_CHILD_TERMINATED_MARKER": str(child_terminated),
+            "MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD": str(termination_proof_hold),
+        }
+    )
+    process = subprocess.Popen(
+        _test_bootstrap_command(
+            _bootstrap_arguments(commit, bundle, macro_transport),
+            environment,
+            scheduler_probe=True,
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    deadline = time.monotonic() + 10
+    registration_payload = ""
+    carrier_payload = ""
+    while time.monotonic() < deadline and (
+        not registration_payload or not carrier_payload
+    ):
+        if registration_marker.exists():
+            registration_payload = registration_marker.read_text(
+                encoding="utf-8"
+            ).strip()
+        if carrier_started.exists():
+            carrier_payload = carrier_started.read_text(encoding="utf-8").strip()
+        time.sleep(0.01)
+    assert registration_payload and carrier_payload, process.communicate(timeout=1)
+    process_group = int(registration_payload)
+    if terminal_path == "signal":
+        process.send_signal(signal.SIGTERM)
+    registration_marker.unlink()
+    if terminal_path == "signal":
+        time.sleep(0.2)
+        process.send_signal(signal.SIGHUP)
+
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline and process.poll() is None:
+        time.sleep(0.05)
+    assert process.poll() is None
+    assert root_namespace.exists()
+
+    termination_proof_hold.unlink()
+    stdout, stderr = process.communicate(timeout=10)
+
+    assert (process.returncode, stdout, stderr) == expected
+    assert child_terminated.exists()
+    assert _process_group_members(process_group) == ()
+    time.sleep(3.2)
+    assert not post_signal_sentinel.exists()
+    assert not root_namespace.exists()
+
+
 @pytest.mark.parametrize(
     "repair_exit,repair_output",
     (
@@ -526,15 +839,12 @@ def test_signal_removes_exclusive_root_namespace(
     marker = tmp_path / "namespace-ready"
     environment["MMX_H0_BOOTSTRAP_TEST_PAUSE_MARKER"] = str(marker)
     process = subprocess.Popen(
-        [
-            "/bin/bash",
-            str(BOOTSTRAP),
-            *_bootstrap_arguments(commit, bundle, macro_transport),
-        ],
+        _test_bootstrap_command(
+            _bootstrap_arguments(commit, bundle, macro_transport), environment
+        ),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=environment,
     )
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and not marker.exists():
@@ -566,22 +876,22 @@ def test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup(
     )
     environment, root_namespace = _bootstrap_environment(tmp_path)
     process = subprocess.Popen(
-        [
-            "/bin/bash",
-            str(BOOTSTRAP),
-            *_bootstrap_arguments(commit, bundle, macro_transport),
-        ],
+        _test_bootstrap_command(
+            _bootstrap_arguments(commit, bundle, macro_transport), environment
+        ),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=environment,
     )
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not carrier_started.exists():
+    carrier_payload = ""
+    while time.monotonic() < deadline and not carrier_payload:
+        if carrier_started.exists():
+            carrier_payload = carrier_started.read_text(encoding="utf-8").strip()
         time.sleep(0.01)
-    assert carrier_started.exists(), process.communicate(timeout=1)
+    assert carrier_payload, process.communicate(timeout=1)
     carrier_pid, descendant_pid = (
-        int(value) for value in carrier_started.read_text(encoding="utf-8").split()
+        int(value) for value in carrier_payload.split()
     )
 
     process.send_signal(interrupt)
@@ -635,15 +945,14 @@ def test_signal_registration_window_never_releases_untracked_carrier(
         }
     )
     process = subprocess.Popen(
-        [
-            "/bin/bash",
-            str(BOOTSTRAP),
-            *_bootstrap_arguments(commit, bundle, macro_transport),
-        ],
+        _test_bootstrap_command(
+            _bootstrap_arguments(commit, bundle, macro_transport),
+            environment,
+            scheduler_probe=True,
+        ),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=environment,
     )
     deadline = time.monotonic() + 10
     registration_payload = ""
@@ -782,7 +1091,9 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
     for value in required:
         assert value in normalized
 
-    bootstrap = """/bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \\
+    bootstrap = """/usr/bin/env -i \\
+  HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \\
+  /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \\
   "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \\
   "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"""
     assert bootstrap in runbook
