@@ -26,8 +26,10 @@ from integrations.slack_agent_dialogue.engine import (
     jsonable,
 )
 from integrations.slack_agent_dialogue.engine import ERROR_CODES as DialogueEngineErrorCodes
+from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2, DialogueEngineV2
 
 CONTROL_VERSION = "mastermind.agent_dialogue_control.v1"
+CONTROL_VERSION_V2 = "mastermind.agent_dialogue_control.v2"
 DEFAULT_MAX_REQUEST_BYTES = 32 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
 
@@ -195,12 +197,48 @@ def _context(value: Any) -> DialogueContext:
     return context
 
 
-class AgentDialogueService:
-    """Owner-only one-request-at-a-time service over an injected engine."""
+def _context_v2(value: Any) -> DialogueContextV2:
+    item = _exact_mapping(
+        value,
+        {
+            "work_ref",
+            "commission_ref",
+            "session_ref",
+            "operation_key",
+            "watch_mode",
+            "actor_ref",
+            "applies_to",
+        },
+    )
+    context = DialogueContextV2(
+        work_ref=item["work_ref"],
+        commission_ref=item["commission_ref"],
+        session_ref=item["session_ref"],
+        operation_key=item["operation_key"],
+        watch_mode=item["watch_mode"],
+        actor_ref=item["actor_ref"],
+        applies_to=item["applies_to"],
+    )
+    try:
+        context.normalized()
+    except Exception:
+        raise DialogueServiceError("REQUEST_INVALID") from None
+    return context
 
-    def __init__(self, config: ServiceConfig, engine: DialogueEngine) -> None:
+
+class AgentDialogueService:
+    """Owner-only one-request-at-a-time service over injected dialogue engines."""
+
+    def __init__(
+        self,
+        config: ServiceConfig,
+        engine: DialogueEngine,
+        *,
+        engine_v2: DialogueEngineV2 | None = None,
+    ) -> None:
         self.config = config
         self.engine = engine
+        self.engine_v2 = engine_v2
         self._server: asyncio.AbstractServer | None = None
         self._handled = asyncio.Event()
 
@@ -356,10 +394,13 @@ class AgentDialogueService:
 
     async def _dispatch(self, request: Any) -> Any:
         item = _exact_mapping(request, {"version", "operation", "args"})
-        if item["version"] != CONTROL_VERSION:
-            raise DialogueServiceError("REQUEST_INVALID")
-        operation = item["operation"]
-        args = item["args"]
+        if item["version"] == CONTROL_VERSION:
+            return await self._dispatch_v1(item["operation"], item["args"])
+        if item["version"] == CONTROL_VERSION_V2 and self.engine_v2 is not None:
+            return await self._dispatch_v2(item["operation"], item["args"])
+        raise DialogueServiceError("REQUEST_INVALID")
+
+    async def _dispatch_v1(self, operation: Any, args: Any) -> Any:
         if not isinstance(operation, str) or not isinstance(args, dict):
             raise DialogueServiceError("REQUEST_INVALID")
 
@@ -417,6 +458,72 @@ class AgentDialogueService:
                 await self.engine.wait_for_reply(
                     thread_ts=values["thread_ts"],
                     context=_context(values["context"]),
+                    request_message_key=values["request_message_key"],
+                    expected_types=values["expected_types"],
+                    max_attempts=values["max_attempts"],
+                )
+            )
+        raise DialogueServiceError("REQUEST_INVALID")
+
+    async def _dispatch_v2(self, operation: Any, args: Any) -> Any:
+        engine = self.engine_v2
+        if engine is None or not isinstance(operation, str) or not isinstance(args, dict):
+            raise DialogueServiceError("REQUEST_INVALID")
+
+        if operation == "status":
+            _exact_mapping(args, set())
+            return engine.status()
+        if operation == "bind_or_verify_thread":
+            values = _exact_mapping(args, {"context"})
+            return self.engine_result(
+                await engine.bind_or_verify_thread(_context_v2(values["context"]))
+            )
+        if operation == "send_message":
+            values = _exact_mapping(args, {"context", "thread_ts", "message"})
+            if not isinstance(values["thread_ts"], str) or not isinstance(
+                values["message"], dict
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.send_message(
+                    thread_ts=values["thread_ts"],
+                    context=_context_v2(values["context"]),
+                    message=values["message"],
+                )
+            )
+        if operation == "read_thread":
+            values = _exact_mapping(args, {"context", "thread_ts"})
+            if not isinstance(values["thread_ts"], str):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.read_thread(
+                    thread_ts=values["thread_ts"],
+                    context=_context_v2(values["context"]),
+                )
+            )
+        if operation == "wait_for_reply":
+            values = _exact_mapping(
+                args,
+                {
+                    "context",
+                    "thread_ts",
+                    "request_message_key",
+                    "expected_types",
+                    "max_attempts",
+                },
+            )
+            if (
+                not isinstance(values["thread_ts"], str)
+                or not isinstance(values["request_message_key"], str)
+                or not isinstance(values["expected_types"], list)
+                or any(not isinstance(item, str) for item in values["expected_types"])
+                or type(values["max_attempts"]) is not int
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.wait_for_reply(
+                    thread_ts=values["thread_ts"],
+                    context=_context_v2(values["context"]),
                     request_message_key=values["request_message_key"],
                     expected_types=values["expected_types"],
                     max_attempts=values["max_attempts"],
@@ -528,6 +635,7 @@ __all__ = [
     "AF_UNIX_PATH_MAX_BYTES",
     "AgentDialogueService",
     "CONTROL_VERSION",
+    "CONTROL_VERSION_V2",
     "DialogueServiceError",
     "ERROR_CODES",
     "ServiceConfig",
