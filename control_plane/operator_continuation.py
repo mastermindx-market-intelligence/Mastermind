@@ -46,10 +46,40 @@ Two different senses of "closed" apply, and the plan requires both:
   leaves.  Freezing their business keys here would put source-shape authority
   in the contract layer instead of OCR-3 Task 2, which owns them.
 
+Secret rejection is a BACKSTOP, not a scanner
+---------------------------------------------
+
+The authoritative credential boundary is that OCR-3 Task 2 builds drafts from
+typed Runtime records rather than free text.  What this module adds underneath
+that is bounded and deliberately incomplete, because a general secret scanner
+here would reject the capsule's own required content:
+
+* **Enforced.** Provider/account/session authority as a mapping key
+  (:data:`FORBIDDEN_KEY_MARKERS`); the existing word family on nested leaves;
+  credential prefixes (Slack, GitHub, Anthropic, OpenAI, Supabase, AWS key
+  ids, JWT, PEM private keys, ``scheme://user:password@`` authorities); and
+  unseparated high-entropy runs of 32+ characters.  All of these apply to keys
+  as well as values.
+* **NOT detected, measured rather than assumed.** A bare hex secret of exactly
+  32/40/64 characters (indistinguishable from an Attempt id or Git object id);
+  a high-entropy value whose ``-``, ``_``, ``/`` or ``.`` separators break it
+  below the 32-character run threshold, which includes base64url tokens and
+  AWS *secret* access keys; and any account label or native handle that is
+  simply an ordinary-looking string, which is undecidable from shape alone and
+  is why the key-marker family exists.
+
+``common.redaction`` is intentionally NOT reused wholesale: its token class
+keeps ``-``, ``_``, ``/`` and ``.`` inside the run, so under it
+``docs/.../operator-continuation-idempotency-amendment.md`` and a branch name
+such as ``sol/operator-continuity-ocr3-task1-20260828`` are both "secrets", and
+no draft could cite its own sources.  Redaction over-collects harmlessly;
+refusing a capsule does not.
+
 Shape versus sufficiency
 ------------------------
 
-This module enforces *shape, bounds, canonicity and secret-freedom*.
+This module enforces *shape, bounds and canonicity*, plus the bounded secret
+backstop above.
 ``control_plane.operator_continuation_sources`` (OCR-3 Task 2) owns
 *sufficiency* — which refs and receipts a particular source->target transition
 must carry.  The single exception is ``source_revisions``, which must be
@@ -70,12 +100,13 @@ Schemas: ``mastermind.operator_continuation.v1``,
 """
 from __future__ import annotations
 
-import copy
 import dataclasses
 import hashlib
 import json
 import re
+import unicodedata
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
 
 
@@ -106,10 +137,17 @@ GIT_OBJECT_ID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 #: instant would content-address to two capsule ids.
 GENERATED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
-_REF_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,256}$")
-_TEXT_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,512}$")
+_REF_RE = re.compile(r"^.{1,256}$", re.DOTALL)
+_TEXT_RE = re.compile(r"^.{1,512}$", re.DOTALL)
 _MAPPING_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _REVISION_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
+
+#: Unicode general categories refused in every string, anywhere in the capsule.
+#: ``Cc`` covers C0 *and* C1 controls (the regex class ``[\x00-\x1f\x7f]`` missed
+#: C1 entirely); ``Cf`` covers bidi overrides and the BOM; ``Zl``/``Zp`` cover
+#: U+2028/U+2029.  Ordinary spaces (``Zs``) stay legal.  A capsule is machine
+#: evidence — an invisible reordering character in it is never benign.
+_FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
 MAX_REFS = 32
 MAX_KNOWN_UNKNOWNS = 16
@@ -209,13 +247,23 @@ SECRET_VALUE_MARKERS: tuple[str, ...] = (
     "credential",
 )
 
-#: Credential formats recognisable by prefix.  Mirrors
-#: ``common.redaction._SECRET_PREFIXES`` plus the Slack token shape.
+#: Credential formats recognisable by prefix or structure.  Extends
+#: ``common.redaction._SECRET_PREFIXES`` with the Slack, AWS, JWT and PEM
+#: families, and with credentials embedded in a URL authority.  These are the
+#: shapes that carry no false-positive cost: nothing lawful in a continuation
+#: capsule looks like them.
 _SECRET_PREFIX_RE = re.compile(
     r"(?i)(?:^|[^0-9A-Za-z])"
-    r"(?:sb_secret_|sb_publishable_|sbp_|sk-ant-|sk-|github_pat_|ghp_|gho_|ghs_|xox[abprs]-)"
+    r"(?:sb_secret_|sb_publishable_|sbp_|sk-ant-|sk-|github_pat_|ghp_|gho_|ghs_"
+    r"|xox[abeprs]-|xapp-)"
     r"[0-9A-Za-z+/=_-]{8,}"
 )
+_AWS_KEY_ID_RE = re.compile(r"(?<![0-9A-Za-z])(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}(?![0-9A-Za-z])")
+_JWT_RE = re.compile(r"(?<![0-9A-Za-z])eyJ[0-9A-Za-z_-]{10,}\.[0-9A-Za-z_-]{6,}")
+_PEM_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+#: ``scheme://user:password@host`` — a DSN is the classic way a credential
+#: reaches a receipt without ever looking like a token.
+_URL_CREDENTIAL_RE = re.compile(r"://[^/\s:@]+:[^/\s:@]+@")
 #: High-entropy run detection, narrowed from ``common.redaction._TOKEN_SECRET_RE``.
 #: ``-``, ``_``, ``/`` and ``.`` are treated as run BOUNDARIES rather than run
 #: characters, because redaction over-collects harmlessly while this contract
@@ -260,12 +308,33 @@ def _digest(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _normalized(value: str, *, name: str) -> str:
+    """NFC-normalize and refuse invisible characters.
+
+    Normalization is load-bearing, not cosmetic: the capsule is content
+    addressed, so an NFC and an NFD spelling of one rendered string would mint
+    two capsule ids for one semantic draft — the exact defect class the
+    idempotency amendment exists to close, and the same argument that pins
+    ``generated_at`` to a single spelling.
+    """
+
+    text = unicodedata.normalize("NFC", value)
+    for char in text:
+        if unicodedata.category(char) in _FORBIDDEN_CATEGORIES:
+            raise OperatorContinuationError(
+                f"{name} contains a control or invisible character (U+{ord(char):04X})"
+            )
+    return text
+
+
 def _assert_not_secret_shaped(text: str, *, name: str, word_family: bool = False) -> None:
-    """Refuse a secret-shaped leaf.
+    """Refuse a secret-shaped string.
+
+    Applied to values AND to keys: a credential smuggled in as a mapping key is
+    exactly as leaked as one smuggled in as a value.
 
     ``word_family`` selects whether :data:`SECRET_VALUE_MARKERS` applies; only
-    the open nested grammar opts in.  The shape rules — credential prefixes and
-    high-entropy runs — always apply.
+    the open nested grammar opts in.  The shape rules always apply.
     """
 
     if word_family:
@@ -275,7 +344,13 @@ def _assert_not_secret_shaped(text: str, *, name: str, word_family: bool = False
                 raise OperatorContinuationError(
                     f"{name} carries secret-shaped material ({marker!r})"
                 )
-    if _SECRET_PREFIX_RE.search(text) is not None:
+    if (
+        _SECRET_PREFIX_RE.search(text) is not None
+        or _AWS_KEY_ID_RE.search(text) is not None
+        or _JWT_RE.search(text) is not None
+        or _PEM_RE.search(text) is not None
+        or _URL_CREDENTIAL_RE.search(text) is not None
+    ):
         raise OperatorContinuationError(f"{name} carries a credential-prefixed value")
     for run in _LONG_RUN_RE.findall(text):
         if _CANONICAL_HEX_RE.fullmatch(run) is None:
@@ -291,12 +366,15 @@ def _text(
     pattern: re.Pattern[str],
     word_family: bool = False,
 ) -> str:
-    if not isinstance(value, str) or not value or value != value.strip():
+    if not isinstance(value, str) or not value:
         raise OperatorContinuationError(f"{name} must be non-empty canonical text")
-    if pattern.fullmatch(value) is None:
+    text = _normalized(value, name=name)
+    if not text or text != text.strip():
+        raise OperatorContinuationError(f"{name} must be non-empty canonical text")
+    if pattern.fullmatch(text) is None:
         raise OperatorContinuationError(f"{name} has an unsupported form")
-    _assert_not_secret_shaped(value, name=name, word_family=word_family)
-    return value
+    _assert_not_secret_shaped(text, name=name, word_family=word_family)
+    return text
 
 
 def _member(value: Any, *, name: str, allowed: frozenset[str]) -> str:
@@ -335,17 +413,37 @@ def _texts(value: Any, *, name: str, limit: int) -> tuple[str, ...]:
     return tuple(texts)
 
 
-def _assert_key_allowed(key: str, *, name: str) -> None:
-    lowered = key.lower()
+def _validated_key(key: Any, *, name: str, pattern: re.Pattern[str]) -> str:
+    """One mapping key: canonical form, no authority markers, no secret shape."""
+
+    if not isinstance(key, str) or not key:
+        raise OperatorContinuationError(f"{name} has an unsupported key {key!r}")
+    text = _normalized(key, name=f"{name} key")
+    if pattern.fullmatch(text) is None:
+        raise OperatorContinuationError(f"{name} has an unsupported key {key!r}")
+    lowered = text.lower()
     for marker in FORBIDDEN_KEY_MARKERS:
         if marker in lowered:
             raise OperatorContinuationError(
-                f"{name} carries provider/credential authority ({marker!r})"
+                f"{name}.{text} carries provider/credential authority ({marker!r})"
             )
+    _assert_not_secret_shaped(text, name=f"{name}.{text}")
+    return text
+
+
+def _materialized(value: Mapping[str, Any]) -> dict[Any, Any]:
+    """Take one snapshot of a Mapping.
+
+    A hostile ``Mapping`` can lie in ``__len__`` or answer ``__iter__`` and
+    ``__getitem__`` inconsistently, so every bound and every lookup must run
+    against a single materialized snapshot rather than re-interrogating it.
+    """
+
+    return dict(value)
 
 
 def _bounded_json(value: Any, *, name: str, depth: int = 0) -> Any:
-    """One closed bounded JSON value: no floats, no control chars, no secrets."""
+    """One closed bounded JSON value: no floats, no invisibles, no secrets."""
 
     if depth > MAX_MAPPING_DEPTH:
         raise OperatorContinuationError(f"{name} nests deeper than {MAX_MAPPING_DEPTH}")
@@ -356,80 +454,95 @@ def _bounded_json(value: Any, *, name: str, depth: int = 0) -> Any:
             raise OperatorContinuationError(f"{name} integer is outside the exact range")
         return value
     if isinstance(value, str):
-        if len(value) > MAX_LEAF_CHARS:
+        text = _normalized(value, name=name)
+        if len(text) > MAX_LEAF_CHARS:
             raise OperatorContinuationError(f"{name} exceeds {MAX_LEAF_CHARS} characters")
-        if _TEXT_RE.fullmatch(value) is None and value != "":
-            raise OperatorContinuationError(f"{name} contains control characters")
-        _assert_not_secret_shaped(value, name=name, word_family=True)
-        return value
+        _assert_not_secret_shaped(text, name=name, word_family=True)
+        return text
     if isinstance(value, Mapping):
-        if len(value) > MAX_MAPPING_KEYS:
+        snapshot = _materialized(value)
+        if len(snapshot) > MAX_MAPPING_KEYS:
             raise OperatorContinuationError(f"{name} exceeds {MAX_MAPPING_KEYS} keys")
         resolved: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str) or _MAPPING_KEY_RE.fullmatch(key) is None:
-                raise OperatorContinuationError(f"{name} has an unsupported key {key!r}")
-            _assert_key_allowed(key, name=f"{name}.{key}")
-            resolved[key] = _bounded_json(item, name=f"{name}.{key}", depth=depth + 1)
-        return resolved
+        for key, item in snapshot.items():
+            resolved_key = _validated_key(key, name=name, pattern=_MAPPING_KEY_RE)
+            if resolved_key in resolved:
+                raise OperatorContinuationError(f"{name} repeats key {resolved_key!r}")
+            resolved[resolved_key] = _bounded_json(
+                item, name=f"{name}.{resolved_key}", depth=depth + 1
+            )
+        return MappingProxyType(resolved)
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         items = tuple(value)
         if len(items) > MAX_SEQUENCE_ITEMS:
             raise OperatorContinuationError(f"{name} exceeds {MAX_SEQUENCE_ITEMS} items")
-        return [
+        return tuple(
             _bounded_json(item, name=f"{name}[{index}]", depth=depth + 1)
             for index, item in enumerate(items)
-        ]
+        )
     raise OperatorContinuationError(
         f"{name} holds an unsupported JSON type {type(value).__name__}"
     )
 
 
-def _bounded_mapping(value: Any, *, name: str) -> dict[str, Any]:
+def _bounded_mapping(value: Any, *, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise OperatorContinuationError(f"{name} must be an object")
     resolved = _bounded_json(value, name=name)
-    assert isinstance(resolved, dict)  # _bounded_json returns dict for a Mapping
+    if not isinstance(resolved, MappingProxyType):  # pragma: no cover - defensive
+        raise OperatorContinuationError(f"{name} must be an object")
     return resolved
 
 
-def _optional_bounded_mapping(value: Any, *, name: str) -> dict[str, Any] | None:
+def _optional_bounded_mapping(value: Any, *, name: str) -> Mapping[str, Any] | None:
     if value is None:
         return None
     return _bounded_mapping(value, name=name)
 
 
-def _source_revisions(value: Any) -> dict[str, str]:
+def _plain(value: Any) -> Any:
+    """Project the frozen internal form back to plain JSON-safe data."""
+
+    if isinstance(value, Mapping):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_plain(item) for item in value]
+    return value
+
+
+def _source_revisions(value: Any) -> Mapping[str, str]:
     name = "source_revisions"
     if not isinstance(value, Mapping):
         raise OperatorContinuationError(f"{name} must be an object")
-    if not value:
+    snapshot = _materialized(value)
+    if not snapshot:
         raise OperatorContinuationError(f"{name} must name at least one Git object id")
-    if len(value) > MAX_SOURCE_REVISIONS:
+    if len(snapshot) > MAX_SOURCE_REVISIONS:
         raise OperatorContinuationError(f"{name} exceeds {MAX_SOURCE_REVISIONS} entries")
     resolved: dict[str, str] = {}
-    for key, item in value.items():
-        if not isinstance(key, str) or _REVISION_KEY_RE.fullmatch(key) is None:
-            raise OperatorContinuationError(f"{name} has an unsupported key {key!r}")
-        _assert_key_allowed(key, name=f"{name}.{key}")
+    for key, item in snapshot.items():
+        resolved_key = _validated_key(key, name=name, pattern=_REVISION_KEY_RE)
+        if resolved_key in resolved:
+            raise OperatorContinuationError(f"{name} repeats key {resolved_key!r}")
         if not isinstance(item, str) or GIT_OBJECT_ID_RE.fullmatch(item) is None:
             raise OperatorContinuationError(
-                f"{name}.{key} must be a full lowercase Git object id"
+                f"{name}.{resolved_key} must be a full lowercase Git object id"
             )
-        resolved[key] = item
-    return resolved
+        resolved[resolved_key] = item
+    return MappingProxyType(resolved)
 
 
-def _closed(value: Any, *, name: str, keys: frozenset[str]) -> Mapping[str, Any]:
+def _closed(value: Any, *, name: str, keys: frozenset[str]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise OperatorContinuationError(f"{name} must be an object")
-    actual = set(value)
+    snapshot = _materialized(value)
+    actual = set(snapshot)
     if actual != keys:
         raise OperatorContinuationError(
             f"{name} fields drifted; missing={sorted(keys - actual)}, "
             f"unknown={sorted(actual - keys)}"
         )
-    return value
+    return snapshot
 
 
 # ---------------------------------------------------------------------------
@@ -456,14 +569,14 @@ class OperatorContinuationDraft:
     effective_grant_digest: str
     source_authority_refs: tuple[str, ...]
     agentos_refs: tuple[str, ...]
-    github_state: dict[str, Any]
-    prior_attempt_receipt: dict[str, Any]
-    checkpoint: dict[str, Any] | None
-    slack_dialogue_ref: dict[str, Any] | None
+    github_state: Mapping[str, Any]
+    prior_attempt_receipt: Mapping[str, Any]
+    checkpoint: Mapping[str, Any] | None
+    slack_dialogue_ref: Mapping[str, Any] | None
     accepted_ruling_refs: tuple[str, ...]
     next_action: str
     known_unknowns: tuple[str, ...]
-    source_revisions: dict[str, str]
+    source_revisions: Mapping[str, str]
 
     def __post_init__(self) -> None:
         set_ = object.__setattr__
@@ -559,14 +672,14 @@ class OperatorContinuationDraft:
             "effective_grant_digest": self.effective_grant_digest,
             "source_authority_refs": list(self.source_authority_refs),
             "agentos_refs": list(self.agentos_refs),
-            "github_state": copy.deepcopy(self.github_state),
-            "prior_attempt_receipt": copy.deepcopy(self.prior_attempt_receipt),
-            "checkpoint": copy.deepcopy(self.checkpoint),
-            "slack_dialogue_ref": copy.deepcopy(self.slack_dialogue_ref),
+            "github_state": _plain(self.github_state),
+            "prior_attempt_receipt": _plain(self.prior_attempt_receipt),
+            "checkpoint": _plain(self.checkpoint),
+            "slack_dialogue_ref": _plain(self.slack_dialogue_ref),
             "accepted_ruling_refs": list(self.accepted_ruling_refs),
             "next_action": self.next_action,
             "known_unknowns": list(self.known_unknowns),
-            "source_revisions": dict(self.source_revisions),
+            "source_revisions": _plain(self.source_revisions),
         }
 
 
@@ -575,8 +688,12 @@ class OperatorContinuation:
     """The finalized, content-addressed, immutable continuation capsule.
 
     Construct through :func:`finalize_continuation` (Executive PREPARE) or
-    :func:`validate_continuation` (replay).  ``capsule_id`` is re-derived on
-    construction, so a tampered capsule cannot be built.
+    :func:`validate_continuation` (replay).  Immutability holds on two legs and
+    needs both: ``capsule_id`` is re-derived on construction, so a capsule
+    whose id does not address its body cannot be built; and every nested
+    container is frozen, so a holder cannot reach through ``capsule.draft`` and
+    edit the body underneath an id that already exists.  Construction-time
+    checking alone left the second door open.
     """
 
     schema: str
@@ -707,12 +824,19 @@ def _assert_generated_at(value: Any) -> str:
         raise OperatorContinuationError(
             "generated_at must be canonical UTC 'YYYY-MM-DDTHH:MM:SS.mmmZ'"
         )
+    year = int(value[0:4])
     month = int(value[5:7])
     day = int(value[8:10])
     hour = int(value[11:13])
     minute = int(value[14:16])
     second = int(value[17:19])
-    if not (1 <= month <= 12 and 1 <= day <= 31 and hour <= 23 and minute <= 59 and second <= 59):
+    if year < 1 or not (1 <= month <= 12) or hour > 23 or minute > 59 or second > 59:
+        raise OperatorContinuationError("generated_at is not a real UTC instant")
+    # Calendar validity is checked arithmetically rather than through datetime,
+    # so this module cannot reach a clock even by accident.
+    leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+    days_in_month = (31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    if not 1 <= day <= days_in_month[month - 1]:
         raise OperatorContinuationError("generated_at is not a real UTC instant")
     return value
 
@@ -773,12 +897,15 @@ def validate_continuation(
     When ``draft`` is supplied the capsule must carry that exact semantic
     draft — the replay check that refuses a semantically different preparation
     under the same target Attempt.
+
+    An already-constructed :class:`OperatorContinuation` is re-derived from its
+    own wire rather than trusted.  Construction-time checking alone would only
+    prove the capsule was valid *once*; this is the call every retry and
+    reconciliation makes, so it must answer for the bytes as they are now.
     """
 
-    capsule = (
-        value
-        if isinstance(value, OperatorContinuation)
-        else OperatorContinuation.from_dict(value)
+    capsule = OperatorContinuation.from_dict(
+        value.to_dict() if isinstance(value, OperatorContinuation) else value
     )
     if draft is not None:
         expected = semantic_draft_digest(draft)
@@ -803,7 +930,9 @@ def validate_continuation_ack(
     the one currently bound session.
     """
 
-    ack = value if isinstance(value, ContinuationAck) else ContinuationAck.from_dict(value)
+    ack = ContinuationAck.from_dict(
+        value.to_dict() if isinstance(value, ContinuationAck) else value
+    )
     if capsule is not None:
         if not isinstance(capsule, OperatorContinuation):
             raise OperatorContinuationError("capsule must be an OperatorContinuation")

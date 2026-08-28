@@ -10,6 +10,8 @@ import ast
 import dataclasses
 import hashlib
 import json
+import unicodedata
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -28,9 +30,11 @@ from control_plane.operator_continuation import (
     GIT_OBJECT_ID_RE,
     JOB_ID_RE,
     MAX_KNOWN_UNKNOWNS,
+    MAX_LEAF_CHARS,
     MAX_MAPPING_DEPTH,
     MAX_MAPPING_KEYS,
     MAX_REFS,
+    MAX_SEQUENCE_ITEMS,
     MAX_SOURCE_REVISIONS,
     OPERATION_KEY_RE,
     OPERATOR_CONTINUATION_ACK_SCHEMA,
@@ -225,6 +229,37 @@ def test_nested_leaves_refuse_the_existing_secret_word_family(marker: str) -> No
         build_draft(prior_attempt_receipt={"status": f"failed: provider {marker} rejected"})
 
 
+@pytest.mark.parametrize("leaf", SECRET_SHAPED_LEAVES)
+def test_secret_shaped_material_is_refused_as_a_mapping_key_too(leaf: str) -> None:
+    """A credential smuggled in as a key is exactly as leaked as one as a value."""
+
+    with pytest.raises(OperatorContinuationError):
+        build_draft(source_revisions={leaf: PICKUP_SHA})
+
+    with pytest.raises(OperatorContinuationError):
+        build_draft(github_state={leaf.lower(): 1})
+
+
+def test_forbidden_authority_markers_are_refused_in_source_revision_keys() -> None:
+    with pytest.raises(OperatorContinuationError, match="provider/credential authority"):
+        build_draft(source_revisions={"provider_session_id": PICKUP_SHA})
+
+
+@pytest.mark.parametrize(
+    ("label", "leaf"),
+    [
+        ("aws access key id", "AKIA" + "IOSFODNN7EXAMPLE"),
+        ("jwt", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0"),
+        ("pem private key", "-----BEGIN RSA PRIVATE KEY-----"),
+        ("dsn with password", "postgres://svc:hunter2hunter2@db.example.com:5432/prod"),
+        ("slack app token", "xapp" + "-1-A01-abcdefghijklmnop"),
+    ],
+)
+def test_draft_refuses_structural_credential_shapes(label: str, leaf: str) -> None:
+    with pytest.raises(OperatorContinuationError, match="credential-prefixed"):
+        build_draft(github_state={"note": leaf})
+
+
 def test_secret_word_family_mirrors_the_operator_harness_contract_family() -> None:
     # control_plane/operator_harness_contract.py AuthRealmFact.__post_init__
     assert SECRET_VALUE_MARKERS == ("token", "refresh", "secret", "auth.json", "credential")
@@ -319,18 +354,44 @@ def test_draft_refuses_a_string_where_a_ref_sequence_is_required() -> None:
         build_draft(agentos_refs="WS:EXECUTIVE-CAPACITY-FABRIC")
 
 
-@pytest.mark.parametrize(
-    "control",
-    ["ref\x00null", "ref\x1fescape", "ref\x7fdelete"],
+#: C0, DEL, C1, the Unicode line/paragraph separators, the bidi overrides and
+#: the BOM.  A capsule is machine evidence; an invisible reordering character
+#: in it is never benign.
+INVISIBLE_CHARS: tuple[str, ...] = (
+    "\x00",
+    "\x1f",
+    "\x7f",
+    "\x85",
+    "\x9b",
+    " ",
+    " ",
+    "​",
+    "‮",
+    "﻿",
 )
-def test_draft_refuses_control_characters_in_refs(control: str) -> None:
-    with pytest.raises(OperatorContinuationError, match="unsupported form"):
-        build_draft(agentos_refs=[control])
 
 
-def test_draft_refuses_control_characters_in_nested_leaves() -> None:
-    with pytest.raises(OperatorContinuationError, match="control characters"):
-        build_draft(checkpoint={"stage": "plan\x00frozen"})
+@pytest.mark.parametrize("char", INVISIBLE_CHARS)
+def test_draft_refuses_invisible_characters_in_refs(char: str) -> None:
+    with pytest.raises(OperatorContinuationError, match="control or invisible"):
+        build_draft(agentos_refs=[f"ref{char}suffix"])
+
+
+@pytest.mark.parametrize("char", INVISIBLE_CHARS)
+def test_draft_refuses_invisible_characters_in_nested_leaves(char: str) -> None:
+    with pytest.raises(OperatorContinuationError, match="control or invisible"):
+        build_draft(checkpoint={"stage": f"plan{char}frozen"})
+
+
+@pytest.mark.parametrize("char", INVISIBLE_CHARS)
+def test_draft_refuses_invisible_characters_in_nested_keys(char: str) -> None:
+    with pytest.raises(OperatorContinuationError, match="control or invisible"):
+        build_draft(checkpoint={f"stage{char}": "plan_frozen"})
+
+
+def test_ordinary_spaces_remain_legal() -> None:
+    draft = build_draft(next_action="Hold for Sol acceptance.")
+    assert " " in draft.next_action
 
 
 @pytest.mark.parametrize(
@@ -388,6 +449,46 @@ def test_draft_refuses_unsupported_nested_keys() -> None:
         build_draft(checkpoint={"Stage": "plan_frozen"})
 
 
+def test_draft_bounds_nested_sequence_length() -> None:
+    with pytest.raises(OperatorContinuationError, match=f"exceeds {MAX_SEQUENCE_ITEMS} items"):
+        build_draft(checkpoint={"steps": list(range(MAX_SEQUENCE_ITEMS + 1))})
+
+
+def test_draft_bounds_nested_leaf_length() -> None:
+    ok = ("word-" * 200)[:MAX_LEAF_CHARS]
+    assert len(ok) == MAX_LEAF_CHARS
+    assert build_draft(checkpoint={"note": ok}).checkpoint["note"] == ok
+
+    with pytest.raises(OperatorContinuationError, match=f"exceeds {MAX_LEAF_CHARS} characters"):
+        build_draft(checkpoint={"note": ok + "x"})
+
+
+def test_draft_refuses_repeated_known_unknowns() -> None:
+    with pytest.raises(OperatorContinuationError, match="repeats"):
+        build_draft(known_unknowns=["same gap", "same gap"])
+
+
+def test_bounds_are_enforced_against_a_mapping_that_lies_about_its_length() -> None:
+    """Every bound runs against one materialized snapshot, not the live object."""
+
+    class LyingMapping(Mapping):
+        def __init__(self, data: dict[str, Any]) -> None:
+            self._data = data
+
+        def __getitem__(self, key: str) -> Any:
+            return self._data[key]
+
+        def __iter__(self):
+            return iter(self._data)
+
+        def __len__(self) -> int:
+            return 1
+
+    hostile = LyingMapping({f"k{index}": index for index in range(MAX_MAPPING_KEYS + 1)})
+    with pytest.raises(OperatorContinuationError, match=f"exceeds {MAX_MAPPING_KEYS} keys"):
+        build_draft(checkpoint=hostile)
+
+
 def test_nullable_fields_accept_none_and_required_mappings_do_not() -> None:
     draft = build_draft(checkpoint=None, slack_dialogue_ref=None)
     assert draft.checkpoint is None
@@ -398,11 +499,81 @@ def test_nullable_fields_accept_none_and_required_mappings_do_not() -> None:
         build_draft(github_state=None)
 
 
-def test_to_dict_does_not_alias_nested_state() -> None:
-    draft = build_draft()
+@pytest.mark.parametrize(
+    "field", ["github_state", "prior_attempt_receipt", "checkpoint", "slack_dialogue_ref"]
+)
+def test_to_dict_does_not_alias_nested_state_at_any_depth(field: str) -> None:
+    """A shallow copy would protect the top level only — mutate underneath it."""
+
+    nested = {"outer": {"inner": {"pull_request": 181}}, "items": [{"n": 1}]}
+    draft = build_draft(**{field: nested})
+
     wire = draft.to_dict()
-    wire["github_state"]["pull_request"] = 999
-    assert draft.github_state["pull_request"] == 181
+    wire[field]["outer"]["inner"]["pull_request"] = 999
+    wire[field]["items"][0]["n"] = 999
+
+    assert draft.to_dict()[field]["outer"]["inner"]["pull_request"] == 181
+    assert draft.to_dict()[field]["items"][0]["n"] == 1
+
+
+def test_construction_does_not_alias_the_caller_mapping() -> None:
+    supplied = {"repository": "acme/repo", "pull_request": 1}
+    draft = build_draft(github_state=supplied)
+    supplied["pull_request"] = 999
+    assert draft.github_state["pull_request"] == 1
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "github_state",
+        "prior_attempt_receipt",
+        "checkpoint",
+        "slack_dialogue_ref",
+        "source_revisions",
+    ],
+)
+def test_nested_state_is_frozen_against_in_place_mutation(field: str) -> None:
+    """The hole a frozen dataclass alone does NOT close.
+
+    `frozen=True` stops attribute rebinding; it does nothing about a plain dict
+    reached THROUGH the attribute.  Without this, a holder could edit the body
+    underneath a capsule_id that already exists.
+    """
+
+    draft = build_draft()
+    target = getattr(draft, field)
+    with pytest.raises(TypeError):
+        target["injected"] = "value"  # type: ignore[index]
+
+
+def test_a_finalized_capsule_cannot_be_edited_through_its_draft() -> None:
+    capsule = finalize_continuation(build_draft(), generated_at=GENERATED_AT)
+    before = capsule.canonical_bytes()
+
+    with pytest.raises(TypeError):
+        capsule.draft.github_state["pull_request"] = 999  # type: ignore[index]
+    with pytest.raises(TypeError):
+        capsule.draft.source_revisions["Mastermind"] = MERGE_SHA  # type: ignore[index]
+
+    assert capsule.canonical_bytes() == before
+    assert validate_continuation(capsule).capsule_id == capsule.capsule_id
+
+
+def test_validate_continuation_re_derives_rather_than_trusting_the_instance() -> None:
+    """Replay must answer for the bytes as they are now, not as they once were."""
+
+    capsule = finalize_continuation(build_draft(), generated_at=GENERATED_AT)
+    forged = OperatorContinuation.__new__(OperatorContinuation)
+    object.__setattr__(forged, "schema", OPERATOR_CONTINUATION_SCHEMA)
+    object.__setattr__(forged, "generated_at", GENERATED_AT)
+    object.__setattr__(forged, "capsule_id", capsule.capsule_id)
+    object.__setattr__(
+        forged, "draft", build_draft(next_action="Tampered after construction.")
+    )
+
+    with pytest.raises(OperatorContinuationError, match="does not content-address"):
+        validate_continuation(forged)
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +586,72 @@ def test_semantic_digest_is_sha256_over_canonical_draft_json() -> None:
     expected = hashlib.sha256(canonical_bytes(draft.to_dict())).hexdigest()
     assert semantic_draft_digest(draft) == expected
     assert DIGEST_RE.fullmatch(semantic_draft_digest(draft))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Reprendre l'exécution après le relais.",
+        "Übergabe an die nächste Sitzung.",
+        "Reanudar la operación señalada.",
+    ],
+)
+def test_one_rendered_draft_mints_one_capsule_id_across_unicode_spellings(
+    text: str,
+) -> None:
+    """NFC and NFD render identically; without normalization they hash apart.
+
+    That is the amendment's own defect class — one source->target transition
+    minting two capsule identities — arriving through text instead of through
+    a caller-supplied timestamp.
+    """
+
+    composed = unicodedata.normalize("NFC", text)
+    decomposed = unicodedata.normalize("NFD", text)
+    assert composed != decomposed
+
+    first = finalize_continuation(build_draft(next_action=composed), generated_at=GENERATED_AT)
+    second = finalize_continuation(
+        build_draft(next_action=decomposed), generated_at=GENERATED_AT
+    )
+
+    assert first.capsule_id == second.capsule_id
+    assert first.canonical_bytes() == second.canonical_bytes()
+    assert semantic_draft_digest(first.draft) == semantic_draft_digest(second.draft)
+
+
+def nfc_nfd(field: str, text: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def shape(spelling: str) -> dict[str, Any]:
+        return {
+            "agentos_refs": {"agentos_refs": [f"WS:{spelling}"]},
+            "next_action": {"next_action": spelling},
+            "known_unknowns": {"known_unknowns": [spelling]},
+            "checkpoint": {"checkpoint": {"stage": spelling}},
+        }[field]
+
+    return (
+        shape(unicodedata.normalize("NFC", text)),
+        shape(unicodedata.normalize("NFD", text)),
+    )
+
+
+@pytest.mark.parametrize(
+    "field", ["agentos_refs", "next_action", "known_unknowns", "checkpoint"]
+)
+def test_normalization_applies_to_every_field_that_may_hold_non_ascii(field: str) -> None:
+    composed, decomposed = nfc_nfd(field, "café señalado")
+    assert semantic_draft_digest(build_draft(**composed)) == semantic_draft_digest(
+        build_draft(**decomposed)
+    )
+
+
+def test_mapping_and_revision_keys_are_ascii_only_by_pattern() -> None:
+    """Keys cannot carry an NFC/NFD ambiguity at all — their patterns exclude it."""
+
+    with pytest.raises(OperatorContinuationError, match="unsupported key"):
+        build_draft(checkpoint={"café": "x"})
+    with pytest.raises(OperatorContinuationError, match="unsupported key"):
+        build_draft(source_revisions={"café": PICKUP_SHA})
 
 
 def test_semantic_digest_is_stable_across_key_order() -> None:
@@ -512,6 +749,10 @@ def test_generated_at_participates_in_the_capsule_id_but_not_the_semantic_digest
         "2026-13-28T04:05:06.789Z",
         "2026-08-28T24:05:06.789Z",
         "2026-08-00T04:05:06.789Z",
+        "2026-02-31T00:00:00.000Z",
+        "2026-04-31T23:59:59.999Z",
+        "2026-02-30T00:00:00.000Z",
+        "0000-01-01T00:00:00.000Z",
         "",
         None,
     ],
@@ -525,6 +766,24 @@ def test_generated_at_pattern_accepts_exactly_one_spelling_per_instant() -> None
     assert GENERATED_AT_RE.fullmatch(GENERATED_AT)
     assert GENERATED_AT_RE.fullmatch("2026-08-28T04:05:06Z") is None
     assert GENERATED_AT_RE.fullmatch("2026-08-28T04:05:06.789+00:00") is None
+
+
+@pytest.mark.parametrize(
+    ("stamp", "valid"),
+    [
+        ("2024-02-29T00:00:00.000Z", True),   # leap year
+        ("2100-02-29T00:00:00.000Z", False),  # century, not divisible by 400
+        ("2000-02-29T00:00:00.000Z", True),   # divisible by 400
+        ("2026-02-29T00:00:00.000Z", False),
+        ("2026-12-31T23:59:59.999Z", True),
+    ],
+)
+def test_generated_at_honours_the_real_calendar(stamp: str, valid: bool) -> None:
+    if valid:
+        assert finalize_continuation(build_draft(), generated_at=stamp).generated_at == stamp
+    else:
+        with pytest.raises(OperatorContinuationError, match="real UTC instant"):
+            finalize_continuation(build_draft(), generated_at=stamp)
 
 
 def test_finalization_refuses_a_non_draft() -> None:
@@ -587,7 +846,7 @@ def test_validate_continuation_checks_the_supplied_semantic_draft() -> None:
     draft = build_draft()
     capsule = finalize_continuation(draft, generated_at=GENERATED_AT)
 
-    assert validate_continuation(capsule, draft=draft) is capsule
+    assert validate_continuation(capsule, draft=draft) == capsule
 
     with pytest.raises(OperatorContinuationError, match="semantic digest"):
         validate_continuation(capsule, draft=build_draft(next_action="Something else."))
@@ -779,12 +1038,13 @@ def test_module_imports_only_the_standard_library() -> None:
     assert modules == {
         "__future__",
         "collections",
-        "copy",
         "dataclasses",
         "hashlib",
         "json",
         "re",
+        "types",
         "typing",
+        "unicodedata",
     }
     assert not any(module.startswith("control_plane") for module in modules)
 
