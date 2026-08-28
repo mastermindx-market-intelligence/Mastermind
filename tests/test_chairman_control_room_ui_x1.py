@@ -18,6 +18,7 @@ STATIC = ROOT / "app" / "static" / "chairman_control"
 INDEX = STATIC / "index.html"
 JS = STATIC / "control_room.js"
 CSS = STATIC / "control_room.css"
+REMOTE = STATIC / "remote.html"
 
 
 class _MarkupProbe(HTMLParser):
@@ -291,3 +292,101 @@ def test_x1_javascript_parses_with_node_when_available() -> None:
     if node is None:
         pytest.skip("node is not installed on this test host")
     subprocess.run([node, "--check", str(JS)], check=True, capture_output=True, text=True)
+
+
+def test_remote_shell_is_one_shared_renderer_without_local_authority() -> None:
+    source = REMOTE.read_text(encoding="utf-8")
+    probe = _MarkupProbe()
+    probe.feed(source)
+
+    assert '<html lang="en" data-control-room-mode="remote-read-only">' in source
+    assert "Remote · read-only" in source
+    assert probe.script_srcs == ["/static/control_room.js"]
+    assert '/static/control_room.css' in source
+    assert 'name="ccr-token"' not in source
+    assert probe.inline_scripts == 0
+    assert probe.style_attrs == []
+    for forbidden in (
+        "refresh-builds", "discover-run", "bind-form", "unbind",
+        "bind-provider", "bind-locator", "ccr-surface-dock", "locator",
+        "provider census",
+    ):
+        assert forbidden not in source.lower()
+
+
+def _run_transport_harness(mode: str) -> dict:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed on this test host")
+    source = JS.read_text(encoding="utf-8")
+    exposed = source.rsplit("})();", 1)[0] + "globalThis.__transport={getJSON:getJSON,postJSON:postJSON,remote:REMOTE_READ_ONLY};})();"
+    harness = f"""
+const calls = [];
+global.document = {{
+  documentElement: {{ getAttribute: () => {mode!r} }},
+  querySelector: () => ({{ getAttribute: () => 'local-token' }}),
+  addEventListener: () => null
+}};
+global.fetch = (path, options) => {{ calls.push({{path, options}}); return Promise.resolve({{json: () => Promise.resolve({{ok:true}})}}); }};
+eval({exposed!r});
+(async () => {{
+  await global.__transport.getJSON('/api/state');
+  let postError = null;
+  try {{ await global.__transport.postJSON('/api/bind', {{x:1}}); }} catch (err) {{ postError = String(err && err.message || err); }}
+  process.stdout.write(JSON.stringify({{remote:global.__transport.remote,calls,postError}}));
+}})();
+"""
+    result = subprocess.run([node, "-e", harness], check=True, capture_output=True, text=True)
+    import json
+    return json.loads(result.stdout)
+
+
+def test_remote_transport_performs_one_credentialless_get_and_cannot_construct_post() -> None:
+    result = _run_transport_harness("remote-read-only")
+    assert result["remote"] is True
+    assert result["calls"] == [{
+        "path": "/api/state",
+        "options": {"method": "GET", "credentials": "same-origin", "headers": {}},
+    }]
+    assert result["postError"] == "remote_read_only"
+
+
+def test_local_transport_retains_token_and_post_contract() -> None:
+    result = _run_transport_harness("")
+    assert result["remote"] is False
+    assert result["calls"][0] == {
+        "path": "/api/state",
+        "options": {
+            "method": "GET", "credentials": "same-origin",
+            "headers": {"X-CCR-Token": "local-token"},
+        },
+    }
+    assert result["calls"][1]["path"] == "/api/bind"
+    assert result["calls"][1]["options"]["method"] == "POST"
+    assert result["calls"][1]["options"]["headers"] == {
+        "Content-Type": "application/json", "X-CCR-Token": "local-token",
+    }
+    assert result["postError"] is None
+
+
+def test_remote_mode_renders_remote_identity_and_freshness_without_local_fields() -> None:
+    source = JS.read_text(encoding="utf-8")
+    assert "REMOTE_READ_ONLY" in source
+    assert "doc.source_freshness" in source
+    assert "doc.code_identity" in source
+    assert 'if (!REMOTE_READ_ONLY)' in source
+    assert 'rel: "noopener noreferrer"' in source
+    remote_branch = source[source.index("function renderEverything(body)") : source.index("function loadState()")]
+    assert "doc.sources" in remote_branch  # preserved local branch
+    assert "doc.source_freshness" in remote_branch
+    assert "doc.bindings" not in remote_branch
+
+
+def test_remote_layout_has_explicit_embed_and_narrow_viewport_rules() -> None:
+    styles = CSS.read_text(encoding="utf-8")
+    assert 'html[data-control-room-mode="remote-read-only"]' in styles
+    assert ".ccr-remote-badge" in styles
+    assert "overflow-x: hidden" in styles
+    remote_rules = styles[styles.index('html[data-control-room-mode="remote-read-only"]') :]
+    assert "minmax(0,1fr)" in remote_rules
+    assert "@media (max-width: 760px)" in remote_rules
