@@ -473,6 +473,20 @@ def test_linear_done_with_unknown_owner_proof_stays_unknown(healthy):
     assert "FALSE_LINEAR_COMPLETION" not in _codes(changed)
 
 
+@pytest.mark.parametrize(
+    "relation",
+    ["contributing", "architecture_evidence", "ignored_wrong_id"],
+)
+def test_non_owner_pr_relation_cannot_decide_linear_completion(healthy, relation):
+    """Only an owner-produced completion-gate relation can testify for Done."""
+
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["linear"]["issues"][0]["github_relations"][0]["relation"] = relation
+    assert changed["github"]["pull_requests"][0]["proof_state"] == "open"
+    assert "FALSE_LINEAR_COMPLETION" not in _codes(changed)
+
+
 def test_merged_pr_with_unknown_owner_proof_stays_unknown(healthy):
     """Unknown proof metadata is observable, not synonymous with proof-open."""
 

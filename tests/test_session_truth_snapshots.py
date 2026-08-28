@@ -164,6 +164,17 @@ def test_linear_preserves_repository_owned_completion_as_an_opaque_string():
     assert normalized["issues"][0]["completion"] == "future-owner-completion-v2"
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["portfolio_mode", "authority", "completion", "proof_state"],
+)
+def test_repository_owned_pr_metadata_remains_structurally_bounded(field):
+    doc = _fixture("github_minimal.json")
+    doc["pull_requests"][0][field] = "x" * 1025
+    with pytest.raises(SessionTruthContractError, match="at most 1024 characters"):
+        normalize_github(doc)
+
+
 def test_linear_normalizes_relation_class_and_rejects_bad_revision():
     doc = _fixture("linear_minimal.json")
     normalized = normalize_linear(doc)
