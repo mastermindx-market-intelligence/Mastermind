@@ -143,11 +143,15 @@ For an eligible Slack handoff:
    silently abandoning the session.
 4. On Sol `RULING` / `CONTINUE` / repair instruction, the same worker session rereads the full
    thread, resumes the same operation/carrier, and re-arms its wait/watch after the next
-   nonterminal return. If that session cannot maintain a watcher/wait, it must return an explicit
-   `WATCH_UNAVAILABLE` (or equivalent typed blocker) rather than disappearing.
+   nonterminal return. If that session cannot maintain a watcher/wait, it must return `BLOCKED`
+   with reason/code `WATCH_UNAVAILABLE` (or the currently accepted equivalent typed blocker)
+   rather than disappearing.
 5. After every nonterminal Sol continuation, verify that both sides still have a continuation path.
-   On terminal `STOP` / accepted completion, disable any temporary fallback watcher so old turns do
-   not re-enter the loop.
+   Reciprocal continuation preserves the same operation/carrier only while the next turn remains
+   inside the **current commissioned wave**. On terminal `STOP` / accepted completion, disable any
+   temporary fallback watcher so old turns do not re-enter the loop. Accepted terminal completion
+   closes that watch; any next independent wave requires a new operation key/carrier, even when the
+   same COO/worker session continues.
 
 Never create one cron/automation/database per handoff as the canonical architecture. The accepted
 Worker Presence & Dialogue / Wake architecture remains the long-run owner of automatic turn
