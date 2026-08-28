@@ -11,6 +11,7 @@ FINISHED=0
 TEST_ADAPTER="false"
 ACTIVE_CHILD_PID=""
 ACTIVE_CHILD_PGID=""
+ACTIVE_CHILD_REAPED=0
 CHILD_OUTPUT=""
 CHILD_GATE=""
 CHILD_REGISTRATION_ACTIVE=0
@@ -73,29 +74,46 @@ active_child_group_exists() {
     && run_root /bin/kill -0 -- "-$ACTIVE_CHILD_PGID"
 }
 
+active_child_group_absent() {
+  local pgrep_status
+  [ -n "$ACTIVE_CHILD_PGID" ] || return 1
+  /usr/bin/pgrep -a -q -g "$ACTIVE_CHILD_PGID" '.'
+  pgrep_status=$?
+  [ "$pgrep_status" -eq 1 ]
+}
+
 terminate_active_child() {
   local attempts=0
-  [ -n "$ACTIVE_CHILD_PID" ] || return 0
+  [ -n "$ACTIVE_CHILD_PGID" ] || return 0
 
-  run_root /bin/kill -TERM -- "-$ACTIVE_CHILD_PGID" || true
-  while active_child_group_exists && [ "$attempts" -lt 10 ]; do
-    /bin/sleep 0.1
-    attempts=$((attempts + 1))
-  done
-  if active_child_group_exists; then
+  if [ "$ACTIVE_CHILD_REAPED" -eq 1 ]; then
+    # A direct carrier return does not release its same-PGID descendants.
+    # They have no remaining graceful carrier lifecycle, so close their
+    # mutation window immediately.
     run_root /bin/kill -KILL -- "-$ACTIVE_CHILD_PGID" || true
+  else
+    run_root /bin/kill -TERM -- "-$ACTIVE_CHILD_PGID" || true
+    while active_child_group_exists && [ "$attempts" -lt 10 ]; do
+      /bin/sleep 0.1
+      attempts=$((attempts + 1))
+    done
+    if active_child_group_exists; then
+      run_root /bin/kill -KILL -- "-$ACTIVE_CHILD_PGID" || true
+    fi
+    wait "$ACTIVE_CHILD_PID" || true
+    ACTIVE_CHILD_REAPED=1
   fi
-  wait "$ACTIVE_CHILD_PID" || true
 
   # A terminal receipt is not lawful while the tracked process group may
   # still exist. Keep applying the non-catchable signal until absence is
   # proven; the direct child has already been waited exactly once above.
-  while active_child_group_exists; do
+  while ! active_child_group_absent; do
     run_root /bin/kill -KILL -- "-$ACTIVE_CHILD_PGID" || true
     /bin/sleep 0.1
   done
   ACTIVE_CHILD_PID=""
   ACTIVE_CHILD_PGID=""
+  ACTIVE_CHILD_REAPED=0
   return 0
 }
 
@@ -142,6 +160,7 @@ run_authenticated_carrier_tracked() {
   ) >"$CHILD_OUTPUT" &
   ACTIVE_CHILD_PID=$!
   ACTIVE_CHILD_PGID=$ACTIVE_CHILD_PID
+  ACTIVE_CHILD_REAPED=0
   CHILD_REGISTRATION_ACTIVE=0
   if [ "$PENDING_INTERRUPT" -eq 1 ]; then
     interrupted
@@ -155,8 +174,15 @@ run_authenticated_carrier_tracked() {
   CHILD_GATE=""
   wait "$ACTIVE_CHILD_PID"
   child_status=$?
-  ACTIVE_CHILD_PID=""
-  ACTIVE_CHILD_PGID=""
+  ACTIVE_CHILD_REAPED=1
+  # Keep signals deferred and the namespace registered until the complete
+  # process group, not only its direct child, is proven absent.
+  CHILD_REGISTRATION_ACTIVE=1
+  terminate_active_child
+  CHILD_REGISTRATION_ACTIVE=0
+  if [ "$PENDING_INTERRUPT" -eq 1 ]; then
+    finish 70 "$INTERRUPTED_OUTPUT"
+  fi
   set +m
 
   CARRIER_OUTPUT="$(/bin/cat "$CHILD_OUTPUT")" \
@@ -185,11 +211,11 @@ cleanup_namespace() {
       CHILD_OUTPUT=""
     fi
   fi
-  if [ -n "$ACTIVE_CHILD_PID" ]; then
+  if [ -n "$ACTIVE_CHILD_PID" ] || [ -n "$ACTIVE_CHILD_PGID" ]; then
     cleanup_failed=1
   fi
   if [ "$ROOT_NAMESPACE_CREATED" -eq 1 ]; then
-    if [ -n "$ACTIVE_CHILD_PID" ]; then
+    if [ -n "$ACTIVE_CHILD_PID" ] || [ -n "$ACTIVE_CHILD_PGID" ]; then
       cleanup_failed=1
     else
       run_root /bin/rm -rf "$ROOT_NAMESPACE" || cleanup_failed=1

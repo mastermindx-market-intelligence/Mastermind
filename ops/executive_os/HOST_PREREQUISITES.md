@@ -183,7 +183,11 @@ gated process group is terminated and reaped before namespace cleanup and the fi
 emitted. An interrupt received during that teardown retains the fixed incomplete/reconcile receipt.
 No post-spawn refusal, interrupt, or unexpected-exit receipt is emitted until the direct child has
 been waited exactly once and absence of the complete process group is proven. The exclusive root
-namespace remains in place while termination proof is unavailable. Additional HUP, INT, or TERM
+namespace remains in place while termination proof is unavailable. Fixed success and typed-return
+paths use the same boundary:
+the direct-child wait retains the process-group identity, any surviving member is killed immediately,
+KILL is repeated until whole-group absence is proven, and only then is buffered output parsed and the
+identity cleared. Additional HUP, INT, or TERM
 signals during this proof are deferred; they cannot restore default signal behavior or bypass reap.
 
 The copied bundle remains inert data. An initially observed symlink refuses before privileged

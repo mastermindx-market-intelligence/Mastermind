@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import select
 import shlex
 import signal
 import subprocess
@@ -91,6 +92,8 @@ def _bootstrap_fixture(
     mid_carrier_marker: Path | None = None,
     child_terminated_marker: Path | None = None,
     post_signal_sentinel: Path | None = None,
+    post_return_descendant_marker: Path | None = None,
+    post_return_mutation_marker: Path | None = None,
 ) -> tuple[Path, str, Path, Path]:
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -127,6 +130,23 @@ def _bootstrap_fixture(
       > {shlex.quote(str(mid_carrier_marker))}
     wait "$descendant_pid"
     {repair_body}
+"""
+    if post_return_descendant_marker is not None:
+        assert post_return_mutation_marker is not None
+        repair_body = f"""
+    (
+      trap '' HUP INT TERM
+      /bin/sleep 0.5
+      /usr/bin/touch {shlex.quote(str(post_return_mutation_marker))}
+    ) </dev/null >/dev/null 2>&1 &
+    descendant_pid=$!
+    carrier_group="$(/bin/ps -o pgid= -p "$$" | /usr/bin/tr -d ' ')"
+    descendant_group="$(/bin/ps -o pgid= -p "$descendant_pid" | /usr/bin/tr -d ' ')"
+    /usr/bin/printf '%s %s %s\n' \
+      "$carrier_group" "$descendant_group" "$descendant_pid" \
+      > {shlex.quote(str(post_return_descendant_marker))}
+    /usr/bin/printf '%s\n' {shlex.quote(repair_output)}
+    exit {repair_exit}
 """
     fake_repair.write_text(
         f"""#!/bin/bash
@@ -282,12 +302,12 @@ __h0_record_child_signal() {
 }
 
 __h0_install_termination_proof_hold() {
-  active_child_group_exists() {
+  active_child_group_absent() {
     if [ -e "$MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD" ]; then
-      return 0
+      return 1
     fi
-    [ -n "$ACTIVE_CHILD_PGID" ] \
-      && run_root /bin/kill -0 -- "-$ACTIVE_CHILD_PGID"
+    /usr/bin/pgrep -a -q -g "$ACTIVE_CHILD_PGID" '.'
+    [ "$?" -eq 1 ]
   }
 }
 
@@ -307,9 +327,18 @@ __h0_debug_checkpoint() {
     return 0
   fi
 
-  if [ "$observed_command" = "active_child_group_exists" ] \
-    && [ -n "${MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD:-}" ]; then
-    __h0_install_termination_proof_hold
+  case "$observed_command" in
+    active_child_group_exists|active_child_group_absent)
+      if [ -n "${MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD:-}" ]; then
+        __h0_install_termination_proof_hold
+      fi
+      ;;
+  esac
+
+  if [ "$observed_command" = 'wait "$ACTIVE_CHILD_PID"' ] \
+    && [ -n "${MMX_H0_SIGNAL_WAIT_COUNT_MARKER:-}" ]; then
+    /usr/bin/printf '%s\n' wait \
+      >> "$MMX_H0_SIGNAL_WAIT_COUNT_MARKER"
   fi
 
   if [ "$__H0_CHECKPOINT_EMITTED" -eq 1 ]; then
@@ -778,6 +807,118 @@ def test_post_spawn_terminal_receipt_waits_for_termination_proof(
     assert _process_group_members(process_group) == ()
     time.sleep(3.2)
     assert not post_signal_sentinel.exists()
+    assert not root_namespace.exists()
+
+
+@pytest.mark.parametrize(
+    "repair_exit,repair_output,expected,expected_wait_count",
+    (
+        (
+            65,
+            "H0_SOURCE_CLOSURE_REPAIR_REFUSED",
+            (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", ""),
+            1,
+        ),
+        (
+            0,
+            "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED",
+            (
+                0,
+                "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED\n"
+                "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED\n"
+                "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED\n",
+                "",
+            ),
+            3,
+        ),
+    ),
+)
+def test_direct_carrier_return_retains_group_until_terminal_proof(
+    tmp_path: Path,
+    repair_exit: int,
+    repair_output: str,
+    expected: tuple[int, str, str],
+    expected_wait_count: int,
+) -> None:
+    descendant_marker = tmp_path / "post-return-descendant"
+    delayed_mutation = tmp_path / "post-return-mutation"
+    wait_count_marker = tmp_path / "direct-wait-count"
+    child_terminated = tmp_path / "tracked-child-terminated"
+    termination_proof_hold = tmp_path / "hold-termination-proof"
+    termination_proof_hold.touch()
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(
+        tmp_path,
+        repair_exit=repair_exit,
+        repair_output=repair_output,
+        post_return_descendant_marker=descendant_marker,
+        post_return_mutation_marker=delayed_mutation,
+    )
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    environment.update(
+        {
+            "BASH_ENV": str(_signal_registration_probe(tmp_path)),
+            "MMX_H0_SIGNAL_REGISTRATION_PHASE": "typed-return",
+            "MMX_H0_SIGNAL_CHILD_TERMINATED_MARKER": str(child_terminated),
+            "MMX_H0_SIGNAL_TERMINATION_PROOF_HOLD": str(
+                termination_proof_hold
+            ),
+            "MMX_H0_SIGNAL_WAIT_COUNT_MARKER": str(wait_count_marker),
+        }
+    )
+    process = subprocess.Popen(
+        _test_bootstrap_command(
+            _bootstrap_arguments(commit, bundle, macro_transport),
+            environment,
+            scheduler_probe=True,
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    try:
+        deadline = time.monotonic() + 10
+        descendant_payload = ""
+        while time.monotonic() < deadline and (
+            not descendant_payload or not wait_count_marker.exists()
+        ):
+            if descendant_marker.exists():
+                descendant_payload = descendant_marker.read_text(
+                    encoding="utf-8"
+                ).strip()
+            time.sleep(0.01)
+        assert descendant_payload and wait_count_marker.exists(), process.communicate(
+            timeout=1
+        )
+        carrier_group, descendant_group, descendant_pid = (
+            int(value) for value in descendant_payload.split()
+        )
+        assert carrier_group == descendant_group
+        assert descendant_pid > 0
+
+        time.sleep(0.2)
+        assert process.poll() is None
+        assert root_namespace.exists()
+        assert select.select([process.stdout], [], [], 0)[0] == []
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and _process_group_members(carrier_group):
+            time.sleep(0.05)
+        assert _process_group_members(carrier_group) == ()
+        assert process.poll() is None
+        assert root_namespace.exists()
+        assert select.select([process.stdout], [], [], 0)[0] == []
+    finally:
+        termination_proof_hold.unlink(missing_ok=True)
+
+    stdout, stderr = process.communicate(timeout=10)
+
+    assert (process.returncode, stdout, stderr) == expected
+    assert wait_count_marker.read_text(encoding="utf-8").splitlines() == [
+        "wait"
+    ] * expected_wait_count
+    time.sleep(0.7)
+    assert not delayed_mutation.exists()
     assert not root_namespace.exists()
 
 

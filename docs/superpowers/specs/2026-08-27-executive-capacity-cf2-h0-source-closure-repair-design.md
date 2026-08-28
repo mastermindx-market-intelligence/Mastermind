@@ -520,6 +520,9 @@ terminates the active child and its descendants and reaps the group before names
 descendant can mutate after the exit-70 receipt. No post-spawn refusal, interrupt, or unexpected-
 exit receipt is emitted until the direct child has been waited exactly once and absence of the
 complete process group is proven; the namespace remains while that proof is unavailable. Additional
+success and typed-return paths share that same post-wait law: reaping the direct child retains its
+process-group identity, immediately kills any surviving group member, repeatedly applies KILL until
+complete absence is proven, and only then parses the buffered result and clears the identity.
 HUP, INT, or TERM signals during termination proof remain deferred and cannot restore default signal
 behavior or bypass reap. The
 fixed namespace is created no-replace, is removed on refusal, success, HUP, INT, and TERM, and is
