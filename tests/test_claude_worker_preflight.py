@@ -342,6 +342,20 @@ def test_receipt_rejects_false_ready_contradiction():
         module.validate_receipt(contradictory)
 
 
+def test_ready_receipt_rejects_unknown_credential_isolation_basis():
+    module = _load()
+    with pytest.raises(module.PreflightError, match="RECEIPT_INVALID"):
+        module.validate_receipt(
+            _receipt(module, macos_credential_isolation_basis="UNKNOWN")
+        )
+
+
+def test_receipt_requires_normalized_numeric_claude_version():
+    module = _load()
+    with pytest.raises(module.PreflightError, match="RECEIPT_INVALID"):
+        module.validate_receipt(_receipt(module, claude_version="2.1.121 (Claude Code)"))
+
+
 def test_builder_cannot_mint_worker_context_ready_before_broker_slice():
     module = _load()
     auth = module.AuthObservation(
@@ -415,6 +429,84 @@ def test_cli_refuses_caller_declared_identity_until_owner_seam_exists(
                 str(binary),
             ]
         )
+
+
+def test_cli_refusal_never_claims_the_closed_receipt_schema(tmp_path: Path):
+    missing = (tmp_path / "missing-claude").resolve()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(_MODULE_PATH),
+            "--realm-label",
+            "claude-pro-01",
+            "--host-ref",
+            "host-01234567",
+            "--os-principal-ref",
+            "principal-01234567",
+            "--execution-context",
+            "INTERACTIVE_PRINCIPAL",
+            "--claude-binary",
+            str(missing),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 2
+    refusal = json.loads(completed.stdout)
+    assert refusal == {"error": "HOST_IDENTITY_SEAM_UNAVAILABLE"}
+    assert "schema" not in refusal
+    assert completed.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("provider_output", "expected"),
+    [
+        ("2.1.121", "2.1.121"),
+        ("2.1.121 (Claude Code)", "2.1.121"),
+    ],
+)
+def test_binary_version_normalizes_only_reviewed_claude_code_forms(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_output: str,
+    expected: str,
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, provider_output),
+    )
+    _, version = module.observe_binary(binary)
+    assert version == expected
+
+
+@pytest.mark.parametrize(
+    "provider_output",
+    [
+        "Claude Code 2.1.121",
+        "2.1.121 beta",
+        "2.1.121 (Claude Desktop)",
+        "2.1.121 private@example.com",
+    ],
+)
+def test_binary_version_rejects_unreviewed_prose(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_output: str,
+):
+    module = _load()
+    binary = _executable(tmp_path)
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda argv, **kwargs: module.CommandObservation(0, provider_output),
+    )
+    with pytest.raises(module.PreflightError, match="BINARY_INVALID"):
+        module.observe_binary(binary)
 
 
 def test_binary_observation_is_size_bounded_before_execution(
