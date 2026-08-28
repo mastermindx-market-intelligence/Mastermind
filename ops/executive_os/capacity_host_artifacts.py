@@ -1898,7 +1898,10 @@ def reconcile_source_repair(
                         "SOURCE_REPAIR_CANDIDATE_PREFIX_INVALID"
                     )
         if _SOURCE_REPAIR_RECEIPT_NAME in names:
-            if not archived_source or not archived_generation:
+            if (
+                (not archived_source or not archived_generation)
+                and failure_name not in names
+            ):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_POSITION_AMBIGUOUS")
             receipt_bytes = _read_source_repair_file(
                 parent,
@@ -4972,6 +4975,32 @@ def run_source_repair_host(
                     not name.startswith(".")
                     for name in _descriptor_directory_names(parents.generation)
                 )
+                if (
+                    not semantic_commit_visible
+                    and position.failure_layout
+                    is SourceRepairFailureLayout.NONE
+                ):
+                    structural_recovery_transition = (
+                        _source_repair_transition_for(
+                            SourceRepairMode.RECOVERY,
+                            current_phase,
+                            position.failure_layout,
+                        )
+                    )
+                    if (
+                        structural_recovery_transition.action
+                        is not SourceRepairAction.RECOVER_PRECOMMIT
+                        or not structural_recovery_transition.permitted_next_states
+                    ):
+                        raise SourceRepairTransitionError(
+                            "SOURCE_REPAIR_TRANSITION_REFUSED"
+                        )
+                    authorized_precommit_recovery = (
+                        current_phase,
+                        position.failure_layout,
+                        structural_recovery_transition,
+                    )
+                    repair_effect_unknown = False
                 evidence = _observe_source_repair_source(
                     source_root,
                     intent=intent,

@@ -609,3 +609,68 @@ needed to bind `S_IFREG`/`S_IFDIR` before snapshot.
 Every exact command and RED/GREEN receipt is recorded in `task-2-report.md`.
 Task 3 and all native/provider/Slack/OAuth/service/routing/publication surfaces
 remained held; no installed preserved payload was executed.
+
+## Task 2 fix round 3 commissioned (2026-08-27)
+
+- Spec/security re-review returned PASS on exact head `5a18e70f3f44b3541fb0d6dc16e5e5c9723958f5`, tree `666ac7ed91d98df515cdb298a55f33ba8c81ee8f`.
+- Quality/lifecycle re-review returned REQUEST_CHANGES on one remaining Finding B ordering defect: exact `RECEIPT_DURABLE/NONE` with no visible generation is structurally precommit, but recovery authorization is not established until after two fallible semantic observers.
+- Ruling: the structural descriptor-bound no-visible-generation classification is sufficient to derive the existing table-owned precommit recovery grant before those observers. This uses the canonical transition authority and costs four additional crash-stage cases; if wrong, a genuinely visible commit could be rolled back, so every visible/ambiguous generation case remains explicitly unauthorized and exit 70.
+- Exact requirements and the reviewer reproduction are frozen in `task-2-fix-round-3-finding.md`.
+- Protected master remained `b901dee0272a99b8a1d60385848b99b7273e8261`; PR #178 remained disjoint at `4122dd245f60937cde44777cd5eda00ac03d25c9`.
+- Task 3 and every downstream/native/publication lane remain held pending a new immutable head and fresh dual PASS.
+
+## Task 2 fix round 3 — RED
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'receipt_durable_precommit_observer_subprocess_failure_restores_exact_state'
+```
+
+Result: exit 1; `FFFF [100%]` (4 failed). Source timeout, source generic
+`SubprocessError`, archived-generation timeout, and archived-generation generic
+`SubprocessError` all returned `POST_COMMIT_RECONCILIATION_REQUIRED`; none
+consumed the canonical `RECOVERY/RECEIPT_DURABLE/NONE` transition or restored
+the exact prior source/generation layout.
+
+## Task 2 fix round 3 — implementation and GREEN (2026-08-27)
+
+- Once the retained generation-parent inventory proves no visible non-prefix
+  child and the descriptor-bound phase is exactly `RECEIPT_DURABLE/NONE`, the
+  repair loop now derives the existing table-owned `RECOVER_PRECOMMIT` grant
+  before either semantic observer runs. No state, transition, retry, receipt,
+  recovery path, pathname authority, or duplicate control plane was added.
+- The first focused GREEN attempt correctly reached the existing rollback
+  helper but remained RED (`FFFF [100%]`): after the helper created the
+  authenticated `failure-<intent_id>` namespace, `reconcile_source_repair()`
+  still rejected the durable receipt plus a partially restored archive as
+  `SOURCE_REPAIR_POSITION_AMBIGUOUS`. The bounded integration repair permits
+  that archive shape only while the exact validated failure namespace is
+  present; the existing failure-namespace validator and transition table still
+  determine the rollback phase and permitted next states.
+- Final focused proof from one unchanged source state:
+  - four receipt-durable source/archive observer timeout/generic failures:
+    `.... [100%]`, exit 0;
+  - ordinary precommit and genuine postcommit timeout/lifecycle selector:
+    `............. [100%]` (13), exit 0;
+  - recovery/crash selector: 49 passed, exit 0;
+  - `recovery_v1`: `..... [100%]` (5), exit 0;
+  - visible/ambiguous/postcommit refusal selector: `......... [100%]` (9),
+    exit 0;
+  - preserved/source-repair: 67 passed, exit 0, `real 89.26`, `user 35.09`,
+    `sys 41.11`;
+  - complete module: 355 passed, exit 0, `real 1236.55`, `user 527.51`,
+    `sys 550.27`;
+  - Apple `/usr/bin/python3 -m py_compile` for production and test modules:
+    exit 0;
+  - collection: 355 tests; `git diff --check`: exit 0.
+- The four new cases consume exactly
+  `SOURCE_REPAIR_TRANSITIONS[(RECOVERY, RECEIPT_DURABLE, NONE)]`, restore the
+  exact prior closed-tree source and generation digests, remove both archived
+  objects, finish at `ROLLED_BACK/INSTALLED_SOURCE`, and expose only
+  `SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID`; private argv/output/error markers
+  remain cause-only and absent from the public message.
+- Final remote re-pin observed protected `master` advance from review-time
+  `b901dee0272a99b8a1d60385848b99b7273e8261` to
+  `e2092cb6235519ac7f50fb3aa50ec1c1a6f627c0`. The former is an ancestor of the
+  latter and `git diff b901dee..e2092cb -- docs/sol_skills` is empty, so the
+  protected procedure used for this bounded work is unchanged. No fetch into,
+  merge from, or rebase onto protected master was performed.

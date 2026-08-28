@@ -4471,6 +4471,150 @@ def test_precommit_subprocess_timeout_uses_authorized_recovery(
     assert position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
 
 
+@pytest.mark.parametrize(
+    ("observer_name", "error_kind"),
+    (
+        pytest.param(
+            "_observe_source_repair_source", "timeout", id="source-timeout"
+        ),
+        pytest.param(
+            "_observe_source_repair_source", "generic", id="source-generic"
+        ),
+        pytest.param(
+            "_observe_source_repair_archived_generation",
+            "timeout",
+            id="archived-generation-timeout",
+        ),
+        pytest.param(
+            "_observe_source_repair_archived_generation",
+            "generic",
+            id="archived-generation-generic",
+        ),
+    ),
+)
+def test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    observer_name: str,
+    error_kind: str,
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    source_root = system_root / "capacity-sources" / "macro" / commit
+    generation_root = system_root / "capacity-generations"
+    old_generation = generation_root / artifacts.PRIOR_GENERATION_DIGEST
+    expected_uid = os.getuid()
+    expected_gid = os.getgid()
+    source_digest_before = artifacts.closed_tree_digest(
+        source_root, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+    generation_digest_before = artifacts.closed_tree_digest(
+        old_generation, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+
+    with pytest.raises(
+        artifacts.SourceRepairIncomplete, match="after_repair_receipt_fsync"
+    ):
+        artifacts.run_source_repair_host(
+            **arguments, crash_at="after_repair_receipt_fsync"
+        )
+
+    archive = next((system_root / "capacity-archive").iterdir())
+    position = artifacts.reconcile_source_repair(
+        archive, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+    assert position.phase is artifacts.SourceRepairPhase.RECEIPT_DURABLE
+    assert position.failure_layout is artifacts.SourceRepairFailureLayout.NONE
+    parents = artifacts._open_source_repair_parents(
+        system_root, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+    try:
+        artifacts._attach_source_repair_archive_parent(
+            parents,
+            archive,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+        )
+        structural_phase = artifacts._classify_source_repair_position(
+            archive_position=position,
+            parents=parents,
+            source_name=commit,
+            staged_source_name=f"source-candidate-{'d' * 40}",
+        )
+        assert structural_phase is artifacts.SourceRepairPhase.RECEIPT_DURABLE
+        assert not any(
+            not name.startswith(".")
+            for name in artifacts._descriptor_directory_names(parents.generation)
+        )
+    finally:
+        parents.close()
+
+    private_marker = "/private/receipt-durable-observer-secret"
+    if error_kind == "timeout":
+        injected: subprocess.SubprocessError = subprocess.TimeoutExpired(
+            ["/bin/observer", private_marker],
+            5,
+            output=b"private output",
+            stderr=b"private error",
+        )
+    else:
+        injected = subprocess.SubprocessError(private_marker)
+    fault_calls = 0
+    restore_transitions: list[artifacts.SourceRepairTransition] = []
+    original_restore = artifacts._restore_digest_bound_precommit_state
+
+    def fail_observer(*args: object, **kwargs: object) -> object:
+        nonlocal fault_calls
+        fault_calls += 1
+        raise injected
+
+    def observed_restore(*args: object, **kwargs: object) -> None:
+        transition = kwargs["transition"]
+        assert isinstance(transition, artifacts.SourceRepairTransition)
+        restore_transitions.append(transition)
+        original_restore(*args, **kwargs)
+
+    monkeypatch.setattr(artifacts, observer_name, fail_observer)
+    monkeypatch.setattr(
+        artifacts, "_restore_digest_bound_precommit_state", observed_restore
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError) as caught:
+        artifacts.run_source_repair_host(**arguments)
+    assert type(caught.value) is artifacts.CapacityHostArtifactError
+    assert str(caught.value) == "SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID"
+    assert private_marker not in str(caught.value)
+    assert caught.value.__cause__ is injected
+    assert fault_calls == 1
+    assert restore_transitions == [
+        artifacts.SOURCE_REPAIR_TRANSITIONS[
+            (
+                artifacts.SourceRepairMode.RECOVERY,
+                artifacts.SourceRepairPhase.RECEIPT_DURABLE,
+                artifacts.SourceRepairFailureLayout.NONE,
+            )
+        ]
+    ]
+
+    restored_position = artifacts.reconcile_source_repair(
+        archive, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+    assert restored_position.phase is artifacts.SourceRepairPhase.ROLLED_BACK
+    assert (
+        restored_position.failure_layout
+        is artifacts.SourceRepairFailureLayout.INSTALLED_SOURCE
+    )
+    assert artifacts.closed_tree_digest(
+        source_root, expected_uid=expected_uid, expected_gid=expected_gid
+    ) == source_digest_before
+    assert artifacts.closed_tree_digest(
+        old_generation, expected_uid=expected_uid, expected_gid=expected_gid
+    ) == generation_digest_before
+    assert not (archive / "archived-source").exists()
+    assert not (archive / "archived-generation").exists()
+
+
 def test_postcommit_subprocess_timeout_requires_same_carrier_reconciliation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

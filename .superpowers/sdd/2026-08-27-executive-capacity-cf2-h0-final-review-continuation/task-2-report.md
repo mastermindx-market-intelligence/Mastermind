@@ -206,3 +206,103 @@ The bounded review repair changes only the Task 2 implementation, its behavior
 tests, and this task's progress/report evidence. Task 3, native/provider/Slack,
 OAuth, services, routing, publication, PR, merge, push, deployment, and installed
 payload execution remained held.
+
+## Task 2 fix round 3 — receipt-durable observer RED
+
+Four receipt-durable crash-replay cases were added before the lifecycle-ordering
+change: timeout and generic `SubprocessError` at each of the installed-source and
+archived-generation semantic observers. Each fixture independently proves the
+descriptor-bound structural phase is exactly `RECEIPT_DURABLE/NONE` and that the
+retained generation parent has no visible non-prefix child. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'receipt_durable_precommit_observer_subprocess_failure_restores_exact_state'
+```
+
+Result: exit 1; `FFFF [100%]` (4 failed). Every case surfaced
+`SourceRepairIncomplete(POST_COMMIT_RECONCILIATION_REQUIRED)` from the trailing
+effect-unknown clause rather than the expected stable preserved-evidence refusal;
+the existing table-owned recovery transition was never consumed, leaving the
+receipt-durable layout stranded.
+
+## Task 2 fix round 3 — implementation and proof
+
+The production repair establishes recovery authority at the last structurally
+unambiguous point: exact `RECEIPT_DURABLE/NONE`, retained generation-parent
+inventory complete, and no visible non-prefix generation child. It looks up the
+existing `RECOVERY/RECEIPT_DURABLE/NONE` transition, requires its action to be
+`RECOVER_PRECOMMIT`, and retains that exact transition for the existing
+digest-bound recovery helper before invoking either fallible observer. A visible
+generation child or any structural ambiguity never receives this grant.
+
+The first focused GREEN attempt remained RED (`FFFF [100%]`) with
+`SOURCE_REPAIR_POSITION_AMBIGUOUS`: the existing recovery helper had consumed the
+newly ordered grant and created its authenticated `failure-<intent_id>`
+namespace, but same-cycle reconciliation still rejected a durable receipt after
+the first archived object was restored. The minimal integration repair allows a
+durable receipt with an incomplete archive only when that exact failure namespace
+is present. The namespace inventory/digests and lifecycle phase remain validated
+by `_validate_source_repair_failure_namespace()` and the same transition's
+permitted-next-state set. No new state, transition, retry, fallback, receipt, or
+recovery implementation exists.
+
+Exact final proof commands and receipts from one unchanged production state:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'receipt_durable_precommit_observer_subprocess_failure_restores_exact_state'
+.... [100%]
+exit 0 (4 passed)
+
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved_native_command_timeout or source_repair_cli_normalizes_subprocess_timeout or precommit_subprocess_timeout or postcommit_subprocess_timeout'
+............. [100%]
+exit 0 (13 passed)
+
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery or crash'
+exit 0 (49 passed)
+
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'recovery_v1'
+..... [100%]
+exit 0 (5 passed)
+
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'committed_replay_early_observation_failure_never_rolls_back or committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown or postcommit_subprocess_timeout_requires_same_carrier_reconciliation'
+......... [100%]
+exit 0 (9 passed)
+
+/usr/bin/time -p python3 -m pytest -q -x tests/test_capacity_host_artifacts.py -k 'preserved or source_repair'
+exit 0 (67 passed)
+real 89.26
+user 35.09
+sys 41.11
+
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py
+exit 0 (355 passed)
+real 1236.55
+user 527.51
+sys 550.27
+
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+exit 0
+
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+355 tests collected; exit 0
+
+git diff --check
+exit 0
+```
+
+Each new case proves the exact old source and prior-generation closed-tree
+digests are restored through the canonical transition, both archived objects are
+absent, the terminal lifecycle is `ROLLED_BACK/INSTALLED_SOURCE`, and the public
+error is exactly `SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID`. The injected private
+argv/output/error marker is absent from that public message. Existing
+visible-generation, effect-unknown ambiguity, and genuine postcommit subprocess
+failures remain unauthorized for rollback and retain same-carrier incomplete
+behavior.
+
+Final protected-master re-pin returned
+`e2092cb6235519ac7f50fb3aa50ec1c1a6f627c0` rather than review-time
+`b901dee0272a99b8a1d60385848b99b7273e8261`. The review pin is an ancestor of
+the current commit and the exact `docs/sol_skills` diff is empty. The carrier was
+not fetched into, merged, or rebased. Task 3 and native/root/provider/Slack/OAuth,
+services, routing, worker, PR, push, merge, and publication surfaces remained
+held.
