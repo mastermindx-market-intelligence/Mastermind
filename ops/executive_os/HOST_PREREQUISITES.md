@@ -160,10 +160,13 @@ commit/mode/blob checks from the root-created bare repository. Only then does th
 one repair and two verify-only passes. Their output is buffered until the fixed root namespace has
 been removed successfully; cleanup failure is a typed non-success and cannot emit a clean pass.
 HUP, INT, TERM, ordinary refusal, and success all enter this same cleanup lifecycle. Each
-authenticated repair or verify-only child is tracked as one process group. A signal delivered to
-the bootstrap PID terminates that child and its descendants and reaps them before namespace
-cleanup, so no delayed child mutation can follow the exit-70 receipt. A preexisting fixed namespace
-is unknown residue: the no-replace `mkdir` refuses it and does not delete it.
+authenticated repair or verify-only child starts behind an unreleased execution gate and is tracked
+as one process group. Signals received while the bootstrap registers the PID and process-group ID
+are deferred to a pending flag. A pending signal prevents gate release and terminates/reaps the
+still-gated group; after release, a signal delivered to the bootstrap PID terminates that child and
+its descendants and reaps them before namespace cleanup. No delayed child mutation can follow the
+exit-70 receipt. A preexisting fixed namespace is unknown residue: the no-replace `mkdir` refuses
+it and does not delete it.
 
 ```bash
 /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \

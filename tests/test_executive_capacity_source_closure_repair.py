@@ -196,6 +196,78 @@ def _bootstrap_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
     return environment, test_root / "mastermind-h0-root-carrier"
 
 
+def _signal_registration_probe(tmp_path: Path) -> Path:
+    probe = tmp_path / "signal-registration-probe.bash"
+    probe.write_text(
+        """set -T
+__H0_DEBUG_ACTIVE=0
+__H0_CHILD_TRAP_ARMED=0
+
+__h0_record_child_signal() {
+  if [ -d "${ROOT_NAMESPACE:-/nonexistent}" ]; then
+    /usr/bin/touch "$MMX_H0_SIGNAL_CHILD_TERMINATED_MARKER"
+  fi
+  exit 143
+}
+
+__h0_debug_checkpoint() {
+  local observed_command="$1" checkpoint_pid=""
+  if [ "$__H0_DEBUG_ACTIVE" -eq 1 ]; then
+    return 0
+  fi
+  __H0_DEBUG_ACTIVE=1
+
+  if [ "${BASH_SUBSHELL:-0}" -gt 0 ]; then
+    if [ "$__H0_CHILD_TRAP_ARMED" -eq 0 ]; then
+      __H0_CHILD_TRAP_ARMED=1
+      trap '__h0_record_child_signal' HUP INT TERM
+    fi
+    __H0_DEBUG_ACTIVE=0
+    return 0
+  fi
+
+  case "$MMX_H0_SIGNAL_REGISTRATION_PHASE:$observed_command" in
+    'after-spawn-before-pid:ACTIVE_CHILD_PID=$!')
+      checkpoint_pid="$!"
+      ;;
+    'after-pid-before-pgid:ACTIVE_CHILD_PGID=$ACTIVE_CHILD_PID')
+      checkpoint_pid="$ACTIVE_CHILD_PID"
+      ;;
+    'steady-state:wait "$ACTIVE_CHILD_PID"')
+      checkpoint_pid="$ACTIVE_CHILD_PGID"
+      ;;
+  esac
+  if [ -n "$checkpoint_pid" ]; then
+    /usr/bin/printf '%s\n' "$checkpoint_pid" \
+      > "$MMX_H0_SIGNAL_REGISTRATION_MARKER"
+    while [ -e "$MMX_H0_SIGNAL_REGISTRATION_MARKER" ]; do
+      /bin/sleep 0.01
+    done
+  fi
+  __H0_DEBUG_ACTIVE=0
+}
+
+trap '__h0_debug_checkpoint "$BASH_COMMAND"' DEBUG
+""",
+        encoding="utf-8",
+    )
+    return probe
+
+
+def _process_group_members(process_group: int) -> tuple[int, ...]:
+    observed = subprocess.run(
+        ["/bin/ps", "-axo", "pid=,pgid="],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return tuple(
+        int(fields[0])
+        for line in observed.splitlines()
+        if len(fields := line.split()) == 2 and int(fields[1]) == process_group
+    )
+
+
 def test_bootstrap_refuses_root_identity_before_bundle_or_namespace_observation(
     tmp_path: Path,
 ) -> None:
@@ -532,6 +604,81 @@ def test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup(
         assert (observed_process.returncode, observed_process.stdout) == (1, "")
     time.sleep(3.2)
     assert not post_signal_sentinel.exists()
+
+
+@pytest.mark.parametrize(
+    "registration_phase",
+    ("after-spawn-before-pid", "after-pid-before-pgid", "steady-state"),
+)
+@pytest.mark.parametrize("interrupt", (signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+def test_signal_registration_window_never_releases_untracked_carrier(
+    tmp_path: Path, registration_phase: str, interrupt: signal.Signals
+) -> None:
+    registration_marker = tmp_path / "registration-checkpoint"
+    carrier_started = tmp_path / "carrier-started"
+    child_terminated = tmp_path / "carrier-terminated-before-cleanup"
+    gated_child_terminated = tmp_path / "gated-child-terminated-before-cleanup"
+    post_signal_sentinel = tmp_path / "post-signal-mutation"
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(
+        tmp_path,
+        mid_carrier_marker=carrier_started,
+        child_terminated_marker=child_terminated,
+        post_signal_sentinel=post_signal_sentinel,
+    )
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    environment.update(
+        {
+            "BASH_ENV": str(_signal_registration_probe(tmp_path)),
+            "MMX_H0_SIGNAL_REGISTRATION_PHASE": registration_phase,
+            "MMX_H0_SIGNAL_REGISTRATION_MARKER": str(registration_marker),
+            "MMX_H0_SIGNAL_CHILD_TERMINATED_MARKER": str(gated_child_terminated),
+        }
+    )
+    process = subprocess.Popen(
+        [
+            "/bin/bash",
+            str(BOOTSTRAP),
+            *_bootstrap_arguments(commit, bundle, macro_transport),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+    )
+    deadline = time.monotonic() + 10
+    registration_payload = ""
+    while time.monotonic() < deadline and not registration_payload:
+        if registration_marker.exists():
+            registration_payload = registration_marker.read_text(
+                encoding="utf-8"
+            ).strip()
+        time.sleep(0.01)
+    assert registration_payload, process.communicate(timeout=1)
+    process_group = int(registration_payload)
+    if registration_phase == "steady-state":
+        while time.monotonic() < deadline and not carrier_started.exists():
+            time.sleep(0.01)
+        assert carrier_started.exists(), process.communicate(timeout=1)
+
+    process.send_signal(interrupt)
+    time.sleep(0.05)
+    registration_marker.unlink(missing_ok=True)
+    stdout, stderr = process.communicate(timeout=15)
+
+    assert (process.returncode, stdout, stderr) == (
+        70,
+        "H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER\n",
+        "",
+    )
+    time.sleep(3.2)
+    assert not post_signal_sentinel.exists()
+    assert gated_child_terminated.exists()
+    assert _process_group_members(process_group) == ()
+    assert not root_namespace.exists()
+    if registration_phase == "steady-state":
+        assert child_terminated.exists()
+    else:
+        assert not carrier_started.exists()
 
 
 @pytest.mark.parametrize(

@@ -12,6 +12,9 @@ TEST_ADAPTER="false"
 ACTIVE_CHILD_PID=""
 ACTIVE_CHILD_PGID=""
 CHILD_OUTPUT=""
+CHILD_GATE=""
+CHILD_REGISTRATION_ACTIVE=0
+PENDING_INTERRUPT=0
 CARRIER_STATUS=65
 CARRIER_OUTPUT="H0_SOURCE_CLOSURE_REPAIR_REFUSED"
 EXPECTED_UID=0
@@ -103,17 +106,38 @@ run_authenticated_carrier_tracked() {
     CHILD_OUTPUT="$(/usr/bin/mktemp \
       "$MMX_H0_BOOTSTRAP_TEST_ROOT/child-output.XXXXXXXX")" \
       || finish 65 "$REFUSED_OUTPUT"
+    CHILD_GATE="$(/usr/bin/mktemp \
+      "$MMX_H0_BOOTSTRAP_TEST_ROOT/child-gate.XXXXXXXX")" \
+      || finish 65 "$REFUSED_OUTPUT"
   else
     CHILD_OUTPUT="$(/usr/bin/mktemp \
       /private/tmp/mastermind-h0-child-output.XXXXXXXX)" \
       || finish 65 "$REFUSED_OUTPUT"
+    CHILD_GATE="$(/usr/bin/mktemp \
+      /private/tmp/mastermind-h0-child-gate.XXXXXXXX)" \
+      || finish 65 "$REFUSED_OUTPUT"
   fi
   /bin/chmod 0600 "$CHILD_OUTPUT" || finish 65 "$REFUSED_OUTPUT"
+  /bin/chmod 0600 "$CHILD_GATE" || finish 65 "$REFUSED_OUTPUT"
 
   set -m
-  run_authenticated_carrier "$@" >"$CHILD_OUTPUT" &
+  PENDING_INTERRUPT=0
+  CHILD_REGISTRATION_ACTIVE=1
+  (
+    while [ -e "$CHILD_GATE" ]; do
+      /bin/sleep 0.01
+    done
+    run_authenticated_carrier "$@"
+  ) >"$CHILD_OUTPUT" &
   ACTIVE_CHILD_PID=$!
   ACTIVE_CHILD_PGID=$ACTIVE_CHILD_PID
+  CHILD_REGISTRATION_ACTIVE=0
+  if [ "$PENDING_INTERRUPT" -eq 1 ]; then
+    interrupted
+  fi
+  /bin/rm -f "$CHILD_GATE" || finish 65 "$REFUSED_OUTPUT"
+  [ ! -e "$CHILD_GATE" ] || finish 65 "$REFUSED_OUTPUT"
+  CHILD_GATE=""
   wait "$ACTIVE_CHILD_PID"
   child_status=$?
   ACTIVE_CHILD_PID=""
@@ -130,6 +154,14 @@ run_authenticated_carrier_tracked() {
 
 cleanup_namespace() {
   local cleanup_failed=0
+  if [ -n "$CHILD_GATE" ]; then
+    /bin/rm -f "$CHILD_GATE" || cleanup_failed=1
+    if [ -e "$CHILD_GATE" ]; then
+      cleanup_failed=1
+    else
+      CHILD_GATE=""
+    fi
+  fi
   if [ -n "$CHILD_OUTPUT" ]; then
     /bin/rm -f "$CHILD_OUTPUT" || cleanup_failed=1
     if [ -e "$CHILD_OUTPUT" ]; then
@@ -183,8 +215,17 @@ unexpected_exit() {
 
 interrupted() {
   trap - HUP INT TERM
+  CHILD_REGISTRATION_ACTIVE=0
   terminate_active_child || true
   finish 70 "$INTERRUPTED_OUTPUT"
+}
+
+signal_received() {
+  if [ "$CHILD_REGISTRATION_ACTIVE" -eq 1 ]; then
+    PENDING_INTERRUPT=1
+    return 0
+  fi
+  interrupted
 }
 
 finish_carrier_failure() {
@@ -204,7 +245,7 @@ finish_carrier_failure() {
 }
 
 trap unexpected_exit EXIT
-trap interrupted HUP INT TERM
+trap signal_received HUP INT TERM
 
 CALLER_UID="$(/usr/bin/id -u)" || finish 64 "INVALID_INVOCATION"
 CALLER_USER="$(/usr/bin/id -un)" || finish 64 "INVALID_INVOCATION"

@@ -507,9 +507,13 @@ binds every path and Git mode to the exact commit, verifies every retained file 
 framing, and writes them into new root-owned single-link inodes. The authenticated Python verifier
 independently repeats the exact commit/mode/blob checks from the root-created bare repository before
 the carrier shell runs. Root never executes an operator-created inode and performs no network
-access. Each authenticated repair or verify-only child runs as one tracked process group. A HUP,
-INT, or TERM delivered only to the bootstrap terminates that active child and its descendants and
-reaps the group before namespace cleanup; no descendant can mutate after the exit-70 receipt. The
+access. Each authenticated repair or verify-only child begins behind an unreleased execution gate
+and runs as one tracked process group. HUP, INT, and TERM are deferred to a pending flag while the
+bootstrap registers both the child PID and process-group ID. If a signal is pending after complete
+registration, the gate is never released; the gated group is terminated and reaped. Otherwise the
+gate is removed and steady-state signal handling begins. A signal delivered only to the bootstrap
+terminates the active child and its descendants and reaps the group before namespace cleanup; no
+descendant can mutate after the exit-70 receipt. The
 fixed namespace is created no-replace, is removed on refusal, success, HUP, INT, and TERM, and is
 never auto-removed when found preexisting. Cleanup failure is a typed non-success and all three
 pass sentinels remain buffered until cleanup succeeds.
