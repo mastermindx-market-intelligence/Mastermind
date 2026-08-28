@@ -209,6 +209,12 @@ def raw_v2_message(
             "completed": "V2 history was read.",
             "next": "Continue the bounded engine proof.",
         },
+        "BLOCKED": {
+            "blocker_code": "AUTH_REQUIRED",
+            "reason": "A bounded dependency is unavailable.",
+            "needed_from": "sol",
+            "work_paused": True,
+        },
         "DECISION_REQUEST": {
             "question": "Which bounded engine option should be selected?",
             "outcome_impact": "The choice changes only the accepted V2 engine path.",
@@ -230,6 +236,10 @@ def raw_v2_message(
             ],
             "recommendation": "opt-continue",
             "work_paused": True,
+        },
+        "RESULT": {
+            "status": "PASS",
+            "result": "The bounded V2 engine wave passed.",
         },
         "RULING": {
             "authority_class": "WITHIN_COMMISSION",
@@ -266,7 +276,7 @@ def raw_v2_message(
         "summary": "Bounded V2 engine message.",
         "body": copy.deepcopy(bodies[message_type]),
         "evidence_refs": [],
-        "requires_response": message_type == "DECISION_REQUEST",
+        "requires_response": message_type in {"DECISION_REQUEST", "BLOCKED"},
         "created_at": "2026-08-27T13:05:00Z",
     }
 
@@ -813,6 +823,87 @@ def test_v2_wait_continue_refuses_when_injected_policy_denies() -> None:
                 context=context(),
                 request_message_key=request["message_key"],
                 expected_types=("CONTINUE",),
+                max_attempts=1,
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+
+
+@pytest.mark.parametrize("request_type", ["DECISION_REQUEST", "RESULT"])
+def test_v2_wait_continue_refuses_noncontinuable_request_family(request_type: str) -> None:
+    client = setup_client()
+    request = v2_message(
+        request_type,
+        message_key=f"asd-{request_type.lower()}-v2-engine-no-continue",
+    )
+    reply = v2_message(
+        "CONTINUE",
+        message_key=f"asd-continue-v2-engine-from-{request_type.lower()}",
+        actor_ref=ceo_actor(),
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000078")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000079")
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("CONTINUE",),
+                max_attempts=1,
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+
+
+@pytest.mark.parametrize("needed_from", ["chairman", "external"])
+def test_v2_wait_continue_refuses_blocked_not_needed_from_sol(needed_from: str) -> None:
+    client = setup_client()
+    raw_request = raw_v2_message(
+        "BLOCKED",
+        message_key=f"asd-blocked-v2-engine-needed-{needed_from}",
+    )
+    raw_request["body"]["needed_from"] = needed_from
+    request = build_message_v2(raw_request)
+    reply = v2_message(
+        "CONTINUE",
+        message_key=f"asd-continue-v2-engine-blocked-{needed_from}",
+        actor_ref=ceo_actor(),
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000080")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000081")
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("CONTINUE",),
+                max_attempts=1,
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "expected_types",
+    [
+        (),
+        ("RULING", "RULING"),
+        ("ACK",),
+        ("NOT_A_TYPE",),
+    ],
+)
+def test_v2_wait_expected_types_remain_closed(expected_types: tuple[str, ...]) -> None:
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(setup_client()).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key="asd-unused-v2-engine-expected-types",
+                expected_types=expected_types,
                 max_attempts=1,
             )
         )
