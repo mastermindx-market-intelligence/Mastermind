@@ -765,3 +765,127 @@ def test_v2_status_is_explicitly_production_inert_and_not_watcher_ready() -> Non
     assert status["production_armed"] is False
     assert "watcher_ready" not in status
     assert "wake_ready" not in status
+
+
+def test_v2_wait_continue_preserves_injected_continuation_policy() -> None:
+    client = setup_client()
+    request = v2_message("PROGRESS", message_key="asd-progress-v2-engine-continue")
+    reply = v2_message(
+        "CONTINUE",
+        message_key="asd-continue-v2-engine-wait",
+        actor_ref=ceo_actor(),
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000070")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000071")
+    result = run(
+        make_engine(client).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(),
+            request_message_key=request["message_key"],
+            expected_types=("CONTINUE",),
+            max_attempts=1,
+        )
+    )
+    assert result["authority"] == {
+        "disposition": "CONTINUE",
+        "executable": True,
+        "selected_option": None,
+        "canonical_ref": None,
+    }
+
+
+def test_v2_wait_continue_refuses_when_injected_policy_denies() -> None:
+    client = setup_client()
+    request = v2_message("PROGRESS", message_key="asd-progress-v2-engine-denied")
+    reply = v2_message(
+        "CONTINUE",
+        message_key="asd-continue-v2-engine-denied",
+        actor_ref=ceo_actor(),
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000072")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000073")
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client, authority_policy=ChairmanFloorPolicy()).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("CONTINUE",),
+                max_attempts=1,
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+
+
+def test_v2_wait_stop_is_executable_without_widening_authority() -> None:
+    client = setup_client()
+    request = v2_message("ACK", message_key="asd-ack-v2-engine-stop")
+    reply = v2_message(
+        "STOP",
+        message_key="asd-stop-v2-engine-wait",
+        actor_ref=ceo_actor(),
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000074")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000075")
+    result = run(
+        make_engine(client).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(),
+            request_message_key=request["message_key"],
+            expected_types=("STOP",),
+            max_attempts=1,
+        )
+    )
+    assert result["authority"] == {
+        "disposition": "STOP",
+        "executable": True,
+        "selected_option": None,
+        "canonical_ref": None,
+    }
+
+
+def test_v2_wait_amendment_available_requires_canonical_ref() -> None:
+    client = setup_client()
+    request = v2_message("ACK", message_key="asd-ack-v2-engine-amendment")
+    canonical_ref = f"https://github.com/{REPO}/commit/" + "d" * 40
+    reply = build_message_v2(
+        {
+            "schema": MESSAGE_SCHEMA_V2,
+            "message_key": "asd-amendment-available-v2-engine-wait",
+            "message_type": "AMENDMENT_AVAILABLE",
+            "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+            "commission_ref": commission(),
+            "session_ref": "asd-session-fable0001",
+            "actor_ref": ceo_actor(),
+            "reply_to_message_key": request["message_key"],
+            "applies_to": applies(),
+            "summary": "A canonical amendment is available.",
+            "body": {
+                "canonical_ref": canonical_ref,
+                "summary": "Review the canonical amendment before continuation.",
+            },
+            "evidence_refs": [],
+            "requires_response": False,
+            "created_at": "2026-08-27T13:06:00Z",
+        }
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000076")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000077")
+    result = run(
+        make_engine(client).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(),
+            request_message_key=request["message_key"],
+            expected_types=("AMENDMENT_AVAILABLE",),
+            max_attempts=1,
+        )
+    )
+    assert result["authority"] == {
+        "disposition": "CANONICAL_REF_REQUIRED",
+        "executable": False,
+        "selected_option": None,
+        "canonical_ref": canonical_ref,
+    }
