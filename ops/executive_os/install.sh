@@ -832,6 +832,16 @@ from scripts.executive_os_phase1c import (
     operator_harness_version,
 ) = sys.argv[1:]
 
+ceo_ingress_expected = {
+    "ceo_ingress_launchd_socket_name": "CeoIngress",
+    "ceo_ingress_peer_uid": 452,
+    "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
+}
+schema_keys = _CONFIG_REQUIRED | _CONFIG_OPTIONAL
+ceo_ingress_schema_keys = set(ceo_ingress_expected) & schema_keys
+if ceo_ingress_schema_keys and ceo_ingress_schema_keys != set(ceo_ingress_expected):
+    raise SystemExit("partial CeoIngress control-config schema")
+
 expected = {
     "schema_version": CONTROL_CONFIG_SCHEMA_VERSION,
     "runtime_root": runtime_root,
@@ -856,6 +866,9 @@ expected = {
     "operator_harness_binary_digest": operator_harness_binary_digest,
     "operator_harness_version": operator_harness_version,
 }
+if ceo_ingress_schema_keys:
+    expected.update(ceo_ingress_expected)
+
 defaults = {
     "proof_branch": "codex/phase1c-a-proof",
     "worker_id": "codex-01",
