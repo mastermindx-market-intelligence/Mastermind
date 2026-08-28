@@ -18,6 +18,7 @@ import io
 import json
 import os
 import re
+import resource
 import stat
 import subprocess
 import struct
@@ -131,6 +132,11 @@ _SOURCE_REPAIR_RECEIPT_NAME = "source-repair-receipt.json"
 _ARCHIVED_SOURCE_NAME = "archived-source"
 _ARCHIVED_GENERATION_NAME = "archived-generation"
 _ALLOWED_BSD_FLAGS = 0
+# The fixed e4 graph alone retains 1,122 manifest entries.  16,384 leaves over
+# an order of magnitude for the runtime, prior-generation, topology, rollback,
+# legacy, socket, parent, and ancestor descriptors without weakening one-graph
+# retention into reopen-on-demand authority.
+_PRESERVED_H0_REQUIRED_NOFILE = 16384
 _TRAVERSAL_ANCESTOR_ALLOWED_FLAGS = (
     int(getattr(stat, "SF_NOUNLINK", 0x00100000))
     | int(getattr(stat, "SF_RESTRICTED", 0x00080000))
@@ -146,6 +152,16 @@ _TRUSTED_E4_MANIFEST_SHA256 = (
 )
 _TRUSTED_E4_MANIFEST_SIZE = 190196
 _TRUSTED_E4_MANIFEST_ENTRY_COUNT = 1122
+_PRIOR_GENERATION_EXPECTED_NAMES = frozenset(
+    {
+        "broker-topology.json",
+        "components.json",
+        "host-preparation-receipt.json",
+        "rollback-contract.json",
+        "rollback-drill-receipt.json",
+        "source-config.json",
+    }
+)
 _REPAIR_CARRIER_FILES = {
     ".repair-carrier-commit": 0o400,
     "ops/executive_os/repair-capacity-source-closure.sh": 0o500,
@@ -375,6 +391,7 @@ class SourceRepairParents:
     locks: int | None = None
     relations: tuple[tuple[int, str, int], ...] = ()
     security_states: tuple[tuple[int, tuple[int, ...]], ...] = ()
+    security_xattr_states: tuple[tuple[int, frozenset[bytes]], ...] = ()
     ancestor_states: tuple[tuple[int, tuple[int, ...]], ...] = ()
     ancestor_xattr_states: tuple[tuple[int, frozenset[bytes]], ...] = ()
     ancestor_expected_uid: int = 0
@@ -427,6 +444,9 @@ class SourceRepairParents:
                 _require_secure_descriptor(
                     descriptor, info, reason="SOURCE_REPAIR_PARENT_DRIFT"
                 )
+            for descriptor, expected in self.security_xattr_states:
+                if _descriptor_extended_attribute_names(descriptor) != expected:
+                    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
             for parent, name, child in self.relations:
                 observed = os.stat(name, dir_fd=parent, follow_symlinks=False)
                 if _descriptor_security_state(observed) != _descriptor_security_state(
@@ -551,6 +571,28 @@ def _read_descriptor(descriptor: int, maximum_bytes: int) -> bytes:
         output.extend(chunk)
         if len(output) > maximum_bytes:
             raise CapacityHostArtifactError("CANONICAL_CANDIDATE_TOO_LARGE")
+
+
+def _ensure_preserved_h0_fd_budget() -> int:
+    """Raise this process's soft descriptor ceiling for one complete H0 graph."""
+
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if hard != resource.RLIM_INFINITY and hard < _PRESERVED_H0_REQUIRED_NOFILE:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_FD_LIMIT_INVALID")
+        if soft < _PRESERVED_H0_REQUIRED_NOFILE:
+            resource.setrlimit(
+                resource.RLIMIT_NOFILE,
+                (_PRESERVED_H0_REQUIRED_NOFILE, hard),
+            )
+        achieved, _observed_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except CapacityHostArtifactError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_FD_LIMIT_INVALID") from exc
+    if achieved < _PRESERVED_H0_REQUIRED_NOFILE:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_FD_LIMIT_INVALID")
+    return int(achieved)
 
 
 def _validate_canonical_file(
@@ -2211,6 +2253,10 @@ def _open_source_repair_parents(
                 (descriptor, _descriptor_security_state(os.fstat(descriptor)))
                 for descriptor, _mode in secured
             ),
+            security_xattr_states=tuple(
+                (descriptor, _descriptor_extended_attribute_names(descriptor))
+                for descriptor, _mode in secured
+            ),
             ancestor_states=tuple(ancestor_states),
             ancestor_xattr_states=tuple(ancestor_xattr_states),
             ancestor_expected_uid=expected_uid,
@@ -2272,6 +2318,18 @@ def _attach_source_repair_archive_parent(
         raise
     parents.intent_archive_path = archive
     parents.intent_archive = descriptor
+    parents.relations = (
+        *parents.relations,
+        (parents.archive, archive.name, descriptor),
+    )
+    parents.security_states = (
+        *parents.security_states,
+        (descriptor, _descriptor_security_state(info)),
+    )
+    parents.security_xattr_states = (
+        *parents.security_xattr_states,
+        (descriptor, _descriptor_extended_attribute_names(descriptor)),
+    )
 
 
 def _descriptor_entry_info(parent: int, name: str) -> os.stat_result | None:
@@ -2403,6 +2461,69 @@ def _validate_prior_generation(
     return closed_tree_digest(
         path, expected_uid=expected_uid, expected_gid=expected_gid
     )
+
+
+def _retained_generation_parent(
+    parents: SourceRepairParents, generation: Path
+) -> int:
+    """Select the sole descriptor capability valid at this lifecycle position."""
+
+    if (
+        generation.parent == parents.generation_path
+        and generation.name == PRIOR_GENERATION_DIGEST
+    ):
+        return parents.generation
+    if (
+        parents.intent_archive is not None
+        and parents.intent_archive_path is not None
+        and generation.parent == parents.intent_archive_path
+        and generation.name == _ARCHIVED_GENERATION_NAME
+    ):
+        return parents.intent_archive
+    raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
+
+
+def _verify_retained_prior_generation(
+    view: "_RepositoryView",
+    *,
+    expected_uid: int,
+    expected_gid: int,
+    expected_device: int,
+) -> None:
+    """Authenticate the fixed prior-generation identity through one retained view."""
+
+    expected_names = _PRIOR_GENERATION_EXPECTED_NAMES
+    root_info = os.fstat(view.root_descriptor)
+    if (
+        frozenset(PRIOR_GENERATION_ARTIFACT_SHA256) != expected_names
+        or set(view.directory_names.get(".", ())) != expected_names
+        or set(view.descriptors) != {".", *expected_names}
+        or not stat.S_ISDIR(root_info.st_mode)
+        or root_info.st_dev != expected_device
+        or root_info.st_uid != expected_uid
+        or root_info.st_gid != expected_gid
+        or stat.S_IMODE(root_info.st_mode) != 0o555
+    ):
+        raise CapacityHostArtifactError("PRIOR_GENERATION_INVALID")
+    for name, expected_digest in PRIOR_GENERATION_ARTIFACT_SHA256.items():
+        descriptor = view.descriptors.get(name)
+        if descriptor is None:
+            raise CapacityHostArtifactError("PRIOR_GENERATION_INVALID")
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_dev != expected_device
+            or info.st_uid != expected_uid
+            or info.st_gid != expected_gid
+            or stat.S_IMODE(info.st_mode) != 0o444
+            or int(getattr(info, "st_flags", 0)) != _ALLOWED_BSD_FLAGS
+            or view.xattr_states.get(name) != _descriptor_extended_attribute_names(descriptor)
+            or _descriptor_has_extended_acl(descriptor)
+            or view.sha256(name) != expected_digest
+        ):
+            raise CapacityHostArtifactError("PRIOR_GENERATION_INVALID")
+    view.revalidate()
 
 
 def _load_complete_manifest(source_root: Path, expected_commit: str) -> dict[str, Any]:
@@ -2812,6 +2933,27 @@ def _open_release_symlink(parent: int, name: str) -> int:
     return os.open(name, flags, dir_fd=parent)
 
 
+def _validate_absolute_components(components: Sequence[str]) -> None:
+    if not components or any(
+        not isinstance(component, str)
+        or component in {"", ".", ".."}
+        or "/" in component
+        or "\x00" in component
+        for component in components
+    ):
+        raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+
+
+def _absolute_evidence_path(value: Any, *, reason: str) -> Path:
+    if not isinstance(value, str) or not value.startswith("/") or "\x00" in value:
+        raise CapacityHostArtifactError(reason)
+    try:
+        _validate_absolute_components(value.split("/")[1:])
+    except CapacityHostArtifactError as exc:
+        raise CapacityHostArtifactError(reason) from exc
+    return Path(value)
+
+
 def _safe_release_link_target(relative: str, target: str) -> None:
     if not target or target.startswith("/") or "\x00" in target:
         raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
@@ -2853,11 +2995,24 @@ def _verify_inert_release_manifest(
                 parent_descriptor=parent_descriptor,
                 root_name=release.name,
                 allow_symlinks=True,
+                recursive=False,
+                security_policy=_RepositorySecurityPolicy(
+                    role="authenticated-e4-release",
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    expected_device=None,
+                    directory_modes=frozenset({0o755}),
+                    file_modes=frozenset({0o444, 0o555, 0o644, 0o755}),
+                    allow_symlinks=True,
+                ),
             )
         elif (
             parent_descriptor is None
             or view.root_name != release.name
             or not view.allow_symlinks
+            or view.recursive
+            or view.security_policy is None
+            or view.security_policy.role != "authenticated-e4-release"
             or _repository_snapshot_state(os.fstat(view.parent_descriptor))
             != _repository_snapshot_state(os.fstat(parent_descriptor))
         ):
@@ -2876,6 +3031,8 @@ def _verify_inert_release_manifest(
             reason="SOURCE_REPAIR_RELEASE_INVALID",
         )
         device = root_before.st_dev
+        if _RELEASE_MANIFEST_NAME not in view.descriptors:
+            view.retain_child(_RELEASE_MANIFEST_NAME)
         manifest_descriptor = view.descriptors.get(_RELEASE_MANIFEST_NAME)
         if manifest_descriptor is None:
             raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
@@ -2934,6 +3091,13 @@ def _verify_inert_release_manifest(
             ):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
             persisted_by_path[path] = dict(entry)
+
+        view.retain_authenticated_inventory(
+            persisted_by_path,
+            expected_uid=expected_uid,
+            expected_gid=expected_gid,
+            expected_device=device,
+        )
 
         observed_entries: list[dict[str, Any]] = []
         for relative, descriptor in view.descriptors.items():
@@ -3260,7 +3424,9 @@ def _verify_preserved_h0_invariants_body(
         or len(drill["artifacts"]) != 9
     ):
         raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
-    drill_archive = Path(str(drill.get("archive_root")))
+    drill_archive = _absolute_evidence_path(
+        drill.get("archive_root"), reason="SOURCE_REPAIR_ROLLBACK_INVALID"
+    )
     if (
         drill_archive.parent != system_root / "capacity-archive"
         or not drill_archive.name.startswith("rollback-drill-")
@@ -3289,7 +3455,9 @@ def _verify_preserved_h0_invariants_body(
             ("attestation_path", "attestation_sha256"),
             ("plist_path", "plist_sha256"),
         ):
-            path = Path(str(row.get(path_key)))
+            path = _absolute_evidence_path(
+                row.get(path_key), reason="SOURCE_REPAIR_TOPOLOGY_INVALID"
+            )
             digest = str(row.get(digest_key))
             view = views.topology.get(path)
             if (
@@ -3381,13 +3549,27 @@ def _verify_preserved_h0_invariants(
 
     if test_adapter:
         return
-    if (
-        parents is None
-        or parents.system_root is None
-        or parents.intent_archive is None
-    ):
+    _ensure_preserved_h0_fd_budget()
+    if parents is None or parents.system_root is None:
         raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
     retained: list[_RepositoryView] = []
+
+    def role_policy(
+        role: str,
+        *,
+        directory_modes: frozenset[int] = frozenset(),
+        file_modes: frozenset[int] = frozenset(),
+        allow_symlinks: bool = False,
+    ) -> _RepositorySecurityPolicy:
+        return _RepositorySecurityPolicy(
+            role=role,
+            expected_uid=0,
+            expected_gid=0,
+            expected_device=parents.device,
+            directory_modes=directory_modes,
+            file_modes=file_modes,
+            allow_symlinks=allow_symlinks,
+        )
 
     def retain(view: _RepositoryView) -> _RepositoryView:
         retained.append(view)
@@ -3400,6 +3582,9 @@ def _verify_preserved_h0_invariants(
                 parent_descriptor=parents.system_root,
                 root_name="capacity-runtimes",
                 recursive=False,
+                security_policy=role_policy(
+                    "runtime-parent", directory_modes=frozenset({0o755})
+                ),
             )
         )
         runtime = retain(
@@ -3409,17 +3594,39 @@ def _verify_preserved_h0_invariants(
                 / "cf1-pyyaml-6.0.3-cp312-arm64",
                 parent_descriptor=runtime_parent.root_descriptor,
                 root_name="cf1-pyyaml-6.0.3-cp312-arm64",
+                security_policy=role_policy(
+                    "runtime",
+                    directory_modes=frozenset({0o555}),
+                    file_modes=frozenset({0o444, 0o555}),
+                ),
             )
         )
+        generation_parent_descriptor = _retained_generation_parent(parents, generation)
         generation_view = retain(
             _RepositoryView(
                 generation,
-                parent_descriptor=parents.intent_archive,
+                parent_descriptor=generation_parent_descriptor,
                 root_name=generation.name,
+                security_policy=role_policy(
+                    "prior-generation",
+                    directory_modes=frozenset({0o555}),
+                    file_modes=frozenset({0o444}),
+                ),
             )
         )
+        _verify_retained_prior_generation(
+            generation_view,
+            expected_uid=0,
+            expected_gid=0,
+            expected_device=parents.device,
+        )
         telemetry = retain(
-            _RepositoryView(Path("/var/db/mastermind-provider-control"))
+            _RepositoryView(
+                Path("/var/db/mastermind-provider-control"),
+                security_policy=role_policy(
+                    "telemetry", directory_modes=frozenset({0o555})
+                ),
+            )
         )
         release_parent = retain(
             _RepositoryView(
@@ -3427,6 +3634,9 @@ def _verify_preserved_h0_invariants(
                 parent_descriptor=parents.system_root,
                 root_name="releases",
                 recursive=False,
+                security_policy=role_policy(
+                    "release-parent", directory_modes=frozenset({0o755})
+                ),
             )
         )
         release = retain(
@@ -3435,6 +3645,13 @@ def _verify_preserved_h0_invariants(
                 parent_descriptor=release_parent.root_descriptor,
                 root_name=PRESERVED_TOPOLOGY_RELEASE_COMMIT,
                 allow_symlinks=True,
+                recursive=False,
+                security_policy=role_policy(
+                    "authenticated-e4-release",
+                    directory_modes=frozenset({0o755}),
+                    file_modes=frozenset({0o444, 0o555, 0o644, 0o755}),
+                    allow_symlinks=True,
+                ),
             )
         )
 
@@ -3443,7 +3660,9 @@ def _verify_preserved_h0_invariants(
                 "rollback-drill-receipt.json", maximum_bytes=1024 * 1024
             )
         )
-        drill_archive = Path(str(drill.get("archive_root")))
+        drill_archive = _absolute_evidence_path(
+            drill.get("archive_root"), reason="SOURCE_REPAIR_ROLLBACK_INVALID"
+        )
         if (
             drill_archive.parent != parents.archive_path
             or not drill_archive.name.startswith("rollback-drill-")
@@ -3454,6 +3673,11 @@ def _verify_preserved_h0_invariants(
                 drill_archive,
                 parent_descriptor=parents.archive,
                 root_name=drill_archive.name,
+                security_policy=role_policy(
+                    "rollback",
+                    directory_modes=frozenset({0o700}),
+                    file_modes=frozenset({0o444}),
+                ),
             )
         )
         topology = json.loads(
@@ -3469,10 +3693,19 @@ def _verify_preserved_h0_invariants(
             if not isinstance(row, Mapping):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
             for key in ("config_path", "attestation_path", "plist_path"):
-                path = Path(str(row.get(key)))
-                if not path.is_absolute() or path in topology_views:
+                path = _absolute_evidence_path(
+                    row.get(key), reason="SOURCE_REPAIR_TOPOLOGY_INVALID"
+                )
+                if path in topology_views:
                     raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
-                topology_views[path] = retain(_RepositoryView(path))
+                topology_views[path] = retain(
+                    _RepositoryView(
+                        path,
+                        security_policy=role_policy(
+                            "topology", file_modes=frozenset({0o444})
+                        ),
+                    )
+                )
 
         config_parent = retain(
             _RepositoryView(
@@ -3480,6 +3713,9 @@ def _verify_preserved_h0_invariants(
                 parent_descriptor=parents.system_root,
                 root_name="config",
                 recursive=False,
+                security_policy=role_policy(
+                    "config-parent", directory_modes=frozenset({0o755})
+                ),
             )
         )
         launchd_parent = retain(
@@ -3506,6 +3742,9 @@ def _verify_preserved_h0_invariants(
                         path,
                         parent_descriptor=parent_view.root_descriptor,
                         root_name=path.name,
+                        security_policy=role_policy(
+                            "legacy", file_modes=frozenset({0o444})
+                        ),
                     )
                 )
             elif parent_view.is_absent(path.name):
@@ -3776,6 +4015,7 @@ def _observe_source_repair_archived_generation(
     expected_uid: int,
     expected_gid: int,
     test_adapter: bool,
+    parents: SourceRepairParents,
 ) -> tuple[Path, str]:
     """Read and validate the archived generation without advancing a phase."""
 
@@ -3786,7 +4026,10 @@ def _observe_source_repair_archived_generation(
         expected_gid=expected_gid,
     )
     _verify_preserved_h0_invariants(
-        system_root, archived_generation, test_adapter=test_adapter
+        system_root,
+        archived_generation,
+        test_adapter=test_adapter,
+        parents=parents,
     )
     return archived_generation, closed_tree_digest(
         archived_generation, expected_uid=expected_uid, expected_gid=expected_gid
@@ -4124,7 +4367,10 @@ def _verify_committed_source_repair(
         expected_gid=expected_gid,
     )
     _verify_preserved_h0_invariants(
-        system_root, archived_generation, test_adapter=test_adapter
+        system_root,
+        archived_generation,
+        test_adapter=test_adapter,
+        parents=parents,
     )
     components = build_component_objects_v2(
         material_source_digest=PRODUCER_MATERIAL_SOURCE_DIGEST,
@@ -4398,7 +4644,10 @@ def run_source_repair_host(
                 expected_gid=expected_gid,
             )
             _verify_preserved_h0_invariants(
-                system_root, prior_generation_path, test_adapter=test_adapter
+                system_root,
+                prior_generation_path,
+                test_adapter=test_adapter,
+                parents=parents,
             )
             if not _path_lexists(staged_transport):
                 copy_closed_input(
@@ -4592,6 +4841,7 @@ def run_source_repair_host(
                         expected_uid=expected_uid,
                         expected_gid=expected_gid,
                         test_adapter=test_adapter,
+                        parents=parents,
                     )
                 )
                 expected_receipt = _expected_source_repair_receipt(
@@ -4759,6 +5009,7 @@ def run_source_repair_host(
                         expected_uid=expected_uid,
                         expected_gid=expected_gid,
                         test_adapter=test_adapter,
+                        parents=parents,
                     )
                 )
                 _advance_source_repair_receipt_phase(
@@ -6158,6 +6409,20 @@ def _repository_snapshot_state(info: os.stat_result) -> tuple[int, ...]:
     return _descriptor_directory_state(info) + (info.st_size,)
 
 
+@dataclass(frozen=True)
+class _RepositorySecurityPolicy:
+    """Stable security law for one semantic role in the retained H0 graph."""
+
+    role: str
+    expected_uid: int
+    expected_gid: int
+    expected_device: int | None
+    directory_modes: frozenset[int]
+    file_modes: frozenset[int]
+    allow_symlinks: bool = False
+    approved_xattrs: frozenset[bytes] = _APPROVED_SYSTEM_XATTRS
+
+
 class _RepositoryView:
     """One retained graph and semantic read capability for preserved evidence."""
 
@@ -6165,6 +6430,18 @@ class _RepositoryView:
         "var": "private/var",
         "tmp": "private/tmp",
     }
+
+    @staticmethod
+    def _absolute_components(source_root: Path) -> tuple[Path, list[str]]:
+        raw = os.fspath(source_root)
+        if "\x00" in raw:
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        absolute = source_root.absolute()
+        if source_root.is_absolute():
+            _validate_absolute_components(raw.split("/")[1:])
+        components = list(absolute.parts[1:])
+        _validate_absolute_components(components)
+        return absolute, components
 
     def __init__(
         self,
@@ -6174,8 +6451,9 @@ class _RepositoryView:
         root_name: str | None = None,
         allow_symlinks: bool = False,
         recursive: bool = True,
+        security_policy: _RepositorySecurityPolicy | None = None,
     ) -> None:
-        absolute = source_root.absolute()
+        absolute, absolute_components = self._absolute_components(source_root)
         directory_flags = (
             os.O_RDONLY
             | getattr(os, "O_DIRECTORY", 0)
@@ -6184,6 +6462,7 @@ class _RepositoryView:
         )
         self.allow_symlinks = allow_symlinks
         self.recursive = recursive
+        self.security_policy = security_policy
         self.descriptors: dict[str, int] = {}
         self.states: dict[str, tuple[int, ...]] = {}
         self.xattr_states: dict[str, frozenset[bytes]] = {}
@@ -6197,6 +6476,7 @@ class _RepositoryView:
         self.alias_relations: list[
             tuple[int, str, int, tuple[int, ...], frozenset[bytes], str]
         ] = []
+        self.alias_descriptors: list[int] = []
         self.parent_descriptor: int | None = None
         self.parent_state: tuple[int, ...] | None = None
         self.parent_xattr_state: frozenset[bytes] | None = None
@@ -6220,7 +6500,7 @@ class _RepositoryView:
                 self.parent_xattr_state = parent_xattrs
                 actual_root_name = root_name if root_name is not None else absolute.name
             else:
-                components = list(absolute.parts[1:])
+                components = absolute_components
                 if not components:
                     raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
                 root_guard = os.open("/", directory_flags)
@@ -6237,6 +6517,7 @@ class _RepositoryView:
                         alias_descriptor = _open_release_symlink(
                             root_guard, components[0]
                         )
+                        self.alias_descriptors.append(alias_descriptor)
                         alias_state = _release_object_state(
                             os.fstat(alias_descriptor)
                         )
@@ -6257,7 +6538,6 @@ class _RepositoryView:
                             - _APPROVED_TRAVERSAL_ANCESTOR_XATTRS
                             or _descriptor_has_extended_acl(alias_descriptor)
                         ):
-                            os.close(alias_descriptor)
                             raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
                         self.alias_relations.append(
                             (
@@ -6387,7 +6667,13 @@ class _RepositoryView:
         self.guard_xattr_states.append(xattrs)
         self.guard_native_tmp.append(native_tmp)
 
-    def _retain(self, relative: str, descriptor: int) -> None:
+    def _retain(
+        self,
+        relative: str,
+        descriptor: int,
+        *,
+        descend: bool | None = None,
+    ) -> None:
         self.descriptors[relative] = descriptor
         info = os.fstat(descriptor)
         if not (
@@ -6396,8 +6682,11 @@ class _RepositoryView:
             or (self.allow_symlinks and stat.S_ISLNK(info.st_mode))
         ):
             raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
-        traversal_root = relative == "." and not self.recursive and stat.S_ISDIR(
-            info.st_mode
+        traversal_root = (
+            relative == "."
+            and not self.recursive
+            and self.security_policy is None
+            and stat.S_ISDIR(info.st_mode)
         )
         if traversal_root:
             expected_device = (
@@ -6419,8 +6708,41 @@ class _RepositoryView:
         else:
             xattrs = _descriptor_extended_attribute_names(descriptor)
             _require_allowed_bsd_flags(info, "SOURCE_METADATA_INVALID")
+            policy = self.security_policy
+            policy_invalid = False
+            if policy is not None:
+                mode = stat.S_IMODE(info.st_mode)
+                policy_invalid = (
+                    info.st_uid != policy.expected_uid
+                    or info.st_gid != policy.expected_gid
+                    or (
+                        policy.expected_device is not None
+                        and info.st_dev != policy.expected_device
+                    )
+                    or (
+                        stat.S_ISDIR(info.st_mode)
+                        and mode not in policy.directory_modes
+                    )
+                    or (
+                        stat.S_ISREG(info.st_mode)
+                        and mode not in policy.file_modes
+                    )
+                    or (
+                        stat.S_ISLNK(info.st_mode)
+                        and not policy.allow_symlinks
+                    )
+                )
             if (
-                xattrs - _APPROVED_SYSTEM_XATTRS
+                policy_invalid
+                or stat.S_IMODE(info.st_mode) & 0o022
+                or (stat.S_ISREG(info.st_mode) and info.st_nlink != 1)
+                or (stat.S_ISLNK(info.st_mode) and info.st_nlink != 1)
+                or xattrs
+                - (
+                    policy.approved_xattrs
+                    if policy is not None
+                    else _APPROVED_SYSTEM_XATTRS
+                )
                 or _descriptor_has_extended_acl(descriptor)
             ):
                 raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
@@ -6430,7 +6752,8 @@ class _RepositoryView:
             return
         names = tuple(_descriptor_directory_names(descriptor))
         self.directory_names[relative] = names
-        if not self.recursive:
+        should_descend = self.recursive if descend is None else descend
+        if not should_descend:
             return
         for name in names:
             child = name if relative == "." else f"{relative}/{name}"
@@ -6455,9 +6778,116 @@ class _RepositoryView:
                     flags |= getattr(os, "O_NONBLOCK", 0)
                 child_descriptor = os.open(name, flags, dir_fd=descriptor)
             self.parents[child] = (relative, name)
-            self._retain(child, child_descriptor)
+            self._retain(child, child_descriptor, descend=should_descend)
             if _repository_snapshot_state(child_info) != self.states[child]:
                 raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+
+    def retain_child(self, name: str) -> None:
+        """Extend a nonrecursive retained root by one authenticated simple child."""
+
+        if (
+            name in {"", ".", ".."}
+            or "/" in name
+            or "\x00" in name
+            or name in self.descriptors
+        ):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self._revalidate_object(".")
+        child_info = os.stat(name, dir_fd=self.root_descriptor, follow_symlinks=False)
+        if stat.S_ISLNK(child_info.st_mode):
+            if not self.allow_symlinks:
+                raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+            descriptor = _open_release_symlink(self.root_descriptor, name)
+        else:
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
+            if stat.S_ISDIR(child_info.st_mode):
+                flags |= getattr(os, "O_DIRECTORY", 0)
+            descriptor = os.open(name, flags, dir_fd=self.root_descriptor)
+        self.parents[name] = (".", name)
+        self._retain(name, descriptor, descend=False)
+        if _repository_snapshot_state(child_info) != self.states[name]:
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+
+    def retain_authenticated_inventory(
+        self,
+        entries: Mapping[str, Mapping[str, Any]],
+        *,
+        expected_uid: int,
+        expected_gid: int,
+        expected_device: int,
+    ) -> None:
+        """Extend this same graph only after a trusted manifest defines its work."""
+
+        children: dict[str, set[str]] = {".": {_RELEASE_MANIFEST_NAME}}
+        for relative, entry in entries.items():
+            parts = relative.split("/")
+            _validate_absolute_components(parts)
+            parent = "." if len(parts) == 1 else "/".join(parts[:-1])
+            if parent != "." and entries.get(parent, {}).get("type") != "directory":
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            children.setdefault(parent, set()).add(parts[-1])
+            if entry.get("type") == "directory":
+                children.setdefault(relative, set())
+        if set(self.directory_names.get(".", ())) != children["."]:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+
+        for relative in sorted(
+            entries,
+            key=lambda value: (value.count("/"), value.encode("utf-8")),
+        ):
+            entry = entries[relative]
+            parent_relative, _separator, name = relative.rpartition("/")
+            parent_relative = parent_relative or "."
+            parent_descriptor = self.descriptors.get(parent_relative)
+            if parent_descriptor is None:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            info = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+            expected_type = entry.get("type")
+            observed_type = (
+                "directory"
+                if stat.S_ISDIR(info.st_mode)
+                else "file"
+                if stat.S_ISREG(info.st_mode)
+                else "symlink"
+                if stat.S_ISLNK(info.st_mode)
+                else None
+            )
+            if (
+                observed_type != expected_type
+                or info.st_dev != expected_device
+                or info.st_uid != expected_uid
+                or info.st_gid != expected_gid
+                or stat.S_IMODE(info.st_mode) != entry.get("mode")
+                or stat.S_IMODE(info.st_mode) & 0o022
+                or (observed_type != "directory" and info.st_nlink != 1)
+                or (observed_type == "file" and info.st_size != entry.get("size"))
+            ):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            if observed_type == "symlink":
+                descriptor = _open_release_symlink(parent_descriptor, name)
+            else:
+                flags = (
+                    os.O_RDONLY
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NONBLOCK", 0)
+                )
+                if observed_type == "directory":
+                    flags |= getattr(os, "O_DIRECTORY", 0)
+                descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+            self.parents[relative] = (parent_relative, name)
+            self._retain(relative, descriptor, descend=False)
+            if _repository_snapshot_state(info) != self.states[relative]:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            if observed_type == "directory" and set(
+                self.directory_names.get(relative, ())
+            ) != children[relative]:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
 
     def _revalidate_parent_capability(self) -> None:
         if self.parent_descriptor is None:
@@ -6684,11 +7114,12 @@ class _RepositoryView:
             except OSError:
                 pass
         self.parent_descriptor = None
-        for relation in reversed(getattr(self, "alias_relations", [])):
+        for descriptor in reversed(getattr(self, "alias_descriptors", [])):
             try:
-                os.close(relation[2])
+                os.close(descriptor)
             except OSError:
                 pass
+        self.alias_descriptors = []
         self.alias_relations = []
         for descriptor in reversed(getattr(self, "guard_descriptors", [])):
             try:
@@ -6713,8 +7144,9 @@ def verify_repair_carrier(
         or expected_gid < 0
     ):
         raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
-    view = _RepositoryView(carrier_root)
+    view: _RepositoryView | None = None
     try:
+        view = _RepositoryView(carrier_root)
         expected_paths = {
             ".",
             ".repair-carrier-commit",
@@ -6753,12 +7185,15 @@ def verify_repair_carrier(
             "commit_sha": expected_commit,
             "verified_file_count": len(_REPAIR_CARRIER_FILES),
         }
-    except CapacityHostArtifactError:
-        raise
+    except CapacityHostArtifactError as exc:
+        if str(exc) == "REPAIR_CARRIER_INVALID":
+            raise
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID") from exc
     except (OSError, UnicodeError) as exc:
         raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID") from exc
     finally:
-        view.close()
+        if view is not None:
+            view.close()
 
 
 def _run_git_v2(

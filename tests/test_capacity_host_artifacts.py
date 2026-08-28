@@ -10,6 +10,7 @@ import json
 import os
 import pwd
 import re
+import resource
 import stat
 import struct
 import subprocess
@@ -22,6 +23,29 @@ import pytest
 
 from ops.executive_os import capacity_host_artifacts as artifacts
 from ops.executive_os import capacity_source_contract as contract
+
+
+def _open_fd_inventory() -> frozenset[int]:
+    return frozenset(int(name) for name in os.listdir("/dev/fd") if name.isdecimal())
+
+
+def _overlay_fixture_identity_as_root(
+    monkeypatch: pytest.MonkeyPatch, *, device: int
+) -> None:
+    """Represent a user-owned temporary tree as root-owned production metadata."""
+
+    original_fstat = os.fstat
+    original_stat = os.stat
+    original_lstat = os.lstat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if info.st_dev == device and info.st_uid == os.getuid():
+            return _StatOverlay(info, st_uid=0, st_gid=0)
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(os, "stat", lambda *args, **kwargs: overlay(original_stat(*args, **kwargs)))
+    monkeypatch.setattr(os, "lstat", lambda *args, **kwargs: overlay(original_lstat(*args, **kwargs)))
 
 
 class _StatOverlay:
@@ -2608,6 +2632,37 @@ def test_source_repair_fixed_system_root_freezes_exact_link_count(
         parents.close()
 
 
+def test_source_repair_fixed_parent_freezes_exact_approved_xattr_name_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    parents = artifacts._open_source_repair_parents(
+        system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    target = parents.generation
+    initial = dict(parents.security_xattr_states)[target]
+    changed = (
+        frozenset()
+        if initial
+        else frozenset({b"com.apple.provenance"})
+    )
+    original = artifacts._descriptor_extended_attribute_names
+
+    def observed(descriptor: int) -> frozenset[bytes]:
+        return changed if descriptor == target else original(descriptor)
+
+    monkeypatch.setattr(artifacts, "_descriptor_extended_attribute_names", observed)
+    try:
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError, match="SOURCE_REPAIR_PARENT_DRIFT"
+        ):
+            parents.revalidate()
+    finally:
+        parents.close()
+
+
 def _write_inert_release_fixture(
     release: Path,
     *,
@@ -3201,6 +3256,586 @@ def test_repository_view_closes_guard_descriptor_when_initial_guard_audit_refuse
         artifacts._RepositoryView(evidence)
     assert opened_root
     assert closed_root == opened_root
+
+
+def test_preserved_fd_budget_uplifts_soft_limit_in_subprocess() -> None:
+    script = """
+import json, resource, tempfile
+from pathlib import Path
+from ops.executive_os import capacity_host_artifacts as a
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+if hard < a._PRESERVED_H0_REQUIRED_NOFILE:
+    raise SystemExit(77)
+resource.setrlimit(resource.RLIMIT_NOFILE, (256, hard))
+observed = a._ensure_preserved_h0_fd_budget()
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary) / 'exact-scale'
+    root.mkdir(mode=0o755)
+    for index in range(a._TRUSTED_E4_MANIFEST_ENTRY_COUNT):
+        child = root / f'evidence-{index:04d}'
+        child.write_bytes(b'evidence\\n')
+        child.chmod(0o444)
+    view = a._RepositoryView(root)
+    try:
+        count = len(view.descriptors)
+        peak = len([name for name in __import__('os').listdir('/dev/fd') if name.isdecimal()])
+        view.revalidate()
+    finally:
+        view.close()
+print(json.dumps({'observed': observed, 'actual': resource.getrlimit(resource.RLIMIT_NOFILE)[0], 'count': count, 'peak': peak}))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parents[1],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        text=True,
+    )
+    if completed.returncode == 77:
+        pytest.skip("host hard RLIMIT_NOFILE is below the reviewed H0 bound")
+    assert completed.returncode == 0, completed.stderr
+    observed = json.loads(completed.stdout)
+    assert observed["observed"] >= artifacts._PRESERVED_H0_REQUIRED_NOFILE
+    assert observed["actual"] >= artifacts._PRESERVED_H0_REQUIRED_NOFILE
+    assert observed["count"] == artifacts._TRUSTED_E4_MANIFEST_ENTRY_COUNT + 1
+    assert observed["peak"] >= observed["count"]
+
+
+def test_preserved_fd_budget_refuses_low_hard_limit_before_graph_in_subprocess() -> None:
+    script = """
+import resource
+from ops.executive_os import capacity_host_artifacts as a
+soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+limit = min(1024, hard)
+resource.setrlimit(resource.RLIMIT_NOFILE, (limit, limit))
+try:
+    a._ensure_preserved_h0_fd_budget()
+except a.CapacityHostArtifactError as exc:
+    print(str(exc))
+    raise SystemExit(0)
+raise SystemExit(1)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).parents[1],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "SOURCE_REPAIR_FD_LIMIT_INVALID" in completed.stdout
+
+
+def test_preserved_fd_budget_refuses_setrlimit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        resource,
+        "getrlimit",
+        lambda limit: (256, artifacts._PRESERVED_H0_REQUIRED_NOFILE * 2),
+    )
+
+    def refused(*args: object, **kwargs: object) -> None:
+        raise OSError(errno.EPERM, "injected")
+
+    monkeypatch.setattr(resource, "setrlimit", refused)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="SOURCE_REPAIR_FD_LIMIT_INVALID",
+    ):
+        artifacts._ensure_preserved_h0_fd_budget()
+
+
+@pytest.mark.parametrize(
+    "component",
+    ("", ".", "..", "slash/name", "nul\x00name"),
+)
+def test_absolute_component_validation_refuses_before_open(
+    monkeypatch: pytest.MonkeyPatch, component: str
+) -> None:
+    opened = False
+
+    def forbidden_open(*args: object, **kwargs: object) -> int:
+        nonlocal opened
+        opened = True
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(os, "open", forbidden_open)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+        artifacts._validate_absolute_components(("private", component, "evidence"))
+    assert not opened
+
+
+@pytest.mark.parametrize("failure_stage", ("fstat", "xattrs", "readlink", "acl"))
+def test_native_alias_descriptor_is_owned_before_every_audit_refusal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    before_fds = _open_fd_inventory()
+    evidence = tmp_path / "evidence"
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(0o444)
+    alias_fd: int | None = None
+    closed: list[int] = []
+    original_open_alias = artifacts._open_release_symlink
+    original_fstat = os.fstat
+    original_xattrs = artifacts._descriptor_extended_attribute_names
+    original_readlink = os.readlink
+    original_acl = artifacts._descriptor_has_extended_acl
+    original_close = os.close
+
+    def opened_alias(parent: int, name: str) -> int:
+        nonlocal alias_fd
+        alias_fd = original_open_alias(parent, name)
+        return alias_fd
+
+    def refuse_fstat(fd: int) -> os.stat_result:
+        if failure_stage == "fstat" and fd == alias_fd:
+            raise OSError(errno.EIO, "injected")
+        return original_fstat(fd)
+
+    def refuse_xattrs(fd: int) -> frozenset[bytes]:
+        if failure_stage == "xattrs" and fd == alias_fd:
+            raise OSError(errno.EIO, "injected")
+        return original_xattrs(fd)
+
+    def refuse_readlink(*args: object, **kwargs: object) -> str:
+        if failure_stage == "readlink":
+            raise OSError(errno.EIO, "injected")
+        return original_readlink(*args, **kwargs)
+
+    def refuse_acl(fd: int) -> bool:
+        if failure_stage == "acl" and fd == alias_fd:
+            raise OSError(errno.EIO, "injected")
+        return original_acl(fd)
+
+    def observe_close(fd: int) -> None:
+        if fd == alias_fd:
+            closed.append(fd)
+        original_close(fd)
+
+    monkeypatch.setattr(artifacts, "_open_release_symlink", opened_alias)
+    monkeypatch.setattr(os, "fstat", refuse_fstat)
+    monkeypatch.setattr(artifacts, "_descriptor_extended_attribute_names", refuse_xattrs)
+    monkeypatch.setattr(os, "readlink", refuse_readlink)
+    monkeypatch.setattr(artifacts, "_descriptor_has_extended_acl", refuse_acl)
+    monkeypatch.setattr(os, "close", observe_close)
+    with pytest.raises((artifacts.CapacityHostArtifactError, OSError)):
+        artifacts._RepositoryView(Path("/var"), recursive=False)
+    assert alias_fd is not None
+    assert closed == [alias_fd]
+    assert _open_fd_inventory() == before_fds
+
+
+@pytest.mark.parametrize("mode,links", ((0o666, 1), (0o444, 2)))
+def test_repository_view_rejects_stably_unsafe_regular_file_before_snapshot(
+    tmp_path: Path,
+    mode: int,
+    links: int,
+) -> None:
+    root = tmp_path / "unsafe"
+    root.mkdir(mode=0o755)
+    evidence = root / "evidence"
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(mode)
+    if links == 2:
+        os.link(evidence, root / "second-link")
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+        artifacts._RepositoryView(root)
+
+
+def test_generation_parent_capability_is_bound_to_exact_lifecycle_position(
+    tmp_path: Path,
+) -> None:
+    generation_parent = tmp_path / "capacity-generations"
+    archive = tmp_path / "archive"
+    generation_parent.mkdir()
+    archive.mkdir()
+    visible = generation_parent / artifacts.PRIOR_GENERATION_DIGEST
+    archived = archive / artifacts._ARCHIVED_GENERATION_NAME
+    generation_fd = os.open(generation_parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    archive_fd = os.open(archive, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    parents = artifacts.SourceRepairParents(
+        source_path=tmp_path,
+        source=os.dup(generation_fd),
+        generation_path=generation_parent,
+        generation=generation_fd,
+        staging_path=tmp_path,
+        staging=os.dup(generation_fd),
+        archive_path=tmp_path,
+        archive=os.dup(generation_fd),
+        device=tmp_path.stat().st_dev,
+        intent_archive_path=archive,
+        intent_archive=archive_fd,
+    )
+    try:
+        assert artifacts._retained_generation_parent(parents, visible) == generation_fd
+        assert artifacts._retained_generation_parent(parents, archived) == archive_fd
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="PARENT_INVALID"):
+            artifacts._retained_generation_parent(parents, archive / artifacts.PRIOR_GENERATION_DIGEST)
+        parents.intent_archive = None
+        assert artifacts._retained_generation_parent(parents, visible) == generation_fd
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="PARENT_INVALID"):
+            artifacts._retained_generation_parent(parents, archived)
+    finally:
+        if parents.intent_archive is None:
+            parents.intent_archive = archive_fd
+        parents.close()
+
+
+def test_retained_prior_generation_authenticates_fixed_inventory_and_hashes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / artifacts.PRIOR_GENERATION_DIGEST
+    root.mkdir(mode=0o755)
+    payloads = {name: f"{name}\n".encode() for name in artifacts.PRIOR_GENERATION_ARTIFACT_SHA256}
+    for name, payload in payloads.items():
+        path = root / name
+        path.write_bytes(payload)
+        path.chmod(0o444)
+    root.chmod(0o555)
+    monkeypatch.setattr(
+        artifacts,
+        "PRIOR_GENERATION_ARTIFACT_SHA256",
+        {name: hashlib.sha256(payload).hexdigest() for name, payload in payloads.items()},
+    )
+    view = artifacts._RepositoryView(root)
+    try:
+        artifacts._verify_retained_prior_generation(
+            view,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+            expected_device=root.stat().st_dev,
+        )
+    finally:
+        view.close()
+    root.chmod(0o755)
+    extra = root / "extra"
+    extra.write_bytes(b"extra")
+    extra.chmod(0o444)
+    root.chmod(0o555)
+    invalid_view = artifacts._RepositoryView(root)
+    try:
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError, match="PRIOR_GENERATION_INVALID"
+        ):
+            artifacts._verify_retained_prior_generation(
+                invalid_view,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+                expected_device=root.stat().st_dev,
+            )
+    finally:
+        invalid_view.close()
+
+
+def test_retained_prior_generation_swap_refuses_before_external_topology_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_root, _transport, _commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    generation = (
+        system_root / "capacity-generations" / artifacts.PRIOR_GENERATION_DIGEST
+    )
+    artifacts._validate_prior_generation(
+        generation,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )
+    topology = generation / "broker-topology.json"
+    topology.chmod(0o600)
+    topology.write_bytes(
+        b'{"brokers":[{"config_path":"/tmp/untrusted-topology-open"}]}'
+    )
+    topology.chmod(0o444)
+    generation.chmod(0o555)
+    runtime_parent = system_root / "capacity-runtimes"
+    runtime = runtime_parent / "cf1-pyyaml-6.0.3-cp312-arm64"
+    runtime.mkdir(parents=True, mode=0o755)
+    runtime.chmod(0o555)
+    runtime_parent.chmod(0o755)
+    parents = artifacts._open_source_repair_parents(
+        system_root, expected_uid=os.getuid(), expected_gid=os.getgid()
+    )
+    opened_external = False
+    original_init = artifacts._RepositoryView.__init__
+
+    def observed_init(
+        received: artifacts._RepositoryView,
+        source_root: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal opened_external
+        if source_root == Path("/tmp/untrusted-topology-open"):
+            opened_external = True
+        original_init(received, source_root, *args, **kwargs)
+
+    monkeypatch.setattr(artifacts._RepositoryView, "__init__", observed_init)
+    _overlay_fixture_identity_as_root(monkeypatch, device=parents.device)
+    try:
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError, match="PRIOR_GENERATION_INVALID"
+        ):
+            artifacts._verify_preserved_h0_invariants(
+                system_root,
+                generation,
+                test_adapter=False,
+                parents=parents,
+            )
+        assert not opened_external
+    finally:
+        parents.close()
+
+
+@pytest.mark.parametrize("field", ("st_uid", "st_gid", "st_dev"))
+def test_role_policy_rejects_wrong_identity_before_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    root = tmp_path / "role-policy"
+    root.mkdir(mode=0o755)
+    evidence = root / "evidence"
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(0o444)
+    target = evidence.stat()
+    identity = (target.st_dev, target.st_ino)
+    original_fstat = os.fstat
+
+    def overlaid_fstat(descriptor: int) -> os.stat_result | _StatOverlay:
+        info = original_fstat(descriptor)
+        if (info.st_dev, info.st_ino) == identity:
+            return _StatOverlay(info, **{field: getattr(info, field) + 1})
+        return info
+
+    monkeypatch.setattr(os, "fstat", overlaid_fstat)
+    policy = artifacts._RepositorySecurityPolicy(
+        role="test-evidence",
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+        expected_device=root.stat().st_dev,
+        directory_modes=frozenset({0o755}),
+        file_modes=frozenset({0o444}),
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+        artifacts._RepositoryView(root, security_policy=policy)
+
+
+def test_bad_release_manifest_refuses_before_any_payload_child_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = tmp_path / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    _write_inert_release_fixture(release, tree_sha="a" * 40)
+    giant = release / "giant-untrusted-child"
+    giant.write_bytes(b"x" * 1024)
+    giant.chmod(0o444)
+    opened: list[str] = []
+    original_open = os.open
+
+    def observed_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        opened.append(os.fspath(path))
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", observed_open)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+        artifacts._verify_inert_release_manifest(
+            release,
+            expected_commit=artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+    assert "giant-untrusted-child" not in opened
+    assert "ops" not in opened
+
+
+def test_authenticated_release_inventory_refuses_unexpected_child_without_opening_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = tmp_path / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    manifest_bytes = _write_inert_release_fixture(release, tree_sha="a" * 40)
+    unexpected = release / "unexpected-giant"
+    unexpected.write_bytes(b"x" * 1024)
+    unexpected.chmod(0o444)
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_RELEASE_TREE", "a" * 40)
+    monkeypatch.setattr(
+        artifacts,
+        "_TRUSTED_E4_MANIFEST_SHA256",
+        hashlib.sha256(manifest_bytes).hexdigest(),
+    )
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_SIZE", len(manifest_bytes))
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_ENTRY_COUNT", 1)
+    opened: list[str] = []
+    original_open = os.open
+
+    def observed_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        opened.append(os.fspath(path))
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", observed_open)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+        artifacts._verify_inert_release_manifest(
+            release,
+            expected_commit=artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+    assert "unexpected-giant" not in opened
+    assert "payload.txt" not in opened
+
+
+def test_release_metadata_mismatch_refuses_before_payload_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = tmp_path / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    manifest_bytes = _write_inert_release_fixture(release, tree_sha="a" * 40)
+    (release / "payload.txt").chmod(0o400)
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_RELEASE_TREE", "a" * 40)
+    monkeypatch.setattr(
+        artifacts,
+        "_TRUSTED_E4_MANIFEST_SHA256",
+        hashlib.sha256(manifest_bytes).hexdigest(),
+    )
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_SIZE", len(manifest_bytes))
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_ENTRY_COUNT", 1)
+
+    def forbidden_hash(*args: object, **kwargs: object) -> str:
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(artifacts, "_descriptor_sha256", forbidden_hash)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+        artifacts._verify_inert_release_manifest(
+            release,
+            expected_commit=artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def test_real_mode_visible_prior_generation_receives_retained_generation_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    _overlay_fixture_identity_as_root(monkeypatch, device=system_root.stat().st_dev)
+
+    class Observed(Exception):
+        pass
+
+    def observed(
+        received_root: Path,
+        generation: Path,
+        *,
+        test_adapter: bool,
+        parents: artifacts.SourceRepairParents | None = None,
+    ) -> None:
+        assert received_root == system_root
+        assert not test_adapter
+        assert parents is not None
+        assert parents.intent_archive is None
+        assert generation == parents.generation_path / artifacts.PRIOR_GENERATION_DIGEST
+        assert artifacts._retained_generation_parent(parents, generation) == parents.generation
+        raise Observed
+
+    monkeypatch.setattr(artifacts, "_verify_preserved_h0_invariants", observed)
+    arguments = _repair_arguments(system_root, transport, commit)
+    arguments["test_adapter"] = False
+    with pytest.raises(Observed):
+        artifacts.run_source_repair_host(**arguments)
+
+
+@pytest.mark.parametrize("mode", ("repair", "verify-only"))
+def test_real_mode_archived_and_verify_only_receive_same_retained_archive_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+    arguments = _repair_arguments(system_root, transport, commit)
+    assert artifacts.run_source_repair_host(**arguments) == (
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED"
+    )
+    archive = next((system_root / "capacity-archive").iterdir())
+    intent = json.loads((archive / artifacts._SOURCE_REPAIR_INTENT_NAME).read_bytes())
+    receipt = json.loads((archive / artifacts._SOURCE_REPAIR_RECEIPT_NAME).read_bytes())
+    installed_manifest, installed_evidence = artifacts._verify_installed_repair_source(
+        system_root / "capacity-sources" / "macro" / commit,
+        commit,
+    )
+    _overlay_fixture_identity_as_root(monkeypatch, device=system_root.stat().st_dev)
+
+    def preserved_tree_digest(path: Path, **kwargs: object) -> str:
+        if path.name == artifacts._ARCHIVED_SOURCE_NAME:
+            return intent["observed_old_source_tree_sha256"]
+        if path.name == artifacts._ARCHIVED_GENERATION_NAME:
+            return receipt["archived_generation_tree_sha256"]
+        return "0" * 64
+
+    monkeypatch.setattr(artifacts, "closed_tree_digest", preserved_tree_digest)
+    monkeypatch.setattr(
+        artifacts,
+        "_validate_prior_generation",
+        lambda *args, **kwargs: receipt["archived_generation_tree_sha256"],
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_verify_installed_repair_source",
+        lambda *args, **kwargs: (installed_manifest, installed_evidence),
+    )
+
+    class Observed(Exception):
+        pass
+
+    def observed(
+        received_root: Path,
+        generation: Path,
+        *,
+        test_adapter: bool,
+        parents: artifacts.SourceRepairParents | None = None,
+    ) -> None:
+        assert received_root == system_root
+        assert not test_adapter
+        assert parents is not None
+        assert parents.intent_archive is not None
+        assert generation == parents.intent_archive_path / artifacts._ARCHIVED_GENERATION_NAME
+        assert (
+            artifacts._retained_generation_parent(parents, generation)
+            == parents.intent_archive
+        )
+        raise Observed
+
+    monkeypatch.setattr(artifacts, "_verify_preserved_h0_invariants", observed)
+    with pytest.raises((Observed, artifacts.SourceRepairIncomplete)) as caught:
+        artifacts.run_source_repair_host(
+            mode=mode,
+            system_root=system_root,
+            lock_file=system_root / "locks" / "cf2-h0.lock",
+            expected_repair_commit="d" * 40,
+            expected_source_commit=commit,
+            transport=transport if mode == "repair" else None,
+            transport_sha256=(
+                hashlib.sha256(transport.read_bytes()).hexdigest()
+                if mode == "repair"
+                else None
+            ),
+            operator_uid=os.getuid() if mode == "repair" else None,
+            test_adapter=False,
+        )
+    if isinstance(caught.value, artifacts.SourceRepairIncomplete):
+        assert isinstance(caught.value.__cause__, Observed)
 
 
 class _FakePreservedView:

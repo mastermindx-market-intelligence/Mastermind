@@ -365,3 +365,131 @@ Result: exit 0; no output.
 - No native/root/provider/service/credential/OAuth/routing/WP/C1/Slack Relay state was touched.
 - No installed release payload was executed; the strengthened sentinel authenticates its manifest first and then refuses changed payload bytes without launching any subprocess.
 - Task 2 remains repository implementation proof only, not native H0, CF2-P0, merge, deploy, or production acceptance.
+
+## Task 2 review-fix follow-up (2026-08-27)
+
+Exact clean pickup was `c1eb17720054e8b538250af8d875b3968b5921f3`
+with parent `90420a97e9a9ddd4aef6abb83fadf0a12f22481e`. Current protected
+master `b901dee0272a99b8a1d60385848b99b7273e8261` supplied the compatible
+`INDEX`, `REVIEW_RETURN`, `RECONCILE_STATE`, and `COMMISSION_WAVE` procedures.
+
+### RED evidence
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved_fd_budget or absolute_component_validation or native_alias_descriptor_is_owned or stably_unsafe_regular or generation_parent_capability or retained_prior_generation'
+```
+
+Result: exit 1; `FFFFFFFFFFFFFFF [100%]` (15 selected failures). The exact
+failures proved the FD-budget constant/gate absent, absolute-component
+validator absent, all four alias audit-stage descriptors leaked, stable 0666
+and hardlinked files were accepted into a retained graph, lifecycle parent
+selection was absent, and retained prior-generation inventory/hash
+authentication was absent.
+
+The first complete-module review-fix run exposed one integration-level error
+contract regression at 44% and was stopped immediately after the failure:
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 1 after interruption; the existing
+`test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor`
+expected `REPAIR_CARRIER_INVALID`, but the newly strengthened generic retained
+view rejected the injected carrier hardlink during construction with the
+internal `SOURCE_METADATA_INVALID` reason. This proved that constructor-time
+retained-view refusals escaped the public repair-carrier error boundary.
+
+### GREEN evidence
+
+The preserved repair-carrier hardlink refusal remains enforced at retained
+view construction, while the public verifier now normalizes that internal
+refusal to its stable carrier contract and closes any partially constructed
+view:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py::test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor
+```
+
+Result: exit 0; `. [100%]`.
+
+The complete new review-fix selector passed:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved_fd_budget or absolute_component_validation or native_alias_descriptor_is_owned or stably_unsafe_regular or generation_parent_capability or retained_prior_generation or role_security_policy or release_manifest_bad_manifest_never_opens_payload or release_manifest_unexpected_child_never_opens_payload or release_manifest_metadata_mismatch_precedes_hash or production_preserved_invariant_callers_use_source_repair_parents or fixed_parent_approved_xattr_name_set_drift'
+```
+
+Result: exit 0; `................ [100%]` (16 selected cases passed).
+
+The positive FD-budget subprocess was also run directly so its captured
+resource receipt was explicit. It began at soft limit 256, authenticated the
+reviewed uplift before constructing the exact-scale graph, retained all 1,122
+children plus the graph root, and revalidated successfully:
+
+```text
+{"actual": 16384, "count": 1123, "observed": 16384, "peak": 1137}
+```
+
+Result: exit 0. The reviewed fixed minimum is therefore 16,384 descriptors;
+the exact-scale retained graph peaked at 1,137 open descriptors in the isolated
+subprocess.
+
+The prior Task 2 focused set remained green:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'unrelated_retained_view or approved_xattr_name_set_drift or optional_absence or forbidden_stable_ancestor_flags or fixed_macos_root_alias or supplied_retained_semantic_views or trusted_e4 or self_authored_payload or wrong_trusted_e4_tree or basename_relation or preserved_semantic_reads or absolute_evidence_view or inert_release_manifest_verifier_never_executes_installed_payload or full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 0; `.................... [100%]` (20 selected cases passed).
+
+The preserved/source-repair compatibility gate passed:
+
+```text
+/usr/bin/time -p python3 -m pytest -q -x tests/test_capacity_host_artifacts.py -k 'preserved or source_repair'
+```
+
+Result: exit 0; all selected cases reached `[100%]`; `real 74.54`,
+`user 31.99`, `sys 33.49`.
+
+The complete module then passed from an unchanged production/test source
+state:
+
+```text
+/usr/bin/time -p python3 -m pytest -q -x tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; all 325 cases reached `[100%]`; `real 1044.23`,
+`user 461.86`, `sys 454.41`. This is faster than the accepted 298-case Task 2
+run (`real 1148.81`) despite 27 additional review-fix regressions and replaces
+the interrupted 44% integration run.
+
+Final collection, Apple system-Python compilation, and diff gates:
+
+```text
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; `tests/test_capacity_host_artifacts.py: 325`.
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; no output.
+
+```text
+git diff --check
+```
+
+Result: exit 0; no output.
+
+### Review-fix files and boundary
+
+- Modified: `ops/executive_os/capacity_host_artifacts.py`
+- Modified: `tests/test_capacity_host_artifacts.py`
+- Appended: `.superpowers/sdd/2026-08-27-executive-capacity-cf2-h0-final-review-continuation/progress.md`
+- Exact parent for the single follow-up commit:
+  `c1eb17720054e8b538250af8d875b3968b5921f3`.
+- Task 3 remains held. No native/root/provider/service/credential/OAuth/routing,
+  WP/C1/Slack Relay, PR, merge, push, deployment, or installed payload execution
+  occurred. This is repository implementation proof only.
