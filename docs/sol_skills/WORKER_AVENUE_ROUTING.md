@@ -248,5 +248,5 @@ Do not copy manual account-selection rules into a second router or quota ledger.
 
 > **Sol recommends the capability avenue; the Chairman spends the account quota. Ordinary new work is
 > capacity-selectable before START; exact-session continuation stays exact; after START, runtime changes
-> require canonical reconciliation. Prefer Terra and CTO Sol when sufficient, and reserve Fable for the
-> hardest principal-level problems.**
+> require canonical reconciliation. Prefer Terra and CTO Sol when sufficient.
+> Fable is for the hardest principal-level problems, not the default.**
