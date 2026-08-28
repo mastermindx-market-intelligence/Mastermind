@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.0.1
 minimum_bootstrap_major: 1
 skill: index
 ---
@@ -85,6 +85,23 @@ leave the exact next action recoverable by a new session.
 The compact text intended for Shared Project instructions. It is constitutional boot logic,
 not a substitute for loading this Skillpack.
 
+## Mandatory universal source-law companions
+
+These are repository source laws, not additional lifecycle/control planes:
+
+### `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`
+For every watcher-enabled Sol↔worker/COO dialogue. It requires an explicit `CONTINUE` or terminal
+`STOP` edge after returns, reciprocal watcher shutdown, truthful `WATCH_STOP_FAILED` handling,
+and fresh authorization/watch setup for every independent next wave. Silence is never terminal.
+
+### `docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md`
+For every meaningful worker/model delegation. It makes economical/least-scarce capable routing
+the default, reserves Fable for justified principal-level ambiguity/continuity, and requires a
+routing receipt including `WHY NOT FABLE` or `WHY FABLE`.
+
+When a loaded skill commissions, reviews, continues or closes a worker dialogue, apply these
+universal source laws at the same protected commit. Do not substitute older pasted copies.
+
 ## Hard laws shared by every skill
 
 1. Outcome before code. Recover the Chairman's actual job, machine job, moat and 10/10 end-state.
@@ -100,6 +117,13 @@ not a substitute for loading this Skillpack.
 10. Green CI is not user/product/production acceptance.
 11. Preserve disagreements instead of cosmetically rewriting canonical truth to match a projection.
 12. Update durable memory after material rulings/discoveries/handoffs; do not leave strategy in chat.
+13. Reciprocal dialogue requires an explicit edge. After a watcher-enabled return, issue an
+    explicit nonterminal continuation or terminal STOP; silence is never terminal receipt.
+14. A terminal child wave closes its watcher cycle. Any independent next wave requires fresh
+    operation identity, carrier reconciliation, commission/pickup and reciprocal continuation setup.
+15. Fable is scarce principal capacity, not the default worker. Route each bounded mission to the
+    cheapest/least-scarce worker that can reliably meet its required quality; every meaningful
+    commission records its route rationale and either `WHY NOT FABLE` or `WHY FABLE`.
 
 ## Modification handshake
 
