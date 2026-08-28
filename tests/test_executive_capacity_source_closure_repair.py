@@ -5,6 +5,7 @@ import os
 import select
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -44,6 +45,8 @@ REPAIR_CARRIER_PATHS = (
     "ops/executive_os/provider_worker_slots.py",
     "ops/executive_os/provider_identity_policy.py",
 )
+
+PROTECTED_REPAIR_MERGE = "d3499f8bd5dd4ecc0c172c82146acf4e8733ddec"
 
 
 def _run(*arguments: str, environment: dict[str, str] | None = None) -> tuple[int, str, str]:
@@ -86,6 +89,184 @@ def _git(repository: Path, *arguments: str) -> str:
         },
     )
     return completed.stdout.strip()
+
+
+def _tracked_symlink_repository(tmp_path: Path) -> tuple[Path, str]:
+    repository = tmp_path / "tracked-symlink-repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "config", "user.name", "Fixture")
+    _git(repository, "config", "user.email", "fixture@example.invalid")
+    vendor = repository / "vendor"
+    vendor.mkdir()
+    (vendor / "macro").symlink_to("macro_src")
+    _git(repository, "add", "vendor/macro")
+    _git(repository, "commit", "-qm", "tracked symlink fixture")
+    commit = _git(repository, "rev-parse", "HEAD")
+    _git(repository, "update-ref", "refs/remotes/origin/master", commit)
+    return repository, commit
+
+
+def _protected_repair_repository(tmp_path: Path) -> Path:
+    repository = tmp_path / "protected-repair-repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "fetch", "-q", "--no-tags", str(ROOT), PROTECTED_REPAIR_MERGE)
+    _git(repository, "checkout", "-q", "--detach", PROTECTED_REPAIR_MERGE)
+    _git(
+        repository,
+        "update-ref",
+        "refs/remotes/origin/master",
+        PROTECTED_REPAIR_MERGE,
+    )
+    return repository
+
+
+def _run_nonprivileged_checkout_block(
+    repository: Path,
+    repair_merge_sha: str,
+    repair_parent: Path,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    block = next(
+        candidate.split("```", 1)[0]
+        for candidate in RUNBOOK.read_text(encoding="utf-8").split("```bash\n")[1:]
+        if "REPAIR_CHECKOUT=\"$REPAIR_PARENT/mastermind\"" in candidate
+    )
+    checkout_block = block.split(
+        'REPAIR_CARRIER="$REPAIR_PARENT/mastermind-exact-commit.bundle"', 1
+    )[0]
+    replacements = {
+        "MACRO_REPOSITORY=/absolute/path/to/macro": (
+            f"MACRO_REPOSITORY={shlex.quote(str(repository))}"
+        ),
+        "MASTERMIND_REPOSITORY=/absolute/path/to/Mastermind": (
+            f"MASTERMIND_REPOSITORY={shlex.quote(str(repository))}"
+        ),
+        "MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b": (
+            f"MACRO_COMMIT={repair_merge_sha}"
+        ),
+        "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'": (
+            f"REPAIR_MERGE_SHA={repair_merge_sha}"
+        ),
+        'REPAIR_PARENT="$(/usr/bin/mktemp -d '
+        '/private/tmp/mastermind-h0-source-repair.XXXXXX)"': (
+            f"REPAIR_PARENT={shlex.quote(str(repair_parent))}"
+        ),
+    }
+    for original, replacement in replacements.items():
+        assert original in checkout_block
+        checkout_block = checkout_block.replace(original, replacement)
+    repair_parent.mkdir()
+    completed = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            checkout_block
+            + "/usr/bin/printf '%s\\n' RUNBOOK_CHECKOUT_MATERIALIZED_PASS\n",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env={
+            "HOME": "/var/empty",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "C",
+            "LC_ALL": "C",
+        },
+    )
+    return completed, repair_parent / "mastermind"
+
+
+def _assert_materialized_checkout_is_closed(
+    checkout: Path,
+    *,
+    expected_symlink_blob: bytes,
+) -> None:
+    materialized_symlink = checkout / "vendor" / "macro"
+    assert not materialized_symlink.is_symlink()
+    assert materialized_symlink.is_file()
+    assert materialized_symlink.read_bytes() == expected_symlink_blob
+    assert materialized_symlink.stat().st_nlink == 1
+    assert not any(candidate.is_symlink() for candidate in checkout.rglob("*"))
+    assert not any(
+        candidate.is_file() and candidate.stat().st_nlink > 1
+        for candidate in checkout.rglob("*")
+    )
+    assert (
+        _git(
+            checkout,
+            "-c",
+            "core.symlinks=false",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        )
+        == ""
+    )
+
+
+def test_runbook_materializes_tracked_symlink_as_regular_clean_checkout(
+    tmp_path: Path,
+) -> None:
+    repository, commit = _tracked_symlink_repository(tmp_path)
+
+    completed, checkout = _run_nonprivileged_checkout_block(
+        repository,
+        commit,
+        tmp_path / "repair-parent",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "RUNBOOK_CHECKOUT_MATERIALIZED_PASS\n"
+    _assert_materialized_checkout_is_closed(
+        checkout,
+        expected_symlink_blob=b"macro_src",
+    )
+
+
+def test_runbook_materializes_exact_protected_tree_and_preserves_carrier_blobs(
+    tmp_path: Path,
+) -> None:
+    repository = _protected_repair_repository(tmp_path)
+
+    completed, checkout = _run_nonprivileged_checkout_block(
+        repository,
+        PROTECTED_REPAIR_MERGE,
+        tmp_path / "protected-repair-parent",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "RUNBOOK_CHECKOUT_MATERIALIZED_PASS\n"
+    _assert_materialized_checkout_is_closed(
+        checkout,
+        expected_symlink_blob=b"macro_src",
+    )
+    symlink_mode, _kind, symlink_oid, symlink_path = _git(
+        repository,
+        "ls-tree",
+        PROTECTED_REPAIR_MERGE,
+        "--",
+        "vendor/macro",
+    ).split()
+    assert (symlink_mode, symlink_path) == ("120000", "vendor/macro")
+    assert _git(checkout, "hash-object", "vendor/macro") == symlink_oid
+
+    for relative in REPAIR_CARRIER_PATHS:
+        mode, kind, expected_oid, observed_path = _git(
+            repository,
+            "ls-tree",
+            PROTECTED_REPAIR_MERGE,
+            "--",
+            relative,
+        ).split()
+        assert (kind, observed_path) == ("blob", relative)
+        assert mode in {"100644", "100755"}
+        materialized = checkout / relative
+        assert materialized.is_file() and not materialized.is_symlink()
+        assert _git(checkout, "hash-object", relative) == expected_oid
+        assert stat.S_IMODE(materialized.stat().st_mode) == (
+            0o755 if mode == "100755" else 0o644
+        )
 
 
 def _bootstrap_fixture(
