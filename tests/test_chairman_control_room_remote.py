@@ -577,6 +577,35 @@ def test_bounded_runner_kills_and_reaps_continuous_stdout_stderr_and_timeout(tmp
     assert result["code"] is not None
 
 
+def test_bounded_runner_cleanup_never_uses_unbounded_wait_on_unkillable_fake_proc(
+    monkeypatch,
+):
+    class FakeProc:
+        pid = 42
+        returncode = None
+
+        def __init__(self):
+            self.wait_timeouts = []
+            self.kill_calls = 0
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            self.kill_calls += 1
+
+        def wait(self, *, timeout):
+            self.wait_timeouts.append(timeout)
+            raise remote.subprocess.TimeoutExpired(["fake"], timeout)
+
+    proc = FakeProc()
+    monkeypatch.setattr(remote.os, "killpg", lambda *_args: None)
+
+    assert remote._terminate_process_group(proc) is False
+    assert proc.wait_timeouts == [0.5, 0.5]
+    assert proc.kill_calls == 1
+
+
 def test_bounded_runner_kills_process_group_when_leader_exits_before_descendant(
     tmp_path
 ):
@@ -592,7 +621,7 @@ def test_bounded_runner_kills_process_group_when_leader_exits_before_descendant(
         result = remote.default_runner(
             [sys.executable, "-c", script],
             cwd=tmp_path,
-            timeout=0.2,
+            timeout=1.0,
             max_bytes=1024,
         )
         assert time.monotonic() - started < 2.0

@@ -302,6 +302,35 @@ def _git(path: Path, *args: str) -> str | None:
     return value or None
 
 
+def _bounded_git(
+    path: Path,
+    *args: str,
+    runner: Runner,
+    max_output_bytes: int,
+) -> str | None:
+    """Read one git fact through the caller's bounded process owner."""
+    try:
+        result = runner(
+            ["git", *args],
+            cwd=path,
+            timeout=_GIT_TIMEOUT,
+            max_bytes=min(max_output_bytes, 64 * 1024),
+        )
+    except Exception:  # noqa: BLE001 - degraded read-only boundary
+        return None
+    if not isinstance(result, Mapping):
+        return None
+    if any(
+        result.get(flag) is True
+        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+    ):
+        return None
+    if result.get("code") != 0 or type(result.get("stdout")) is not str:
+        return None
+    value = result["stdout"].strip()
+    return value or None
+
+
 def _git_sha(path: Path) -> str | None:
     """HEAD commit sha of the checkout at `path`, or None if it cannot be read."""
     return _git(path, "rev-parse", "HEAD")
@@ -477,7 +506,17 @@ def build_packet(
         if handoff_warning:
             degraded.append(handoff_warning)
 
-        macro_sha = _git_sha(macro_root)
+        macro_sha = (
+            _git_sha(macro_root)
+            if runner is None
+            else _bounded_git(
+                macro_root,
+                "rev-parse",
+                "HEAD",
+                runner=runner,
+                max_output_bytes=max_output_bytes,
+            )
+        )
         if macro_sha is None:
             degraded.append(f"macro git sha unreadable at {macro_root}")
 

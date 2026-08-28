@@ -7,8 +7,14 @@ ACCEPTED_MASTERMIND_COMMIT=
 ACCEPTED_MASTERMIND_TREE=
 VERIFY_SOURCE_ONLY=0
 STAGE_RELEASE_ONLY=
+VALIDATE_DIRECTORY_ONLY=
+VALIDATE_DIRECTORY_UID=
+VALIDATE_DIRECTORY_GID=
+VALIDATE_DIRECTORY_MODE=
+VALIDATE_DIRECTORY_LABEL=
 SERVICE_UID=497
 DESTINATION_ROOT=/opt/mastermind-control-room
+RELEASES_ROOT=$DESTINATION_ROOT/releases
 UNIT_DESTINATION=/etc/systemd/system/mastermind-control-room-remote.service
 SERVICE_USER=mastermind-control-room
 CADDY_GROUP=caddy
@@ -55,6 +61,42 @@ die() {
   exit 65
 }
 
+verify_existing_directory() {
+  local path=$1
+  local expected_uid=$2
+  local expected_gid=$3
+  local expected_mode=$4
+  local label=$5
+  local reason
+  if ! reason=$(python3 -I -B - "$path" "$expected_uid" "$expected_gid" "$expected_mode" <<'PY'
+import os
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+info = path.lstat()
+if stat.S_ISLNK(info.st_mode):
+    print("symlink")
+    raise SystemExit(1)
+if not stat.S_ISDIR(info.st_mode):
+    print("type")
+    raise SystemExit(1)
+if info.st_uid != int(sys.argv[2]):
+    print("owner")
+    raise SystemExit(1)
+if info.st_gid != int(sys.argv[3]):
+    print("group")
+    raise SystemExit(1)
+if stat.S_IMODE(info.st_mode) != int(sys.argv[4], 8):
+    print("mode")
+    raise SystemExit(1)
+PY
+  ); then
+    die "${label}_${reason:-unsafe}"
+  fi
+}
+
 while (($#)); do
   case "$1" in
     --source-repo) SOURCE_REPO=${2-}; shift 2 ;;
@@ -63,9 +105,31 @@ while (($#)); do
     --service-uid) SERVICE_UID=${2-}; shift 2 ;;
     --verify-source-only) VERIFY_SOURCE_ONLY=1; shift ;;
     --stage-release-only) STAGE_RELEASE_ONLY=${2-}; shift 2 ;;
+    --validate-directory-only)
+      VALIDATE_DIRECTORY_ONLY=${2-}
+      VALIDATE_DIRECTORY_UID=${3-}
+      VALIDATE_DIRECTORY_GID=${4-}
+      VALIDATE_DIRECTORY_MODE=${5-}
+      VALIDATE_DIRECTORY_LABEL=${6-}
+      shift 6
+      ;;
     *) die "unknown_argument" ;;
   esac
 done
+
+if [[ -n $VALIDATE_DIRECTORY_ONLY ]]; then
+  [[ $VALIDATE_DIRECTORY_ONLY == /* ]] || die "validate_directory_not_absolute"
+  [[ $VALIDATE_DIRECTORY_UID =~ ^[0-9]+$ ]] || die "validate_directory_uid_invalid"
+  [[ $VALIDATE_DIRECTORY_GID =~ ^[0-9]+$ ]] || die "validate_directory_gid_invalid"
+  [[ $VALIDATE_DIRECTORY_MODE =~ ^0[0-7]{3}$ ]] || die "validate_directory_mode_invalid"
+  [[ $VALIDATE_DIRECTORY_LABEL =~ ^[a-z_]+$ ]] || die "validate_directory_label_invalid"
+  verify_existing_directory \
+    "$VALIDATE_DIRECTORY_ONLY" "$VALIDATE_DIRECTORY_UID" \
+    "$VALIDATE_DIRECTORY_GID" "$VALIDATE_DIRECTORY_MODE" \
+    "$VALIDATE_DIRECTORY_LABEL"
+  printf 'DIRECTORY_VERIFIED path=%s\n' "$VALIDATE_DIRECTORY_ONLY"
+  exit 0
+fi
 
 [[ $SOURCE_REPO == /* ]] || die "source_repo_not_absolute"
 [[ $ACCEPTED_MASTERMIND_COMMIT =~ ^[0-9a-f]{40}$ ]] || die "accepted_commit_invalid"
@@ -301,7 +365,11 @@ CADDY_RECORD=$(getent group "$CADDY_GROUP" || true)
 [[ -n $CADDY_RECORD ]] || die "caddy_group_missing"
 CADDY_GID=$(printf '%s' "$CADDY_RECORD" | cut -d: -f3)
 [[ $CADDY_GID =~ ^[0-9]+$ ]] || die "caddy_group_invalid"
-install -d -o root -g "$CADDY_GROUP" -m 0750 "$SOURCE_ARTIFACT_ROOT"
+if [[ -e $SOURCE_ARTIFACT_ROOT || -L $SOURCE_ARTIFACT_ROOT ]]; then
+  verify_existing_directory "$SOURCE_ARTIFACT_ROOT" 0 "$CADDY_GID" 0750 source_artifact_root
+else
+  install -d -o root -g "$CADDY_GROUP" -m 0750 "$SOURCE_ARTIFACT_ROOT"
+fi
 
 if [[ -e $DESTINATION_ROOT || -L $DESTINATION_ROOT ]]; then
   [[ -d $DESTINATION_ROOT && ! -L $DESTINATION_ROOT ]] || die "destination_root_unsafe"
@@ -311,7 +379,11 @@ if [[ -e $DESTINATION_ROOT || -L $DESTINATION_ROOT ]]; then
 else
   install -d -o root -g root -m 0755 "$DESTINATION_ROOT"
 fi
-install -d -o root -g root -m 0755 "$DESTINATION_ROOT/releases"
+if [[ -e $RELEASES_ROOT || -L $RELEASES_ROOT ]]; then
+  verify_existing_directory "$RELEASES_ROOT" 0 0 0755 releases_root
+else
+  install -d -o root -g root -m 0755 "$RELEASES_ROOT"
+fi
 
 if [[ -e $UNIT_DESTINATION || -L $UNIT_DESTINATION ]]; then
   [[ -f $UNIT_DESTINATION && ! -L $UNIT_DESTINATION ]] || die "unit_destination_unsafe"
@@ -320,7 +392,7 @@ if [[ -e $UNIT_DESTINATION || -L $UNIT_DESTINATION ]]; then
     || die "unit_destination_writable"
 fi
 
-RELEASE_PATH=$DESTINATION_ROOT/releases/$ACCEPTED_MASTERMIND_COMMIT
+RELEASE_PATH=$RELEASES_ROOT/$ACCEPTED_MASTERMIND_COMMIT
 [[ ! -e $RELEASE_PATH && ! -L $RELEASE_PATH ]] || die "release_already_exists"
 STAGING_DIR=$(mktemp -d "$DESTINATION_ROOT/.candidate-${ACCEPTED_MASTERMIND_COMMIT}.XXXXXX")
 ARCHIVE_PATH=$DESTINATION_ROOT/.archive-${ACCEPTED_MASTERMIND_COMMIT}.$$.tar

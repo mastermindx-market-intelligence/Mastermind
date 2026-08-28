@@ -458,6 +458,75 @@ def test_installer_is_archive_based_atomic_and_install_only():
     assert "stage_parent_foreign_owner" in source
 
 
+def _validate_installer_directory(path: Path, *, mode: str):
+    return subprocess.run(
+        [
+            "bash",
+            os.fspath(INSTALLER),
+            "--validate-directory-only",
+            os.fspath(path),
+            str(os.getuid()),
+            str(os.getgid()),
+            mode,
+            "test_directory",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_installer_directory_guard_refuses_symlink_and_unsafe_mode_without_target_effect(
+    tmp_path,
+):
+    safe = tmp_path / "safe"
+    safe.mkdir(mode=0o750)
+    safe.chmod(0o750)
+    accepted = _validate_installer_directory(safe, mode="0750")
+    assert accepted.returncode == 0, accepted.stderr
+
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    target.chmod(0o700)
+    link = tmp_path / "link"
+    link.symlink_to(target, target_is_directory=True)
+    before = target.stat()
+    refused_link = _validate_installer_directory(link, mode="0750")
+    after = target.stat()
+    assert refused_link.returncode == 65
+    assert refused_link.stderr.strip() == "test_directory_symlink"
+    assert (after.st_mode, after.st_uid, after.st_gid) == (
+        before.st_mode,
+        before.st_uid,
+        before.st_gid,
+    )
+
+    unsafe = tmp_path / "unsafe"
+    unsafe.mkdir(mode=0o770)
+    unsafe.chmod(0o770)
+    refused_mode = _validate_installer_directory(unsafe, mode="0750")
+    assert refused_mode.returncode == 65
+    assert refused_mode.stderr.strip() == "test_directory_mode"
+    assert stat.S_IMODE(unsafe.stat().st_mode) == 0o770
+
+
+def test_installer_guards_source_artifact_and_releases_before_install_d():
+    source = INSTALLER.read_text(encoding="utf-8")
+    source_guard = (
+        'verify_existing_directory "$SOURCE_ARTIFACT_ROOT" 0 "$CADDY_GID" '
+        '0750 source_artifact_root'
+    )
+    source_create = (
+        'install -d -o root -g "$CADDY_GROUP" -m 0750 '
+        '"$SOURCE_ARTIFACT_ROOT"'
+    )
+    releases_guard = (
+        'verify_existing_directory "$RELEASES_ROOT" 0 0 0755 releases_root'
+    )
+    releases_create = 'install -d -o root -g root -m 0755 "$RELEASES_ROOT"'
+    assert source.index(source_guard) < source.index(source_create)
+    assert source.index(releases_guard) < source.index(releases_create)
+
+
 def _git(*args, cwd: Path) -> str:
     return subprocess.run(
         ["git", *args], cwd=cwd, check=True, capture_output=True, text=True

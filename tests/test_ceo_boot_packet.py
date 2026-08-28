@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -275,6 +276,58 @@ def test_packet_uses_injected_bounded_runner_for_real_agent_os_brief(
 
     assert packet["brief"]["schema"] == BRIEF_SCHEMA
     assert packet["brief"]["generated_at"] == "2026-08-13T00:00:00Z"
+
+
+def test_immutable_packet_routes_macro_identity_through_bounded_runner(
+    tmp_path, monkeypatch
+):
+    macro = make_macro_root(tmp_path)
+    calls = []
+
+    def bounded_runner(argv, *, cwd, timeout, max_bytes):
+        calls.append((list(argv), Path(cwd), timeout, max_bytes))
+        if argv[0] == "git":
+            stdout = "b" * 40 + "\n"
+        else:
+            stdout = json.dumps({
+                "schema": BRIEF_SCHEMA,
+                "generated_at": "2026-08-13T00:00:00Z",
+            })
+        return {
+            "code": 0,
+            "stdout": stdout,
+            "stderr": "",
+            "timed_out": False,
+            "limit_exceeded": False,
+            "invalid_utf8": False,
+        }
+
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "immutable bounded collection must not use capture_output subprocess.run"
+        ),
+    )
+
+    packet = build_packet(
+        repo_root=tmp_path,
+        macro_root_flag=os.fspath(macro),
+        environ={},
+        now="2026-08-13T00:00:00Z",
+        runner=bounded_runner,
+        max_output_bytes=64 * 1024,
+        mastermind_identity={"sha": "a" * 40, "branch": "immutable-release"},
+    )
+
+    assert packet["mastermind"] == {
+        "root": os.fspath(tmp_path),
+        "sha": "a" * 40,
+        "branch": "immutable-release",
+    }
+    assert packet["macro"]["sha"] == "b" * 40
+    assert [call[0][0] for call in calls] == [sys.executable, "git"]
+    assert all(call[3] <= 64 * 1024 for call in calls)
 
 
 # ---------------------------------------------------------------------------

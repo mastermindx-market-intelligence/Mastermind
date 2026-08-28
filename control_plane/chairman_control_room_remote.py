@@ -690,6 +690,31 @@ def project_remote_document(
     return projected
 
 
+def _terminate_process_group(proc) -> bool:
+    """Kill an owned process group and reap its leader with bounded waits only."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+    try:
+        proc.wait(timeout=0.5)
+        return True
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=0.5)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+
+
 def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[str, Any]:
     """Run a command with incremental hard-capped capture and prompt reap."""
     try:
@@ -713,24 +738,6 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
             "invalid_utf8": False,
         }
 
-    def terminate_and_reap() -> None:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            if proc.poll() is None:
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
-        try:
-            proc.wait(timeout=1.0)
-        except subprocess.TimeoutExpired:
-            try:
-                proc.kill()
-            except OSError:
-                pass
-            proc.wait()
-
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
     selector = selectors.DefaultSelector()
     for name, pipe in (("stdout", proc.stdout), ("stderr", proc.stderr)):
@@ -745,7 +752,7 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 timed_out = True
-                terminate_and_reap()
+                _terminate_process_group(proc)
                 break
             ready = selector.select(timeout=min(remaining, 0.1))
             for key, _mask in ready:
@@ -763,7 +770,7 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
                 if len(buffers[name]) > max_bytes:
                     del buffers[name][max_bytes:]
                     limit_exceeded = True
-                    terminate_and_reap()
+                    _terminate_process_group(proc)
                     break
             if limit_exceeded:
                 break
@@ -773,7 +780,7 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
                 proc.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                terminate_and_reap()
+                _terminate_process_group(proc)
     finally:
         selector.close()
         for pipe in (proc.stdout, proc.stderr):
@@ -782,7 +789,7 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
         # The leader may have exited cleanly after forking a quiet descendant
         # which closed both capture streams.  The runner owns the whole session,
         # so always terminate that process group before returning.
-        terminate_and_reap()
+        _terminate_process_group(proc)
 
     invalid_utf8 = False
     try:
