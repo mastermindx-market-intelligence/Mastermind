@@ -2,150 +2,165 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Prove that one current Phase 1F-C Fable/COO orchestration Job can survive a real Claude subscription quota boundary by ending Attempt 1 truthfully, letting the existing COO cycle requeue the same Job, claiming a different eligible Claude realm for Attempt 2, creating a fresh provider session, delivering/acknowledging the deterministic continuation capsule, and completing through the unchanged orchestration result law—with zero cross-realm movement when the source effect is ambiguous.
+**Goal:** Prove that one current **non-modifying** Phase 1F-C Fable/COO orchestration Job can survive a real Claude subscription quota boundary by ending Attempt 1 truthfully, letting the existing COO cycle requeue the same Job, claiming a different capacity-identified Claude realm for Attempt 2, starting a fresh provider session, preparing/acknowledging exactly one immutable continuation capsule, and completing through unchanged orchestration result law—while write-capable or effect-uncertain interruptions remain blocked on the original carrier.
 
-**Architecture:** This wave composes existing owners; it does not add a rollover scheduler. `ExecutiveOperatorSupervisor`/Operator Harness observes the provider failure and proves shutdown. Existing `AttemptRegistry.rate_limit_attempt()` terminalizes the old Attempt and marks that quota class `RATE_LIMITED`. Existing `CooCycle.run_once()` already gives recoverable same-Job requeue precedence. Existing CF2-I claim then considers only available eligible capacity and records the new placement. OCR-3 builds the continuation capsule and derives RuntimeBinding. OCR-4 runs the new Claude provider session. Fable continuity stays at root Job + COO seat + logical session alias; the provider Attempt changes underneath it.
+**Architecture:** OCR-5 composes existing owners; it adds no rollover scheduler. A pure safety classifier derives `NON_MODIFYING_ATTEMPT` from canonical Executive effective grant + reviewed execution-capability profile + current OHF/Event evidence. Only an exact read-only quota failure may terminalize through existing `rate_limit_attempt()`. Existing `CooCycle` then requeues the same Job. Existing CF2-I/Model Router/Capacity Fabric law chooses the next already-eligible Worker realm; OCR-2C must have established canonical capacity identity for both source and target Claude realms. OCR-4 starts a fresh provider session for Attempt 2. OCR-3 builds the current semantic draft **after the new session is bound/attested** and Executive PREPARE mints exactly one immutable continuation capsule before the first work turn. Fable continuity stays root Job + COO seat + logical session alias; provider Attempt/Worker/session changes underneath it.
 
-**Tech Stack:** Python 3.12, existing `executive_runtime`, `executive_coo_cycle`, `executive_operator_supervisor`, Operator Harness, OCR-3 continuation contract, OCR-4 Claude adapter, CF2-I placement, pytest.
+**Tech Stack:** Python 3.12, existing `executive_runtime`, `executive_coo_cycle`, `executive_agent_capabilities`, `executive_operator_supervisor`, Operator Harness, OCR-2C canonical capacity identity, OCR-3 continuation contract, OCR-4 Claude adapter, accepted CF2-I placement, pytest.
 
 **Specs:**
 - `docs/superpowers/specs/2026-08-27-operator-continuity-realm-rebinding-design.md`
 - `docs/superpowers/specs/2026-08-27-operator-continuity-fable-root-seat-amendment.md`
-- `docs/superpowers/specs/2026-08-27-operator-continuity-claude-auth-compatibility-amendment.md`
+- `docs/superpowers/specs/2026-08-27-operator-continuity-readonly-quota-rollover-amendment.md`
+- `docs/superpowers/specs/2026-08-27-operator-continuation-idempotency-amendment.md`
+- `docs/superpowers/specs/2026-08-27-operator-continuity-native-claude-capacity-identity-amendment.md`
 
 ## Dependency Gate
 
-Do not implement/arm OCR-5 until:
+Do not implement/arm OCR-5 until all are accepted/current:
 
 ```text
-CF2-I accepted with real multi-account claim evidence
-RF1 accepted
-HF1 accepted
-PF1 real Claude sealed-worker accepted
-OCR-1 V2 proves at least two distinct native Claude realms
-OCR-3 continuation/binding implementation accepted
-OCR-4 one-realm sustained Claude operator accepted
+CF2-I with real capacity-aware claim evidence
+RF1 provider-neutral suitability
+HF1 common worker harness
+PF1 real Claude provider vertical
+OCR-1 V2 >=2 distinct native Claude realms with WORKER_CONTEXT_AUTH_READY
+OCR-2C accepted canonical capacity identity for both rollover realms
+OCR-3 continuation/binding implementation
+OCR-4A provider-neutral rich harness composition
+OCR-4 one-realm sustained Claude operator
 ```
 
-Phase 1F-C policy remains unchanged: non-review orchestration Jobs have at most two Attempts. This wave proves one retry path; it does not raise that ceiling.
+Phase 1F-C policy remains unchanged: non-review orchestration Jobs retain their current Attempt ceiling. OCR-5 proves one accepted retry; it does not raise Attempt limits or introduce another requeue path.
 
 ## Global Constraints
 
-- No `rollover_daemon`, retry table, provider failover service, account scheduler, new Job role or Fable session table.
-- Rate-limit detection cannot itself create Attempt 2. It may only produce typed adapter/reconcile evidence. Executive terminalization -> CooCycle requeue -> Executive claim remain distinct steps.
-- `QUOTA_OR_RATE_LIMIT` is accepted for automatic same-Job recovery only when the exact source Attempt has **no effect-unknown provider operation, no accepted candidate/result/seal that closes the retry path, and no live/unknown provider writer**.
-- Any `OPERATOR_OPERATION_EFFECT_UNKNOWN` relevant to the current provider start/turn/stop path blocks `rate_limit_attempt`/requeue until reconciled under existing OHF law.
-- Old realm remains `RATE_LIMITED`/unavailable through its current Executive/Provider Control owners; claim never “excludes Claude5 by name.” It selects from the available eligible set.
-- Attempt 2 must have a different accepted placement/account label from Attempt 1 for the cross-realm proof. A same-realm claim is not accepted as OCR-5 even if the provider session changes.
-- Cross-realm always starts a fresh provider session. `SupportsSessionResume` is forbidden for Attempt 2 because account/auth-home changed.
-- Continuation ACK is deterministic runtime evidence: the exact current provider session accepts the first TX-5 turn whose input binds the exact `capsule_id`; it is not model-authored authority and is not automatically Wake `TARGET_ACKNOWLEDGED`.
-- The same Job objective, immutable lineage, authority/effective grant constraints, workspace/base policy and role result schema remain controlling. Rollover cannot widen or “refresh” them.
-- Slack/Steward projection is OCR-6 and does not block the core Executive rollover proof.
+- No rollover daemon, retry table, provider failover service, account scheduler, new Job role, workspace journal, mutation log or Fable session table.
+- Automatic quota rollover is **read-only/non-modifying only**. A write-capable or otherwise mutation-capable Attempt never becomes cross-realm retryable merely because no diff/final result is observed.
+- A source Attempt is `NON_MODIFYING_ATTEMPT` only when canonical evidence re-derives all of:
+  - effective authorities contain no `WRITE_BRANCH` or other modifying grant;
+  - allowed write paths are empty;
+  - the accepted `ExecutionCapabilityProfile.write_capable` is exactly `False`;
+  - sandbox policy is the accepted read-only policy;
+  - no effective profile capability grants browser/computer/write-capable MCP/native-helper behavior outside that reviewed read-only profile;
+  - observed OHF attestation/principal remains bound to that exact profile/grant.
+- `QUOTA_OR_RATE_LIMIT` + dead writer + no candidate/result is not enough. The non-modifying predicate is mandatory.
+- Any unreconciled `OPERATOR_OPERATION_EFFECT_UNKNOWN`, unknown process liveness, unknown/held provider writer, current writer/epoch, conflicting candidate/result/seal or exhausted retry lineage blocks terminalization/requeue.
+- For a write-capable quota failure: stop/reconcile exact current generation/turn, preserve the Attempt/workspace/evidence, return `RECONCILIATION_REQUIRED`, and perform **zero cross-realm claim** under OCR-5.
+- Old realm availability/cooling comes from existing Executive/Provider Control owners. OCR-5 never excludes/selects a realm by Slack/account nickname or ordinal.
+- Both source and target realms must carry accepted OCR-2C canonical capacity identities; auth-ready but capacity-unbound realms are ineligible for the automatic canary.
+- Attempt 2 must have a different accepted placement/account realm from Attempt 1. Same-realm replacement is not OCR-5.
+- Cross-realm always starts a fresh provider-native session. Same-session resume/fork is forbidden across account/auth-home change.
+- One target Attempt gets one immutable PREPARED continuation capsule. No capsule is finalized before P2 provider session binding, and no second capsule is rebuilt after PREPARE.
+- Continuation ACK is mechanical exact-runtime evidence only; it is not model-authored authority, Job completion or automatic Wake ACK.
+- Same Job/root/role/authority/plan lineage/result law remains controlling. Rollover cannot widen any of them.
+- Slack/Steward projection belongs to OCR-6 and does not cause the Executive rollover.
 
 ---
 
-### Task 1: Add fail-closed operator provider-failure terminalization
+### Task 1: Implement the closed non-modifying rollover safety classifier
 
 **Files:**
+- Create: `control_plane/operator_rollover_safety.py`
 - Modify: `control_plane/executive_operator_supervisor.py`
-- Modify only if a generic helper is needed: `control_plane/operator_harness_orchestrator.py`
+- Create: `tests/test_operator_rollover_safety.py`
 - Create: `tests/test_executive_operator_provider_failures.py`
 
 **Interfaces:**
-- New supervisor-private decision path only; no new public lifecycle store.
-- Consumes an exact `ReconcileObservation` + current Runtime/Event evidence.
-- May call existing `runtime.attempts.rate_limit_attempt(...)` only after shutdown/epoch abandonment.
-
-- [ ] **Step 1: Write RED-first rate-limit terminalization test**
-
-Fixture:
-
-```text
-strict v2 root
-plan Job attempt_limit=2
-Attempt P1 claimed on worker claude-a / account_label claude-pro-01
-OHF profile/session/turn start committed
-provider returns QUOTA_OR_RATE_LIMIT before candidate/result
-helper/process generation gracefully stopped
-PROVEN_DEAD + ProviderWriterState.RELEASED
-no EFFECT_UNKNOWN receipt
-no candidate/result seal
-```
-
-Expected:
 
 ```python
-job = supervisor._terminalize_provider_failure(...)
-assert job.status is JobStatus.RATE_LIMITED
-assert runtime.attempts.get_attempt(p1).status is AttemptStatus.RATE_LIMITED
-assert quota("claude-a").status is WorkerStatus.RATE_LIMITED
+@dataclass(frozen=True)
+class OperatorRolloverSafety:
+    eligible: bool
+    classification: str  # NON_MODIFYING_ATTEMPT | RECONCILIATION_REQUIRED | REFUSED
+    reason_codes: tuple[str, ...]
+
+
+def classify_quota_rollover_safety(
+    *,
+    effective_authorities: tuple[str, ...],
+    allowed_write_paths: tuple[str, ...],
+    capability_profile: ExecutionCapabilityProfile,
+    requested_profile: RequestedExecutionProfile,
+    reconcile: ReconcileObservation,
+    unreconciled_effect_unknown_count: int,
+    candidate_or_result_exists: bool,
+    retry_lineage_available: bool,
+) -> OperatorRolloverSafety:
+    ...
 ```
 
-- [ ] **Step 2: Write adverse RED tests**
+- [ ] **Step 1: Write RED-first positive test**
 
-Refuse terminalization when any of these is true:
+Construct the current accepted read-only planner-equivalent profile/grant:
 
-- current generation liveness is `UNKNOWN`;
-- provider writer is `UNKNOWN`/`HELD`;
-- current epoch still exists/writer held;
-- any provider operation has unreconciled `EFFECT_UNKNOWN`;
-- candidate/result/seal already exists and current Phase 1F-C recovery law disallows retry;
-- failure class is generic transport/model failure rather than `QUOTA_OR_RATE_LIMIT`;
-- Attempt is no longer current;
-- source Job has exhausted attempt limit.
+```text
+authorities = READ only
+allowed_write_paths = []
+ExecutionCapabilityProfile.write_capable = False
+sandbox_policy = read-only
+requested profile/observed attestation match exact reviewed profile
+process liveness = PROVEN_DEAD
+provider writer = RELEASED
+unreconciled effect-unknown count = 0
+candidate/result/seal absent
+retry lineage available
+failure class = QUOTA_OR_RATE_LIMIT
+```
 
-No refusal may call requeue/claim/start another provider.
+Require `eligible=True`, `classification=NON_MODIFYING_ATTEMPT`.
+
+- [ ] **Step 2: Write mandatory adverse tests**
+
+Each independently refuses automatic rollover:
+
+```text
+WRITE_BRANCH or another modifying authority present
+non-empty allowed_write_paths
+capability_profile.write_capable == True
+sandbox != read-only
+profile/attestation mismatch or unknown capability state
+liveness UNKNOWN/ALIVE
+writer HELD/UNKNOWN
+unreconciled EFFECT_UNKNOWN
+candidate/result/seal closes retry path
+attempt limit/retry lineage exhausted
+failure class not QUOTA_OR_RATE_LIMIT
+```
+
+Also prove an empty observed Git diff does **not** turn a write-capable grant into read-only eligibility.
 
 - [ ] **Step 3: Run RED**
 
 ```bash
-pytest -q tests/test_executive_operator_provider_failures.py
+pytest -q tests/test_operator_rollover_safety.py tests/test_executive_operator_provider_failures.py
 ```
 
-- [ ] **Step 4: Implement deterministic safety predicate**
+- [ ] **Step 4: Implement the pure predicate**
 
-Prefer a pure helper such as:
+Use existing `ExecutionCapabilityProfile.write_capable`, sandbox/profile identity and typed OHF observations. Do not accept model/provider booleans such as `safe_to_retry=True`.
 
-```python
-@dataclass(frozen=True)
-class ProviderFailureTerminalization:
-    allowed: bool
-    target_status: AttemptStatus | None
-    reason_codes: tuple[str, ...]
+- [ ] **Step 5: Add supervisor-private terminalization**
 
-
-def classify_operator_provider_failure(
-    *,
-    failure_class: AdapterFailureClass,
-    reconcile: ReconcileObservation,
-    effect_unknown_count: int,
-    candidate_or_result_exists: bool,
-    attempt_limit_remaining: bool,
-) -> ProviderFailureTerminalization:
-    ...
-```
-
-The Runtime/Event query that feeds it is supervisor-owned and rechecks the exact current Attempt/generation. No model/adapter boolean may assert `effect_unknown_count=0` or retry eligibility.
-
-- [ ] **Step 5: Terminalize only after existing shutdown law**
-
-Required sequence:
+Required sequence for the positive subset only:
 
 ```text
-provider failure observed
--> graceful stop / exact reconcile
--> generation PROVEN_DEAD + writer RELEASED
--> epoch ABANDONED under existing Executive transaction
--> safety predicate re-read
--> rate_limit_attempt(...)
+provider quota failure observed
+-> exact generation/turn stop + reconciliation
+-> process PROVEN_DEAD + writer RELEASED
+-> no current writer/epoch after accepted shutdown/abandon law
+-> re-read effective grant/profile/Event facts
+-> classify_quota_rollover_safety(...)
+-> only NON_MODIFYING_ATTEMPT may call runtime.attempts.rate_limit_attempt(...)
 ```
 
-Use a bounded deterministic `JobPayload` checkpoint such as machine status + next action; do not pretend provider output exists.
+For write-capable/mutation-capable or ambiguous states return a bounded `RECONCILIATION_REQUIRED` result and make no `rate_limit_attempt`, requeue or claim call.
 
-- [ ] **Step 6: Run focused + Phase 1F-C regressions**
+- [ ] **Step 6: Run focused + Phase 1F-C regression**
 
 ```bash
 pytest -q \
+  tests/test_operator_rollover_safety.py \
   tests/test_executive_operator_provider_failures.py \
   tests/test_executive_runtime.py \
   tests/test_operator_harness_orchestrator.py \
@@ -155,344 +170,310 @@ pytest -q \
 - [ ] **Step 7: Commit**
 
 ```bash
-git add control_plane/executive_operator_supervisor.py control_plane/operator_harness_orchestrator.py tests/test_executive_operator_provider_failures.py
-git commit -m "feat(exec): terminalize reconciled operator quota failures"
+git add control_plane/operator_rollover_safety.py control_plane/executive_operator_supervisor.py tests/test_operator_rollover_safety.py tests/test_executive_operator_provider_failures.py
+git commit -m "feat(exec): gate quota rollover to non-modifying Attempts"
 ```
 
 ---
 
-### Task 2: Prove existing CooCycle requeue preserves the same orchestration Job
+### Task 2: Pin same-Job Phase 1F-C requeue after an accepted read-only quota terminal
 
 **Files:**
-- Modify only if missing regression coverage: `tests/test_executive_coo_cycle.py`
-- No production code change unless a concrete bug appears.
+- Modify: `tests/test_executive_coo_cycle.py`
+- No production source change unless the regression exposes a concrete current-law defect.
 
 **Interfaces:**
-- Existing `CooCycle.run_once(root_job_id)`.
+- Existing `CooCycle.run_once(root_job_id)` and existing Runtime `requeue_job()` law.
 
-- [ ] **Step 1: Add a discriminating regression**
+- [ ] **Step 1: Add a discriminating requeue regression**
 
-Given the Task-1 state:
+Given a current read-only `plan` Job whose P1 became `RATE_LIMITED` through Task 1:
 
 ```python
-first = CooCycle(runtime).run_once(root.job_id)
-assert first.action == "REQUEUED"
-assert first.selected_job_id == plan_job.job_id
+outcome = CooCycle(runtime).run_once(root.job_id)
+assert outcome.action == "REQUEUED"
+assert outcome.selected_job_id == plan_job.job_id
 requeued = runtime.jobs.get_job(plan_job.job_id)
 assert requeued.status is JobStatus.QUEUED
 assert requeued.attempt_count == 1
 assert requeued.current_attempt_id is None
 ```
 
-Assert exactly one `JOB_REQUEUED` event names P1 as `previous_attempt_id`. No new Job is created and root/plan lineage/digests remain byte-equal.
+Require exactly one `JOB_REQUEUED` event naming P1 as `previous_attempt_id`. No new Job is created; root/plan lineage, authority and plan identity stay unchanged.
 
-- [ ] **Step 2: Prove requeue refuses effect ambiguity**
+- [ ] **Step 2: Pin no requeue when Task 1 classified reconciliation-required**
 
-This should normally be impossible because Task 1 did not terminalize while ambiguity exists. Add a hostile fixture attempting to fabricate a RATE_LIMITED Job alongside unresolved OHF effect evidence and ensure a reviewed upstream predicate or CooCycle lineage validation refuses. If current CooCycle cannot see an impossible corrupted state, keep the corruption test at the Task-1 gate rather than duplicating policy here.
+A write-capable quota fixture must remain on its current/blocked Attempt state and produce zero `JOB_REQUEUED` event from OCR-5.
 
-- [ ] **Step 3: Run tests**
+- [ ] **Step 3: Run regression**
 
 ```bash
-pytest -q tests/test_executive_coo_cycle.py tests/test_executive_operator_provider_failures.py
+pytest -q tests/test_executive_coo_cycle.py tests/test_operator_rollover_safety.py tests/test_executive_operator_provider_failures.py
 ```
 
-- [ ] **Step 4: Commit only if test/source changed**
+- [ ] **Step 4: Commit the regression**
 
 ```bash
 git add tests/test_executive_coo_cycle.py
-git commit -m "test(exec): pin same-Job quota requeue for operator continuity"
+git commit -m "test(exec): pin read-only quota requeue continuity"
 ```
 
 ---
 
-### Task 3: Claim a different realm through CF2-I, not rollover-specific selection
+### Task 3: Prove the normal accepted claim path selects a different capacity-identified Claude realm
 
 **Files:**
-- Modify current CF2-I integration tests only after CF2-I is accepted/current; likely `tests/test_executive_capacity_claim.py` or its landed equivalent.
-- Modify no provider-selection algorithm specifically for OCR-5 unless a proven CF2-I defect exists.
+- Create: `tests/test_operator_cross_realm_capacity_claim.py`
+- Production Capacity Fabric/claim source remains owned by accepted CF2-I and is **not modified by OCR-5** unless a separately reviewed defect is found.
 
 **Interfaces:**
-- Existing claim path after CooCycle requeue.
-- Consumes current `mastermind.provider_capacity.v1` evidence through accepted CF2-I seam.
+- Existing command-bound Phase 1F-C dispatch/claim path after Task-2 requeue.
+- Consumes two Workers whose placement/capacity evidence is already valid under accepted CF2-I + OCR-2C.
 
-- [ ] **Step 1: Fixture two equivalent Claude realms**
+- [ ] **Step 1: Build the two-realm fixture**
 
 ```text
-claude-pro-01 -> Worker A -> RATE_LIMITED / not AVAILABLE
-claude-pro-02 -> Worker B -> AVAILABLE, same RF1 quality/execution tier, same required profile capability
+realm A / Worker A / accepted capacity identity A -> source P1 RATE_LIMITED/unavailable
+realm B / Worker B / accepted capacity identity B -> AVAILABLE
+same RF1 lawful quality/execution tier
+same required non-modifying execution profile/authority class
 ```
 
-- [ ] **Step 2: Dispatch the requeued plan Job through the normal command-bound CooCycle dispatcher**
+- [ ] **Step 2: Dispatch through the normal COO cycle/claim path**
 
-The next `run_once(root)` should eventually use the existing dispatcher/claim operation and return Attempt P2 on Worker B. Do not pass `worker_id=B` from the rollover code in production; the test may inspect the deterministic result but selection belongs to CF2-I.
+Do not pass `worker_id=B` from rollover code. Run the same current command-bound dispatcher that any queued orchestration Job uses.
 
-- [ ] **Step 3: Assert placement evidence**
+- [ ] **Step 3: Assert new Attempt identity and placement**
+
+Require:
 
 ```text
 P2.job_id == P1.job_id
 P2.attempt_number == 2
 P2.worker_id != P1.worker_id
-P2 placement/account_label == claude-pro-02
-P1 placement/account_label == claude-pro-01
-same Job/root/role/authority/plan lineage
+P2 placement/account realm != P1 placement/account realm
+P2 capacity identity == accepted realm B identity
+same root/job/role/authority/plan lineage
 ```
 
-`JOB_CLAIMED` must carry the accepted CF2-I capacity evidence; no `ROLLOVER_SELECTED` event/table is introduced.
+No `ROLLOVER_SELECTED` event/table is introduced; existing `JOB_CLAIMED`/accepted Capacity Fabric evidence remains the claim receipt.
 
-- [ ] **Step 4: Negative candidates**
+- [ ] **Step 4: Add negative capacity cases**
 
-Prove no claim when:
+No claim when realm B capacity is stale/unknown, OCR-2C capacity identity is absent/invalidated, wrong RF1 tier/profile, auth/principal incompatible, only realm A remains rate-limited, or Attempt limit is exhausted.
 
-- realm B capacity is stale/unknown under CF2-I law;
-- realm B is wrong RF1 suitability tier;
-- realm B profile/auth principal is incompatible;
-- only realm A exists and remains RATE_LIMITED;
-- attempt limit is exhausted.
-
-- [ ] **Step 5: Run current CF2/claim/Phase1F suites**
-
-Use exact file names landed by CF2-I at implementation time.
-
-- [ ] **Step 6: Commit only bounded integration changes**
+- [ ] **Step 5: Run integration + current claim regressions**
 
 ```bash
-git commit -m "test(exec): prove capacity claim moves a requeued Job to another realm"
+pytest -q tests/test_operator_cross_realm_capacity_claim.py tests/test_executive_runtime.py tests/test_executive_coo_cycle.py
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tests/test_operator_cross_realm_capacity_claim.py
+git commit -m "test(exec): prove normal claim selects replacement Claude realm"
 ```
 
 ---
 
-### Task 4: Bind P1 -> P2 through OCR-3 continuation without transcript transplantation
+### Task 4: Bind P1 -> P2 with one immutable OCR-3 continuation after P2 session attestation
 
 **Files:**
 - Modify: `control_plane/executive_operator_supervisor.py`
-- Modify: `control_plane/operator_continuation_sources.py`
-- Modify: `tests/test_operator_continuation_integration.py`
 - Create: `tests/test_operator_cross_realm_continuation.py`
+- Modify: `tests/test_operator_continuation_integration.py`
 
 **Interfaces:**
-- Existing OCR-3 `build_current_continuation(...)`, RuntimeBinding projection and Event-plane preparation/ACK.
+- Existing OCR-3 `build_current_continuation_draft(...)`, `prepare_operator_continuation(...)`, RuntimeBinding projection and ACK Event path.
 
-- [ ] **Step 1: Write RED-first cross-realm capsule test**
+- [ ] **Step 1: Write RED-first ordering test**
 
-After P2 claim but before P2 provider start, build a capsule with:
+Required order is exactly:
 
 ```text
-source_attempt_id = P1
-target_attempt_id = P2
-same root/plan Job
-same operation/commission context
-prior_attempt_receipt.status = RATE_LIMITED
-P1 checkpoint = deterministic pre-candidate provider failure state
-P2 placement = claude-pro-02
+P2 claim on realm B
+-> P2 TX-2/TX-3 provider session bound
+-> P2 TX-4 attestation/admission ALLOW
+-> build_current_continuation_draft(P1, P2, current refs)
+-> Executive PREPARE finalizes/mints the one capsule for P2
+-> first P2 TX-5 input carries exact prepared capsule bytes + ordinary role prompt
+-> provider turn acceptance/TX-5 APPLIED
+-> exact continuation ACK event for P2 session/capsule
 ```
 
-Assert no provider transcript/session id from P1 appears in the semantic continuation body except the exact source Attempt receipt fields explicitly allowed by the contract.
+No finalized capsule/capsule id exists before PREPARE.
 
-- [ ] **Step 2: Render the exact continuation preamble**
+- [ ] **Step 2: Add deterministic continuation renderer**
 
-Add a deterministic renderer, for example:
+Pure renderer:
 
 ```text
 MMX/OPERATOR_CONTINUATION_V1
-capsule_id=<sha256>
+capsule_id=<prepared sha256>
 target_attempt_id=<P2>
-<canonical minified capsule JSON>
+<canonical minified prepared capsule JSON>
 
-<existing role prompt follows>
+<ordinary role input follows>
 ```
 
-The renderer is pure. The model cannot omit or modify the capsule prefix.
+Caller/model cannot omit/change prefix fields.
 
-- [ ] **Step 3: Prepare only after P2 provider session is bound/attested**
+- [ ] **Step 3: Prove no transcript transplantation**
 
-Sequence:
+Continuation may carry only contract-approved source Attempt/checkpoint/reference material. It must not copy P1 native provider transcript, P1 native session as target identity, credential/account PII or hidden provider memory into P2.
 
-```text
-P2 TX-2/TX-3/TX-4 ALLOW
--> build/revalidate current capsule against current P2
--> OPERATOR_CONTINUATION_PREPARED event binds capsule + P2 provider_session_id
--> first P2 TX-5 prompt = exact continuation preamble + ordinary role prompt
-```
+- [ ] **Step 4: Prove immutable PREPARE replay**
 
-If source GitHub/Agent OS/source-law revisions changed materially between build and TX-5, rebuild/revalidate before provider dispatch; do not send a stale capsule and update its timestamp afterward.
+Same P2 + same semantic draft/session -> same prepared bytes/id and one PREPARED Event. Source/ref movement after PREPARE must conflict/trigger current reconciliation/cancel law; it must not rewrite P2 capsule. Provider-dispatch uncertainty reuses exact prepared bytes/id.
 
-- [ ] **Step 4: ACK from exact provider turn acceptance**
+- [ ] **Step 5: Add exact ACK tests**
 
-After the provider returns a valid `TurnStartObservation` and existing TX-5 APPLIED commits for the first P2 turn, record `OPERATOR_CONTINUATION_ACKNOWLEDGED` mechanically with:
+Wrong capsule, P2 provider session change, wrong Attempt, first work turn without a PREPARED continuation, or TX-5 effect unknown must refuse ACK/continuation advancement. ACK is not Job/Wake completion.
 
-```text
-target_attempt_id = P2
-capsule_id = prepared capsule
-provider_session_id = exact P2 session
-```
-
-This means the exact bound provider session accepted the turn containing the exact continuation bytes. It is not model-authored executive authority, semantic agreement, Job completion or Wake ACK.
-
-- [ ] **Step 5: Adverse tests**
-
-Refuse:
-
-- P2 provider session changed after preparation;
-- capsule rebuilt with changed semantics under same id;
-- first turn started without prepared capsule for a cross-realm Attempt;
-- TX-5 response effect is unknown;
-- wrong source Attempt/job/root;
-- source P1 has any unresolved effect unknown;
-- P2 is same account/placement in the cross-realm canary.
-
-- [ ] **Step 6: Run tests and commit**
+- [ ] **Step 6: Run/commit**
 
 ```bash
-pytest -q tests/test_operator_continuation_integration.py tests/test_operator_cross_realm_continuation.py
+pytest -q tests/test_operator_cross_realm_continuation.py tests/test_operator_continuation_integration.py tests/test_executive_operator_supervisor.py
 
-git add control_plane/executive_operator_supervisor.py control_plane/operator_continuation_sources.py tests/test_operator_continuation_integration.py tests/test_operator_cross_realm_continuation.py
-git commit -m "feat(exec): bind cross-realm Attempt continuation"
+git add control_plane/executive_operator_supervisor.py tests/test_operator_cross_realm_continuation.py tests/test_operator_continuation_integration.py
+git commit -m "feat(exec): continue read-only Fable Job on fresh realm"
 ```
 
 ---
 
-### Task 5: Complete the existing Fable plan role on Attempt 2
+### Task 5: End-to-end hermetic positive + adverse ruler
 
 **Files:**
-- Modify/add integration tests only unless a real provider-neutral supervisor composition gap remains after OCR-4.
-- Likely: `tests/test_executive_operator_cross_realm_plan.py`.
+- Create: `tests/test_operator_cross_realm_rollover.py`
 
-- [ ] **Step 1: Build end-to-end hermetic sequence**
+- [ ] **Step 1: Positive sequence**
+
+Prove in one fixture:
 
 ```text
-root R + plan Job P
-P1 claim realm A
-P1 OHF provider quota failure before candidate
-P1 exact shutdown + RATE_LIMITED
-CooCycle REQUEUED P
-CooCycle dispatch / CF2-I claim P2 realm B
-P2 fresh Claude provider session S2
-P1 -> P2 continuation PREPARED
-P2 first TX-5 APPLIED -> continuation ACK
-P2 valid plan candidate/result seal
-P2 shutdown/epoch abandonment
+strict-v2 root R + read-only plan Job P
+P1 claim realm A (capacity identity A)
+P1 OHF starts/attests and quota-fails before candidate
+P1 exact shutdown/reconcile
+NON_MODIFYING_ATTEMPT classifier PASS
+P1 -> RATE_LIMITED
+CooCycle -> REQUEUED same Job P
+normal claim -> P2 realm B (capacity identity B)
+P2 fresh provider session S2 + attestation ALLOW
+current continuation draft -> one PREPARED capsule
+first P2 work turn carries exact capsule
+TX-5 APPLIED -> continuation ACK
+P2 valid read-only plan result/seal
+P2 clean shutdown
 P2 COMPLETED
-CooCycle admits the completed plan
+CooCycle accepts/adopts normal plan result
 ```
 
 - [ ] **Step 2: Assert Fable logical continuity**
 
-Stable across the sequence:
+Stable:
 
 ```text
-root_job_id R
+root_job_id
 target seat coo
-logical session_alias used by current root/dialogue binding
-plan Job P
-commission/operation context
-Phase 1F-C root/plan authority and result schema
+logical session_alias/commission context
+same plan Job id
+Phase 1F-C lineage/effective authority ceiling
 ```
 
 Changed:
 
 ```text
 Attempt P1 -> P2
-Worker A -> B
-account label realm A -> B
+Worker/realm A -> B
 provider session S1 -> S2
-RuntimeBinding -> new binding life
+RuntimeBinding identity/generation as dictated by OCR-3
 ```
 
-No `fable` Job/role/table exists.
+- [ ] **Step 3: Mandatory adverse ruler**
 
-- [ ] **Step 3: Prove the negative integration canary**
-
-Inject an unknown modifying/provider effect before P1 terminalization. Assert:
+Repeat the failure point with each condition and require **zero realm-B claim / zero P2 session**:
 
 ```text
-P1 remains nonterminal/reconciliation-required
-zero JOB_RATE_LIMITED
-zero JOB_REQUEUED
-zero P2
-zero provider session on realm B
-zero continuation PREPARED
+WRITE_BRANCH grant
+non-empty allowed write paths
+write_capable execution profile
+unreconciled EFFECT_UNKNOWN
+process liveness UNKNOWN
+provider writer HELD/UNKNOWN
+source capacity identity invalidated
 ```
 
-This test is release-blocking.
+The externally visible state is `RECONCILIATION_REQUIRED`/blocked, not `REBINDING`.
 
-- [ ] **Step 4: Run full relevant suites**
+- [ ] **Step 4: Prove no duplicate plane**
+
+Source/schema census asserts no rollover queue/table/daemon/provider scheduler/workspace mutation log/session store was added.
+
+- [ ] **Step 5: Run focused/full relevant suite and commit**
 
 ```bash
 pytest -q \
+  tests/test_operator_rollover_safety.py \
   tests/test_executive_operator_provider_failures.py \
-  tests/test_executive_coo_cycle.py \
+  tests/test_operator_cross_realm_capacity_claim.py \
   tests/test_operator_cross_realm_continuation.py \
-  tests/test_executive_operator_cross_realm_plan.py
-```
+  tests/test_operator_cross_realm_rollover.py \
+  tests/test_executive_coo_cycle.py \
+  tests/test_executive_runtime.py \
+  tests/test_executive_os_phase1fc.py
 
-Then run current hosted CI/CodeQL and existing Phase 1F-C/OHF/Capacity mutation suites.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/test_executive_operator_cross_realm_plan.py
-git commit -m "test(exec): prove Fable plan survives Claude realm rollover"
+git add tests/test_operator_cross_realm_rollover.py
+git commit -m "test(exec): prove safe cross-realm Fable rollover"
 ```
 
 ---
 
-### Task 6: Real two-subscription rollover canary
+### Task 6: Real two-subscription production canary
+
+**Authority:** separately released production proof only after Tasks 1-5, all dependencies and current host/provider gates are accepted.
 
 **Files:**
-- No source changes unless a concrete same-carrier defect is found.
-- Sanitized evidence only.
+- No source modification during canary unless a reproducible defect is found; any defect returns under `REVIEW_RETURN` before retry.
+- Sanitized proof artifact only under the current evidence convention.
 
-- [ ] **Step 1: Re-pin exact accepted predecessors**
+- [ ] **Step 1: Select the harmless read-only Fable coordination/plan canary**
 
-Require protected Skillpack, current Executive release, two OCR-1 distinct native realms, current CF2-I capacity evidence path, OCR-3/OCR-4 exact accepted heads and current Phase 1F-C policy.
+Use one real orchestration Job whose effective grant/profile independently passes the exact `NON_MODIFYING_ATTEMPT` classifier. Do not use a write-capable implementation Job merely to demonstrate rollover.
 
-- [ ] **Step 2: Create one harmless real strict-v2 root + plan Job**
+- [ ] **Step 2: Start on capacity-identified realm A**
 
-Use a test/acceptance objective that exercises real Claude planning without a production repo mutation. Both candidate realms must be configured as equivalent lawful Claude operator capacity.
+Require current OCR-1 worker-context auth, OCR-2C capacity identity, CF2 claim receipt, exact provider/OHF session/attestation and current RuntimeBinding projection.
 
-- [ ] **Step 3: Start Attempt 1 on realm A and induce a controlled safe rate-limit/drain boundary**
+- [ ] **Step 3: Trigger/observe a truthful quota boundary without fabricating provider state**
 
-Preferred proof is a provider-reported genuine quota/rate-limit when operationally feasible. A separately reviewed canary-only injected failure may prove deterministic state transitions but **cannot** substitute for final provider-real quota proof.
+Use a naturally exhausted/limited realm or a provider-supported bounded canary condition. Do not corrupt credentials, mutate quota ledgers or manufacture a 429. Preserve exact provider outcome evidence.
 
-The source Attempt must stop before candidate/result and close its provider writer exactly.
+- [ ] **Step 4: Execute the canonical rollover chain**
 
-- [ ] **Step 4: Let normal CooCycle/Capacity Fabric perform the replacement**
-
-Do not manually choose realm B after the failure. Observe:
+Require:
 
 ```text
+exact shutdown/reconcile
+NON_MODIFYING_ATTEMPT PASS
 P1 RATE_LIMITED
-P REQUEUED
-P2 JOB_CLAIMED with realm B capacity evidence
+same Job requeued
+normal Capacity Fabric claim picks realm B
+fresh P2 provider session
+one immutable prepared continuation
+first-turn ACK
+continued real result
 ```
 
-- [ ] **Step 5: Prove fresh session + capsule + successful plan**
+- [ ] **Step 5: Run one adverse live refusal or production-faithful shadow**
 
-Require S2 != S1, continuation PREPARED/ACK exact to P2/S2, valid plan result, and normal Phase 1F-C completion/admission.
+A write-capable/effect-uncertain equivalent must stop at `RECONCILIATION_REQUIRED` with zero cross-realm dispatch. Do not induce a real ambiguous modification merely for the test if a production-faithful shadow can prove the refusal path.
 
-- [ ] **Step 6: Run adverse effect-unknown canary separately**
+- [ ] **Step 6: Return exact evidence to Sol**
 
-Use a safe canary operation where the transport reply is intentionally lost after dispatch. The system must refuse cross-realm movement until exact same-Attempt reconciliation establishes the outcome. Do not generate a real duplicate provider turn merely to prove the negative.
-
-- [ ] **Step 7: Return to Sol**
-
-Return:
-
-```text
-exact release/head
-root Job / plan Job
-P1/P2 Attempt ids
-realm A/B opaque labels
-capacity snapshot/claim evidence digests
-provider session S1/S2 opaque ids
-P1 terminal/requeue receipts
-continuation capsule/prepared/ACK digests
-P2 result/terminal/admission receipts
-negative EFFECT_UNKNOWN zero-failover receipt
-hosted CI/security/adversarial review
-zero duplicate lifecycle/queue/session DB proof
-```
+Return source/target Job/Attempt/Worker/realm/capacity identities, provider outcome class, safety-classification receipt, requeue/claim events, session/binding identities, continuation PREPARE/ACK receipts, result/closeout, adverse refusal, zero-duplicate-plane proof and exact current heads. No credential/account PII.
 
 ## Stop Condition
 
-OCR-5 stops when one real Phase 1F-C Fable planning responsibility successfully moves from one native Claude realm to another through **two Executive Attempts on the same Job**, using the normal Capacity Fabric claim path and deterministic continuation, and an adverse effect-unknown canary proves zero cross-realm failover. It does not yet claim same Slack thread/product UX, Steward automation, cross-host movement or the full five-account pool.
+OCR-5 reaches `PROVEN_LIVE` only when a genuine read-only two-subscription canary preserves one Fable/COO logical responsibility through two Executive Attempts and a fresh provider session, with canonical capacity identity and one immutable continuation capsule, and the adverse ruler proves write-capable/effect-uncertain interruptions do **not** fail over. Slack/Steward presentation is still OCR-6; multi-host is OCR-7.
