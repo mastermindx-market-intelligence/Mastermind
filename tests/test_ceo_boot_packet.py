@@ -250,6 +250,33 @@ def test_since_is_passed_through_to_the_brief(tmp_path):
     assert packet["brief"]["generated_at"] == "2026-08-13T00:00:00Z"
 
 
+def test_packet_uses_injected_bounded_runner_for_real_agent_os_brief(
+    tmp_path, monkeypatch, frozen_git
+):
+    from control_plane.chairman_control_room_remote import default_runner
+
+    macro = make_macro_root(tmp_path)
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail(
+            "injected runner must own the Agent OS subprocess"
+        ),
+    )
+
+    packet = build_packet(
+        repo_root=tmp_path,
+        macro_root_flag=os.fspath(macro),
+        environ={},
+        now="2026-08-13T00:00:00Z",
+        runner=default_runner,
+        max_output_bytes=64 * 1024,
+    )
+
+    assert packet["brief"]["schema"] == BRIEF_SCHEMA
+    assert packet["brief"]["generated_at"] == "2026-08-13T00:00:00Z"
+
+
 # ---------------------------------------------------------------------------
 # 2. degraded when the Macro checkout is missing — the fail-open proof
 # ---------------------------------------------------------------------------

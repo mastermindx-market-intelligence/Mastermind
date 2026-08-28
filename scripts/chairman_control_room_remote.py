@@ -269,6 +269,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         stale_after_seconds=args.stale_after_seconds,
         timeout_seconds=args.timeout_seconds,
         max_output_bytes=args.max_output_bytes,
+        release_commit=identity.commit,
     )
     cache = remote.RemoteStateCache(collector, identity)
     stop = threading.Event()

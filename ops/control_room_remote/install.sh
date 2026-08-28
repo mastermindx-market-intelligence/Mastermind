@@ -13,6 +13,42 @@ UNIT_DESTINATION=/etc/systemd/system/mastermind-control-room-remote.service
 SERVICE_USER=mastermind-control-room
 CADDY_GROUP=caddy
 SOURCE_ARTIFACT_ROOT=/var/lib/mastermind-control-room-sources
+RELEASE_TRACKED_PATHS=(
+  app/static/chairman_control/control_room.css
+  app/static/chairman_control/control_room.js
+  app/static/chairman_control/remote.html
+  common/__init__.py
+  common/redaction.py
+  config/strategic_state.yml
+  control_plane/__init__.py
+  control_plane/ceo_boot_packet.py
+  control_plane/ceo_intent.py
+  control_plane/chairman_control_room.py
+  control_plane/chairman_control_room_remote.py
+  control_plane/codex_worker.py
+  control_plane/executive_agent_capabilities.py
+  control_plane/executive_ambient_process.py
+  control_plane/executive_authority.py
+  control_plane/executive_coo_policy.py
+  control_plane/executive_inbox.py
+  control_plane/executive_orchestration_principal.py
+  control_plane/executive_orchestration_result.py
+  control_plane/executive_runtime.py
+  control_plane/executive_supervisor.py
+  control_plane/executive_worker_broker.py
+  control_plane/executive_workspace.py
+  control_plane/flags.py
+  control_plane/operator_harness_contract.py
+  control_plane/operator_harness_wire.py
+  control_plane/strategic_state.py
+  control_plane/surface_bindings.py
+  control_plane/worker_adapter.py
+  ops/control_room_remote/mastermind-control-room-remote.service
+  scripts/__init__.py
+  scripts/chairman_control_room_remote.py
+  scripts/ohf/__init__.py
+  scripts/ohf/redaction.py
+)
 
 die() {
   printf '%s\n' "$1" >&2
@@ -47,7 +83,8 @@ SOURCE_TREE=$(cd "$SOURCE_REPO" && git rev-parse 'HEAD^{tree}')
 [[ $SOURCE_HEAD == "$ACCEPTED_MASTERMIND_COMMIT" ]] || die "source_commit_mismatch"
 [[ $SOURCE_TREE == "$ACCEPTED_MASTERMIND_TREE" ]] || die "source_tree_mismatch"
 
-python3 -I -B - "$SOURCE_REPO" "$ACCEPTED_MASTERMIND_COMMIT" <<'PY' || die "source_member_unsafe"
+python3 -I -B - "$SOURCE_REPO" "$ACCEPTED_MASTERMIND_COMMIT" \
+  "${RELEASE_TRACKED_PATHS[@]}" <<'PY' || die "source_member_unsafe"
 import os
 import stat
 import subprocess
@@ -56,20 +93,19 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 commit = sys.argv[2]
+requested = sys.argv[3:]
 root_info = root.lstat()
 listed = subprocess.run(
     [
-        "git", "-C", os.fspath(root), "ls-files", "-z", "--",
-        "app/static/chairman_control", "common/__init__.py", "common/redaction.py",
-        "control_plane",
-        "ops/control_room_remote/mastermind-control-room-remote.service",
-        "scripts/__init__.py", "scripts/chairman_control_room_remote.py",
-        "scripts/ohf/__init__.py", "scripts/ohf/redaction.py",
+        "git", "-C", os.fspath(root), "ls-files", "-z", "--", *requested,
     ],
     check=True,
     capture_output=True,
 ).stdout.split(b"\0")
 if not listed or listed == [b""]:
+    raise SystemExit(1)
+decoded = [item.decode("utf-8", errors="strict") for item in listed if item]
+if len(decoded) != len(set(decoded)) or set(decoded) != set(requested):
     raise SystemExit(1)
 for encoded in listed:
     if not encoded:
@@ -157,11 +193,7 @@ materialize_archive() {
   local staging=$1
   local archive=$2
   (cd "$SOURCE_REPO" && git archive "$ACCEPTED_MASTERMIND_COMMIT" \
-    app/static/chairman_control common/__init__.py common/redaction.py control_plane \
-    ops/control_room_remote/mastermind-control-room-remote.service \
-    scripts/__init__.py scripts/chairman_control_room_remote.py \
-    scripts/ohf/__init__.py scripts/ohf/redaction.py \
-    > "$archive")
+    "${RELEASE_TRACKED_PATHS[@]}" > "$archive")
 
   python3 -I -B - "$archive" <<'PY' || die "archive_member_unsafe"
 import pathlib
@@ -197,7 +229,7 @@ required_once = (
     "RuntimeDirectoryMode=0750",
     "UMask=0007",
     "Environment=CONTROL_ROOM_EXPECTED_COMMIT=@EXPECTED_COMMIT@",
-    "ExecStart=/opt/mastermind-control-room/current/venv/bin/python -I -B /opt/mastermind-control-room/current/scripts/chairman_control_room_remote.py --repo-root /opt/mastermind-control-room/current --macro-root /opt/macro --expected-commit ${CONTROL_ROOM_EXPECTED_COMMIT} --build-metadata /opt/mastermind-control-room/current/control_room_build.json",
+    "ExecStart=/usr/bin/python3 -I -B /opt/mastermind-control-room/current/scripts/chairman_control_room_remote.py --repo-root /opt/mastermind-control-room/current --macro-root /opt/macro --expected-commit ${CONTROL_ROOM_EXPECTED_COMMIT} --build-metadata /opt/mastermind-control-room/current/control_room_build.json",
     "NoNewPrivileges=true",
     "PrivateTmp=true",
     "ProtectSystem=strict",
@@ -303,11 +335,7 @@ grep -Fq "Environment=CONTROL_ROOM_EXPECTED_COMMIT=$ACCEPTED_MASTERMIND_COMMIT" 
   || die "unit_commit_render_failed"
 if grep -Fq '@EXPECTED_COMMIT@' "$UNIT_STAGE"; then die "unit_placeholder_remained"; fi
 
-python3 -m venv "$STAGING_DIR/venv"
 chmod 0640 "$STAGING_DIR/control_room_build.json"
-find "$STAGING_DIR/venv" -type d -exec chmod 0750 {} +
-find "$STAGING_DIR/venv" -type f -perm /100 -exec chmod 0750 {} +
-find "$STAGING_DIR/venv" -type f ! -perm /100 -exec chmod 0640 {} +
 chown -R root:"$CADDY_GROUP" "$STAGING_DIR"
 chmod -R go-w "$STAGING_DIR"
 

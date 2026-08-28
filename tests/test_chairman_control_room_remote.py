@@ -148,6 +148,9 @@ def test_remote_projection_is_closed_and_omits_local_authority(canonical_doc):
         (lambda d: d["work"][0].__setitem__("disagreements", ["/opt/private/file"]), "sensitive_value"),
         (lambda d: d["work"][0].__setitem__("disagreements", ["person@example.com"]), "sensitive_value"),
         (lambda d: d["work"][0].__setitem__("disagreements", ["provider_session_id=raw-123"]), "sensitive_value"),
+        (lambda d: d["degraded"].append("failed at path=/opt/private/file"), "sensitive_value"),
+        (lambda d: d["degraded"].append("failed at uri=file:///var/lib/private"), "sensitive_value"),
+        (lambda d: d["degraded"].append("failed at root:'/Users/chris/private'"), "sensitive_value"),
     ],
 )
 def test_remote_projection_rejects_adversarial_canonical_documents(canonical_doc, mutation, code):
@@ -243,10 +246,12 @@ def _patch_collectors(monkeypatch, canonical_doc):
     return packet_calls, inbox_calls
 
 
-def test_collector_injects_fixed_safe_artifact_into_pure_compositor_without_runner(
+def test_collector_routes_agent_os_through_bounded_runner_and_injects_fixed_artifact(
     monkeypatch, collector_config, canonical_doc
 ):
     packet_calls, inbox_calls = _patch_collectors(monkeypatch, canonical_doc)
+    bounded_runner = object()
+    collector_config.runner = bounded_runner
     compose_calls = []
     monkeypatch.setattr(remote.ccr, "build_control_room", lambda **_: pytest.fail("forbidden"))
     monkeypatch.setattr(
@@ -264,6 +269,8 @@ def test_collector_injects_fixed_safe_artifact_into_pure_compositor_without_runn
     projected = remote.compose_collected(inputs, IDENTITY)
 
     assert len(packet_calls) == len(inbox_calls) == 1
+    assert packet_calls[0]["runner"] is bounded_runner
+    assert packet_calls[0]["max_output_bytes"] == collector_config.max_output_bytes
     assert len(compose_calls) == 1
     assert compose_calls[0]["active_builds"]["schema"] == "project_active_builds.v1"
     assert compose_calls[0]["active_builds"]["collected_at"] == NOW
@@ -358,7 +365,8 @@ def test_unavailable_source_clocks_omit_only_their_documents_from_composition(
 
     inputs = remote.collect_once(collector_config, now=NOW)
 
-    assert inputs.inbox is inbox
+    assert inputs.inbox == inbox
+    assert inputs.inbox is not inbox
     assert inputs.boot_packet is not packet
     assert inputs.boot_packet["brief"] is None
     assert packet["brief"] is not None
@@ -567,6 +575,77 @@ def test_bounded_runner_kills_and_reaps_continuous_stdout_stderr_and_timeout(tmp
     assert result["timed_out"] is True
     assert result["limit_exceeded"] is False
     assert result["code"] is not None
+
+
+def test_bounded_runner_kills_process_group_when_leader_exits_before_descendant(
+    tmp_path
+):
+    script = (
+        "import subprocess,sys\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],"
+        "stdout=sys.stdout,stderr=sys.stderr)\n"
+        "print(child.pid,flush=True)\n"
+    )
+    child_pid = None
+    try:
+        started = time.monotonic()
+        result = remote.default_runner(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            timeout=0.2,
+            max_bytes=1024,
+        )
+        assert time.monotonic() - started < 2.0
+        child_pid = int(result["stdout"].strip())
+        assert result["timed_out"] is True
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            if time.monotonic() >= deadline:
+                pytest.fail("bounded runner left its descendant alive")
+            time.sleep(0.01)
+    finally:
+        if child_pid is not None:
+            try:
+                os.kill(child_pid, remote.signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_bounded_runner_kills_quiet_descendant_after_clean_leader_exit(tmp_path):
+    script = (
+        "import subprocess,sys\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],"
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\n"
+        "print(child.pid,flush=True)\n"
+    )
+    child_pid = None
+    try:
+        result = remote.default_runner(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            timeout=2.0,
+            max_bytes=1024,
+        )
+        child_pid = int(result["stdout"].strip())
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            if time.monotonic() >= deadline:
+                pytest.fail("bounded runner left its quiet descendant alive")
+            time.sleep(0.01)
+    finally:
+        if child_pid is not None:
+            try:
+                os.kill(child_pid, remote.signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_absent_runtime_database_is_degraded_and_never_created(

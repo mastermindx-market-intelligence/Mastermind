@@ -40,8 +40,30 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "app/static/chairman_control/remote.html",
     "common/__init__.py",
     "common/redaction.py",
+    "config/strategic_state.yml",
+    "control_plane/__init__.py",
+    "control_plane/ceo_boot_packet.py",
+    "control_plane/ceo_intent.py",
     "control_plane/chairman_control_room.py",
     "control_plane/chairman_control_room_remote.py",
+    "control_plane/codex_worker.py",
+    "control_plane/executive_agent_capabilities.py",
+    "control_plane/executive_ambient_process.py",
+    "control_plane/executive_authority.py",
+    "control_plane/executive_coo_policy.py",
+    "control_plane/executive_inbox.py",
+    "control_plane/executive_orchestration_principal.py",
+    "control_plane/executive_orchestration_result.py",
+    "control_plane/executive_runtime.py",
+    "control_plane/executive_supervisor.py",
+    "control_plane/executive_worker_broker.py",
+    "control_plane/executive_workspace.py",
+    "control_plane/flags.py",
+    "control_plane/operator_harness_contract.py",
+    "control_plane/operator_harness_wire.py",
+    "control_plane/strategic_state.py",
+    "control_plane/surface_bindings.py",
+    "control_plane/worker_adapter.py",
     "ops/control_room_remote/mastermind-control-room-remote.service",
     "scripts/__init__.py",
     "scripts/chairman_control_room_remote.py",
@@ -67,7 +89,9 @@ _PRIVATE_HOST_RE = re.compile(
     r"\b10(?:\.\d{1,3}){3}\b|\b192\.168(?:\.\d{1,3}){2}\b|"
     r"\b172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}\b)"
 )
-_PATH_RE = re.compile(r"(?:^|\s)/(?:Users|opt|home|var|private|etc)/")
+_PATH_RE = re.compile(
+    r"/(?:Users|opt|home|var|private|etc|root|run|srv|tmp|usr)(?:/|$)"
+)
 _SESSION_RE = re.compile(r"(?i)\b(?:provider[_ -]?session(?:[_ -]?id)?|session[_ -]?identity)\s*[:=]")
 
 _ATTENTION_INPUT_KEYS = frozenset({
@@ -212,6 +236,8 @@ def build_release_manifest(root: Path, *, commit: str, tree: str) -> dict[str, A
     files = _release_files(Path(root))
     if not REQUIRED_RUNTIME_PATHS.issubset(files):
         raise ReleaseError("required_runtime_path_missing")
+    if set(files) != REQUIRED_RUNTIME_PATHS:
+        raise ReleaseError("release_file_set_mismatch")
     artifact_digest = "sha256:" + hashlib.sha256(_canonical_json(files)).hexdigest()
     return {
         "artifact_digest": artifact_digest,
@@ -326,6 +352,11 @@ def verify_release_identity(
         files[safe_relative] = _release_digest(raw_files[relative])
     if not REQUIRED_RUNTIME_PATHS.issubset(files):
         raise ReleaseError("required_runtime_path_missing")
+    if set(files) != REQUIRED_RUNTIME_PATHS:
+        raise ReleaseError("release_file_set_mismatch")
+    observed_files = _release_files(release_root)
+    if set(observed_files) != REQUIRED_RUNTIME_PATHS:
+        raise ReleaseError("release_file_set_mismatch")
     for relative, expected_digest in files.items():
         candidate = release_root / relative
         try:
@@ -356,6 +387,8 @@ class CollectorConfig:
     timeout_seconds: float = 60.0
     max_output_bytes: int = 4 * 1024 * 1024
     environ: Mapping[str, str] | None = None
+    runner: Any = None
+    release_commit: str | None = None
 
     def __post_init__(self) -> None:
         self.repo_root = Path(self.repo_root)
@@ -363,6 +396,14 @@ class CollectorConfig:
         self.active_builds_path = Path(self.active_builds_path)
         if self.environ is None:
             self.environ = os.environ
+        if self.runner is None:
+            self.runner = default_runner
+        if not callable(self.runner):
+            raise ValueError("runner must be callable")
+        if self.release_commit is not None and not _SHA_RE.fullmatch(
+            self.release_commit
+        ):
+            raise ValueError("release_commit must be a lowercase 40-hex commit")
         for value in (
             self.interval_seconds, self.stale_after_seconds, self.timeout_seconds
         ):
@@ -673,10 +714,10 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
         }
 
     def terminate_and_reap() -> None:
-        if proc.poll() is None:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            if proc.poll() is None:
                 try:
                     proc.kill()
                 except OSError:
@@ -707,10 +748,6 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
                 terminate_and_reap()
                 break
             ready = selector.select(timeout=min(remaining, 0.1))
-            if not ready and proc.poll() is not None:
-                ready = selector.select(timeout=0)
-                if not ready:
-                    break
             for key, _mask in ready:
                 name = key.data
                 allowance = max_bytes + 1 - len(buffers[name])
@@ -742,8 +779,10 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
         for pipe in (proc.stdout, proc.stderr):
             if pipe is not None and not pipe.closed:
                 pipe.close()
-        if proc.poll() is None:
-            terminate_and_reap()
+        # The leader may have exited cleanly after forking a quiet descendant
+        # which closed both capture streams.  The runner owns the whole session,
+        # so always terminate that process group before returning.
+        terminate_and_reap()
 
     invalid_utf8 = False
     try:
@@ -1008,6 +1047,27 @@ def _runtime_source_time(config: CollectorConfig) -> str | None:
     ).isoformat().replace("+00:00", "Z")
 
 
+def _sanitize_collected_degraded(
+    document: dict[str, Any], *, source: str
+) -> dict[str, Any]:
+    """Replace only sensitive source diagnostics before canonical composition."""
+
+    sanitized = dict(document)
+    entries = document.get("degraded")
+    if not isinstance(entries, list):
+        return sanitized
+    public_entries: list[Any] = []
+    for entry in entries:
+        try:
+            _reject_sensitive_values(entry)
+        except RemoteProjectionError:
+            public_entries.append(f"{source}_detail_redacted")
+        else:
+            public_entries.append(entry)
+    sanitized["degraded"] = public_entries
+    return sanitized
+
+
 def collect_once(config: CollectorConfig, *, now: str) -> CollectedInputs:
     """Collect one generation from independent read-only source boundaries."""
     observed_at = _zulu(now)
@@ -1017,6 +1077,13 @@ def collect_once(config: CollectorConfig, *, now: str) -> CollectedInputs:
         environ=config.environ,
         now=observed_at,
         timeout=config.timeout_seconds,
+        runner=config.runner,
+        max_output_bytes=config.max_output_bytes,
+        mastermind_identity=(
+            {"sha": config.release_commit, "branch": "immutable-release"}
+            if config.release_commit is not None
+            else None
+        ),
     )
     inbox = executive_inbox.build_inbox(
         repo_root=config.repo_root,
@@ -1025,6 +1092,10 @@ def collect_once(config: CollectorConfig, *, now: str) -> CollectedInputs:
         now=observed_at,
         timeout=config.timeout_seconds,
     )
+    if isinstance(packet, dict):
+        packet = _sanitize_collected_degraded(packet, source="boot_packet")
+    if isinstance(inbox, dict):
+        inbox = _sanitize_collected_degraded(inbox, source="executive_inbox")
     active_builds, active_builds_freshness = read_active_builds_artifact(
         config, observed_at=observed_at
     )
