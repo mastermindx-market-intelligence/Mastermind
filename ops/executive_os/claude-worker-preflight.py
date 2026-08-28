@@ -1,8 +1,8 @@
 """Provider-work-free Claude Worker realm/auth preflight.
 
 This executable is the single Claude preflight family reserved by PF1 and
-advanced by Operator Continuity OCR-1 V3.  It owns only non-secret binary/auth
-readiness observations.  It does not perform login, execute a model turn,
+advanced by Operator Continuity OCR-1 V3. It owns only non-secret binary/auth
+readiness observations. It does not perform login, execute a model turn,
 select capacity, create Executive lifecycle state, or persist provider identity.
 
 V1 intentionally permits only two provider commands:
@@ -10,9 +10,10 @@ V1 intentionally permits only two provider commands:
 * ``claude --version``
 * ``claude auth status``
 
-The public receipt is a closed, secret-free contract.  Provider account PII is
-never copied into it.  A concrete host/principal identity is supplied by the
-existing canonical owner; ``local-unbound`` is a refusal, never a host identity.
+The public receipt is a closed, secret-free contract. Provider account PII is
+never copied into it. Host/principal references are wire identities supplied by
+their existing canonical owners; syntax validation in this module is never
+proof that the current process matches those owners.
 """
 from __future__ import annotations
 
@@ -101,8 +102,8 @@ _RAW_AUTH_ALLOWED_KEYS = frozenset(
         "apiProvider",
         "subscriptionType",
         "apiKeySource",
-        # Known provider PII is explicitly tolerated as INPUT only so it can be
-        # discarded.  It is never returned or persisted by this module.
+        # Known provider PII is tolerated as INPUT only so it can be discarded.
+        # It is never returned or persisted by this module.
         "email",
         "organization",
         "accountId",
@@ -110,6 +111,10 @@ _RAW_AUTH_ALLOWED_KEYS = frozenset(
     }
 )
 _PROVIDER_TIMEOUT_SECONDS = 15.0
+_HASH_CHUNK_BYTES = 1024 * 1024
+# A reviewed provider binary may be large, but hashing must never read an
+# unbounded caller-selected file into memory or chase growth without a ceiling.
+MAX_BINARY_BYTES = 512 * 1024 * 1024
 
 
 class PreflightError(RuntimeError):
@@ -122,6 +127,12 @@ class AuthObservation:
     auth_method: str
     api_provider: str
     reason_codes: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class CommandObservation:
+    returncode: int
+    stdout: str
 
 
 def _raise(code: str) -> None:
@@ -168,6 +179,13 @@ def now_iso() -> str:
 
 
 def require_canonical_identity(host_ref: str, os_principal_ref: str) -> tuple[str, str]:
+    """Validate only the closed opaque identity wire.
+
+    This function deliberately does *not* prove that the caller currently runs
+    on that host or OS principal. That proof belongs to the existing identity
+    owners and must be established before a ready receipt can be minted.
+    """
+
     host = str(host_ref or "").strip()
     principal = str(os_principal_ref or "").strip()
     if not host or host == "local-unbound" or _HOST_RE.fullmatch(host) is None:
@@ -175,6 +193,19 @@ def require_canonical_identity(host_ref: str, os_principal_ref: str) -> tuple[st
     if not principal or _PRINCIPAL_RE.fullmatch(principal) is None:
         _raise("PRINCIPAL_IDENTITY_SEAM_UNAVAILABLE")
     return host, principal
+
+
+def require_current_identity_owner(host_ref: str, os_principal_ref: str) -> None:
+    """Fail closed until the current estate exposes the accepted host owner.
+
+    OCR-1 V3 Task 2 forbids deriving a competing host/principal identity from
+    hostname, UID, username, home path, or machine UUID. Current protected
+    Capacity/Executive law has no concrete host-ref resolver available to this
+    CLI, so a syntactically valid caller declaration remains unproven.
+    """
+
+    require_canonical_identity(host_ref, os_principal_ref)
+    _raise("HOST_IDENTITY_SEAM_UNAVAILABLE")
 
 
 def _require_binary(binary: Path) -> Path:
@@ -188,6 +219,8 @@ def _require_binary(binary: Path) -> Path:
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         _raise("BINARY_INVALID")
     if not os.access(raw, os.X_OK):
+        _raise("BINARY_INVALID")
+    if info.st_size <= 0 or info.st_size > MAX_BINARY_BYTES:
         _raise("BINARY_INVALID")
     return raw
 
@@ -238,6 +271,8 @@ def normalize_auth_status(raw: Mapping[str, Any]) -> AuthObservation:
 
 
 def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the closed public wire; do not treat validity as mint authority."""
+
     _reject_secret_shaped(value)
     if not isinstance(value, Mapping) or set(value) != _RECEIPT_KEYS:
         _raise("RECEIPT_INVALID")
@@ -253,9 +288,8 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     )
     result["host_ref"], result["os_principal_ref"] = host, principal
     _require_utc(result["observed_at"])
-    if not isinstance(result["claude_binary_sha256"], str) or _SHA256_RE.fullmatch(
-        result["claude_binary_sha256"]
-    ) is None:
+    digest = result["claude_binary_sha256"]
+    if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
         _raise("RECEIPT_INVALID")
     _bounded_text(result["claude_version"], maximum=128)
     if type(result["auth_ready"]) is not bool:
@@ -268,6 +302,7 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
         _raise("RECEIPT_INVALID")
     if result["macos_credential_isolation_basis"] not in ISOLATION_BASES:
         _raise("RECEIPT_INVALID")
+
     context = result["execution_context"]
     if context not in EXECUTION_CONTEXTS:
         _raise("RECEIPT_INVALID")
@@ -275,14 +310,14 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     if context == "INTERACTIVE_PRINCIPAL":
         if worker_id is not None or quota_class is not None:
             _raise("RECEIPT_INVALID")
-    else:
-        if (
-            not isinstance(worker_id, str)
-            or _WORKER_RE.fullmatch(worker_id) is None
-            or not isinstance(quota_class, str)
-            or _QUOTA_RE.fullmatch(quota_class) is None
-        ):
-            _raise("RECEIPT_INVALID")
+    elif (
+        not isinstance(worker_id, str)
+        or _WORKER_RE.fullmatch(worker_id) is None
+        or not isinstance(quota_class, str)
+        or _QUOTA_RE.fullmatch(quota_class) is None
+    ):
+        _raise("RECEIPT_INVALID")
+
     if result["verdict"] not in VERDICTS:
         _raise("RECEIPT_INVALID")
     reasons = result["reason_codes"]
@@ -294,7 +329,10 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     ):
         _raise("RECEIPT_INVALID")
     if result["auth_ready"]:
-        if result["auth_method"] != "claudeai" or result["api_provider"] != "first_party":
+        if (
+            result["auth_method"] != "claudeai"
+            or result["api_provider"] != "first_party"
+        ):
             _raise("RECEIPT_INVALID")
         expected = (
             "INTERACTIVE_AUTH_READY"
@@ -306,7 +344,12 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _run(argv: tuple[str, ...], *, timeout_seconds: float = _PROVIDER_TIMEOUT_SECONDS) -> str:
+def _run(
+    argv: tuple[str, ...],
+    *,
+    accepted_returncodes: frozenset[int] = frozenset({0}),
+    timeout_seconds: float = _PROVIDER_TIMEOUT_SECONDS,
+) -> CommandObservation:
     try:
         completed = subprocess.run(
             argv,
@@ -319,15 +362,39 @@ def _run(argv: tuple[str, ...], *, timeout_seconds: float = _PROVIDER_TIMEOUT_SE
         )
     except subprocess.TimeoutExpired:
         _raise("PROVIDER_TIMEOUT")
-    if completed.returncode != 0:
+    if completed.returncode not in accepted_returncodes:
         _raise("PROVIDER_COMMAND_FAILED")
-    return completed.stdout
+    return CommandObservation(
+        returncode=int(completed.returncode),
+        stdout=str(completed.stdout or ""),
+    )
+
+
+def _sha256_bounded(path: Path) -> str:
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(_HASH_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_BINARY_BYTES:
+                    _raise("BINARY_INVALID")
+                digest.update(chunk)
+    except OSError:
+        _raise("BINARY_UNAVAILABLE")
+    if total <= 0:
+        _raise("BINARY_INVALID")
+    return digest.hexdigest()
 
 
 def observe_binary(binary: Path) -> tuple[str, str]:
     resolved = _require_binary(binary)
-    digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
-    version = _run(build_allowed_argv(resolved, "version")).strip()
+    digest = _sha256_bounded(resolved)
+    observed = _run(build_allowed_argv(resolved, "version"))
+    version = observed.stdout.strip()
     if not version or len(version) > 128 or _CONTROL_RE.search(version):
         _raise("BINARY_INVALID")
     _reject_secret_shaped(version)
@@ -335,12 +402,23 @@ def observe_binary(binary: Path) -> tuple[str, str]:
 
 
 def observe_auth(binary: Path) -> AuthObservation:
-    raw_text = _run(build_allowed_argv(binary, "auth_status"))
+    observed = _run(
+        build_allowed_argv(binary, "auth_status"),
+        accepted_returncodes=frozenset({0, 1}),
+    )
     try:
-        parsed = json.loads(raw_text)
+        parsed = json.loads(observed.stdout)
     except (TypeError, ValueError):
         _raise("AUTH_STATUS_UNSUPPORTED")
     if not isinstance(parsed, dict):
+        _raise("AUTH_STATUS_UNSUPPORTED")
+
+    # Current first-party Claude Code contract: auth status exits 0 when logged
+    # in and 1 when logged out, while still emitting the JSON status document.
+    logged_in = parsed.get("loggedIn")
+    if type(logged_in) is not bool:
+        _raise("AUTH_STATUS_UNSUPPORTED")
+    if (observed.returncode == 0) is not logged_in:
         _raise("AUTH_STATUS_UNSUPPORTED")
     return normalize_auth_status(parsed)
 
@@ -359,13 +437,12 @@ def build_ready_receipt(
     isolation_basis: str = "OS_PRINCIPAL_KEYCHAIN",
     observed_at: str | None = None,
 ) -> dict[str, Any]:
+    if execution_context != "INTERACTIVE_PRINCIPAL":
+        # Task 3 owns the real Worker-broker composition. This Task 1/2 slice
+        # cannot turn a caller declaration into worker-context evidence.
+        _raise("EXECUTION_CONTEXT_UNPROVEN")
     if not auth.auth_ready:
         _raise(auth.reason_codes[0] if auth.reason_codes else "AUTH_STATUS_UNSUPPORTED")
-    verdict = (
-        "INTERACTIVE_AUTH_READY"
-        if execution_context == "INTERACTIVE_PRINCIPAL"
-        else "WORKER_CONTEXT_AUTH_READY"
-    )
     return validate_receipt(
         {
             "schema": SCHEMA,
@@ -383,7 +460,7 @@ def build_ready_receipt(
             "execution_context": execution_context,
             "worker_id": worker_id,
             "quota_class": quota_class,
-            "verdict": verdict,
+            "verdict": "INTERACTIVE_AUTH_READY",
             "reason_codes": [],
         }
     )
@@ -404,8 +481,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--claude-binary", required=True, type=Path)
     args = parser.parse_args(argv)
 
-    # Refuse missing canonical identity before touching the provider binary.
-    require_canonical_identity(args.host_ref, args.os_principal_ref)
+    # The ordinary CLI is not the Worker broker. Preserve the closed future
+    # wire, but do not allow this slice to mint Worker-context evidence.
+    if args.execution_context == "WORKER_BROKER":
+        _raise("EXECUTION_CONTEXT_UNPROVEN")
+
+    # Validate caller wire shape, then require actual existing-owner proof.
+    # Current protected estate has no concrete host owner exposed to this CLI,
+    # so this fails closed before any provider metadata command is started.
+    require_current_identity_owner(args.host_ref, args.os_principal_ref)
+
+    # Unreachable under the current Task-2 estate. Kept as the bounded positive
+    # composition that a future accepted identity owner may invoke without
+    # introducing a second preflight family.
     digest, version = observe_binary(args.claude_binary)
     auth = observe_auth(args.claude_binary)
     receipt = build_ready_receipt(
