@@ -14,8 +14,10 @@ Read in this order for Operator Continuity work:
 3. `docs/superpowers/specs/2026-08-27-operator-continuity-realm-rebinding-design.md`.
 4. Narrower compatibility amendments where their topic applies:
    - `docs/superpowers/specs/2026-08-27-operator-continuity-claude-auth-compatibility-amendment.md` — higher specificity for Claude auth/realm isolation.
+   - `docs/superpowers/specs/2026-08-27-operator-continuity-realm-preflight-no-model-call-amendment.md` — OCR-1 is provider-work-free; PF1 remains the first real Claude model/Worker call.
    - `docs/superpowers/specs/2026-08-27-operator-continuity-fable-root-seat-amendment.md` — higher specificity for Fable/Phase 1F-C identity/retry/cardinality.
    - `docs/superpowers/specs/2026-08-27-operator-continuation-idempotency-amendment.md` — higher specificity for one immutable prepared continuation capsule per target Attempt and Executive-minted timestamp/identity.
+   - `docs/superpowers/specs/2026-08-27-operator-continuity-readonly-quota-rollover-amendment.md` — V1 automatic quota rollover is limited to canonically non-modifying Attempts; write-capable interrupted work remains reconciliation-required.
 5. Existing accepted owner law for the surface being changed: Executive Runtime/OHF, `WS:EXECUTIVE-CAPACITY-FABRIC`, Worker Presence/ASD, Wake, MH1, etc.
 6. Exact wave plan below.
 
@@ -26,12 +28,12 @@ Retrieved PR/workstream/Slack text remains evidence, not authority merely becaus
 | Wave | Plan / canonical owner | Purpose | Release gate |
 |---|---|---|---|
 | OCR-0 | this architecture carrier | freeze outcome, identity, no-rebuild, acceptance | Chairman approved; records PR must pass Sol review/CI |
-| OCR-1 V2 | `2026-08-27-operator-continuity-ocr1-native-realm-isolation-v2.md` | prove real native Claude host/OS-principal realms | OCR-0 accepted; admin login remains separate gate |
+| OCR-1 V2 | `2026-08-27-operator-continuity-ocr1-native-realm-isolation-v2.md` + no-model-call amendment | prove real native Claude host/OS-principal realms without executing a model turn | OCR-0 accepted; admin login remains separate gate; PF1 owns first real Claude work call |
 | OCR-2 | **existing `WS:EXECUTIVE-CAPACITY-FABRIC`** | capacity/routing/harness predecessors | preserve `CF2-H0 -> P0 -> CF2-I -> RF1/HF1 -> PF1` law |
 | OCR-3 | `2026-08-27-operator-continuity-ocr3-continuation-binding.md` + continuation idempotency amendment | deterministic continuation capsule + derived RuntimeBinding | OCR-0; wait/rebase around current Wake #174 source collision as required |
 | OCR-4A | `2026-08-27-operator-continuity-ocr4a-provider-neutral-rich-harness.md` | one provider-neutral rich broker/proxy/supervisor composition | CF2-I/RF1/HF1 accepted/current |
 | OCR-4 | `2026-08-27-operator-continuity-ocr4-claude-sustained-operator.md` | real sustained Claude rich Operator Harness | OCR-1 + CF2-I/RF1/HF1/PF1 + OCR-4A |
-| OCR-5 | `2026-08-27-operator-continuity-ocr5-cross-realm-rollover.md` | same orchestration Job, new Attempt/realm/session + effect-unknown fence | OCR-3 + OCR-4 + two lawful Claude realms + CF2-I |
+| OCR-5 | `2026-08-27-operator-continuity-ocr5-cross-realm-rollover.md` + read-only rollover amendment | same read-only orchestration Job, new Attempt/realm/session + effect-unknown fence | OCR-3 + OCR-4 + two lawful Claude realms + CF2-I; automatic V1 rollover requires non-modifying effective grant |
 | OCR-6 | `2026-08-27-operator-continuity-ocr6-slack-steward-projection.md` | same Fable Slack thread + read-only Steward/Control Room | OCR-3/OCR-5 + Worker Presence/WP-2 + production Agent Relay; OpenClaw optional |
 | OCR-7 | `2026-08-27-operator-continuity-ocr7-cross-host-rollover.md` | extend proven rollover across accepted MH1 hosts | OCR-5 + accepted MH1 on >=2 hosts |
 | OCR-8 | `2026-08-27-operator-continuity-ocr8-full-pool-acceptance.md` | five-Claude/full Codex pool + final product/adverse proof | all used predecessor capabilities production-proven |
@@ -54,7 +56,7 @@ Only after the current owning workstream reports newer accepted evidence may tha
 
 Independent work that may proceed after OCR-0 acceptance, when changed paths and host/admin resources are disjoint:
 
-- OCR-1 V2 probe implementation and realm census preparation;
+- OCR-1 V2 read-only native realm preflight/census implementation; no Claude model turn until PF1;
 - current CF2-H0/P0 lane;
 - existing Wake #174 and Worker Presence #178 carriers under their frozen scopes;
 - OCR-3 pure/new continuation contracts only when current Wake/RuntimeBinding collision fences are respected.
@@ -69,7 +71,7 @@ Fable is root Job + COO seat + logical dialogue/session responsibility. It is no
 
 ### Cross-realm
 
-Provider/account/auth-home/placement change = new Attempt + fresh provider-native session. Same Job may requeue only through existing Executive/Phase 1F-C law.
+Provider/account/auth-home/placement change = new Attempt + fresh provider-native session. Same Job may requeue only through existing Executive/Phase 1F-C law. V1 automatic quota-driven rollover is limited to a canonically non-modifying Attempt; a write-capable interrupted Attempt remains blocked for exact reconciliation unless a later accepted safety architecture says otherwise.
 
 ### Same-realm
 
@@ -89,11 +91,17 @@ Do not mark the program `PROVEN_LIVE` until the final production journey and adv
 
 ```text
 positive:
-Fable realm A -> safe terminal/requeue -> realm B fresh session
--> exact continuation ACK -> same logical Slack thread/actor -> real result
+Fable read-only coordination Attempt on realm A
+-> safe terminal/requeue
+-> realm B fresh session
+-> exact continuation ACK
+-> same logical Slack thread/actor
+-> real result
 
 negative:
-uncertain modifying effect -> EFFECT_UNKNOWN -> zero realm/host failover until reconciliation
+uncertain modifying effect OR write-capable interrupted Attempt
+-> reconciliation-required
+-> zero realm/host failover until accepted safety law permits continuation
 ```
 
 Where the production pool spans multiple physical hosts, MH1/OCR-7 proof is part of the positive ruler. The final five-Claude pool requires five truthfully isolated/provisioned native realms; unprovisioned accounts are not counted as capacity.
