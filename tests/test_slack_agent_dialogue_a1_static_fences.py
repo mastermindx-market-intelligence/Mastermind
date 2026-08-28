@@ -205,6 +205,14 @@ def _coo_actor() -> dict[str, str]:
     }
 
 
+def _chairman_actor() -> dict[str, str]:
+    return {
+        "kind": "executive_surface",
+        "seat": "chairman",
+        "reasoning_surface": "chatgpt",
+    }
+
+
 def _worker_actor(worker_id: str = "worker-01") -> dict[str, str]:
     return {
         "kind": "worker_attempt",
@@ -357,30 +365,29 @@ def _engine_for(actor_ref: dict[str, str]):
     return DialogueEngineV2(policy, client, authority_policy=_AllowAuthority()), client, context
 
 
-def test_v2_ceo_cannot_self_adjudicate_executable_ruling() -> None:
+def _add_reply(client, value: dict[str, object], *, ts: str) -> None:
     from integrations.slack_agent_dialogue.contract_v2 import render_message_v2
-    from integrations.slack_agent_dialogue.engine import DialogueEngineError, SlackMessage
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+
+    client.add_reply(
+        SlackMessage(
+            ts=ts,
+            author_user_id=BOT,
+            text=render_message_v2(value),
+            thread_ts=THREAD_TS,
+        )
+    )
+
+
+def test_v2_ceo_cannot_self_adjudicate_executable_ruling() -> None:
+    from integrations.slack_agent_dialogue.engine import DialogueEngineError
 
     actor = _ceo_actor()
     engine, client, context = _engine_for(actor)
     request = _decision_request(actor)
     reply = _ruling(actor, str(request["message_key"]))
-    client.add_reply(
-        SlackMessage(
-            ts="1787471000.000010",
-            author_user_id=BOT,
-            text=render_message_v2(request),
-            thread_ts=THREAD_TS,
-        )
-    )
-    client.add_reply(
-        SlackMessage(
-            ts="1787471000.000011",
-            author_user_id=BOT,
-            text=render_message_v2(reply),
-            thread_ts=THREAD_TS,
-        )
-    )
+    _add_reply(client, request, ts="1787471000.000010")
+    _add_reply(client, reply, ts="1787471000.000011")
 
     with pytest.raises(DialogueEngineError) as exc:
         asyncio.run(
@@ -393,6 +400,51 @@ def test_v2_ceo_cannot_self_adjudicate_executable_ruling() -> None:
             )
         )
     assert exc.value.code == "THREAD_CONTEXT_MISMATCH"
+
+
+def test_v2_reasoning_surface_cannot_widen_same_ceo_seat() -> None:
+    from integrations.slack_agent_dialogue.engine import DialogueEngineError
+
+    request_actor = _ceo_actor("codex")
+    engine, client, context = _engine_for(request_actor)
+    request = _decision_request(request_actor)
+    reply = _ruling(_ceo_actor("chatgpt"), str(request["message_key"]))
+    _add_reply(client, request, ts="1787471000.000010")
+    _add_reply(client, reply, ts="1787471000.000011")
+
+    with pytest.raises(DialogueEngineError) as exc:
+        asyncio.run(
+            engine.wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context,
+                request_message_key=str(request["message_key"]),
+                expected_types=["RULING"],
+                max_attempts=1,
+            )
+        )
+    assert exc.value.code == "THREAD_CONTEXT_MISMATCH"
+
+
+def test_relay_projection_does_not_require_bot_in_personal_sol_allowlist() -> None:
+    request_actor = _coo_actor()
+    engine, client, context = _engine_for(request_actor)
+    request = _decision_request(request_actor)
+    reply = _ruling(_ceo_actor(), str(request["message_key"]))
+    _add_reply(client, request, ts="1787471000.000010")
+    _add_reply(client, reply, ts="1787471000.000011")
+
+    result = asyncio.run(
+        engine.wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context,
+            request_message_key=str(request["message_key"]),
+            expected_types=["RULING"],
+            max_attempts=1,
+        )
+    )
+    assert BOT not in {SOL1, SOL2}
+    assert result["authority"]["executable"] is True
+    assert result["authority"]["disposition"] == "CONTINUE"
 
 
 def test_v2_worker_frame_refuses_chatgpt_provenance_trailer() -> None:
@@ -431,11 +483,12 @@ def test_v2_worker_frame_refuses_chatgpt_provenance_trailer() -> None:
     assert exc.value.code == "TRAILER_REFUSED"
 
 
-def test_v2_identity_refuses_unicode_line_separator() -> None:
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029"])
+def test_v2_identity_refuses_unicode_line_separator(separator: str) -> None:
     from integrations.slack_agent_dialogue.contract import DialogueContractError
     from integrations.slack_agent_dialogue.contract_v2 import MESSAGE_SCHEMA_V2, build_message_v2
 
-    bad_worker = "worker\u2028forged"
+    bad_worker = f"worker{separator}forged"
     with pytest.raises(DialogueContractError) as exc:
         build_message_v2(
             {
@@ -484,13 +537,102 @@ def test_v2_text_refuses_slack_mention_shaped_value() -> None:
     assert exc.value.code == "MESSAGE_INVALID"
 
 
+def test_v2_parent_and_message_invalid_trailers_stay_closed() -> None:
+    from integrations.slack_agent_dialogue.contract import DialogueContractError
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_parent_v2,
+        parse_message_frame_v2,
+        parse_parent_frame_v2,
+        render_message_v2,
+        render_parent_v2,
+    )
+
+    parent = build_parent_v2(
+        {
+            "schema": PARENT_SCHEMA_V2,
+            "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+            "commission_ref": _commission(),
+            "session_ref": "asd-session-fable0001",
+            "operation_key": OPERATION,
+            "watch_mode": "turn_watch_v1",
+            "allowed_sol_user_ids": [SOL1],
+            "created_at": "2026-08-28T04:00:00Z",
+        }
+    )
+    with pytest.raises(DialogueContractError) as parent_exc:
+        parse_parent_frame_v2(render_parent_v2(parent) + "\nSent using Claude")
+    assert parent_exc.value.code == "TRAILER_REFUSED"
+
+    message = _decision_request(_coo_actor())
+    with pytest.raises(DialogueContractError) as message_exc:
+        parse_message_frame_v2(render_message_v2(message) + "\nSent using Claude")
+    assert message_exc.value.code == "TRAILER_REFUSED"
+
+
+def test_worker_requires_executive_attempt_applicability_kind() -> None:
+    from integrations.slack_agent_dialogue.contract import DialogueContractError
+    from integrations.slack_agent_dialogue.contract_v2 import MESSAGE_SCHEMA_V2, build_message_v2
+
+    with pytest.raises(DialogueContractError) as exc:
+        build_message_v2(
+            {
+                "schema": MESSAGE_SCHEMA_V2,
+                "message_key": "asd-worker-kind-refusal-0001",
+                "message_type": "ACK",
+                "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+                "commission_ref": _commission(),
+                "session_ref": "asd-session-fable0001",
+                "actor_ref": _worker_actor(),
+                "reply_to_message_key": None,
+                "applies_to": _applies(),
+                "summary": "Worker acknowledgement.",
+                "body": {"acknowledged": True},
+                "evidence_refs": [],
+                "requires_response": False,
+                "created_at": "2026-08-28T04:10:00Z",
+            }
+        )
+    assert exc.value.code == "MESSAGE_INVALID"
+
+
+def test_chairman_actor_cannot_emit_contributor_family() -> None:
+    from integrations.slack_agent_dialogue.contract import DialogueContractError
+    from integrations.slack_agent_dialogue.contract_v2 import MESSAGE_SCHEMA_V2, build_message_v2
+
+    with pytest.raises(DialogueContractError) as exc:
+        build_message_v2(
+            {
+                "schema": MESSAGE_SCHEMA_V2,
+                "message_key": "asd-chairman-contributor-refusal-0001",
+                "message_type": "ACK",
+                "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+                "commission_ref": _commission(),
+                "session_ref": "asd-session-fable0001",
+                "actor_ref": _chairman_actor(),
+                "reply_to_message_key": None,
+                "applies_to": _applies(),
+                "summary": "Contributor acknowledgement.",
+                "body": {"acknowledged": True},
+                "evidence_refs": [],
+                "requires_response": False,
+                "created_at": "2026-08-28T04:11:00Z",
+            }
+        )
+    assert exc.value.code == "MESSAGE_INVALID"
+
+
 def test_v2_parent_sol_allowlist_is_bound_but_relay_projection_is_not_personal_sol() -> None:
     from integrations.slack_agent_dialogue.contract_v2 import (
         PARENT_SCHEMA_V2,
         build_parent_v2,
         render_parent_v2,
     )
-    from integrations.slack_agent_dialogue.engine import DialogueEngineError, DialoguePolicy, SlackMessage
+    from integrations.slack_agent_dialogue.engine import (
+        DialogueEngineError,
+        DialoguePolicy,
+        SlackMessage,
+    )
     from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2, DialogueEngineV2
     from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 
