@@ -11,7 +11,8 @@
  * - source-owned text is rendered through textContent / DOM construction, never innerHTML.
  */
 (function () {
-  var TOKEN = (function () {
+  var REMOTE_READ_ONLY = document.documentElement.getAttribute("data-control-room-mode") === "remote-read-only";
+  var TOKEN = REMOTE_READ_ONLY ? "" : (function () {
     var meta = document.querySelector('meta[name="ccr-token"]');
     return meta ? meta.getAttribute("content") : "";
   })();
@@ -161,16 +162,19 @@
 
   // transport -------------------------------------------------------------
   function getJSON(path) {
-    return fetch(path, {
+    var options = {
       method: "GET",
       credentials: "same-origin",
-      headers: { "X-CCR-Token": TOKEN },
-    }).then(function (resp) {
+      headers: {},
+    };
+    if (!REMOTE_READ_ONLY) options.headers["X-CCR-Token"] = TOKEN;
+    return fetch(path, options).then(function (resp) {
       return resp.json();
     });
   }
 
   function postJSON(path, body) {
+    if (REMOTE_READ_ONLY) return Promise.reject(new Error("remote_read_only"));
     return fetch(path, {
       method: "POST",
       credentials: "same-origin",
@@ -213,6 +217,7 @@
 
   function renderSystemSources(sources) {
     var dl = document.getElementById("ccr-sources");
+    if (!dl) return;
     clear(dl);
     SOURCE_STAMPS.forEach(function (spec) {
       var pair = el("div");
@@ -259,6 +264,37 @@
     }
   }
 
+  function renderRemoteSources(doc, sourceFreshness, codeIdentity) {
+    var node = document.getElementById("ccr-source-pulse");
+    clear(node);
+    var freshness = sourceFreshness || {};
+    Object.keys(freshness).sort().forEach(function (name) {
+      var row = freshness[name] || {};
+      var value = safeText(row.state);
+      if (row.source_time && ageWords(row.source_time)) value += " · " + ageWords(row.source_time);
+      node.appendChild(sourcePulsePill(name.replace(/_/g, " "), value, row.state !== "fresh"));
+    });
+    var identity = codeIdentity || {};
+    var sources = {
+      remote_schema: doc.schema,
+      observed_at: doc.observed_at,
+      commit: identity.commit,
+      tree: identity.tree,
+      artifact_digest: identity.artifact_digest,
+    };
+    var dl = document.getElementById("ccr-sources");
+    clear(dl);
+    Object.keys(sources).forEach(function (key) {
+      var pair = el("div");
+      pair.appendChild(el("dt", { text: key.replace(/_/g, " ") }));
+      pair.appendChild(el("dd", { text: key === "commit" || key === "tree" ? shortSha(sources[key]) : safeText(sources[key]) }));
+      dl.appendChild(pair);
+    });
+    document.getElementById("ccr-composed-age").textContent = "State " + (ageWords(doc.observed_at) || "unknown");
+    document.getElementById("ccr-live-builds-label").textContent = "Remote projection";
+    document.getElementById("ccr-refresh-banner").hidden = true;
+  }
+
   function renderDegraded(items) {
     var section = document.getElementById("degraded");
     var list = section.querySelector("ul");
@@ -271,6 +307,7 @@
 
   function renderCapabilities(capabilities) {
     var container = document.getElementById("ccr-capabilities");
+    if (!container) return;
     clear(container);
     var keys = Object.keys(capabilities || {}).sort();
     if (!keys.length) {
@@ -292,6 +329,14 @@
   }
 
   // attention -------------------------------------------------------------
+  function attentionSummary(item) {
+    return safeText(item && (item.summary || item.reason), "Attention item");
+  }
+
+  function attentionState(item) {
+    return item && (item.state || item.status);
+  }
+
   function findCardForAttention(item) {
     var attentionId = item && item.attention_id;
     if (!attentionId) return null;
@@ -331,7 +376,7 @@
 
   function renderAttentionDetail(item, target) {
     document.getElementById("ccr-detail-ref").textContent = "ATTENTION · " + safeText(target, "unknown").toUpperCase();
-    document.getElementById("ccr-detail-title").textContent = safeText(item.reason, "Attention item");
+    document.getElementById("ccr-detail-title").textContent = attentionSummary(item);
     var body = document.getElementById("ccr-detail-body");
     clear(body);
 
@@ -340,7 +385,7 @@
       ["id", item.attention_id],
       ["kind", item.kind],
       ["work", item.workstream],
-      ["status", item.status],
+      ["status", attentionState(item)],
       ["job", item.job_id],
       ["reported by", item.source],
     ].filter(function (pair) { return !isBlank(pair[1]); });
@@ -397,10 +442,10 @@
     rows.forEach(function (item) {
       var li = el("li", { className: "ccr-attention-item" });
       var body = el("div");
-      body.appendChild(el("p", { text: safeText(item.reason, "This item carries no reason text."), className: "ccr-attention-reason" }));
+      body.appendChild(el("p", { text: attentionSummary(item), className: "ccr-attention-reason" }));
       var meta = el("div", { className: "ccr-attention-meta" });
       [
-        ["work", item.workstream], ["kind", item.kind], ["status", item.status], ["reported by", item.source]
+        ["work", item.workstream], ["kind", item.kind], ["status", attentionState(item)], ["reported by", item.source]
       ].forEach(function (pair) {
         if (!isBlank(pair[1])) meta.appendChild(el("span", { text: pair[0] + " " + pair[1] }));
       });
@@ -441,7 +486,7 @@
     }
     rows.slice(0, 5).forEach(function (item) {
       var li = el("li", { className: "ccr-mini-item" });
-      li.appendChild(el("span", { text: safeText(item.reason, "Attention item") }));
+      li.appendChild(el("span", { text: attentionSummary(item) }));
       var card = findCardForAttention(item);
       var work = card ? card.work_ref : item.workstream;
       li.appendChild(el("span", { text: safeText(work, "unjoined"), className: "ccr-mini-work" }));
@@ -843,7 +888,7 @@
         left.appendChild(el("div", { text: safeText(pr.title, "Untitled PR"), className: "ccr-detail-pr-title" }));
         left.appendChild(el("div", { text: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + (pr.draft === true ? "draft" : pr.draft === false ? "ready" : "draft unknown") + " · merge " + safeText(pr.merge_state), className: "ccr-detail-pr-meta" }));
         row.appendChild(left);
-        var link = el("a", { text: "Open PR", className: "ccr-open-button", attrs: { href: pr.url || "#", target: "_blank", rel: "noopener" } });
+        var link = el("a", { text: "Open PR", className: "ccr-open-button", attrs: { href: pr.url || "#", target: "_blank", rel: "noopener noreferrer" } });
         row.appendChild(link);
         node.appendChild(row);
       });
@@ -864,7 +909,7 @@
       attentionRows.forEach(function (entry) {
         var line = el("div", { className: "ccr-binding-card" });
         var copy = el("div");
-        copy.appendChild(el("div", { text: ROLE_NAME[entry.target] + " · " + safeText(entry.item.reason, "Attention item"), className: "ccr-binding-title" }));
+        copy.appendChild(el("div", { text: ROLE_NAME[entry.target] + " · " + attentionSummary(entry.item), className: "ccr-binding-title" }));
         copy.appendChild(el("div", { text: safeText(entry.item.attention_id), className: "ccr-binding-meta" }));
         line.appendChild(copy);
         line.appendChild(chip(entry.target.toUpperCase(), "is-brass"));
@@ -883,10 +928,11 @@
     }
 
     var bindings = card.bindings || [];
-    var surfaceSection = el("section", { className: "ccr-detail-section" });
-    surfaceSection.appendChild(el("h3", { text: "Navigation surfaces" }));
-    if (!bindings.length) surfaceSection.appendChild(el("p", { text: "No surface is bound to this work reference.", className: "ccr-empty-line" }));
-    bindings.forEach(function (binding) {
+    if (!REMOTE_READ_ONLY) {
+      var surfaceSection = el("section", { className: "ccr-detail-section" });
+      surfaceSection.appendChild(el("h3", { text: "Navigation surfaces" }));
+      if (!bindings.length) surfaceSection.appendChild(el("p", { text: "No surface is bound to this work reference.", className: "ccr-empty-line" }));
+      bindings.forEach(function (binding) {
       var confidence = bindingConfidence(binding);
       var row = el("div", { className: "ccr-binding-card" });
       var copy = el("div");
@@ -909,9 +955,10 @@
       });
       controls.appendChild(unbind);
       row.appendChild(controls);
-      surfaceSection.appendChild(row);
-    });
-    body.appendChild(surfaceSection);
+        surfaceSection.appendChild(row);
+      });
+      body.appendChild(surfaceSection);
+    }
   }
 
   function openDetail(card, opener) {
@@ -942,6 +989,7 @@
   // loose ends ------------------------------------------------------------
   function renderLooseRows(selector, rows, rowBuilder, emptyLine) {
     var list = document.querySelector(selector + " ul");
+    if (!list) return 0;
     clear(list);
     (rows || []).forEach(function (row) { list.appendChild(rowBuilder(row)); });
     if (!rows || !rows.length) list.appendChild(el("li", { text: emptyLine, className: "ccr-empty-line" }));
@@ -952,7 +1000,7 @@
     var unjoined = renderLooseRows("#unjoined-prs", doc.unjoined_open_prs, function (pr) {
       var li = el("li", { className: "ccr-row" });
       li.appendChild(el("span", { text: safeText(pr.repo) + " #" + safeText(pr.number) + " · " + safeText(pr.title, "Untitled PR"), className: "ccr-row-title" }));
-      li.appendChild(el("a", { text: "Open PR", className: "ccr-open-button", attrs: { href: pr.url || "#", target: "_blank", rel: "noopener" } }));
+      li.appendChild(el("a", { text: "Open PR", className: "ccr-open-button", attrs: { href: pr.url || "#", target: "_blank", rel: "noopener noreferrer" } }));
       return li;
     }, "Every loaded open PR is claimed by a work card.");
 
@@ -1169,11 +1217,15 @@
     STATE.capabilities = (body && body.capabilities) || {};
     indexState(doc);
 
-    var sources = {};
-    Object.keys(doc.sources || {}).forEach(function (key) { sources[key] = doc.sources[key]; });
-    sources.composed_at = body && body.composed_at;
-    renderSourcePulse(body, sources);
-    renderSystemSources(sources);
+    if (REMOTE_READ_ONLY) {
+      renderRemoteSources(doc, doc.source_freshness, doc.code_identity);
+    } else {
+      var sources = {};
+      Object.keys(doc.sources || {}).forEach(function (key) { sources[key] = doc.sources[key]; });
+      sources.composed_at = body && body.composed_at;
+      renderSourcePulse(body, sources);
+      renderSystemSources(sources);
+    }
 
     var degraded = (doc.degraded || []).slice();
     if (body && body.state_refresh_error) degraded.push(body.state_refresh_error);
@@ -1192,9 +1244,9 @@
     document.getElementById("nav-today-count").textContent = String(chairman.length);
 
     renderWork();
-    renderSurfaces();
+    if (!REMOTE_READ_ONLY) renderSurfaces();
     var loose = renderLooseEnds(doc);
-    renderCapabilities(STATE.capabilities);
+    if (!REMOTE_READ_ONLY) renderCapabilities(STATE.capabilities);
     rebuildPaletteIndex();
 
     if (STATE.selectedWork && STATE.workByRef[STATE.selectedWork.work_ref]) {
@@ -1209,7 +1261,7 @@
       renderEverything(body);
       return body;
     }).catch(function () {
-      renderDegraded(["control_room_api: unavailable — this page could not reach the local state endpoint"]);
+      renderDegraded(["control_room_api: unavailable — this page could not reach the state endpoint"]);
       return null;
     });
   }
@@ -1263,13 +1315,14 @@
     var collapsed = false;
 
     function desktopDockVisible() {
-      return !(window.matchMedia && window.matchMedia("(max-width: 1050px)").matches);
+      return !REMOTE_READ_ONLY && !(window.matchMedia && window.matchMedia("(max-width: 1050px)").matches);
     }
 
     function applyDockState() {
       // Below the dock breakpoint the dock is replaced by the responsive
       // Surfaces section. A remembered desktop collapse preference must not
       // reserve a phantom 42px grid column when the dock itself is hidden.
+      if (!dock) return;
       var activeCollapsed = collapsed && desktopDockVisible();
       dock.classList.toggle("is-collapsed", activeCollapsed);
       if (layout) layout.classList.toggle("ccr-dock-collapsed", activeCollapsed);
@@ -1279,9 +1332,11 @@
       toggle.setAttribute("aria-expanded", activeCollapsed ? "false" : "true");
     }
 
-    try { collapsed = window.localStorage.getItem(DOCK_KEY) === "1"; } catch (_e) { collapsed = false; }
-    applyDockState();
-    window.addEventListener("resize", applyDockState);
+    if (!REMOTE_READ_ONLY) {
+      try { collapsed = window.localStorage.getItem(DOCK_KEY) === "1"; } catch (_e) { collapsed = false; }
+      applyDockState();
+      window.addEventListener("resize", applyDockState);
+    }
 
     document.getElementById("ccr-theme").addEventListener("click", cycleTheme);
     document.getElementById("ccr-command").addEventListener("click", function () { openPalette(this); });
@@ -1362,13 +1417,14 @@
       });
     }
 
-    document.getElementById("ccr-dock-collapse").addEventListener("click", function () {
-      collapsed = !collapsed;
-      applyDockState();
-      try { window.localStorage.setItem(DOCK_KEY, collapsed ? "1" : "0"); } catch (_e) { /* no-op */ }
-    });
+    if (!REMOTE_READ_ONLY) {
+      document.getElementById("ccr-dock-collapse").addEventListener("click", function () {
+        collapsed = !collapsed;
+        applyDockState();
+        try { window.localStorage.setItem(DOCK_KEY, collapsed ? "1" : "0"); } catch (_e) { /* no-op */ }
+      });
 
-    document.getElementById("discover-run").addEventListener("click", function () {
+      document.getElementById("discover-run").addEventListener("click", function () {
       getJSON("/api/discover").then(renderDiscoverResults).catch(function () {
         var results = document.getElementById("discover-results");
         clear(results);
@@ -1376,7 +1432,7 @@
       });
     });
 
-    document.getElementById("refresh-builds").addEventListener("click", function () {
+      document.getElementById("refresh-builds").addEventListener("click", function () {
       var btn = this;
       var result = document.getElementById("refresh-builds-result");
       btn.disabled = true;
@@ -1396,10 +1452,10 @@
       }).finally(function () { btn.disabled = false; });
     });
 
-    document.getElementById("bind-provider").addEventListener("change", updateBindFieldVisibility);
-    document.getElementById("bind-chatgpt-manager").addEventListener("change", updateBindFieldVisibility);
-    updateBindFieldVisibility();
-    document.getElementById("bind-form").addEventListener("submit", function (event) {
+      document.getElementById("bind-provider").addEventListener("change", updateBindFieldVisibility);
+      document.getElementById("bind-chatgpt-manager").addEventListener("change", updateBindFieldVisibility);
+      updateBindFieldVisibility();
+      document.getElementById("bind-form").addEventListener("submit", function (event) {
       event.preventDefault();
       var result = document.getElementById("bind-result");
       clear(result);
@@ -1440,6 +1496,7 @@
         clear(result);
         result.appendChild(el("div", { text: "Binding request failed · local server unavailable", className: "ccr-problem" }));
       });
-    });
+      });
+    }
   });
 })();
