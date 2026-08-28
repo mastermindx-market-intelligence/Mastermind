@@ -190,7 +190,33 @@ self-claim unless the currently accepted pickup law explicitly permits that mech
 receiver is lawfully assigned, that receiver performs the same pickup handshake without requiring a
 second redundant assignment.
 
-For either mode, keep delivery, pickup acknowledgement, watcher readiness, execution start,
+For Chairman-mediated/manual account selection, also declare exactly one binding mode from
+`WORKER_AVENUE_ROUTING.md`:
+
+```text
+RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE
+RECEIVER_BINDING_MODE: EXACT_SESSION_REQUIRED
+```
+
+`CAPACITY_SELECTABLE` is the default for ordinary new bounded work whose complete context is carried
+by the commission/canonical sources and whose exact provider conversation/session is not part of the
+target. Before `START`, the Chairman may issue `PRESTART_REBIND` by delivering the same operation to
+another eligible concrete account/session. The operation key, carrier, scope and logical
+responsibility stay unchanged; the newest explicit live Chairman assignment wins. When no prior
+`START`, modifying effect, `EFFECT_UNKNOWN`, or conflicting active pickup exists, a numbered-account
+mismatch alone is not a blocker and the new receiver ACKs with its actual identity.
+
+`EXACT_SESSION_REQUIRED` applies when provider-native continuation/resume, effect reconciliation,
+conversation-local state, or the acceptance target requires the exact existing provider
+conversation/session. A different account/session is then a real mismatch and must fail closed or
+reconcile under the owning RuntimeBinding/continuation law.
+
+After `START`, a concrete runtime binding is sticky for the current operation. Quota/capacity loss
+must return through the accepted capacity/continuation reconciliation path rather than silently
+moving the same started work to another numbered account. `EFFECT_UNKNOWN` always blocks receiver
+change.
+
+For either receiver mode, keep delivery, pickup acknowledgement, watcher readiness, execution start,
 execution and completion distinct. The worker-side handshake is:
 
 1. **Pickup ACK:** immediately acknowledge the exact `operation_key` in the required carrier and
@@ -289,7 +315,7 @@ For an eligible Slack/session handoff:
    ```
 
    The temporary host-native watcher prompt/job must be bounded to the exact operation/carrier. On
-   each run it reads the exact carrier using whatever connector/read capability is available to that
+   each run it reads that exact carrier using whatever connector/read capability is available to that
    scheduled surface, ignores the baseline and older messages, and detects the first qualifying
    opposite-side reply for the current operation. If the scheduled surface cannot access that carrier
    at run time, the watcher is unavailable; report that concrete limitation rather than generalizing
@@ -439,7 +465,11 @@ K2 specifically fails if any regression recurs:
   redundant cross-channel/second Chairman authorization not required by current source law;
 * a `DIRECT_TARGETED` session asks the Chairman for a second receiver assignment, remains in
   `AWAITING_CHAIRMAN_RECEIVER_ASSIGNMENT`, or does nothing even though the current live delivery
-  already assigned it; or
+  already assigned it;
+* a `CAPACITY_SELECTABLE` receiver blocks only because an older packet named another numbered account
+  even though the newest explicit live Chairman assignment reached this session before `START` and no
+  effect/effect-unknown/conflicting pickup exists, or a session treats `CAPACITY_SELECTABLE` as
+  permission to hop accounts after `START`; or
 * a session declares watching impossible merely because Slack lacks push subscriptions while its
   host exposes a usable native scheduled/condition watcher, stays in a watcher-planning/debate loop
   instead of invoking the available create/arm tool, or says `WATCH_ARMED` without an actual
