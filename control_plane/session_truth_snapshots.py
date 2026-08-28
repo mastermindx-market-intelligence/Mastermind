@@ -51,49 +51,6 @@ _GITHUB_CI = frozenset(
         "unavailable",
     }
 )
-_PORTFOLIO_MODES = frozenset(
-    {
-        "tracked",
-        "maintenance_exception",
-        "workstream_creation",
-        "architecture_candidate",
-        "implementation",
-    }
-)
-_AUTHORITIES = frozenset(
-    {
-        "runtime",
-        "records",
-        "research",
-        "architecture",
-        "maintenance",
-        "production-proof",
-        "implementation",
-    }
-)
-_COMPLETIONS = frozenset(
-    {
-        "merge-is-done",
-        "built-not-proven",
-        "production-proof-required",
-        "acceptance-required",
-        "hosted-ci+current-estate-proof+sol-acceptance",
-    }
-)
-_PROOF_STATES = frozenset(
-    {
-        "open",
-        "not_built",
-        "spec_only",
-        "partial",
-        "built_not_proven",
-        "proven_live",
-        "blocked",
-        "complete",
-        "not_required",
-        "unknown",
-    }
-)
 _LINEAR_STATUSES = frozenset(
     {
         "Backlog",
@@ -502,27 +459,26 @@ def normalize_github(doc: Mapping[str, Any]) -> dict[str, Any]:
                     row["workstream"], f"github.pull_requests[{index}].workstream"
                 ),
                 "linear": _mas(row["linear"], f"github.pull_requests[{index}].linear"),
-                "portfolio_mode": _nullable_enum(
+                # These values belong to the source repository's PR-linkage
+                # contract.  Session Truth preserves them as structural opaque
+                # metadata and never becomes a second authoring grammar.
+                "portfolio_mode": _nullable_string(
                     row["portfolio_mode"],
-                    _PORTFOLIO_MODES,
                     f"github.pull_requests[{index}].portfolio_mode",
                 ),
                 "wave": _nullable_string(
                     row["wave"], f"github.pull_requests[{index}].wave"
                 ),
-                "authority": _nullable_enum(
+                "authority": _nullable_string(
                     row["authority"],
-                    _AUTHORITIES,
                     f"github.pull_requests[{index}].authority",
                 ),
-                "completion": _nullable_enum(
+                "completion": _nullable_string(
                     row["completion"],
-                    _COMPLETIONS,
                     f"github.pull_requests[{index}].completion",
                 ),
-                "proof_state": _nullable_enum(
+                "proof_state": _nullable_string(
                     row["proof_state"],
-                    _PROOF_STATES,
                     f"github.pull_requests[{index}].proof_state",
                 ),
                 "operation_key": _nullable_string(
@@ -619,9 +575,8 @@ def normalize_linear(doc: Mapping[str, Any]) -> dict[str, Any]:
                 "workstream": _ws(
                     issue["workstream"], f"linear.issues[{index}].workstream"
                 ),
-                "completion": _nullable_enum(
+                "completion": _nullable_string(
                     issue["completion"],
-                    _COMPLETIONS,
                     f"linear.issues[{index}].completion",
                 ),
                 "projection_revision": revision,

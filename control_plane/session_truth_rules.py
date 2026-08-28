@@ -55,7 +55,9 @@ _CONSEQUENCE = {
     "INFO": "visibility_only",
 }
 _TERMINAL_LINEAR = frozenset({"Done", "Canceled", "Cancelled"})
-_TERMINAL_PROOF = frozenset({"complete", "proven_live", "not_required"})
+_NONTERMINAL_PROOF = frozenset(
+    {"open", "not_built", "spec_only", "partial", "built_not_proven", "blocked"}
+)
 _RUNNABLE_SLACK_CLASSES = frozenset({"PICKUP", "COMMISSION", "READ_ONLY_COMMISSION"})
 
 
@@ -97,6 +99,7 @@ def build_indexes(inputs: Mapping[str, Any]) -> dict[str, Any]:
 
     github: dict[tuple[str, int], dict[str, Any]] = {}
     github_by_operation: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    github_by_linear: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for pr in _rows(inputs.get("github"), "pull_requests"):
         repository = pr.get("repository")
         number = pr.get("number")
@@ -106,6 +109,9 @@ def build_indexes(inputs: Mapping[str, Any]) -> dict[str, Any]:
             operation_key = stored.get("operation_key")
             if isinstance(operation_key, str) and operation_key:
                 github_by_operation[operation_key].append(stored)
+            linear_id = stored.get("linear")
+            if isinstance(linear_id, str) and linear_id:
+                github_by_linear[linear_id].append(stored)
 
     identities_by_slack: dict[str, list[dict[str, Any]]] = defaultdict(list)
     identities_by_service: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -144,6 +150,7 @@ def build_indexes(inputs: Mapping[str, Any]) -> dict[str, Any]:
         "linear_available": _available(inputs.get("linear")),
         "github": github,
         "github_by_operation": dict(github_by_operation),
+        "github_by_linear": dict(github_by_linear),
         "slack_by_operation": dict(slack_by_operation),
         "executive_operations": executive_operations,
         "identities_by_slack": dict(identities_by_slack),
@@ -280,15 +287,38 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                     source_a={"agentos_projection_revision": direct_revision},
                     source_b={"linear_projection_revision": linear_revision},
                 )
-        if issue.get("status") == "Done" and issue.get("completion") != "merge-is-done":
-            _append(
-                findings,
-                seen,
-                "FALSE_LINEAR_COMPLETION",
-                issue_id,
-                source_a={"completion": issue.get("completion")},
-                source_b={"linear_status": "Done"},
-            )
+        if issue.get("status") == "Done":
+            # Linear is only a projection.  A false-completion finding therefore
+            # requires exact bound owner evidence that the canonical proof remains
+            # nonterminal.  Terminal proof makes Done valid; absent/future proof
+            # classifications stay unknown rather than being guessed from the
+            # spelling of the completion header.
+            relations = {
+                (relation.get("repository"), relation.get("number"))
+                for relation in (issue.get("github_relations") or [])
+                if isinstance(relation, Mapping)
+            }
+            bound_proof_states = [
+                pr.get("proof_state")
+                for pr in indexes["github_by_linear"].get(issue_id, [])
+                if (pr.get("repository"), pr.get("number")) in relations
+            ]
+            if any(state in _NONTERMINAL_PROOF for state in bound_proof_states):
+                _append(
+                    findings,
+                    seen,
+                    "FALSE_LINEAR_COMPLETION",
+                    issue_id,
+                    source_a={
+                        "completion": issue.get("completion"),
+                        "owner_proof_states": sorted(
+                            state
+                            for state in bound_proof_states
+                            if isinstance(state, str)
+                        ),
+                    },
+                    source_b={"linear_status": "Done"},
+                )
 
     for issue_id, issue in linear.items():
         parent_id = issue.get("parent_id")
@@ -356,7 +386,7 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
         if (
             pr.get("state") == "merged"
             and pr.get("completion") != "merge-is-done"
-            and pr.get("proof_state") not in _TERMINAL_PROOF
+            and pr.get("proof_state") in _NONTERMINAL_PROOF
         ):
             _append(
                 findings,
@@ -369,17 +399,6 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
 
         if pr.get("state") == "open" and isinstance(workstream_key, str) and workstream_key:
             active_by_workstream_wave[(workstream_key, pr.get("wave"))].append(pr)
-
-        pickup_head = pr.get("pickup_head_sha")
-        if isinstance(pickup_head, str) and pickup_head and pr.get("head_sha") != pickup_head:
-            _append(
-                findings,
-                seen,
-                "CARRIER_HEAD_MOVED",
-                subject,
-                source_a={"pickup_head_sha": pickup_head},
-                source_b={"head_sha": pr.get("head_sha")},
-            )
 
         linear_id = pr.get("linear")
         if isinstance(linear_id, str) and linear_id:
