@@ -51,6 +51,16 @@ At release:
 - no open WP-1 implementation PR or branch existed before this carrier was created;
 - no WP-2 or WP-TW1 implementation carrier is authorized to start before WP-1 acceptance.
 
+### Current-base reconciliation and final-repair receipt — 2026-08-28
+
+The release pin above is historical pickup evidence and is intentionally preserved. Before final acceptance, the same #178 carrier was history-preservingly reconciled to protected `master = b901dee0272a99b8a1d60385848b99b7273e8261`, with the same compatible `mastermind.sol_skillpack.v1` v1.0.0 / bootstrap-major 1. The reconciled pre-review head was `4122dd245f60937cde44777cd5eda00ac03d25c9`; the protected-master catch-up changed no WP implementation path outside this carrier.
+
+Independent final adversarial review `wp1-final-adversarial-review-20260827-sol-001` returned `REQUEST_CHANGES` against that reconciled head. Sol accepted the authority/presentation findings and released the same-carrier repair operation `wp1-final-authority-boundary-repair-20260827-sol-001` without creating a new PR, branch, lifecycle, Worker or provider session.
+
+The final repair preserves the accepted Relay/personal-principal distinction: the trusted Relay app may transport already-validated logical actors, but it is never inserted into the personal Sol allowlist and transport identity never becomes Executive authority. Repair scope is limited to V2 contributor→executive reply direction, V2 frame/presentation integrity, mutation/static no-rebuild coverage, and this current-base evidence amendment. Historical authorship receipts are not rewritten by this section.
+
+Final-repair TDD evidence begins with RED commit `1080053d9fd80bb305f3142454269f94b7ddd829`, whose hosted repository gate failed only the four intended missing behaviors: CEO self-adjudication refusal, worker ChatGPT-trailer refusal, Unicode U+2028/U+2029 frame-integrity refusal, and Slack mention-shaped presentation refusal. Production fixes then landed on the same carrier in `539724c183bad2fffdd051464cb135906b38a800` and `2d721347fea6d58eb3c68fdb5f0e8ba31c9650e3`; the expanded mutation/static-fence receipt follows on the same history. Final acceptance must cite the exact final carrier head and its fresh hosted CI/CodeQL rather than treating these intermediate commits as completion.
+
 ## Exact scope / owned paths
 
 Expected implementation/test paths are exactly:
@@ -63,6 +73,8 @@ tests/test_slack_agent_dialogue_contract_v2.py            CREATE
 tests/test_slack_agent_dialogue_engine_v2.py              CREATE
 tests/test_slack_agent_dialogue_service.py                MODIFY narrowly for V1 regression + V2 dispatch tests
 ```
+
+The final adversarial repair explicitly widens the acceptance-fence surface to `tests/test_slack_agent_dialogue_a1_static_fences.py` so the new V2 modules participate in the already-existing A1 no-persistence/no-network/no-duplicate-transport fence. This is proof/fence scope, not a new product or runtime path.
 
 This checked-in commission file and the already-merged plan/spec are evidence/source-law files; ordinary implementation commits need not edit them.
 
