@@ -832,13 +832,14 @@ def test_v2_wait_continue_refuses_when_injected_policy_denies() -> None:
 @pytest.mark.parametrize("request_type", ["DECISION_REQUEST", "RESULT"])
 def test_v2_wait_continue_refuses_noncontinuable_request_family(request_type: str) -> None:
     client = setup_client()
+    key_suffix = request_type.lower().replace("_", "-")
     request = v2_message(
         request_type,
-        message_key=f"asd-{request_type.lower()}-v2-engine-no-continue",
+        message_key=f"asd-{key_suffix}-v2-engine-no-continue",
     )
     reply = v2_message(
         "CONTINUE",
-        message_key=f"asd-continue-v2-engine-from-{request_type.lower()}",
+        message_key=f"asd-continue-v2-engine-from-{key_suffix}",
         actor_ref=ceo_actor(),
         reply_to_message_key=request["message_key"],
     )
