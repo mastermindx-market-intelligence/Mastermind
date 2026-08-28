@@ -191,6 +191,32 @@ def test_remote_projection_is_deterministic_and_does_not_mutate_input(canonical_
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "sensitive_value"),
+    [
+        ("title", "provider_session_id=raw-123"),
+        ("program", "host.local"),
+        ("next_action", "/opt/private/file"),
+        ("reason", "person@example.com"),
+    ],
+)
+def test_remote_projection_redacts_sensitive_agent_os_freeform_fields(
+    canonical_doc,
+    field,
+    sensitive_value,
+):
+    document = copy.deepcopy(canonical_doc)
+    assert document["work"][0]["agent_os"] is not None
+    document["work"][0]["agent_os"][field] = sensitive_value
+    before = copy.deepcopy(document)
+
+    projected = _project(document)
+
+    assert document == before
+    assert projected["work"][0]["agent_os"][field] == "agent_os_detail_redacted"
+    assert sensitive_value not in json.dumps(projected, sort_keys=True)
+
+
 @pytest.fixture
 def collector_config(tmp_path):
     macro = tmp_path / "macro"
