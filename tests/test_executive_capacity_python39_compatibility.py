@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,10 @@ def _system_python(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.skipif(not SYSTEM_PYTHON.is_file(), reason="system Python is unavailable")
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not SYSTEM_PYTHON.is_file(),
+    reason="macOS system Python is unavailable",
+)
 def test_h0_topology_and_contract_clis_run_with_macos_system_python(
     tmp_path: Path,
 ) -> None:
@@ -122,7 +126,10 @@ def test_h0_topology_and_contract_clis_run_with_macos_system_python(
     assert json.loads(verified_contract.stdout) == rendered
 
 
-@pytest.mark.skipif(not SYSTEM_PYTHON.is_file(), reason="system Python is unavailable")
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not SYSTEM_PYTHON.is_file(),
+    reason="macOS system Python is unavailable",
+)
 def test_python39_runs_v2_manifest_inventory_closure_intent_receipt_and_recovery(
     tmp_path: Path,
 ) -> None:

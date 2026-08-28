@@ -6,6 +6,7 @@ import select
 import shlex
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -25,6 +26,9 @@ PLAN = (
     / "docs/superpowers/plans/2026-08-27-executive-capacity-cf2-h0-source-closure-repair.md"
 )
 INVALID = (64, "INVALID_INVOCATION\n", "")
+DARWIN_NATIVE = pytest.mark.skipif(
+    sys.platform != "darwin", reason="native macOS bootstrap ceremony"
+)
 
 CLOSED_BOOTSTRAP_ENVIRONMENT = (
     "HOME=/var/empty",
@@ -445,6 +449,7 @@ def test_bootstrap_refuses_operator_identity_mismatch_before_bundle_observation(
     assert not root_namespace.exists()
 
 
+@DARWIN_NATIVE
 def test_exact_disposable_carrier_inventory_runs_under_isolated_apple_python(
     tmp_path: Path,
 ) -> None:
@@ -477,6 +482,7 @@ def test_exact_disposable_carrier_inventory_runs_under_isolated_apple_python(
     assert "Build or inspect inert CF2-H0 artifacts" in completed.stdout
 
 
+@DARWIN_NATIVE
 def test_invalid_bundle_cannot_interpret_hostile_stdin_before_authentication(
     tmp_path: Path,
 ) -> None:
@@ -552,6 +558,7 @@ def test_native_runbook_command_closes_ambient_bash_env_before_line_one(
     assert not sentinel.exists()
 
 
+@DARWIN_NATIVE
 def test_symlink_bundle_refuses_without_touching_target(
     tmp_path: Path,
 ) -> None:
@@ -621,6 +628,7 @@ def test_symlink_bundle_refuses_without_touching_target(
     assert not root_namespace.exists()
 
 
+@DARWIN_NATIVE
 def test_exact_bundle_runs_three_passes_and_removes_root_namespace(
     tmp_path: Path,
 ) -> None:
@@ -642,6 +650,7 @@ def test_exact_bundle_runs_three_passes_and_removes_root_namespace(
     assert not root_namespace.exists()
 
 
+@DARWIN_NATIVE
 def test_cleanup_failure_cannot_emit_clean_success(tmp_path: Path) -> None:
     _repository, commit, bundle, macro_transport = _bootstrap_fixture(tmp_path)
     environment, root_namespace = _bootstrap_environment(tmp_path)
@@ -656,6 +665,7 @@ def test_cleanup_failure_cannot_emit_clean_success(tmp_path: Path) -> None:
     assert not root_namespace.exists()
 
 
+@DARWIN_NATIVE
 def test_gate_release_failure_reaps_gated_group_before_refusal_cleanup(
     tmp_path: Path,
 ) -> None:
@@ -732,6 +742,7 @@ def test_gate_release_failure_reaps_gated_group_before_refusal_cleanup(
         ("unexpected-exit", (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")),
     ),
 )
+@DARWIN_NATIVE
 def test_post_spawn_terminal_receipt_waits_for_termination_proof(
     tmp_path: Path,
     terminal_path: str,
@@ -833,6 +844,7 @@ def test_post_spawn_terminal_receipt_waits_for_termination_proof(
         ),
     ),
 )
+@DARWIN_NATIVE
 def test_direct_carrier_return_retains_group_until_terminal_proof(
     tmp_path: Path,
     repair_exit: int,
@@ -930,6 +942,7 @@ def test_direct_carrier_return_retains_group_until_terminal_proof(
         (75, "H0_LOCK_HELD"),
     ),
 )
+@DARWIN_NATIVE
 def test_bootstrap_preserves_authenticated_carrier_primary_failure(
     tmp_path: Path, repair_exit: int, repair_output: str
 ) -> None:
@@ -950,6 +963,7 @@ def test_bootstrap_preserves_authenticated_carrier_primary_failure(
     assert not root_namespace.exists()
 
 
+@DARWIN_NATIVE
 def test_preexisting_fixed_namespace_refuses_without_deleting_unknown_residue(
     tmp_path: Path,
 ) -> None:
@@ -972,6 +986,7 @@ def test_preexisting_fixed_namespace_refuses_without_deleting_unknown_residue(
 
 
 @pytest.mark.parametrize("interrupt", (signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+@DARWIN_NATIVE
 def test_signal_removes_exclusive_root_namespace(
     tmp_path: Path, interrupt: signal.Signals
 ) -> None:
@@ -1003,6 +1018,7 @@ def test_signal_removes_exclusive_root_namespace(
 
 
 @pytest.mark.parametrize("interrupt", (signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+@DARWIN_NATIVE
 def test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup(
     tmp_path: Path, interrupt: signal.Signals
 ) -> None:
@@ -1062,6 +1078,7 @@ def test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup(
     ("after-spawn-before-pid", "after-pid-before-pgid", "steady-state"),
 )
 @pytest.mark.parametrize("interrupt", (signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+@DARWIN_NATIVE
 def test_signal_registration_window_never_releases_untracked_carrier(
     tmp_path: Path, registration_phase: str, interrupt: signal.Signals
 ) -> None:

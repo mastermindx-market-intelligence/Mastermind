@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from ops.executive_os import capacity_host_artifacts as artifacts
 from ops.executive_os import capacity_source_contract as contract
@@ -2849,6 +2850,23 @@ def _canonical_e4_manifest_from_git_objects() -> tuple[str, bytes, int]:
     return tree, manifest_bytes, len(entries)
 
 
+def test_primary_ci_checkout_retains_full_history_for_trusted_release_identity() -> None:
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["test"]["steps"]
+    primary = next(
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and step.get("uses") == "actions/checkout@v4"
+        and "repository" not in step.get("with", {})
+    )
+    assert primary.get("with", {}).get("fetch-depth") == 0
+
+
 def test_trusted_e4_release_manifest_identity_is_derived_from_git_objects() -> None:
     tree, manifest_bytes, entry_count = _canonical_e4_manifest_from_git_objects()
     assert tree == artifacts._TRUSTED_E4_RELEASE_TREE
@@ -3098,6 +3116,251 @@ def test_absolute_view_authenticates_fixed_macos_root_alias_component(
         view = artifacts._RepositoryView(alias, recursive=False)
         try:
             assert stat.S_ISDIR(os.fstat(view.root_descriptor).st_mode)
+            view.revalidate()
+        finally:
+            view.close()
+
+
+@pytest.mark.parametrize(
+    "violation",
+    (
+        "type",
+        "owner",
+        "group",
+        "mode",
+        "device",
+        "link",
+        "acl",
+        "xattr",
+        "flags",
+    ),
+)
+def test_linux_tmp_traversal_root_requires_exact_security_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    violation: str,
+) -> None:
+    descriptor = os.open(
+        tmp_path,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    original = os.fstat(descriptor)
+    changes = {
+        "st_mode": stat.S_IFDIR | 0o1777,
+        "st_uid": 0,
+        "st_gid": 0,
+        "st_dev": original.st_dev,
+        "st_nlink": max(original.st_nlink, 1),
+        "st_flags": 0,
+    }
+    if violation == "type":
+        changes["st_mode"] = stat.S_IFREG | 0o1777
+    elif violation == "owner":
+        changes["st_uid"] = 10000
+    elif violation == "group":
+        changes["st_gid"] = 10000
+    elif violation == "mode":
+        changes["st_mode"] = stat.S_IFDIR | 0o0777
+    elif violation == "device":
+        changes["st_dev"] = original.st_dev + 1
+    elif violation == "link":
+        changes["st_nlink"] = 0
+    elif violation == "flags":
+        changes["st_flags"] = 1
+    monkeypatch.setattr(
+        artifacts,
+        "_descriptor_extended_attribute_names",
+        lambda _descriptor: (
+            frozenset({b"user.mastermind-test"})
+            if violation == "xattr"
+            else frozenset()
+        ),
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_descriptor_has_extended_acl",
+        lambda _descriptor: violation == "acl",
+    )
+    try:
+        with pytest.raises(
+            artifacts.CapacityHostArtifactError,
+            match="SOURCE_METADATA_INVALID",
+        ):
+            artifacts._require_linux_tmp_traversal_root(
+                descriptor,
+                _StatOverlay(original, **changes),
+                expected_device=original.st_dev,
+                reason="SOURCE_METADATA_INVALID",
+            )
+    finally:
+        os.close(descriptor)
+
+
+def test_linux_tmp_traversal_root_accepts_only_empty_security_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    descriptor = os.open(
+        tmp_path,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    original = os.fstat(descriptor)
+    trusted = _StatOverlay(
+        original,
+        st_mode=stat.S_IFDIR | 0o1777,
+        st_uid=0,
+        st_gid=0,
+        st_dev=original.st_dev,
+        st_nlink=max(original.st_nlink, 1),
+        st_flags=0,
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_descriptor_extended_attribute_names",
+        lambda _descriptor: frozenset(),
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_descriptor_has_extended_acl",
+        lambda _descriptor: False,
+    )
+    try:
+        assert artifacts._require_linux_tmp_traversal_root(
+            descriptor,
+            trusted,
+            expected_device=original.st_dev,
+            reason="SOURCE_METADATA_INVALID",
+        ) == frozenset()
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="real Linux /tmp traversal root")
+@pytest.mark.parametrize("phase", ("open", "revalidation"))
+@pytest.mark.parametrize(
+    "violation",
+    (
+        "owner",
+        "group",
+        "mode",
+        "device",
+        "link",
+        "acl",
+        "xattr",
+        "flags",
+        "relation",
+    ),
+)
+def test_absolute_view_refuses_each_linux_tmp_traversal_root_violation(
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    violation: str,
+) -> None:
+    tmp_info = Path("/tmp").stat()
+    tmp_identity = (tmp_info.st_dev, tmp_info.st_ino)
+    original_fstat = os.fstat
+    original_stat = os.stat
+    original_xattrs = artifacts._descriptor_extended_attribute_names
+    original_acl = artifacts._descriptor_has_extended_acl
+
+    with tempfile.TemporaryDirectory(prefix="mmx-linux-tmp-", dir="/tmp") as root:
+        evidence = Path(root) / "evidence.json"
+        evidence.write_bytes(b"evidence\n")
+        evidence.chmod(0o444)
+        view = (
+            artifacts._RepositoryView(evidence)
+            if phase == "revalidation"
+            else None
+        )
+
+        def is_tmp(info: os.stat_result) -> bool:
+            return (info.st_dev, info.st_ino) == tmp_identity
+
+        def overlay(
+            info: os.stat_result, *, relation: bool = False
+        ) -> os.stat_result | _StatOverlay:
+            if not is_tmp(info):
+                return info
+            changes: dict[str, int] = {}
+            if violation == "owner":
+                changes["st_uid"] = 10000
+            elif violation == "group":
+                changes["st_gid"] = 10000
+            elif violation == "mode":
+                changes["st_mode"] = stat.S_IFDIR | 0o0777
+            elif violation == "device":
+                changes["st_dev"] = info.st_dev + 1
+            elif violation == "link":
+                changes["st_nlink"] = 0
+            elif violation == "flags":
+                changes["st_flags"] = 1
+            elif violation == "relation" and relation:
+                changes["st_ino"] = info.st_ino + 1
+            return _StatOverlay(info, **changes) if changes else info
+
+        monkeypatch.setattr(
+            os,
+            "fstat",
+            lambda descriptor: overlay(original_fstat(descriptor)),
+        )
+        monkeypatch.setattr(
+            os,
+            "stat",
+            lambda *args, **kwargs: overlay(
+                original_stat(*args, **kwargs), relation=True
+            ),
+        )
+
+        def observed_xattrs(descriptor: int) -> frozenset[bytes]:
+            observed = original_xattrs(descriptor)
+            if violation == "xattr" and is_tmp(original_fstat(descriptor)):
+                return observed | frozenset({b"user.mastermind-test"})
+            return observed
+
+        def observed_acl(descriptor: int) -> bool:
+            if violation == "acl" and is_tmp(original_fstat(descriptor)):
+                return True
+            return original_acl(descriptor)
+
+        monkeypatch.setattr(
+            artifacts,
+            "_descriptor_extended_attribute_names",
+            observed_xattrs,
+        )
+        monkeypatch.setattr(
+            artifacts,
+            "_descriptor_has_extended_acl",
+            observed_acl,
+        )
+        try:
+            with pytest.raises(
+                artifacts.CapacityHostArtifactError,
+                match=(
+                    "SOURCE_VIEW_DRIFT"
+                    if phase == "revalidation"
+                    else "SOURCE_METADATA_INVALID"
+                ),
+            ):
+                if phase == "revalidation":
+                    assert view is not None
+                    view.revalidate()
+                else:
+                    artifacts._RepositoryView(evidence)
+        finally:
+            if view is not None:
+                view.close()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="real Linux /tmp traversal root")
+def test_absolute_view_accepts_exact_real_linux_tmp_traversal_root() -> None:
+    with tempfile.TemporaryDirectory(prefix="mmx-linux-tmp-", dir="/tmp") as root:
+        evidence = Path(root) / "evidence.json"
+        evidence.write_bytes(b"evidence\n")
+        evidence.chmod(0o444)
+        view = artifacts._RepositoryView(evidence)
+        try:
+            assert view.read_bytes(".", maximum_bytes=1024) == b"evidence\n"
+            assert view.guard_linux_tmp.count(True) == 1
             view.revalidate()
         finally:
             view.close()
@@ -3641,6 +3904,7 @@ def test_absolute_component_validation_refuses_before_open(
     assert not opened
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed root alias")
 @pytest.mark.parametrize("failure_stage", ("fstat", "xattrs", "readlink", "acl"))
 def test_native_alias_descriptor_is_owned_before_every_audit_refusal(
     tmp_path: Path,

@@ -406,6 +406,7 @@ class SourceRepairParents:
     security_xattr_states: tuple[tuple[int, frozenset[bytes]], ...] = ()
     ancestor_states: tuple[tuple[int, tuple[int, ...]], ...] = ()
     ancestor_xattr_states: tuple[tuple[int, frozenset[bytes]], ...] = ()
+    linux_tmp_ancestors: frozenset[int] = frozenset()
     ancestor_expected_uid: int = 0
     ancestor_expected_gid: int = 0
 
@@ -417,14 +418,22 @@ class SourceRepairParents:
                 info = os.fstat(descriptor)
                 if _descriptor_ancestor_state(info) != expected:
                     raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
-                _require_source_repair_ancestor(
-                    descriptor,
-                    info,
-                    expected_uid=self.ancestor_expected_uid,
-                    expected_gid=self.ancestor_expected_gid,
-                    expected_device=self.device,
-                    reason="SOURCE_REPAIR_PARENT_DRIFT",
-                )
+                if descriptor in self.linux_tmp_ancestors:
+                    _require_linux_tmp_traversal_root(
+                        descriptor,
+                        info,
+                        expected_device=self.device,
+                        reason="SOURCE_REPAIR_PARENT_DRIFT",
+                    )
+                else:
+                    _require_source_repair_ancestor(
+                        descriptor,
+                        info,
+                        expected_uid=self.ancestor_expected_uid,
+                        expected_gid=self.ancestor_expected_gid,
+                        expected_device=self.device,
+                        reason="SOURCE_REPAIR_PARENT_DRIFT",
+                    )
             for descriptor, expected in self.ancestor_xattr_states:
                 if _descriptor_extended_attribute_names(descriptor) != expected:
                     raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_DRIFT")
@@ -1033,6 +1042,31 @@ def _source_repair_ancestor_xattrs(
     if observed - _APPROVED_TRAVERSAL_ANCESTOR_XATTRS:
         raise CapacityHostArtifactError(reason)
     return observed
+
+
+def _require_linux_tmp_traversal_root(
+    descriptor: int,
+    info: os.stat_result,
+    *,
+    expected_device: int,
+    reason: str,
+) -> frozenset[bytes]:
+    """Authenticate the only Linux sticky shared traversal ancestor H0 permits."""
+
+    xattrs = _descriptor_extended_attribute_names(descriptor)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != 0
+        or stat.S_IMODE(info.st_mode) != 0o1777
+        or info.st_nlink < 1
+        or info.st_dev != expected_device
+        or int(getattr(info, "st_flags", 0)) != 0
+        or xattrs
+        or _descriptor_has_extended_acl(descriptor)
+    ):
+        raise CapacityHostArtifactError(reason)
+    return xattrs
 
 
 def _descriptor_closed_tree_digest(
@@ -2136,7 +2170,8 @@ def _open_source_repair_parents(
                 ),
             )
         ]
-        for component in absolute.parent.parts[1:]:
+        linux_tmp_ancestors: set[int] = set()
+        for component_index, component in enumerate(absolute.parent.parts[1:]):
             child = os.open(
                 component, directory_flags, dir_fd=guard_descriptors[-1]
             )
@@ -2144,14 +2179,31 @@ def _open_source_repair_parents(
             guard_descriptors.append(child)
             guard_names.append(component)
             child_info = os.fstat(child)
-            _require_source_repair_ancestor(
-                child,
-                child_info,
-                expected_uid=expected_uid,
-                expected_gid=expected_gid,
-                expected_device=ancestor_device,
-                reason="SOURCE_REPAIR_PARENT_INVALID",
+            linux_tmp = (
+                sys.platform == "linux"
+                and component_index == 0
+                and component == "tmp"
             )
+            if linux_tmp:
+                child_xattrs = _require_linux_tmp_traversal_root(
+                    child,
+                    child_info,
+                    expected_device=ancestor_device,
+                    reason="SOURCE_REPAIR_PARENT_INVALID",
+                )
+                linux_tmp_ancestors.add(child)
+            else:
+                _require_source_repair_ancestor(
+                    child,
+                    child_info,
+                    expected_uid=expected_uid,
+                    expected_gid=expected_gid,
+                    expected_device=ancestor_device,
+                    reason="SOURCE_REPAIR_PARENT_INVALID",
+                )
+                child_xattrs = _source_repair_ancestor_xattrs(
+                    child, reason="SOURCE_REPAIR_PARENT_INVALID"
+                )
             observed = os.stat(
                 component,
                 dir_fd=guard_descriptors[-2],
@@ -2165,12 +2217,7 @@ def _open_source_repair_parents(
                 raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
             ancestor_states.append((child, _descriptor_ancestor_state(child_info)))
             ancestor_xattr_states.append(
-                (
-                    child,
-                    _source_repair_ancestor_xattrs(
-                        child, reason="SOURCE_REPAIR_PARENT_INVALID"
-                    ),
-                )
+                (child, child_xattrs)
             )
 
         root_descriptor = os.open(
@@ -2285,6 +2332,7 @@ def _open_source_repair_parents(
             ),
             ancestor_states=tuple(ancestor_states),
             ancestor_xattr_states=tuple(ancestor_xattr_states),
+            linux_tmp_ancestors=frozenset(linux_tmp_ancestors),
             ancestor_expected_uid=expected_uid,
             ancestor_expected_gid=expected_gid,
         )
@@ -6712,6 +6760,7 @@ class _RepositoryView:
         self.guard_states: list[tuple[int, ...]] = []
         self.guard_xattr_states: list[frozenset[bytes]] = []
         self.guard_native_tmp: list[bool] = []
+        self.guard_linux_tmp: list[bool] = []
         self.alias_relations: list[
             tuple[int, str, int, tuple[int, ...], frozenset[bytes], str]
         ] = []
@@ -6744,7 +6793,11 @@ class _RepositoryView:
                     raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
                 root_guard = os.open("/", directory_flags)
                 self._retain_guard(root_guard, "/", relation_parent=None)
-                alias_target = self._NATIVE_ROOT_ALIASES.get(components[0])
+                alias_target = (
+                    self._NATIVE_ROOT_ALIASES.get(components[0])
+                    if sys.platform == "darwin"
+                    else None
+                )
                 native_alias_name: str | None = None
                 if alias_target is not None:
                     alias_info = os.stat(
@@ -6814,6 +6867,12 @@ class _RepositoryView:
                             and component_index == 1
                             and component == "tmp"
                         ),
+                        linux_tmp=(
+                            sys.platform == "linux"
+                            and native_alias_name is None
+                            and component_index == 0
+                            and component == "tmp"
+                        ),
                     )
                 self.parent_descriptor = os.dup(self.guard_descriptors[-1])
 
@@ -6865,6 +6924,7 @@ class _RepositoryView:
         relation_parent: int | None,
         observed: os.stat_result | None = None,
         native_tmp: bool = False,
+        linux_tmp: bool = False,
     ) -> None:
         self.guard_descriptors.append(descriptor)
         info = os.fstat(descriptor)
@@ -6886,6 +6946,16 @@ class _RepositoryView:
                 or _descriptor_has_extended_acl(descriptor)
             ):
                 raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+            xattrs = _source_repair_ancestor_xattrs(
+                descriptor, reason="SOURCE_METADATA_INVALID"
+            )
+        elif linux_tmp:
+            xattrs = _require_linux_tmp_traversal_root(
+                descriptor,
+                info,
+                expected_device=root_device,
+                reason="SOURCE_METADATA_INVALID",
+            )
         else:
             _require_source_repair_ancestor(
                 descriptor,
@@ -6895,9 +6965,9 @@ class _RepositoryView:
                 expected_device=root_device,
                 reason="SOURCE_METADATA_INVALID",
             )
-        xattrs = _source_repair_ancestor_xattrs(
-            descriptor, reason="SOURCE_METADATA_INVALID"
-        )
+            xattrs = _source_repair_ancestor_xattrs(
+                descriptor, reason="SOURCE_METADATA_INVALID"
+            )
         state = _descriptor_ancestor_state(info)
         if observed is not None and _descriptor_ancestor_state(observed) != state:
             raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
@@ -6905,6 +6975,7 @@ class _RepositoryView:
         self.guard_states.append(state)
         self.guard_xattr_states.append(xattrs)
         self.guard_native_tmp.append(native_tmp)
+        self.guard_linux_tmp.append(linux_tmp)
 
     def _retain(
         self,
@@ -7179,6 +7250,13 @@ class _RepositoryView:
                     or _descriptor_has_extended_acl(descriptor)
                 ):
                     raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+            elif self.guard_linux_tmp[index]:
+                _require_linux_tmp_traversal_root(
+                    descriptor,
+                    info,
+                    expected_device=os.fstat(self.guard_descriptors[0]).st_dev,
+                    reason="SOURCE_VIEW_DRIFT",
+                )
             else:
                 _require_source_repair_ancestor(
                     descriptor,
@@ -7378,6 +7456,8 @@ class _RepositoryView:
             except OSError:
                 pass
         self.guard_descriptors = []
+        self.guard_native_tmp = []
+        self.guard_linux_tmp = []
 
 
 def _repair_carrier_git(
