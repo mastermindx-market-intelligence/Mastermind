@@ -2,7 +2,14 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import http.client
 import json
+import os
+import shutil
+import socket
+import stat
+import tempfile
 import threading
 from pathlib import Path
 
@@ -10,6 +17,7 @@ import pytest
 
 from control_plane import chairman_control_room as ccr
 from control_plane import chairman_control_room_remote as remote
+from scripts import chairman_control_room_remote as server
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "chairman_control_room"
@@ -379,3 +387,170 @@ def test_snapshot_is_memory_only(monkeypatch, collector_config):
     monkeypatch.setattr(Path, "read_bytes", lambda *_: pytest.fail("no filesystem reads"))
     monkeypatch.setattr(remote.subprocess, "run", lambda *_a, **_k: pytest.fail("no subprocess"))
     assert cache.snapshot() is None
+
+
+class StaticCache:
+    def __init__(self, document=None):
+        self.document = document
+        self.snapshot_calls = 0
+
+    def snapshot(self):
+        self.snapshot_calls += 1
+        return copy.deepcopy(self.document)
+
+
+class UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, socket_path: Path):
+        super().__init__("localhost", timeout=5)
+        self.socket_path = socket_path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(os.fspath(self.socket_path))
+
+
+@contextlib.contextmanager
+def _running_remote_server(tmp_path, *, document=None):
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "remote.html").write_text("<html>remote</html>", encoding="utf-8")
+    (static / "control_room.css").write_text("body{}", encoding="utf-8")
+    (static / "control_room.js").write_text("/* remote */", encoding="utf-8")
+    # Darwin's AF_UNIX pathname ceiling is shorter than pytest's nested tmp
+    # fixture path. Keep only the socket seam in a separately owned short dir.
+    socket_root = Path(tempfile.mkdtemp(prefix="ccr-remote-", dir="/tmp"))
+    socket_path = socket_root / "remote.sock"
+    cache = StaticCache(document)
+    config = server.RemoteServerConfig(
+        socket_path=socket_path,
+        static_dir=static,
+        cache=cache,
+        caddy_gid=os.getgid(),
+        service_uid=os.getuid(),
+    )
+    httpd = server.ControlRoomUnixServer(
+        socket_path, server.RemoteControlRoomHandler, config
+    )
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield httpd, socket_path, cache
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+        shutil.rmtree(socket_root)
+
+
+def _unix_request(socket_path, method, path, headers=None):
+    conn = UnixHTTPConnection(socket_path)
+    try:
+        conn.request(method, path, headers=headers or {})
+        response = conn.getresponse()
+        return response.status, dict(response.getheaders()), response.read()
+    finally:
+        conn.close()
+
+
+def test_remote_cli_has_no_tcp_or_socket_override():
+    parser = server.build_parser()
+    args = parser.parse_args([
+        "--repo-root", "/release", "--macro-root", "/macro",
+        "--expected-commit", "a" * 40, "--build-metadata", "/release/build.json",
+        "--interval-seconds", "300", "--stale-after-seconds", "900",
+        "--timeout-seconds", "10", "--max-output-bytes", "4096",
+    ])
+    assert args.expected_commit == "a" * 40
+    for option in ("--host", "--port", "--bind", "--socket"):
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args([option, "value"])
+        assert exc.value.code == 2
+
+
+def test_remote_server_is_unix_only_with_restricted_metadata(tmp_path):
+    with _running_remote_server(tmp_path) as (httpd, socket_path, _cache):
+        assert httpd.address_family == socket.AF_UNIX
+        assert stat.S_IMODE(socket_path.parent.stat().st_mode) == 0o750
+        assert stat.S_IMODE(socket_path.stat().st_mode) == 0o660
+        assert socket_path.stat().st_gid == os.getgid()
+    assert not socket_path.exists()
+
+
+def test_fixed_get_head_health_and_state_routes(tmp_path):
+    document = {"schema": remote.REMOTE_SCHEMA, "observed_at": NOW}
+    with _running_remote_server(tmp_path, document=document) as (_httpd, sock, cache):
+        for path in ("/", "/static/control_room.css", "/static/control_room.js"):
+            get_status, get_headers, get_body = _unix_request(sock, "GET", path)
+            head_status, head_headers, head_body = _unix_request(sock, "HEAD", path)
+            assert get_status == head_status == 200
+            assert get_headers["Content-Length"] == head_headers["Content-Length"]
+            assert get_body
+            assert head_body == b""
+
+        status, headers, body = _unix_request(sock, "GET", "/healthz")
+        assert status == 200
+        assert headers["Content-Type"] == "text/plain; charset=utf-8"
+        assert body == b"ok\n"
+        assert cache.snapshot_calls == 0
+
+        status, _headers, body = _unix_request(sock, "GET", "/api/state")
+        assert status == 200
+        assert json.loads(body) == {"ok": True, "control_room": document}
+
+
+def test_state_is_typed_unavailable_before_first_success(tmp_path):
+    with _running_remote_server(tmp_path) as (_httpd, sock, _cache):
+        status, _headers, body = _unix_request(sock, "GET", "/api/state")
+    assert status == 503
+    assert json.loads(body) == {"ok": False, "error": {"code": "state_unavailable"}}
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_mutation_methods_are_closed_before_cache(method, tmp_path):
+    with _running_remote_server(tmp_path, document={"secret": "must-not-read"}) as (
+        _httpd, sock, cache
+    ):
+        status, headers, _body = _unix_request(sock, method, "/api/state")
+    assert status == 405
+    assert headers["Allow"] == "GET, HEAD"
+    assert cache.snapshot_calls == 0
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/open", "/api/bind", "/api/unbind", "/api/refresh-builds",
+        "/api/state?x=1", "//api/state", "/x/../api/state", "/%2e%2e/api/state",
+        "/static%2fcontrol_room.js", "/static%252fcontrol_room.js", "/x%00",
+        "/static\\control_room.js", "/bad%zz", "/wild/*",
+    ],
+)
+def test_unexpected_or_ambiguous_read_paths_fail_before_cache(path, tmp_path):
+    with _running_remote_server(tmp_path, document={"ok": "hidden"}) as (
+        _httpd, sock, cache
+    ):
+        status, _headers, _body = _unix_request(sock, "GET", path)
+    assert status in (400, 404)
+    assert cache.snapshot_calls == 0
+
+
+def test_browser_credentials_and_forged_headers_change_no_decision_or_log(tmp_path):
+    document = {"schema": remote.REMOTE_SCHEMA}
+    with _running_remote_server(tmp_path, document=document) as (httpd, sock, _cache):
+        baseline = _unix_request(sock, "GET", "/api/state")
+        forged = _unix_request(
+            sock,
+            "GET",
+            "/api/state",
+            headers={
+                "X-CCR-Token": "secret-nonce", "Cookie": "secret-cookie",
+                "Authorization": "Bearer secret", "Host": "evil.example",
+                "Origin": "https://evil.example", "X-Forwarded-User": "admin",
+            },
+        )
+        events = list(httpd.config.events)
+    assert forged == baseline
+    encoded = json.dumps(events)
+    for secret in ("secret-nonce", "secret-cookie", "Bearer secret", "evil.example", "admin"):
+        assert secret not in encoded
