@@ -122,6 +122,37 @@ The precise point where the worker stops rather than absorbing the next wave.
 Exact return packet Sol needs: head SHA, changed files, CI, proof receipts, discovered conflicts,
 remaining gates and next action.
 
+### Continuation watch / reciprocal wait discipline
+Any Slack/session handoff that is expected to return later must also define how the dialogue loop
+stays alive. The watcher is transport/attention behavior only; it never owns Job/Attempt/Worker
+state, completion, authority, provider selection, retry or session identity.
+
+For an eligible Slack handoff:
+
+1. Bind Sol's follow-up observation to the **exact thread + stable operation key** before concluding
+   the handoff. If the canonical Worker Presence / Turn-Watcher path is `PROVEN_LIVE`, use its
+   reviewed `watch_mode="turn_watch_v1"` contract. Do not pretend records-only or built-not-proven
+   watcher code is live.
+2. Until the canonical watcher is production-proven, use an available temporary, non-authoritative
+   surface-level condition watch only as a continuity bridge. State its limitations/cadence. It
+   must never become a second lifecycle, cursor, inbox, retry or truth plane. If no watcher surface
+   is available, say so explicitly instead of implying automatic continuation.
+3. The initial worker/COO envelope must require: ACK this exact operation, read the full thread,
+   keep later `BLOCKED` / `DECISION_REQUEST` / `RESULT` and Sol replies on the same carrier, and
+   after every **nonterminal** return enter the available exact-thread wait/watch path rather than
+   silently abandoning the session.
+4. On Sol `RULING` / `CONTINUE` / repair instruction, the same worker session rereads the full
+   thread, resumes the same operation/carrier, and re-arms its wait/watch after the next
+   nonterminal return. If that session cannot maintain a watcher/wait, it must return an explicit
+   `WATCH_UNAVAILABLE` (or equivalent typed blocker) rather than disappearing.
+5. After every nonterminal Sol continuation, verify that both sides still have a continuation path.
+   On terminal `STOP` / accepted completion, disable any temporary fallback watcher so old turns do
+   not re-enter the loop.
+
+Never create one cron/automation/database per handoff as the canonical architecture. The accepted
+Worker Presence & Dialogue / Wake architecture remains the long-run owner of automatic turn
+continuation.
+
 ## Step 5 — Collision fence before dispatch
 
 Immediately before handoff/operation creation, re-check:
@@ -194,4 +225,6 @@ what it does not prove
 A fresh Sol can turn “send Fable the next wave” into one bounded commission whose authority,
 scope, failure behavior, tests and stop condition are sufficient for the worker to execute without
 reconstructing the company—and can withhold canonical modification when any runtime/transport
-gate is missing.
+gate is missing. For Slack/session handoffs that expect later returns, K2 also requires an explicit
+continuation-watch path on Sol's side and reciprocal wait/watch instructions for the worker, with
+no false claim that an unproven watcher runtime is live.
