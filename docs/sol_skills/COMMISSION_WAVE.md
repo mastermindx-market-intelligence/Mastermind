@@ -1,6 +1,6 @@
 ---
 schema: mastermind.sol_skillpack.v1
-skillpack_version: 1.0.0
+skillpack_version: 1.0.1
 minimum_bootstrap_major: 1
 skill: commission_wave
 ---
@@ -13,8 +13,11 @@ another operator, or when a production-proven CEO-intent path is available for t
 ## Mission
 
 Translate free-flowing Chairman intent into **one independently useful vertical capability**
-without asking the worker to rediscover the company, widening the PR, or confusing admission
-with execution.
+without asking the worker to rediscover the company, widening the PR, confusing admission
+with execution, or spending scarce principal capacity where a bounded worker is sufficient.
+
+Apply `docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md` to every meaningful delegation and
+`docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` to every watcher-enabled dialogue.
 
 ## Gate 0 — modifying authority
 
@@ -45,18 +48,67 @@ Read enough current state to answer:
 
 Do not commission from an old handoff alone.
 
-## Step 2 — Choose the operator by ambiguity
+## Step 2 — Classify and route by ambiguity, risk and scarcity
+
+Before choosing a worker, classify:
+
+* task kind;
+* ambiguity;
+* technical/product risk;
+* repository/system scope;
+* architecture/authority sensitivity;
+* expected continuity;
+* whether the mission is sufficiently frozen for bounded execution.
 
 Default routing:
 
-* **Fable** — sustained cross-repository or architecture-sensitive principal build where current
-  system context and adversarial follow-through matter.
-* **Claude/Codex/GLM/Grok frontier worker** — bounded concrete wave with explicit inputs/outputs.
+* **Sol** — product thesis, architecture, authority adjudication, program decomposition, architecture
+  freeze, adversarial CEO review and final acceptance. Sol should not become routine implementation labor.
+* **Luna** — default fast worker for low-ambiguity bounded/mechanical work, fixtures, tests,
+  extraction, simple bugs, straightforward migrations and small well-specified implementation.
+* **Terra** — default standard engineering/research worker for normal features, bounded refactors,
+  elevated research, standard debugging and independent technical review.
+* **Sonnet** — default Claude workhorse for bounded multi-step engineering, research,
+  documentation and general execution when Claude's workflow surface is useful.
+* **Opus** — premium bounded specialist for difficult debugging, complex bounded refactors,
+  adversarial review, multi-service investigation or reasoning-heavy execution after Sol freezes
+  the strategic boundary.
+* **Codex** — preferred engineering execution surface for well-specified repo work, parallel waves,
+  tests, migrations, refactors and isolated worktrees. Use the least-scarce capable model tier inside it.
+* **Cursor** — interactive engineering surface when repo-local exploration, rapid implementation,
+  browser/visual work or long IDE workflows materially help. Cursor is a surface, not a capability tier.
+* **Fable** — scarce principal/escalation capacity only for materially high ambiguity, sustained
+  cross-repository work whose boundaries cannot yet be safely frozen, architecture-sensitive
+  integration/adjudication, stalled-program recovery, unusually difficult long-horizon continuity,
+  or exceptional review where lesser lanes are demonstrably insufficient.
 * **Mechanical agent** — repetitive low-ambiguity migration/fixtures only.
-* **Sol** — architecture, product thesis, adjudication, Skillpack/CEO procedure and final review;
-  avoid turning Sol into the routine coding worker.
 
-The worker is not expected to infer authority beyond the packet.
+Prefer using Fable as a principal/advisor who resolves ambiguity or establishes the hard boundary,
+then hand bounded implementation slices to Luna/Terra/Sonnet/Opus/Codex/Cursor where appropriate.
+
+Do not route one model for an entire major program by habit. Route each bounded mission independently.
+
+For every meaningful commission, record:
+
+```text
+ROUTE: <worker/model + execution surface>
+WHY: <why this route can reliably satisfy the mission>
+WHY NOT FABLE: <why principal capacity is unnecessary>
+```
+
+For Fable:
+
+```text
+ROUTE: Fable + <execution surface>
+WHY: <mission fit>
+WHY FABLE: <specific ambiguity/cross-system dependency/architecture sensitivity/continuity need>
+```
+
+“Important project,” “large task,” “Fable is our COO,” “Fable is strongest,” or availability alone
+are not valid `WHY FABLE` reasons. If Sol cannot write a convincing `WHY FABLE`, decompose or route elsewhere.
+
+Execution surface, worker/model and organizational authority are separate. Do not claim a named
+worker/model is Executive-runtime-armed merely because manual/session routing policy allows it.
 
 ## Step 3 — Freeze one observable mission
 
@@ -123,11 +175,11 @@ Exact return packet Sol needs: head SHA, changed files, CI, proof receipts, disc
 remaining gates and next action.
 
 ### Continuation watch / reciprocal wait discipline
-Any Slack/session handoff that is expected to return later must also define how the dialogue loop
-stays alive. The watcher is transport/attention behavior only; it never owns Job/Attempt/Worker
-state, completion, authority, provider selection, retry or session identity.
+Any Slack/session handoff that is expected to return later must define how the dialogue loop stays
+alive **and how it terminates explicitly**. The watcher is transport/attention behavior only; it never
+owns Job/Attempt/Worker state, completion, authority, provider selection, retry or session identity.
 
-For an eligible Slack handoff:
+For an eligible Slack/session handoff:
 
 1. Bind Sol's follow-up observation to the **exact thread + stable operation key** before concluding
    the handoff. If the canonical Worker Presence / Turn-Watcher path is `PROVEN_LIVE`, use its
@@ -137,21 +189,34 @@ For an eligible Slack handoff:
    surface-level condition watch only as a continuity bridge. State its limitations/cadence. It
    must never become a second lifecycle, cursor, inbox, retry or truth plane. If no watcher surface
    is available, say so explicitly instead of implying automatic continuation.
-3. The initial worker/COO envelope must require: ACK this exact operation, read the full thread,
-   keep later `BLOCKED` / `DECISION_REQUEST` / `RESULT` and Sol replies on the same carrier, and
-   after every **nonterminal** return enter the available exact-thread wait/watch path rather than
-   silently abandoning the session.
+3. The initial worker/COO envelope must require: acknowledge this exact operation using the currently
+   accepted carrier vocabulary; read the full thread; keep later `BLOCKED` / `DECISION_REQUEST` /
+   `RESULT` and Sol replies on the same carrier; after every **nonterminal** return enter the available
+   exact-thread wait/watch path rather than silently abandoning the session; and treat pickup
+   acknowledgement, actual execution start and terminal STOP as distinct states even where the
+   live schema has not yet implemented separate typed names for all three.
 4. On Sol `RULING` / `CONTINUE` / repair instruction, the same worker session rereads the full
    thread, resumes the same operation/carrier, and re-arms its wait/watch after the next
    nonterminal return. If that session cannot maintain a watcher/wait, it must return `BLOCKED`
    with reason/code `WATCH_UNAVAILABLE` (or the currently accepted equivalent typed blocker)
    rather than disappearing.
-5. After every nonterminal Sol continuation, verify that both sides still have a continuation path.
-   Reciprocal continuation preserves the same operation/carrier only while the next turn remains
-   inside the **current commissioned wave**. On terminal `STOP` / accepted completion, disable any
-   temporary fallback watcher so old turns do not re-enter the loop. Accepted terminal completion
-   closes that watch; any next independent wave requires a new operation key/carrier, even when the
-   same COO/worker session continues.
+5. **After every `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must reply in the same lawful carrier
+   with exactly one explicit edge before doing CEO-only follow-up:** either a nonterminal
+   `SOL CONTINUE` / `SOL RULING / CONTINUE` / `SOL REQUEST_REPAIR`, or a terminal
+   `SOL STOP` / `SOL ACCEPTED / STOP` / `SOL CLOSED / STOP`. Silence is never a terminal receipt.
+6. A nonterminal Sol edge names the exact current child operation and tells the worker to re-arm
+   after its next nonterminal return. Verify both sides still have a continuation path.
+7. A terminal Sol edge explicitly states that the child wave is terminal, the worker must stop work,
+   the temporary watcher must be disarmed, no further reply is required except any exact terminal
+   consumption receipt required by current transport law or a watcher shutdown failure, and no next
+   child wave is authorized by this STOP.
+8. If either side cannot actually disable its watcher, report `WATCH_STOP_FAILED` (or the currently
+   accepted typed equivalent), keep the child operation terminal, ensure the counterpart still
+   receives STOP, and never let the leftover watcher originate another wave/retry/merge/continuation.
+9. Terminal completion closes that watch cycle. Any independent next wave requires a new stable
+   operation key, one lawful carrier, fresh collision/current-state reconciliation, explicit commission,
+   fresh pickup acknowledgement, separate execution start where supported, and newly armed reciprocal
+   continuation paths. Never use an old watcher as implicit authorization for the next wave.
 
 Never create one cron/automation/database per handoff as the canonical architecture. The accepted
 Worker Presence & Dialogue / Wake architecture remains the long-run owner of automatic turn
@@ -209,7 +274,7 @@ After sending a modifying request:
 
 ## Commission output template
 
-When handing work to a human/session, produce the full packet above.
+When handing work to a human/session, produce the full packet above plus the routing receipt.
 
 When reporting a canonical CEO admission, state at minimum:
 
@@ -229,6 +294,8 @@ what it does not prove
 A fresh Sol can turn “send Fable the next wave” into one bounded commission whose authority,
 scope, failure behavior, tests and stop condition are sufficient for the worker to execute without
 reconstructing the company—and can withhold canonical modification when any runtime/transport
-gate is missing. For Slack/session handoffs that expect later returns, K2 also requires an explicit
-continuation-watch path on Sol's side and reciprocal wait/watch instructions for the worker, with
-no false claim that an unproven watcher runtime is live.
+gate is missing. K2 also requires Sol to challenge the premise that Fable is the right worker,
+record a least-scarce-capable routing receipt, and use Fable only with a concrete `WHY FABLE`.
+For watcher-enabled handoffs, K2 requires reciprocal continuation paths plus an explicit
+`CONTINUE`-or-`STOP` edge after every return, truthful watcher shutdown handling, and no reuse of an
+old watcher as authorization for an independent next wave.
