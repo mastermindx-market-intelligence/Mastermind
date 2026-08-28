@@ -58,6 +58,7 @@ _TERMINAL_LINEAR = frozenset({"Done", "Canceled", "Cancelled"})
 _NONTERMINAL_PROOF = frozenset(
     {"open", "not_built", "spec_only", "partial", "built_not_proven", "blocked"}
 )
+_COMPLETION_OWNER_RELATIONS = frozenset({"merge_is_done", "program_gate"})
 _RUNNABLE_SLACK_CLASSES = frozenset({"PICKUP", "COMMISSION", "READ_ONLY_COMMISSION"})
 
 
@@ -297,6 +298,7 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                 (relation.get("repository"), relation.get("number"))
                 for relation in (issue.get("github_relations") or [])
                 if isinstance(relation, Mapping)
+                and relation.get("relation") in _COMPLETION_OWNER_RELATIONS
             }
             bound_proof_states = [
                 pr.get("proof_state")

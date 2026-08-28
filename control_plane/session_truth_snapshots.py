@@ -33,6 +33,7 @@ _REPO_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 _WS_RE = re.compile(r"^WS:[A-Z0-9][A-Z0-9-]*$")
 _MAS_RE = re.compile(r"^MAS-[0-9]+$")
 _SLACK_TS_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
+_OPAQUE_METADATA_MAX_CHARS = 1024
 
 _GITHUB_STATES = frozenset({"open", "closed", "merged"})
 _GITHUB_CI = frozenset(
@@ -278,6 +279,15 @@ def _nullable_string(value: Any, label: str) -> str | None:
     return _string(value, label)
 
 
+def _nullable_opaque_metadata(value: Any, label: str) -> str | None:
+    """Preserve source-owned metadata without owning its value grammar."""
+
+    text = _nullable_string(value, label)
+    if text is not None and len(text) > _OPAQUE_METADATA_MAX_CHARS:
+        raise _error(f"{label} must be at most 1024 characters")
+    return text
+
+
 def _enum(value: Any, allowed: frozenset[str], label: str) -> str:
     text = _string(value, label)
     if text not in allowed:
@@ -462,22 +472,22 @@ def normalize_github(doc: Mapping[str, Any]) -> dict[str, Any]:
                 # These values belong to the source repository's PR-linkage
                 # contract.  Session Truth preserves them as structural opaque
                 # metadata and never becomes a second authoring grammar.
-                "portfolio_mode": _nullable_string(
+                "portfolio_mode": _nullable_opaque_metadata(
                     row["portfolio_mode"],
                     f"github.pull_requests[{index}].portfolio_mode",
                 ),
                 "wave": _nullable_string(
                     row["wave"], f"github.pull_requests[{index}].wave"
                 ),
-                "authority": _nullable_string(
+                "authority": _nullable_opaque_metadata(
                     row["authority"],
                     f"github.pull_requests[{index}].authority",
                 ),
-                "completion": _nullable_string(
+                "completion": _nullable_opaque_metadata(
                     row["completion"],
                     f"github.pull_requests[{index}].completion",
                 ),
-                "proof_state": _nullable_string(
+                "proof_state": _nullable_opaque_metadata(
                     row["proof_state"],
                     f"github.pull_requests[{index}].proof_state",
                 ),
@@ -575,7 +585,7 @@ def normalize_linear(doc: Mapping[str, Any]) -> dict[str, Any]:
                 "workstream": _ws(
                     issue["workstream"], f"linear.issues[{index}].workstream"
                 ),
-                "completion": _nullable_string(
+                "completion": _nullable_opaque_metadata(
                     issue["completion"],
                     f"linear.issues[{index}].completion",
                 ),
