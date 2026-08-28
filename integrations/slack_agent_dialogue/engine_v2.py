@@ -7,7 +7,9 @@ it creates no persistence, watcher, Wake source, provider path, or Slack client.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from integrations.slack_agent_dialogue.contract import (
@@ -15,8 +17,10 @@ from integrations.slack_agent_dialogue.contract import (
     TrustedAuthorityPolicy,
 )
 from integrations.slack_agent_dialogue.contract_v2 import (
+    MESSAGE_DISCRIMINATOR_V2,
     PARENT_DISCRIMINATOR_V2,
     build_parent_v2,
+    parse_message_frame_v2,
     parse_parent_frame_v2,
     validate_actor_ref,
     validate_applies_to_v2,
@@ -26,10 +30,14 @@ from integrations.slack_agent_dialogue.engine import (
     DialogueEngineError,
     DialoguePolicy,
     HistoryPage,
+    ReadMessage,
     SlackDialogueClient,
+    SlackMessage,
+    ThreadRead,
 )
 
 _CONTEXT_PROBE_SOL = "U00000000"
+_TS_RE = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
 
 
 @dataclass(frozen=True)
@@ -107,6 +115,24 @@ def _one_field_different(left: tuple[Any, ...], right: tuple[Any, ...]) -> bool:
     return sum(a != b for a, b in zip(left, right, strict=True)) == 1
 
 
+def _ts_order(value: str) -> Decimal:
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
+
+
+def _message_context_matches(
+    message: Mapping[str, Any], context: Mapping[str, Any]
+) -> bool:
+    return (
+        message.get("work_ref") == context["work_ref"]
+        and message.get("commission_ref") == context["commission_ref"]
+        and message.get("session_ref") == context["session_ref"]
+        and message.get("applies_to") == context["applies_to"]
+    )
+
+
 class DialogueEngineV2:
     """One production-inert V2 engine over the existing injected Slack client."""
 
@@ -141,7 +167,7 @@ class DialogueEngineV2:
         if not page.mutation_evidence_complete:
             raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
 
-        matches: list[tuple[Any, Mapping[str, Any]]] = []
+        matches: list[tuple[SlackMessage, Mapping[str, Any]]] = []
         near_matches: list[Mapping[str, Any]] = []
         wanted = _context_parent_identity(normalized)
 
@@ -184,6 +210,121 @@ class DialogueEngineV2:
         if near_matches:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         raise DialogueEngineError("THREAD_BINDING_AMBIGUOUS")
+
+    def _sender_is_eligible(
+        self, transport: SlackMessage, message: Mapping[str, Any]
+    ) -> bool:
+        # The Relay bot may project any already-validated logical actor; Slack
+        # transport identity never becomes Executive/Worker authority.
+        if transport.author_user_id == self.policy.relay_bot_user_id:
+            return True
+        if transport.author_user_id not in self.policy.allowed_sol_user_ids:
+            return False
+        actor = message["actor_ref"]
+        return (
+            actor["kind"] == "executive_surface"
+            and actor["seat"] in {"ceo", "chairman"}
+        )
+
+    async def _history(
+        self, *, thread_ts: str, context: DialogueContextV2
+    ) -> ThreadRead:
+        if not isinstance(thread_ts, str) or _TS_RE.fullmatch(thread_ts) is None:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        bound = await self.bind_or_verify_thread(context)
+        if bound.thread_ts != thread_ts:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+        try:
+            page = await asyncio.wait_for(
+                self.client.fetch_thread(
+                    channel_id=self.policy.channel_id,
+                    thread_ts=thread_ts,
+                    limit=self.policy.max_thread_history,
+                ),
+                timeout=self.policy.method_timeout_seconds,
+            )
+        except Exception:
+            raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
+
+        if not isinstance(page, HistoryPage) or not page.complete:
+            raise DialogueEngineError("THREAD_HISTORY_INCOMPLETE")
+        if not page.mutation_evidence_complete:
+            raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+
+        normalized_context = context.normalized()
+        eligible: dict[str, list[tuple[SlackMessage, Mapping[str, Any]]]] = {}
+        ineligible_count = 0
+        mutated_count = 0
+
+        for transport in page.messages:
+            if transport.ts == thread_ts or transport.thread_ts != thread_ts:
+                continue
+
+            raw_text = transport.text
+            if transport.deleted or transport.edited:
+                mutated_count += 1
+                if transport.created_text is None:
+                    raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+                raw_text = transport.created_text
+
+            if not raw_text.startswith(MESSAGE_DISCRIMINATOR_V2):
+                continue
+
+            # Unknown Slack identities are transport-ineligible even when their
+            # text happens to be a valid V2 frame. Actor identity comes from the
+            # validated frame, not from the Slack member/app identity.
+            sender_known = (
+                transport.author_user_id == self.policy.relay_bot_user_id
+                or transport.author_user_id in self.policy.allowed_sol_user_ids
+            )
+            if not sender_known:
+                ineligible_count += 1
+                continue
+
+            try:
+                message = parse_message_frame_v2(raw_text)
+            except DialogueContractError:
+                raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
+
+            if not _message_context_matches(message, normalized_context):
+                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+            if not self._sender_is_eligible(transport, message):
+                ineligible_count += 1
+                continue
+
+            eligible.setdefault(message["message_key"], []).append((transport, message))
+
+        output: list[ReadMessage] = []
+        for entries in eligible.values():
+            fingerprints = {entry[1]["fingerprint"] for entry in entries}
+            if len(fingerprints) != 1:
+                raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+            entries.sort(key=lambda entry: _ts_order(entry[0].ts))
+            primary_transport, primary_message = entries[0]
+            output.append(
+                ReadMessage(
+                    message=primary_message,
+                    primary_ts=primary_transport.ts,
+                    duplicate_timestamps=tuple(
+                        transport.ts for transport, _message in entries[1:]
+                    ),
+                )
+            )
+
+        output.sort(key=lambda item: _ts_order(item.primary_ts))
+        return ThreadRead(
+            thread_ts=thread_ts,
+            messages=tuple(output),
+            historical_messages=(),
+            ineligible_count=ineligible_count,
+            mutated_count=mutated_count,
+        )
+
+    async def read_thread(
+        self, *, thread_ts: str, context: DialogueContextV2
+    ) -> ThreadRead:
+        return await self._history(thread_ts=thread_ts, context=context)
 
 
 __all__ = ["DialogueContextV2", "DialogueEngineV2"]
