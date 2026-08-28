@@ -13,7 +13,8 @@ import socketserver
 import stat
 import sys
 import threading
-from dataclasses import dataclass, field
+from collections import deque
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Sequence
@@ -46,7 +47,15 @@ class RemoteServerConfig:
     cache: Any
     caddy_gid: int
     service_uid: int
-    events: list[dict[str, Any]] = field(default_factory=list)
+    events: deque[dict[str, Any]] | None = None
+
+    def __post_init__(self) -> None:
+        if self.events is not None and (
+            not isinstance(self.events, deque)
+            or self.events.maxlen is None
+            or self.events.maxlen <= 0
+        ):
+            raise ValueError("events must be a bounded test-only event sink")
 
 
 def _prepare_socket_path(config: RemoteServerConfig) -> None:
@@ -126,11 +135,12 @@ class RemoteControlRoomHandler(BaseHTTPRequestHandler):
         return
 
     def _event(self, path: str | None, status: int) -> None:
-        self._config.events.append({
-            "method": self.command if self.command in ("GET", "HEAD") else "MUTATION",
-            "path": path if path is not None else "<rejected>",
-            "status": status,
-        })
+        if self._config.events is not None:
+            self._config.events.append({
+                "method": self.command if self.command in ("GET", "HEAD") else "MUTATION",
+                "path": path if path is not None else "<rejected>",
+                "status": status,
+            })
 
     def _send(self, status: int, body: bytes, content_type: str, *, path: str | None) -> None:
         self.send_response(status)
@@ -249,9 +259,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     identity = _load_build_identity(
         args.repo_root, args.build_metadata, args.expected_commit
     )
+    caddy_gid = grp.getgrnam("caddy").gr_gid
     collector = remote.CollectorConfig(
         repo_root=args.repo_root,
         macro_root=args.macro_root,
+        active_builds_directory_group_gid=caddy_gid,
+        active_builds_group_gid=caddy_gid,
         interval_seconds=args.interval_seconds,
         stale_after_seconds=args.stale_after_seconds,
         timeout_seconds=args.timeout_seconds,
@@ -260,7 +273,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     cache = remote.RemoteStateCache(collector, identity)
     stop = threading.Event()
     refresh_thread = threading.Thread(target=cache.run, args=(stop,), daemon=True)
-    caddy_gid = grp.getgrnam("caddy").gr_gid
     config = RemoteServerConfig(
         socket_path=REMOTE_SOCKET,
         static_dir=DEFAULT_STATIC_DIR,

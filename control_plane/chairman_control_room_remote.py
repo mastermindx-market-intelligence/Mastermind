@@ -11,15 +11,16 @@ import json
 import hashlib
 import os
 import re
+import selectors
+import signal
 import subprocess
 import stat
-import sys
 import tempfile
 import threading
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -30,13 +31,22 @@ from control_plane import ceo_boot_packet, chairman_control_room as ccr, executi
 REMOTE_SCHEMA = "mastermind.chairman_control_room_remote.v1"
 RELEASE_SCHEMA = "mastermind.control_room_build.v1"
 BUILD_METADATA_FILENAME = "control_room_build.json"
+ACTIVE_BUILDS_ARTIFACT = Path(
+    "/var/lib/mastermind-control-room-sources/project-active-builds.json"
+)
 REQUIRED_RUNTIME_PATHS = frozenset({
     "app/static/chairman_control/control_room.css",
     "app/static/chairman_control/control_room.js",
     "app/static/chairman_control/remote.html",
+    "common/__init__.py",
+    "common/redaction.py",
     "control_plane/chairman_control_room.py",
     "control_plane/chairman_control_room_remote.py",
+    "ops/control_room_remote/mastermind-control-room-remote.service",
+    "scripts/__init__.py",
     "scripts/chairman_control_room_remote.py",
+    "scripts/ohf/__init__.py",
+    "scripts/ohf/redaction.py",
 })
 SOURCE_AGENT_OS_BRIEF = "agent_os_brief"
 SOURCE_AGENT_OS_STATE = "agent_os_state"
@@ -336,18 +346,21 @@ def verify_release_identity(
 class CollectorConfig:
     repo_root: Path
     macro_root: Path
+    active_builds_path: Path = ACTIVE_BUILDS_ARTIFACT
+    active_builds_directory_owner_uid: int = 0
+    active_builds_directory_group_gid: int | None = None
+    active_builds_owner_uid: int = 0
+    active_builds_group_gid: int | None = None
     interval_seconds: float = 300.0
     stale_after_seconds: float = 900.0
     timeout_seconds: float = 60.0
     max_output_bytes: int = 4 * 1024 * 1024
-    runner: Any = None
     environ: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         self.repo_root = Path(self.repo_root)
         self.macro_root = Path(self.macro_root)
-        if self.runner is None:
-            self.runner = default_runner
+        self.active_builds_path = Path(self.active_builds_path)
         if self.environ is None:
             self.environ = os.environ
         for value in (
@@ -357,13 +370,31 @@ class CollectorConfig:
                 raise ValueError("collector bounds must be finite and positive")
         if type(self.max_output_bytes) is not int or self.max_output_bytes <= 0:
             raise ValueError("max_output_bytes must be a positive integer")
+        for name, value in (
+            ("active_builds_directory_owner_uid", self.active_builds_directory_owner_uid),
+            ("active_builds_owner_uid", self.active_builds_owner_uid),
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        if self.active_builds_group_gid is not None and (
+            type(self.active_builds_group_gid) is not int
+            or self.active_builds_group_gid < 0
+        ):
+            raise ValueError("active_builds_group_gid must be a non-negative integer")
+        if self.active_builds_directory_group_gid is not None and (
+            type(self.active_builds_directory_group_gid) is not int
+            or self.active_builds_directory_group_gid < 0
+        ):
+            raise ValueError(
+                "active_builds_directory_group_gid must be a non-negative integer"
+            )
 
 
 @dataclass(frozen=True)
 class CollectedInputs:
     inbox: dict[str, Any]
     boot_packet: dict[str, Any]
-    active_builds: dict[str, Any]
+    active_builds: dict[str, Any] | None
     agent_os_state: dict[str, Any] | None
     runtime_jobs: list[dict[str, Any]] | None
     observed_at: str
@@ -619,7 +650,7 @@ def project_remote_document(
 
 
 def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[str, Any]:
-    """Run one read-only collector command with bounded captured output."""
+    """Run a command with incremental hard-capped capture and prompt reap."""
     try:
         proc = subprocess.Popen(
             [os.fspath(item) for item in argv],
@@ -629,23 +660,109 @@ def default_runner(argv, *, cwd: Path, timeout: float, max_bytes: int) -> dict[s
             stderr=subprocess.PIPE,
             text=False,
             close_fds=True,
+            start_new_session=True,
         )
     except OSError:
-        return {"code": None, "stdout": "", "stderr": "", "timed_out": False}
+        return {
+            "code": None,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": False,
+            "limit_exceeded": False,
+            "invalid_utf8": False,
+        }
+
+    def terminate_and_reap() -> None:
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+        try:
+            proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            proc.wait()
+
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    selector = selectors.DefaultSelector()
+    for name, pipe in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+        if pipe is not None:
+            os.set_blocking(pipe.fileno(), False)
+            selector.register(pipe, selectors.EVENT_READ, name)
+    deadline = time.monotonic() + timeout
+    timed_out = False
+    limit_exceeded = False
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-        timed_out = False
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        stdout, stderr = proc.communicate()
-        timed_out = True
-    stdout = stdout[: max_bytes + 1]
-    stderr = stderr[: max_bytes + 1]
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                terminate_and_reap()
+                break
+            ready = selector.select(timeout=min(remaining, 0.1))
+            if not ready and proc.poll() is not None:
+                ready = selector.select(timeout=0)
+                if not ready:
+                    break
+            for key, _mask in ready:
+                name = key.data
+                allowance = max_bytes + 1 - len(buffers[name])
+                try:
+                    chunk = os.read(key.fileobj.fileno(), min(65536, max(1, allowance)))
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    key.fileobj.close()
+                    continue
+                buffers[name].extend(chunk)
+                if len(buffers[name]) > max_bytes:
+                    del buffers[name][max_bytes:]
+                    limit_exceeded = True
+                    terminate_and_reap()
+                    break
+            if limit_exceeded:
+                break
+        if proc.poll() is None and not (timed_out or limit_exceeded):
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                proc.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                terminate_and_reap()
+    finally:
+        selector.close()
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None and not pipe.closed:
+                pipe.close()
+        if proc.poll() is None:
+            terminate_and_reap()
+
+    invalid_utf8 = False
+    try:
+        stdout = bytes(buffers["stdout"]).decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        stdout = ""
+        invalid_utf8 = True
+    try:
+        stderr = bytes(buffers["stderr"]).decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        stderr = ""
+        invalid_utf8 = True
     return {
         "code": proc.returncode,
-        "stdout": stdout.decode("utf-8", errors="strict") if stdout else "",
-        "stderr": stderr.decode("utf-8", errors="replace") if stderr else "",
+        "stdout": stdout,
+        "stderr": stderr,
         "timed_out": timed_out,
+        "limit_exceeded": limit_exceeded,
+        "invalid_utf8": invalid_utf8,
     }
 
 
@@ -682,6 +799,10 @@ def run_json_document(
         raise RemoteProjectionError("active_builds_command_failed")
     if result.get("timed_out") is True:
         raise RemoteProjectionError("active_builds_command_timed_out")
+    if result.get("limit_exceeded") is True:
+        raise RemoteProjectionError("collector_output_too_large")
+    if result.get("invalid_utf8") is True:
+        raise RemoteProjectionError("invalid_collector_output")
     if result.get("code") != 0:
         raise RemoteProjectionError("active_builds_command_failed")
     stdout = result.get("stdout")
@@ -710,21 +831,185 @@ def run_json_document(
     return dict(document)
 
 
-def _freshness_entry(
-    present: bool,
+def classify_source_freshness(
+    source: str,
     *,
+    present: bool,
     observed_at: str,
     source_time: Any,
-    unavailable_reason: str,
+    stale_after_seconds: float,
 ) -> SourceFreshness:
+    """Classify one source against the single collection-generation clock."""
+
     if not present:
-        return SourceFreshness("unavailable", observed_at, None, unavailable_reason)
-    valid_source_time = source_time if type(source_time) is str else None
-    return SourceFreshness("fresh", observed_at, valid_source_time, None)
+        return SourceFreshness("unavailable", observed_at, None, f"{source}_unavailable")
+    if source_time is None:
+        return SourceFreshness(
+            "unavailable", observed_at, None, f"{source}_source_time_missing"
+        )
+    if type(source_time) is not str:
+        return SourceFreshness(
+            "unavailable", observed_at, None, f"{source}_source_time_malformed"
+        )
+    if source_time.endswith("Z"):
+        parseable_source_time = source_time[:-1] + "+00:00"
+        normalized_source_time = source_time
+    elif source_time.endswith("+00:00"):
+        parseable_source_time = source_time
+        normalized_source_time = source_time[:-6] + "Z"
+    else:
+        try:
+            datetime.fromisoformat(source_time)
+        except ValueError:
+            reason = f"{source}_source_time_malformed"
+        else:
+            reason = f"{source}_source_time_non_utc"
+        return SourceFreshness("unavailable", observed_at, None, reason)
+    try:
+        generation = datetime.fromisoformat(observed_at[:-1] + "+00:00")
+        source_clock = datetime.fromisoformat(parseable_source_time)
+    except ValueError:
+        return SourceFreshness(
+            "unavailable", observed_at, None, f"{source}_source_time_malformed"
+        )
+    if source_clock.utcoffset() is None or source_clock.utcoffset().total_seconds() != 0:
+        return SourceFreshness(
+            "unavailable", observed_at, None, f"{source}_source_time_non_utc"
+        )
+    age = (generation - source_clock).total_seconds()
+    if age < 0:
+        return SourceFreshness(
+            "unavailable",
+            observed_at,
+            normalized_source_time,
+            f"{source}_source_time_future",
+        )
+    if age > stale_after_seconds:
+        return SourceFreshness(
+            "stale", observed_at, normalized_source_time, f"{source}_source_over_age"
+        )
+    return SourceFreshness("fresh", observed_at, normalized_source_time, None)
+
+
+def _artifact_failure(observed_at: str, reason: str) -> tuple[None, SourceFreshness]:
+    return None, SourceFreshness("unavailable", observed_at, None, reason)
+
+
+def read_active_builds_artifact(
+    config: CollectorConfig, *, observed_at: str
+) -> tuple[dict[str, Any] | None, SourceFreshness]:
+    """Read the fixed external producer artifact without following links."""
+
+    path = config.active_builds_path
+    try:
+        parent_info = path.parent.lstat()
+    except FileNotFoundError:
+        return _artifact_failure(observed_at, "active_builds_not_found")
+    except OSError:
+        return _artifact_failure(observed_at, "active_builds_path_unsafe")
+    if (
+        stat.S_ISLNK(parent_info.st_mode)
+        or not stat.S_ISDIR(parent_info.st_mode)
+        or parent_info.st_uid != config.active_builds_directory_owner_uid
+        or (
+            config.active_builds_directory_group_gid is not None
+            and parent_info.st_gid != config.active_builds_directory_group_gid
+        )
+        or stat.S_IMODE(parent_info.st_mode) != 0o750
+    ):
+        return _artifact_failure(observed_at, "active_builds_path_unsafe")
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return _artifact_failure(observed_at, "active_builds_not_found")
+    except OSError:
+        return _artifact_failure(observed_at, "active_builds_path_unsafe")
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        return _artifact_failure(observed_at, "active_builds_path_unsafe")
+    if before.st_nlink != 1:
+        return _artifact_failure(observed_at, "active_builds_hardlink_forbidden")
+    if before.st_uid != config.active_builds_owner_uid:
+        return _artifact_failure(observed_at, "active_builds_owner_mismatch")
+    if (
+        config.active_builds_group_gid is not None
+        and before.st_gid != config.active_builds_group_gid
+    ):
+        return _artifact_failure(observed_at, "active_builds_group_mismatch")
+    if stat.S_IMODE(before.st_mode) != 0o640:
+        return _artifact_failure(observed_at, "active_builds_mode_unsafe")
+    if not hasattr(os, "O_NOFOLLOW"):
+        return _artifact_failure(observed_at, "active_builds_nofollow_unavailable")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        return _artifact_failure(observed_at, "active_builds_not_found")
+    except OSError:
+        return _artifact_failure(observed_at, "active_builds_path_unsafe")
+    try:
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            return _artifact_failure(observed_at, "active_builds_path_changed")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(65536, config.max_output_bytes + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > config.max_output_bytes:
+                return _artifact_failure(observed_at, "active_builds_too_large")
+    finally:
+        os.close(descriptor)
+    try:
+        payload = b"".join(chunks).decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return _artifact_failure(observed_at, "active_builds_invalid_utf8")
+    try:
+        document = json.loads(
+            payload,
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_json_constant,
+        )
+    except RemoteProjectionError as exc:
+        reason = {
+            "duplicate_json_key": "active_builds_duplicate_json_key",
+            "non_finite_number": "active_builds_non_finite_number",
+        }.get(exc.code, "active_builds_invalid_json")
+        return _artifact_failure(observed_at, reason)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return _artifact_failure(observed_at, "active_builds_invalid_json")
+    if not isinstance(document, Mapping):
+        return _artifact_failure(observed_at, "active_builds_invalid_json")
+    if document.get("schema") != ccr.ACTIVE_BUILDS_SCHEMA:
+        return _artifact_failure(observed_at, "active_builds_schema_mismatch")
+    freshness = classify_source_freshness(
+        SOURCE_ACTIVE_BUILDS,
+        present=True,
+        observed_at=observed_at,
+        source_time=document.get("collected_at"),
+        stale_after_seconds=config.stale_after_seconds,
+    )
+    if freshness.state == "unavailable":
+        return None, freshness
+    return dict(document), freshness
+
+
+def _runtime_source_time(config: CollectorConfig) -> str | None:
+    try:
+        info = (config.repo_root / executive_inbox.DB_RELATIVE_PATH).lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
+    return datetime.fromtimestamp(info.st_mtime, timezone.utc).replace(
+        microsecond=0
+    ).isoformat().replace("+00:00", "Z")
 
 
 def collect_once(config: CollectorConfig, *, now: str) -> CollectedInputs:
-    """Collect one generation without reading the stale active-build artifact."""
+    """Collect one generation from independent read-only source boundaries."""
     observed_at = _zulu(now)
     packet = ceo_boot_packet.build_packet(
         repo_root=config.repo_root,
@@ -740,17 +1025,8 @@ def collect_once(config: CollectorConfig, *, now: str) -> CollectedInputs:
         now=observed_at,
         timeout=config.timeout_seconds,
     )
-    active_builds = run_json_document(
-        config.runner,
-        [
-            sys.executable,
-            os.fspath(config.macro_root / "scripts" / "build_project_active_build_map.py"),
-            "--json-stdout",
-        ],
-        cwd=config.macro_root,
-        timeout=config.timeout_seconds,
-        max_bytes=config.max_output_bytes,
-        expected_schema=ccr.ACTIVE_BUILDS_SCHEMA,
+    active_builds, active_builds_freshness = read_active_builds_artifact(
+        config, observed_at=observed_at
     )
     agent_os_state, agent_os_error = ccr._read_agent_os_state(os.fspath(config.macro_root))
     runtime_jobs, runtime_error = ccr._read_runtime_jobs(config.repo_root)
@@ -762,39 +1038,51 @@ def collect_once(config: CollectorConfig, *, now: str) -> CollectedInputs:
         and agent_os_state.get("schema") == ccr.AGENT_OS_STATE_SCHEMA
     )
     freshness = {
-        SOURCE_AGENT_OS_BRIEF: _freshness_entry(
-            brief_ok,
+        SOURCE_AGENT_OS_BRIEF: classify_source_freshness(
+            SOURCE_AGENT_OS_BRIEF,
+            present=brief_ok,
             observed_at=observed_at,
-            source_time=packet.get("generated_at") if isinstance(packet, Mapping) else None,
-            unavailable_reason="agent_os_brief_unavailable",
+            source_time=brief.get("generated_at") if brief_ok else None,
+            stale_after_seconds=config.stale_after_seconds,
         ),
-        SOURCE_AGENT_OS_STATE: _freshness_entry(
-            agent_state_ok,
+        SOURCE_AGENT_OS_STATE: classify_source_freshness(
+            SOURCE_AGENT_OS_STATE,
+            present=agent_state_ok,
             observed_at=observed_at,
             source_time=agent_os_state.get("generated_at") if agent_state_ok else None,
-            unavailable_reason="agent_os_state_unavailable" if agent_os_error else "agent_os_state_invalid",
+            stale_after_seconds=config.stale_after_seconds,
         ),
-        SOURCE_ACTIVE_BUILDS: _freshness_entry(
-            True,
+        SOURCE_ACTIVE_BUILDS: active_builds_freshness,
+        SOURCE_EXECUTIVE_RUNTIME: classify_source_freshness(
+            SOURCE_EXECUTIVE_RUNTIME,
+            present=runtime_jobs is not None,
             observed_at=observed_at,
-            source_time=active_builds.get("collected_at"),
-            unavailable_reason="active_builds_unavailable",
-        ),
-        SOURCE_EXECUTIVE_RUNTIME: _freshness_entry(
-            runtime_jobs is not None,
-            observed_at=observed_at,
-            source_time=observed_at if runtime_jobs is not None else None,
-            unavailable_reason="executive_runtime_unavailable" if runtime_error else "executive_runtime_invalid",
+            source_time=_runtime_source_time(config) if runtime_jobs is not None else None,
+            stale_after_seconds=config.stale_after_seconds,
         ),
     }
     if not isinstance(packet, dict) or not isinstance(inbox, dict):
         raise RemoteProjectionError("collector_document_invalid")
+    packet_for_composition = dict(packet)
+    if freshness[SOURCE_AGENT_OS_BRIEF].state == "unavailable":
+        packet_for_composition["brief"] = None
+    agent_state_for_composition = (
+        dict(agent_os_state)
+        if freshness[SOURCE_AGENT_OS_STATE].state != "unavailable"
+        and isinstance(agent_os_state, Mapping)
+        else None
+    )
+    runtime_for_composition = (
+        runtime_jobs
+        if freshness[SOURCE_EXECUTIVE_RUNTIME].state != "unavailable"
+        else None
+    )
     return CollectedInputs(
         inbox=inbox,
-        boot_packet=packet,
+        boot_packet=packet_for_composition,
         active_builds=active_builds,
-        agent_os_state=dict(agent_os_state) if isinstance(agent_os_state, Mapping) else None,
-        runtime_jobs=runtime_jobs,
+        agent_os_state=agent_state_for_composition,
+        runtime_jobs=runtime_for_composition,
         observed_at=observed_at,
         freshness=freshness,
     )
