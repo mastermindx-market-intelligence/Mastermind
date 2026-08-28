@@ -47,6 +47,14 @@ class ExactV2AuthorityPolicy:
         return True
 
 
+class ChairmanFloorPolicy:
+    def minimum_authority(self, *, request, option) -> str:
+        return "CHAIRMAN_REQUIRED"
+
+    def allows_continuation(self, *, request, reply) -> bool:
+        return False
+
+
 def run(coro):
     return asyncio.run(coro)
 
@@ -92,6 +100,8 @@ def context(
     session_ref: str = "asd-session-fable0001",
     operation_key: str = OPERATION,
     watch_mode: str | None = TURN_WATCH_MODE_V1,
+    actor_ref: dict[str, object] | None = None,
+    applies_to: dict[str, object] | None = None,
 ):
     from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 
@@ -101,8 +111,8 @@ def context(
         session_ref=session_ref,
         operation_key=operation_key,
         watch_mode=watch_mode,
-        actor_ref=actor(),
-        applies_to=applies(),
+        actor_ref=copy.deepcopy(actor() if actor_ref is None else actor_ref),
+        applies_to=copy.deepcopy(applies() if applies_to is None else applies_to),
     )
 
 
@@ -120,13 +130,19 @@ def policy(**overrides) -> DialoguePolicy:
     return DialoguePolicy(**values)
 
 
-def make_engine(client: InMemorySlackClient):
+def make_engine(
+    client: InMemorySlackClient,
+    *,
+    authority_policy=None,
+):
     from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
 
     return DialogueEngineV2(
         policy(),
         client,
-        authority_policy=ExactV2AuthorityPolicy(),
+        authority_policy=(
+            ExactV2AuthorityPolicy() if authority_policy is None else authority_policy
+        ),
     )
 
 
@@ -184,6 +200,7 @@ def raw_v2_message(
     commission_ref: dict[str, str] | None = None,
     session_ref: str = "asd-session-fable0001",
     applies_to: dict[str, object] | None = None,
+    reply_to_message_key: str | None = None,
 ) -> dict[str, object]:
     bodies: dict[str, dict[str, object]] = {
         "ACK": {"acknowledged": True},
@@ -192,11 +209,46 @@ def raw_v2_message(
             "completed": "V2 history was read.",
             "next": "Continue the bounded engine proof.",
         },
+        "DECISION_REQUEST": {
+            "question": "Which bounded engine option should be selected?",
+            "outcome_impact": "The choice changes only the accepted V2 engine path.",
+            "options": [
+                {
+                    "id": "opt-continue",
+                    "summary": "Continue.",
+                    "consequence": "The bounded engine proof continues.",
+                    "disposition": "CONTINUE",
+                    "authority_effect": "NONE",
+                },
+                {
+                    "id": "opt-stop",
+                    "summary": "Stop.",
+                    "consequence": "The bounded engine proof remains held.",
+                    "disposition": "STOP",
+                    "authority_effect": "NONE",
+                },
+            ],
+            "recommendation": "opt-continue",
+            "work_paused": True,
+        },
+        "RULING": {
+            "authority_class": "WITHIN_COMMISSION",
+            "selected_option": "opt-continue",
+            "decision": "Continue the bounded engine proof.",
+            "rationale": "It preserves the accepted commission.",
+            "canonical_ref": None,
+        },
+        "CONTINUE": {
+            "instruction": "Continue within the frozen WP-1 scope.",
+            "stop_condition": "Stop if the commission or carrier changes.",
+            "scope_change": False,
+        },
         "STOP": {
             "reason": "Stop at the current bounded gate.",
             "next_authority": "sol",
         },
     }
+    sol_reply = message_type in {"RULING", "CONTINUE", "STOP"}
     return {
         "schema": MESSAGE_SCHEMA_V2,
         "message_key": message_key or f"asd-{message_type.lower()}-v2-engine-0001",
@@ -206,13 +258,15 @@ def raw_v2_message(
         "session_ref": session_ref,
         "actor_ref": copy.deepcopy(actor() if actor_ref is None else actor_ref),
         "reply_to_message_key": (
-            "asd-request-v2-engine-0001" if message_type == "STOP" else None
+            reply_to_message_key
+            if reply_to_message_key is not None
+            else ("asd-request-v2-engine-0001" if sol_reply else None)
         ),
         "applies_to": copy.deepcopy(applies() if applies_to is None else applies_to),
         "summary": "Bounded V2 engine message.",
         "body": copy.deepcopy(bodies[message_type]),
         "evidence_refs": [],
-        "requires_response": False,
+        "requires_response": message_type == "DECISION_REQUEST",
         "created_at": "2026-08-27T13:05:00Z",
     }
 
@@ -453,3 +507,261 @@ def test_v2_history_unknown_sender_is_ineligible_not_actor_authority() -> None:
     read = run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
     assert read.messages == ()
     assert read.ineligible_count == 1
+
+
+def test_v2_send_duplicate_is_storeless_and_posts_zero_times() -> None:
+    client = setup_client()
+    message = v2_message("ACK", message_key="asd-ack-v2-send-duplicate")
+    add_v2_reply(client, message, author=BOT, ts="1787471000.000050")
+    receipt = run(
+        make_engine(client).send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=message,
+        )
+    )
+    assert receipt.action == "DUPLICATE"
+    assert receipt.message_ts == "1787471000.000050"
+    assert client.post_call_count == 0
+
+
+def test_v2_send_same_key_changed_fingerprint_is_conflict() -> None:
+    client = setup_client()
+    first = v2_message("ACK", message_key="asd-ack-v2-send-conflict")
+    add_v2_reply(client, first, author=BOT, ts="1787471000.000051")
+    changed_raw = raw_v2_message("ACK", message_key="asd-ack-v2-send-conflict")
+    changed_raw["summary"] = "Changed bounded V2 engine message."
+    changed = build_message_v2(changed_raw)
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=changed,
+            )
+        )
+    assert code(exc) == "MESSAGE_KEY_CONFLICT"
+    assert client.post_call_count == 0
+
+
+def test_v2_send_effect_unknown_reconciles_before_retry() -> None:
+    committed = setup_client()
+    committed.post_behaviors = ["commit_unknown"]
+    message = v2_message("ACK", message_key="asd-ack-v2-send-recovered")
+    receipt = run(
+        make_engine(committed).send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=message,
+        )
+    )
+    assert receipt.action == "RECOVERED"
+    assert committed.post_call_count == 1
+
+    retry = setup_client()
+    retry.post_behaviors = ["unknown_no_commit", "success"]
+    retry_message = v2_message("ACK", message_key="asd-ack-v2-send-retry")
+    receipt = run(
+        make_engine(retry).send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=retry_message,
+        )
+    )
+    assert receipt.action == "POSTED"
+    assert retry.post_call_count == 2
+
+
+def test_v2_send_second_unknown_stays_effect_unknown() -> None:
+    client = setup_client()
+    client.post_behaviors = ["unknown_no_commit", "unknown_no_commit"]
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=v2_message("ACK", message_key="asd-ack-v2-send-unknown"),
+            )
+        )
+    assert code(exc) == "SEND_EFFECT_UNKNOWN"
+    assert client.post_call_count == 2
+
+
+def test_v2_send_definitive_transport_failure_does_not_failover() -> None:
+    client = setup_client()
+    client.post_behaviors = ["definitive_error"]
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=v2_message("ACK", message_key="asd-ack-v2-send-definitive"),
+            )
+        )
+    assert code(exc) == "TRANSPORT_UNAVAILABLE"
+    assert client.post_call_count == 1
+
+
+@pytest.mark.parametrize("behavior", ["wrong_author", "wrong_text"])
+def test_v2_send_malformed_committed_receipt_recovers_from_history(behavior: str) -> None:
+    client = setup_client()
+    client.post_behaviors = [behavior]
+    message = v2_message(
+        "ACK",
+        message_key=f"asd-ack-v2-send-{behavior.replace('_', '-')}",
+    )
+    receipt = run(
+        make_engine(client).send_message(
+            thread_ts=THREAD_TS,
+            context=context(),
+            message=message,
+        )
+    )
+    assert receipt.action == "RECOVERED"
+    assert client.post_call_count == 1
+
+
+def test_v2_send_refuses_actor_or_applicability_laundering_before_post() -> None:
+    client = setup_client()
+    ceo_ack = v2_message(
+        "ACK",
+        message_key="asd-ack-v2-send-ceo-launder",
+        actor_ref=ceo_actor(),
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=ceo_ack,
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert client.post_call_count == 0
+
+    changed_scope = v2_message(
+        "ACK",
+        message_key="asd-ack-v2-send-scope-launder",
+        applies_to=applies("d" * 40),
+    )
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).send_message(
+                thread_ts=THREAD_TS,
+                context=context(),
+                message=changed_scope,
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+    assert client.post_call_count == 0
+
+
+def _decision_and_ruling() -> tuple[dict[str, object], dict[str, object]]:
+    request = v2_message(
+        "DECISION_REQUEST",
+        message_key="asd-request-v2-engine-wait",
+    )
+    reply = v2_message(
+        "RULING",
+        message_key="asd-ruling-v2-engine-wait",
+        actor_ref=ceo_actor(),
+        reply_to_message_key=request["message_key"],
+    )
+    return request, reply
+
+
+def test_v2_wait_for_reply_uses_injected_authority_policy() -> None:
+    client = setup_client()
+    request, reply = _decision_and_ruling()
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000060")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000061")
+    result = run(
+        make_engine(client).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(),
+            request_message_key=request["message_key"],
+            expected_types=("RULING",),
+            max_attempts=1,
+        )
+    )
+    assert result["reply"] == reply
+    assert result["authority"] == {
+        "disposition": "CONTINUE",
+        "executable": True,
+        "selected_option": "opt-continue",
+        "canonical_ref": None,
+    }
+
+
+def test_v2_executive_actor_is_not_sufficient_ruling_authority() -> None:
+    client = setup_client()
+    request, reply = _decision_and_ruling()
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000062")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000063")
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client, authority_policy=ChairmanFloorPolicy()).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        )
+    assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+
+
+def test_v2_wait_competing_replies_are_ambiguous() -> None:
+    client = setup_client()
+    request, reply = _decision_and_ruling()
+    second = v2_message(
+        "RULING",
+        message_key="asd-ruling-v2-engine-wait-second",
+        actor_ref=ceo_actor(),
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000064")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000065")
+    add_v2_reply(client, second, author=SOL1, ts="1787471000.000066")
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        )
+    assert code(exc) == "REPLY_AMBIGUOUS"
+
+
+def test_v2_wait_without_reply_times_out() -> None:
+    client = setup_client()
+    request = v2_message(
+        "DECISION_REQUEST",
+        message_key="asd-request-v2-engine-timeout",
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000067")
+    with pytest.raises(DialogueEngineError) as exc:
+        run(
+            make_engine(client).wait_for_reply(
+                thread_ts=THREAD_TS,
+                context=context(),
+                request_message_key=request["message_key"],
+                expected_types=("RULING",),
+                max_attempts=1,
+            )
+        )
+    assert code(exc) == "WAIT_TIMEOUT"
+
+
+def test_v2_status_is_explicitly_production_inert_and_not_watcher_ready() -> None:
+    status = make_engine(setup_client()).status()
+    assert status["schema"] == "mastermind.agent_dialogue_status.v2"
+    assert status["status"] == "DEVELOPMENT_UNARMED"
+    assert status["persistent_state"] is False
+    assert status["production_token_installed"] is False
+    assert status["production_armed"] is False
+    assert "watcher_ready" not in status
+    assert "wake_ready" not in status
