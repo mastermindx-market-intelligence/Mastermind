@@ -35,6 +35,31 @@ _EXPECTED_SETTINGS = {
 }
 
 
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in mapping
+            except TypeError as exc:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found an unhashable mapping key",
+                    key_node.start_mark,
+                ) from exc
+            if duplicate:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key {key!r}",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
 def _emit(status: str, *, error: str | None = None) -> int:
     receipt: dict[str, str] = {"schema": SCHEMA, "status": status}
     if error is not None:
@@ -45,7 +70,8 @@ def _emit(status: str, *, error: str | None = None) -> int:
 
 def _load(path: Path) -> Any:
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        return yaml.load(text, Loader=_UniqueKeySafeLoader)
     except (OSError, UnicodeError, yaml.YAMLError):
         return None
 
