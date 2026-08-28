@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 import signal
 import subprocess
 import time
@@ -80,6 +81,9 @@ def _bootstrap_fixture(
     *,
     repair_exit: int = 0,
     repair_output: str = "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED",
+    mid_carrier_marker: Path | None = None,
+    child_terminated_marker: Path | None = None,
+    post_signal_sentinel: Path | None = None,
 ) -> tuple[Path, str, Path, Path]:
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -90,11 +94,38 @@ def _bootstrap_fixture(
     executive_os = repository / "ops" / "executive_os"
     executive_os.mkdir(parents=True)
     fake_repair = executive_os / "repair-capacity-source-closure.sh"
+    repair_body = (
+        f"/usr/bin/printf '%s\\n' {shlex.quote(repair_output)}; "
+        f"exit {repair_exit}"
+    )
+    if mid_carrier_marker is not None:
+        assert child_terminated_marker is not None
+        assert post_signal_sentinel is not None
+        root_namespace = tmp_path / "bootstrap-root/mastermind-h0-root-carrier"
+        repair_body = f"""
+    on_signal() {{
+      if [ -d {shlex.quote(str(root_namespace))} ]; then
+        /usr/bin/touch {shlex.quote(str(child_terminated_marker))}
+      fi
+      exit 143
+    }}
+    trap on_signal HUP INT TERM
+    (
+      trap '' HUP INT TERM
+      /bin/sleep 3
+      /usr/bin/touch {shlex.quote(str(post_signal_sentinel))}
+    ) &
+    descendant_pid=$!
+    /usr/bin/printf '%s %s\\n' "$$" "$descendant_pid" \
+      > {shlex.quote(str(mid_carrier_marker))}
+    wait "$descendant_pid"
+    {repair_body}
+"""
     fake_repair.write_text(
         f"""#!/bin/bash
 set -u
 case "$1" in
-  repair) /usr/bin/printf '%s\\n' {repair_output}; exit {repair_exit} ;;
+  repair) {repair_body} ;;
   verify-only) /usr/bin/printf '%s\\n' H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED ;;
   *) exit 64 ;;
 esac
@@ -118,11 +149,22 @@ esac
 
 
 def _bootstrap_arguments(
-    commit: str, bundle: Path, macro_transport: Path
+    commit: str,
+    bundle: Path,
+    macro_transport: Path,
+    *,
+    operator_user: str | None = None,
 ) -> tuple[str, ...]:
+    if operator_user is None:
+        operator_user = subprocess.run(
+            ["/usr/bin/id", "-un"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
     return (
         commit,
-        "operator",
+        operator_user,
         str(macro_transport),
         hashlib.sha256(macro_transport.read_bytes()).hexdigest(),
         str(bundle),
@@ -152,6 +194,48 @@ def _bootstrap_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
     environment = dict(os.environ)
     environment["MMX_H0_BOOTSTRAP_TEST_ROOT"] = str(test_root)
     return environment, test_root / "mastermind-h0-root-carrier"
+
+
+def test_bootstrap_refuses_root_identity_before_bundle_or_namespace_observation(
+    tmp_path: Path,
+) -> None:
+    _repository, commit, bundle_target, macro_transport = _bootstrap_fixture(tmp_path)
+    bundle = tmp_path / "operator-bundle-symlink"
+    bundle.symlink_to(bundle_target)
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    environment["MMX_H0_BOOTSTRAP_TEST_CALLER_UID"] = "0"
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments(commit, bundle, macro_transport),
+        environment=environment,
+    )
+
+    assert result == INVALID
+    assert bundle.is_symlink()
+    assert not root_namespace.exists()
+
+
+def test_bootstrap_refuses_operator_identity_mismatch_before_bundle_observation(
+    tmp_path: Path,
+) -> None:
+    _repository, commit, bundle_target, macro_transport = _bootstrap_fixture(tmp_path)
+    bundle = tmp_path / "operator-bundle-symlink"
+    bundle.symlink_to(bundle_target)
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments(
+            commit,
+            bundle,
+            macro_transport,
+            operator_user="definitely_not_current_user",
+        ),
+        environment=environment,
+    )
+
+    assert result == INVALID
+    assert bundle.is_symlink()
+    assert not root_namespace.exists()
 
 
 def test_exact_disposable_carrier_inventory_runs_under_isolated_apple_python(
@@ -393,6 +477,61 @@ def test_signal_removes_exclusive_root_namespace(
         "",
     )
     assert not root_namespace.exists()
+
+
+@pytest.mark.parametrize("interrupt", (signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+def test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup(
+    tmp_path: Path, interrupt: signal.Signals
+) -> None:
+    carrier_started = tmp_path / "carrier-started"
+    child_terminated = tmp_path / "child-terminated-before-cleanup"
+    post_signal_sentinel = tmp_path / "post-signal-mutation"
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(
+        tmp_path,
+        mid_carrier_marker=carrier_started,
+        child_terminated_marker=child_terminated,
+        post_signal_sentinel=post_signal_sentinel,
+    )
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    process = subprocess.Popen(
+        [
+            "/bin/bash",
+            str(BOOTSTRAP),
+            *_bootstrap_arguments(commit, bundle, macro_transport),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+    )
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not carrier_started.exists():
+        time.sleep(0.01)
+    assert carrier_started.exists(), process.communicate(timeout=1)
+    carrier_pid, descendant_pid = (
+        int(value) for value in carrier_started.read_text(encoding="utf-8").split()
+    )
+
+    process.send_signal(interrupt)
+    stdout, stderr = process.communicate(timeout=10)
+
+    assert (process.returncode, stdout, stderr) == (
+        70,
+        "H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER\n",
+        "",
+    )
+    assert child_terminated.exists()
+    assert not root_namespace.exists()
+    for child_pid in (carrier_pid, descendant_pid):
+        observed_process = subprocess.run(
+            ["/bin/ps", "-p", str(child_pid), "-o", "pid="],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert (observed_process.returncode, observed_process.stdout) == (1, "")
+    time.sleep(3.2)
+    assert not post_signal_sentinel.exists()
 
 
 @pytest.mark.parametrize(

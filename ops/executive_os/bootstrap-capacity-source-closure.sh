@@ -9,6 +9,11 @@ ROOT_NAMESPACE="/private/var/root/mastermind-h0-root-carrier"
 ROOT_NAMESPACE_CREATED=0
 FINISHED=0
 TEST_ADAPTER="false"
+ACTIVE_CHILD_PID=""
+ACTIVE_CHILD_PGID=""
+CHILD_OUTPUT=""
+CARRIER_STATUS=65
+CARRIER_OUTPUT="H0_SOURCE_CLOSURE_REPAIR_REFUSED"
 EXPECTED_UID=0
 EXPECTED_GID=0
 INSTALL_OWNER="root"
@@ -60,14 +65,92 @@ run_authenticated_carrier() {
     /bin/bash "$@"
 }
 
+active_child_group_exists() {
+  [ -n "$ACTIVE_CHILD_PGID" ] \
+    && run_root /bin/kill -0 -- "-$ACTIVE_CHILD_PGID"
+}
+
+terminate_active_child() {
+  local attempts=0
+  [ -n "$ACTIVE_CHILD_PID" ] || return 0
+
+  run_root /bin/kill -TERM -- "-$ACTIVE_CHILD_PGID" || true
+  while active_child_group_exists && [ "$attempts" -lt 10 ]; do
+    /bin/sleep 0.1
+    attempts=$((attempts + 1))
+  done
+  if active_child_group_exists; then
+    run_root /bin/kill -KILL -- "-$ACTIVE_CHILD_PGID" || true
+  fi
+  wait "$ACTIVE_CHILD_PID" || true
+
+  attempts=0
+  while active_child_group_exists && [ "$attempts" -lt 50 ]; do
+    /bin/sleep 0.1
+    attempts=$((attempts + 1))
+  done
+  if active_child_group_exists; then
+    return 1
+  fi
+  ACTIVE_CHILD_PID=""
+  ACTIVE_CHILD_PGID=""
+  return 0
+}
+
+run_authenticated_carrier_tracked() {
+  local child_status
+  if [ "$TEST_ADAPTER" = "true" ]; then
+    CHILD_OUTPUT="$(/usr/bin/mktemp \
+      "$MMX_H0_BOOTSTRAP_TEST_ROOT/child-output.XXXXXXXX")" \
+      || finish 65 "$REFUSED_OUTPUT"
+  else
+    CHILD_OUTPUT="$(/usr/bin/mktemp \
+      /private/tmp/mastermind-h0-child-output.XXXXXXXX)" \
+      || finish 65 "$REFUSED_OUTPUT"
+  fi
+  /bin/chmod 0600 "$CHILD_OUTPUT" || finish 65 "$REFUSED_OUTPUT"
+
+  set -m
+  run_authenticated_carrier "$@" >"$CHILD_OUTPUT" &
+  ACTIVE_CHILD_PID=$!
+  ACTIVE_CHILD_PGID=$ACTIVE_CHILD_PID
+  wait "$ACTIVE_CHILD_PID"
+  child_status=$?
+  ACTIVE_CHILD_PID=""
+  ACTIVE_CHILD_PGID=""
+  set +m
+
+  CARRIER_OUTPUT="$(/bin/cat "$CHILD_OUTPUT")" \
+    || finish 65 "$REFUSED_OUTPUT"
+  /bin/rm -f "$CHILD_OUTPUT" || finish 65 "$REFUSED_OUTPUT"
+  [ ! -e "$CHILD_OUTPUT" ] || finish 65 "$REFUSED_OUTPUT"
+  CHILD_OUTPUT=""
+  CARRIER_STATUS=$child_status
+}
+
 cleanup_namespace() {
   local cleanup_failed=0
-  if [ "$ROOT_NAMESPACE_CREATED" -eq 1 ]; then
-    run_root /bin/rm -rf "$ROOT_NAMESPACE" || cleanup_failed=1
-    if run_root /bin/test -e "$ROOT_NAMESPACE"; then
+  if [ -n "$CHILD_OUTPUT" ]; then
+    /bin/rm -f "$CHILD_OUTPUT" || cleanup_failed=1
+    if [ -e "$CHILD_OUTPUT" ]; then
       cleanup_failed=1
     else
-      ROOT_NAMESPACE_CREATED=0
+      CHILD_OUTPUT=""
+    fi
+  fi
+  if [ -n "$ACTIVE_CHILD_PID" ]; then
+    cleanup_failed=1
+  fi
+  if [ "$ROOT_NAMESPACE_CREATED" -eq 1 ]; then
+    if [ -n "$ACTIVE_CHILD_PID" ]; then
+      cleanup_failed=1
+    else
+      run_root /bin/rm -rf "$ROOT_NAMESPACE" || cleanup_failed=1
+      if run_root /bin/test -e "$ROOT_NAMESPACE"; then
+        cleanup_failed=1
+      else
+        ROOT_NAMESPACE_CREATED=0
+      fi
     fi
     if [ "$TEST_ADAPTER" = "true" ] \
       && [ "${MMX_H0_BOOTSTRAP_TEST_CLEANUP_FAIL:-}" = "1" ]; then
@@ -93,11 +176,16 @@ finish() {
 
 unexpected_exit() {
   if [ "$FINISHED" -eq 0 ]; then
+    terminate_active_child || true
     finish 65 "$REFUSED_OUTPUT"
   fi
 }
 
-interrupted() { finish 70 "$INTERRUPTED_OUTPUT"; }
+interrupted() {
+  trap - HUP INT TERM
+  terminate_active_child || true
+  finish 70 "$INTERRUPTED_OUTPUT"
+}
 
 finish_carrier_failure() {
   local code="$1" output="$2"
@@ -118,8 +206,16 @@ finish_carrier_failure() {
 trap unexpected_exit EXIT
 trap interrupted HUP INT TERM
 
-if [ -n "${MMX_H0_BOOTSTRAP_TEST_ROOT:-}" ] \
-  && [ "$(/usr/bin/id -u)" != "0" ]; then
+CALLER_UID="$(/usr/bin/id -u)" || finish 64 "INVALID_INVOCATION"
+CALLER_USER="$(/usr/bin/id -un)" || finish 64 "INVALID_INVOCATION"
+case "$CALLER_UID" in
+  0|[1-9][0-9]*) ;;
+  *) finish 64 "INVALID_INVOCATION" ;;
+esac
+valid_local_name "$CALLER_USER" || finish 64 "INVALID_INVOCATION"
+[ "$CALLER_UID" -ne 0 ] || finish 64 "INVALID_INVOCATION"
+
+if [ -n "${MMX_H0_BOOTSTRAP_TEST_ROOT:-}" ]; then
   valid_absolute_path "$MMX_H0_BOOTSTRAP_TEST_ROOT" || finish 64 "INVALID_INVOCATION"
   case "$MMX_H0_BOOTSTRAP_TEST_ROOT" in
     /private/tmp/*|/private/var/folders/*) ;;
@@ -133,7 +229,13 @@ if [ -n "${MMX_H0_BOOTSTRAP_TEST_ROOT:-}" ] \
   INSTALL_OWNER="$EXPECTED_UID"
   INSTALL_GROUP="$EXPECTED_GID"
   INSTALL_PRINCIPAL="$EXPECTED_UID:$EXPECTED_GID"
+  case "${MMX_H0_BOOTSTRAP_TEST_CALLER_UID:-$CALLER_UID}" in
+    0|[1-9][0-9]*) CALLER_UID="${MMX_H0_BOOTSTRAP_TEST_CALLER_UID:-$CALLER_UID}" ;;
+    *) finish 64 "INVALID_INVOCATION" ;;
+  esac
 fi
+
+[ "$CALLER_UID" -ne 0 ] || finish 64 "INVALID_INVOCATION"
 
 if [ "$#" -ne 6 ] \
   || ! valid_commit "$1" \
@@ -151,6 +253,7 @@ MACRO_TRANSPORT="$3"
 MACRO_TRANSPORT_SHA256="$4"
 REPAIR_BUNDLE="$5"
 REPAIR_BUNDLE_SHA256="$6"
+[ "$OPERATOR_USER" = "$CALLER_USER" ] || finish 64 "INVALID_INVOCATION"
 
 # The operator bundle is inert input. Refuse an initially observed symlink
 # before any privileged namespace exists and freeze its source inode relation
@@ -319,33 +422,36 @@ run_root /usr/bin/env -i \
     --expected-gid "$EXPECTED_GID" >/dev/null \
   || finish 65 "$REFUSED_OUTPUT"
 
-REPAIR_OUTPUT="$(run_authenticated_carrier \
+run_authenticated_carrier_tracked \
   "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" repair \
   --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA" \
   --operator-user "$OPERATOR_USER" \
   --macro-transport "$MACRO_TRANSPORT" \
-  --macro-transport-sha256 "$MACRO_TRANSPORT_SHA256")"
-REPAIR_STATUS="$?"
+  --macro-transport-sha256 "$MACRO_TRANSPORT_SHA256"
+REPAIR_OUTPUT="$CARRIER_OUTPUT"
+REPAIR_STATUS="$CARRIER_STATUS"
 if [ "$REPAIR_STATUS" -ne 0 ]; then
   finish_carrier_failure "$REPAIR_STATUS" "$REPAIR_OUTPUT"
 fi
 [ "$REPAIR_OUTPUT" = "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED" ] \
   || finish 65 "$REFUSED_OUTPUT"
 
-VERIFY_ONE_OUTPUT="$(run_authenticated_carrier \
+run_authenticated_carrier_tracked \
   "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" verify-only \
-  --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA")"
-VERIFY_ONE_STATUS="$?"
+  --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA"
+VERIFY_ONE_OUTPUT="$CARRIER_OUTPUT"
+VERIFY_ONE_STATUS="$CARRIER_STATUS"
 if [ "$VERIFY_ONE_STATUS" -ne 0 ]; then
   finish_carrier_failure "$VERIFY_ONE_STATUS" "$VERIFY_ONE_OUTPUT"
 fi
 [ "$VERIFY_ONE_OUTPUT" = "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED" ] \
   || finish 65 "$REFUSED_OUTPUT"
 
-VERIFY_TWO_OUTPUT="$(run_authenticated_carrier \
+run_authenticated_carrier_tracked \
   "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" verify-only \
-  --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA")"
-VERIFY_TWO_STATUS="$?"
+  --expected-source-closure-repair-commit "$REPAIR_MERGE_SHA"
+VERIFY_TWO_OUTPUT="$CARRIER_OUTPUT"
+VERIFY_TWO_STATUS="$CARRIER_STATUS"
 if [ "$VERIFY_TWO_STATUS" -ne 0 ]; then
   finish_carrier_failure "$VERIFY_TWO_STATUS" "$VERIFY_TWO_OUTPUT"
 fi

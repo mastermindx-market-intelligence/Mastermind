@@ -486,8 +486,12 @@ new attempt. No output contains a path, Git output, principal, account, credenti
 
 Review, CI, Macro acquisition, v2 transport construction/hash, and construction of a digest-bound
 exact-merge Git bundle occur before privilege. The reviewed bootstrap runs only as the unprivileged
-operator. Root receives no shell, heredoc, interpreter `-c`, or stdin program text: before carrier
-authentication it executes only reviewed absolute macOS system-tool argv through `sudo`. Those
+operator. Before it observes the bundle or creates the privileged namespace, it resolves its own
+UID and username with absolute `/usr/bin/id` calls, rejects UID 0, and requires the supplied
+operator username to equal that exact non-root identity. Either boundary failure returns only
+`64 INVALID_INVOCATION` with empty stderr. Root receives no shell, heredoc, interpreter `-c`, or
+stdin program text: before carrier authentication it executes only reviewed absolute macOS
+system-tool argv through `sudo`. Those
 tools copy the inert bundle without preserving metadata into the exclusive fixed root-created
 `0700` namespace `/private/var/root/mastermind-h0-root-carrier`, remove ACLs/xattrs/flags from the
 new inodes, and verify the recorded digest. An initially observed symlink refuses before namespace
@@ -503,9 +507,12 @@ binds every path and Git mode to the exact commit, verifies every retained file 
 framing, and writes them into new root-owned single-link inodes. The authenticated Python verifier
 independently repeats the exact commit/mode/blob checks from the root-created bare repository before
 the carrier shell runs. Root never executes an operator-created inode and performs no network
-access. The fixed namespace is created no-replace, is removed on refusal, success, HUP, INT, and
-TERM, and is never auto-removed when found preexisting. Cleanup failure is a typed non-success and
-all three pass sentinels remain buffered until cleanup succeeds.
+access. Each authenticated repair or verify-only child runs as one tracked process group. A HUP,
+INT, or TERM delivered only to the bootstrap terminates that active child and its descendants and
+reaps the group before namespace cleanup; no descendant can mutate after the exit-70 receipt. The
+fixed namespace is created no-replace, is removed on refusal, success, HUP, INT, and TERM, and is
+never auto-removed when found preexisting. Cleanup failure is a typed non-success and all three
+pass sentinels remain buffered until cleanup succeeds.
 
 One native administrator dialog executes the repair once from that root-created carrier, then runs
 verify-only twice using the exact CLI grammar. The installed `release_manifest.py` is never

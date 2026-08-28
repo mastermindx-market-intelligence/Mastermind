@@ -138,10 +138,12 @@ digest. These are per-carrier proof; they are not a future generation identity.
 ### One offline administrator ceremony
 
 Keep the same Terminal and invoke the checked-in bootstrap once as the unprivileged operator.
-`sudo` may open one native administrator dialog, but root never receives a shell, heredoc,
-interpreter `-c`, or operator stdin. Before the carrier is authenticated, each privileged call is
-one reviewed absolute macOS system-tool argv. The bootstrap copies the inert bundle without
-preserving metadata into the exclusive fixed literal
+Before reading the bundle or creating the fixed root namespace, the bootstrap resolves its own UID
+and username through absolute `/usr/bin/id` calls. UID 0 or any mismatch with `OPERATOR_USER`
+returns `64 INVALID_INVOCATION` with empty stderr. `sudo` may open one native administrator dialog,
+but root never receives a shell, heredoc, interpreter `-c`, or operator stdin. Before the carrier
+is authenticated, each privileged call is one reviewed absolute macOS system-tool argv. The
+bootstrap copies the inert bundle without preserving metadata into the exclusive fixed literal
 `/private/var/root/mastermind-h0-root-carrier`, authenticates its digest and exact commit with fully
 closed Git configuration, and materializes the complete five-file local-module closure into new
 root-owned inodes:
@@ -157,8 +159,11 @@ carrier Python or shell launch. The authenticated Python verifier independently 
 commit/mode/blob checks from the root-created bare repository. Only then does the bootstrap execute
 one repair and two verify-only passes. Their output is buffered until the fixed root namespace has
 been removed successfully; cleanup failure is a typed non-success and cannot emit a clean pass.
-HUP, INT, TERM, ordinary refusal, and success all enter this same cleanup lifecycle. A preexisting
-fixed namespace is unknown residue: the no-replace `mkdir` refuses it and does not delete it.
+HUP, INT, TERM, ordinary refusal, and success all enter this same cleanup lifecycle. Each
+authenticated repair or verify-only child is tracked as one process group. A signal delivered to
+the bootstrap PID terminates that child and its descendants and reaps them before namespace
+cleanup, so no delayed child mutation can follow the exit-70 receipt. A preexisting fixed namespace
+is unknown residue: the no-replace `mkdir` refuses it and does not delete it.
 
 ```bash
 /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \
