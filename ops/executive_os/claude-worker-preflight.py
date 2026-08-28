@@ -444,6 +444,7 @@ def build_ready_receipt(
         # Task 3 owns the real Worker-broker composition. This Task 1/2 slice
         # cannot turn a caller declaration into worker-context evidence.
         _raise("EXECUTION_CONTEXT_UNPROVEN")
+    require_current_identity_owner(host_ref, os_principal_ref)
     if not auth.auth_ready:
         _raise(auth.reason_codes[0] if auth.reason_codes else "AUTH_STATUS_UNSUPPORTED")
     return validate_receipt(
