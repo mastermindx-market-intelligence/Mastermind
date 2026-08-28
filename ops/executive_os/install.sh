@@ -4,6 +4,7 @@
 set -euo pipefail
 umask 077
 
+SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
 CONTROL_USER="_mastermind_exec"
@@ -17,6 +18,8 @@ WORKER_GID="451"
 OPS_GID="453"
 SOURCE_REPO=""
 EXPECTED_SHA=""
+PROTECTED_MASTER_SHA=""
+ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
 CONTROL_CONFIG_SOURCE=""
 OPERATOR_USER=""
 PYTHON_BINARY=""
@@ -34,7 +37,7 @@ CODEX_VERSION="0.147.0"
 CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
 
 usage() {
-  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [options]" >&2
+  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
 }
 
@@ -42,6 +45,8 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --source-repo) SOURCE_REPO="${2:-}"; shift 2 ;;
     --expected-sha) EXPECTED_SHA="${2:-}"; shift 2 ;;
+    --protected-master-sha) PROTECTED_MASTER_SHA="${2:-}"; shift 2 ;;
+    --allow-frozen-accepted-ancestor) ALLOW_FROZEN_ACCEPTED_ANCESTOR="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
@@ -522,20 +527,28 @@ if ! /usr/bin/id -Gn "$OPERATOR_USER" | /usr/bin/tr ' ' '\n' | /usr/bin/grep -qx
 fi
 OPERATOR_UID="$(/usr/bin/id -u "$OPERATOR_USER")"
 
-HEAD_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse HEAD)"
-[ "$HEAD_SHA" = "$EXPECTED_SHA" ] || {
-  /bin/echo "source checkout HEAD is not the exact expected SHA" >&2
+SOURCE_POLICY="$SCRIPT_DIR/install_source_policy.py"
+[ -f "$SOURCE_POLICY" ] && [ ! -L "$SOURCE_POLICY" ] || {
+  /bin/echo "installer source policy helper is unavailable or unsafe" >&2
   exit 65
 }
-[ -z "$(/usr/bin/git --no-optional-locks -C "$SOURCE_REPO" status --porcelain=v1 --untracked-files=normal)" ] || {
-  /bin/echo "source checkout is not clean" >&2
-  exit 65
-}
-REMOTE_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse refs/remotes/origin/master 2>/dev/null || true)"
-[ "$REMOTE_SHA" = "$EXPECTED_SHA" ] || {
-  /bin/echo "expected SHA is not the checkout's exact origin/master" >&2
-  exit 65
-}
+SOURCE_POLICY_ARGS=(
+  --source-repo "$SOURCE_REPO"
+  --expected-sha "$EXPECTED_SHA"
+)
+if [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "1" ]; then
+  SOURCE_POLICY_ARGS+=(
+    --allow-frozen-accepted-ancestor
+    --protected-master-sha "$PROTECTED_MASTER_SHA"
+  )
+elif [ -n "$PROTECTED_MASTER_SHA" ]; then
+  SOURCE_POLICY_ARGS+=(--protected-master-sha "$PROTECTED_MASTER_SHA")
+fi
+"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/install_source_policy.py" \
+  "${SOURCE_POLICY_ARGS[@]}" >/dev/null || {
+    /bin/echo "source checkout failed the reviewed Executive install policy" >&2
+    exit 65
+  }
 TREE_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
