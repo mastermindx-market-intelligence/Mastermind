@@ -365,6 +365,29 @@ def test_builder_cannot_mint_worker_context_ready_before_broker_slice():
         )
 
 
+def test_builder_cannot_mint_interactive_ready_without_identity_owner():
+    module = _load()
+    auth = module.AuthObservation(
+        auth_ready=True,
+        auth_method="claudeai",
+        api_provider="first_party",
+        reason_codes=(),
+    )
+    with pytest.raises(module.PreflightError, match="HOST_IDENTITY_SEAM_UNAVAILABLE"):
+        module.build_ready_receipt(
+            realm_label="claude-pro-01",
+            host_ref="host-01234567",
+            os_principal_ref="principal-01234567",
+            execution_context="INTERACTIVE_PRINCIPAL",
+            worker_id=None,
+            quota_class=None,
+            binary_sha256="a" * 64,
+            version="2.1.0",
+            auth=auth,
+            observed_at="2026-08-27T23:30:00Z",
+        )
+
+
 def test_cli_refuses_caller_declared_identity_until_owner_seam_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
