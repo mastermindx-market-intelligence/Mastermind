@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 from integrations.slack_agent_dialogue.contract import (
     AUTHORITY_CLASSES,
     FABLE_MESSAGE_TYPES,
+    SOL_MESSAGE_TYPES,
     DialogueContractError,
     TrustedAuthorityPolicy,
 )
@@ -223,6 +224,73 @@ def _adjudicate_ruling_v2(
         "selected_option": selected,
         "canonical_ref": None,
     }
+
+
+def _adjudicate_reply_v2(
+    request: Mapping[str, Any],
+    reply: Mapping[str, Any],
+    *,
+    authority_policy: TrustedAuthorityPolicy,
+) -> dict[str, Any]:
+    """Apply V1-equivalent Sol reply-family semantics to validated V2 envelopes."""
+
+    try:
+        request_message = validate_message_v2(dict(request))
+        reply_message = validate_message_v2(dict(reply))
+    except DialogueContractError:
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH") from None
+
+    if (
+        reply_message["reply_to_message_key"] != request_message["message_key"]
+        or not _messages_share_context(request_message, reply_message)
+    ):
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+    message_type = reply_message["message_type"]
+    if message_type == "RULING":
+        return _adjudicate_ruling_v2(
+            request_message,
+            reply_message,
+            authority_policy=authority_policy,
+        )
+    if message_type == "CONTINUE":
+        if request_message["message_type"] not in {"ACK", "PROGRESS", "BLOCKED"}:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        if (
+            request_message["message_type"] == "BLOCKED"
+            and request_message["body"]["needed_from"] != "sol"
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        try:
+            allowed = authority_policy.allows_continuation(
+                request=request_message,
+                reply=reply_message,
+            )
+        except Exception:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH") from None
+        if allowed is not True:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return {
+            "disposition": "CONTINUE",
+            "executable": True,
+            "selected_option": None,
+            "canonical_ref": None,
+        }
+    if message_type == "STOP":
+        return {
+            "disposition": "STOP",
+            "executable": True,
+            "selected_option": None,
+            "canonical_ref": None,
+        }
+    if message_type == "AMENDMENT_AVAILABLE":
+        return {
+            "disposition": "CANONICAL_REF_REQUIRED",
+            "executable": False,
+            "selected_option": None,
+            "canonical_ref": reply_message["body"]["canonical_ref"],
+        }
+    raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
 
 
 class DialogueEngineV2:
@@ -577,7 +645,7 @@ class DialogueEngineV2:
         if (
             not expected
             or len(expected) != len(set(expected))
-            or any(message_type != "RULING" for message_type in expected)
+            or any(message_type not in SOL_MESSAGE_TYPES for message_type in expected)
         ):
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         attempts = self.policy.max_wait_attempts if max_attempts is None else max_attempts
@@ -609,7 +677,7 @@ class DialogueEngineV2:
                 raise DialogueEngineError("REPLY_AMBIGUOUS")
             if len(replies) == 1:
                 reply = replies[0]
-                authority = _adjudicate_ruling_v2(
+                authority = _adjudicate_reply_v2(
                     request,
                     reply.message,
                     authority_policy=self.authority_policy,
