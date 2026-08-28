@@ -10,9 +10,11 @@ import asyncio
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from integrations.slack_agent_dialogue.contract import (
+    AUTHORITY_CLASSES,
+    FABLE_MESSAGE_TYPES,
     DialogueContractError,
     TrustedAuthorityPolicy,
 )
@@ -22,16 +24,20 @@ from integrations.slack_agent_dialogue.contract_v2 import (
     build_parent_v2,
     parse_message_frame_v2,
     parse_parent_frame_v2,
+    render_message_v2,
     validate_actor_ref,
     validate_applies_to_v2,
+    validate_message_v2,
 )
 from integrations.slack_agent_dialogue.engine import (
     BoundThread,
     DialogueEngineError,
     DialoguePolicy,
     HistoryPage,
+    MessageReceipt,
     ReadMessage,
     SlackDialogueClient,
+    SlackEffectUnknown,
     SlackMessage,
     ThreadRead,
 )
@@ -131,6 +137,92 @@ def _message_context_matches(
         and message.get("session_ref") == context["session_ref"]
         and message.get("applies_to") == context["applies_to"]
     )
+
+
+def _messages_share_context(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    return all(
+        left.get(key) == right.get(key)
+        for key in ("work_ref", "commission_ref", "session_ref", "applies_to")
+    )
+
+
+def _adjudicate_ruling_v2(
+    request: Mapping[str, Any],
+    reply: Mapping[str, Any],
+    *,
+    authority_policy: TrustedAuthorityPolicy,
+) -> dict[str, Any]:
+    """Apply the accepted RULING authority floor to validated V2 envelopes."""
+
+    try:
+        request_message = validate_message_v2(dict(request))
+        reply_message = validate_message_v2(dict(reply))
+    except DialogueContractError:
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH") from None
+
+    if (
+        request_message["message_type"] != "DECISION_REQUEST"
+        or reply_message["message_type"] != "RULING"
+        or reply_message["reply_to_message_key"] != request_message["message_key"]
+        or not _messages_share_context(request_message, reply_message)
+    ):
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+    body = reply_message["body"]
+    options = {option["id"]: option for option in request_message["body"]["options"]}
+    selected = body["selected_option"]
+    if selected not in options:
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+    option = options[selected]
+
+    model_escalation_floor = {
+        "NONE": "WITHIN_COMMISSION",
+        "CANONICAL_REF_REQUIRED": "CANONICAL_REF_REQUIRED",
+        "CHAIRMAN_REQUIRED": "CHAIRMAN_REQUIRED",
+    }[option["authority_effect"]]
+    try:
+        trusted_floor = authority_policy.minimum_authority(
+            request=request_message,
+            option=option,
+        )
+    except Exception:
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH") from None
+    if trusted_floor not in AUTHORITY_CLASSES:
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+    authority_rank = {
+        "WITHIN_COMMISSION": 0,
+        "CANONICAL_REF_REQUIRED": 1,
+        "CHAIRMAN_REQUIRED": 2,
+    }
+    authority_class = body["authority_class"]
+    minimum_rank = max(
+        authority_rank[trusted_floor],
+        authority_rank[model_escalation_floor],
+    )
+    if authority_rank[authority_class] < minimum_rank:
+        raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+    if authority_class == "WITHIN_COMMISSION":
+        return {
+            "disposition": option["disposition"],
+            "executable": True,
+            "selected_option": selected,
+            "canonical_ref": None,
+        }
+    if authority_class == "CANONICAL_REF_REQUIRED":
+        return {
+            "disposition": "CANONICAL_REF_REQUIRED",
+            "executable": False,
+            "selected_option": selected,
+            "canonical_ref": body["canonical_ref"],
+        }
+    return {
+        "disposition": "CHAIRMAN_REQUIRED",
+        "executable": False,
+        "selected_option": selected,
+        "canonical_ref": None,
+    }
 
 
 class DialogueEngineV2:
@@ -325,6 +417,228 @@ class DialogueEngineV2:
         self, *, thread_ts: str, context: DialogueContextV2
     ) -> ThreadRead:
         return await self._history(thread_ts=thread_ts, context=context)
+
+    @staticmethod
+    def _find_key(
+        read: ThreadRead, *, message_key: str, fingerprint: str
+    ) -> ReadMessage | None:
+        matches = [
+            item for item in read.messages if item.message["message_key"] == message_key
+        ]
+        if not matches:
+            return None
+        if len(matches) != 1:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        candidate = matches[0]
+        if candidate.message["fingerprint"] != fingerprint:
+            raise DialogueEngineError("MESSAGE_KEY_CONFLICT")
+        return candidate
+
+    def _validate_outbound(
+        self, message: Mapping[str, Any], *, context: DialogueContextV2
+    ) -> dict[str, Any]:
+        try:
+            validated = validate_message_v2(dict(message))
+        except DialogueContractError:
+            raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
+        normalized = context.normalized()
+        if (
+            not _message_context_matches(validated, normalized)
+            or validated["actor_ref"] != normalized["actor_ref"]
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return validated
+
+    @staticmethod
+    def _validate_write_result(
+        result: Any,
+        *,
+        thread_ts: str,
+        expected_text: str,
+        expected_author_user_id: str,
+    ) -> SlackMessage:
+        if (
+            not isinstance(result, SlackMessage)
+            or result.author_user_id != expected_author_user_id
+            or result.thread_ts != thread_ts
+            or result.text != expected_text
+            or result.edited
+            or result.deleted
+        ):
+            raise DialogueEngineError("WRITE_RESULT_INVALID")
+        return result
+
+    async def _reconcile_post_effect(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        message_key: str,
+        fingerprint: str,
+    ) -> ReadMessage | None:
+        try:
+            read = await self._history(thread_ts=thread_ts, context=context)
+            return self._find_key(
+                read,
+                message_key=message_key,
+                fingerprint=fingerprint,
+            )
+        except DialogueEngineError:
+            raise DialogueEngineError("SEND_EFFECT_UNKNOWN") from None
+
+    async def send_message(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        message: Mapping[str, Any],
+    ) -> MessageReceipt:
+        validated = self._validate_outbound(message, context=context)
+        text = render_message_v2(validated)
+        existing = self._find_key(
+            await self._history(thread_ts=thread_ts, context=context),
+            message_key=validated["message_key"],
+            fingerprint=validated["fingerprint"],
+        )
+        if existing is not None:
+            return MessageReceipt(
+                action="DUPLICATE",
+                message_key=validated["message_key"],
+                fingerprint=validated["fingerprint"],
+                message_ts=existing.primary_ts,
+                duplicate_timestamps=existing.duplicate_timestamps,
+            )
+
+        for attempt in range(2):
+            invalid_receipt = False
+            transport: SlackMessage | None = None
+            try:
+                result = await asyncio.wait_for(
+                    self.client.post_reply(
+                        channel_id=self.policy.channel_id,
+                        thread_ts=thread_ts,
+                        text=text,
+                    ),
+                    timeout=self.policy.method_timeout_seconds,
+                )
+            except (SlackEffectUnknown, asyncio.TimeoutError):
+                pass
+            except Exception:
+                raise DialogueEngineError("TRANSPORT_UNAVAILABLE") from None
+            else:
+                try:
+                    transport = self._validate_write_result(
+                        result,
+                        thread_ts=thread_ts,
+                        expected_text=text,
+                        expected_author_user_id=self.policy.relay_bot_user_id,
+                    )
+                except DialogueEngineError:
+                    invalid_receipt = True
+
+            recovered = await self._reconcile_post_effect(
+                thread_ts=thread_ts,
+                context=context,
+                message_key=validated["message_key"],
+                fingerprint=validated["fingerprint"],
+            )
+            if recovered is not None:
+                action = (
+                    "POSTED"
+                    if transport is not None
+                    and transport.ts
+                    in {recovered.primary_ts, *recovered.duplicate_timestamps}
+                    else "RECOVERED"
+                )
+                return MessageReceipt(
+                    action=action,
+                    message_key=validated["message_key"],
+                    fingerprint=validated["fingerprint"],
+                    message_ts=recovered.primary_ts,
+                    duplicate_timestamps=recovered.duplicate_timestamps,
+                )
+            if attempt == 0:
+                continue
+            if invalid_receipt:
+                raise DialogueEngineError("WRITE_RESULT_INVALID")
+            raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+        raise DialogueEngineError("SEND_EFFECT_UNKNOWN")
+
+    async def wait_for_reply(
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        request_message_key: str,
+        expected_types: Sequence[str],
+        max_attempts: int | None = None,
+    ) -> dict[str, Any]:
+        expected = tuple(expected_types)
+        if (
+            not expected
+            or len(expected) != len(set(expected))
+            or any(message_type != "RULING" for message_type in expected)
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        attempts = self.policy.max_wait_attempts if max_attempts is None else max_attempts
+        if not isinstance(attempts, int) or not 1 <= attempts <= self.policy.max_wait_attempts:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+
+        normalized = context.normalized()
+        for index in range(attempts):
+            read = await self._history(thread_ts=thread_ts, context=context)
+            request_matches = [
+                item
+                for item in read.messages
+                if item.message["message_key"] == request_message_key
+                and item.message["message_type"] in FABLE_MESSAGE_TYPES
+                and item.message["actor_ref"] == normalized["actor_ref"]
+            ]
+            if len(request_matches) != 1:
+                raise DialogueEngineError("REPLY_NOT_FOUND")
+            request = request_matches[0].message
+            request_ts = _ts_order(request_matches[0].primary_ts)
+            replies = [
+                item
+                for item in read.messages
+                if item.message["reply_to_message_key"] == request_message_key
+                and item.message["message_type"] in expected
+                and _ts_order(item.primary_ts) > request_ts
+            ]
+            if len(replies) > 1:
+                raise DialogueEngineError("REPLY_AMBIGUOUS")
+            if len(replies) == 1:
+                reply = replies[0]
+                authority = _adjudicate_ruling_v2(
+                    request,
+                    reply.message,
+                    authority_policy=self.authority_policy,
+                )
+                return {
+                    "reply": dict(reply.message),
+                    "transport": {
+                        "primary_ts": reply.primary_ts,
+                        "duplicate_timestamps": list(reply.duplicate_timestamps),
+                    },
+                    "authority": authority,
+                }
+            if index + 1 < attempts:
+                await self._sleep(self.policy.poll_interval_seconds)
+        raise DialogueEngineError("WAIT_TIMEOUT")
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "schema": "mastermind.agent_dialogue_status.v2",
+            "status": "DEVELOPMENT_UNARMED",
+            "workspace_id": self.policy.workspace_id,
+            "channel_id": self.policy.channel_id,
+            "relay_bot_user_id": self.policy.relay_bot_user_id,
+            "sol_sender_count": len(self.policy.allowed_sol_user_ids),
+            "method_timeout_seconds": self.policy.method_timeout_seconds,
+            "persistent_state": False,
+            "production_token_installed": False,
+            "production_armed": False,
+        }
 
 
 __all__ = ["DialogueContextV2", "DialogueEngineV2"]
