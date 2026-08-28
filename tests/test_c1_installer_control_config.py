@@ -11,6 +11,11 @@ OPS = ROOT / "ops" / "executive_os"
 INSTALL = OPS / "install.sh"
 TEMPLATE = OPS / "control.json.template"
 C1_PREP = OPS / "prepare-c1-sol-state-relay.sh"
+C1_FIELDS = {
+    "ceo_ingress_launchd_socket_name": "CeoIngress",
+    "ceo_ingress_peer_uid": 452,
+    "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
+}
 
 
 def _embedded_control_config_generator() -> str:
@@ -22,7 +27,11 @@ def _embedded_control_config_generator() -> str:
     return source[start:end]
 
 
-def _render_default_control_config(tmp_path: Path) -> dict[str, object]:
+def _run_default_control_config(
+    tmp_path: Path,
+    *,
+    release_root: Path = ROOT,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
     destination = tmp_path / "control.json"
     expected_sha = "a" * 40
     completed = subprocess.run(
@@ -30,7 +39,7 @@ def _render_default_control_config(tmp_path: Path) -> dict[str, object]:
             sys.executable,
             "-c",
             _embedded_control_config_generator(),
-            str(ROOT),
+            str(release_root),
             str(destination),
             "",
             "/private/runtime",
@@ -55,24 +64,79 @@ def _render_default_control_config(tmp_path: Path) -> dict[str, object]:
         capture_output=True,
         text=True,
     )
+    return completed, destination
+
+
+def _render_default_control_config(
+    tmp_path: Path,
+    *,
+    release_root: Path = ROOT,
+) -> dict[str, object]:
+    completed, destination = _run_default_control_config(
+        tmp_path,
+        release_root=release_root,
+    )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     return json.loads(destination.read_text(encoding="utf-8"))
+
+
+def _synthetic_release_schema(
+    tmp_path: Path,
+    *,
+    c1_keys: set[str],
+) -> Path:
+    release_root = tmp_path / "release"
+    scripts = release_root / "scripts"
+    scripts.mkdir(parents=True)
+    template_keys = set(json.loads(TEMPLATE.read_text(encoding="utf-8")))
+    base_keys = template_keys - set(C1_FIELDS)
+    optional_keys = sorted(base_keys | c1_keys)
+    (scripts / "executive_os_phase1c.py").write_text(
+        "CONTROL_CONFIG_SCHEMA_VERSION = 'mastermind.executive_control_config/v1'\n"
+        "_CONFIG_REQUIRED = frozenset()\n"
+        f"_CONFIG_OPTIONAL = frozenset({optional_keys!r})\n",
+        encoding="utf-8",
+    )
+    return release_root
 
 
 def test_default_installer_control_config_matches_c1_unarmed_composition(tmp_path: Path) -> None:
     generated = _render_default_control_config(tmp_path)
     template = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     prep = C1_PREP.read_text(encoding="utf-8")
-    expected = {
-        "ceo_ingress_launchd_socket_name": "CeoIngress",
-        "ceo_ingress_peer_uid": 452,
-        "ceo_ingress_socket_path": "/var/run/mastermind-executive/ceo-ingress.sock",
-    }
 
-    for key, value in expected.items():
+    for key, value in C1_FIELDS.items():
         assert template[key] == value
         assert generated[key] == value
         assert f'"{key}"' in prep
 
     assert "ceo_ingress_armed" not in generated
     assert "ceo_ingress_armed" not in template
+
+
+def test_installer_does_not_inject_c1_fields_into_pre_c1_release_schema(tmp_path: Path) -> None:
+    release_root = _synthetic_release_schema(tmp_path, c1_keys=set())
+
+    generated = _render_default_control_config(
+        tmp_path,
+        release_root=release_root,
+    )
+
+    assert set(C1_FIELDS).isdisjoint(generated)
+    assert "ceo_ingress_armed" not in generated
+
+
+def test_installer_refuses_partial_c1_release_schema(tmp_path: Path) -> None:
+    release_root = _synthetic_release_schema(
+        tmp_path,
+        c1_keys={"ceo_ingress_socket_path"},
+    )
+
+    completed, destination = _run_default_control_config(
+        tmp_path,
+        release_root=release_root,
+    )
+
+    assert completed.returncode != 0
+    assert "partial CeoIngress control-config schema" in completed.stderr
+    assert not destination.exists()
