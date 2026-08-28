@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -9,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "ops" / "executive_os" / "repair-capacity-source-closure.sh"
+BOOTSTRAP = ROOT / "ops" / "executive_os" / "bootstrap-capacity-source-closure.sh"
 RUNBOOK = ROOT / "ops" / "executive_os" / "HOST_PREREQUISITES.md"
 DESIGN = (
     ROOT
@@ -19,6 +23,14 @@ PLAN = (
     / "docs/superpowers/plans/2026-08-27-executive-capacity-cf2-h0-source-closure-repair.md"
 )
 INVALID = (64, "INVALID_INVOCATION\n", "")
+
+REPAIR_CARRIER_PATHS = (
+    "ops/executive_os/repair-capacity-source-closure.sh",
+    "ops/executive_os/capacity_host_artifacts.py",
+    "ops/executive_os/capacity_source_contract.py",
+    "ops/executive_os/provider_worker_slots.py",
+    "ops/executive_os/provider_identity_policy.py",
+)
 
 
 def _run(*arguments: str, environment: dict[str, str] | None = None) -> tuple[int, str, str]:
@@ -45,6 +57,342 @@ def _run_script(
         env=environment,
     )
     return completed.returncode, completed.stdout, completed.stderr
+
+
+def _git(repository: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["/usr/bin/git", "-C", str(repository), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            "HOME": "/var/empty",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "C",
+            "LC_ALL": "C",
+        },
+    )
+    return completed.stdout.strip()
+
+
+def _bootstrap_fixture(
+    tmp_path: Path,
+    *,
+    repair_exit: int = 0,
+    repair_output: str = "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED",
+) -> tuple[Path, str, Path, Path]:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "config", "user.name", "Fixture")
+    _git(repository, "config", "user.email", "fixture@example.invalid")
+
+    executive_os = repository / "ops" / "executive_os"
+    executive_os.mkdir(parents=True)
+    fake_repair = executive_os / "repair-capacity-source-closure.sh"
+    fake_repair.write_text(
+        f"""#!/bin/bash
+set -u
+case "$1" in
+  repair) /usr/bin/printf '%s\\n' {repair_output}; exit {repair_exit} ;;
+  verify-only) /usr/bin/printf '%s\\n' H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED ;;
+  *) exit 64 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_repair.chmod(0o755)
+    for relative in REPAIR_CARRIER_PATHS[1:]:
+        destination = repository / relative
+        destination.write_bytes((ROOT / relative).read_bytes())
+        destination.chmod(0o644)
+    _git(repository, "add", *REPAIR_CARRIER_PATHS)
+    _git(repository, "commit", "-qm", "fixture carrier")
+    commit = _git(repository, "rev-parse", "HEAD")
+    bundle = tmp_path / "repair.bundle"
+    _git(repository, "bundle", "create", str(bundle), "HEAD")
+
+    macro_transport = tmp_path / "macro-transport.zip"
+    macro_transport.write_bytes(b"inert macro transport\n")
+    return repository, commit, bundle, macro_transport
+
+
+def _bootstrap_arguments(
+    commit: str, bundle: Path, macro_transport: Path
+) -> tuple[str, ...]:
+    return (
+        commit,
+        "operator",
+        str(macro_transport),
+        hashlib.sha256(macro_transport.read_bytes()).hexdigest(),
+        str(bundle),
+        hashlib.sha256(bundle.read_bytes()).hexdigest(),
+    )
+
+
+def _run_bootstrap(
+    *arguments: str,
+    environment: dict[str, str],
+    stdin: str = "",
+) -> tuple[int, str, str]:
+    completed = subprocess.run(
+        ["/bin/bash", str(BOOTSTRAP), *arguments],
+        input=stdin,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+    return completed.returncode, completed.stdout, completed.stderr
+
+
+def _bootstrap_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    test_root = tmp_path / "bootstrap-root"
+    test_root.mkdir()
+    environment = dict(os.environ)
+    environment["MMX_H0_BOOTSTRAP_TEST_ROOT"] = str(test_root)
+    return environment, test_root / "mastermind-h0-root-carrier"
+
+
+def test_exact_disposable_carrier_inventory_runs_under_isolated_apple_python(
+    tmp_path: Path,
+) -> None:
+    carrier = tmp_path / "carrier"
+    for relative in REPAIR_CARRIER_PATHS:
+        destination = carrier / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
+    completed = subprocess.run(
+        [
+            "/usr/bin/python3",
+            "-I",
+            "-S",
+            "-B",
+            str(carrier / "ops/executive_os/capacity_host_artifacts.py"),
+            "--help",
+        ],
+        cwd="/",
+        text=True,
+        capture_output=True,
+        check=False,
+        env={
+            "HOME": "/var/empty",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "C",
+            "LC_ALL": "C",
+        },
+    )
+    assert (completed.returncode, completed.stderr) == (0, "")
+    assert "Build or inspect inert CF2-H0 artifacts" in completed.stdout
+
+
+def test_invalid_bundle_cannot_interpret_hostile_stdin_before_authentication(
+    tmp_path: Path,
+) -> None:
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    bundle = tmp_path / "malformed.bundle"
+    bundle.write_bytes(b"not a git bundle\n")
+    macro_transport = tmp_path / "macro.zip"
+    macro_transport.write_bytes(b"inert\n")
+    sentinel = tmp_path / "hostile-stdin-ran"
+    hostile_stdin = f"/usr/bin/touch {sentinel}\n"
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments("d" * 40, bundle, macro_transport),
+        environment=environment,
+        stdin=hostile_stdin,
+    )
+
+    assert result == (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")
+    assert not sentinel.exists()
+    assert not root_namespace.exists()
+
+
+def test_symlink_bundle_refuses_without_touching_target(
+    tmp_path: Path,
+) -> None:
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    target = tmp_path / "bundle-target"
+    target.write_bytes(b"inert target\n")
+    target.chmod(0o640)
+    before = target.stat()
+    before_xattrs = subprocess.run(
+        ["/usr/bin/xattr", str(target)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    before_acl = subprocess.run(
+        ["/bin/ls", "-lde", str(target)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    bundle = tmp_path / "repair.bundle"
+    bundle.symlink_to(target)
+    macro_transport = tmp_path / "macro.zip"
+    macro_transport.write_bytes(b"inert\n")
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments("d" * 40, bundle, macro_transport),
+        environment=environment,
+    )
+    after = target.stat()
+
+    assert result == (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")
+    assert target.read_bytes() == b"inert target\n"
+    assert (
+        after.st_dev,
+        after.st_ino,
+        after.st_uid,
+        after.st_gid,
+        after.st_mode,
+        getattr(after, "st_flags", 0),
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_uid,
+        before.st_gid,
+        before.st_mode,
+        getattr(before, "st_flags", 0),
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    assert subprocess.run(
+        ["/usr/bin/xattr", str(target)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == before_xattrs
+    assert subprocess.run(
+        ["/bin/ls", "-lde", str(target)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == before_acl
+    assert not root_namespace.exists()
+
+
+def test_exact_bundle_runs_three_passes_and_removes_root_namespace(
+    tmp_path: Path,
+) -> None:
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(tmp_path)
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments(commit, bundle, macro_transport),
+        environment=environment,
+    )
+
+    assert result == (
+        0,
+        "H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED\n"
+        "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED\n"
+        "H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED\n",
+        "",
+    )
+    assert not root_namespace.exists()
+
+
+def test_cleanup_failure_cannot_emit_clean_success(tmp_path: Path) -> None:
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(tmp_path)
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    environment["MMX_H0_BOOTSTRAP_TEST_CLEANUP_FAIL"] = "1"
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments(commit, bundle, macro_transport),
+        environment=environment,
+    )
+
+    assert result == (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")
+    assert not root_namespace.exists()
+
+
+@pytest.mark.parametrize(
+    "repair_exit,repair_output",
+    (
+        (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED"),
+        (70, "H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER"),
+        (75, "H0_LOCK_HELD"),
+    ),
+)
+def test_bootstrap_preserves_authenticated_carrier_primary_failure(
+    tmp_path: Path, repair_exit: int, repair_output: str
+) -> None:
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(
+        tmp_path,
+        repair_exit=repair_exit,
+        repair_output=repair_output,
+    )
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    environment["MMX_H0_BOOTSTRAP_TEST_CLEANUP_FAIL"] = "1"
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments(commit, bundle, macro_transport),
+        environment=environment,
+    )
+
+    assert result == (repair_exit, f"{repair_output}\n", "")
+    assert not root_namespace.exists()
+
+
+def test_preexisting_fixed_namespace_refuses_without_deleting_unknown_residue(
+    tmp_path: Path,
+) -> None:
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    root_namespace.mkdir()
+    residue = root_namespace / "unknown-residue"
+    residue.write_bytes(b"must remain\n")
+    bundle = tmp_path / "malformed.bundle"
+    bundle.write_bytes(b"inert until namespace refusal\n")
+    macro_transport = tmp_path / "macro.zip"
+    macro_transport.write_bytes(b"inert\n")
+
+    result = _run_bootstrap(
+        *_bootstrap_arguments("d" * 40, bundle, macro_transport),
+        environment=environment,
+    )
+
+    assert result == (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")
+    assert residue.read_bytes() == b"must remain\n"
+
+
+@pytest.mark.parametrize("interrupt", (signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+def test_signal_removes_exclusive_root_namespace(
+    tmp_path: Path, interrupt: signal.Signals
+) -> None:
+    _repository, commit, bundle, macro_transport = _bootstrap_fixture(tmp_path)
+    environment, root_namespace = _bootstrap_environment(tmp_path)
+    marker = tmp_path / "namespace-ready"
+    environment["MMX_H0_BOOTSTRAP_TEST_PAUSE_MARKER"] = str(marker)
+    process = subprocess.Popen(
+        [
+            "/bin/bash",
+            str(BOOTSTRAP),
+            *_bootstrap_arguments(commit, bundle, macro_transport),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=environment,
+    )
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not marker.exists():
+        time.sleep(0.01)
+    assert marker.exists(), process.communicate(timeout=1)
+    process.send_signal(interrupt)
+    stdout, stderr = process.communicate(timeout=5)
+
+    assert (process.returncode, stdout, stderr) == (
+        70,
+        "H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER\n",
+        "",
+    )
+    assert not root_namespace.exists()
 
 
 @pytest.mark.parametrize(
@@ -128,8 +476,11 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'",
         "checkout --detach",
         "one native administrator dialog",
-        "/usr/bin/sudo /usr/bin/env -i",
-        "No network command runs as root",
+        "bootstrap-capacity-source-closure.sh",
+        "root never receives a shell",
+        "/private/var/root/mastermind-h0-root-carrier",
+        "provider_worker_slots.py",
+        "provider_identity_policy.py",
         "2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60",
         "02886a6c79f22534ac24234d8adb3224329976342393988541c2a50d7e297f29",
         "51c58d18869663d90c593e416c7fc7833b3725378870f576abd3647f62f40830",
@@ -145,16 +496,12 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
     for value in required:
         assert value in normalized
 
-    repair = """/bin/bash "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" repair \\
-  --expected-source-closure-repair-commit \"$REPAIR_MERGE_SHA\" \\
-  --operator-user \"$OPERATOR_USER\" \\
-  --macro-transport \"$MACRO_TRANSPORT\" \\
-  --macro-transport-sha256 \"$MACRO_TRANSPORT_SHA256\""""
-    verify = """/bin/bash "$ROOT_CARRIER/ops/executive_os/repair-capacity-source-closure.sh" verify-only \\
-  --expected-source-closure-repair-commit \"$REPAIR_MERGE_SHA\""""
-    assert repair in runbook
-    assert runbook.count(verify) == 2
-    assert "\n  sudo /bin/bash -s -- \\" not in runbook
+    bootstrap = """/bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \\
+  "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \\
+  "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"""
+    assert bootstrap in runbook
+    for forbidden in ("/bin/bash -s", "<<'H0_SOURCE_REPAIR'", "one root shell"):
+        assert forbidden not in runbook
 
 
 def test_native_ceremony_materializes_one_digest_bound_root_created_carrier() -> None:
@@ -178,9 +525,9 @@ def test_native_ceremony_materializes_one_digest_bound_root_created_carrier() ->
         "core.fsmonitor=false",
         "core.attributesFile=/dev/null",
         "--no-ext-diff --no-textconv",
-        "root-created `0700`",
-        "verify-repair-carrier",
-        ".repair-carrier-commit",
+        "exclusive fixed literal",
+        "Git blob OID",
+        "buffered until the fixed root namespace has been removed",
         "No installed release executable or Python module is launched",
     )
     for value in required:
@@ -198,6 +545,7 @@ def test_root_carrier_wrapper_uses_no_git_and_requires_descriptor_verification()
     script = SCRIPT.read_text(encoding="utf-8")
     assert "/usr/bin/git" not in script
     assert "verify-repair-carrier" in script
+    assert "--repository" in script
     assert ".repair-carrier-commit" in script
     assert "/usr/bin/env -i" in script
 

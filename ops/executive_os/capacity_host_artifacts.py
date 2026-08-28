@@ -31,6 +31,10 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+_SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+if str(_SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIRECTORY))
+
 try:
     from ops.executive_os.capacity_source_contract import (
         PRESERVED_TOPOLOGY_RELEASE_COMMIT,
@@ -167,7 +171,15 @@ _REPAIR_CARRIER_FILES = {
     "ops/executive_os/repair-capacity-source-closure.sh": 0o500,
     "ops/executive_os/capacity_host_artifacts.py": 0o400,
     "ops/executive_os/capacity_source_contract.py": 0o400,
+    "ops/executive_os/provider_worker_slots.py": 0o400,
+    "ops/executive_os/provider_identity_policy.py": 0o400,
 }
+_REPAIR_CARRIER_GIT_MODES = {
+    relative: "100755" if relative.endswith(".sh") else "100644"
+    for relative in _REPAIR_CARRIER_FILES
+    if relative != ".repair-carrier-commit"
+}
+_REPAIR_CARRIER_FILE_MAX_BYTES = 8 * 1024 * 1024
 
 
 class CapacityHostArtifactError(ValueError):
@@ -960,6 +972,17 @@ def _descriptor_security_state(info: os.stat_result) -> tuple[int, ...]:
         info.st_gid,
         int(getattr(info, "st_flags", 0)),
     )
+
+
+def _descriptor_retained_directory_state(info: os.stat_result) -> tuple[int, ...]:
+    """Identity/security state for a directory held through an open descriptor.
+
+    Namespace operations such as renaming the directory legitimately change its
+    ctime without changing the retained capability.  Link count remains part of
+    this state so deletion of the retained repository is still detected.
+    """
+
+    return _descriptor_security_state(info) + (info.st_nlink,)
 
 
 def _require_secure_descriptor(
@@ -7357,9 +7380,154 @@ class _RepositoryView:
         self.guard_descriptors = []
 
 
+def _repair_carrier_git(
+    repository_descriptor: int,
+    repository_state: tuple[int, ...],
+    *arguments: str,
+) -> bytes:
+    def enter_retained_repository() -> None:
+        os.fchdir(repository_descriptor)
+
+    repository_info = os.fstat(repository_descriptor)
+    if _descriptor_retained_directory_state(repository_info) != repository_state:
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+    _require_secure_descriptor(
+        repository_descriptor,
+        repository_info,
+        reason="REPAIR_CARRIER_INVALID",
+    )
+    completed = subprocess.run(
+        [
+            "/usr/bin/git",
+            "--no-replace-objects",
+            "--git-dir=.",
+            *arguments,
+        ],
+        capture_output=True,
+        check=False,
+        env=_git_environment(),
+        pass_fds=(repository_descriptor,),
+        preexec_fn=enter_retained_repository,
+        timeout=10,
+    )
+    repository_info = os.fstat(repository_descriptor)
+    if (
+        completed.returncode != 0
+        or completed.stderr
+        or len(completed.stdout) > 64 * 1024
+        or _descriptor_retained_directory_state(repository_info) != repository_state
+    ):
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+    _require_secure_descriptor(
+        repository_descriptor,
+        repository_info,
+        reason="REPAIR_CARRIER_INVALID",
+    )
+    return completed.stdout
+
+
+def _repair_carrier_expected_blobs(
+    repository_root: Path,
+    *,
+    expected_commit: str,
+    expected_uid: int,
+    expected_gid: int,
+) -> dict[str, str]:
+    if not repository_root.is_absolute():
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        repository_descriptor = os.open(repository_root, flags)
+    except OSError as exc:
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID") from exc
+    try:
+        repository_info = os.fstat(repository_descriptor)
+        if (
+            not stat.S_ISDIR(repository_info.st_mode)
+            or repository_info.st_uid != expected_uid
+            or repository_info.st_gid != expected_gid
+            or stat.S_IMODE(repository_info.st_mode) & 0o022
+        ):
+            raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+        _require_secure_descriptor(
+            repository_descriptor,
+            repository_info,
+            reason="REPAIR_CARRIER_INVALID",
+        )
+        repository_state = _descriptor_retained_directory_state(repository_info)
+        if _repair_carrier_git(
+            repository_descriptor,
+            repository_state,
+            "rev-parse",
+            "--show-object-format",
+        ) != b"sha1\n":
+            raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+        if _repair_carrier_git(
+            repository_descriptor,
+            repository_state,
+            "rev-parse",
+            "--verify",
+            f"{expected_commit}^{{commit}}",
+        ) != f"{expected_commit}\n".encode("ascii"):
+            raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+
+        expected: dict[str, str] = {}
+        for relative, expected_mode in _REPAIR_CARRIER_GIT_MODES.items():
+            output = _repair_carrier_git(
+                repository_descriptor,
+                repository_state,
+                "ls-tree",
+                "-z",
+                expected_commit,
+                "--",
+                relative,
+            )
+            match = re.fullmatch(
+                rb"([0-9]{6}) blob ([0-9a-f]{40})\t([^\0]+)\0",
+                output,
+            )
+            if (
+                match is None
+                or match.group(1).decode("ascii") != expected_mode
+                or match.group(3).decode("utf-8", "strict") != relative
+            ):
+                raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+            expected[relative] = match.group(2).decode("ascii")
+        _require_secure_descriptor(
+            repository_descriptor,
+            os.fstat(repository_descriptor),
+            reason="REPAIR_CARRIER_INVALID",
+        )
+        return expected
+    except CapacityHostArtifactError:
+        raise
+    except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID") from exc
+    finally:
+        os.close(repository_descriptor)
+
+
+def _descriptor_git_blob_oid(descriptor: int) -> str:
+    info = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_size < 0
+        or info.st_size > _REPAIR_CARRIER_FILE_MAX_BYTES
+    ):
+        raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+    payload = _read_descriptor(descriptor, _REPAIR_CARRIER_FILE_MAX_BYTES)
+    digest = hashlib.sha1()
+    digest.update(f"blob {len(payload)}\0".encode("ascii"))
+    digest.update(payload)
+    return digest.hexdigest()
+
+
 def verify_repair_carrier(
     carrier_root: Path,
     *,
+    repository_root: Path,
     expected_commit: str,
     expected_uid: int,
     expected_gid: int,
@@ -7372,6 +7540,12 @@ def verify_repair_carrier(
         or expected_gid < 0
     ):
         raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
+    expected_blobs = _repair_carrier_expected_blobs(
+        repository_root,
+        expected_commit=expected_commit,
+        expected_uid=expected_uid,
+        expected_gid=expected_gid,
+    )
     view: _RepositoryView | None = None
     try:
         view = _RepositoryView(carrier_root)
@@ -7403,6 +7577,10 @@ def verify_repair_carrier(
             ):
                 raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
             _require_allowed_bsd_flags(info, "REPAIR_CARRIER_INVALID")
+            if relative in expected_blobs and (
+                _descriptor_git_blob_oid(descriptor) != expected_blobs[relative]
+            ):
+                raise CapacityHostArtifactError("REPAIR_CARRIER_INVALID")
         stamp = _read_descriptor(
             view.descriptors[".repair-carrier-commit"], 41
         )
@@ -8042,6 +8220,7 @@ def _parser() -> argparse.ArgumentParser:
     verify_complete.add_argument("--commit", required=True)
     verify_carrier = commands.add_parser("verify-repair-carrier")
     verify_carrier.add_argument("--path", type=Path, required=True)
+    verify_carrier.add_argument("--repository", type=Path, required=True)
     verify_carrier.add_argument("--expected-commit", required=True)
     verify_carrier.add_argument("--expected-uid", type=int, required=True)
     verify_carrier.add_argument("--expected-gid", type=int, required=True)
@@ -8144,6 +8323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "verify-repair-carrier":
             value = verify_repair_carrier(
                 args.path,
+                repository_root=args.repository,
                 expected_commit=args.expected_commit,
                 expected_uid=args.expected_uid,
                 expected_gid=args.expected_gid,

@@ -69,6 +69,7 @@ fi
 # Resolve the already root-created carrier only after complete argv validation.
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "${BASH_SOURCE[0]}")" && /bin/pwd)"
 CARRIER_ROOT="$(cd "$SCRIPT_DIR/../.." && /bin/pwd -P)"
+CARRIER_REPOSITORY="$(cd "$CARRIER_ROOT/.." && /bin/pwd -P)/repository.git"
 ARTIFACTS="$SCRIPT_DIR/capacity_host_artifacts.py"
 CARRIER_STAMP="$CARRIER_ROOT/.repair-carrier-commit"
 
@@ -84,6 +85,7 @@ else
     HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
     /usr/bin/python3 -I -S -B "$ARTIFACTS" verify-repair-carrier \
     --path "$CARRIER_ROOT" \
+    --repository "$CARRIER_REPOSITORY" \
     --expected-commit "$EXPECTED_REPAIR_COMMIT" \
     --expected-uid 0 \
     --expected-gid 0 >/dev/null || refused

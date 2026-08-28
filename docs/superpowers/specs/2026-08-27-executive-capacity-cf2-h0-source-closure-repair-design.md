@@ -485,15 +485,27 @@ new attempt. No output contains a path, Git output, principal, account, credenti
 ## 13. Native administrator ceremony and proof
 
 Review, CI, Macro acquisition, v2 transport construction/hash, and construction of a digest-bound
-exact-merge Git bundle occur before privilege. Root receives only the inert bundle plus its SHA-256
-and the single-link operator transport plus its recorded digest. The trusted inline root shell runs
-under `env -i`, copies the bundle without preserving metadata into a new root-created `0700`
-namespace, removes ACLs/xattrs/flags from those new inodes, and verifies the recorded digest. Fully
-hardened Git is local-file-only and ignores system/global/local config, hooks, fsmonitor,
+exact-merge Git bundle occur before privilege. The reviewed bootstrap runs only as the unprivileged
+operator. Root receives no shell, heredoc, interpreter `-c`, or stdin program text: before carrier
+authentication it executes only reviewed absolute macOS system-tool argv through `sudo`. Those
+tools copy the inert bundle without preserving metadata into the exclusive fixed root-created
+`0700` namespace `/private/var/root/mastermind-h0-root-carrier`, remove ACLs/xattrs/flags from the
+new inodes, and verify the recorded digest. An initially observed symlink refuses before namespace
+creation; source metadata is never changed; a source race must produce deterministic refusal or the
+same already authenticated inert bytes.
+
+Fully hardened Git is local-file-only and ignores system/global/local config, hooks, fsmonitor,
 attributes, replacement refs, external diff/textconv, prompts, lazy fetch, optional locks, ambient
-locale, `HOME`, and `PATH`. It extracts only the exact reviewed carrier blobs, verifies their Git
-object identities, and writes them into new root-owned single-link inodes before descriptor
-verification. Root never executes an operator-created inode and performs no network access.
+locale, `HOME`, and `PATH`. It extracts the exact five-file local-module closure
+(`repair-capacity-source-closure.sh`, `capacity_host_artifacts.py`,
+`capacity_source_contract.py`, `provider_worker_slots.py`, and `provider_identity_policy.py`),
+binds every path and Git mode to the exact commit, verifies every retained file with Git blob
+framing, and writes them into new root-owned single-link inodes. The authenticated Python verifier
+independently repeats the exact commit/mode/blob checks from the root-created bare repository before
+the carrier shell runs. Root never executes an operator-created inode and performs no network
+access. The fixed namespace is created no-replace, is removed on refusal, success, HUP, INT, and
+TERM, and is never auto-removed when found preexisting. Cleanup failure is a typed non-success and
+all three pass sentinels remain buffered until cleanup succeeds.
 
 One native administrator dialog executes the repair once from that root-created carrier, then runs
 verify-only twice using the exact CLI grammar. The installed `release_manifest.py` is never

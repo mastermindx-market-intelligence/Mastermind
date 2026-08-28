@@ -5085,26 +5085,44 @@ def test_hardened_git_does_not_execute_local_include_fsmonitor_diff_or_textconv(
     assert not sentinel.exists()
 
 
-def test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor(
+def _repair_carrier_git_fixture(
     tmp_path: Path,
-) -> None:
-    operator_source = tmp_path / "operator-source"
-    operator_source.write_bytes(b"reviewed carrier bytes\n")
-    writable_descriptor = os.open(operator_source, os.O_RDWR)
+) -> tuple[Path, Path, str, dict[str, bytes]]:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "config", "user.name", "Fixture")
+    _git(repository, "config", "user.email", "fixture@example.invalid")
+    payloads = {
+        "ops/executive_os/repair-capacity-source-closure.sh": (
+            b"#!/bin/bash\n/usr/bin/printf '%s\\n' reviewed\n"
+        ),
+        "ops/executive_os/capacity_host_artifacts.py": b"# artifacts reviewed\n",
+        "ops/executive_os/capacity_source_contract.py": b"# contract reviewed\n",
+        "ops/executive_os/provider_worker_slots.py": b"# slots reviewed\n",
+        "ops/executive_os/provider_identity_policy.py": b"# identity reviewed\n",
+    }
+    for relative, payload in payloads.items():
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        path.chmod(0o755 if relative.endswith(".sh") else 0o644)
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-qm", "fixture carrier")
+    commit = _git(repository, "rev-parse", "HEAD")
+
     carrier = tmp_path / "carrier"
     executive_os = carrier / "ops" / "executive_os"
     executive_os.mkdir(parents=True, mode=0o700)
     for directory in (carrier, carrier / "ops", executive_os):
         directory.chmod(0o700)
-    files = {
-        ".repair-carrier-commit": (b"d" * 40 + b"\n", 0o400),
-        "ops/executive_os/repair-capacity-source-closure.sh": (
-            operator_source.read_bytes(),
-            0o500,
-        ),
-        "ops/executive_os/capacity_host_artifacts.py": (b"# reviewed\n", 0o400),
-        "ops/executive_os/capacity_source_contract.py": (b"# reviewed\n", 0o400),
-    }
+    files = {".repair-carrier-commit": (f"{commit}\n".encode("ascii"), 0o400)}
+    files.update(
+        {
+            relative: (payload, 0o500 if relative.endswith(".sh") else 0o400)
+            for relative, payload in payloads.items()
+        }
+    )
     for relative, (payload, mode) in files.items():
         destination = carrier / relative
         destination.write_bytes(payload)
@@ -5117,18 +5135,29 @@ def test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor(
             path.chmod(0o600)
             subprocess.run(["/usr/bin/xattr", "-c", path], check=True, capture_output=True)
             path.chmod(mode)
+    return repository, carrier, commit, payloads
+
+
+def test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor(
+    tmp_path: Path,
+) -> None:
+    repository, carrier, commit, payloads = _repair_carrier_git_fixture(tmp_path)
+    operator_source = tmp_path / "operator-source"
+    operator_source.write_bytes(payloads["ops/executive_os/repair-capacity-source-closure.sh"])
+    writable_descriptor = os.open(operator_source, os.O_RDWR)
     try:
         os.lseek(writable_descriptor, 0, os.SEEK_SET)
         os.write(writable_descriptor, b"attacker mutation\n")
         os.ftruncate(writable_descriptor, len(b"attacker mutation\n"))
         assert artifacts.verify_repair_carrier(
             carrier,
-            expected_commit="d" * 40,
+            repository_root=repository / ".git",
+            expected_commit=commit,
             expected_uid=os.getuid(),
             expected_gid=os.getgid(),
-        )["commit_sha"] == "d" * 40
+        )["commit_sha"] == commit
         assert (carrier / "ops/executive_os/repair-capacity-source-closure.sh").read_bytes() == (
-            b"reviewed carrier bytes\n"
+            payloads["ops/executive_os/repair-capacity-source-closure.sh"]
         )
     finally:
         os.close(writable_descriptor)
@@ -5138,10 +5167,67 @@ def test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor(
     with pytest.raises(artifacts.CapacityHostArtifactError, match="REPAIR_CARRIER_INVALID"):
         artifacts.verify_repair_carrier(
             carrier,
-            expected_commit="d" * 40,
+            repository_root=repository / ".git",
+            expected_commit=commit,
             expected_uid=os.getuid(),
             expected_gid=os.getgid(),
         )
+
+
+def test_repair_carrier_refuses_one_byte_substitution_against_real_git_commit(
+    tmp_path: Path,
+) -> None:
+    repository, carrier, commit, _payloads = _repair_carrier_git_fixture(tmp_path)
+    victim = carrier / "ops/executive_os/capacity_source_contract.py"
+    victim.chmod(0o600)
+    payload = bytearray(victim.read_bytes())
+    payload[-2] ^= 1
+    victim.write_bytes(payload)
+    victim.chmod(0o400)
+
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="REPAIR_CARRIER_INVALID"):
+        artifacts.verify_repair_carrier(
+            carrier,
+            repository_root=repository / ".git",
+            expected_commit=commit,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def test_repair_carrier_uses_retained_repository_after_basename_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, carrier, commit, _payloads = _repair_carrier_git_fixture(tmp_path)
+    repository_root = repository / ".git"
+    retained_repository = repository / ".git-retained"
+    original_run = subprocess.run
+    swapped = False
+
+    def swap_before_first_git(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        nonlocal swapped
+        command = args[0]
+        if (
+            not swapped
+            and isinstance(command, list)
+            and command
+            and command[0] == "/usr/bin/git"
+        ):
+            repository_root.rename(retained_repository)
+            repository_root.mkdir(mode=0o700)
+            swapped = True
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(artifacts.subprocess, "run", swap_before_first_git)
+
+    assert artifacts.verify_repair_carrier(
+        carrier,
+        repository_root=repository_root,
+        expected_commit=commit,
+        expected_uid=os.getuid(),
+        expected_gid=os.getgid(),
+    )["commit_sha"] == commit
+    assert swapped is True
 
 
 def _verify_arguments(system_root: Path, commit: str) -> dict[str, object]:
