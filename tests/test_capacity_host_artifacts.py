@@ -14,6 +14,7 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -2607,10 +2608,763 @@ def test_source_repair_fixed_system_root_freezes_exact_link_count(
         parents.close()
 
 
+def _write_inert_release_fixture(
+    release: Path,
+    *,
+    tree_sha: str,
+    payload: bytes = b"self-authored release payload\n",
+) -> bytes:
+    release.mkdir(mode=0o755)
+    release.chmod(0o755)
+    installed = release / "payload.txt"
+    installed.write_bytes(payload)
+    installed.chmod(0o444)
+    manifest = {
+        "schema_version": "mastermind.executive_release_manifest/v1",
+        "commit_sha": artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+        "tree_sha": tree_sha,
+        "entries": [
+            {
+                "path": "payload.txt",
+                "mode": 0o444,
+                "uid": os.getuid(),
+                "gid": os.getgid(),
+                "type": "file",
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        ],
+    }
+    manifest_bytes = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    manifest_path = release / ".executive-release-manifest.json"
+    manifest_path.write_bytes(manifest_bytes)
+    manifest_path.chmod(0o444)
+    return manifest_bytes
+
+
+def _canonical_e4_manifest_from_git_objects() -> tuple[str, bytes, int]:
+    """Derive the installed e4 manifest without importing release code."""
+
+    repository = Path(__file__).resolve().parents[1]
+    commit = artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    tree = _git(repository, "rev-parse", f"{commit}^{{tree}}")
+    listing = subprocess.run(
+        ["git", "-C", str(repository), "ls-tree", "-r", "-t", "-z", commit],
+        check=True,
+        capture_output=True,
+    ).stdout
+    objects: list[tuple[str, str, str, str]] = []
+    blob_oids: list[str] = []
+    for record in listing.split(b"\0"):
+        if not record:
+            continue
+        metadata, encoded_path = record.split(b"\t", 1)
+        encoded_mode, encoded_kind, encoded_oid = metadata.split(b" ")
+        mode = encoded_mode.decode("ascii")
+        kind = encoded_kind.decode("ascii")
+        oid = encoded_oid.decode("ascii")
+        path = encoded_path.decode("utf-8", "strict")
+        objects.append((mode, kind, oid, path))
+        if kind == "blob":
+            blob_oids.append(oid)
+
+    batch = subprocess.Popen(
+        ["git", "-C", str(repository), "cat-file", "--batch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+    )
+    assert batch.stdin is not None
+    assert batch.stdout is not None
+    batch.stdin.write("".join(f"{oid}\n" for oid in blob_oids).encode("ascii"))
+    batch.stdin.close()
+    blob_bytes: dict[str, bytes] = {}
+    for oid in blob_oids:
+        header = batch.stdout.readline().removesuffix(b"\n").split()
+        assert header[:2] == [oid.encode("ascii"), b"blob"]
+        size = int(header[2])
+        blob_bytes[oid] = batch.stdout.read(size)
+        assert batch.stdout.read(1) == b"\n"
+    assert batch.wait() == 0
+
+    by_parent: dict[str, list[tuple[str, str, str, str, str]]] = {}
+    for mode, kind, oid, path in objects:
+        parent, _separator, name = path.rpartition("/")
+        by_parent.setdefault(parent, []).append((name, mode, kind, oid, path))
+
+    entries: list[dict[str, object]] = []
+
+    def visit(parent: str) -> None:
+        children = by_parent.get(parent, [])
+        directories = sorted(
+            (row for row in children if row[2] == "tree"),
+            key=lambda row: row[0],
+        )
+        nondirectories = sorted(
+            (row for row in children if row[2] != "tree"),
+            key=lambda row: row[0],
+        )
+        for _name, mode, kind, oid, path in (*directories, *nondirectories):
+            installed_mode = (
+                0o755
+                if kind == "tree" or mode in {"100755", "120000"}
+                else 0o644
+            )
+            common: dict[str, object] = {
+                "path": path,
+                "mode": installed_mode,
+                "uid": 0,
+                "gid": 0,
+            }
+            if kind == "tree":
+                entries.append({**common, "type": "directory"})
+            elif mode == "120000":
+                entries.append(
+                    {
+                        **common,
+                        "type": "symlink",
+                        "target": blob_bytes[oid].decode("utf-8", "strict"),
+                    }
+                )
+            else:
+                payload = blob_bytes[oid]
+                entries.append(
+                    {
+                        **common,
+                        "type": "file",
+                        "size": len(payload),
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                    }
+                )
+        for _name, _mode, _kind, _oid, path in directories:
+            visit(path)
+
+    visit("")
+    document = {
+        "schema_version": "mastermind.executive_release_manifest/v1",
+        "commit_sha": commit,
+        "tree_sha": tree,
+        "entries": entries,
+    }
+    manifest_bytes = json.dumps(
+        document,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    return tree, manifest_bytes, len(entries)
+
+
+def test_trusted_e4_release_manifest_identity_is_derived_from_git_objects() -> None:
+    tree, manifest_bytes, entry_count = _canonical_e4_manifest_from_git_objects()
+    assert tree == artifacts._TRUSTED_E4_RELEASE_TREE
+    assert len(manifest_bytes) == artifacts._TRUSTED_E4_MANIFEST_SIZE
+    assert entry_count == artifacts._TRUSTED_E4_MANIFEST_ENTRY_COUNT
+    assert (
+        hashlib.sha256(manifest_bytes).hexdigest()
+        == artifacts._TRUSTED_E4_MANIFEST_SHA256
+    )
+
+
+def test_inert_release_refuses_self_authored_payload_and_matching_manifest_under_e4_basename(
+    tmp_path: Path,
+) -> None:
+    release = tmp_path / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    _write_inert_release_fixture(
+        release,
+        tree_sha="ee1b95af3341a49151890cec1a6a31997f632aec",
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+        artifacts._verify_inert_release_manifest(
+            release,
+            expected_commit=artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def test_inert_release_refuses_valid_manifest_shape_with_wrong_trusted_e4_tree(
+    tmp_path: Path,
+) -> None:
+    release = tmp_path / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    _write_inert_release_fixture(release, tree_sha="f" * 40)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+        artifacts._verify_inert_release_manifest(
+            release,
+            expected_commit=artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+
+
+def test_inert_release_revalidates_basename_relation_after_root_is_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = tmp_path / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    manifest_bytes = _write_inert_release_fixture(release, tree_sha="a" * 40)
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_RELEASE_TREE", "a" * 40, raising=False)
+    monkeypatch.setattr(
+        artifacts,
+        "_TRUSTED_E4_MANIFEST_SHA256",
+        hashlib.sha256(manifest_bytes).hexdigest(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        artifacts, "_TRUSTED_E4_MANIFEST_SIZE", len(manifest_bytes), raising=False
+    )
+    monkeypatch.setattr(
+        artifacts, "_TRUSTED_E4_MANIFEST_ENTRY_COUNT", 1, raising=False
+    )
+    replacement = tmp_path / "replacement"
+    replacement.mkdir(mode=0o755)
+    replacement.chmod(0o755)
+    displaced = tmp_path / "displaced-release"
+    manifest_inode = (release / ".executive-release-manifest.json").stat().st_ino
+    root_before = release.stat()
+    root_inode = root_before.st_ino
+    original_read = artifacts._read_descriptor
+    original_fstat = os.fstat
+    swapped = False
+
+    def swap_release_basename(descriptor: int, maximum_bytes: int) -> bytes:
+        nonlocal swapped
+        if not swapped and os.fstat(descriptor).st_ino == manifest_inode:
+            release.rename(displaced)
+            replacement.rename(release)
+            swapped = True
+        return original_read(descriptor, maximum_bytes)
+
+    monkeypatch.setattr(artifacts, "_read_descriptor", swap_release_basename)
+    monkeypatch.setattr(
+        os,
+        "fstat",
+        lambda descriptor: (
+            _StatOverlay(
+                original_fstat(descriptor),
+                st_ctime_ns=root_before.st_ctime_ns,
+            )
+            if swapped and original_fstat(descriptor).st_ino == root_inode
+            else original_fstat(descriptor)
+        ),
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+        artifacts._verify_inert_release_manifest(
+            release,
+            expected_commit=artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+    assert swapped
+
+
+def test_inert_release_refuses_unrelated_retained_view_injection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected_parent = tmp_path / "expected-parent"
+    injected_parent = tmp_path / "injected-parent"
+    expected_parent.mkdir(mode=0o755)
+    injected_parent.mkdir(mode=0o755)
+    expected_release = expected_parent / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    injected_release = injected_parent / artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT
+    manifest_bytes = _write_inert_release_fixture(expected_release, tree_sha="a" * 40)
+    _write_inert_release_fixture(injected_release, tree_sha="a" * 40)
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_RELEASE_TREE", "a" * 40)
+    monkeypatch.setattr(
+        artifacts,
+        "_TRUSTED_E4_MANIFEST_SHA256",
+        hashlib.sha256(manifest_bytes).hexdigest(),
+    )
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_SIZE", len(manifest_bytes))
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_ENTRY_COUNT", 1)
+    expected_parent_descriptor = os.open(
+        expected_parent,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    injected_view = artifacts._RepositoryView(
+        injected_release,
+        allow_symlinks=True,
+    )
+    try:
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
+            artifacts._verify_inert_release_manifest(
+                expected_release,
+                expected_commit=artifacts.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+                parent_descriptor=expected_parent_descriptor,
+                retained_view=injected_view,
+            )
+    finally:
+        injected_view.close()
+        os.close(expected_parent_descriptor)
+
+
+def test_retained_semantic_read_refuses_approved_xattr_name_set_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "xattr-state"
+    root.mkdir(mode=0o755)
+    evidence = root / "evidence.json"
+    evidence.write_bytes(b"{}\n")
+    evidence.chmod(0o444)
+    view = artifacts._RepositoryView(root)
+    target = view.descriptors["evidence.json"]
+    initial_names = view.xattr_states["evidence.json"]
+    drifted_names = (
+        frozenset()
+        if initial_names
+        else frozenset({b"com.apple.provenance"})
+    )
+    original_names = artifacts._descriptor_extended_attribute_names
+    original_read = artifacts._read_descriptor
+    drifted = False
+
+    def observed_names(descriptor: int) -> frozenset[bytes]:
+        if drifted and descriptor == target:
+            return drifted_names
+        return original_names(descriptor)
+
+    def drift_after_read(descriptor: int, maximum_bytes: int) -> bytes:
+        nonlocal drifted
+        payload = original_read(descriptor, maximum_bytes)
+        if descriptor == target:
+            drifted = True
+        return payload
+
+    monkeypatch.setattr(artifacts, "_descriptor_extended_attribute_names", observed_names)
+    monkeypatch.setattr(artifacts, "_read_descriptor", drift_after_read)
+    try:
+        with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_VIEW_DRIFT"):
+            view.read_bytes("evidence.json", maximum_bytes=1024)
+    finally:
+        view.close()
+
+
+def test_retained_parent_proves_optional_absence_without_path_reopen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = tmp_path / "optional-parent"
+    parent.mkdir(mode=0o755)
+    view = artifacts._RepositoryView(parent, recursive=False)
+
+    def forbid_lexists(*args: object, **kwargs: object) -> bool:
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(artifacts, "_path_lexists", forbid_lexists)
+    try:
+        assert view.is_absent("optional-evidence.json")
+        view.revalidate()
+    finally:
+        view.close()
+
+
+def test_absolute_view_refuses_forbidden_stable_ancestor_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence = tmp_path / "ancestor-policy.json"
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(0o444)
+    ancestor = tmp_path.parent.stat()
+    ancestor_identity = (ancestor.st_dev, ancestor.st_ino)
+    original_fstat = os.fstat
+    original_stat = os.stat
+
+    def overlay(info: os.stat_result) -> os.stat_result | _StatOverlay:
+        if (info.st_dev, info.st_ino) == ancestor_identity:
+            return _StatOverlay(info, st_flags=1)
+        return info
+
+    monkeypatch.setattr(os, "fstat", lambda descriptor: overlay(original_fstat(descriptor)))
+    monkeypatch.setattr(
+        os,
+        "stat",
+        lambda *args, **kwargs: overlay(original_stat(*args, **kwargs)),
+    )
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+        artifacts._RepositoryView(evidence)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS fixed root aliases")
+@pytest.mark.parametrize("alias", (Path("/var"), Path("/tmp")))
+def test_absolute_view_authenticates_fixed_macos_root_alias_component(
+    alias: Path,
+) -> None:
+    if alias == Path("/tmp"):
+        with tempfile.TemporaryDirectory(prefix="mmx-retained-", dir="/tmp") as root:
+            os.chown(root, os.getuid(), os.getgid())
+            evidence = Path(root) / "evidence.json"
+            evidence.write_bytes(b"evidence\n")
+            evidence.chmod(0o444)
+            view = artifacts._RepositoryView(evidence)
+            try:
+                assert view.read_bytes(".", maximum_bytes=1024) == b"evidence\n"
+            finally:
+                view.close()
+    else:
+        view = artifacts._RepositoryView(alias, recursive=False)
+        try:
+            assert stat.S_ISDIR(os.fstat(view.root_descriptor).st_mode)
+            view.revalidate()
+        finally:
+            view.close()
+
+
+@pytest.mark.parametrize(
+    "semantic_role",
+    ("runtime", "generation", "topology", "rollback", "legacy"),
+)
+def test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    semantic_role: str,
+) -> None:
+    root = tmp_path / semantic_role
+    root.mkdir(mode=0o755)
+    trusted = root / "evidence.json"
+    trusted.write_bytes(b'{"trusted":true}\n')
+    trusted.chmod(0o444)
+    replacement = tmp_path / f"{semantic_role}-replacement"
+    replacement.mkdir(mode=0o755)
+    attacker = replacement / "evidence.json"
+    attacker.write_bytes(b'{"trusted":false}\n')
+    attacker.chmod(0o444)
+    displaced = tmp_path / f"{semantic_role}-displaced"
+    view = artifacts._RepositoryView(root)
+    original_read = artifacts._read_descriptor
+    target_descriptor = view.descriptors["evidence.json"]
+    root_before = root.stat()
+    root_inode = root_before.st_ino
+    swapped = False
+    original_fstat = os.fstat
+    original_stat = os.stat
+
+    def restored_swap(descriptor: int, maximum_bytes: int) -> bytes:
+        nonlocal swapped
+        if descriptor == target_descriptor and not swapped:
+            root.rename(displaced)
+            replacement.rename(root)
+            try:
+                payload = original_read(descriptor, maximum_bytes)
+            finally:
+                root.rename(replacement)
+                displaced.rename(root)
+            swapped = True
+            return payload
+        return original_read(descriptor, maximum_bytes)
+
+    def forbid_pathname_read(*args: object, **kwargs: object) -> bytes:
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(artifacts, "_read_descriptor", restored_swap)
+    monkeypatch.setattr(Path, "read_bytes", forbid_pathname_read)
+    monkeypatch.setattr(
+        os,
+        "fstat",
+        lambda descriptor: (
+            _StatOverlay(
+                original_fstat(descriptor),
+                st_ctime_ns=root_before.st_ctime_ns,
+            )
+            if (original_fstat(descriptor).st_dev, original_fstat(descriptor).st_ino)
+            == (root_before.st_dev, root_inode)
+            else original_fstat(descriptor)
+        ),
+    )
+    monkeypatch.setattr(
+        os,
+        "stat",
+        lambda *args, **kwargs: (
+            _StatOverlay(
+                original_stat(*args, **kwargs),
+                st_ctime_ns=root_before.st_ctime_ns,
+            )
+            if (
+                original_stat(*args, **kwargs).st_dev,
+                original_stat(*args, **kwargs).st_ino,
+            )
+            == (root_before.st_dev, root_inode)
+            else original_stat(*args, **kwargs)
+        ),
+    )
+    try:
+        assert view.read_bytes("evidence.json", maximum_bytes=1024) == (
+            b'{"trusted":true}\n'
+        )
+        assert swapped
+        view.revalidate()
+    finally:
+        view.close()
+
+
+def test_absolute_evidence_view_opens_every_component_from_retained_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence = tmp_path / "absolute-evidence.json"
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(0o444)
+    original_open = os.open
+    absolute_opens: list[str] = []
+
+    def observe_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        encoded = os.fspath(path)
+        if "dir_fd" not in kwargs and os.path.isabs(encoded):
+            absolute_opens.append(encoded)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", observe_open)
+    view = artifacts._RepositoryView(evidence)
+    try:
+        assert view.read_bytes(".", maximum_bytes=1024) == b"evidence\n"
+    finally:
+        view.close()
+    assert absolute_opens == ["/"]
+
+
+def test_repository_view_full_revalidation_walks_retained_parent_capability_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "linear-revalidation"
+    for branch_index in range(3):
+        nested = root / f"branch-{branch_index}" / "middle" / "leaf"
+        nested.mkdir(parents=True)
+        for file_index in range(3):
+            evidence = nested / f"evidence-{file_index}.json"
+            evidence.write_bytes(f"{branch_index}:{file_index}\n".encode("ascii"))
+            evidence.chmod(0o444)
+    view = artifacts._RepositoryView(root)
+    parent_checks = 0
+    object_xattr_checks = {descriptor: 0 for descriptor in view.descriptors.values()}
+    original_parent = artifacts._RepositoryView._revalidate_parent_capability
+    original_xattrs = artifacts._descriptor_extended_attribute_names
+
+    def observed_parent_capability(received: artifacts._RepositoryView) -> None:
+        nonlocal parent_checks
+        parent_checks += 1
+        original_parent(received)
+
+    def observed_xattrs(descriptor: int) -> frozenset[bytes]:
+        if descriptor in object_xattr_checks:
+            object_xattr_checks[descriptor] += 1
+        return original_xattrs(descriptor)
+
+    monkeypatch.setattr(
+        artifacts._RepositoryView,
+        "_revalidate_parent_capability",
+        observed_parent_capability,
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_descriptor_extended_attribute_names",
+        observed_xattrs,
+    )
+    try:
+        view.revalidate()
+        assert parent_checks == 2
+        assert set(object_xattr_checks.values()) == {1}
+    finally:
+        view.close()
+
+
+def test_repository_view_closes_guard_descriptor_when_initial_guard_audit_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    evidence = tmp_path / "evidence.json"
+    evidence.write_bytes(b"evidence\n")
+    evidence.chmod(0o444)
+    opened_root: list[int] = []
+    closed_root: list[int] = []
+    original_open = os.open
+    original_close = os.close
+
+    def observed_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        descriptor = original_open(path, flags, *args, **kwargs)
+        if os.fspath(path) == "/" and "dir_fd" not in kwargs:
+            opened_root.append(descriptor)
+        return descriptor
+
+    def observed_close(descriptor: int) -> None:
+        if descriptor in opened_root:
+            closed_root.append(descriptor)
+        original_close(descriptor)
+
+    def refuse_guard(*args: object, **kwargs: object) -> None:
+        raise artifacts.CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+
+    monkeypatch.setattr(os, "open", observed_open)
+    monkeypatch.setattr(os, "close", observed_close)
+    monkeypatch.setattr(artifacts, "_require_source_repair_ancestor", refuse_guard)
+    with pytest.raises(artifacts.CapacityHostArtifactError, match="SOURCE_METADATA_INVALID"):
+        artifacts._RepositoryView(evidence)
+    assert opened_root
+    assert closed_root == opened_root
+
+
+class _FakePreservedView:
+    def __init__(
+        self,
+        payloads: dict[str, bytes] | None = None,
+        *,
+        absent: frozenset[str] = frozenset(),
+    ) -> None:
+        self.payloads = payloads or {}
+        self.absent = absent
+
+    def read_bytes(self, relative: str, *, maximum_bytes: int) -> bytes:
+        payload = self.payloads[relative]
+        assert len(payload) <= maximum_bytes
+        return payload
+
+    def sha256(self, relative: str) -> str:
+        return hashlib.sha256(self.payloads[relative]).hexdigest()
+
+    def is_absent(self, name: str) -> bool:
+        return name in self.absent
+
+    def revalidate(self) -> None:
+        return None
+
+
+def test_preserved_verifier_body_uses_only_supplied_retained_semantic_views(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root = tmp_path / "system"
+    generation = system_root / "capacity-generations" / ("a" * 64)
+    archive = system_root / "capacity-archive" / "rollback-drill-fixture"
+    labels = (
+        "com.mastermind.executive.control",
+        "com.mastermind.executive.worker.codex",
+        "com.mastermind.executive.worker.codex-pro-01",
+        "com.mastermind.executive.worker.codex-pro-02",
+        "com.mastermind.executive.worker.codex-pro-03",
+    )
+    topology_payloads: dict[Path, bytes] = {}
+    brokers: list[dict[str, object]] = []
+    artifacts_rows: list[dict[str, str]] = []
+    rollback_payloads: dict[str, bytes] = {}
+    for index in range(9):
+        path = tmp_path / f"topology-{index}.json"
+        payload = f"topology-{index}\n".encode("ascii")
+        topology_payloads[path] = payload
+    for broker_index in range(3):
+        offset = broker_index * 3
+        brokers.append(
+            {
+                "config_path": str(tuple(topology_payloads)[offset]),
+                "config_sha256": hashlib.sha256(
+                    topology_payloads[tuple(topology_payloads)[offset]]
+                ).hexdigest(),
+                "attestation_path": str(tuple(topology_payloads)[offset + 1]),
+                "attestation_sha256": hashlib.sha256(
+                    topology_payloads[tuple(topology_payloads)[offset + 1]]
+                ).hexdigest(),
+                "plist_path": str(tuple(topology_payloads)[offset + 2]),
+                "plist_sha256": hashlib.sha256(
+                    topology_payloads[tuple(topology_payloads)[offset + 2]]
+                ).hexdigest(),
+            }
+        )
+    for index in range(9):
+        name = f"artifact-{index}.json"
+        payload = f"rollback-{index}\n".encode("ascii")
+        rollback_payloads[name] = payload
+        artifacts_rows.append(
+            {"name": name, "sha256": hashlib.sha256(payload).hexdigest()}
+        )
+    legacy_paths = (
+        system_root / "config" / "control.json",
+        system_root / "config" / "worker-codex.json",
+        Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist"),
+        Path("/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"),
+    )
+    legacy_lines = [f"{path}=absent\n" for path in legacy_paths]
+    legacy_lines.extend(
+        f"{label}:disabled=true:loaded=false\n" for label in labels[:2]
+    )
+    topology = {
+        "brokers": brokers,
+        "legacy_phase1c_state_digest": hashlib.sha256(
+            "".join(legacy_lines).encode("utf-8")
+        ).hexdigest(),
+    }
+    drill = {
+        "outcome": "SHRINK_ONLY_ROLLBACK_PASS",
+        "moved_artifact_count": 9,
+        "artifacts": artifacts_rows,
+        "archive_root": str(archive),
+    }
+    drill_bytes = json.dumps(drill).encode("utf-8")
+    rollback_payloads["rollback-receipt.json"] = drill_bytes
+    generation_view = _FakePreservedView(
+        {
+            "broker-topology.json": json.dumps(topology).encode("utf-8"),
+            "rollback-drill-receipt.json": drill_bytes,
+        }
+    )
+    topology_views = {
+        path: _FakePreservedView({".": payload})
+        for path, payload in topology_payloads.items()
+    }
+    views = artifacts._PreservedH0Views(
+        runtime=_FakePreservedView(),
+        generation=generation_view,
+        telemetry=_FakePreservedView(),
+        release=_FakePreservedView(),
+        rollback_archive=_FakePreservedView(rollback_payloads),
+        topology=topology_views,
+        legacy={path: None for path in legacy_paths},
+        socket_parent=_FakePreservedView(absent=frozenset({"mastermind-executive"})),
+        socket_directory=None,
+    )
+    observed_helpers: list[str] = []
+    monkeypatch.setattr(
+        artifacts,
+        "_verify_runtime_view",
+        lambda view: observed_helpers.append("runtime"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_verify_telemetry_view",
+        lambda view: observed_helpers.append("telemetry"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_verify_preserved_service_principal_state",
+        lambda received_labels: observed_helpers.append("services"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        artifacts,
+        "_verify_inert_release_manifest",
+        lambda *args, **kwargs: observed_helpers.append("release") or {},
+    )
+
+    def forbidden_path_reopen(*args: object, **kwargs: object) -> object:
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(Path, "read_bytes", forbidden_path_reopen)
+    monkeypatch.setattr(Path, "rglob", forbidden_path_reopen)
+    monkeypatch.setattr(Path, "lstat", forbidden_path_reopen)
+    monkeypatch.setattr(artifacts, "sha256_file", forbidden_path_reopen)
+    monkeypatch.setattr(artifacts, "_path_lexists", forbidden_path_reopen)
+    artifacts._verify_preserved_h0_invariants_body(
+        system_root,
+        generation,
+        test_adapter=False,
+        retained_views=views,
+    )
+    assert observed_helpers == ["runtime", "telemetry", "release", "services"]
+
+
 def test_inert_release_manifest_verifier_never_executes_installed_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    release = tmp_path / ("e" * 40)
+    release = tmp_path / contract.PRESERVED_TOPOLOGY_RELEASE_COMMIT
     script = release / "ops" / "executive_os" / "release_manifest.py"
     script.parent.mkdir(parents=True)
     script.write_bytes(b"# reviewed release verifier placeholder\n")
@@ -2644,11 +3398,11 @@ def test_inert_release_manifest_verifier_never_executes_installed_payload(
         },
     ]
     manifest = release / ".executive-release-manifest.json"
-    manifest.write_bytes(
+    manifest_bytes = (
         json.dumps(
             {
                 "schema_version": "mastermind.executive_release_manifest/v1",
-                "commit_sha": "e" * 40,
+                "commit_sha": contract.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
                 "tree_sha": "f" * 40,
                 "entries": entries,
             },
@@ -2657,7 +3411,16 @@ def test_inert_release_manifest_verifier_never_executes_installed_payload(
         ).encode("utf-8")
         + b"\n"
     )
+    manifest.write_bytes(manifest_bytes)
     manifest.chmod(0o444)
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_RELEASE_TREE", "f" * 40)
+    monkeypatch.setattr(
+        artifacts,
+        "_TRUSTED_E4_MANIFEST_SHA256",
+        hashlib.sha256(manifest_bytes).hexdigest(),
+    )
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_SIZE", len(manifest_bytes))
+    monkeypatch.setattr(artifacts, "_TRUSTED_E4_MANIFEST_ENTRY_COUNT", len(entries))
     sentinel = tmp_path / "installed-code-executed"
     script.chmod(0o600)
     script.write_text(
@@ -2673,7 +3436,7 @@ def test_inert_release_manifest_verifier_never_executes_installed_payload(
     with pytest.raises(artifacts.CapacityHostArtifactError, match="RELEASE_INVALID"):
         artifacts._verify_inert_release_manifest(
             release,
-            expected_commit="e" * 40,
+            expected_commit=contract.PRESERVED_TOPOLOGY_RELEASE_COMMIT,
             expected_uid=os.getuid(),
             expected_gid=os.getgid(),
         )

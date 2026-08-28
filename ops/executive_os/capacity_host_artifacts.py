@@ -140,6 +140,12 @@ _TRAVERSAL_ANCESTOR_ALLOWED_FLAGS = (
 )
 _RELEASE_MANIFEST_SCHEMA = "mastermind.executive_release_manifest/v1"
 _RELEASE_MANIFEST_NAME = ".executive-release-manifest.json"
+_TRUSTED_E4_RELEASE_TREE = "ee1b95af3341a49151890cec1a6a31997f632aec"
+_TRUSTED_E4_MANIFEST_SHA256 = (
+    "ecb9a58eec12890126c291a451921ab0dd738baee765c61aae3a42fd74a31fc9"
+)
+_TRUSTED_E4_MANIFEST_SIZE = 190196
+_TRUSTED_E4_MANIFEST_ENTRY_COUNT = 1122
 _REPAIR_CARRIER_FILES = {
     ".repair-carrier-commit": 0o400,
     "ops/executive_os/repair-capacity-source-closure.sh": 0o500,
@@ -2828,30 +2834,35 @@ def _verify_inert_release_manifest(
     expected_uid: int,
     expected_gid: int,
     parent_descriptor: int | None = None,
+    retained_view: _RepositoryView | None = None,
 ) -> dict[str, Any]:
     """Verify an installed release strictly as inert descriptor-read data."""
 
-    if _COMMIT_RE.fullmatch(expected_commit) is None:
+    if (
+        expected_commit != PRESERVED_TOPOLOGY_RELEASE_COMMIT
+        or _COMMIT_RE.fullmatch(expected_commit) is None
+        or release.name != expected_commit
+    ):
         raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-    directory_flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-    )
-    owns_parent = parent_descriptor is None
-    parent = parent_descriptor
+    owns_view = retained_view is None
+    view = retained_view
     try:
-        if parent is None:
-            parent = os.open(release.absolute().parent, directory_flags)
-        root = os.open(release.name, directory_flags, dir_fd=parent)
-    except OSError as exc:
-        if owns_parent and parent is not None:
-            os.close(parent)
-        raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
-    descriptors: list[int] = [root]
-    try:
-        root_before = os.fstat(root)
+        if view is None:
+            view = _RepositoryView(
+                release,
+                parent_descriptor=parent_descriptor,
+                root_name=release.name,
+                allow_symlinks=True,
+            )
+        elif (
+            parent_descriptor is None
+            or view.root_name != release.name
+            or not view.allow_symlinks
+            or _repository_snapshot_state(os.fstat(view.parent_descriptor))
+            != _repository_snapshot_state(os.fstat(parent_descriptor))
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        root_before = os.fstat(view.root_descriptor)
         if (
             not stat.S_ISDIR(root_before.st_mode)
             or root_before.st_uid != expected_uid
@@ -2860,106 +2871,14 @@ def _verify_inert_release_manifest(
         ):
             raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
         _require_secure_descriptor(
-            root, root_before, reason="SOURCE_REPAIR_RELEASE_INVALID"
+            view.root_descriptor,
+            root_before,
+            reason="SOURCE_REPAIR_RELEASE_INVALID",
         )
         device = root_before.st_dev
-        states: dict[str, tuple[int, ...]] = {".": _release_object_state(root_before)}
-        namespaces: dict[str, tuple[str, ...]] = {}
-        descriptor_by_path: dict[str, int] = {".": root}
-
-        def inspect(parent_fd: int, relative_parent: str) -> list[dict[str, Any]]:
-            names = tuple(_descriptor_directory_names(parent_fd))
-            namespaces[relative_parent] = names
-            immediate: list[tuple[str, int, os.stat_result, str]] = []
-            directories: list[tuple[str, int]] = []
-            entries: list[dict[str, Any]] = []
-            for name in names:
-                relative = name if relative_parent == "." else f"{relative_parent}/{name}"
-                if relative == _RELEASE_MANIFEST_NAME:
-                    continue
-                link_info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-                if stat.S_ISDIR(link_info.st_mode):
-                    descriptor = os.open(name, directory_flags, dir_fd=parent_fd)
-                    kind = "directory"
-                elif stat.S_ISREG(link_info.st_mode):
-                    descriptor = os.open(
-                        name,
-                        os.O_RDONLY
-                        | getattr(os, "O_NOFOLLOW", 0)
-                        | getattr(os, "O_CLOEXEC", 0),
-                        dir_fd=parent_fd,
-                    )
-                    kind = "file"
-                elif stat.S_ISLNK(link_info.st_mode):
-                    descriptor = _open_release_symlink(parent_fd, name)
-                    kind = "symlink"
-                else:
-                    raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-                descriptors.append(descriptor)
-                descriptor_by_path[relative] = descriptor
-                info = os.fstat(descriptor)
-                if (
-                    stat.S_IFMT(info.st_mode) != stat.S_IFMT(link_info.st_mode)
-                    or info.st_dev != device
-                    or info.st_uid != expected_uid
-                    or info.st_gid != expected_gid
-                    or stat.S_IMODE(info.st_mode) & 0o022
-                    or (not stat.S_ISDIR(info.st_mode) and info.st_nlink != 1)
-                ):
-                    raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-                _require_secure_descriptor(
-                    descriptor, info, reason="SOURCE_REPAIR_RELEASE_INVALID"
-                )
-                states[relative] = _release_object_state(info)
-                immediate.append((relative, descriptor, info, kind))
-
-            # The persisted v1 manifest is validated by path, while recursion
-            # stays descriptor-relative and never imports or launches content.
-            for relative, descriptor, info, kind in immediate:
-                common = {
-                    "path": relative,
-                    "mode": stat.S_IMODE(info.st_mode),
-                    "uid": info.st_uid,
-                    "gid": info.st_gid,
-                }
-                if kind == "directory":
-                    entries.append({**common, "type": "directory"})
-                    directories.append((relative, descriptor))
-                elif kind == "file":
-                    entries.append(
-                        {
-                            **common,
-                            "type": "file",
-                            "size": info.st_size,
-                            "sha256": _descriptor_sha256(descriptor),
-                        }
-                    )
-                else:
-                    parent_relative, leaf = relative.rsplit("/", 1) if "/" in relative else (".", relative)
-                    link_parent = root if parent_relative == "." else next(
-                        value for path, value in directories_by_path.items() if path == parent_relative
-                    )
-                    target = os.readlink(leaf, dir_fd=link_parent)
-                    _safe_release_link_target(relative, target)
-                    entries.append({**common, "type": "symlink", "target": target})
-            for relative, descriptor in directories:
-                directories_by_path[relative] = descriptor
-                entries.extend(inspect(descriptor, relative))
-            return entries
-
-        directories_by_path: dict[str, int] = {".": root}
-        observed_entries = inspect(root, ".")
-        try:
-            manifest_descriptor = os.open(
-                _RELEASE_MANIFEST_NAME,
-                os.O_RDONLY
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
-                dir_fd=root,
-            )
-        except OSError as exc:
-            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
-        descriptors.append(manifest_descriptor)
+        manifest_descriptor = view.descriptors.get(_RELEASE_MANIFEST_NAME)
+        if manifest_descriptor is None:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
         manifest_info = os.fstat(manifest_descriptor)
         if (
             not stat.S_ISREG(manifest_info.st_mode)
@@ -2975,8 +2894,16 @@ def _verify_inert_release_manifest(
             manifest_info,
             reason="SOURCE_REPAIR_RELEASE_INVALID",
         )
-        manifest_state = _release_object_state(manifest_info)
-        manifest_bytes = _read_descriptor(manifest_descriptor, 64 * 1024 * 1024)
+        manifest_bytes = view.read_bytes(
+            _RELEASE_MANIFEST_NAME,
+            maximum_bytes=_TRUSTED_E4_MANIFEST_SIZE,
+        )
+        if (
+            len(manifest_bytes) != _TRUSTED_E4_MANIFEST_SIZE
+            or hashlib.sha256(manifest_bytes).hexdigest()
+            != _TRUSTED_E4_MANIFEST_SHA256
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
         try:
             manifest = json.loads(manifest_bytes)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -2986,10 +2913,13 @@ def _verify_inert_release_manifest(
             or set(manifest) != {"schema_version", "commit_sha", "tree_sha", "entries"}
             or manifest.get("schema_version") != _RELEASE_MANIFEST_SCHEMA
             or manifest.get("commit_sha") != expected_commit
-            or _COMMIT_RE.fullmatch(str(manifest.get("tree_sha"))) is None
+            or manifest.get("tree_sha") != _TRUSTED_E4_RELEASE_TREE
             or not isinstance(manifest.get("entries"), list)
+            or len(manifest["entries"]) != _TRUSTED_E4_MANIFEST_ENTRY_COUNT
+            or manifest_bytes != canonical_json(manifest) + b"\n"
         ):
             raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+
         persisted_by_path: dict[str, Any] = {}
         for entry in manifest["entries"]:
             if not isinstance(entry, Mapping):
@@ -3004,175 +2934,195 @@ def _verify_inert_release_manifest(
             ):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
             persisted_by_path[path] = dict(entry)
+
+        observed_entries: list[dict[str, Any]] = []
+        for relative, descriptor in view.descriptors.items():
+            if relative in {".", _RELEASE_MANIFEST_NAME}:
+                continue
+            info = os.fstat(descriptor)
+            if (
+                info.st_dev != device
+                or info.st_uid != expected_uid
+                or info.st_gid != expected_gid
+                or stat.S_IMODE(info.st_mode) & 0o022
+                or (not stat.S_ISDIR(info.st_mode) and info.st_nlink != 1)
+            ):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+            _require_secure_descriptor(
+                descriptor,
+                info,
+                reason="SOURCE_REPAIR_RELEASE_INVALID",
+            )
+            common = {
+                "path": relative,
+                "mode": stat.S_IMODE(info.st_mode),
+                "uid": info.st_uid,
+                "gid": info.st_gid,
+            }
+            if stat.S_ISDIR(info.st_mode):
+                observed_entries.append({**common, "type": "directory"})
+            elif stat.S_ISREG(info.st_mode):
+                observed_entries.append(
+                    {
+                        **common,
+                        "type": "file",
+                        "size": info.st_size,
+                        "sha256": view.sha256(relative),
+                    }
+                )
+            elif stat.S_ISLNK(info.st_mode):
+                target = view.readlink(relative)
+                _safe_release_link_target(relative, target)
+                observed_entries.append(
+                    {**common, "type": "symlink", "target": target}
+                )
+            else:
+                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
         observed_by_path = {entry["path"]: entry for entry in observed_entries}
         if persisted_by_path != observed_by_path:
             raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-
-        # Rewalk every retained descriptor and relation after the semantic read.
-        if _release_object_state(os.fstat(root)) != states["."]:
-            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-        for relative, descriptor in directories_by_path.items():
-            if tuple(_descriptor_directory_names(descriptor)) != namespaces[relative]:
-                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-        for relative, expected_state in states.items():
-            descriptor = descriptor_by_path[relative]
-            if _release_object_state(os.fstat(descriptor)) != expected_state:
-                raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-        if (
-            _release_object_state(os.fstat(manifest_descriptor)) != manifest_state
-            or _read_descriptor(manifest_descriptor, 64 * 1024 * 1024) != manifest_bytes
-        ):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
+        view.revalidate()
         return dict(manifest)
-    except (CapacityHostArtifactError, OSError, StopIteration) as exc:
-        if isinstance(exc, CapacityHostArtifactError):
-            raise
+    except (CapacityHostArtifactError, OSError) as exc:
         raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID") from exc
     finally:
-        for descriptor in reversed(descriptors):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
-        if owns_parent and parent is not None:
-            try:
-                os.close(parent)
-            except OSError:
-                pass
+        if owns_view and view is not None:
+            view.close()
 
 
-def _verify_preserved_h0_invariants_body(
-    system_root: Path,
-    generation: Path,
-    *,
-    test_adapter: bool,
-    parents: SourceRepairParents | None = None,
-) -> None:
-    """Read only the fixed H0 roots and identity attributes; never provider homes."""
+@dataclass(frozen=True)
+class _PreservedH0Views:
+    """The one retained semantic evidence graph consumed by H0 verification."""
 
-    if test_adapter:
-        return
-    if parents is None or parents.system_root is None:
-        raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
-    runtime = system_root / "capacity-runtimes" / "cf1-pyyaml-6.0.3-cp312-arm64"
-    if (
-        verify_pyyaml_record(runtime) != PYYAML_RECORD_SHA256
-        or runtime_tree_digest(runtime) != RUNTIME_TREE_SHA256
+    runtime: "_RepositoryView"
+    generation: "_RepositoryView"
+    telemetry: "_RepositoryView"
+    release: "_RepositoryView"
+    rollback_archive: "_RepositoryView"
+    topology: Mapping[Path, "_RepositoryView"]
+    legacy: Mapping[Path, "_RepositoryView | None"]
+    socket_parent: "_RepositoryView"
+    socket_directory: "_RepositoryView | None"
+    release_parent: "_RepositoryView | None" = None
+
+
+def _verify_runtime_view(view: "_RepositoryView") -> None:
+    """Authenticate the preserved runtime entirely through retained objects."""
+
+    site_prefix = "lib/python3.12/site-packages/"
+    record_relative = f"{site_prefix}pyyaml-6.0.3.dist-info/RECORD"
+    record_descriptor = view.descriptors.get(record_relative)
+    if record_descriptor is None:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+    try:
+        record_bytes = view.read_bytes(
+            record_relative,
+            maximum_bytes=os.fstat(record_descriptor).st_size,
+        )
+        rows = list(csv.reader(record_bytes.decode("utf-8").splitlines()))
+    except (CapacityHostArtifactError, UnicodeError, csv.Error) as exc:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID") from exc
+    declared: dict[str, tuple[str, str]] = {}
+    retained_hashes: dict[str, str] = {}
+
+    def retained_sha256(relative: str) -> str:
+        digest = retained_hashes.get(relative)
+        if digest is None:
+            digest = view.sha256(relative)
+            retained_hashes[relative] = digest
+        return digest
+
+    for row in rows:
+        if len(row) != 3 or row[0] in declared:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+        path = PurePosixPath(row[0])
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or not any(row[0].startswith(prefix) for prefix in _WHEEL_PREFIXES)
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+        declared[row[0]] = (row[1], row[2])
+    observed = {
+        relative.removeprefix(site_prefix)
+        for relative, descriptor in view.descriptors.items()
+        if relative.startswith(site_prefix)
+        and stat.S_ISREG(os.fstat(descriptor).st_mode)
+    }
+    if observed != set(declared):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+    for relative, (encoded_hash, encoded_size) in declared.items():
+        retained_relative = f"{site_prefix}{relative}"
+        descriptor = view.descriptors.get(retained_relative)
+        if descriptor is None:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+        if relative.endswith(".dist-info/RECORD") and not encoded_hash and not encoded_size:
+            continue
+        if not encoded_hash.startswith("sha256=") or not encoded_size.isdecimal():
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+        digest = base64.urlsafe_b64encode(
+            bytes.fromhex(retained_sha256(retained_relative))
+        ).rstrip(b"=").decode("ascii")
+        if digest != encoded_hash.removeprefix("sha256=") or info.st_size != int(
+            encoded_size
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+    forbidden = {f"{site_prefix}sitecustomize.py", f"{site_prefix}usercustomize.py"}
+    if forbidden & set(view.descriptors) or any(
+        relative.startswith(site_prefix) and relative.endswith(".pth")
+        for relative in view.descriptors
     ):
         raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+    if retained_sha256(record_relative) != PYYAML_RECORD_SHA256:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
 
-    telemetry = Path("/var/db/mastermind-provider-control")
-    expected_telemetry = {
-        ".",
-        "data",
-        "data/ai_costs",
-        "data/metabolism",
-    }
-    observed_telemetry = {
-        ".",
-        *(
-            path.relative_to(telemetry).as_posix()
-            for path in telemetry.rglob("*")
-        ),
-    }
-    if observed_telemetry != expected_telemetry:
+    digest_rows: list[dict[str, Any]] = []
+    for relative in sorted(view.descriptors, key=lambda value: value.encode("utf-8")):
+        info = os.fstat(view.descriptors[relative])
+        if stat.S_ISDIR(info.st_mode):
+            digest_row: dict[str, Any] = {
+                "mode": f"{stat.S_IMODE(info.st_mode):04o}",
+                "nlink": info.st_nlink,
+                "path": relative,
+                "type": "directory",
+            }
+        elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+            digest_row = {
+                "mode": f"{stat.S_IMODE(info.st_mode):04o}",
+                "nlink": 1,
+                "path": relative,
+                "sha256": retained_sha256(relative),
+                "size": info.st_size,
+                "type": "file",
+            }
+        else:
+            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+        digest_rows.append(digest_row)
+    if hashlib.sha256(canonical_json(digest_rows)).hexdigest() != RUNTIME_TREE_SHA256:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
+    view.revalidate()
+
+
+def _verify_telemetry_view(view: "_RepositoryView") -> None:
+    expected = {".", "data", "data/ai_costs", "data/metabolism"}
+    if set(view.descriptors) != expected:
         raise CapacityHostArtifactError("SOURCE_REPAIR_TELEMETRY_INVALID")
-    for relative in expected_telemetry:
-        path = telemetry if relative == "." else telemetry / relative
-        info = path.lstat()
+    for relative in expected:
+        info = os.fstat(view.descriptors[relative])
         if (
             not stat.S_ISDIR(info.st_mode)
-            or path.is_symlink()
             or info.st_uid != 0
             or info.st_gid != 0
             or stat.S_IMODE(info.st_mode) != 0o555
         ):
             raise CapacityHostArtifactError("SOURCE_REPAIR_TELEMETRY_INVALID")
+    view.revalidate()
 
-    release = system_root / "releases" / PRESERVED_TOPOLOGY_RELEASE_COMMIT
-    release_parent = os.open(
-        "releases",
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-        | getattr(os, "O_CLOEXEC", 0),
-        dir_fd=parents.system_root,
-    )
-    try:
-        release_parent_info = os.fstat(release_parent)
-        if (
-            not stat.S_ISDIR(release_parent_info.st_mode)
-            or release_parent_info.st_uid != 0
-            or release_parent_info.st_gid != 0
-            or stat.S_IMODE(release_parent_info.st_mode) != 0o755
-            or release_parent_info.st_dev != parents.device
-        ):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_RELEASE_INVALID")
-        _require_secure_descriptor(
-            release_parent,
-            release_parent_info,
-            reason="SOURCE_REPAIR_RELEASE_INVALID",
-        )
-        _verify_inert_release_manifest(
-            release,
-            expected_commit=PRESERVED_TOPOLOGY_RELEASE_COMMIT,
-            expected_uid=0,
-            expected_gid=0,
-            parent_descriptor=release_parent,
-        )
-    finally:
-        os.close(release_parent)
 
-    topology = json.loads((generation / "broker-topology.json").read_bytes())
-    rows = topology.get("brokers")
-    if not isinstance(rows, list) or len(rows) != 3:
-        raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
-
-    drill_path = generation / "rollback-drill-receipt.json"
-    drill_bytes = drill_path.read_bytes()
-    drill = json.loads(drill_bytes)
-    if (
-        drill.get("outcome") != "SHRINK_ONLY_ROLLBACK_PASS"
-        or drill.get("moved_artifact_count") != 9
-        or not isinstance(drill.get("artifacts"), list)
-        or len(drill["artifacts"]) != 9
-    ):
-        raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
-    drill_archive = Path(str(drill.get("archive_root")))
-    if (
-        drill_archive.parent != system_root / "capacity-archive"
-        or not drill_archive.name.startswith("rollback-drill-")
-        or (drill_archive / "rollback-receipt.json").read_bytes() != drill_bytes
-    ):
-        raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
-    for artifact in drill["artifacts"]:
-        if (
-            not isinstance(artifact, Mapping)
-            or set(artifact) != {"name", "sha256"}
-            or "/" in str(artifact.get("name"))
-            or _DIGEST_RE.fullmatch(str(artifact.get("sha256"))) is None
-        ):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
-        archived_artifact = drill_archive / str(artifact["name"])
-        if sha256_file(archived_artifact) != artifact["sha256"]:
-            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
-    for row in rows:
-        if not isinstance(row, Mapping):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
-        for path_key, digest_key in (
-            ("config_path", "config_sha256"),
-            ("attestation_path", "attestation_sha256"),
-            ("plist_path", "plist_sha256"),
-        ):
-            path = Path(str(row.get(path_key)))
-            digest = str(row.get(digest_key))
-            if (
-                not path.is_absolute()
-                or _DIGEST_RE.fullmatch(digest) is None
-                or sha256_file(path) != digest
-            ):
-                raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
-
+def _verify_preserved_service_principal_state(labels: Sequence[str]) -> None:
     disabled = subprocess.run(
         ["/bin/launchctl", "print-disabled", "system"],
         stdin=subprocess.DEVNULL,
@@ -3185,49 +3135,8 @@ def _verify_preserved_h0_invariants_body(
     if disabled.returncode != 0:
         raise CapacityHostArtifactError("SOURCE_REPAIR_SERVICE_STATE_INVALID")
     disabled_text = disabled.stdout.decode("utf-8", "strict")
-    labels = (
-        "com.mastermind.executive.control",
-        "com.mastermind.executive.worker.codex",
-        "com.mastermind.executive.worker.codex-pro-01",
-        "com.mastermind.executive.worker.codex-pro-02",
-        "com.mastermind.executive.worker.codex-pro-03",
-    )
     for label in labels:
         _verify_disabled_unloaded_label(label, disabled_text)
-
-    def legacy_path_digest(path: Path) -> str:
-        if not _path_lexists(path):
-            return "absent"
-        info = path.lstat()
-        if not stat.S_ISREG(info.st_mode) or path.is_symlink() or info.st_nlink != 1:
-            return "ambiguous"
-        metadata = (
-            f"{info.st_uid}:{info.st_gid}:{stat.S_IMODE(info.st_mode):o}:"
-            f"{info.st_nlink}\n"
-        ).encode("ascii")
-        content_digest = f"{sha256_file(path)}\n".encode("ascii")
-        return hashlib.sha256(metadata + content_digest).hexdigest()
-
-    legacy_files = (
-        system_root / "config" / "control.json",
-        system_root / "config" / "worker-codex.json",
-        Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist"),
-        Path("/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"),
-    )
-    legacy_lines = [
-        f"{path}={legacy_path_digest(path)}\n" for path in legacy_files
-    ]
-    legacy_lines.extend(
-        f"{label}:disabled=true:loaded=false\n" for label in labels[:2]
-    )
-    if hashlib.sha256("".join(legacy_lines).encode("utf-8")).hexdigest() != topology.get(
-        "legacy_phase1c_state_digest"
-    ):
-        raise CapacityHostArtifactError("SOURCE_REPAIR_LEGACY_STATE_INVALID")
-    for slot_id in ("codex-pro-01", "codex-pro-02", "codex-pro-03"):
-        socket_path = Path(f"/var/run/mastermind-executive/worker-{slot_id}.sock")
-        if _path_lexists(socket_path):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_SOCKET_STATE_INVALID")
 
     identities = (
         ("_mastermind_exec", 450, 450),
@@ -3251,14 +3160,7 @@ def _verify_preserved_h0_invariants_body(
             "Groups", name, identity_field="PrimaryGroupID", expected=gid
         )
         membership = subprocess.run(
-            [
-                "/usr/bin/dsmemberutil",
-                "checkmembership",
-                "-U",
-                name,
-                "-G",
-                name,
-            ],
+            ["/usr/bin/dsmemberutil", "checkmembership", "-U", name, "-G", name],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -3306,6 +3208,168 @@ def _verify_preserved_h0_invariants_body(
         raise CapacityHostArtifactError("SOURCE_REPAIR_PRINCIPAL_INVALID")
 
 
+def _verify_preserved_h0_invariants_body(
+    system_root: Path,
+    generation: Path,
+    *,
+    test_adapter: bool,
+    parents: SourceRepairParents | None = None,
+    retained_views: _PreservedH0Views | None = None,
+) -> None:
+    """Read only the fixed H0 roots and identity attributes; never provider homes."""
+
+    if test_adapter:
+        return
+    if retained_views is None:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID")
+    views = retained_views
+    _verify_runtime_view(views.runtime)
+    _verify_telemetry_view(views.telemetry)
+    _verify_inert_release_manifest(
+        system_root / "releases" / PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+        expected_commit=PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+        expected_uid=0,
+        expected_gid=0,
+        parent_descriptor=(
+            views.release_parent.root_descriptor
+            if views.release_parent is not None
+            else None
+        ),
+        retained_view=views.release,
+    )
+
+    try:
+        topology = json.loads(
+            views.generation.read_bytes(
+                "broker-topology.json", maximum_bytes=1024 * 1024
+            )
+        )
+        drill_bytes = views.generation.read_bytes(
+            "rollback-drill-receipt.json", maximum_bytes=1024 * 1024
+        )
+        drill = json.loads(drill_bytes)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID") from exc
+    rows = topology.get("brokers")
+    if not isinstance(rows, list) or len(rows) != 3:
+        raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+    if (
+        drill.get("outcome") != "SHRINK_ONLY_ROLLBACK_PASS"
+        or drill.get("moved_artifact_count") != 9
+        or not isinstance(drill.get("artifacts"), list)
+        or len(drill["artifacts"]) != 9
+    ):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+    drill_archive = Path(str(drill.get("archive_root")))
+    if (
+        drill_archive.parent != system_root / "capacity-archive"
+        or not drill_archive.name.startswith("rollback-drill-")
+        or views.rollback_archive.read_bytes(
+            "rollback-receipt.json", maximum_bytes=1024 * 1024
+        )
+        != drill_bytes
+    ):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+    for artifact in drill["artifacts"]:
+        if (
+            not isinstance(artifact, Mapping)
+            or set(artifact) != {"name", "sha256"}
+            or "/" in str(artifact.get("name"))
+            or _DIGEST_RE.fullmatch(str(artifact.get("sha256"))) is None
+            or views.rollback_archive.sha256(str(artifact["name"]))
+            != artifact["sha256"]
+        ):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
+    observed_topology_paths: set[Path] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+        for path_key, digest_key in (
+            ("config_path", "config_sha256"),
+            ("attestation_path", "attestation_sha256"),
+            ("plist_path", "plist_sha256"),
+        ):
+            path = Path(str(row.get(path_key)))
+            digest = str(row.get(digest_key))
+            view = views.topology.get(path)
+            if (
+                not path.is_absolute()
+                or path in observed_topology_paths
+                or _DIGEST_RE.fullmatch(digest) is None
+                or view is None
+                or view.sha256(".") != digest
+            ):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+            observed_topology_paths.add(path)
+    if observed_topology_paths != set(views.topology):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
+
+    labels = (
+        "com.mastermind.executive.control",
+        "com.mastermind.executive.worker.codex",
+        "com.mastermind.executive.worker.codex-pro-01",
+        "com.mastermind.executive.worker.codex-pro-02",
+        "com.mastermind.executive.worker.codex-pro-03",
+    )
+
+    def legacy_view_digest(view: _RepositoryView | None) -> str:
+        if view is None:
+            return "absent"
+        info = os.fstat(view.root_descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            return "ambiguous"
+        metadata = (
+            f"{info.st_uid}:{info.st_gid}:{stat.S_IMODE(info.st_mode):o}:"
+            f"{info.st_nlink}\n"
+        ).encode("ascii")
+        content_digest = f"{view.sha256('.')}\n".encode("ascii")
+        return hashlib.sha256(metadata + content_digest).hexdigest()
+
+    legacy_files = (
+        system_root / "config" / "control.json",
+        system_root / "config" / "worker-codex.json",
+        Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist"),
+        Path("/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"),
+    )
+    if set(views.legacy) != set(legacy_files):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_LEGACY_STATE_INVALID")
+    legacy_lines = [
+        f"{path}={legacy_view_digest(views.legacy[path])}\n" for path in legacy_files
+    ]
+    legacy_lines.extend(
+        f"{label}:disabled=true:loaded=false\n" for label in labels[:2]
+    )
+    if hashlib.sha256("".join(legacy_lines).encode("utf-8")).hexdigest() != topology.get(
+        "legacy_phase1c_state_digest"
+    ):
+        raise CapacityHostArtifactError("SOURCE_REPAIR_LEGACY_STATE_INVALID")
+    if views.socket_directory is None:
+        if not views.socket_parent.is_absent("mastermind-executive"):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_SOCKET_STATE_INVALID")
+    else:
+        for slot_id in ("codex-pro-01", "codex-pro-02", "codex-pro-03"):
+            if not views.socket_directory.is_absent(f"worker-{slot_id}.sock"):
+                raise CapacityHostArtifactError("SOURCE_REPAIR_SOCKET_STATE_INVALID")
+
+    for view in (
+        views.runtime,
+        views.generation,
+        views.telemetry,
+        views.release,
+        views.rollback_archive,
+        *views.topology.values(),
+        *(view for view in views.legacy.values() if view is not None),
+        views.socket_parent,
+    ):
+        view.revalidate()
+    if views.release_parent is not None:
+        views.release_parent.revalidate()
+    if views.socket_directory is not None:
+        views.socket_directory.revalidate()
+    _verify_preserved_service_principal_state(labels)
+    return
+
+
 def _verify_preserved_h0_invariants(
     system_root: Path,
     generation: Path,
@@ -3323,116 +3387,177 @@ def _verify_preserved_h0_invariants(
         or parents.intent_archive is None
     ):
         raise CapacityHostArtifactError("SOURCE_REPAIR_PARENT_INVALID")
-    views: list[_RepositoryView] = []
-    extra_descriptors: list[int] = []
+    retained: list[_RepositoryView] = []
+
+    def retain(view: _RepositoryView) -> _RepositoryView:
+        retained.append(view)
+        return view
+
     try:
-        runtime_parent = os.open(
-            "capacity-runtimes",
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0),
-            dir_fd=parents.system_root,
+        runtime_parent = retain(
+            _RepositoryView(
+                system_root / "capacity-runtimes",
+                parent_descriptor=parents.system_root,
+                root_name="capacity-runtimes",
+                recursive=False,
+            )
         )
-        extra_descriptors.append(runtime_parent)
-        runtime_parent_info = os.fstat(runtime_parent)
-        if (
-            not stat.S_ISDIR(runtime_parent_info.st_mode)
-            or runtime_parent_info.st_uid != 0
-            or runtime_parent_info.st_gid != 0
-            or stat.S_IMODE(runtime_parent_info.st_mode) != 0o755
-            or runtime_parent_info.st_dev != parents.device
-        ):
-            raise CapacityHostArtifactError("SOURCE_REPAIR_RUNTIME_INVALID")
-        _require_secure_descriptor(
-            runtime_parent,
-            runtime_parent_info,
-            reason="SOURCE_REPAIR_RUNTIME_INVALID",
-        )
-        views.append(
+        runtime = retain(
             _RepositoryView(
                 system_root
                 / "capacity-runtimes"
                 / "cf1-pyyaml-6.0.3-cp312-arm64",
-                parent_descriptor=runtime_parent,
+                parent_descriptor=runtime_parent.root_descriptor,
                 root_name="cf1-pyyaml-6.0.3-cp312-arm64",
             )
         )
-        views.append(
+        generation_view = retain(
             _RepositoryView(
                 generation,
                 parent_descriptor=parents.intent_archive,
                 root_name=generation.name,
             )
         )
-        views.append(_RepositoryView(Path("/var/db/mastermind-provider-control")))
-
-        generation_view = views[1]
-        drill_descriptor = generation_view.descriptors.get(
-            "rollback-drill-receipt.json"
+        telemetry = retain(
+            _RepositoryView(Path("/var/db/mastermind-provider-control"))
         )
-        topology_descriptor = generation_view.descriptors.get("broker-topology.json")
-        if drill_descriptor is None or topology_descriptor is None:
-            raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
-        drill = json.loads(_read_descriptor(drill_descriptor, 1024 * 1024))
+        release_parent = retain(
+            _RepositoryView(
+                system_root / "releases",
+                parent_descriptor=parents.system_root,
+                root_name="releases",
+                recursive=False,
+            )
+        )
+        release = retain(
+            _RepositoryView(
+                system_root / "releases" / PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+                parent_descriptor=release_parent.root_descriptor,
+                root_name=PRESERVED_TOPOLOGY_RELEASE_COMMIT,
+                allow_symlinks=True,
+            )
+        )
+
+        drill = json.loads(
+            generation_view.read_bytes(
+                "rollback-drill-receipt.json", maximum_bytes=1024 * 1024
+            )
+        )
         drill_archive = Path(str(drill.get("archive_root")))
         if (
             drill_archive.parent != parents.archive_path
             or not drill_archive.name.startswith("rollback-drill-")
         ):
             raise CapacityHostArtifactError("SOURCE_REPAIR_ROLLBACK_INVALID")
-        views.append(
+        rollback_archive = retain(
             _RepositoryView(
                 drill_archive,
                 parent_descriptor=parents.archive,
                 root_name=drill_archive.name,
             )
         )
-        topology = json.loads(_read_descriptor(topology_descriptor, 1024 * 1024))
+        topology = json.loads(
+            generation_view.read_bytes(
+                "broker-topology.json", maximum_bytes=1024 * 1024
+            )
+        )
         rows = topology.get("brokers")
         if not isinstance(rows, list):
             raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
-        retained_paths: set[Path] = set()
+        topology_views: dict[Path, _RepositoryView] = {}
         for row in rows:
             if not isinstance(row, Mapping):
                 raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
             for key in ("config_path", "attestation_path", "plist_path"):
                 path = Path(str(row.get(key)))
-                if not path.is_absolute() or path in retained_paths:
+                if not path.is_absolute() or path in topology_views:
                     raise CapacityHostArtifactError("SOURCE_REPAIR_TOPOLOGY_INVALID")
-                retained_paths.add(path)
-                views.append(_RepositoryView(path))
-        for legacy in (
-            system_root / "config" / "control.json",
-            system_root / "config" / "worker-codex.json",
-            Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist"),
-            Path("/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"),
-        ):
-            if _path_lexists(legacy):
-                views.append(_RepositoryView(legacy))
+                topology_views[path] = retain(_RepositoryView(path))
 
+        config_parent = retain(
+            _RepositoryView(
+                system_root / "config",
+                parent_descriptor=parents.system_root,
+                root_name="config",
+                recursive=False,
+            )
+        )
+        launchd_parent = retain(
+            _RepositoryView(Path("/Library/LaunchDaemons"), recursive=False)
+        )
+        legacy: dict[Path, _RepositoryView | None] = {}
+        for parent_view, path in (
+            (config_parent, system_root / "config" / "control.json"),
+            (config_parent, system_root / "config" / "worker-codex.json"),
+            (
+                launchd_parent,
+                Path("/Library/LaunchDaemons/com.mastermind.executive.control.plist"),
+            ),
+            (
+                launchd_parent,
+                Path(
+                    "/Library/LaunchDaemons/com.mastermind.executive.worker.codex.plist"
+                ),
+            ),
+        ):
+            if parent_view.contains(path.name):
+                legacy[path] = retain(
+                    _RepositoryView(
+                        path,
+                        parent_descriptor=parent_view.root_descriptor,
+                        root_name=path.name,
+                    )
+                )
+            elif parent_view.is_absent(path.name):
+                legacy[path] = None
+            else:  # pragma: no cover - contains/is_absent are exhaustive
+                raise CapacityHostArtifactError("SOURCE_REPAIR_LEGACY_STATE_INVALID")
+
+        socket_parent = retain(_RepositoryView(Path("/var/run"), recursive=False))
+        socket_directory: _RepositoryView | None = None
+        if socket_parent.contains("mastermind-executive"):
+            socket_directory = retain(
+                _RepositoryView(
+                    Path("/var/run/mastermind-executive"),
+                    parent_descriptor=socket_parent.root_descriptor,
+                    root_name="mastermind-executive",
+                    recursive=False,
+                )
+            )
+        elif not socket_parent.is_absent("mastermind-executive"):
+            raise CapacityHostArtifactError("SOURCE_REPAIR_SOCKET_STATE_INVALID")
+
+        views = _PreservedH0Views(
+            runtime=runtime,
+            generation=generation_view,
+            telemetry=telemetry,
+            release=release,
+            rollback_archive=rollback_archive,
+            topology=topology_views,
+            legacy=legacy,
+            socket_parent=socket_parent,
+            socket_directory=socket_directory,
+            release_parent=release_parent,
+        )
         parents.revalidate()
         _verify_preserved_h0_invariants_body(
             system_root,
             generation,
             test_adapter=False,
             parents=parents,
+            retained_views=views,
         )
         parents.revalidate()
-        for view in views:
+        for view in retained:
             view.revalidate()
+        return
     except CapacityHostArtifactError:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise CapacityHostArtifactError("SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID") from exc
     finally:
-        for view in reversed(views):
+        for view in reversed(retained):
             view.close()
-        for descriptor in reversed(extra_descriptors):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
 
 
 def _advance_source_repair_source_phase(
@@ -6034,7 +6159,12 @@ def _repository_snapshot_state(info: os.stat_result) -> tuple[int, ...]:
 
 
 class _RepositoryView:
-    """Retained descriptor graph that makes transient pathname swaps observable."""
+    """One retained graph and semantic read capability for preserved evidence."""
+
+    _NATIVE_ROOT_ALIASES = {
+        "var": "private/var",
+        "tmp": "private/tmp",
+    }
 
     def __init__(
         self,
@@ -6042,100 +6172,499 @@ class _RepositoryView:
         *,
         parent_descriptor: int | None = None,
         root_name: str | None = None,
+        allow_symlinks: bool = False,
+        recursive: bool = True,
     ) -> None:
         absolute = source_root.absolute()
-        parent_flags = (
+        directory_flags = (
             os.O_RDONLY
             | getattr(os, "O_DIRECTORY", 0)
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_CLOEXEC", 0)
         )
-        self.parent_descriptor = (
-            os.dup(parent_descriptor)
-            if parent_descriptor is not None
-            else os.open(absolute.parent, parent_flags)
-        )
-        self.root_name = root_name if root_name is not None else absolute.name
+        self.allow_symlinks = allow_symlinks
+        self.recursive = recursive
         self.descriptors: dict[str, int] = {}
         self.states: dict[str, tuple[int, ...]] = {}
+        self.xattr_states: dict[str, frozenset[bytes]] = {}
         self.directory_names: dict[str, tuple[str, ...]] = {}
         self.parents: dict[str, tuple[str, str]] = {}
+        self.guard_descriptors: list[int] = []
+        self.guard_names: list[str] = []
+        self.guard_states: list[tuple[int, ...]] = []
+        self.guard_xattr_states: list[frozenset[bytes]] = []
+        self.guard_native_tmp: list[bool] = []
+        self.alias_relations: list[
+            tuple[int, str, int, tuple[int, ...], frozenset[bytes], str]
+        ] = []
+        self.parent_descriptor: int | None = None
+        self.parent_state: tuple[int, ...] | None = None
+        self.parent_xattr_state: frozenset[bytes] | None = None
+        self.explicit_parent = parent_descriptor is not None
         try:
+            if parent_descriptor is not None:
+                self.parent_descriptor = os.dup(parent_descriptor)
+                parent_info = os.fstat(self.parent_descriptor)
+                if not stat.S_ISDIR(parent_info.st_mode):
+                    raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+                parent_xattrs = _descriptor_extended_attribute_names(
+                    self.parent_descriptor
+                )
+                _require_allowed_bsd_flags(parent_info, "SOURCE_METADATA_INVALID")
+                if (
+                    parent_xattrs - _APPROVED_SYSTEM_XATTRS
+                    or _descriptor_has_extended_acl(self.parent_descriptor)
+                ):
+                    raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+                self.parent_state = _repository_snapshot_state(parent_info)
+                self.parent_xattr_state = parent_xattrs
+                actual_root_name = root_name if root_name is not None else absolute.name
+            else:
+                components = list(absolute.parts[1:])
+                if not components:
+                    raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+                root_guard = os.open("/", directory_flags)
+                self._retain_guard(root_guard, "/", relation_parent=None)
+                alias_target = self._NATIVE_ROOT_ALIASES.get(components[0])
+                native_alias_name: str | None = None
+                if alias_target is not None:
+                    alias_info = os.stat(
+                        components[0],
+                        dir_fd=root_guard,
+                        follow_symlinks=False,
+                    )
+                    if stat.S_ISLNK(alias_info.st_mode):
+                        alias_descriptor = _open_release_symlink(
+                            root_guard, components[0]
+                        )
+                        alias_state = _release_object_state(
+                            os.fstat(alias_descriptor)
+                        )
+                        alias_xattrs = _descriptor_extended_attribute_names(
+                            alias_descriptor
+                        )
+                        target = os.readlink(components[0], dir_fd=root_guard)
+                        if (
+                            target != alias_target
+                            or alias_state
+                            != _release_object_state(alias_info)
+                            or alias_info.st_uid != 0
+                            or stat.S_IMODE(alias_info.st_mode) & 0o022
+                            or alias_info.st_nlink != 1
+                            or int(getattr(alias_info, "st_flags", 0))
+                            & ~_TRAVERSAL_ANCESTOR_ALLOWED_FLAGS
+                            or alias_xattrs
+                            - _APPROVED_TRAVERSAL_ANCESTOR_XATTRS
+                            or _descriptor_has_extended_acl(alias_descriptor)
+                        ):
+                            os.close(alias_descriptor)
+                            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+                        self.alias_relations.append(
+                            (
+                                root_guard,
+                                components[0],
+                                alias_descriptor,
+                                alias_state,
+                                alias_xattrs,
+                                target,
+                            )
+                        )
+                        native_alias_name = components[0]
+                        components = [*PurePosixPath(target).parts, *components[1:]]
+                actual_root_name = components[-1]
+                for component_index, component in enumerate(components[:-1]):
+                    observed = os.stat(
+                        component,
+                        dir_fd=self.guard_descriptors[-1],
+                        follow_symlinks=False,
+                    )
+                    if not stat.S_ISDIR(observed.st_mode):
+                        raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+                    child = os.open(
+                        component,
+                        directory_flags,
+                        dir_fd=self.guard_descriptors[-1],
+                    )
+                    self._retain_guard(
+                        child,
+                        component,
+                        relation_parent=self.guard_descriptors[-1],
+                        observed=observed,
+                        native_tmp=(
+                            native_alias_name == "tmp"
+                            and component_index == 1
+                            and component == "tmp"
+                        ),
+                    )
+                self.parent_descriptor = os.dup(self.guard_descriptors[-1])
+
+            if (
+                not isinstance(actual_root_name, str)
+                or not actual_root_name
+                or actual_root_name in {".", ".."}
+                or "/" in actual_root_name
+            ):
+                raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+            self.root_name = actual_root_name
             relation_info = os.stat(
                 self.root_name,
                 dir_fd=self.parent_descriptor,
                 follow_symlinks=False,
             )
-            root_flags = (
-                parent_flags
-                if stat.S_ISDIR(relation_info.st_mode)
-                else os.O_RDONLY
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0)
-            )
-            root_descriptor = os.open(
-                self.root_name, root_flags, dir_fd=self.parent_descriptor
-            )
+            if stat.S_ISDIR(relation_info.st_mode):
+                root_descriptor = os.open(
+                    self.root_name,
+                    directory_flags,
+                    dir_fd=self.parent_descriptor,
+                )
+            elif allow_symlinks and stat.S_ISLNK(relation_info.st_mode):
+                root_descriptor = _open_release_symlink(
+                    self.parent_descriptor, self.root_name
+                )
+            else:
+                root_descriptor = os.open(
+                    self.root_name,
+                    os.O_RDONLY
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=self.parent_descriptor,
+                )
             self.root_descriptor = root_descriptor
             self._retain(".", root_descriptor)
             self.root_relation_state = self.states["."]
+            if _repository_snapshot_state(relation_info) != self.root_relation_state:
+                raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
         except Exception:
             self.close()
             raise
 
-    def _retain(self, relative: str, descriptor: int) -> None:
+    def _retain_guard(
+        self,
+        descriptor: int,
+        name: str,
+        *,
+        relation_parent: int | None,
+        observed: os.stat_result | None = None,
+        native_tmp: bool = False,
+    ) -> None:
         info = os.fstat(descriptor)
-        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
-            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
-        _require_secure_descriptor(
-            descriptor, info, reason="SOURCE_METADATA_INVALID"
+        root_device = (
+            info.st_dev
+            if not self.guard_descriptors
+            else os.fstat(self.guard_descriptors[0]).st_dev
         )
+        self.guard_descriptors.append(descriptor)
+        if native_tmp:
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_nlink < 1
+                or info.st_dev != root_device
+                or info.st_uid != 0
+                or info.st_gid != 0
+                or stat.S_IMODE(info.st_mode) != 0o1777
+                or int(getattr(info, "st_flags", 0))
+                & ~_TRAVERSAL_ANCESTOR_ALLOWED_FLAGS
+                or _descriptor_has_extended_acl(descriptor)
+            ):
+                raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        else:
+            _require_source_repair_ancestor(
+                descriptor,
+                info,
+                expected_uid=os.geteuid(),
+                expected_gid=os.getegid(),
+                expected_device=root_device,
+                reason="SOURCE_METADATA_INVALID",
+            )
+        xattrs = _source_repair_ancestor_xattrs(
+            descriptor, reason="SOURCE_METADATA_INVALID"
+        )
+        state = _descriptor_ancestor_state(info)
+        if observed is not None and _descriptor_ancestor_state(observed) != state:
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self.guard_names.append(name)
+        self.guard_states.append(state)
+        self.guard_xattr_states.append(xattrs)
+        self.guard_native_tmp.append(native_tmp)
+
+    def _retain(self, relative: str, descriptor: int) -> None:
         self.descriptors[relative] = descriptor
+        info = os.fstat(descriptor)
+        if not (
+            stat.S_ISDIR(info.st_mode)
+            or stat.S_ISREG(info.st_mode)
+            or (self.allow_symlinks and stat.S_ISLNK(info.st_mode))
+        ):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        traversal_root = relative == "." and not self.recursive and stat.S_ISDIR(
+            info.st_mode
+        )
+        if traversal_root:
+            expected_device = (
+                os.fstat(self.guard_descriptors[0]).st_dev
+                if self.guard_descriptors
+                else info.st_dev
+            )
+            _require_source_repair_ancestor(
+                descriptor,
+                info,
+                expected_uid=os.geteuid(),
+                expected_gid=os.getegid(),
+                expected_device=expected_device,
+                reason="SOURCE_METADATA_INVALID",
+            )
+            xattrs = _source_repair_ancestor_xattrs(
+                descriptor, reason="SOURCE_METADATA_INVALID"
+            )
+        else:
+            xattrs = _descriptor_extended_attribute_names(descriptor)
+            _require_allowed_bsd_flags(info, "SOURCE_METADATA_INVALID")
+            if (
+                xattrs - _APPROVED_SYSTEM_XATTRS
+                or _descriptor_has_extended_acl(descriptor)
+            ):
+                raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
         self.states[relative] = _repository_snapshot_state(info)
+        self.xattr_states[relative] = xattrs
         if not stat.S_ISDIR(info.st_mode):
             return
         names = tuple(_descriptor_directory_names(descriptor))
         self.directory_names[relative] = names
+        if not self.recursive:
+            return
         for name in names:
             child = name if relative == "." else f"{relative}/{name}"
             child_info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
-            if stat.S_ISLNK(child_info.st_mode) or not (
-                stat.S_ISDIR(child_info.st_mode) or stat.S_ISREG(child_info.st_mode)
+            if not (
+                stat.S_ISDIR(child_info.st_mode)
+                or stat.S_ISREG(child_info.st_mode)
+                or (self.allow_symlinks and stat.S_ISLNK(child_info.st_mode))
             ):
                 raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
-            if stat.S_ISDIR(child_info.st_mode):
-                flags |= getattr(os, "O_DIRECTORY", 0)
+            if stat.S_ISLNK(child_info.st_mode):
+                child_descriptor = _open_release_symlink(descriptor, name)
             else:
-                flags |= getattr(os, "O_NONBLOCK", 0)
-            child_descriptor = os.open(name, flags, dir_fd=descriptor)
+                flags = (
+                    os.O_RDONLY
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0)
+                )
+                if stat.S_ISDIR(child_info.st_mode):
+                    flags |= getattr(os, "O_DIRECTORY", 0)
+                else:
+                    flags |= getattr(os, "O_NONBLOCK", 0)
+                child_descriptor = os.open(name, flags, dir_fd=descriptor)
             self.parents[child] = (relative, name)
             self._retain(child, child_descriptor)
+            if _repository_snapshot_state(child_info) != self.states[child]:
+                raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
 
-    def revalidate(self) -> None:
-        try:
-            root_info = os.stat(
+    def _revalidate_parent_capability(self) -> None:
+        if self.parent_descriptor is None:
+            raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        if self.explicit_parent:
+            parent_info = os.fstat(self.parent_descriptor)
+            parent_xattrs = _descriptor_extended_attribute_names(
+                self.parent_descriptor
+            )
+            if (
+                self.parent_state is None
+                or _repository_snapshot_state(parent_info) != self.parent_state
+                or self.parent_xattr_state is None
+                or parent_xattrs != self.parent_xattr_state
+            ):
+                raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+            _require_allowed_bsd_flags(parent_info, "SOURCE_VIEW_DRIFT")
+            if _descriptor_has_extended_acl(self.parent_descriptor):
+                raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        for index, descriptor in enumerate(self.guard_descriptors):
+            info = os.fstat(descriptor)
+            if (
+                _descriptor_ancestor_state(info) != self.guard_states[index]
+                or _descriptor_extended_attribute_names(descriptor)
+                != self.guard_xattr_states[index]
+            ):
+                raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+            if self.guard_native_tmp[index]:
+                if (
+                    not stat.S_ISDIR(info.st_mode)
+                    or info.st_nlink < 1
+                    or info.st_dev != os.fstat(self.guard_descriptors[0]).st_dev
+                    or info.st_uid != 0
+                    or info.st_gid != 0
+                    or stat.S_IMODE(info.st_mode) != 0o1777
+                    or int(getattr(info, "st_flags", 0))
+                    & ~_TRAVERSAL_ANCESTOR_ALLOWED_FLAGS
+                    or _descriptor_has_extended_acl(descriptor)
+                ):
+                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+            else:
+                _require_source_repair_ancestor(
+                    descriptor,
+                    info,
+                    expected_uid=os.geteuid(),
+                    expected_gid=os.getegid(),
+                    expected_device=os.fstat(self.guard_descriptors[0]).st_dev,
+                    reason="SOURCE_VIEW_DRIFT",
+                )
+            if index:
+                observed_guard = os.stat(
+                    self.guard_names[index],
+                    dir_fd=self.guard_descriptors[index - 1],
+                    follow_symlinks=False,
+                )
+                if _descriptor_ancestor_state(observed_guard) != self.guard_states[index]:
+                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        for parent, name, descriptor, state, xattrs, target in self.alias_relations:
+            observed = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (
+                _release_object_state(observed) != state
+                or _release_object_state(os.fstat(descriptor)) != state
+                or _descriptor_extended_attribute_names(descriptor) != xattrs
+                or _descriptor_has_extended_acl(descriptor)
+                or os.readlink(name, dir_fd=parent) != target
+            ):
+                raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+
+    def _revalidate_object(self, relative: str, seen: set[str] | None = None) -> None:
+        if seen is None:
+            seen = set()
+        if relative in seen:
+            return
+        seen.add(relative)
+        descriptor = self.descriptors.get(relative)
+        if descriptor is None:
+            raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        info = os.fstat(descriptor)
+        object_xattrs = _descriptor_extended_attribute_names(descriptor)
+        if (
+            _repository_snapshot_state(info) != self.states[relative]
+            or object_xattrs != self.xattr_states[relative]
+        ):
+            raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        if relative == "." and not self.recursive and stat.S_ISDIR(info.st_mode):
+            expected_device = (
+                os.fstat(self.guard_descriptors[0]).st_dev
+                if self.guard_descriptors
+                else info.st_dev
+            )
+            _require_source_repair_ancestor(
+                descriptor,
+                info,
+                expected_uid=os.geteuid(),
+                expected_gid=os.getegid(),
+                expected_device=expected_device,
+                reason="SOURCE_VIEW_DRIFT",
+            )
+        else:
+            _require_allowed_bsd_flags(info, "SOURCE_VIEW_DRIFT")
+            if _descriptor_has_extended_acl(descriptor):
+                raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        if relative in self.directory_names and tuple(
+            _descriptor_directory_names(descriptor)
+        ) != self.directory_names[relative]:
+            raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+        relation = self.parents.get(relative)
+        if relation is None:
+            self._revalidate_parent_capability()
+            observed = os.stat(
                 self.root_name,
                 dir_fd=self.parent_descriptor,
                 follow_symlinks=False,
             )
-            if _repository_snapshot_state(root_info) != self.root_relation_state:
+            if _repository_snapshot_state(observed) != self.root_relation_state:
                 raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
-            for relative, descriptor in self.descriptors.items():
-                if _repository_snapshot_state(os.fstat(descriptor)) != self.states[relative]:
-                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
-                if relative in self.directory_names and tuple(
-                    _descriptor_directory_names(descriptor)
-                ) != self.directory_names[relative]:
-                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
-            for relative, (parent, name) in self.parents.items():
-                observed = os.stat(
-                    name,
-                    dir_fd=self.descriptors[parent],
-                    follow_symlinks=False,
-                )
-                if _repository_snapshot_state(observed) != self.states[relative]:
-                    raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+            return
+        parent, name = relation
+        self._revalidate_object(parent, seen)
+        observed = os.stat(
+            name,
+            dir_fd=self.descriptors[parent],
+            follow_symlinks=False,
+        )
+        if _repository_snapshot_state(observed) != self.states[relative]:
+            raise CapacityHostArtifactError("SOURCE_VIEW_DRIFT")
+
+    def read_bytes(self, relative: str, *, maximum_bytes: int) -> bytes:
+        """Read one retained regular file and revalidate its complete relation."""
+
+        if (
+            isinstance(maximum_bytes, bool)
+            or not isinstance(maximum_bytes, int)
+            or maximum_bytes < 0
+        ):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        descriptor = self.descriptors.get(relative)
+        if descriptor is None or not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self._revalidate_object(relative)
+        payload = _read_descriptor(descriptor, maximum_bytes)
+        if len(payload) > maximum_bytes:
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self._revalidate_object(relative)
+        return payload
+
+    def sha256(self, relative: str) -> str:
+        """Hash one retained regular file without reopening its pathname."""
+
+        descriptor = self.descriptors.get(relative)
+        if descriptor is None or not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self._revalidate_object(relative)
+        digest = _descriptor_sha256(descriptor)
+        self._revalidate_object(relative)
+        return digest
+
+    def readlink(self, relative: str) -> str:
+        """Read one retained release symlink through its retained parent."""
+
+        descriptor = self.descriptors.get(relative)
+        relation = self.parents.get(relative)
+        if (
+            descriptor is None
+            or relation is None
+            or not stat.S_ISLNK(os.fstat(descriptor).st_mode)
+        ):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        parent, name = relation
+        self._revalidate_object(relative)
+        target = os.readlink(name, dir_fd=self.descriptors[parent])
+        self._revalidate_object(relative)
+        return target
+
+    def is_absent(self, name: str) -> bool:
+        """Prove a simple child name absent through this retained directory root."""
+
+        if (
+            name in {"", ".", ".."}
+            or "/" in name
+            or "." not in self.directory_names
+        ):
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self._revalidate_object(".")
+        if name in self.directory_names["."]:
+            return False
+        try:
+            os.stat(name, dir_fd=self.root_descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            return False
+        self._revalidate_object(".")
+        return True
+
+    def contains(self, name: str) -> bool:
+        if name in {"", ".", ".."} or "/" in name:
+            raise CapacityHostArtifactError("SOURCE_METADATA_INVALID")
+        self._revalidate_object(".")
+        return name in self.directory_names.get(".", ())
+
+    def revalidate(self) -> None:
+        try:
+            self._revalidate_parent_capability()
+            seen: set[str] = set()
+            for relative in self.descriptors:
+                self._revalidate_object(relative, seen)
         except CapacityHostArtifactError:
             raise
         except (OSError, UnicodeError) as exc:
@@ -6155,6 +6684,18 @@ class _RepositoryView:
             except OSError:
                 pass
         self.parent_descriptor = None
+        for relation in reversed(getattr(self, "alias_relations", [])):
+            try:
+                os.close(relation[2])
+            except OSError:
+                pass
+        self.alias_relations = []
+        for descriptor in reversed(getattr(self, "guard_descriptors", [])):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        self.guard_descriptors = []
 
 
 def verify_repair_carrier(

@@ -235,3 +235,133 @@ Result: exit 0; no output.
 - Task 2 and Task 3 were not started.
 - No native/root/provider/service/credential/OAuth/routing/WP/C1/Slack Relay state was touched.
 - No new native flag bit was observed or silently added; the live full-module path completed under the explicit reviewed mask.
+
+## Task 2 — in progress
+
+### Frozen pickup and independent e4 identity
+
+- Exact pickup HEAD: `90420a97e9a9ddd4aef6abb83fadf0a12f22481e` on the existing clean `codex/cf2-h0-source-closure-20260827` carrier.
+- Protected `origin/master` and Skillpack pin: `af43f356f4f7f34cb3514d1d1099b50444af8487`.
+- Loaded from that exact pin: `docs/sol_skills/INDEX.md`, `docs/sol_skills/COLD_START.md`, and `docs/sol_skills/REVIEW_RETURN.md`; schema `mastermind.sol_skillpack.v1`, version `1.0.0`, compatible with project `bootstrap_major = 1`.
+- Independently derived from direct Git objects without executing installed/repository payload code: e4 commit `e4e44867ace335ac9208a3990a10c163e199492d`, tree `ee1b95af3341a49151890cec1a6a31997f632aec`, canonical manifest SHA-256 `ecb9a58eec12890126c291a451921ab0dd738baee765c61aae3a42fd74a31fc9`, byte length `190196` including one final LF, and `1122` entries.
+
+### RED evidence
+
+The first Task 2 filesystem edit changed tests only. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'trusted_e4 or self_authored_payload or wrong_trusted_e4_tree or basename_relation or preserved_semantic_reads or absolute_evidence_view'
+```
+
+Result: exit 1; `FFFFFFFFFF [100%]` (10 failed).
+
+The failures discriminated the current defects:
+
+- no reviewed e4 tree/manifest trust constants existed;
+- an arbitrary payload plus self-authored internally matching manifest under the exact e4 basename was accepted;
+- a canonically shaped manifest carrying the wrong e4 tree was accepted;
+- an exact release-basename swap was accepted when descriptor-metadata side effects were held constant, proving the retained root was not rebound to its parent/name relation;
+- runtime, generation, topology, rollback, and legacy semantic views had no descriptor-read capability, so the preserved verifier could not use the retained graph as its read authority; and
+- an absolute evidence view had no retained-descriptor read capability and opened its absolute parent directly instead of starting at a retained `/` and traversing component by component.
+
+The installed-release sentinel test remains present and continues to forbid execution of installed `release_manifest.py` payload bytes.
+
+The live adversarial controller then required deeper retained-graph coverage. Those tests were also added before their production capabilities. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'unrelated_retained_view or approved_xattr_name_set_drift or optional_absence or forbidden_stable_ancestor_flags or fixed_macos_root_alias or supplied_retained_semantic_views'
+```
+
+Result: exit 1; `FFFFFFF [100%]` (7 failed).
+
+The additional RED failures proved that an unrelated retained release view could be injected, an approved xattr name could appear after a semantic read without refusal, optional absence had no retained-parent capability, absolute-view ancestors accepted a stable forbidden user flag, native `/var` and `/tmp` symlink components had no authenticated traversal, and the preserved verifier body had no retained-view input contract and therefore could not be proven free of pathname reads.
+
+The first full-module attempt was interrupted by the controller after 45m51s because it exceeded the 279-case pre-change baseline by more than threefold; it is not acceptance evidence. Deterministic profiling isolated repeated retained-repository graph revalidation, not e4 manifest traversal: one source-repair test spent 21.917s across 619 `_RepositoryView.revalidate` calls, including 78,613 `_revalidate_object` calls and 25,379 retained-parent capability checks. A performance regression test was added before optimizing the graph walk. Exact RED command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'full_revalidation_walks_retained_parent_capability_once'
+```
+
+Result: exit 1; `F [100%]`. The one full retained-graph revalidation performed 18 parent-capability checks instead of the required two (one explicit outer check and one identity-bound root relation check), proving repeated ancestor recursion across sibling/descendant objects.
+
+The RED was strengthened to a branching three-level graph with an exact per-object xattr-audit counter and paired with a refusal-path descriptor-ownership regression. Exact command:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 1; `FF [100%]`. The branching graph performed 20 parent-capability checks instead of two, and the initial `/` guard descriptor was opened but never closed when its security audit refused.
+
+### GREEN evidence
+
+The retained graph now uses one shared `seen` set per complete temporal gate, so every retained object, relation, exact xattr-name set, BSD-flag state, and ACL state is audited once while semantic reads still recheck their complete ancestor chain before and after reading. Guard descriptor ownership is registered before its first security audit, and retained runtime file hashes are reused within one authenticated runtime verification.
+
+The two performance/refusal regressions turned green:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 0; `.. [100%]` (2 selected cases passed). The branching three-level graph performs exactly two retained-parent capability checks and exactly one xattr-name audit per retained object for the full gate.
+
+The representative source-repair test used for deterministic timing improved from `25.42s` before the shared graph walk to `9.72s` after it:
+
+```text
+python3 -m pytest -vv --durations=5 -o addopts='' tests/test_capacity_host_artifacts.py::test_source_repair_host_commits_generation_last_and_verify_is_zero_mutation
+```
+
+Result: exit 0; 1 passed in `10.77s`, with the test call reported as `9.72s`.
+
+The complete discriminating Task 2 selector, including the performance and refusal-path regressions:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'unrelated_retained_view or approved_xattr_name_set_drift or optional_absence or forbidden_stable_ancestor_flags or fixed_macos_root_alias or supplied_retained_semantic_views or trusted_e4 or self_authored_payload or wrong_trusted_e4_tree or basename_relation or preserved_semantic_reads or absolute_evidence_view or inert_release_manifest_verifier_never_executes_installed_payload or full_revalidation_walks_retained_parent_capability_once or closes_guard_descriptor_when_initial_guard_audit_refuses'
+```
+
+Result: exit 0; `.................... [100%]` (20 selected cases passed).
+
+Preserved-invariant and source-repair compatibility gate:
+
+```text
+python3 -m pytest -q tests/test_capacity_host_artifacts.py -k 'preserved or source_repair'
+```
+
+Result: exit 0; all selected cases reached `[100%]` with no failures in about 81 seconds, down from about 176 seconds before the shared graph walk.
+
+Complete module with explicit elapsed time:
+
+```text
+/usr/bin/time -p python3 -m pytest -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; all 298 collected cases reached `[100%]`; `real 1148.81`, `user 476.21`, `sys 513.97`. This bounded 19m08.81s run replaces the interrupted 45m51s non-evidence run.
+
+Final collection, Apple system-Python compilation, and diff gates:
+
+```text
+python3 -m pytest --collect-only -q tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; `tests/test_capacity_host_artifacts.py: 298`.
+
+```text
+/usr/bin/python3 -m py_compile ops/executive_os/capacity_host_artifacts.py tests/test_capacity_host_artifacts.py
+```
+
+Result: exit 0; no output.
+
+```text
+git diff --check
+```
+
+Result: exit 0; no output.
+
+### Task 2 files and scope boundary
+
+- Modified: `ops/executive_os/capacity_host_artifacts.py`
+- Modified: `tests/test_capacity_host_artifacts.py`
+- Appended: `.superpowers/sdd/2026-08-27-executive-capacity-cf2-h0-final-review-continuation/progress.md`
+- Task 3 was not started.
+- No native/root/provider/service/credential/OAuth/routing/WP/C1/Slack Relay state was touched.
+- No installed release payload was executed; the strengthened sentinel authenticates its manifest first and then refuses changed payload bytes without launching any subprocess.
+- Task 2 remains repository implementation proof only, not native H0, CF2-P0, merge, deploy, or production acceptance.
