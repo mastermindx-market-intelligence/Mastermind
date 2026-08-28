@@ -5,6 +5,7 @@ import copy
 import pytest
 
 try:
+    from control_plane.session_truth import compute_admission
     from control_plane.session_truth_rules import (
         FINDING_REGISTRY,
         build_indexes,
@@ -18,6 +19,7 @@ except ModuleNotFoundError as exc:
     def _missing(*_args, **_kwargs):
         raise NotImplementedError("session_truth_rules not implemented")
 
+    compute_admission = _missing
     build_indexes = _missing
     detect_findings = _missing
 
@@ -35,6 +37,11 @@ CONTEXT_DIGEST = "sha256:" + "8" * 64
 
 EXPECTED_REGISTRY = {
     "AGENTOS_RECORD_IDENTITY_UNAVAILABLE": ("BLOCKING", "agentos", "agentos"),
+    "COMPLETION_OWNER_EVIDENCE_UNKNOWN": (
+        "BLOCKING",
+        "declared_completion_owner",
+        "declared_completion_owner",
+    ),
     "STALE_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
     "FALSE_LINEAR_COMPLETION": ("BLOCKING", "declared_completion_owner", "linear"),
     "MISSING_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
@@ -306,6 +313,9 @@ def _codes(doc: dict) -> set[str]:
 def _mutate(code: str, doc: dict) -> None:
     if code == "AGENTOS_RECORD_IDENTITY_UNAVAILABLE":
         del doc["agentos"]["state"]["source_records_digest"]
+    elif code == "COMPLETION_OWNER_EVIDENCE_UNKNOWN":
+        doc["linear"]["issues"][0]["status"] = "Done"
+        doc["github"]["pull_requests"][0]["proof_state"] = "unknown"
     elif code == "STALE_LINEAR_PROJECTION":
         doc["linear"]["issues"][0]["projection_revision"] = 6
     elif code == "FALSE_LINEAR_COMPLETION":
@@ -455,22 +465,52 @@ def test_two_projections_cannot_outvote_owner(healthy):
     assert "FALSE_LINEAR_COMPLETION" in _codes(changed)
 
 
-def test_non_merge_linear_done_with_exact_terminal_proof_is_not_false_completion(healthy):
+@pytest.mark.parametrize("proof_state", ["complete", "proven_live", "not_required"])
+def test_non_merge_linear_done_with_exact_terminal_proof_is_not_false_completion(
+    healthy, proof_state
+):
     """A terminal owner proof, not completion-string spelling, decides validity."""
 
     changed = copy.deepcopy(healthy)
     changed["linear"]["issues"][0]["status"] = "Done"
-    changed["github"]["pull_requests"][0]["proof_state"] = "proven_live"
-    assert "FALSE_LINEAR_COMPLETION" not in _codes(changed)
+    changed["github"]["pull_requests"][0]["proof_state"] = proof_state
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
 
 
-def test_linear_done_with_unknown_owner_proof_stays_unknown(healthy):
-    """A future owner value is opaque; R1 must not invent false completion."""
+@pytest.mark.parametrize(
+    "proof_state",
+    ["open", "not_built", "spec_only", "partial", "built_not_proven", "blocked"],
+)
+def test_linear_done_with_exact_nonterminal_owner_is_false_completion(
+    healthy, proof_state
+):
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["proof_state"] = proof_state
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
+
+
+@pytest.mark.parametrize("proof_state", ["future_owner_state", "unknown", None])
+def test_linear_done_with_unknown_exact_owner_blocks_without_false_claim(
+    healthy, proof_state
+):
+    """Opaque or absent exact-owner proof is blocking uncertainty, not false proof."""
 
     changed = copy.deepcopy(healthy)
     changed["linear"]["issues"][0]["status"] = "Done"
-    changed["github"]["pull_requests"][0]["proof_state"] = "future_owner_state"
-    assert "FALSE_LINEAR_COMPLETION" not in _codes(changed)
+    changed["github"]["pull_requests"][0]["proof_state"] = proof_state
+    findings = detect_findings(changed)
+    codes = {finding["code"] for finding in findings}
+    assert "FALSE_LINEAR_COMPLETION" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" in codes
+    admission = compute_admission(changed, findings)
+    assert admission["mode"] == "DIALOGUE_ONLY"
+    assert admission["modification_safe"] is False
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" in admission["blocking_codes"]
 
 
 @pytest.mark.parametrize(
@@ -484,21 +524,82 @@ def test_non_owner_pr_relation_cannot_decide_linear_completion(healthy, relation
     changed["linear"]["issues"][0]["status"] = "Done"
     changed["linear"]["issues"][0]["github_relations"][0]["relation"] = relation
     assert changed["github"]["pull_requests"][0]["proof_state"] == "open"
-    assert "FALSE_LINEAR_COMPLETION" not in _codes(changed)
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" in codes
 
 
-def test_merged_pr_with_unknown_owner_proof_stays_unknown(healthy):
-    """Unknown proof metadata is observable, not synonymous with proof-open."""
+def test_one_way_completion_relation_is_not_exact_owner_evidence(healthy):
+    """A Linear relation without the PR's reciprocal binding cannot decide completion."""
+
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["linear"] = None
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" in codes
+
+
+def test_same_pr_number_in_other_repository_is_not_completion_owner(healthy):
+    """Repository plus PR number, not a bare number, qualifies owner evidence."""
+
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["repository"] = OTHER_REPO
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" in codes
+
+
+def test_foreign_same_number_nonterminal_does_not_outvote_exact_terminal_owner(healthy):
+    """An exact repository-qualified terminal owner stays healthy despite # collision."""
+
+    changed = copy.deepcopy(healthy)
+    changed["linear"]["issues"][0]["status"] = "Done"
+    changed["github"]["pull_requests"][0]["proof_state"] = "complete"
+    foreign = copy.deepcopy(changed["github"]["pull_requests"][0])
+    foreign.update(
+        {
+            "repository": OTHER_REPO,
+            "proof_state": "open",
+            "linear": "MAS-10",
+            "wave": "R1-FOREIGN",
+            "operation_key": "op-foreign",
+        }
+    )
+    changed["github"]["pull_requests"].append(foreign)
+    codes = _codes(changed)
+    assert "FALSE_LINEAR_COMPLETION" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
+
+
+@pytest.mark.parametrize("proof_state", ["future_owner_state", "unknown", None])
+def test_merged_non_merge_completion_with_unknown_proof_blocks_as_uncertain(
+    healthy, proof_state
+):
+    """A merge cannot make unknown non-merge completion evidence safe."""
 
     changed = copy.deepcopy(healthy)
     changed["github"]["pull_requests"][0].update(
         {
             "state": "merged",
             "merge_sha": SHA_C,
-            "proof_state": "future_owner_state",
+            "proof_state": proof_state,
         }
     )
-    assert "GITHUB_MERGE_WITH_PROOF_OPEN" not in _codes(changed)
+    codes = _codes(changed)
+    assert "GITHUB_MERGE_WITH_PROOF_OPEN" not in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" in codes
+
+
+def test_merged_non_merge_completion_with_nonterminal_proof_is_proof_open(healthy):
+    changed = copy.deepcopy(healthy)
+    changed["github"]["pull_requests"][0].update(
+        {"state": "merged", "merge_sha": SHA_C, "proof_state": "built_not_proven"}
+    )
+    codes = _codes(changed)
+    assert "GITHUB_MERGE_WITH_PROOF_OPEN" in codes
+    assert "COMPLETION_OWNER_EVIDENCE_UNKNOWN" not in codes
 
 
 def test_ordinary_open_carrier_progress_is_not_unexpected_head_movement(healthy):

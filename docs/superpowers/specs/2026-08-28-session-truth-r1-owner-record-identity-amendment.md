@@ -205,3 +205,45 @@ R1 is accepted only when:
 - Sol independently accepts the exact final head and receipt.
 
 Merge alone does not release R2-R7, Project Recovery, Linear mutation, Agent Relay, Wake, capacity routing or production modification.
+
+## 11. Completion-owner evidence classification
+
+R1 snapshot normalization preserves repository-owned `completion` and `proof_state` metadata as
+bounded opaque string/null values. It does not validate or own the repository's header grammar.
+The reconciliation rule boundary nevertheless requires a positive, fail-closed classification
+before a terminal projection can be treated as healthy:
+
+```text
+terminal owner evidence:    complete | proven_live | not_required
+nonterminal owner evidence: open | not_built | spec_only | partial | built_not_proven | blocked
+unknown owner evidence:     null | unknown | every other current/future opaque value
+```
+
+This is a consequence classification in the R1 consumer, not a restored snapshot enum. Raw values
+remain byte-for-byte observable in the normalized receipt, and future bounded metadata must never
+make the GitHub source unavailable merely because R1 cannot classify it.
+
+For a Linear issue projected `Done`, completion-owner evidence qualifies only when all identity and
+direction conditions are positive:
+
+- relation class is `merge_is_done` or `program_gate`;
+- repository and PR number match exactly;
+- the observed PR reciprocally declares the same Linear issue id.
+
+An exact nonterminal owner emits `FALSE_LINEAR_COMPLETION`. If every exact owner is terminal, the
+projection is healthy. If no exact reciprocal completion owner is available, or any otherwise exact
+owner carries unknown evidence without a known nonterminal owner, emit the new deterministic
+BLOCKING finding:
+
+```text
+COMPLETION_OWNER_EVIDENCE_UNKNOWN
+```
+
+The finding's canonical and repair owner is `declared_completion_owner`; it produces
+`DIALOGUE_ONLY` / `modification_safe=false` and must not be rewritten as
+`FALSE_LINEAR_COMPLETION`. Contributing, architecture-evidence and ignored-wrong-id relations,
+one-way relations, and same-number PRs in another repository never testify about completion.
+
+For a merged PR whose completion law is not `merge-is-done`, exact nonterminal proof emits
+`GITHUB_MERGE_WITH_PROOF_OPEN`, exact terminal proof is healthy, and unknown/null/future proof emits
+`COMPLETION_OWNER_EVIDENCE_UNKNOWN`. No completion-header spelling alone proves terminality.

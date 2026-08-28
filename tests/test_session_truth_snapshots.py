@@ -175,6 +175,16 @@ def test_repository_owned_pr_metadata_remains_structurally_bounded(field):
         normalize_github(doc)
 
 
+@pytest.mark.parametrize(
+    "field", ["portfolio_mode", "authority", "completion", "proof_state"]
+)
+def test_future_repository_metadata_at_bound_is_preserved_verbatim(field):
+    value = "future-owner-metadata:" + "x" * (1024 - len("future-owner-metadata:"))
+    doc = _fixture("github_minimal.json")
+    doc["pull_requests"][0][field] = value
+    assert normalize_github(doc)["pull_requests"][0][field] == value
+
+
 def test_linear_normalizes_relation_class_and_rejects_bad_revision():
     doc = _fixture("linear_minimal.json")
     normalized = normalize_linear(doc)

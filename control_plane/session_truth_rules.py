@@ -17,6 +17,11 @@ from control_plane.session_truth_contract import valid_source_records_digest
 
 FINDING_REGISTRY = {
     "AGENTOS_RECORD_IDENTITY_UNAVAILABLE": ("BLOCKING", "agentos", "agentos"),
+    "COMPLETION_OWNER_EVIDENCE_UNKNOWN": (
+        "BLOCKING",
+        "declared_completion_owner",
+        "declared_completion_owner",
+    ),
     "STALE_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
     "FALSE_LINEAR_COMPLETION": ("BLOCKING", "declared_completion_owner", "linear"),
     "MISSING_LINEAR_PROJECTION": ("WARNING", "agentos", "linear"),
@@ -55,6 +60,7 @@ _CONSEQUENCE = {
     "INFO": "visibility_only",
 }
 _TERMINAL_LINEAR = frozenset({"Done", "Canceled", "Cancelled"})
+_TERMINAL_PROOF = frozenset({"complete", "proven_live", "not_required"})
 _NONTERMINAL_PROOF = frozenset(
     {"open", "not_built", "spec_only", "partial", "built_not_proven", "blocked"}
 )
@@ -210,6 +216,55 @@ def _is_runnable(message: Mapping[str, Any]) -> bool:
     return message.get("message_class") in _RUNNABLE_SLACK_CLASSES
 
 
+def _completion_evidence_class(proof_state: object) -> str:
+    """Classify owner proof at the rule boundary without validating its grammar.
+
+    Snapshot normalization deliberately preserves repository-owned metadata as an
+    opaque bounded string/null.  This detector therefore recognizes only the
+    source states whose completion consequence R1 positively knows; every other
+    current or future value remains typed uncertainty instead of reading healthy.
+    """
+
+    if proof_state in _TERMINAL_PROOF:
+        return "terminal"
+    if proof_state in _NONTERMINAL_PROOF:
+        return "nonterminal"
+    return "unknown"
+
+
+def _linear_completion_owners(
+    issue_id: str,
+    issue: Mapping[str, Any],
+    github: Mapping[tuple[str, int], Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return exact repository-qualified, reciprocal completion-owner PRs."""
+
+    owner_relations = {
+        (relation.get("repository"), relation.get("number"))
+        for relation in (issue.get("github_relations") or [])
+        if isinstance(relation, Mapping)
+        and relation.get("relation") in _COMPLETION_OWNER_RELATIONS
+    }
+    owners = [
+        dict(pr)
+        for identity, pr in github.items()
+        if identity in owner_relations and pr.get("linear") == issue_id
+    ]
+    owners.sort(key=lambda pr: (str(pr.get("repository")), int(pr.get("number") or 0)))
+    return owners
+
+
+def _owner_evidence(owners: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "repository": owner.get("repository"),
+            "number": owner.get("number"),
+            "proof_state": owner.get("proof_state"),
+        }
+        for owner in owners
+    ]
+
+
 def _append(
     findings: list[dict[str, Any]],
     seen: set[tuple[str, str]],
@@ -294,18 +349,11 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
             # nonterminal.  Terminal proof makes Done valid; absent/future proof
             # classifications stay unknown rather than being guessed from the
             # spelling of the completion header.
-            relations = {
-                (relation.get("repository"), relation.get("number"))
-                for relation in (issue.get("github_relations") or [])
-                if isinstance(relation, Mapping)
-                and relation.get("relation") in _COMPLETION_OWNER_RELATIONS
-            }
-            bound_proof_states = [
-                pr.get("proof_state")
-                for pr in indexes["github_by_linear"].get(issue_id, [])
-                if (pr.get("repository"), pr.get("number")) in relations
+            owners = _linear_completion_owners(issue_id, issue, github)
+            evidence_classes = [
+                _completion_evidence_class(owner.get("proof_state")) for owner in owners
             ]
-            if any(state in _NONTERMINAL_PROOF for state in bound_proof_states):
+            if "nonterminal" in evidence_classes:
                 _append(
                     findings,
                     seen,
@@ -313,13 +361,28 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                     issue_id,
                     source_a={
                         "completion": issue.get("completion"),
-                        "owner_proof_states": sorted(
-                            state
-                            for state in bound_proof_states
-                            if isinstance(state, str)
-                        ),
+                        "owner_evidence": _owner_evidence(owners),
                     },
                     source_b={"linear_status": "Done"},
+                )
+            elif not owners or "unknown" in evidence_classes:
+                _append(
+                    findings,
+                    seen,
+                    "COMPLETION_OWNER_EVIDENCE_UNKNOWN",
+                    issue_id,
+                    source_a={
+                        "completion": issue.get("completion"),
+                        "owner_evidence": _owner_evidence(owners),
+                    },
+                    source_b={"linear_status": "Done"},
+                    details={
+                        "reason": (
+                            "owner_proof_state_unclassified"
+                            if owners
+                            else "exact_reciprocal_completion_owner_unavailable"
+                        )
+                    },
                 )
 
     for issue_id, issue in linear.items():
@@ -385,19 +448,27 @@ def detect_findings(inputs: Mapping[str, Any]) -> list[dict[str, Any]]:
                 source_b=None,
             )
 
-        if (
-            pr.get("state") == "merged"
-            and pr.get("completion") != "merge-is-done"
-            and pr.get("proof_state") in _NONTERMINAL_PROOF
-        ):
-            _append(
-                findings,
-                seen,
-                "GITHUB_MERGE_WITH_PROOF_OPEN",
-                subject,
-                source_a={"completion": pr.get("completion")},
-                source_b={"proof_state": pr.get("proof_state")},
-            )
+        if pr.get("state") == "merged" and pr.get("completion") != "merge-is-done":
+            evidence_class = _completion_evidence_class(pr.get("proof_state"))
+            if evidence_class == "nonterminal":
+                _append(
+                    findings,
+                    seen,
+                    "GITHUB_MERGE_WITH_PROOF_OPEN",
+                    subject,
+                    source_a={"completion": pr.get("completion")},
+                    source_b={"proof_state": pr.get("proof_state")},
+                )
+            elif evidence_class == "unknown":
+                _append(
+                    findings,
+                    seen,
+                    "COMPLETION_OWNER_EVIDENCE_UNKNOWN",
+                    subject,
+                    source_a={"completion": pr.get("completion")},
+                    source_b={"proof_state": pr.get("proof_state")},
+                    details={"reason": "owner_proof_state_unclassified"},
+                )
 
         if pr.get("state") == "open" and isinstance(workstream_key, str) and workstream_key:
             active_by_workstream_wave[(workstream_key, pr.get("wave"))].append(pr)
