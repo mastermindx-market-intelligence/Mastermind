@@ -160,7 +160,7 @@ def test_receipt_is_closed_secret_free_and_context_bound():
     value = _receipt(module)
     assert module.validate_receipt(value) == value
 
-    # The closed V1 wire already reserves future worker-context receipts.  Wire
+    # The closed V1 wire already reserves future worker-context receipts. Wire
     # validation is not authority to mint one from an arbitrary shell.
     worker_value = _receipt(
         module,
@@ -179,6 +179,20 @@ def test_receipt_is_closed_secret_free_and_context_bound():
         )
     with pytest.raises(module.PreflightError, match="SECRET_SHAPED_VALUE"):
         module.validate_receipt({**value, "realm_label": "sk-" + "x" * 30})
+
+
+def test_receipt_rejects_false_ready_contradiction():
+    module = _load()
+    contradictory = _receipt(
+        module,
+        auth_ready=False,
+        auth_method="unknown",
+        api_provider="unknown",
+        verdict="INTERACTIVE_AUTH_READY",
+        reason_codes=[],
+    )
+    with pytest.raises(module.PreflightError, match="RECEIPT_INVALID"):
+        module.validate_receipt(contradictory)
 
 
 def test_builder_cannot_mint_worker_context_ready_before_broker_slice():
