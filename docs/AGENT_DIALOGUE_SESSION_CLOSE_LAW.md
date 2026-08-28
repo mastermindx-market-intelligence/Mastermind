@@ -61,11 +61,15 @@ A parent program may remain active while one child operation is terminal.
 
 After a nonterminal return, a watcher-enabled worker/COO must enter the approved exact-carrier wait/watch path rather than silently abandoning the dialogue.
 
+An approved continuation path may be the production-proven canonical Worker Presence / Turn-Watcher path, an accepted already-live exact-carrier waiter, or—while the canonical path is not production-proven—a temporary host-native Task/Automation/scheduled condition watcher that periodically reads the exact carrier. **A Slack connector lacking push/webhook subscriptions does not by itself make watching unavailable.** If the current reasoning surface can create a native scheduled/condition watcher that reads the exact thread, that is a lawful non-authoritative continuity bridge under the commission procedure.
+
+Before returning `WATCH_UNAVAILABLE`, the worker/session must check the applicable canonical watcher, any accepted live exact-carrier waiter and its own host-native scheduling/automation surface. If no path is usable, state which mechanisms were checked instead of disappearing or silently assuming Slack push capability is required.
+
 After receiving a nonterminal Sol continuation, the worker must reread the lawful thread/context, continue only the same authorized child operation, and re-arm its watcher after its next nonterminal return.
 
 After receiving terminal `STOP` / `ACCEPTED / STOP` / `CLOSED / STOP`, the worker must stop that child operation and disarm its temporary watcher. A terminal receipt, when required by the currently accepted transport schema, acknowledges consumption of STOP only; it does not create another wave.
 
-If the worker cannot maintain or enter the required watcher/wait path, it must return the currently accepted typed blocker such as `WATCH_UNAVAILABLE` rather than disappear.
+If the worker cannot maintain or enter the required watcher/wait path after the checks above, it must return the currently accepted typed blocker such as `WATCH_UNAVAILABLE` rather than disappear.
 
 ## 4. Critical anti-pattern
 
@@ -97,7 +101,7 @@ For every watcher-enabled handoff expected to return:
 
 A watcher owns **no** Job, Attempt, Worker, completion, retry, provider choice, queue, authority, current work status, durable session identity or next-wave right.
 
-Do not create one watcher daemon/database/cron/automation per handoff as a second control plane.
+Do not create one watcher daemon/database/cron/automation per handoff **as a second control plane**. This prohibition is about giving a watcher durable semantic/lifecycle authority; it does **not** forbid the explicitly temporary, non-authoritative host-native condition watcher described above. Such a bridge owns no lifecycle/cursor/inbox/retry/truth state, must stay bound to the exact current operation/carrier, and must be disarmed on terminal STOP.
 
 ## 6. Watcher shutdown failure
 
@@ -153,6 +157,8 @@ It does not by itself prove that every provider, Slack contract, managed-browser
 
 This law exists because a returned worker result was left waiting after Sol decided that final adjudication belonged to Sol and therefore sent no further message. The worker had correctly re-armed its watcher and remained indefinitely blocked on Sol silence.
 
+A later production incident exposed the reciprocal arming ambiguity: a session equated “Slack has no push subscription” with “watching is unavailable” even though its host surface could create a native scheduled watcher. That distinction is now explicit: transport push capability and host-native continuation watching are separate capabilities.
+
 Universal repair:
 
-> **Every reciprocal dialogue loop gets an explicit terminal edge. Never require another agent to infer completion from silence.**
+> **Every reciprocal dialogue loop gets an explicit terminal edge, and every promised continuation path must actually be armed. Never require another agent to infer completion or watcher availability from silence.**
