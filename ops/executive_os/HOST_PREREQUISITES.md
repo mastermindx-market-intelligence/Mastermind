@@ -94,11 +94,13 @@ REPAIR_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-source-repair.XXX
 REPAIR_CHECKOUT="$REPAIR_PARENT/mastermind"
 safe_git clone --no-local --no-hardlinks --no-checkout \
   "$MASTERMIND_REPOSITORY" "$REPAIR_CHECKOUT"
-safe_git -C "$REPAIR_CHECKOUT" checkout --detach "$REPAIR_MERGE_SHA"
+safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
+  checkout --detach "$REPAIR_MERGE_SHA"
 test -d "$REPAIR_CHECKOUT/.git"
 test ! -f "$REPAIR_CHECKOUT/.git"
 test "$(safe_git -C "$REPAIR_CHECKOUT" rev-parse HEAD)" = "$REPAIR_MERGE_SHA"
-test -z "$(safe_git -C "$REPAIR_CHECKOUT" status --porcelain=v1 --untracked-files=all)"
+test -z "$(safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
+  status --porcelain=v1 --untracked-files=all)"
 test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type l -print -quit)"
 test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type f -links +1 -print -quit)"
 
@@ -127,6 +129,12 @@ MACRO_TRANSPORT_SHA256="$(/usr/bin/shasum -a 256 "$MACRO_TRANSPORT" | /usr/bin/a
 [[ "$MACRO_TRANSPORT_SHA256" =~ ^[0-9a-f]{64}$ ]]
 /usr/bin/printf 'macro_transport_sha256=%s\n' "$MACRO_TRANSPORT_SHA256"
 ```
+
+The explicit `core.symlinks=false` setting applies only while materializing and checking this
+disposable unprivileged checkout. A tracked Git symlink remains a mode-`120000` blob in the
+authenticated commit but is written here as an ordinary single-link file containing the exact link
+target bytes. The clean-status check uses the same interpretation. The whole-checkout symlink and
+hardlink prohibitions remain mandatory, and no privileged/root carrier verification is weakened.
 
 The builder emits `mastermind.capacity_source_transport/v2`. It requires the exact two-member ZIP,
 complete reachable object inventory, frozen eleven-path material projection, and ordinary strict
