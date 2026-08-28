@@ -821,3 +821,75 @@ def test_v2_real_unix_status_uses_same_one_shot_boundary(socket_root: Path) -> N
         assert not srv.config.socket_path.exists()
 
     run(scenario())
+
+
+def test_v2_control_version_constant_is_explicit() -> None:
+    assert service_module.CONTROL_VERSION_V2 == CONTROL_VERSION_V2_TEXT
+
+
+def test_v2_peer_denial_happens_before_dispatch(monkeypatch, socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 999999)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "PEER_DENIED"}}
+            assert fake.calls == []
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
+
+    run(scenario())
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"version":"mastermind.agent_dialogue_control.v2","operation":"status","args":{},"args":{}}\n',
+        b'{"version":"mastermind.agent_dialogue_control.v2","operation":"status","args":{"x":NaN}}\n',
+    ],
+)
+def test_v2_malformed_json_refuses_before_dispatch(raw: bytes, socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+            writer.write(raw)
+            await writer.drain()
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "REQUEST_INVALID"}}
+            assert fake.calls == []
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
+
+    run(scenario())
+
+
+def test_v2_oversize_request_refuses_before_dispatch(socket_root: Path) -> None:
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(str(srv.config.socket_path))
+            raw = (
+                b'{"version":"mastermind.agent_dialogue_control.v2","operation":"status","args":{"payload":"'
+                + b"x" * 40000
+                + b'"}}\n'
+            )
+            writer.write(raw)
+            await writer.drain()
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "REQUEST_TOO_LARGE"}}
+            assert fake.calls == []
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
+
+    run(scenario())
