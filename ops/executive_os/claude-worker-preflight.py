@@ -83,6 +83,7 @@ _RECEIPT_KEYS = frozenset(
         "reason_codes",
     }
 )
+_READY_VERDICTS = frozenset({"INTERACTIVE_AUTH_READY", "WORKER_CONTEXT_AUTH_READY"})
 _REALM_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _HOST_RE = re.compile(r"^host-[A-Za-z0-9][A-Za-z0-9._-]{7,63}$")
 _PRINCIPAL_RE = re.compile(r"^principal-[A-Za-z0-9][A-Za-z0-9._-]{7,63}$")
@@ -341,6 +342,8 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
         )
         if result["verdict"] != expected or reasons:
             _raise("RECEIPT_INVALID")
+    elif result["verdict"] in _READY_VERDICTS:
+        _raise("RECEIPT_INVALID")
     return result
 
 
