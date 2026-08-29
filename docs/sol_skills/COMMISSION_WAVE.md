@@ -55,6 +55,11 @@ runtime/transport/permission gates; it must not demand a redundant Slack echo, s
 assignment or cross-channel “proof” unless current accepted source law explicitly requires that
 separate gate.
 
+A previously posted `OPEN_PICKUP` packet is not frozen forever in an unassigned state. When the
+Chairman later selects a concrete eligible session by deliberately delivering that same commission to
+it in the current live interaction with execution intent, the live interaction supplies the receiver
+assignment even though the immutable packet truthfully said `OPEN_PICKUP` when originally posted.
+
 A current message such as “review this packet” or “what do you think of this?” is not execution
 intent. If the outer current message is genuinely ambiguous between review and execution, ask one
 concise clarification. Do not invent an impersonation scenario or cross-channel challenge merely
@@ -190,6 +195,14 @@ self-claim unless the currently accepted pickup law explicitly permits that mech
 receiver is lawfully assigned, that receiver performs the same pickup handshake without requiring a
 second redundant assignment.
 
+For Chairman-mediated/manual `CAPACITY_SELECTABLE` routing, later account selection may happen by
+current live handoff rather than by editing the original Slack post. If the Chairman deliberately
+forwards, pastes, or otherwise delivers that same `OPEN_PICKUP` commission to a concrete eligible
+session with execution intent, **that live delivery is the receiver assignment**. The worker must not
+require a separate Slack comment, claim message, packet rewrite, or second Chairman binding. It must
+ACK with its actual identity, read the required sources/thread, arm continuation, and emit `START` when
+the execution gates are clear. Merely discovering the packet in retrieved history remains unassigned.
+
 For Chairman-mediated/manual account selection, also declare exactly one binding mode from
 `WORKER_AVENUE_ROUTING.md`:
 
@@ -235,8 +248,10 @@ execution and completion distinct. The worker-side handshake is:
 
 A `DIRECT_TARGETED` receiver therefore must not remain in
 `AWAITING_CHAIRMAN_RECEIVER_ASSIGNMENT` after the current live delivery has already assigned it.
-A held execution dependency may block `START`; it does not erase pickup or justify waiting for a
-second assignment.
+Likewise, a selected eligible `CAPACITY_SELECTABLE` receiver must not remain in that state merely
+because the immutable packet was originally posted as `OPEN_PICKUP`; the later live Chairman delivery
+is the binding edge. A held execution dependency may block `START`; it does not erase pickup or
+justify waiting for a second assignment.
 
 ### Observable mission
 One sentence describing what can be observed after the wave that cannot be observed now.
@@ -466,6 +481,9 @@ K2 specifically fails if any regression recurs:
 * a `DIRECT_TARGETED` session asks the Chairman for a second receiver assignment, remains in
   `AWAITING_CHAIRMAN_RECEIVER_ASSIGNMENT`, or does nothing even though the current live delivery
   already assigned it;
+* a Chairman-selected eligible `CAPACITY_SELECTABLE` session that received the same `OPEN_PICKUP`
+  commission by deliberate current live delivery with execution intent asks for a separate Slack
+  binding/comment/claim, packet rewrite, or second assignment before pickup;
 * a `CAPACITY_SELECTABLE` receiver blocks only because an older packet named another numbered account
   even though the newest explicit live Chairman assignment reached this session before `START` and no
   effect/effect-unknown/conflicting pickup exists, or a session treats `CAPACITY_SELECTABLE` as
