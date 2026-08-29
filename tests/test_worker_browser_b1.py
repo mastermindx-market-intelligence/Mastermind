@@ -20,6 +20,7 @@ def _fake_mcp(
     snapshot_bytes: int = 24,
     screenshots_follow_cwd: bool = False,
     create_profile: bool = False,
+    screenshot_bytes: int | None = None,
 ) -> tuple[str, ...]:
     script = tmp_path / "fake_playwright_mcp.py"
     script.write_text(
@@ -59,7 +60,11 @@ def _fake_mcp(
                     calls.append({{'name': name, 'arguments': arguments}})
                     (output_dir / 'calls.json').write_text(json.dumps(calls), encoding='utf-8')
                     if name == 'browser_take_screenshot':
-                        (screenshot_dir / arguments['filename']).write_bytes(png)
+                        screenshot = screenshot_dir / arguments['filename']
+                        screenshot.write_bytes(png)
+                        if {screenshot_bytes!r} is not None:
+                            with screenshot.open('r+b') as artifact:
+                                artifact.truncate({screenshot_bytes!r})
                         text = 'Saved screenshot to ' + arguments['filename']
                     elif name == 'browser_snapshot':
                         text = 'S' * {snapshot_bytes}
@@ -168,6 +173,79 @@ def test_real_stdio_flow_is_closed_bounded_and_returns_two_hashed_screenshots(tm
     assert calls[5]["arguments"] == {"filename": "desktop.png", "fullPage": True, "scale": "css", "type": "png"}
     assert calls[7]["arguments"] == {"filename": "mobile.png", "fullPage": True, "scale": "css", "type": "png"}
     assert all(row["name"] in browser.ALLOWED_TOOLS for row in calls)
+
+
+def test_zero_length_screenshot_is_refused_before_receipt(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "desktop.png").write_bytes(b"")
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser._screenshot_receipt(output_dir, "desktop.png", {"width": 1440, "height": 900})
+
+    assert raised.value.state == "SCREENSHOT_OVERSIZE"
+    assert raised.value.detail == "screenshot evidence size is outside the reviewed bound"
+
+
+def test_oversized_screenshot_is_refused_before_reading_bytes(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    screenshot = output_dir / "desktop.png"
+    screenshot.write_bytes(b"\x89PNG\r\n\x1a\n")
+    with screenshot.open("r+b") as artifact:
+        artifact.truncate(12 * 1024 * 1024)
+
+    original_read_bytes = Path.read_bytes
+    read_attempts = 0
+
+    def fail_if_oversized_is_read(path):
+        nonlocal read_attempts
+        if path.resolve() == screenshot.resolve():
+            read_attempts += 1
+            raise AssertionError("oversized screenshot bytes were read")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_if_oversized_is_read)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser._screenshot_receipt(output_dir, "desktop.png", {"width": 1440, "height": 900})
+
+    assert raised.value.state == "SCREENSHOT_OVERSIZE"
+    assert raised.value.detail == "screenshot evidence size is outside the reviewed bound"
+    assert read_attempts == 0
+    assert browser.MAX_SCREENSHOT_BYTES > 202_184
+
+
+def test_oversized_screenshot_returns_no_complete_receipt_or_retry_and_cleans(tmp_path, monkeypatch):
+    launch_count = 0
+    original_popen = browser.subprocess.Popen
+
+    def count_browser_launches(*args, **kwargs):
+        nonlocal launch_count
+        argv = args[0] if args else kwargs.get("args", ())
+        if "--output-dir" in argv:
+            launch_count += 1
+        return original_popen(*args, **kwargs)
+
+    monkeypatch.setattr(browser.subprocess, "Popen", count_browser_launches)
+    config = _config(
+        tmp_path,
+        command_override=_fake_mcp(tmp_path, screenshot_bytes=12 * 1024 * 1024),
+    )
+    coordinator = browser.BrowserReviewCoordinator(config)
+
+    receipt = coordinator.run()
+
+    assert receipt == {
+        "schema": "mastermind.worker_browser_b1.receipt.v1",
+        "ok": False,
+        "state": "SCREENSHOT_OVERSIZE",
+        "detail": "screenshot evidence size is outside the reviewed bound",
+        "cleanup": {"process_group_absent": True, "profile_absent": True},
+    }
+    assert coordinator.snapshot() == receipt
+    assert coordinator.read_artifact("desktop.png") is None
+    assert launch_count == 1
 
 
 def test_named_official_screenshots_resolve_inside_private_run_cwd_not_repo(tmp_path):

@@ -46,6 +46,7 @@ ALLOWED_TOOLS = frozenset(
 _DESKTOP = {"width": 1440, "height": 900}
 _MOBILE = {"width": 390, "height": 844}
 _MAX_PROTOCOL_LINE_BYTES = 4 * 1024 * 1024
+MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 _CLEANUP_GRACE_SECONDS = 3.0
 _CLEANUP_PROOF_SECONDS = 3.0
 
@@ -318,6 +319,11 @@ def _screenshot_receipt(output_dir: Path, filename: str, viewport: dict[str, int
         raise BrowserReviewError("SCREENSHOT_MISSING", f"{filename} was not produced") from exc
     if resolved.parent != root or not stat.S_ISREG(info.st_mode) or path.is_symlink():
         raise BrowserReviewError("SCREENSHOT_REFUSED", f"{filename} is not a direct regular artifact")
+    if info.st_size <= 0 or info.st_size > MAX_SCREENSHOT_BYTES:
+        raise BrowserReviewError(
+            "SCREENSHOT_OVERSIZE",
+            "screenshot evidence size is outside the reviewed bound",
+        )
     raw = resolved.read_bytes()
     if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
         raise BrowserReviewError("SCREENSHOT_REFUSED", f"{filename} is not a PNG")
