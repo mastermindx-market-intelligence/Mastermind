@@ -9,6 +9,7 @@ import pytest
 
 from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import chatgpt
+from integrations.chairman_surfaces import web_sol_client as client
 from integrations.chairman_surfaces import web_sol_native_host as native
 from integrations.chairman_surfaces import web_sol_protocol as wsp
 
@@ -78,8 +79,8 @@ def call_kwargs() -> dict:
 
 
 def test_public_extension_seam_is_explicit_and_does_not_accept_transport_or_target_overrides():
-    assert chatgpt.WEB_SOL_SOCKET_PATH == native.SOCKET_PATH
-    for function in (chatgpt.inspect_via_extension, chatgpt.foreground_via_extension):
+    assert client.WEB_SOL_SOCKET_PATH == native.SOCKET_PATH
+    for function in (client.inspect_via_extension, client.foreground_via_extension):
         signature = inspect.signature(function)
         assert list(signature.parameters) == [
             "binding",
@@ -95,8 +96,8 @@ def test_public_extension_seam_is_explicit_and_does_not_accept_transport_or_targ
 def test_conversation_identity_is_canonical_and_trailing_slash_equivalent():
     plain = binding(url="https://chatgpt.com/c/session-alpha")
     slash = binding(url="https://chatgpt.com/c/session-alpha/")
-    assert chatgpt.conversation_fingerprint(plain) == chatgpt.conversation_fingerprint(slash)
-    assert len(chatgpt.conversation_fingerprint(plain)) == 64
+    assert client.conversation_fingerprint(plain) == client.conversation_fingerprint(slash)
+    assert len(client.conversation_fingerprint(plain)) == 64
 
 
 def test_binding_fingerprint_is_deterministic_but_changes_on_exact_surface_drift():
@@ -105,10 +106,10 @@ def test_binding_fingerprint_is_deterministic_but_changes_on_exact_surface_drift
     changed_profile = binding(profile_id="bbbbbbbbbbbbbbbbbbbbbbbb")
     changed_url = binding(url="https://chatgpt.com/c/session-beta")
 
-    assert chatgpt.binding_fingerprint(original) == chatgpt.binding_fingerprint(same)
-    assert len(chatgpt.binding_fingerprint(original)) == 64
-    assert chatgpt.binding_fingerprint(original) != chatgpt.binding_fingerprint(changed_profile)
-    assert chatgpt.binding_fingerprint(original) != chatgpt.binding_fingerprint(changed_url)
+    assert client.binding_fingerprint(original) == client.binding_fingerprint(same)
+    assert len(client.binding_fingerprint(original)) == 64
+    assert client.binding_fingerprint(original) != client.binding_fingerprint(changed_profile)
+    assert client.binding_fingerprint(original) != client.binding_fingerprint(changed_url)
 
 
 def test_inspect_builds_one_closed_request_without_raw_locator_values(monkeypatch):
@@ -119,8 +120,8 @@ def test_inspect_builds_one_closed_request_without_raw_locator_values(monkeypatc
         seen.append(request)
         return receipt_for(request)
 
-    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
-    result = chatgpt.inspect_via_extension(row, **call_kwargs())
+    monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
+    result = client.inspect_via_extension(row, **call_kwargs())
 
     assert result["status"] == "INSPECTED"
     assert len(seen) == 1
@@ -143,8 +144,8 @@ def test_foreground_builds_one_closed_request_and_never_retries(monkeypatch):
         calls += 1
         return receipt_for(request)
 
-    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
-    result = chatgpt.foreground_via_extension(row, **call_kwargs())
+    monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
+    result = client.foreground_via_extension(row, **call_kwargs())
     assert result["status"] == "FOREGROUNDED_VERIFIED"
     assert calls == 1
 
@@ -159,9 +160,9 @@ def test_invalid_binding_refuses_before_transport(monkeypatch):
         calls += 1
         raise AssertionError("transport must not be reached")
 
-    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
-    with pytest.raises(chatgpt.WebSolExtensionError, match="invalid_binding"):
-        chatgpt.inspect_via_extension(row, **call_kwargs())
+    monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(client.WebSolExtensionError, match="invalid_binding"):
+        client.inspect_via_extension(row, **call_kwargs())
     assert calls == 0
 
 
@@ -175,9 +176,9 @@ def test_non_chatgpt_binding_refuses_before_transport(monkeypatch):
         calls += 1
         raise AssertionError("transport must not be reached")
 
-    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
-    with pytest.raises(chatgpt.WebSolExtensionError, match="invalid_binding"):
-        chatgpt.inspect_via_extension(row, **call_kwargs())
+    monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(client.WebSolExtensionError, match="invalid_binding"):
+        client.inspect_via_extension(row, **call_kwargs())
     assert calls == 0
 
 
@@ -187,9 +188,9 @@ def test_mismatched_receipt_identity_is_refused(monkeypatch):
     def exchange(request):
         return receipt_for(request, nonce="different-nonce-00000001")
 
-    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
-    with pytest.raises(chatgpt.WebSolExtensionError, match="receipt_identity_mismatch"):
-        chatgpt.inspect_via_extension(row, **call_kwargs())
+    monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(client.WebSolExtensionError, match="receipt_identity_mismatch"):
+        client.inspect_via_extension(row, **call_kwargs())
 
 
 def test_protocol_error_is_laundered_without_locator_or_payload(monkeypatch):
@@ -198,24 +199,19 @@ def test_protocol_error_is_laundered_without_locator_or_payload(monkeypatch):
     def exchange(_request):
         raise native.NativeHostError("inspect_timeout")
 
-    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
-    with pytest.raises(chatgpt.WebSolExtensionError) as caught:
-        chatgpt.inspect_via_extension(row, **call_kwargs())
+    monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(client.WebSolExtensionError) as caught:
+        client.inspect_via_extension(row, **call_kwargs())
     assert caught.value.code == "inspect_timeout"
     assert str(caught.value) == "inspect_timeout"
     assert row["locator"]["url"] not in str(caught.value)
     assert row["locator"]["profile_id"] not in str(caught.value)
 
 
-def test_legacy_open_surface_remains_fail_closed_and_never_calls_extension(monkeypatch, tmp_path):
+def test_legacy_open_surface_remains_fail_closed_and_chatgpt_module_stays_socket_free(tmp_path):
     row = binding()
     root = tmp_path / "gologin"
     (root / PROFILE).mkdir(parents=True)
-
-    def forbidden_exchange(_request):
-        raise AssertionError("legacy open_surface must never use extension transport")
-
-    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", forbidden_exchange)
     outcome = chatgpt.open_surface(
         row,
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runner must not be called")),
@@ -224,6 +220,9 @@ def test_legacy_open_surface_remains_fail_closed_and_never_calls_extension(monke
     )
     assert outcome["ok"] is False
     assert outcome["failure_kind"] == "unsupported_surface"
+    source = inspect.getsource(chatgpt)
+    assert "web_sol_client" not in source
+    assert "AF_UNIX" not in source
 
 
 def test_fixed_socket_exchange_round_trips_one_request_without_retry(monkeypatch, tmp_path):
@@ -231,7 +230,7 @@ def test_fixed_socket_exchange_round_trips_one_request_without_retry(monkeypatch
     private.mkdir(mode=0o700)
     private.chmod(0o700)
     path = private / "web_sol_surface.sock"
-    monkeypatch.setattr(chatgpt, "WEB_SOL_SOCKET_PATH", str(path))
+    monkeypatch.setattr(client, "WEB_SOL_SOCKET_PATH", str(path))
 
     ready = threading.Event()
     received: list[dict] = []
@@ -242,10 +241,10 @@ def test_fixed_socket_exchange_round_trips_one_request_without_retry(monkeypatch
         path.chmod(0o600)
         listener.listen(1)
         ready.set()
-        client, _ = listener.accept()
-        with client:
-            reader = client.makefile("rb", buffering=0)
-            writer = client.makefile("wb", buffering=0)
+        peer, _ = listener.accept()
+        with peer:
+            reader = peer.makefile("rb", buffering=0)
+            writer = peer.makefile("wb", buffering=0)
             request = native.read_frame(reader)
             received.append(request)
             native.write_frame(writer, receipt_for(request))
@@ -270,14 +269,14 @@ def test_fixed_socket_exchange_round_trips_one_request_without_retry(monkeypatch
         "expires_at": EXPIRES,
         "nonce": NONCE,
     })
-    result = chatgpt._exchange_web_sol_socket(request)
+    result = client._exchange_web_sol_socket(request)
     thread.join(timeout=2)
     assert result["status"] == "INSPECTED"
     assert received == [request]
 
 
 def test_explicit_seam_source_contains_no_browser_launch_retry_or_openclaw_fallback():
-    source = inspect.getsource(chatgpt.inspect_via_extension) + inspect.getsource(chatgpt.foreground_via_extension)
+    source = inspect.getsource(client.inspect_via_extension) + inspect.getsource(client.foreground_via_extension)
     lowered = source.lower()
     for forbidden in ("retry", "openclaw", "osascript", "subprocess", "launch", "start_browser", "click", "type("):
         assert forbidden not in lowered
