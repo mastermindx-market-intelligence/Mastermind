@@ -119,6 +119,146 @@ def test_token_input_reuses_bounded_one_line_no_echo_ceremony():
         enrollment.read_token_from_stdin(io.BytesIO(b"contains whitespace\n"))
 
 
+def test_production_main_refuses_piped_enroll_before_run(monkeypatch):
+    enrollment = _module()
+    stdout = io.StringIO()
+    run_calls: list[object] = []
+    read_descriptor, write_descriptor = os.pipe()
+    try:
+        with os.fdopen(read_descriptor, "rb") as pipe_input:
+            monkeypatch.setattr(
+                enrollment.sys,
+                "argv",
+                ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
+            )
+            monkeypatch.setattr(
+                enrollment.sys,
+                "stdin",
+                SimpleNamespace(buffer=pipe_input),
+            )
+            monkeypatch.setattr(enrollment.sys, "stdout", stdout)
+            monkeypatch.setattr(
+                enrollment,
+                "run",
+                lambda *args, **kwargs: run_calls.append((args, kwargs)) or 99,
+            )
+
+            assert enrollment.main() == 2
+    finally:
+        os.close(write_descriptor)
+
+    assert run_calls == []
+    assert json.loads(stdout.getvalue()) == {
+        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "schema": "mastermind.a2_agent_relay_enrollment.v1",
+        "status": "ERROR",
+    }
+    assert TOKEN not in stdout.getvalue()
+
+
+@pytest.mark.parametrize("invalid_input", [object(), io.BytesIO()])
+def test_production_main_refuses_missing_or_raising_fileno(
+    monkeypatch, invalid_input
+):
+    enrollment = _module()
+    stdout = io.StringIO()
+    run_calls: list[object] = []
+    monkeypatch.setattr(
+        enrollment.sys,
+        "argv",
+        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
+    )
+    monkeypatch.setattr(
+        enrollment.sys,
+        "stdin",
+        SimpleNamespace(buffer=invalid_input),
+    )
+    monkeypatch.setattr(enrollment.sys, "stdout", stdout)
+    monkeypatch.setattr(
+        enrollment,
+        "run",
+        lambda *args, **kwargs: run_calls.append((args, kwargs)) or 99,
+    )
+
+    assert enrollment.main() == 2
+    assert run_calls == []
+    assert json.loads(stdout.getvalue()) == {
+        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "schema": "mastermind.a2_agent_relay_enrollment.v1",
+        "status": "ERROR",
+    }
+
+
+def test_production_main_allows_tty_enroll_to_reach_run(monkeypatch):
+    enrollment = _module()
+    stdout = io.StringIO()
+    stdin = SimpleNamespace(fileno=lambda: 23)
+    run_calls: list[tuple[object, ...]] = []
+
+    def fake_run(argv, *, stdin, stdout, environ):
+        run_calls.append((tuple(argv), stdin, stdout, environ))
+        return 17
+
+    monkeypatch.setattr(
+        enrollment.sys,
+        "argv",
+        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
+    )
+    monkeypatch.setattr(enrollment.sys, "stdin", SimpleNamespace(buffer=stdin))
+    monkeypatch.setattr(enrollment.sys, "stdout", stdout)
+    monkeypatch.setattr(enrollment.os, "environ", {"SAFE": "1"})
+    monkeypatch.setattr(enrollment.os, "isatty", lambda descriptor: descriptor == 23)
+    monkeypatch.setattr(enrollment, "run", fake_run)
+
+    assert enrollment.main() == 17
+    assert run_calls == [
+        (
+            ("enroll", "--expected-bot-user-id", BOT),
+            stdin,
+            stdout,
+            {"SAFE": "1"},
+        )
+    ]
+
+
+def test_production_main_allows_non_tty_verify_without_isatty(monkeypatch):
+    enrollment = _module()
+    stdout = io.StringIO()
+    stdin = SimpleNamespace(fileno=lambda: 24)
+    run_calls: list[tuple[object, ...]] = []
+
+    def fake_run(argv, *, stdin, stdout, environ):
+        run_calls.append((tuple(argv), stdin, stdout, environ))
+        return 19
+
+    monkeypatch.setattr(
+        enrollment.sys,
+        "argv",
+        ["a2_agent_relay_enrollment.py", "verify", "--expected-bot-user-id", BOT],
+    )
+    monkeypatch.setattr(enrollment.sys, "stdin", SimpleNamespace(buffer=stdin))
+    monkeypatch.setattr(enrollment.sys, "stdout", stdout)
+    monkeypatch.setattr(enrollment.os, "environ", {"SAFE": "1"})
+    monkeypatch.setattr(
+        enrollment.os,
+        "isatty",
+        lambda _descriptor: (_ for _ in ()).throw(
+            AssertionError("verify must not inspect TTY state")
+        ),
+    )
+    monkeypatch.setattr(enrollment, "run", fake_run)
+
+    assert enrollment.main() == 19
+    assert run_calls == [
+        (
+            ("verify", "--expected-bot-user-id", BOT),
+            stdin,
+            stdout,
+            {"SAFE": "1"},
+        )
+    ]
+
+
 def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
     enrollment = _module()
     release_sha = "a" * 40

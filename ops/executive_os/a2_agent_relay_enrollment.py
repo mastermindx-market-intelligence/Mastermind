@@ -942,9 +942,31 @@ def run(
 
 
 def main() -> int:
+    argv = sys.argv[1:]
+    stdin = getattr(sys.stdin, "buffer", sys.stdin)
+    if argv[:1] == ["enroll"]:
+        try:
+            descriptor = stdin.fileno()
+            if (
+                isinstance(descriptor, bool)
+                or not isinstance(descriptor, int)
+                or descriptor < 0
+                or not os.isatty(descriptor)
+            ):
+                raise A2EnrollmentError("A2_ENROLLMENT_INPUT_REFUSED")
+        except Exception:
+            sys.stdout.write(
+                json.dumps(
+                    _fixed_error("A2_ENROLLMENT_INPUT_REFUSED"),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
+            return 2
     return run(
-        sys.argv[1:],
-        stdin=sys.stdin.buffer,
+        argv,
+        stdin=stdin,
         stdout=sys.stdout,
         environ=os.environ,
     )
