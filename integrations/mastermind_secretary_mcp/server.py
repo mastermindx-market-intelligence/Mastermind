@@ -5,7 +5,10 @@ from __future__ import annotations
 import copy
 
 from integrations.mastermind_secretary_mcp.adapter import SecretaryGroundingGateway
-from integrations.mastermind_secretary_mcp.schemas import TOOL_SPECS
+from integrations.mastermind_secretary_mcp.schemas import (
+    TOOL_SPECS,
+    assert_contract_integrity,
+)
 
 STATIC_CAPABILITIES = {
     "tools": True,
@@ -21,6 +24,7 @@ STATIC_CAPABILITIES = {
 def build_tools() -> list[dict[str, object]]:
     """Return the immutable six-tool advertisement as plain JSON-compatible rows."""
 
+    assert_contract_integrity()
     return [
         {
             "name": spec.name,

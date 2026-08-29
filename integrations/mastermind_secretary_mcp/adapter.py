@@ -123,7 +123,10 @@ class SecretaryGroundingGateway:
     async def call(self, tool_name: str, arguments: object) -> dict[str, object]:
         try:
             normalized = validate_tool_arguments(tool_name, arguments)
-        except GatewayError:
+        except GatewayError as exc:
+            code = "INTERNAL_ERROR" if exc.code == "INTERNAL_ERROR" else "INVALID_REQUEST"
+            return error_envelope(tool_name, code)
+        except Exception:
             return error_envelope(tool_name, "INVALID_REQUEST")
         try:
             grounding = await self._read(tool_name, normalized)
@@ -135,7 +138,7 @@ class SecretaryGroundingGateway:
             return error_envelope(tool_name, "INTERNAL_ERROR")
         try:
             return result_envelope(tool_name, data=_grounding_data(grounding))
-        except GatewayError:
+        except Exception:
             return error_envelope(tool_name, "RESPONSE_REFUSED")
 
 

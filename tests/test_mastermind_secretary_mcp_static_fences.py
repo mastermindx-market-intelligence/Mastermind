@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import ast
+import copy
 from pathlib import Path
+
+import pytest
 
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
 from integrations.mastermind_secretary_mcp.adapter import SecretaryGroundingGateway
 from integrations.mastermind_secretary_mcp.schemas import TOOL_SCHEMA_DIGEST, TOOL_SPECS
+from integrations.mastermind_secretary_mcp.schemas import (
+    error_envelope,
+    result_envelope,
+)
 from integrations.mastermind_secretary_mcp.server import (
     STATIC_CAPABILITIES,
     SecretaryGroundingContractServer,
@@ -63,6 +70,63 @@ def test_sdk_free_static_tool_rows_are_exact_and_read_only():
     assert len(TOOL_SCHEMA_DIGEST) == 64
     observed = {"tools": {row["name"]: row for row in tools}}
     assert observed_mcp_tool_schema_digest(observed) == TOOL_SCHEMA_DIGEST
+
+
+def test_advertised_output_schema_matches_runtime_state_and_error_law():
+    jsonschema = pytest.importorskip("jsonschema")
+    validator = jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema)
+    source = {"owner": "agent_os", "source_ref": "WS:SAFE", "observed_at": None}
+    fresh_fact = {
+        "subject_ref": "responsibility:alpha",
+        "predicate": "attention.state",
+        "value": 1,
+        "freshness": "FRESH",
+        "sources": [source],
+    }
+    stale_fact = {**fresh_fact, "freshness": "STALE"}
+    valid_data = (
+        {"state": "FACTS", "facts": [fresh_fact], "reason_codes": []},
+        {"state": "UNKNOWN", "facts": [], "reason_codes": ["NO_SOURCE"]},
+        {
+            "state": "DEGRADED",
+            "facts": [stale_fact],
+            "reason_codes": ["STALE_SOURCE"],
+        },
+        {"state": "REFUSED", "facts": [], "reason_codes": ["POLICY_REFUSAL"]},
+    )
+    for data in valid_data:
+        validator.validate(result_envelope("get_attention", data=data))
+    validator.validate(error_envelope("get_attention", "INVALID_REQUEST"))
+
+    contradictory = error_envelope("get_attention", "INVALID_REQUEST")
+    contradictory["ok"] = True
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(contradictory)
+
+    mismatched_error = error_envelope("get_attention", "INVALID_REQUEST")
+    mismatched_error["error"]["message"] = "INTERNAL_ERROR"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(mismatched_error)
+
+    successful_error = result_envelope("get_attention", data=valid_data[0])
+    successful_error["ok"] = False
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(successful_error)
+
+    malformed_state = copy.deepcopy(successful_error)
+    malformed_state["ok"] = True
+    malformed_state["data"] = {
+        "state": "REFUSED",
+        "facts": [fresh_fact],
+        "reason_codes": [],
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(malformed_state)
+
+    stale_facts_state = result_envelope("get_attention", data=valid_data[0])
+    stale_facts_state["data"]["facts"][0]["freshness"] = "STALE"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(stale_facts_state)
 
 
 def test_static_contract_server_exposes_only_list_and_call():

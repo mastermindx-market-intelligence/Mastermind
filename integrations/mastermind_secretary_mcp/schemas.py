@@ -16,6 +16,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from common.redaction import REDACTION, sanitize_external_text
+
 SERVER_NAME = "mastermind-secretary-grounding"
 SERVER_IDENTITY = "mastermind-secretary-grounding-mcp"
 SERVER_VERSION = "1.0.0"
@@ -53,15 +55,88 @@ SOURCE_OWNERS = frozenset(
     }
 )
 
-_RESPONSIBILITY_REF_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}\Z")
+_RESPONSIBILITY_REF_PATTERN = r"^responsibility:[a-z0-9][a-z0-9._-]{0,144}$"
+_RESPONSIBILITY_REF_RE = re.compile(
+    r"\Aresponsibility:[a-z0-9][a-z0-9._-]{0,144}\Z"
+)
 _SECRET_SHAPED_RE = re.compile(
     r"(?i)(?:xox[a-z]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|"
     r"github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
     r"sk-[A-Za-z0-9_-]{20,}|bearer\s+[A-Za-z0-9._~-]{16,}|"
     r"AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
-    r"[\"']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password)[\"']?"
-    r"\s*[:=]\s*[\"']?[A-Za-z0-9._~+/=-]{12,})"
+    r"[\"']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|token|secret)"
+    r"[\"']?\s*[:=]\s*[\"']?[^\s\"']{8,})"
 )
+_PRIVATE_URL_RE = re.compile(r"(?i)(?:\A|\b)[a-z][a-z0-9+.-]{1,15}://")
+_PRIVATE_PATH_RE = re.compile(
+    r"(?i)(?:\A|[\s\"'])(?:/[A-Z0-9._-]+(?:/[A-Z0-9._-]+)*|[A-Z]:\\)"
+)
+_EMAIL_RE = re.compile(r"(?i)(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}")
+_PRIVATE_SELECTOR_RE = re.compile(
+    r"(?i)(?:\A|[\s,;|/])"
+    r"(?:provider|account|host|native[_-]?session|session|browser[_-]?profile|profile|"
+    r"channel|thread|url|coordinates?|action|target)\s*[:=]"
+)
+_FORBIDDEN_PREDICATE_PARTS = frozenset(
+    {
+        "account",
+        "action",
+        "browser",
+        "browser_profile",
+        "channel",
+        "coordinate",
+        "coordinates",
+        "credential",
+        "email",
+        "host",
+        "native_session",
+        "path",
+        "profile",
+        "provider",
+        "secret",
+        "session",
+        "target",
+        "thread",
+        "token",
+        "url",
+        "username",
+    }
+)
+_PUBLIC_PREDICATE_ROOTS = frozenset(
+    {
+        "attention",
+        "blocker",
+        "continuity",
+        "health",
+        "metric",
+        "responsibility",
+        "runtime",
+        "status",
+        "surface",
+        "work",
+    }
+)
+_PUBLIC_PREDICATE_PATTERN = (
+    r"^(?:attention|blocker|continuity|health|metric|responsibility|runtime|status|surface|work)"
+    r"(?:[._-][a-z0-9]+)*$"
+)
+_PUBLIC_FACT_TEXT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 _.,:+()-]{0,1023}$"
+_PUBLIC_FACT_TEXT_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9 _.,:+()-]{0,1023}\Z")
+_SOURCE_NAMESPACE_BY_OWNER = {
+    "agent_os": ("WS", "DEC", "DSC"),
+    "executive_os": ("MAS",),
+    "runtime_binding": ("RUNTIME",),
+    "wake": ("WAKE",),
+    "agent_dialogue": ("DIALOGUE",),
+    "surface_binding": ("SURFACE",),
+    "provider_control": ("POLICY",),
+    "unknown": ("UNKNOWN",),
+}
+
+
+def _source_ref_pattern(namespaces: tuple[str, ...]) -> str:
+    joined = "|".join(namespaces)
+    return rf"^(?:{joined}):[A-Za-z0-9][A-Za-z0-9._-]{{0,223}}$"
 
 
 class GatewayError(RuntimeError):
@@ -94,12 +169,21 @@ def _object(properties: Mapping[str, Any], *, required: tuple[str, ...] = ()) ->
 
 _RESPONSIBILITY_REF_SCHEMA = _string(
     max_length=MAX_RESPONSIBILITY_REF_CHARS,
-    pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$",
+    pattern=_RESPONSIBILITY_REF_PATTERN,
 )
 _SOURCE_SCHEMA = _object(
     {
         "owner": {"type": "string", "enum": sorted(SOURCE_OWNERS)},
-        "source_ref": _string(max_length=256),
+        "source_ref": _string(
+            max_length=256,
+            pattern=_source_ref_pattern(
+                tuple(
+                    namespace
+                    for namespaces in _SOURCE_NAMESPACE_BY_OWNER.values()
+                    for namespace in namespaces
+                )
+            ),
+        ),
         "observed_at": {
             "oneOf": [
                 {"type": "null"},
@@ -112,17 +196,38 @@ _SOURCE_SCHEMA = _object(
     },
     required=("owner", "source_ref", "observed_at"),
 )
+_SOURCE_SCHEMA["allOf"] = [
+    {
+        "oneOf": [
+            {
+                "properties": {
+                    "owner": {"const": owner},
+                    "source_ref": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": _source_ref_pattern(namespaces),
+                    },
+                }
+            }
+            for owner, namespaces in _SOURCE_NAMESPACE_BY_OWNER.items()
+        ]
+    }
+]
 _FACT_SCHEMA = _object(
     {
         "subject_ref": _RESPONSIBILITY_REF_SCHEMA,
-        "predicate": _string(max_length=96, pattern=r"^[a-z][a-z0-9_.-]{0,95}$"),
+        "predicate": _string(max_length=96, pattern=_PUBLIC_PREDICATE_PATTERN),
         "value": {
             "anyOf": [
                 {"type": "null"},
                 {"type": "boolean"},
                 {"type": "integer"},
                 {"type": "number"},
-                _string(max_length=MAX_FACT_VALUE_CHARS),
+                _string(
+                    max_length=MAX_FACT_VALUE_CHARS,
+                    pattern=_PUBLIC_FACT_TEXT_PATTERN,
+                ),
             ]
         },
         "freshness": {"type": "string", "enum": sorted(FRESHNESS_STATES)},
@@ -148,10 +253,71 @@ _RESULT_DATA_SCHEMA = _object(
     },
     required=("state", "facts", "reason_codes"),
 )
+_FRESH_FACT_SCHEMA = copy.deepcopy(_FACT_SCHEMA)
+_FRESH_FACT_SCHEMA["properties"]["freshness"] = {"const": "FRESH"}
+_RESULT_DATA_SCHEMA["allOf"] = [
+    {
+        "oneOf": [
+            {
+                "properties": {
+                    "state": {"const": "FACTS"},
+                    "facts": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_FACTS,
+                        "items": _FRESH_FACT_SCHEMA,
+                    },
+                    "reason_codes": {"type": "array", "maxItems": 0},
+                }
+            },
+            {
+                "properties": {
+                    "state": {"const": "UNKNOWN"},
+                    "facts": {"type": "array", "maxItems": 0},
+                    "reason_codes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_REASON_CODES,
+                    },
+                }
+            },
+            {
+                "properties": {
+                    "state": {"const": "DEGRADED"},
+                    "reason_codes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_REASON_CODES,
+                    },
+                }
+            },
+            {
+                "properties": {
+                    "state": {"const": "REFUSED"},
+                    "facts": {"type": "array", "maxItems": 0},
+                    "reason_codes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_REASON_CODES,
+                    },
+                }
+            },
+        ]
+    }
+]
+_ERROR_DETAIL_SCHEMA = {
+    "oneOf": [
+        _object(
+            {"code": {"const": code}, "message": {"const": code}},
+            required=("code", "message"),
+        )
+        for code in sorted(ERROR_CODES)
+    ]
+}
 
 
 def _output_schema(tool_name: str) -> dict[str, Any]:
-    return _object(
+    value = _object(
         {
             "schema": {"const": RESULT_SCHEMA},
             "tool": {"const": tool_name},
@@ -161,18 +327,33 @@ def _output_schema(tool_name: str) -> dict[str, Any]:
             "error": {
                 "oneOf": [
                     {"type": "null"},
-                    _object(
-                        {
-                            "code": {"type": "string", "enum": sorted(ERROR_CODES)},
-                            "message": {"type": "string", "enum": sorted(ERROR_CODES)},
-                        },
-                        required=("code", "message"),
-                    ),
+                    copy.deepcopy(_ERROR_DETAIL_SCHEMA),
                 ]
             },
         },
         required=("schema", "tool", "ok", "server_version", "data", "error"),
     )
+    value["allOf"] = [
+        {
+            "oneOf": [
+                {
+                    "properties": {
+                        "ok": {"const": True},
+                        "data": copy.deepcopy(_RESULT_DATA_SCHEMA),
+                        "error": {"type": "null"},
+                    }
+                },
+                {
+                    "properties": {
+                        "ok": {"const": False},
+                        "data": {"type": "null"},
+                        "error": copy.deepcopy(_ERROR_DETAIL_SCHEMA),
+                    }
+                },
+            ]
+        }
+    ]
+    return value
 
 
 @dataclasses.dataclass(frozen=True)
@@ -181,9 +362,21 @@ class ToolSpec:
 
     name: str
     description: str
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
+    requires_responsibility_ref: bool
     read_only: bool = True
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        if self.requires_responsibility_ref:
+            return _object(
+                {"responsibility_ref": copy.deepcopy(_RESPONSIBILITY_REF_SCHEMA)},
+                required=("responsibility_ref",),
+            )
+        return _object({})
+
+    @property
+    def output_schema(self) -> dict[str, Any]:
+        return _output_schema(self.name)
 
     @property
     def annotations(self) -> dict[str, Any]:
@@ -196,46 +389,41 @@ class ToolSpec:
         }
 
 
-_ZERO_INPUT = _object({})
-_RESPONSIBILITY_INPUT = _object(
-    {"responsibility_ref": _RESPONSIBILITY_REF_SCHEMA},
-    required=("responsibility_ref",),
-)
 _TOOL_ROWS = (
     (
         "list_responsibilities",
         "List source-attributed responsibility grounding from the injected Steward read port.",
-        _ZERO_INPUT,
+        False,
     ),
     (
         "get_responsibility",
         "Read one exact responsibility reference without heuristic identity resolution.",
-        _RESPONSIBILITY_INPUT,
+        True,
     ),
     (
         "get_attention",
         "Read source-attributed attention facts without selecting a person, role, or transport.",
-        _ZERO_INPUT,
+        False,
     ),
     (
         "get_current_runtime",
         "Read current runtime facts for one exact responsibility reference.",
-        _RESPONSIBILITY_INPUT,
+        True,
     ),
     (
         "explain_blocker",
         "Read source-attributed company, runtime, and surface blocker facts for one responsibility.",
-        _RESPONSIBILITY_INPUT,
+        True,
     ),
     (
         "resolve_surface",
         "Read exact reviewed surface resolution and health without performing any action.",
-        _RESPONSIBILITY_INPUT,
+        True,
     ),
 )
 TOOL_SPECS: tuple[ToolSpec, ...] = tuple(
-    ToolSpec(name, description, copy.deepcopy(input_schema), _output_schema(name))
-    for name, description, input_schema in _TOOL_ROWS
+    ToolSpec(name, description, requires_responsibility_ref)
+    for name, description, requires_responsibility_ref in _TOOL_ROWS
 )
 _TOOLS_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
 
@@ -268,10 +456,41 @@ def contains_secret_shape(value: Any) -> bool:
         rendered = canonical_json(value).decode("utf-8")
     except GatewayError:
         return True
-    return _SECRET_SHAPED_RE.search(rendered) is not None
+    if _SECRET_SHAPED_RE.search(rendered) is not None:
+        return True
+    sanitized = sanitize_external_text(
+        rendered,
+        include_environment=False,
+        limit=0,
+    )
+    return REDACTION in sanitized
+
+
+def _contains_private_locator(value: str) -> bool:
+    return any(
+        pattern.search(value) is not None
+        for pattern in (
+            _PRIVATE_URL_RE,
+            _PRIVATE_PATH_RE,
+            _EMAIL_RE,
+            _PRIVATE_SELECTOR_RE,
+        )
+    )
+
+
+def _predicate_is_public(value: str) -> bool:
+    lowered = value.lower()
+    parts = set(re.split(r"[._-]+", lowered))
+    root = re.split(r"[._-]+", lowered, maxsplit=1)[0]
+    if root not in _PUBLIC_PREDICATE_ROOTS or parts & _FORBIDDEN_PREDICATE_PARTS:
+        return False
+    return not any(marker in lowered for marker in ("browser_profile", "native_session"))
 
 
 def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
+    assert_contract_integrity()
+    if not isinstance(tool_name, str):
+        raise GatewayError("INVALID_REQUEST")
     spec = _TOOLS_BY_NAME.get(tool_name)
     if spec is None:
         raise GatewayError("INVALID_REQUEST")
@@ -280,8 +499,6 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
     if not isinstance(arguments, Mapping):
         raise GatewayError("INVALID_REQUEST")
     raw = dict(arguments)
-    if len(canonical_json({"arguments": raw})) > MAX_REQUEST_BYTES:
-        raise GatewayError("INVALID_REQUEST")
     allowed = set(spec.input_schema["properties"])
     if set(raw) != set(spec.input_schema.get("required", ())) or not set(raw) <= allowed:
         raise GatewayError("INVALID_REQUEST")
@@ -293,6 +510,8 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
         or _RESPONSIBILITY_REF_RE.fullmatch(responsibility_ref) is None
         or contains_secret_shape(responsibility_ref)
     ):
+        raise GatewayError("INVALID_REQUEST")
+    if len(canonical_json({"arguments": raw})) > MAX_REQUEST_BYTES:
         raise GatewayError("INVALID_REQUEST")
     return {"responsibility_ref": responsibility_ref}
 
@@ -307,13 +526,16 @@ def _validated_source(value: Any) -> dict[str, Any]:
     owner = value["owner"]
     source_ref = value["source_ref"]
     observed_at = value["observed_at"]
-    if owner not in SOURCE_OWNERS:
+    if not isinstance(owner, str) or owner not in SOURCE_OWNERS:
         raise GatewayError("RESPONSE_REFUSED")
+    allowed_namespaces = _SOURCE_NAMESPACE_BY_OWNER[owner]
     if (
         not isinstance(source_ref, str)
         or not 1 <= len(source_ref) <= 256
+        or re.fullmatch(_source_ref_pattern(allowed_namespaces), source_ref) is None
         or any(ord(character) < 32 or ord(character) == 127 for character in source_ref)
         or contains_secret_shape(source_ref)
+        or _contains_private_locator(source_ref)
     ):
         raise GatewayError("RESPONSE_REFUSED")
     if observed_at is not None and (
@@ -343,8 +565,10 @@ def _validated_fact_value(value: Any) -> str | int | float | bool | None:
         return value
     if isinstance(value, str) and (
         1 <= len(value) <= MAX_FACT_VALUE_CHARS
+        and _PUBLIC_FACT_TEXT_RE.fullmatch(value) is not None
         and not any(ord(character) < 32 or ord(character) == 127 for character in value)
         and not contains_secret_shape(value)
+        and not _contains_private_locator(value)
     ):
         return value
     raise GatewayError("RESPONSE_REFUSED")
@@ -368,7 +592,9 @@ def _validated_fact(value: Any) -> dict[str, Any]:
         or _RESPONSIBILITY_REF_RE.fullmatch(subject_ref) is None
         or contains_secret_shape(subject_ref)
         or not isinstance(predicate, str)
-        or re.fullmatch(r"[a-z][a-z0-9_.-]{0,95}", predicate) is None
+        or re.fullmatch(_PUBLIC_PREDICATE_PATTERN, predicate) is None
+        or not _predicate_is_public(predicate)
+        or not isinstance(freshness, str)
         or freshness not in FRESHNESS_STATES
         or not isinstance(sources, (list, tuple))
         or not 1 <= len(sources) <= MAX_SOURCES_PER_FACT
@@ -396,20 +622,25 @@ def validate_result_data(value: Any) -> dict[str, Any]:
     facts = value["facts"]
     reason_codes = value["reason_codes"]
     if (
-        state not in GROUNDING_STATES
+        not isinstance(state, str)
+        or state not in GROUNDING_STATES
         or not isinstance(facts, (list, tuple))
         or len(facts) > MAX_FACTS
         or not isinstance(reason_codes, (list, tuple))
         or len(reason_codes) > MAX_REASON_CODES
-        or len(reason_codes) != len(set(reason_codes))
         or any(
             not isinstance(code, str) or re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", code) is None
             for code in reason_codes
         )
+        or len(reason_codes) != len(set(reason_codes))
     ):
         raise GatewayError("RESPONSE_REFUSED")
     normalized_facts = [_validated_fact(fact) for fact in facts]
-    if state == "FACTS" and (not normalized_facts or reason_codes):
+    if state == "FACTS" and (
+        not normalized_facts
+        or reason_codes
+        or any(fact["freshness"] != "FRESH" for fact in normalized_facts)
+    ):
         raise GatewayError("RESPONSE_REFUSED")
     if state in {"UNKNOWN", "REFUSED"} and (normalized_facts or not reason_codes):
         raise GatewayError("RESPONSE_REFUSED")
@@ -450,7 +681,11 @@ def error_envelope(tool_name: str, code: str) -> dict[str, Any]:
         code = "INTERNAL_ERROR"
     return {
         "schema": RESULT_SCHEMA,
-        "tool": tool_name if tool_name in _TOOLS_BY_NAME else "unknown",
+        "tool": (
+            tool_name
+            if isinstance(tool_name, str) and tool_name in _TOOLS_BY_NAME
+            else "unknown"
+        ),
         "ok": False,
         "server_version": SERVER_VERSION,
         "data": None,
@@ -508,11 +743,21 @@ def tool_schema_digest() -> str:
 
 # Literal review tripwires. Update only when the reviewed contract changes.
 SCHEMA_SNAPSHOT_SHA256 = (
-    "84344b185a4bc61443d5955a1fd787126eecf7144b237f09eda7f7ba80dfd2f9"
+    "dbbafad735ac4c3120272c991b7a8f813dba2e4b6d7f7a50d85fbbf651f11bbb"
 )
 TOOL_SCHEMA_DIGEST = (
-    "206ee247d84aa3c6301d2010e5bffc797fe8afd03b0f3034016b5c92d7ac3215"
+    "f96a277a2b41f05ad4dfa98eddb4da93467acfeb8b6c7995c3d4d7495a5573dd"
 )
+
+
+def assert_contract_integrity() -> None:
+    """Refuse advertisement or calls if the reviewed static contract drifted."""
+
+    if (
+        schema_snapshot_sha256() != SCHEMA_SNAPSHOT_SHA256
+        or tool_schema_digest() != TOOL_SCHEMA_DIGEST
+    ):
+        raise GatewayError("INTERNAL_ERROR")
 
 
 __all__ = [
@@ -533,6 +778,7 @@ __all__ = [
     "TOOL_SCHEMA_DIGEST",
     "TOOL_SPECS",
     "ToolSpec",
+    "assert_contract_integrity",
     "canonical_json",
     "contains_secret_shape",
     "error_envelope",

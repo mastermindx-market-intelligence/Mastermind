@@ -17,6 +17,7 @@ from integrations.mastermind_secretary_mcp.schemas import (
     tool_schema_digest,
     validate_tool_arguments,
 )
+from integrations.mastermind_secretary_mcp.server import build_tools
 
 
 EXPECTED_TOOLS = (
@@ -111,6 +112,27 @@ def test_request_size_and_responsibility_ref_are_bounded():
         validate_tool_arguments("get_responsibility", {"responsibility_ref": "latest window"})
 
 
+@pytest.mark.parametrize(
+    "smuggled_ref",
+    [
+        "https://attacker.example/path",
+        "provider:codex",
+        "account:chairman",
+        "host:Mac-Studio.local",
+        "native_session:session-123",
+        "browser_profile:Chairman",
+        "channel:C123/thread:1700000000.000000",
+        "coordinates:120-300",
+        "action:send/target:production",
+    ],
+)
+def test_selector_value_smuggling_is_not_a_responsibility_reference(smuggled_ref):
+    with pytest.raises(GatewayError, match="INVALID_REQUEST"):
+        validate_tool_arguments(
+            "get_responsibility", {"responsibility_ref": smuggled_ref}
+        )
+
+
 def test_fact_value_schema_has_no_overlapping_one_of_numeric_branches():
     value_schema = TOOL_SPECS[0].output_schema["properties"]["data"]["oneOf"][1][
         "properties"
@@ -126,8 +148,30 @@ def test_fact_value_schema_has_no_overlapping_one_of_numeric_branches():
             "type": "string",
             "minLength": 1,
             "maxLength": 1_024,
+            "pattern": r"^[A-Za-z0-9][A-Za-z0-9 _.,:+()-]{0,1023}$",
         },
     ]
+
+
+def test_live_schema_views_cannot_widen_the_canonical_contract():
+    before_digest = tool_schema_digest()
+    exposed = TOOL_SPECS[1].input_schema
+    original = copy.deepcopy(exposed)
+    try:
+        exposed["properties"]["provider"] = {"type": "string"}
+        exposed["required"].append("provider")
+
+        assert "provider" not in TOOL_SPECS[1].input_schema["properties"]
+        assert "provider" not in build_tools()[1]["inputSchema"]["properties"]
+        assert tool_schema_digest() == before_digest == TOOL_SCHEMA_DIGEST
+        with pytest.raises(GatewayError, match="INVALID_REQUEST"):
+            validate_tool_arguments(
+                "get_responsibility",
+                {"responsibility_ref": "responsibility:alpha", "provider": "codex"},
+            )
+    finally:
+        exposed.clear()
+        exposed.update(original)
 
 
 def test_static_schema_snapshot_and_digests_are_literal_and_drift_sensitive():
