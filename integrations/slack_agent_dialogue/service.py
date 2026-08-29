@@ -258,6 +258,7 @@ class AgentDialogueService:
         self.engine_v2 = engine_v2
         self._server: asyncio.AbstractServer | None = None
         self._bound_socket_identity: tuple[int, int] | None = None
+        self._close_lock = asyncio.Lock()
         self._handled = asyncio.Event()
 
     def _prepare_socket(self) -> None:
@@ -365,14 +366,9 @@ class AgentDialogueService:
                 await self.close()
             raise DialogueServiceError("SERVICE_UNAVAILABLE") from None
 
-    async def close(self) -> None:
-        server = self._server
-        bound_socket_identity = self._bound_socket_identity
-        self._server = None
-        self._bound_socket_identity = None
-        if server is not None:
-            server.close()
-            await server.wait_closed()
+    def _unlink_bound_socket(
+        self, bound_socket_identity: tuple[int, int] | None
+    ) -> None:
         if bound_socket_identity is None:
             return
         try:
@@ -395,6 +391,22 @@ class AgentDialogueService:
         )
         if owned_private_socket or owned_shared_socket:
             self.config.socket_path.unlink()
+
+    async def close(self) -> None:
+        async with self._close_lock:
+            server = self._server
+            bound_socket_identity = self._bound_socket_identity
+            close_issued = server is None
+            try:
+                if server is not None:
+                    server.close()
+                    close_issued = True
+                    await server.wait_closed()
+            finally:
+                if close_issued:
+                    self._unlink_bound_socket(bound_socket_identity)
+                    self._server = None
+                    self._bound_socket_identity = None
 
     async def serve_one(self) -> None:
         await self.start()

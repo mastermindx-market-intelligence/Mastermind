@@ -641,6 +641,60 @@ def test_shared_relay_cancel_never_unlinks_same_metadata_replacement_inode(
     run(scenario())
 
 
+def test_shared_relay_close_cancellation_does_not_strand_owned_socket(
+    socket_root: Path,
+) -> None:
+    class SuspendedClose:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_started = asyncio.Event()
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_started.set()
+            await asyncio.Future()
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        bound_info = srv.config.socket_path.lstat()
+        bound_identity = (bound_info.st_dev, bound_info.st_ino)
+        assert srv._bound_socket_identity == bound_identity
+
+        suspended = SuspendedClose()
+        srv._server = suspended  # type: ignore[assignment]
+        close_task = asyncio.create_task(srv.close())
+        await suspended.wait_started.wait()
+        concurrent_close = asyncio.create_task(srv.close())
+        await asyncio.sleep(0)
+        close_task.cancel()
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await close_task
+            await concurrent_close
+
+            assert not srv.config.socket_path.exists()
+            assert srv._server is None
+            assert srv._bound_socket_identity is None
+            await srv.close()
+            assert suspended.close_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            if not concurrent_close.done():
+                concurrent_close.cancel()
+            await asyncio.gather(concurrent_close, return_exceptions=True)
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
 @pytest.mark.parametrize("invalid_metadata", ["owner", "group", "mode"])
 def test_shared_relay_refuses_wrong_parent_metadata_before_bind(
     monkeypatch, socket_root: Path, invalid_metadata: str
