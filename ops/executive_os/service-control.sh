@@ -1,13 +1,15 @@
 #!/bin/bash
-# Bounded lifecycle controller for exactly the two Executive OS system jobs.
+# Bounded lifecycle controller for exactly the three Executive OS system jobs.
 # It never accepts a label, plist path, domain, or arbitrary launchctl verb.
 set -euo pipefail
 umask 077
 
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
+RELAY_LABEL="com.mastermind.executive.agent-relay"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
+RELAY_PLIST="/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist"
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 
 usage() {
@@ -56,8 +58,10 @@ stop_one() {
 case "$1" in
   start)
     require_root
+    validate_plist "$RELAY_PLIST"
     validate_plist "$WORKER_PLIST"
     validate_plist "$CONTROL_PLIST"
+    start_one "$RELAY_LABEL" "$RELAY_PLIST"
     start_one "$WORKER_LABEL" "$WORKER_PLIST"
     start_one "$CONTROL_LABEL" "$CONTROL_PLIST"
     ;;
@@ -66,13 +70,17 @@ case "$1" in
     # Stop the control plane before removing its worker execution boundary.
     stop_one "$CONTROL_LABEL"
     stop_one "$WORKER_LABEL"
+    stop_one "$RELAY_LABEL"
     ;;
   restart)
     require_root
+    validate_plist "$RELAY_PLIST"
     validate_plist "$WORKER_PLIST"
     validate_plist "$CONTROL_PLIST"
     stop_one "$CONTROL_LABEL"
     stop_one "$WORKER_LABEL"
+    stop_one "$RELAY_LABEL"
+    start_one "$RELAY_LABEL" "$RELAY_PLIST"
     start_one "$WORKER_LABEL" "$WORKER_PLIST"
     start_one "$CONTROL_LABEL" "$CONTROL_PLIST"
     ;;

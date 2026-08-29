@@ -4,10 +4,15 @@ set -u
 
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
+RELAY_LABEL="com.mastermind.executive.agent-relay"
 CONTROL_USER="_mastermind_exec"
 WORKER_USER="_mastermind_worker"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
+RELAY_PLIST="/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist"
+CONTROL_SOCKET="/var/run/mastermind-executive/control.sock"
+WORKER_SOCKET="/var/run/mastermind-executive/worker.sock"
+RELAY_SOCKET="/var/run/mastermind-executive/agent-relay/agent-relay.sock"
 FAILED=0
 
 check_file() {
@@ -36,14 +41,17 @@ check_service() {
 
 check_file "$CONTROL_PLIST"
 check_file "$WORKER_PLIST"
+check_file "$RELAY_PLIST"
 if [ -r "$CONTROL_PLIST" ]; then
   /usr/bin/plutil -lint "$CONTROL_PLIST" || FAILED=1
 elif [ -f "$CONTROL_PLIST" ]; then
   /bin/echo "plist=$CONTROL_PLIST lint=skipped_not_readable"
 fi
 if [ -f "$WORKER_PLIST" ]; then /usr/bin/plutil -lint "$WORKER_PLIST" || FAILED=1; fi
+if [ -f "$RELAY_PLIST" ]; then /usr/bin/plutil -lint "$RELAY_PLIST" || FAILED=1; fi
 check_service "$CONTROL_LABEL"
 check_service "$WORKER_LABEL"
+check_service "$RELAY_LABEL"
 
 for account in "$CONTROL_USER" "$WORKER_USER"; do
   if ! /usr/bin/id "$account"; then
@@ -59,7 +67,7 @@ for account in "$CONTROL_USER" "$WORKER_USER"; do
   fi
 done
 
-for path in /var/run/mastermind-executive/control.sock /var/run/mastermind-executive/worker.sock; do
+for path in "$CONTROL_SOCKET" "$WORKER_SOCKET" "$RELAY_SOCKET"; do
   if [ -S "$path" ]; then
     /usr/bin/stat -f 'unix_socket=%N owner=%Su group=%Sg mode=%Sp' "$path"
   else
