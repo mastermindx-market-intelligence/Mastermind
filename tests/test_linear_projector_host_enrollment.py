@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import io
@@ -344,3 +345,144 @@ def test_enroll_second_file_failure_is_not_retried_or_rolled_back(
     assert calls == ["projector.json", "oauth-client-secret"]
     assert (root / "config" / "projector.json").is_file()
     assert not (root / "config" / "oauth-client-secret").exists()
+
+
+def _valid_boundary(mod, tmp_path: Path) -> tuple[Path, int, int]:
+    root = tmp_path / "projector"
+    uid = os.geteuid()
+    gid = os.getegid()
+    mod.prepare_host(root=root, uid=uid, gid=gid)
+    mod.enroll(
+        client_id="client-abc123",
+        secret=b"projector-secret",
+        root=root,
+        uid=uid,
+        gid=gid,
+    )
+    return root, uid, gid
+
+
+def test_verify_boundary_never_reads_secret_contents(monkeypatch, tmp_path: Path) -> None:
+    mod = _load()
+    root, uid, gid = _valid_boundary(mod, tmp_path)
+    original = Path.read_bytes
+
+    def _guarded_read_bytes(path: Path):
+        if path.name == "oauth-client-secret":
+            raise AssertionError("verify must not read secret contents")
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", _guarded_read_bytes)
+    expected = hashlib.sha256(b"client-abc123").hexdigest()
+    assert (
+        mod.verify_boundary(
+            expected_client_id="client-abc123",
+            root=root,
+            uid=uid,
+            gid=gid,
+        )
+        == expected
+    )
+
+
+def test_verify_boundary_refuses_secret_mode_config_and_client_mismatch(
+    tmp_path: Path,
+) -> None:
+    mod = _load()
+    root, uid, gid = _valid_boundary(mod, tmp_path)
+    secret_path = root / "config" / "oauth-client-secret"
+    secret_path.chmod(0o640)
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.verify_boundary(
+            expected_client_id="client-abc123",
+            root=root,
+            uid=uid,
+            gid=gid,
+        )
+    assert exc.value.code == "PROJECTOR_HOST_PERMISSIONS_REFUSED"
+
+    secret_path.chmod(0o600)
+    config_path = root / "config" / "projector.json"
+    document = json.loads(config_path.read_text(encoding="utf-8"))
+    document["team_key"] = "WRONG"
+    config_path.write_text(
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    config_path.chmod(0o640)
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.verify_boundary(
+            expected_client_id="client-abc123",
+            root=root,
+            uid=uid,
+            gid=gid,
+        )
+    assert exc.value.code == "PROJECTOR_HOST_CONFIG_REFUSED"
+
+    document["team_key"] = "MAS"
+    config_path.write_text(
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="ascii",
+    )
+    config_path.chmod(0o640)
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.verify_boundary(
+            expected_client_id="other-client",
+            root=root,
+            uid=uid,
+            gid=gid,
+        )
+    assert exc.value.code == "PROJECTOR_HOST_CLIENT_ID_MISMATCH"
+
+
+def test_main_emits_only_closed_receipts_and_opaque_errors(monkeypatch) -> None:
+    mod = _load()
+    monkeypatch.setattr(mod.os, "geteuid", lambda: 0)
+
+    out = io.StringIO()
+    err = io.StringIO()
+    monkeypatch.setattr(mod, "prepare_host", lambda **kwargs: None)
+    assert mod.main(argv=["prepare"], environ={}, stdout=out, stderr=err) == 0
+    assert out.getvalue() == "LINEAR_PROJECTOR_HOST_PREPARED\n"
+    assert err.getvalue() == ""
+
+    captured: dict[str, bytes] = {}
+
+    def _enroll(**kwargs):
+        captured["secret"] = kwargs["secret"]
+
+    out = io.StringIO()
+    err = io.StringIO()
+    monkeypatch.setattr(mod, "enroll", _enroll)
+    assert (
+        mod.main(
+            argv=["enroll", "--client-id", "client-abc123"],
+            environ={},
+            stdin=io.BytesIO(b"projector-secret\n"),
+            stdout=out,
+            stderr=err,
+        )
+        == 0
+    )
+    assert captured["secret"] == b"projector-secret"
+    assert out.getvalue() == "LINEAR_PROJECTOR_CREDENTIAL_ENROLLED\n"
+    assert "projector-secret" not in out.getvalue() + err.getvalue()
+
+    def _explode(**kwargs):
+        raise RuntimeError("unexpected projector-secret detail")
+
+    out = io.StringIO()
+    err = io.StringIO()
+    monkeypatch.setattr(mod, "verify_boundary", _explode)
+    assert (
+        mod.main(
+            argv=["verify", "--expected-client-id", "client-abc123"],
+            environ={},
+            stdout=out,
+            stderr=err,
+        )
+        == 2
+    )
+    assert out.getvalue() == ""
+    assert err.getvalue() == "REFUSED: PROJECTOR_HOST_INTERNAL\n"
+    assert "projector-secret" not in err.getvalue()
