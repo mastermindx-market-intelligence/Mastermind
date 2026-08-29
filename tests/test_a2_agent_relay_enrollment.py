@@ -79,6 +79,11 @@ class _LineOnlyInput(io.BytesIO):
         raise AssertionError("token input must never read to EOF")
 
 
+class _NoTokenRead(io.BytesIO):
+    def readline(self, *args, **kwargs):
+        raise AssertionError("host refusal must precede token input")
+
+
 def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides():
     enrollment = _module()
     parser = enrollment.build_parser()
@@ -369,59 +374,17 @@ def test_host_gate_requires_distinct_relay_owner_exact_exec_client_and_disarmed_
     monkeypatch, tmp_path: Path
 ):
     enrollment = _module()
-    monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(enrollment.sys, "platform", "darwin")
-    monkeypatch.setattr(enrollment.c1_enrollment, "_release_identity", lambda: "c" * 40)
+    _install_canonical_host_gate_fakes(monkeypatch, enrollment, tmp_path)
 
-    config_parent = tmp_path / "config"
-    config_parent.mkdir(mode=0o755)
-    monkeypatch.setattr(enrollment, "CONFIG_PATH", config_parent / "agent-relay.json")
-    monkeypatch.setattr(enrollment, "TOKEN_PATH", config_parent / "agent-relay.token")
+    assert enrollment._assert_host_prepared() == "d" * 40  # noqa: SLF001
 
-    accounts = {
-        "_mastermind_agent_relay": SimpleNamespace(
-            pw_uid=457,
-            pw_gid=457,
-            pw_dir="/var/db/mastermind-agent-relay/home",
-            pw_shell="/usr/bin/false",
-        ),
-        "_mastermind_exec": SimpleNamespace(
-            pw_uid=450,
-            pw_gid=450,
-            pw_dir="/var/db/mastermind-executive/control/home",
-            pw_shell="/usr/bin/false",
-        ),
-    }
-    monkeypatch.setattr(
-        enrollment.pwd,
-        "getpwnam",
-        accounts.__getitem__,
+    exec_account = SimpleNamespace(
+        pw_uid=450,
+        pw_gid=450,
+        pw_dir="/var/db/mastermind-executive/control/home",
+        pw_shell="/usr/bin/false",
     )
-    monkeypatch.setattr(
-        enrollment.grp,
-        "getgrnam",
-        lambda _name: SimpleNamespace(gr_gid=457, gr_mem=["_mastermind_exec"]),
-    )
-    groups = {
-        "_mastermind_agent_relay": [457],
-        "_mastermind_exec": [450, 457],
-    }
-    monkeypatch.setattr(
-        enrollment.os, "getgrouplist", lambda name, _gid: groups[name]
-    )
-    monkeypatch.setattr(
-        enrollment.grp,
-        "getgrgid",
-        lambda gid: SimpleNamespace(
-            gr_name={450: "_mastermind_exec", 457: "_mastermind_agent_relay"}[gid]
-        ),
-    )
-    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
-    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
-
-    assert enrollment._assert_host_prepared() == "c" * 40  # noqa: SLF001
-
-    accounts["_mastermind_agent_relay"] = accounts["_mastermind_exec"]
+    monkeypatch.setattr(enrollment.pwd, "getpwnam", lambda _name: exec_account)
     with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
         enrollment._assert_host_prepared()  # noqa: SLF001
 
@@ -497,6 +460,125 @@ def test_host_gate_refuses_credential_parent_not_traversable_by_relay(
     assert enrollment._principal_can_traverse(  # noqa: SLF001
         config_parent, uid=457, gids={457}
     )
+
+
+def _install_canonical_host_gate_fakes(
+    monkeypatch,
+    enrollment,
+    tmp_path: Path,
+    *,
+    intermediate_symlink: bool = False,
+    relay_gids: list[int] | None = None,
+):
+    library = tmp_path / "Library"
+    library.mkdir(mode=0o755)
+    support = library / "Application Support"
+    if intermediate_symlink:
+        real_support = tmp_path / "real-application-support"
+        system_root = real_support / "MastermindExecutive"
+        (system_root / "config").mkdir(parents=True, mode=0o755)
+        support.symlink_to(real_support, target_is_directory=True)
+    else:
+        system_root = support / "MastermindExecutive"
+        (system_root / "config").mkdir(parents=True, mode=0o755)
+    for path in (library, system_root, system_root / "config"):
+        path.chmod(0o755)
+    if not intermediate_symlink:
+        support.chmod(0o755)
+
+    monkeypatch.setattr(enrollment, "SYSTEM_ROOT", system_root)
+    monkeypatch.setattr(enrollment, "CONFIG_PATH", system_root / "config/agent-relay.json")
+    monkeypatch.setattr(enrollment, "TOKEN_PATH", system_root / "config/agent-relay.token")
+    monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(enrollment.sys, "platform", "darwin")
+    monkeypatch.setattr(enrollment.c1_enrollment, "_release_identity", lambda: "d" * 40)
+    accounts = {
+        "_mastermind_agent_relay": SimpleNamespace(
+            pw_uid=457,
+            pw_gid=457,
+            pw_dir="/var/db/mastermind-agent-relay/home",
+            pw_shell="/usr/bin/false",
+        ),
+        "_mastermind_exec": SimpleNamespace(
+            pw_uid=450,
+            pw_gid=450,
+            pw_dir="/var/db/mastermind-executive/control/home",
+            pw_shell="/usr/bin/false",
+        ),
+    }
+    monkeypatch.setattr(enrollment.pwd, "getpwnam", accounts.__getitem__)
+    monkeypatch.setattr(
+        enrollment.grp,
+        "getgrnam",
+        lambda _name: SimpleNamespace(gr_gid=457, gr_mem=["_mastermind_exec"]),
+    )
+    groups = {
+        "_mastermind_agent_relay": [457] if relay_gids is None else relay_gids,
+        "_mastermind_exec": [450, 457],
+    }
+    monkeypatch.setattr(
+        enrollment.os, "getgrouplist", lambda name, _gid: groups[name]
+    )
+    monkeypatch.setattr(
+        enrollment.grp,
+        "getgrgid",
+        lambda gid: SimpleNamespace(
+            gr_name={450: "_mastermind_exec", 457: "_mastermind_agent_relay"}[gid]
+        ),
+    )
+    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
+    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
+    return library, support, system_root
+
+
+def test_host_gate_refuses_intermediate_credential_symlink(monkeypatch, tmp_path: Path):
+    enrollment = _module()
+    _install_canonical_host_gate_fakes(
+        monkeypatch,
+        enrollment,
+        tmp_path,
+        intermediate_symlink=True,
+    )
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
+        asyncio.run(enrollment._enroll(bot_user_id=BOT, stdin=_NoTokenRead()))  # noqa: SLF001
+
+
+def test_host_gate_refuses_inaccessible_credential_ancestor(monkeypatch, tmp_path: Path):
+    enrollment = _module()
+    _library, support, _system_root = _install_canonical_host_gate_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    support.chmod(0o700)
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
+        asyncio.run(enrollment._enroll(bot_user_id=BOT, stdin=_NoTokenRead()))  # noqa: SLF001
+
+
+def test_host_gate_refuses_group_or_other_writable_credential_parent(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    _library, _support, system_root = _install_canonical_host_gate_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    (system_root / "config").chmod(0o777)
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
+        asyncio.run(enrollment._enroll(bot_user_id=BOT, stdin=_NoTokenRead()))  # noqa: SLF001
+
+
+def test_host_gate_refuses_relay_membership_in_exec_group(monkeypatch, tmp_path: Path):
+    enrollment = _module()
+    _install_canonical_host_gate_fakes(
+        monkeypatch,
+        enrollment,
+        tmp_path,
+        relay_gids=[457, 450],
+    )
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
+        asyncio.run(enrollment._enroll(bot_user_id=BOT, stdin=_NoTokenRead()))  # noqa: SLF001
 
 
 def test_source_has_no_principal_creation_service_arm_or_secret_surface():

@@ -403,13 +403,15 @@ def _assert_disarmed() -> None:
 
 
 def _principal_can_traverse(path: Path, *, uid: int, gids: set[int]) -> bool:
-    """Return whether one exact principal may traverse a real directory."""
+    """Return whether one exact principal may safely traverse a real directory."""
 
     try:
         info = Path(path).lstat()
     except OSError:
         return False
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        return False
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         return False
     if info.st_uid == uid:
         required = stat.S_IXUSR
@@ -418,6 +420,23 @@ def _principal_can_traverse(path: Path, *, uid: int, gids: set[int]) -> bool:
     else:
         required = stat.S_IXOTH
     return bool(info.st_mode & required)
+
+
+def _credential_directory_chain() -> tuple[Path, ...] | None:
+    """Return the fixed lexical credential chain without resolving symlinks."""
+
+    config_parent = SYSTEM_ROOT / "config"
+    support = SYSTEM_ROOT.parent
+    library = support.parent
+    if (
+        SYSTEM_ROOT.name != "MastermindExecutive"
+        or support.name != "Application Support"
+        or library.name != "Library"
+        or TOKEN_PATH != config_parent / "agent-relay.token"
+        or CONFIG_PATH != config_parent / "agent-relay.json"
+    ):
+        return None
+    return (library, support, SYSTEM_ROOT, config_parent)
 
 
 def _assert_host_prepared() -> str:
@@ -431,6 +450,7 @@ def _assert_host_prepared() -> str:
         relay_gids = set(os.getgrouplist(RELAY_USER, RELAY_GID))
         exec_gids = set(os.getgrouplist(EXEC_USER, EXEC_GID))
         relay_group_names = {grp.getgrgid(gid).gr_name for gid in relay_gids}
+        credential_chain = _credential_directory_chain()
     except Exception:
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
     if (
@@ -443,12 +463,12 @@ def _assert_host_prepared() -> str:
         or account.pw_dir != os.fspath(RELAY_HOME)
         or account.pw_shell != "/usr/bin/false"
         or RELAY_GROUP not in relay_group_names
+        or EXEC_GID in relay_gids
         or RELAY_GID not in exec_gids
-        or TOKEN_PATH.parent != CONFIG_PATH.parent
-        or not _principal_can_traverse(
-            CONFIG_PATH.parent,
-            uid=RELAY_UID,
-            gids=relay_gids,
+        or credential_chain is None
+        or not all(
+            _principal_can_traverse(path, uid=RELAY_UID, gids=relay_gids)
+            for path in credential_chain
         )
     ):
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
