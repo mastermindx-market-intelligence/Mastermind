@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import io
+import json
 import os
 import stat
 import termios
@@ -223,3 +224,123 @@ def test_safe_directory_validator_refuses_wrong_owner(monkeypatch, tmp_path: Pat
             mode=0o750,
         )
     assert exc.value.code == "PROJECTOR_HOST_PERMISSIONS_REFUSED"
+
+
+def test_config_document_is_exact_non_secret_identity() -> None:
+    mod = _load()
+    assert mod.build_config_document(client_id="client-abc123") == {
+        "schema": "mastermind.linear_projector_host.v1",
+        "app_name": "Mastermind Portfolio Projector",
+        "client_id": "client-abc123",
+        "workspace_id": "93bfb3d6-93f1-48a8-9720-aa653cba4335",
+        "team_id": "26b5bb87-2482-4f8f-a42f-955250bd9eaf",
+        "team_key": "MAS",
+    }
+
+    for value in ("", " client", "client ", "client id", "bad\x7f", "é", "x" * 257):
+        with pytest.raises(mod.ProjectorHostError) as exc:
+            mod.build_config_document(client_id=value)
+        assert exc.value.code == "PROJECTOR_HOST_CONFIG_REFUSED"
+
+
+def test_write_new_private_file_is_create_once_with_exact_metadata(tmp_path: Path) -> None:
+    mod = _load()
+    parent = tmp_path / "config"
+    parent.mkdir()
+    parent.chmod(0o750)
+    path = parent / "projector.json"
+    payload = b'{"schema":"test"}\n'
+
+    mod.write_new_private_file(
+        path,
+        payload,
+        uid=os.geteuid(),
+        gid=os.getegid(),
+        mode=0o640,
+    )
+    info = path.lstat()
+    assert path.read_bytes() == payload
+    assert stat.S_ISREG(info.st_mode)
+    assert info.st_nlink == 1
+    assert info.st_uid == os.geteuid()
+    assert info.st_gid == os.getegid()
+    assert stat.S_IMODE(info.st_mode) == 0o640
+
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.write_new_private_file(
+            path,
+            payload,
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=0o640,
+        )
+    assert exc.value.code == "PROJECTOR_HOST_COLLISION"
+
+
+def test_enroll_writes_deterministic_config_and_exact_secret_once(tmp_path: Path) -> None:
+    mod = _load()
+    root = tmp_path / "projector"
+    uid = os.geteuid()
+    gid = os.getegid()
+    mod.prepare_host(root=root, uid=uid, gid=gid)
+
+    mod.enroll(
+        client_id="client-abc123",
+        secret=b"projector-secret",
+        root=root,
+        uid=uid,
+        gid=gid,
+    )
+    config_path = root / "config" / "projector.json"
+    secret_path = root / "config" / "oauth-client-secret"
+    expected_config = json.dumps(
+        mod.build_config_document(client_id="client-abc123"),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii") + b"\n"
+    assert config_path.read_bytes() == expected_config
+    assert secret_path.read_bytes() == b"projector-secret"
+    assert stat.S_IMODE(config_path.lstat().st_mode) == 0o640
+    assert stat.S_IMODE(secret_path.lstat().st_mode) == 0o600
+
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.enroll(
+            client_id="client-abc123",
+            secret=b"projector-secret",
+            root=root,
+            uid=uid,
+            gid=gid,
+        )
+    assert exc.value.code == "PROJECTOR_HOST_COLLISION"
+
+
+def test_enroll_second_file_failure_is_not_retried_or_rolled_back(
+    monkeypatch, tmp_path: Path
+) -> None:
+    mod = _load()
+    root = tmp_path / "projector"
+    uid = os.geteuid()
+    gid = os.getegid()
+    mod.prepare_host(root=root, uid=uid, gid=gid)
+    original = mod.write_new_private_file
+    calls: list[str] = []
+
+    def _write(path, payload, *, uid, gid, mode):
+        calls.append(Path(path).name)
+        if Path(path).name == "oauth-client-secret":
+            raise mod.ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED")
+        return original(path, payload, uid=uid, gid=gid, mode=mode)
+
+    monkeypatch.setattr(mod, "write_new_private_file", _write)
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.enroll(
+            client_id="client-abc123",
+            secret=b"projector-secret",
+            root=root,
+            uid=uid,
+            gid=gid,
+        )
+    assert exc.value.code == "PROJECTOR_HOST_WRITE_REFUSED"
+    assert calls == ["projector.json", "oauth-client-secret"]
+    assert (root / "config" / "projector.json").is_file()
+    assert not (root / "config" / "oauth-client-secret").exists()
