@@ -93,6 +93,20 @@ def test_commission_wave_rejects_fastest_supported_reasoning_polling() -> None:
         assert phrase in commission
 
 
+def test_commission_wave_child_stop_is_source_local_not_resource_shutdown() -> None:
+    commission = _flat("docs/sol_skills/COMMISSION_WAVE.md")
+    for phrase in (
+        "exact `operation_key + carrier` child source",
+        "keep that aggregate resource active",
+        "Whole-resource shutdown requires",
+        "cannot remove/suppress the exact terminal child source",
+        "keep any independently valid aggregate seat/principal/sibling watcher resource active",
+        "Terminal completion closes that child source/cycle",
+    ):
+        assert phrase in commission
+    assert "the temporary watcher must be disarmed" not in commission
+
+
 def test_root_worker_bootstraps_carry_codex_continuation_invariant() -> None:
     for path in ("AGENTS.md", "CLAUDE.md"):
         text = _flat(path)
@@ -103,5 +117,6 @@ def test_root_worker_bootstraps_carry_codex_continuation_invariant() -> None:
             "hard floor is 15 minutes",
             "fresh-read the exact bound carrier",
             "Slack delivery is not target consumption",
+            "aggregate seat/principal watcher resource",
         ):
             assert phrase in text
