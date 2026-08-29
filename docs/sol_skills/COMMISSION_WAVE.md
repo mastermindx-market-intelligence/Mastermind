@@ -472,3 +472,27 @@ record a least-scarce-capable routing receipt, and use Fable only with a concret
 For watcher-enabled handoffs, K2 requires reciprocal continuation paths plus an explicit
 `CONTINUE`-or-`STOP` edge after every return, truthful watcher shutdown handling, and no reuse of an
 old watcher as authorization for an independent next wave.
+
+K2 specifically fails if any regression recurs:
+
+* a current live explicit Chairman directive to this exact session is dismissed as “untrusted pasted
+  text,” an impersonation theory is invented without conflicting evidence, or the session demands a
+  redundant cross-channel/second Chairman authorization not required by current source law;
+* a `DIRECT_TARGETED` session asks the Chairman for a second receiver assignment, remains in
+  `AWAITING_CHAIRMAN_RECEIVER_ASSIGNMENT`, or does nothing even though the current live delivery
+  already assigned it;
+* a Chairman-selected eligible `CAPACITY_SELECTABLE` session that received the same `OPEN_PICKUP`
+  commission by deliberate current live delivery with execution intent asks for a separate Slack
+  binding/comment/claim, packet rewrite, or second assignment before pickup;
+* a `CAPACITY_SELECTABLE` receiver blocks only because an older packet named another numbered account
+  even though the newest explicit live Chairman assignment reached this session before `START` and no
+  effect/effect-unknown/conflicting pickup exists, or a session treats `CAPACITY_SELECTABLE` as
+  permission to hop accounts after `START`; or
+* a session declares watching impossible merely because Slack lacks push subscriptions while its
+  host exposes a usable native scheduled/condition watcher, stays in a watcher-planning/debate loop
+  instead of invoking the available create/arm tool, or says `WATCH_ARMED` without an actual
+  arm/registration receipt.
+
+A gated direct receiver must ACK, read, arm its continuation path, perform only explicitly permitted
+preflight while held, and emit a separate truthful start-of-work edge when the gate clears rather
+than becoming silently stranded between delivery and execution.
