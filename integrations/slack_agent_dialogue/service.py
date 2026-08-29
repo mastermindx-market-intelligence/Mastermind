@@ -16,6 +16,7 @@ import stat
 import struct
 import sys
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -50,6 +51,13 @@ _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 # the target kernel's ``sockaddr_un.sun_path`` buffer. Validate the encoded
 # path that Python passes to the kernel, not its character count.
 AF_UNIX_PATH_MAX_BYTES = 107 if sys.platform.startswith("linux") else 103
+
+
+class _SocketCleanupResult(Enum):
+    REMOVED = "removed"
+    ABSENT = "absent"
+    REPLACED = "replaced"
+    REFUSED = "refused"
 
 
 class DialogueServiceError(RuntimeError):
@@ -258,7 +266,8 @@ class AgentDialogueService:
         self.engine_v2 = engine_v2
         self._server: asyncio.AbstractServer | None = None
         self._bound_socket_identity: tuple[int, int] | None = None
-        self._close_lock = asyncio.Lock()
+        self._server_close_issued = False
+        self._close_lock: asyncio.Lock | None = None
         self._handled = asyncio.Event()
 
     def _prepare_socket(self) -> None:
@@ -321,12 +330,18 @@ class AgentDialogueService:
         self.config.socket_path.unlink(missing_ok=True)
 
     async def start(self) -> None:
-        if self._server is not None or self._bound_socket_identity is not None:
+        if (
+            self._server is not None
+            or self._bound_socket_identity is not None
+            or self._close_lock is not None
+        ):
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
         path_prepared = False
         try:
             self._prepare_socket()
             path_prepared = True
+            self._close_lock = asyncio.Lock()
+            self._server_close_issued = False
             self._server = await asyncio.start_unix_server(
                 self._handle_connection,
                 path=str(self.config.socket_path),
@@ -368,15 +383,17 @@ class AgentDialogueService:
 
     def _unlink_bound_socket(
         self, bound_socket_identity: tuple[int, int] | None
-    ) -> None:
+    ) -> _SocketCleanupResult:
         if bound_socket_identity is None:
-            return
+            return _SocketCleanupResult.ABSENT
         try:
             info = self.config.socket_path.lstat()
-        except (FileNotFoundError, OSError):
-            return
+        except FileNotFoundError:
+            return _SocketCleanupResult.ABSENT
+        except OSError:
+            return _SocketCleanupResult.REFUSED
         if (info.st_dev, info.st_ino) != bound_socket_identity:
-            return
+            return _SocketCleanupResult.REPLACED
         owned_private_socket = (
             self.config.socket_group_gid is None
             and stat.S_ISSOCK(info.st_mode)
@@ -389,24 +406,62 @@ class AgentDialogueService:
             and info.st_gid == self.config.socket_group_gid
             and stat.S_IMODE(info.st_mode) == self.config.socket_mode
         )
-        if owned_private_socket or owned_shared_socket:
+        if not (owned_private_socket or owned_shared_socket):
+            return _SocketCleanupResult.REFUSED
+        try:
             self.config.socket_path.unlink()
+        except FileNotFoundError:
+            return _SocketCleanupResult.ABSENT
+        except OSError:
+            return _SocketCleanupResult.REFUSED
+        return _SocketCleanupResult.REMOVED
 
     async def close(self) -> None:
-        async with self._close_lock:
+        close_lock = self._close_lock
+        if close_lock is None:
+            return
+        async with close_lock:
+            if self._close_lock is not close_lock:
+                return
             server = self._server
             bound_socket_identity = self._bound_socket_identity
-            close_issued = server is None
+            primary_error: BaseException | None = None
+            shutdown_definite = server is None
             try:
                 if server is not None:
-                    server.close()
-                    close_issued = True
+                    if not self._server_close_issued:
+                        server.close()
+                        self._server_close_issued = True
                     await server.wait_closed()
-            finally:
-                if close_issued:
-                    self._unlink_bound_socket(bound_socket_identity)
-                    self._server = None
-                    self._bound_socket_identity = None
+                    shutdown_definite = True
+            except BaseException as exc:
+                primary_error = exc
+
+            cleanup_result: _SocketCleanupResult | None = None
+            if self._server_close_issued or server is None:
+                try:
+                    cleanup_result = self._unlink_bound_socket(
+                        bound_socket_identity
+                    )
+                except BaseException:
+                    cleanup_result = _SocketCleanupResult.REFUSED
+
+            if shutdown_definite:
+                self._server = None
+            if cleanup_result in {
+                _SocketCleanupResult.REMOVED,
+                _SocketCleanupResult.ABSENT,
+                _SocketCleanupResult.REPLACED,
+            }:
+                self._bound_socket_identity = None
+            if self._server is None and self._bound_socket_identity is None:
+                self._server_close_issued = False
+                self._close_lock = None
+
+            if primary_error is not None:
+                raise primary_error
+            if cleanup_result is _SocketCleanupResult.REFUSED:
+                raise DialogueServiceError("SERVICE_UNAVAILABLE")
 
     async def serve_one(self) -> None:
         await self.start()

@@ -647,14 +647,17 @@ def test_shared_relay_close_cancellation_does_not_strand_owned_socket(
     class SuspendedClose:
         def __init__(self) -> None:
             self.close_calls = 0
+            self.wait_calls = 0
             self.wait_started = asyncio.Event()
 
         def close(self) -> None:
             self.close_calls += 1
 
         async def wait_closed(self) -> None:
-            self.wait_started.set()
-            await asyncio.Future()
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                self.wait_started.set()
+                await asyncio.Future()
 
     async def scenario() -> None:
         shared_root = prepare_shared_socket_root(socket_root)
@@ -693,6 +696,252 @@ def test_shared_relay_close_cancellation_does_not_strand_owned_socket(
             srv.config.socket_path.unlink(missing_ok=True)
 
     run(scenario())
+
+
+def test_cancelled_wait_preserves_primary_and_retries_refused_cleanup(
+    monkeypatch, socket_root: Path
+) -> None:
+    class CancelOnceServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_calls = 0
+            self.wait_started = asyncio.Event()
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                self.wait_started.set()
+                await asyncio.Future()
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = CancelOnceServer()
+        srv._server = controlled  # type: ignore[assignment]
+
+        real_unlink = Path.unlink
+        refused = False
+
+        def refuse_once(path: Path, *args, **kwargs) -> None:
+            nonlocal refused
+            if path == srv.config.socket_path and not refused:
+                refused = True
+                raise PermissionError("cleanup refused")
+            real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", refuse_once)
+        close_task = asyncio.create_task(srv.close())
+        await controlled.wait_started.wait()
+        close_task.cancel()
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await close_task
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 1
+            assert controlled.wait_calls == 2
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            real_unlink(srv.config.socket_path, missing_ok=True)
+
+    run(scenario())
+
+
+def test_wait_failure_preserves_primary_and_retries_refused_cleanup(
+    monkeypatch, socket_root: Path
+) -> None:
+    class FailWaitOnceServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise RuntimeError("wait failed")
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = FailWaitOnceServer()
+        srv._server = controlled  # type: ignore[assignment]
+
+        real_unlink = Path.unlink
+        refused = False
+
+        def refuse_once(path: Path, *args, **kwargs) -> None:
+            nonlocal refused
+            if path == srv.config.socket_path and not refused:
+                refused = True
+                raise PermissionError("cleanup refused")
+            real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", refuse_once)
+        try:
+            with pytest.raises(RuntimeError, match="wait failed"):
+                await srv.close()
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 1
+            assert controlled.wait_calls == 2
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            real_unlink(srv.config.socket_path, missing_ok=True)
+
+    run(scenario())
+
+
+def test_unprovable_cleanup_refuses_then_cleanup_only_retry_succeeds(
+    monkeypatch, socket_root: Path
+) -> None:
+    class ClosedServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = ClosedServer()
+        srv._server = controlled  # type: ignore[assignment]
+
+        real_lstat = Path.lstat
+        refused = False
+
+        def refuse_once(path: Path):
+            nonlocal refused
+            if path == srv.config.socket_path and not refused:
+                refused = True
+                raise PermissionError("lstat refused")
+            return real_lstat(path)
+
+        monkeypatch.setattr(Path, "lstat", refuse_once)
+        try:
+            with pytest.raises(DialogueServiceError, match="SERVICE_UNAVAILABLE"):
+                await srv.close()
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_close_failure_before_issue_retains_lifecycle_for_retry(
+    socket_root: Path,
+) -> None:
+    class FailCloseOnceServer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.wait_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("close failed")
+
+        async def wait_closed(self) -> None:
+            self.wait_calls += 1
+
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+        controlled = FailCloseOnceServer()
+        srv._server = controlled  # type: ignore[assignment]
+        try:
+            with pytest.raises(RuntimeError, match="close failed"):
+                await srv.close()
+            assert srv.config.socket_path.exists()
+
+            await srv.close()
+            assert controlled.close_calls == 2
+            assert controlled.wait_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_restart_uses_loop_local_close_serialization(socket_root: Path) -> None:
+    srv, _client = shared_relay_service(prepare_shared_socket_root(socket_root))
+
+    async def lifecycle() -> None:
+        await srv.start()
+        real_server = srv._server
+        assert real_server is not None
+
+        class BlockingServer:
+            def __init__(self) -> None:
+                self.close_calls = 0
+                self.wait_started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            def close(self) -> None:
+                self.close_calls += 1
+
+            async def wait_closed(self) -> None:
+                self.wait_started.set()
+                await self.release.wait()
+
+        controlled = BlockingServer()
+        srv._server = controlled  # type: ignore[assignment]
+        first = asyncio.create_task(srv.close())
+        await controlled.wait_started.wait()
+        second = asyncio.create_task(srv.close())
+        await asyncio.sleep(0)
+        controlled.release.set()
+        try:
+            await asyncio.gather(first, second)
+            assert controlled.close_calls == 1
+            assert not srv.config.socket_path.exists()
+        finally:
+            for task in (first, second):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(first, second, return_exceptions=True)
+            real_server.close()
+            await real_server.wait_closed()
+            srv.config.socket_path.unlink(missing_ok=True)
+
+    run(lifecycle())
+    run(lifecycle())
 
 
 @pytest.mark.parametrize("invalid_metadata", ["owner", "group", "mode"])
