@@ -318,6 +318,18 @@ class AgentDialogueService:
         finally:
             await self.close()
 
+    async def serve_forever(self) -> None:
+        """Serve sequential callers until cancellation, then remove the socket."""
+
+        await self.start()
+        server = self._server
+        if server is None:
+            raise DialogueServiceError("SERVICE_UNAVAILABLE")
+        try:
+            await server.serve_forever()
+        finally:
+            await self.close()
+
     async def _send(self, writer: asyncio.StreamWriter, value: Mapping[str, Any]) -> None:
         payload = _canonical_json(value)
         if len(payload) > self.config.max_response_bytes:

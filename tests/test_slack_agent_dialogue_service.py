@@ -800,6 +800,34 @@ def test_v2_bool_max_attempts_refuses_at_service_boundary(socket_root: Path) -> 
     assert exc.value.code == "REQUEST_INVALID"
 
 
+def test_serve_forever_accepts_sequential_v2_calls_and_cleans_up_on_cancel(
+    socket_root: Path,
+) -> None:
+    """Closing after one request, or leaking the socket on stop, must fail."""
+
+    async def scenario() -> None:
+        srv, fake = service_with_v2(socket_root)
+        task = asyncio.create_task(srv.serve_forever())
+        await wait_for_service_start(task, srv.config.socket_path)
+        try:
+            first = await call_service(
+                srv.config.socket_path, request_envelope_v2("status", {})
+            )
+            second = await call_service(
+                srv.config.socket_path, request_envelope_v2("status", {})
+            )
+            assert first["ok"] is True
+            assert second == first
+            assert [name for name, _value in fake.calls] == ["status", "status"]
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
 def test_v2_real_unix_status_uses_same_one_shot_boundary(socket_root: Path) -> None:
     async def scenario() -> None:
         srv, _fake = service_with_v2(socket_root)
