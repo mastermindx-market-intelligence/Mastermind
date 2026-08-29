@@ -664,8 +664,21 @@ def reconstruct_status(
         return ObligationStatus.DELIVERED_UNACKNOWLEDGED
     if any(record.phase is LedgerPhase.ACCEPTED for record in matching):
         return ObligationStatus.ACCEPTED
-    if any(record.phase is LedgerPhase.DELIVERY_ATTEMPT for record in matching):
+    phases_by_attempt: dict[int, set[LedgerPhase]] = {}
+    for record in matching:
+        if record.attempt_n is not None:
+            phases_by_attempt.setdefault(record.attempt_n, set()).add(record.phase)
+    if any(
+        LedgerPhase.DELIVERY_ATTEMPT in phases
+        and not (phases & EFFECT_KNOWN_PHASES)
+        for phases in phases_by_attempt.values()
+    ):
         return ObligationStatus.RECONCILIATION_REQUIRED
+    if any(
+        record.phase in {LedgerPhase.FAILED, LedgerPhase.TARGET_UNAVAILABLE}
+        for record in matching
+    ):
+        return ObligationStatus.ATTEMPTED
     return ObligationStatus.PENDING_RETRYABLE
 
 
