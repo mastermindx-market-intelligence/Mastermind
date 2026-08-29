@@ -344,7 +344,13 @@ def test_production_armed_is_a_global_kill_switch():
     assert route.delivery_allowed is False
     assert load_session_targets().production_armed is False
     assert all(not target.target_enabled for target in load_session_targets().targets.values())
-    assert all(not item.transport_implemented for item in WAKE_TRANSPORT_DESCRIPTORS.values())
+    implemented = {
+        transport_id
+        for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
+        if descriptor.transport_implemented
+    }
+    assert implemented == {"codex-app-server"}
+    assert WAKE_TRANSPORT_DESCRIPTORS["claude-code-session"].transport_implemented is False
 
 
 def test_a1_receipt_cannot_close_a2_or_a_different_route():
