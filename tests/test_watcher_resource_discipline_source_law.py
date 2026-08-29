@@ -44,7 +44,7 @@ def test_universal_dialogue_law_requires_fresh_read_before_substantive_write() -
         "after the latest local evidence-producing action",
         "WATCH_ARMED",
         "never satisfies this freshness fence",
-        "pickup ACK",
+        "Pickup ACK",
     ):
         assert phrase in law
 
