@@ -36,6 +36,36 @@ conditions, plus `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` for every watcher-en
 Read the exact bound carrier and operation key. Ignore the stored baseline and older turns. A wake
 without a qualifying new opposite-side turn is `NO_MATERIAL_CHANGE`; do not manufacture work.
 
+### Watcher lifetime invariant — nonterminal events do not end the watch
+
+A continuation watcher spans the **entire current child dialogue cycle**, not merely the first reply
+it notices.
+
+- **ACK, WATCH_ARMED, START, and PROGRESS are nonterminal watcher events.** Consume the event,
+  advance the consumed baseline and keep or re-arm the Sol watcher before ending the turn. If the
+  underlying watcher is one-shot/first-match, a successful nonterminal match means Sol must register
+  the next watch against the newest consumed baseline; it is not terminal cleanup.
+- **BLOCKED, DECISION_REQUEST, and RESULT are action-required watcher events.** Do not disable the
+  watcher and merely report upward. Re-pin, adjudicate, and post exactly one lawful same-carrier Sol
+  edge. A nonterminal `CONTINUE`/ruling/repair advances the baseline and keeps/re-arms the watcher for
+  the next return.
+- `WATCH_UNAVAILABLE` is a continuation defect to adjudicate, not silent permission to abandon the
+  counterpart. `WATCH_STOP_FAILED` is handled by the universal session-close law without reopening
+  an otherwise terminal child.
+- **Never disable Sol's continuation watcher before sending the worker's terminal STOP.** Only after
+  the terminal STOP edge is sent may Sol disarm its watcher for that child operation (or report the
+  truthful shutdown failure required by current law).
+
+Canonical regression sequence:
+
+```text
+ACK -> WATCH_ARMED -> START -> RESULT -> STOP
+```
+
+The first four edges are nonterminal from the watcher-lifetime perspective. `RESULT` requires Sol
+adjudication; it does not itself close either side's watcher. The watcher cycle closes only after the
+explicit terminal Sol edge required by `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`.
+
 ### 2. RE-PIN
 
 Before any modifying response, load current protected `docs/sol_skills/INDEX.md`, record its exact
@@ -91,6 +121,8 @@ A Sol-owned watcher prompt is incomplete unless it contains all of:
 
 - exact carrier + current operation/child keys and the latest consumed baseline;
 - qualifying return/event types;
+- watcher lifetime behavior: nonterminal matches advance the baseline and keep/re-arm the watcher,
+  including explicit re-registration when the host mechanism is one-shot/first-match;
 - current-Skillpack re-pin before modifying action;
 - minimum canonical evidence reconciliation;
 - same-carrier Sol action when current authority/gates permit;
@@ -110,6 +142,8 @@ a write-capability limitation into permanent Chairman relay work.
 
 | Failure | Correct response |
 |---|---|
+| Watcher detects `PICKUP_ACK` and is disabled because the first reply arrived | Advance the baseline and keep/re-arm the watcher; ACK is nonterminal |
+| A one-shot watcher matches `START` or `PROGRESS` and is not re-registered | Re-arm against the newest consumed baseline before ending the turn |
 | Watcher detects `RESULT` and only tells Chairman what Sol should do | Re-pin, review, post the lawful Sol edge, then report material outcome |
 | Worker is waiting and Sol says “the next step is mine” | Send explicit CONTINUE or STOP first |
 | Watcher sees terminal completion and starts the next wave | STOP/disarm; independent wave needs fresh commission law |
@@ -121,3 +155,8 @@ a write-capability limitation into permanent Chairman relay work.
 Given a watcher-enabled COO `RESULT` that is fully decidable inside current Chairman-authorized
 scope, a fresh Sol must directly complete the required review and same-carrier continuation/STOP
 without requiring the Chairman to notice the alert, copy a prompt, or manually wake the worker.
+
+Given the sequence `ACK -> WATCH_ARMED -> START -> RESULT`, a fresh Sol must keep or re-arm its
+continuation watcher after each nonterminal event, adjudicate the `RESULT`, send the required same-
+carrier terminal or nonterminal edge, and disarm the child watcher only after terminal STOP. A Sol
+that disables its watcher on ACK/START and therefore misses the later RESULT fails this skill.
