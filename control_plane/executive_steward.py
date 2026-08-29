@@ -109,9 +109,13 @@ def _require_enum(name: str, value: object, expected: type[enum.Enum]) -> None:
 def _require_source_owner(
     source: "SourceRef", allowed: tuple[SourceOwner, ...], fact_name: str
 ) -> None:
+    if not isinstance(source, SourceRef):
+        raise TypeError(f"{fact_name} must be SourceRef")
     if source.owner not in allowed:
+        if len(allowed) == 1:
+            raise ValueError(f"{fact_name} owner must be {allowed[0].value}")
         values = ", ".join(owner.value for owner in allowed)
-        raise ValueError(f"{fact_name} source owner must be one of: {values}")
+        raise ValueError(f"{fact_name} owner must be one of: {values}")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -177,6 +181,8 @@ class AttentionFact:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class RuntimeFact:
+    """Composed runtime evidence with independently enforced source authority."""
+
     responsibility_ref: str
     root_job_id: str
     seat: Seat
@@ -191,7 +197,8 @@ class RuntimeFact:
     capacity_state: CapacityState
     previous_attempt_id: str | None
     movement_reason_code: str | None
-    source: SourceRef
+    executive_source: SourceRef
+    binding_source: SourceRef
     reasoning_surface: str | None = None
     account_label: str | None = None
     host_ref: str | None = None
@@ -227,10 +234,23 @@ class RuntimeFact:
         ):
             raise TypeError("provider_session_id_present must be bool or None")
         _require_source_owner(
-            self.source,
-            (SourceOwner.EXECUTIVE_OS, SourceOwner.RUNTIME_BINDING),
-            "runtime",
+            self.executive_source,
+            (SourceOwner.EXECUTIVE_OS,),
+            "executive_source",
         )
+        _require_source_owner(
+            self.binding_source,
+            (SourceOwner.RUNTIME_BINDING,),
+            "binding_source",
+        )
+
+
+def _runtime_sources(fact: RuntimeFact) -> tuple[SourceRef, SourceRef]:
+    return (fact.executive_source, fact.binding_source)
+
+
+def _runtime_candidate_sources(facts: tuple[RuntimeFact, ...]) -> tuple[SourceRef, ...]:
+    return tuple(source for fact in facts for source in _runtime_sources(fact))
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -458,7 +478,8 @@ class ExecutiveStewardSnapshot:
                     fact.seat.value,
                     fact.root_job_id,
                     fact.attempt_id,
-                    _source_key(fact.source),
+                    _source_key(fact.executive_source),
+                    _source_key(fact.binding_source),
                 ),
             ),
         )
@@ -837,7 +858,7 @@ class ExecutiveStewardSnapshot:
                     _issue(
                         "runtime_root_mismatch",
                         f"runtime candidates do not all join root {responsibility.root_job_id}",
-                        tuple(fact.source for fact in candidates),
+                        _runtime_candidate_sources(candidates),
                     ),
                 )
                 + source_issues,
@@ -851,7 +872,7 @@ class ExecutiveStewardSnapshot:
                     _issue(
                         "ambiguous_runtime_join",
                         f"{responsibility_ref}/{seat.value} has {len(candidates)} current candidates",
-                        tuple(fact.source for fact in candidates),
+                        _runtime_candidate_sources(candidates),
                     ),
                 )
                 + source_issues,
@@ -866,14 +887,15 @@ class ExecutiveStewardSnapshot:
                     _issue(
                         "reconciliation_required",
                         "runtime effect is unknown; no current operator may be asserted",
-                        (fact.source,),
+                        _runtime_sources(fact),
                     ),
                 )
                 + source_issues,
             )
         if (
             responsibility.source.freshness is not Freshness.CURRENT
-            or fact.source.freshness is not Freshness.CURRENT
+            or fact.executive_source.freshness is not Freshness.CURRENT
+            or fact.binding_source.freshness is not Freshness.CURRENT
         ):
             return _result(
                 operation,
@@ -882,8 +904,8 @@ class ExecutiveStewardSnapshot:
                 (
                     _issue(
                         "stale_runtime_join",
-                        "responsibility or runtime binding is not current",
-                        (responsibility.source, fact.source),
+                        "responsibility, Executive OS runtime, or RuntimeBinding evidence is not current",
+                        (responsibility.source,) + _runtime_sources(fact),
                     ),
                 )
                 + source_issues,

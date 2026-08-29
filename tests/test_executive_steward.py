@@ -127,6 +127,10 @@ def _runtime(
     status: str = "RUNNING",
     observed_at: str = "2026-08-29T04:42:00Z",
     freshness: str = "CURRENT",
+    executive_observed_at: str | None = None,
+    executive_freshness: str | None = None,
+    binding_observed_at: str | None = None,
+    binding_freshness: str | None = None,
     effect_state: str = "NONE",
     capacity_state: str = "UNKNOWN",
 ):
@@ -145,12 +149,19 @@ def _runtime(
         capacity_state=getattr(module.CapacityState, capacity_state),
         previous_attempt_id="ATT-OCR6-1",
         movement_reason_code="RATE_LIMITED_REALM_MOVE",
-        source=_source(
+        executive_source=_source(
+            module,
+            "EXECUTIVE_OS",
+            f"executive-runtime:{attempt_id}",
+            observed_at=executive_observed_at or observed_at,
+            freshness=executive_freshness or freshness,
+        ),
+        binding_source=_source(
             module,
             "RUNTIME_BINDING",
             f"runtime-binding:{attempt_id}",
-            observed_at=observed_at,
-            freshness=freshness,
+            observed_at=binding_observed_at or observed_at,
+            freshness=binding_freshness or freshness,
         ),
     )
 
@@ -465,6 +476,117 @@ def test_current_runtime_uses_only_exact_responsibility_and_seat_join():
     assert result.status is module.QueryStatus.OK
     assert result.data.attempt_id == "ATT-EXACT"
     assert result.to_dict()["data"]["capacity_state"] == "unknown"
+
+
+def test_runtime_fact_rejects_runtime_binding_as_lifecycle_authority():
+    module = _module()
+    with pytest.raises(ValueError, match="executive_source owner must be executive_os"):
+        dataclasses.replace(
+            _runtime(module),
+            executive_source=_source(
+                module,
+                "RUNTIME_BINDING",
+                "runtime-binding:cannot-author-lifecycle",
+            ),
+        )
+
+
+def test_runtime_fact_rejects_executive_os_as_binding_authority():
+    module = _module()
+    with pytest.raises(
+        ValueError, match="binding_source owner must be runtime_binding"
+    ):
+        dataclasses.replace(
+            _runtime(module),
+            binding_source=_source(
+                module,
+                "EXECUTIVE_OS",
+                "executive-runtime:cannot-author-binding",
+            ),
+        )
+
+
+def test_runtime_fact_rejects_swapped_source_owner_labels():
+    module = _module()
+    runtime = _runtime(module)
+    with pytest.raises(ValueError, match="executive_source owner must be executive_os"):
+        dataclasses.replace(
+            runtime,
+            executive_source=runtime.binding_source,
+            binding_source=runtime.executive_source,
+        )
+
+
+@pytest.mark.parametrize("missing_field", ("executive_source", "binding_source"))
+def test_runtime_fact_requires_both_exact_source_halves(missing_field):
+    module = _module()
+    with pytest.raises(TypeError, match=rf"{missing_field} must be SourceRef"):
+        dataclasses.replace(_runtime(module), **{missing_field: None})
+
+
+@pytest.mark.parametrize(
+    ("stale_field", "stale_owner"),
+    (
+        ("executive_source", "EXECUTIVE_OS"),
+        ("binding_source", "RUNTIME_BINDING"),
+    ),
+)
+def test_stale_runtime_source_half_never_claims_a_current_operator(
+    stale_field, stale_owner
+):
+    module = _module()
+    runtime = _runtime(module)
+    stale_source = _source(
+        module,
+        stale_owner,
+        f"{stale_owner.lower()}:stale",
+        freshness="STALE",
+    )
+    result = _snapshot(
+        module,
+        runtimes=(dataclasses.replace(runtime, **{stale_field: stale_source}),),
+    ).get_current_runtime("WS:OCR-6", module.Seat.CEO)
+
+    assert result.status is module.QueryStatus.DEGRADED
+    assert result.data is None
+    assert [issue.code for issue in result.issues] == ["stale_runtime_join"]
+    assert {source.owner for source in result.issues[0].sources} == {
+        module.SourceOwner.AGENT_OS,
+        module.SourceOwner.EXECUTIVE_OS,
+        module.SourceOwner.RUNTIME_BINDING,
+    }
+
+
+@pytest.mark.parametrize(
+    ("ambiguous_field", "owner"),
+    (
+        ("executive_source", "EXECUTIVE_OS"),
+        ("binding_source", "RUNTIME_BINDING"),
+    ),
+)
+def test_ambiguous_runtime_source_half_refuses_without_selecting_a_winner(
+    ambiguous_field, owner
+):
+    module = _module()
+    first = _runtime(module)
+    alternate_source = _source(
+        module,
+        owner,
+        f"{owner.lower()}:alternate",
+        observed_at="2026-08-29T04:59:00Z",
+    )
+    second = dataclasses.replace(first, **{ambiguous_field: alternate_source})
+    result = _snapshot(module, runtimes=(first, second)).get_current_runtime(
+        "WS:OCR-6", module.Seat.CEO
+    )
+
+    assert result.status is module.QueryStatus.REFUSED
+    assert result.data is None
+    assert [issue.code for issue in result.issues] == ["ambiguous_runtime_join"]
+    assert {source.owner for source in result.issues[0].sources} == {
+        module.SourceOwner.EXECUTIVE_OS,
+        module.SourceOwner.RUNTIME_BINDING,
+    }
 
 
 def test_runtime_wrong_root_refuses_even_when_workstream_seat_and_provider_match():
