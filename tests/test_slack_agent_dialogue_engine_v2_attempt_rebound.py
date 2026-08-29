@@ -76,6 +76,23 @@ def _ceo() -> dict[str, str]:
     }
 
 
+def _coo() -> dict[str, str]:
+    return {
+        "kind": "executive_surface",
+        "seat": "coo",
+        "reasoning_surface": "claude",
+    }
+
+
+def _repository(*, head: str, pr: int) -> dict[str, object]:
+    return {
+        "kind": "repository",
+        "repository": REPO,
+        "head_sha": head,
+        "pr": f"{REPO}#{pr}",
+    }
+
+
 def _parent() -> dict[str, object]:
     return build_parent_v2(
         {
@@ -96,7 +113,7 @@ def _message(
     *,
     message_key: str,
     actor: dict[str, str],
-    applies_to: dict[str, str],
+    applies_to: dict[str, object],
     reply_to_message_key: str | None,
     created_at: str,
 ) -> dict[str, object]:
@@ -154,7 +171,7 @@ def _engine(client: InMemorySlackClient) -> DialogueEngineV2:
     )
 
 
-def _context(actor: dict[str, str]) -> DialogueContextV2:
+def _attempt_context(actor: dict[str, str]) -> DialogueContextV2:
     return DialogueContextV2(
         work_ref=WORK_REF,
         commission_ref=_commission(),
@@ -163,6 +180,18 @@ def _context(actor: dict[str, str]) -> DialogueContextV2:
         watch_mode=TURN_WATCH_MODE_V1,
         actor_ref=actor,
         applies_to=_attempt(actor),
+    )
+
+
+def _repository_context(applies_to: dict[str, object]) -> DialogueContextV2:
+    return DialogueContextV2(
+        work_ref=WORK_REF,
+        commission_ref=_commission(),
+        session_ref=SESSION_REF,
+        operation_key=OPERATION,
+        watch_mode=TURN_WATCH_MODE_V1,
+        actor_ref=_coo(),
+        applies_to=applies_to,
     )
 
 
@@ -224,7 +253,7 @@ def test_v2_preserves_result_continue_then_worker_attempt_replacement() -> None:
     continuation = asyncio.run(
         engine.wait_for_reply(
             thread_ts=THREAD_TS,
-            context=_context(p1_actor),
+            context=_attempt_context(p1_actor),
             request_message_key=p1_result["message_key"],
             expected_types=("CONTINUE",),
             max_attempts=1,
@@ -239,7 +268,7 @@ def test_v2_preserves_result_continue_then_worker_attempt_replacement() -> None:
     }
 
     read = asyncio.run(
-        engine.read_thread(thread_ts=THREAD_TS, context=_context(p2_actor))
+        engine.read_thread(thread_ts=THREAD_TS, context=_attempt_context(p2_actor))
     )
     assert [item.message["message_key"] for item in read.messages] == [
         p1_result["message_key"],
@@ -274,7 +303,30 @@ def test_v2_history_refuses_foreign_job_inside_same_parent() -> None:
         asyncio.run(
             _engine(client).read_thread(
                 thread_ts=THREAD_TS,
-                context=_context(current_actor),
+                context=_attempt_context(current_actor),
+            )
+        )
+    assert exc.value.code == "THREAD_CONTEXT_MISMATCH"
+
+
+def test_v2_history_refuses_foreign_repository_pr_inside_same_parent() -> None:
+    trusted = _repository(head="c" * 40, pr=178)
+    foreign = _repository(head="d" * 40, pr=999)
+    foreign_message = _message(
+        "PROGRESS",
+        message_key="asd-progress-foreign-repository-pr",
+        actor=_coo(),
+        applies_to=foreign,
+        reply_to_message_key=None,
+        created_at="2026-08-29T04:05:00Z",
+    )
+    client = _client_with(("1787976100.000005", BOT, foreign_message))
+
+    with pytest.raises(DialogueEngineError) as exc:
+        asyncio.run(
+            _engine(client).read_thread(
+                thread_ts=THREAD_TS,
+                context=_repository_context(trusted),
             )
         )
     assert exc.value.code == "THREAD_CONTEXT_MISMATCH"
