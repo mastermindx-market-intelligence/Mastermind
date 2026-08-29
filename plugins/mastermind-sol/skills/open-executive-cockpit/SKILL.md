@@ -1,6 +1,6 @@
 ---
 name: open-executive-cockpit
-description: Compose the current Chairman and Sol company view through the approved Steward interface without another state store.
+description: Use when the Chairman asks what is happening, what needs attention, who owes the next turn, or why a program is blocked.
 ---
 
 # Open Executive Cockpit
@@ -10,6 +10,10 @@ Use when the Chairman asks what is happening, what needs attention, which role o
 ## Mandatory current-source gate
 
 Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `COLD_START.md`, and `RECONCILE_STATE.md` from that same exact commit, and verify compatibility before using packaged guidance. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
 
 ## Input
 

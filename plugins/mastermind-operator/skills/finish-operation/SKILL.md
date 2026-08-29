@@ -1,6 +1,6 @@
 ---
 name: finish-operation
-description: Return one evidence-backed RESULT for the bound operation and wait for an explicit Sol continuation or STOP.
+description: Use when the bound operation has reached a result boundary and exact evidence must be returned for Sol adjudication.
 ---
 
 # Finish Operation
@@ -10,6 +10,10 @@ Use only for one already-bound operation and dialogue. The model must never choo
 ## Bound operation gate
 
 Fresh-read the exact carrier after the latest evidence-producing action and verify the current binding has not been superseded.
+
+## Required package reference
+
+Read `../../references/dialogue-boundary.md` before ACK, START, return, or STOP handling. It defines the state distinctions and no-generic-Slack boundary for this packaged workflow.
 
 ## Procedure
 

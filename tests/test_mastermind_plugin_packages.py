@@ -378,3 +378,72 @@ def test_validator_is_stdlib_only_and_has_no_action_surface() -> None:
         "Popen(",
     ):
         assert forbidden not in text
+
+@pytest.mark.parametrize("skill", SOL_SKILLS)
+def test_every_sol_skill_loads_authority_reference(skill: str) -> None:
+    text = _sol(skill)
+    assert "../../references/authority-boundaries.md" in text
+    assert "before interpreting any app, record, or action as authority" in text
+
+
+@pytest.mark.parametrize("skill", OPERATOR_SKILLS)
+def test_every_operator_skill_loads_dialogue_reference(skill: str) -> None:
+    text = _operator(skill)
+    assert "../../references/dialogue-boundary.md" in text
+    assert "before ACK, START, return, or STOP handling" in text
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    (
+        ("\nCurrent decision is DEC:SECRET-DECISION.\n", "LIVE_STATE_FORBIDDEN"),
+        ("\nCurrent workstream is WS:PRIVATE-WORK.\n", "LIVE_STATE_FORBIDDEN"),
+        ("\nCurrent Linear issue is MAS-999.\n", "LIVE_STATE_FORBIDDEN"),
+        ("\nCurrent pull request is #999.\n", "LIVE_STATE_FORBIDDEN"),
+        ("\nDigest: " + "a" * 64 + "\n", "LIVE_STATE_FORBIDDEN"),
+    ),
+)
+def test_additional_live_company_identities_are_refused(
+    tmp_path: Path, content: str, expected: str
+) -> None:
+    _copy_package(tmp_path)
+    target = tmp_path / "plugins/mastermind-sol/skills/bootstrap-mastermind/SKILL.md"
+    target.write_text(target.read_text() + content)
+    result = validate_repository(tmp_path)
+    assert expected in {error["code"] for error in result["errors"]}
+
+@pytest.mark.parametrize(
+    ("plugin", "skills"),
+    (("mastermind-sol", SOL_SKILLS), ("mastermind-operator", OPERATOR_SKILLS)),
+)
+def test_skill_descriptions_are_trigger_only(plugin: str, skills: tuple[str, ...]) -> None:
+    for skill in skills:
+        text = (ROOT / "plugins" / plugin / "skills" / skill / "SKILL.md").read_text()
+        description = next(
+            line.removeprefix("description: ")
+            for line in text.splitlines()
+            if line.startswith("description: ")
+        )
+        assert description.startswith("Use when ")
+
+
+def test_validator_rejects_missing_package_reference(tmp_path: Path) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-sol/skills/bootstrap-mastermind/SKILL.md"
+    path.write_text(path.read_text().replace(
+        "../../references/authority-boundaries.md",
+        "missing-authority-reference.md",
+    ))
+    result = validate_repository(tmp_path)
+    assert "PACKAGE_REFERENCE_MISSING" in {error["code"] for error in result["errors"]}
+
+
+def test_validator_rejects_nontrigger_skill_description(tmp_path: Path) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-operator/skills/return-progress/SKILL.md"
+    text = path.read_text()
+    lines = text.splitlines()
+    lines[2] = "description: Return progress through the bound operation."
+    path.write_text("\n".join(lines) + "\n")
+    result = validate_repository(tmp_path)
+    assert "INVALID_SKILL_DESCRIPTION" in {error["code"] for error in result["errors"]}

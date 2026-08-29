@@ -161,6 +161,8 @@ ALLOWED_PACKAGE_FILES = frozenset(
         for skill in skills
     }
 )
+SOL_REFERENCE_MARKER = "../../references/authority-boundaries.md"
+OPERATOR_REFERENCE_MARKER = "../../references/dialogue-boundary.md"
 SOL_GATE_MARKERS = (
     "Read protected Mastermind `master`",
     "`docs/sol_skills/INDEX.md`",
@@ -197,9 +199,17 @@ FRONTMATTER_RE = re.compile(
     re.DOTALL,
 )
 SHA_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])")
+DIGEST_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
 RUNTIME_ID_RE = re.compile(r"\b(?:JOB|ATT|WORKER)-[A-Za-z0-9._:-]+\b")
+AGENTOS_REF_RE = re.compile(r"\b(?:WS|DEC|DSC):[A-Z0-9][A-Z0-9._-]*\b")
+LINEAR_REF_RE = re.compile(r"\bMAS-[0-9]{1,9}\b")
+PR_REF_RE = re.compile(r"(?<![A-Za-z0-9_])#[0-9]{2,6}\b")
 SLACK_CHANNEL_RE = re.compile(r"\bC[A-Z0-9]{8,}\b")
 SLACK_TS_RE = re.compile(r"\b\d{10}\.\d{6}\b")
+LIVE_STATE_PATTERNS = (
+    SHA_RE, DIGEST_RE, RUNTIME_ID_RE, AGENTOS_REF_RE, LINEAR_REF_RE,
+    PR_REF_RE, SLACK_CHANNEL_RE, SLACK_TS_RE,
+)
 APP_ID_RE = re.compile(r"\b(?:asdk_app|connector|templated_apps|plugin)_[A-Za-z0-9_-]+\b")
 
 
@@ -296,6 +306,16 @@ def _validate_skill(
             )
         )
         return
+    description = match.group("description").strip()
+    if not description.startswith("Use when ") or len(description) > 500:
+        errors.append(
+            _error(
+                root,
+                path,
+                "INVALID_SKILL_DESCRIPTION",
+                "description must be a trigger-only sentence beginning with 'Use when '",
+            )
+        )
     body = match.group("body")
     if plugin == "mastermind-sol":
         missing = [marker for marker in SOL_GATE_MARKERS if marker not in body]
@@ -308,15 +328,34 @@ def _validate_skill(
                     f"Sol skill is missing current-source marker(s): {missing}",
                 )
             )
-    elif "one already-bound operation and dialogue" not in body:
-        errors.append(
-            _error(
-                root,
-                path,
-                "BOUND_OPERATION_GATE_MISSING",
-                "Operator skill must require one already-bound operation and dialogue",
+        if SOL_REFERENCE_MARKER not in body:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "PACKAGE_REFERENCE_MISSING",
+                    "Sol skill must load the packaged authority-boundary reference",
+                )
             )
-        )
+    else:
+        if "one already-bound operation and dialogue" not in body:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "BOUND_OPERATION_GATE_MISSING",
+                    "Operator skill must require one already-bound operation and dialogue",
+                )
+            )
+        if OPERATOR_REFERENCE_MARKER not in body:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "PACKAGE_REFERENCE_MISSING",
+                    "Operator skill must load the packaged dialogue-boundary reference",
+                )
+            )
 
 
 def _package_files(root: Path, errors: list[dict[str, str]]) -> list[Path]:
@@ -374,9 +413,14 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
             errors.append(
                 _error(root, path, "INSTALLED_APP_ID_FORBIDDEN", "installed app identifier is forbidden")
             )
-        if SHA_RE.search(text) or RUNTIME_ID_RE.search(text) or SLACK_CHANNEL_RE.search(text) or SLACK_TS_RE.search(text):
+        if any(pattern.search(text) for pattern in LIVE_STATE_PATTERNS):
             errors.append(
-                _error(root, path, "LIVE_STATE_FORBIDDEN", "live repository, runtime, or transport identity is forbidden")
+                _error(
+                    root,
+                    path,
+                    "LIVE_STATE_FORBIDDEN",
+                    "live repository, organizational, runtime, projection, or transport identity is forbidden",
+                )
             )
         if "mastermind-operator" in path.parts:
             for phrase in GENERIC_OPERATOR_PHRASES:

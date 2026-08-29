@@ -1,6 +1,6 @@
 ---
 name: review-worker-return
-description: Review a worker, COO, research, or implementation return against the original outcome before continuing or stopping it.
+description: Use when a worker or COO returns BLOCKED, DECISION_REQUEST, RESULT, research, code, a pull request, or claimed completion.
 ---
 
 # Review Worker Return
@@ -10,6 +10,10 @@ Use when a worker or COO returns `BLOCKED`, `DECISION_REQUEST`, `RESULT`, resear
 ## Mandatory current-source gate
 
 Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `REVIEW_RETURN.md`, `RECONCILE_STATE.md`, `CLOSEOUT.md`, and the dialogue close law from that same exact commit, and verify compatibility. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
 
 ## Procedure
 

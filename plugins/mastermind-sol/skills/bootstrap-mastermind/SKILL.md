@@ -1,11 +1,15 @@
 ---
 name: bootstrap-mastermind
-description: Load the current protected Mastermind Sol procedure from one exact commit before substantial reasoning or action.
+description: Use when entering any substantial Mastermind task, fresh Sol chat, architecture review, modifying CEO action, or material closeout.
 ---
 
 # Bootstrap Mastermind
 
 Use for every substantial Mastermind task, fresh Sol chat, program recovery, architecture review, modifying CEO action, or material closeout.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
 
 ## Input
 

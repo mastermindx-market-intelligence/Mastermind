@@ -1,6 +1,6 @@
 ---
 name: escalate-decision
-description: Return one bound BLOCKED or DECISION_REQUEST when a material decision prevents lawful continuation.
+description: Use when a material dependency, authority, architecture, security, source-law, or scope decision prevents lawful continuation.
 ---
 
 # Escalate Decision
@@ -10,6 +10,10 @@ Use only for one already-bound operation and dialogue. The model must never choo
 ## Bound operation gate
 
 Fresh-read the exact carrier and prove the current Attempt and binding remain authoritative before writing.
+
+## Required package reference
+
+Read `../../references/dialogue-boundary.md` before ACK, START, return, or STOP handling. It defines the state distinctions and no-generic-Slack boundary for this packaged workflow.
 
 ## Procedure
 

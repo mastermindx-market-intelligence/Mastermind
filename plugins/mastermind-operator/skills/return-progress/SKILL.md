@@ -1,6 +1,6 @@
 ---
 name: return-progress
-description: Return one concise evidence-backed PROGRESS update on the bound operation without changing lifecycle state.
+description: Use when the bound operation has a material evidence-producing update and lawful execution can continue.
 ---
 
 # Return Progress
@@ -10,6 +10,10 @@ Use only for one already-bound operation and dialogue. The model must never choo
 ## Bound operation gate
 
 Require the exact current binding and fresh-read the bound carrier after the latest evidence-producing action.
+
+## Required package reference
+
+Read `../../references/dialogue-boundary.md` before ACK, START, return, or STOP handling. It defines the state distinctions and no-generic-Slack boundary for this packaged workflow.
 
 ## Procedure
 

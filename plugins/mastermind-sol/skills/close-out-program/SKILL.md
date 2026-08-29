@@ -1,6 +1,6 @@
 ---
 name: close-out-program
-description: Make an accepted Mastermind result durable across canonical systems without creating another memory plane.
+description: Use when a material architecture ruling, accepted implementation, production proof, reconciliation, or terminal operator wave must become durable.
 ---
 
 # Close Out Program
@@ -10,6 +10,10 @@ Use after a material architecture ruling, accepted implementation, production pr
 ## Mandatory current-source gate
 
 Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `CLOSEOUT.md`, `RECONCILE_STATE.md`, and the dialogue close law from that same exact commit, and verify compatibility. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
 
 ## Procedure
 

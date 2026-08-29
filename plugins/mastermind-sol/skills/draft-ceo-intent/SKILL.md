@@ -1,6 +1,6 @@
 ---
 name: draft-ceo-intent
-description: Draft one bounded Executive CEO-intent packet from current Chairman intent without authoring raw authority.
+description: Use when current Chairman intent authorizes one bounded Executive root admission and a typed CEO-intent packet must be prepared.
 ---
 
 # Draft CEO Intent
@@ -10,6 +10,10 @@ Use after the Chairman gives current intent and current-source recovery shows on
 ## Mandatory current-source gate
 
 Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `COMMISSION_WAVE.md`, `RECONCILE_STATE.md`, and current routing companions from that same exact commit, and verify compatibility. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
 
 ## Input
 

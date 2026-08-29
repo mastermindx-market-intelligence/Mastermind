@@ -1,6 +1,6 @@
 ---
 name: reconcile-company-state
-description: Resolve cross-plane disagreement or ambiguous effects by consulting canonical owners and repairing only the wrong layer.
+description: Use when Mastermind canonical sources, projections, transports, session bindings, or modifying effects disagree or are ambiguous.
 ---
 
 # Reconcile Company State
@@ -10,6 +10,10 @@ Use for stale or conflicting Agent OS, Executive OS, GitHub, Linear, Slack, Runt
 ## Mandatory current-source gate
 
 Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `RECONCILE_STATE.md`, and `CLOSEOUT.md` from that same exact commit, and verify compatibility. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
 
 ## Procedure
 

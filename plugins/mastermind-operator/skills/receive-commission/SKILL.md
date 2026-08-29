@@ -1,6 +1,6 @@
 ---
 name: receive-commission
-description: Receive one bound Mastermind operation, acknowledge pickup, read the exact carrier, and START only after gates clear.
+description: Use when a trusted host has bound the current operator to one exact Mastermind operation and dialogue.
 ---
 
 # Receive Commission
@@ -10,6 +10,10 @@ Use only for one already-bound operation and dialogue. Never self-select work fr
 ## Bound operation gate
 
 Require the trusted host or app binding for the exact operation, actor, Job, Attempt, Worker, commission, dialogue parent, and allowed message types. The model must never choose actor, Job, Attempt, Worker, provider, account, host, channel, or thread.
+
+## Required package reference
+
+Read `../../references/dialogue-boundary.md` before ACK, START, return, or STOP handling. It defines the state distinctions and no-generic-Slack boundary for this packaged workflow.
 
 ## Procedure
 

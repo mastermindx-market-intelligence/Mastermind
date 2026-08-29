@@ -1,6 +1,6 @@
 ---
 name: review-pull-request
-description: Perform an adversarial exact-head pull-request review against the governing outcome and current source law.
+description: Use when reviewing one exact GitHub pull request against its governing Mastermind outcome and current source law.
 ---
 
 # Review Pull Request
@@ -10,6 +10,10 @@ Use for one exact GitHub pull request after recovering the governing outcome and
 ## Mandatory current-source gate
 
 Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `REVIEW_RETURN.md`, and `RECONCILE_STATE.md` from that same exact commit, and verify compatibility. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+
+## Required package reference
+
+Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. The reference summarizes canonical ownership; current protected source still controls.
 
 ## Procedure
 
