@@ -1,6 +1,7 @@
 "use strict";
 
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
+const REPROBE_KIND = "MMX_WEB_SOL_REPROBE";
 const PROBE_SCHEMA = "mastermind.web_sol_surface_probe.v1";
 const CHAT_PATH = /^(?:\/c\/[^/]+|\/g\/g-p-[A-Za-z0-9_-]+\/c\/[^/]+)\/?$/;
 
@@ -52,7 +53,7 @@ async function sha256Hex(value) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function buildProbe() {
+async function buildProbe(expectedConversationFingerprint = null) {
   const targetPresent = CHAT_PATH.test(location.pathname);
   const composerAvailable = firstMatch(COMPOSER_SELECTORS);
   const generationActive = firstMatch(ACTIVE_SELECTORS);
@@ -60,6 +61,10 @@ async function buildProbe() {
   const conversationFingerprint = targetPresent
     ? await sha256Hex(`${location.origin}${location.pathname}`)
     : null;
+  const exactConversationLoaded =
+    targetPresent &&
+    typeof expectedConversationFingerprint === "string" &&
+    conversationFingerprint === expectedConversationFingerprint;
 
   return {
     kind: PROBE_KIND,
@@ -67,7 +72,7 @@ async function buildProbe() {
     observation: {
       schema: PROBE_SCHEMA,
       target_present: targetPresent,
-      exact_conversation_loaded: false,
+      exact_conversation_loaded: exactConversationLoaded,
       page_responsive: true,
       document_ready_state: normalizedReadyState(),
       visibility: normalizeVisibility(),
@@ -78,6 +83,21 @@ async function buildProbe() {
     },
   };
 }
+
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  if (
+    !request ||
+    request.kind !== REPROBE_KIND ||
+    typeof request.expected_conversation_fingerprint !== "string" ||
+    !/^[0-9a-f]{64}$/.test(request.expected_conversation_fingerprint)
+  ) {
+    return false;
+  }
+  buildProbe(request.expected_conversation_fingerprint)
+    .then((probe) => sendResponse(probe))
+    .catch(() => sendResponse(null));
+  return true;
+});
 
 buildProbe()
   .then((probe) => chrome.runtime.sendMessage(probe))
