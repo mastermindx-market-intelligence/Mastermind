@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import io
+import os
+import termios
 from pathlib import Path
 
 import pytest
@@ -21,6 +24,16 @@ def _load():
     spec = _module_spec()
     assert spec is not None, "CRED0 host_enrollment module is not built yet"
     return importlib.import_module(MODULE)
+
+
+class _LineOnlyInput(io.BytesIO):
+    def read(self, *args, **kwargs):  # pragma: no cover - forbidden path
+        raise AssertionError("secret input must use one bounded readline")
+
+
+class _FakeTtyInput(io.BytesIO):
+    def fileno(self) -> int:
+        return 77
 
 
 def test_linear_projector_host_enrollment_module_exists() -> None:
@@ -84,3 +97,59 @@ def test_secret_shaped_argv_or_environment_refuses_opaquely() -> None:
         )
     assert exc.value.code == "PROJECTOR_HOST_SECRET_SURFACE_REFUSED"
     assert "not-for-output" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"",
+        b" secret\n",
+        b"secret \n",
+        b"secret value\n",
+        b"secret\tvalue\n",
+        b"a\nsecond\n",
+        b"\x7f\n",
+        "caf\N{LATIN SMALL LETTER E WITH ACUTE}\n".encode("utf-8"),
+        b"a" * 4097 + b"\n",
+    ],
+)
+def test_decode_secret_refuses_malformed_input(raw: bytes) -> None:
+    mod = _load()
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod._decode_secret_bytes(raw)
+    assert exc.value.code == "PROJECTOR_HOST_INPUT_REFUSED"
+
+
+def test_secret_reader_uses_one_bounded_line_and_returns_bytes() -> None:
+    mod = _load()
+    stream = _LineOnlyInput(b"projector-secret\nsecond-line\n")
+    assert mod.read_secret_from_stdin(stream) == b"projector-secret"
+    assert stream.readline() == b"second-line\n"
+
+
+def test_tty_echo_is_restored_even_when_secret_decode_refuses(monkeypatch) -> None:
+    mod = _load()
+    original = [0, 0, 0, termios.ECHO | 0x100]
+    calls: list[list[int]] = []
+
+    monkeypatch.setattr(mod.os, "isatty", lambda fd: fd == 77)
+    monkeypatch.setattr(mod.termios, "tcgetattr", lambda fd: list(original))
+
+    def _setattr(fd, when, attrs):
+        assert fd == 77
+        assert when == termios.TCSANOW
+        calls.append(list(attrs))
+
+    monkeypatch.setattr(mod.termios, "tcsetattr", _setattr)
+
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.read_secret_from_stdin(_FakeTtyInput(b"bad secret\n"))
+    assert exc.value.code == "PROJECTOR_HOST_INPUT_REFUSED"
+    assert calls[0][3] & termios.ECHO == 0
+    assert calls[-1] == original
+
+
+def test_secret_decoder_accepts_maximum_ascii_value() -> None:
+    mod = _load()
+    raw = b"x" * 4096 + b"\n"
+    assert mod._decode_secret_bytes(raw) == b"x" * 4096
