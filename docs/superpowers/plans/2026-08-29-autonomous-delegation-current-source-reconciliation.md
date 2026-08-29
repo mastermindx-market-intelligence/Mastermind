@@ -4,32 +4,14 @@
 **Owner:** Sol, AI CEO  
 **Planning carrier:** Mastermind #212 / `sol/organizational-continuity-attention-recovery-plan-20260828`  
 **Parent detailed plan:** `docs/superpowers/plans/2026-08-29-autonomous-delegation-operational-fluency.md`  
-**Architecture release carrier:** Mastermind #227; closed-unmerged #225 is metadata history only  
-**Current protected source:** `mastermindx-market-intelligence/Mastermind@19fe09ddbe065d57292effc2544edcbf447bfcc0`, `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.  
-**Authority:** current-source/current-carrier precedence only. This file supersedes stale current-state statements in #212 planning files while preserving their detailed implementation contracts unless explicitly narrowed here.  
+**Protected architecture:** Mastermind #227 / merge `edc10addbb6dd827929a6661d6ec125d2967ac3e`  
+**Current protected source at this reconciliation:** `mastermindx-market-intelligence/Mastermind@1b99ea1d0a6232e11fd46915d348685764cb00cf`, `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.  
+**Authority:** current-source/current-carrier precedence only. This file supersedes stale current-state statements in older #212 planning records. It does not change the detailed implementation contracts unless explicitly narrowed below.  
 **Capability state:** `SPEC_ONLY / RECORDS_ONLY / DRAFT-HOLD`.
 
-## 1. Source movement during planning
+## 1. Protected / subtract from future work
 
-The detailed operational-fluency plan was authored from protected `adccc544509aaa0ef7c0bb4f8bdbbfab19cf85e2`. During planning, the expected existing WP-1R owner completed and Mastermind #217 merged into protected master as:
-
-```text
-19fe09ddbe065d57292effc2544edcbf447bfcc0
-```
-
-This is not a collision requiring a replacement branch. It satisfies the plan's `AD-DLG1` prerequisite.
-
-Therefore:
-
-```text
-AD-DLG1 / #217 = DONE / PROTECTED
-```
-
-Do not reopen #217 and do not commission a sibling Agent Dialogue rebound repair.
-
-## 2. Current implementation-carrier ledger
-
-### Protected / subtract from future work
+The following are now protected and must not be reopened or rebuilt:
 
 - #214 — continuity / project-management / single-Sol-action source law;
 - #209 — WP-TW1 classifier;
@@ -37,156 +19,211 @@ Do not reopen #217 and do not commission a sibling Agent Dialogue rebound repair
 - #216 — WP-TW2 observer -> Wake bridge;
 - #217 — Agent Dialogue V2 RESULT continuation + P1/P2 same-parent applicability carrier;
 - #220 — production-disarmed Slack Web API client;
-- current Wake transport predecessor;
-- Executive strict-v2 deterministic orchestration/Job/Attempt/Worker command machinery;
-- existing Operator Continuity Attempt-boundary/continuation primitives.
+- #227 — Autonomous Delegation Operational Fluency source law, merged as `edc10addbb6dd827929a6661d6ec125d2967ac3e`;
+- #231 — private long-running Agent Relay runtime, merged as `2962759e8abf6bf722a8582f92af8f84013f5f40`;
+- #215 — no-precommission / account-neutral placement Skillpack repair, merged as current protected `1b99ea1d0a6232e11fd46915d348685764cb00cf`;
+- current Wake transport predecessor, Executive strict-v2 Job/Attempt/Worker command machinery, and accepted Operator Continuity Attempt-boundary primitives.
 
-### Existing open/current owners — preserve, do not duplicate
+The protected #215 law is now canonical procedure: ordinary unbound `CAPACITY_SELECTABLE` work is `WAITING_CAPACITY / needs_placement`, not routine Chairman account selection; deliberate lawful direct delivery to a concrete eligible session is receiver assignment.
 
-- #221 — private long-running Agent Relay runtime. It remains the runtime owner to accept/review/reconcile before AD-DLG2 touches shared Agent Relay paths.
-- #223 — stacked Agent Relay enrollment/install ceremony. It must reconcile against #221/current base on the same carrier; never create a second enrollment/runtime stack.
-- #228 / MAS-206 — same-branch/same-head OCR-6R pure Executive Steward read-core release carrier. Closed-unmerged draft #222 is metadata history only. AD-CR1 waits for this exact owner to be protected before modifying Steward core paths.
-- #215 — manual-handoff/precommission Skillpack release. It remains the sole five-file policy carrier and is currently under same-carrier RED->GREEN release repair; automated-delegation code must not duplicate its Skillpack paths.
-- #170 — Session Truth only where current cross-owner joins still require it.
-- #188 / current Web-Sol/Secretary descendants — surface architecture/actuation owner; autonomous delegation must not create a browser/session owner plane.
-- Capacity Fabric / RF / HF / PF / Operator Continuity / MH lanes — exclusive provider/realm/placement/continuity owners.
+## 2. Current active exceptions
 
-### Current architecture source-law carrier
+### 2.1 AD-ID1 / MAS-208 — receiver assigned, worker has not consumed it
 
-Closed-unmerged draft #225 is historical metadata only. The exact same branch and exact same reviewed head continue through non-draft **#227** under the same logical operation:
+Canonical operation:
 
 ```text
-operation: organizational-continuity-autonomous-delegation-operational-fluency-20260829-sol-001
-branch:    sol/autonomous-delegation-operational-fluency-20260829
-head:      0e80dd0739b2bb650ce8809669163f8854e26794
+ad-id1-transport-neutral-ceo-request-20260829-sol-001
 ```
 
-#225's exact-head architecture review and CI are valid evidence for these identical bytes, but #227 still requires its own current-base required `test` and final protected-source reread before release.
-
-No runtime wave is released merely because #227 exists. New runtime waves require protected #227 plus their own current-source/collision/action gates.
-
-## 2.1 Agent Relay foundation is intentionally not full autonomous dialogue
-
-Current review of #221 exact head `567a68d24c197999c6ba4849c617a106ef1f9ed6` plus stacked #223 exposed two intentional transitional limits. They are **not reasons to widen #221**; they are explicit downstream gates.
-
-### RULING authority remains Chairman-only in the current Relay composition
-
-`PrivateRelayAuthorityPolicy` currently allows an engine-validated Sol `CONTINUE`, but `minimum_authority(...)` always returns `CHAIRMAN_REQUIRED`. Tests deliberately pin that behavior.
-
-This is acceptable for the production-disarmed A2 Relay foundation, because Slack prose cannot grant authority. It is **not** sufficient for the zero-touch company: a fully within-commission worker `DECISION_REQUEST` must eventually be answerable by the exact action-authoritative Sol when current canonical commission/authority law permits it.
-
-Therefore:
-
-- do not weaken #221's fixed conservative policy as an incidental runtime edit;
-- **AD-SOL1** owns the later trusted authority composition: exact action-authoritative Sol target + current canonical commission/authority floor + Chairman-only/new-authority refusal;
-- no model/Slack field may lower that trusted floor;
-- ambiguous Sol ownership remains `ATTENTION_OWNER_CONFLICT`, not newest-responder election.
-
-### Current enrollment is ChatGPT1-parent-only and the Web API client is reply-only
-
-Stacked #223 currently freezes:
+Canonical dialogue carrier:
 
 ```text
-ALLOWED_SOL_USER_IDS    = ChatGPT1 + ChatGPT2
-ALLOWED_PARENT_USER_IDS = ChatGPT1 only
+C0BSBM78V1N / 1787992460.223269
 ```
 
-The protected #220 Slack client exposes thread-reply mutation, not a canonical top-level parent `ensure` primitive. This means the current A2 stack can safely service an already-existing accepted parent, but it cannot be the final automated source of exactly-one parent for an Executive-derived child operation.
-
-Therefore:
-
-- do not make ChatGPT2/another Sol manually create the autonomous parent;
-- do not simply broaden `allowed_parent_user_ids` to more Sol accounts and recreate the duplicate-top-level-handoff problem;
-- **AD-DLG2** owns the governed idempotent parent-ensure path from the Executive-derived child/dialogue identity;
-- the parent-emission actor must be a trusted canonical Relay/company transport identity, not arbitrary current Sol account identity;
-- `0 matches -> create once`, `1 match -> reuse`, `>1 -> refuse/repair`; effect-unknown parent write reconciles the same prospective identity and never emits a blind second parent.
-
-Until AD-DLG2 is proven, #221/#223 may be accepted only as Agent Relay infrastructure primitives, never as proof that autonomous handoff creation is solved.
-
-## 3. Current executable DAG
-
-Use this order unless a later protected source law explicitly changes it:
+Assigned receiver:
 
 ```text
-A. #227 exact-current source-law release
-
-B. independent existing carriers continue/release under own authority:
-   #221 Agent Relay runtime
-   #223 Agent Relay enrollment (stacked on #221)
-   #228 OCR-6R Steward read core
-   #215 Skillpack manual-handoff repair
-   Capacity/OCR/HF/PF/MH predecessors
-
-C. after #227 protected:
-   AD-ID1 transport-neutral automated CEO request identity
-   AD-CHILD1 Executive Job -> company operation/dialogue identity
-
-D. after #221/#223 + #217 protected and shared paths clear:
-   AD-DLG2 idempotent canonical dialogue-parent ensure
-
-E. after AD-CHILD1 + AD-DLG2:
-   AD-RET1 sealed-worker mechanical RESULT projection
-   then AD-RET2 sustained Operator Harness semantic-yield projection when its provider-neutral owner is accepted
-
-F. after current SessionTarget/Wake/runtime binding owners are sufficient:
-   AD-SOL1 exact Sol action-target enforcement/transfer + trusted within-commission RULING composition
-
-G. after current OCR retry safety sources are pinned:
-   AD-RETRY1 typed retry-safe classification before automatic requeue/rollover
-
-H. after multiple real lawful Worker realms + provider-neutral harness are accepted:
-   AD-FLEET1 cross-root parallel dispatch
-   one active action-authoritative child per root remains the initial V1 rule
-
-I. after #228 + relevant AD-* projections:
-   AD-CR1 Steward/Control Room operating cockpit
-
-J. SHADOW -> CANARY -> SMALL FLEET -> PRODUCTION FLEET acceptance
+CTO-SENTINEL
+native_task_id=01a04c44-7988-7da1-a05e-9ed43da374c0
 ```
 
-`AD-ID2` second-approved-ingress parity may proceed after AD-ID1 and current Executive MCP caller-identity/write authority allows it. It is required before the final cross-ingress production canary but is not required to begin single-ingress shadow mode.
+The source-law gate is closed and the direct-targeted receiver assignment exists. The same carrier also contains later Sol `CONTINUE / EXECUTE NOW` and acceptance-addendum edges. Fresh reconciliation nevertheless finds **zero worker replies**: no PICKUP_ACK, WATCH_ARMED, START, BLOCKED, DECISION_REQUEST, CYBER_GUARD or RESULT. Exec Ops likewise has no `EXECUTION_ACK CTO-SENTINEL`.
 
-## 4. Held boundaries
+Current derived state:
+
+```text
+ATTENTION_OWNER_UNRESPONSIVE
+execution_not_proven_started
+```
+
+This is no longer `WAITING_CAPACITY`; do not create another AD-ID1 operation, receiver, Slack parent or watcher plane. A coordination-only POINTER was sent to the existing `SOL-DIR-PRO / director_epoch=20260829-pro-001` fleet mechanism. MAS-208 carries the same projection.
+
+### 2.2 PR #223 / MAS-207 — real ABA code blocker plus unconsumed worker assignment
+
+Canonical operation:
+
+```text
+a2-agent-relay-enrollment-aba-repair-20260829-sol-001
+```
+
+Canonical dialogue carrier:
+
+```text
+C0BSBM78V1N / 1787994179.362369
+```
+
+Assigned receiver:
+
+```text
+CTO-ORION
+native_task_id=01a03330-4c36-7a11-b730-44c591ed3481
+```
+
+Exec Ops has already reconciled ORION's old AD-CHILD1 child as terminal and assigned ORION exclusively to this #223 repair. The #223 repair thread still has zero worker replies, so attention state is:
+
+```text
+ATTENTION_OWNER_UNRESPONSIVE
+execution_not_proven_started
+```
+
+Separately, PR #223 has a genuine candidate-owned security blocker:
+
+```text
+INODE_REUSE_ABA_ROLLBACK_IDENTITY
+```
+
+Hosted Linux proved that `(device,inode)` is insufficient after the original created-file descriptor is closed because an unlinked path can be immediately recreated with the same inode. The same two-file #223 carrier must retain a kernel-bound original object reference/descriptor through commit-or-rollback, authenticate the current path/dirfd entry against that original object before unlink, preserve foreign replacements on mismatch, and close retained descriptors exactly once/idempotently. Do not weaken the failing tests, rely on ctime/sleeps/retries, or create a sibling PR.
+
+A coordination-only POINTER was sent to the existing `SOL-DIR-PRO` fleet mechanism. MAS-207 carries the same attention + code-blocker split.
+
+### 2.3 Temporary worker-side scheduled inbox wake is not production continuity
+
+The two exact direct-targeted operations above demonstrate the current transition failure: assignment can be semantically correct while the provider-native reasoning session fails to consume it. The temporary scheduled Exec-Ops/provider-inbox bridge is therefore not sufficient proof for autonomous delegation.
+
+Final acceptance must mechanically guarantee:
+
+```text
+canonical assignment / return
+-> exact current RuntimeBinding / target
+-> provider-native wake or safe transfer
+-> pickup/semantic projection
+```
+
+and must surface assigned-but-unconsumed work in Steward/Control Room without Chairman Slack archaeology.
+
+The existing **single** `Mastermind Continuity Watch` remains the only estate-level temporary convergence watch. Its current prompt has been reconciled to these exceptions; do not create sibling estate watches.
+
+## 3. Current release / foundation carriers
+
+### Agent Relay runtime
+
+#231 is protected as `2962759e8abf6bf722a8582f92af8f84013f5f40`. It is a `BUILT_NOT_PROVEN / production-disarmed` infrastructure primitive only.
+
+Two intentional transitional limits remain downstream requirements rather than reasons to widen #231:
+
+1. `PrivateRelayAuthorityPolicy` conservatively keeps every RULING at `CHAIRMAN_REQUIRED`; trusted within-commission exact-Sol RULING belongs to AD-SOL1.
+2. current Relay/enrollment composition does not implement idempotent exactly-one autonomous top-level parent creation; that belongs to AD-DLG2.
+
+### Agent Relay enrollment / credential boundary
+
+#223 remains the sole two-file enrollment carrier and remains DRAFT/HOLD until the ABA repair is implemented and freshly proved. Runtime #231 is no longer a dependency blocker.
+
+HOST0 / MAS-209 is a later privileged macOS host-principal/group preparation gate for `_mastermind_agent_relay` UID/GID 457 and exact `_mastermind_exec` client reachability. It is not the current #223 software blocker and no credential should be entered before #223 is safe and HOST0 is separately released.
+
+### Executive Steward read core / MAS-206
+
+#228 remains the sole release carrier. The existing branch was history-preservingly reconciled to protected `1b99ea1d...` at current head:
+
+```text
+8b0c0757d01af24c5dab448b564e7d6d100ca5da
+```
+
+Its merge base is exactly protected `1b99ea1d...`, `behind_by=0`, and the diff remains exactly:
+
+- `control_plane/executive_steward.py`
+- `tests/test_executive_steward.py`
+
+Both implementation blobs are byte-identical to the already-reviewed Steward implementation. Fresh required CI run `33247144893` was still `IN_PROGRESS` at this reconciliation. Check it once per scheduled/active review cycle; do not poll noisily.
+
+Current `SOL-DIR-PRO` hot-state release serialization remains in force unless canonically superseded:
+
+```text
+#223 ABA repair/current-base proof
+-> AD-ID1 immutable head/proof
+-> #228 Steward/current Capacity prerequisites
+```
+
+Therefore a green #228 before that release edge becomes `READY_FOR_RELEASE`, not automatic merge.
+
+## 4. Capacity / placement truth
+
+Protected CF1/provider-capacity is capacity truth only; it is not placement.
+
+Current canonical Capacity continuation remains:
+
+```text
+CF2-H0 installed-host proof
+-> CF2-P0
+-> CF2-I Executive capacity-aware placement
+```
+
+Until CF2-I is proven live, do not claim automatic Executive placement exists. Conversely, once an exact direct-targeted receiver has already been assigned (as for AD-ID1 and #223 above), do not misclassify a missing pickup as `WAITING_CAPACITY`.
+
+Routine quota-account selection is not Chairman labor under protected #215.
+
+## 5. Current autonomous-delegation DAG
+
+The detailed implementation plan remains controlling. Current executable interpretation is:
+
+```text
+PROTECTED: #227 source law
+PROTECTED: #231 Agent Relay runtime foundation
+PROTECTED: #215 account-neutral placement procedure
+PROTECTED: #217 cross-Attempt dialogue primitive
+
+CURRENT ATTENTION-HELD:
+  AD-ID1 / MAS-208 -> CTO-SENTINEL assigned, no pickup/start
+  #223 / MAS-207  -> CTO-ORION assigned, no pickup/start + ABA code defect
+
+AFTER CURRENT OWNERS RETURN/RELEASE:
+  AD-ID1    transport-neutral automated CEO request identity
+  AD-CHILD1 Executive Job -> stable company operation/dialogue identity
+  AD-ID2    second approved ingress parity / duplicate-race proof
+  AD-DLG2   idempotent canonical company dialogue-parent ensure
+  AD-RET1   sealed-worker mechanical RESULT projection
+  AD-RET2   sustained provider/harness semantic-yield projection
+  AD-SOL1   exact Sol action-target enforcement/transfer + trusted within-commission RULING
+  AD-RETRY1 typed retry-safe classification
+  AD-FLEET1 bounded cross-root parallel dispatch
+  AD-CR1    Steward/Control Room zero-Slack operating cockpit
+  AD-CUTOVER SHADOW -> CANARY -> SMALL FLEET -> PRODUCTION FLEET
+```
+
+The old ORION AD-CHILD1 operation is terminal and must not be reopened. A future lawful AD-CHILD1 implementation requires its own fresh child identity/carrier after current source/placement reconciliation.
+
+## 6. Held boundaries
 
 Do not:
 
-- run a new WP-1R implementation wave;
-- turn #221/#223 into multiple competing Relay services;
-- claim #221/#223 solve canonical top-level parent creation or trusted within-commission Sol RULING;
-- add a delegation registry, operation DB, retry DB, Sol owner registry or second scheduler;
-- rely on fuzzy semantic task matching for modification dedupe;
+- create a second estate convergence watch;
+- duplicate AD-ID1 or #223 because the assigned native task is silent;
+- reopen ORION's terminal AD-CHILD1 child;
+- weaken #223 security tests to unblock release;
+- turn #231 into AD-SOL1 or AD-DLG2 by incidental runtime widening;
+- add a delegation registry, operation DB, retry DB, Sol-owner DB, session DB, second scheduler or Slack task queue;
+- rely on fuzzy semantic similarity for mutation dedupe;
 - use RuntimeBinding alone as write authority;
-- auto-requeue generic semantic FAILED or EFFECT_UNKNOWN work;
-- enable broad intra-root parallel writes;
-- make routine capacity selection a Chairman gate;
-- make Slack or provider-window presence the authoritative task state;
-- retire the single temporary estate convergence watch before the canonical replacement paths are production-proven.
+- auto-requeue generic FAILED or EFFECT_UNKNOWN work;
+- make Slack/provider-window presence authoritative lifecycle truth;
+- make routine capacity selection a Chairman gate.
 
-## 5. Capability ledger at this reconciliation
+## 7. Exact next action
 
-```text
-#227 revised architecture release carrier         SPEC_ONLY / OPEN RELEASE CARRIER
-#225 original draft carrier                       CLOSED UNMERGED / metadata history
-#217 cross-Attempt dialogue primitive             BUILT_NOT_PROVEN / PROTECTED implementation primitive
-#220 real Slack Web API client                    BUILT_NOT_PROVEN / production-disarmed
-#221 long-running Agent Relay runtime             BUILT_NOT_PROVEN candidate / OPEN-DRAFT; not canonical-parent/RULING complete
-#223 Agent Relay enrollment/install               BUILT_NOT_PROVEN candidate / OPEN-DRAFT stacked; ChatGPT1-parent-only transition
-#228 Executive Steward read core release          BUILT_NOT_PROVEN candidate / OPEN release carrier
-#222 Steward draft carrier                        CLOSED UNMERGED / metadata history
-#215 manual handoff/precommission Skillpack fix   BUILT_NOT_PROVEN procedure candidate / OPEN release repair
-AD-ID1 / MAS-208 transport-neutral root identity  NOT_BUILT / WAITING_SOURCE_LAW
-AD-CHILD1 derived child delegation identity       NOT_BUILT
-AD-DLG2 idempotent canonical parent ensure         NOT_BUILT / REQUIRED beyond #221/#223
-AD-RET1/2 mechanical provider returns             NOT_BUILT
-AD-SOL1 runtime Sol action + trusted RULING        NOT_BUILT / REQUIRED beyond #221 host policy
-AD-RETRY1 typed retry safety                       NOT_BUILT
-AD-FLEET1 cross-root multi-worker fleet            NOT_BUILT
-AD-CR1 complete zero-Slack Chairman cockpit        PARTIAL through existing Control Room/OCR work
-full autonomous delegation cutover                 NOT_BUILT / NOT PROVEN
-```
-
-## 6. Exact next action
-
-First release gate for the **new** architecture is #227 fresh non-draft current-base required `test` plus final exact-head/current-protected-source reread. In parallel, already-started #221/#223/#228/#215 and Capacity/OCR owners may continue only under their own existing scopes and gates.
-
-After #227 is protected, the first new implementation wave is **AD-ID1 / MAS-208** because duplicate root identity must be solved before automated frontends can safely fan out new company work.
+1. Existing `SOL-DIR-PRO` / fleet attention path must recover CTO-ORION on the **existing** #223 ABA carrier or surface the exact worker-wake failure. Do not replace the operation.
+2. Existing `SOL-DIR-PRO` / fleet attention path must recover CTO-SENTINEL on the **existing** AD-ID1 carrier or surface the exact worker-wake failure. Do not replace the operation.
+3. Continue #228 CI only once per review cycle; if it turns green before the serialized release edge, mark it ready rather than merging.
+4. Preserve current protected master/release serialization while the two active Mastermind code carriers establish immutable proof unless a material security/source change requires adjudication.
+5. After worker returns, review exact immutable heads under current protected Skillpack; accept/repair/STOP explicitly on their canonical carriers and update Linear/this current-source record.
+6. Final success remains the Chairman-zero-touch production interval: no Slack archaeology, message shuttling, watcher repair, provider-account selection, stale-session hunting or manual Sol/worker waking.
