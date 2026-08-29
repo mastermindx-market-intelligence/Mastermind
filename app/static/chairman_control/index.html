@@ -165,6 +165,28 @@
         <div id="ccr-capabilities" class="ccr-capability-grid"></div>
       </section>
 
+      <section class="ccr-system-card" id="browser-review">
+        <div class="ccr-system-card-head">
+          <div>
+            <p class="ccr-section-eyebrow">Worker resource</p>
+            <h3>Isolated browser review</h3>
+          </div>
+          <button type="button" id="browser-review-run" class="ccr-secondary-button">Review this Control Room</button>
+        </div>
+        <p class="ccr-help">Runs the pinned official Playwright MCP in a fresh isolated browser. It reviews only this exact local Control Room and does not use your browser profile, cookies or credentials.</p>
+        <div id="browser-review-result" class="ccr-browser-result" role="status">No review has run in this Control Room process.</div>
+        <div id="browser-review-previews" class="ccr-browser-previews" hidden>
+          <figure>
+            <figcaption>Desktop · 1440 × 900</figcaption>
+            <img id="browser-review-desktop" alt="Latest isolated desktop Control Room screenshot">
+          </figure>
+          <figure>
+            <figcaption>Mobile · 390 × 844</figcaption>
+            <img id="browser-review-mobile" alt="Latest isolated mobile Control Room screenshot">
+          </figure>
+        </div>
+      </section>
+
       <section class="ccr-system-card">
         <div class="ccr-system-card-head"><div><p class="ccr-section-eyebrow">Unreconciled</p><h3>Loose ends</h3></div><span class="ccr-count" data-tally="loose">—</span></div>
         <div class="ccr-loose-grid">
