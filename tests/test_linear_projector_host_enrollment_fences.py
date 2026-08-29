@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 from pathlib import Path
 
 from ops.linear_projector import host_enrollment as mod
@@ -9,6 +10,11 @@ from ops.linear_projector import host_enrollment as mod
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DOC = _ROOT / "docs" / "LINEAR_PORTFOLIO_PROJECTOR_HOST.md"
+
+
+class _PipedStdin:
+    def __init__(self, payload: bytes) -> None:
+        self.buffer = io.BytesIO(payload)
 
 
 def _import_roots() -> set[str]:
@@ -62,6 +68,29 @@ def test_public_cli_has_no_generic_secret_or_service_surface() -> None:
         "schedule",
     ):
         assert forbidden not in surface
+
+
+def test_production_enroll_refuses_piped_non_tty_stdin(monkeypatch) -> None:
+    monkeypatch.setattr(mod.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(mod.sys, "stdin", _PipedStdin(b"projector-secret\n"))
+
+    def _must_not_enroll(**kwargs):  # pragma: no cover - forbidden path
+        raise AssertionError("production piped stdin must refuse before enroll")
+
+    monkeypatch.setattr(mod, "enroll", _must_not_enroll)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    assert (
+        mod.main(
+            argv=["enroll", "--client-id", "client-abc123"],
+            environ={},
+            stdout=stdout,
+            stderr=stderr,
+        )
+        == 2
+    )
+    assert stdout.getvalue() == ""
+    assert stderr.getvalue() == "REFUSED: PROJECTOR_HOST_INPUT_REFUSED\n"
 
 
 def test_non_secret_config_contract_has_no_secret_bearing_keys() -> None:
