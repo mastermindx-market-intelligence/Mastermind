@@ -17,7 +17,10 @@ def test_background_has_closed_native_action_listener_and_exact_request_schema()
     text = source(BACKGROUND)
     assert 'ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1"' in text
     assert 'RECEIPT_SCHEMA = "mastermind.web_sol_surface_receipt.v1"' in text
-    assert "nativePort.onMessage.addListener" in text
+    assert "nativePort = chrome.runtime.connectNative(NATIVE_HOST)" in text
+    assert "const port = nativePort" in text
+    assert "port.onMessage.addListener" in text
+    assert "handleNativeRequest(request, port)" in text
     assert "validActionRequest" in text
     assert 'request.action === "INSPECT"' in text
     assert 'request.action === "FOREGROUND"' in text
