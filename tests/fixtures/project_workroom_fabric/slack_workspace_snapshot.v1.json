@@ -1,10 +1,10 @@
 {
   "schema": "mastermind.project_workroom_slack_snapshot.v1",
   "workspace_id": "T0BRD2AQXQV",
-  "observed_at": "2026-08-29T09:34:34-04:00",
+  "observed_at": "2026-08-29T14:05:55-04:00",
   "source": {
-    "kind": "CONNECTED_ACTING_PRINCIPAL_READ_ONLY_CENSUS",
-    "ref": "slack:T0BRD2AQXQV:2026-08-29T09:34:34-04:00",
+    "kind": "COMPOSITE_ACTING_PRINCIPAL_READ_ONLY_CENSUS_PLUS_EXACT_CHANNEL_READBACK",
+    "ref": "slack:T0BRD2AQXQV:2026-08-29T14:05:55-04:00",
     "complete_for_public_channel_absence_proof": false,
     "completeness_reason": "CONNECTED_PRINCIPAL_VISIBLE_CHANNEL_SET_ONLY_NOT_ADMIN_COMPLETE",
     "mutation_performed": false
@@ -133,6 +133,17 @@
       "id": "C0BTD5804QK",
       "name": "mastermind-exec-ops",
       "is_private": true,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BTQ71QEA0",
+      "name": "canary-project-workroom-20260829",
+      "is_private": false,
       "is_archived": false,
       "is_general": false,
       "topic": "",
