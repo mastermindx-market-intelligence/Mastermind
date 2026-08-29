@@ -308,6 +308,8 @@ def write_new_private_file(
         descriptor = os.open(path, flags, 0o600)
     except FileExistsError:
         raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
+    except BaseException:
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
     try:
         identity = _CreatedFile(
             path=path,
@@ -646,6 +648,8 @@ def _write_new_bound_private_file(
         )
     except FileExistsError:
         raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
+    except BaseException:
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
     try:
         identity = _BoundCreatedFile(
             name=name,

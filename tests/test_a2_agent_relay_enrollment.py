@@ -661,6 +661,92 @@ def test_bound_writer_postopen_fileexists_rolls_back_and_releases_once(
         os.close(directory_descriptor)
 
 
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [(PermissionError, "open permission denied"), (OSError, "open raw failure")],
+)
+def test_absolute_writer_open_failure_is_opaque_and_never_closes_unacquired_fd(
+    monkeypatch, tmp_path: Path, error_type: type[OSError], message: str
+):
+    enrollment = _module()
+    target = tmp_path / "created"
+    close_calls: list[int] = []
+    real_close = os.close
+
+    def refuse_open(*_args, **_kwargs):
+        raise error_type(message)
+
+    def record_close(descriptor: int):
+        close_calls.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(enrollment.os, "open", refuse_open)
+    monkeypatch.setattr(enrollment.os, "close", record_close)
+
+    with pytest.raises(enrollment.A2EnrollmentError) as raised:
+        enrollment.write_new_private_file(
+            target,
+            b"original",
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=0o600,
+        )
+
+    assert str(raised.value) == "A2_ENROLLMENT_WRITE_REFUSED"
+    assert message not in str(raised.value)
+    assert not target.exists()
+    assert close_calls == []
+
+
+@pytest.mark.parametrize(
+    ("error_type", "message"),
+    [(PermissionError, "open permission denied"), (OSError, "open raw failure")],
+)
+def test_bound_writer_open_failure_is_opaque_and_never_closes_unacquired_fd(
+    monkeypatch, tmp_path: Path, error_type: type[OSError], message: str
+):
+    enrollment = _module()
+    directory_descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    real_close = os.close
+    try:
+        directory_info = os.fstat(directory_descriptor)
+        binding = enrollment._BoundDirectory(  # noqa: SLF001
+            descriptor=directory_descriptor,
+            device=directory_info.st_dev,
+            inode=directory_info.st_ino,
+            relay_gids=frozenset({os.getegid()}),
+        )
+        target = tmp_path / "agent-relay.token"
+        close_calls: list[int] = []
+
+        def refuse_open(*_args, **_kwargs):
+            raise error_type(message)
+
+        def record_close(descriptor: int):
+            close_calls.append(descriptor)
+            real_close(descriptor)
+
+        monkeypatch.setattr(enrollment.os, "open", refuse_open)
+        monkeypatch.setattr(enrollment.os, "close", record_close)
+
+        with pytest.raises(enrollment.A2EnrollmentError) as raised:
+            enrollment._write_new_bound_private_file(  # noqa: SLF001
+                binding,
+                target.name,
+                b"original",
+                uid=os.geteuid(),
+                gid=os.getegid(),
+                mode=0o600,
+            )
+
+        assert str(raised.value) == "A2_ENROLLMENT_WRITE_REFUSED"
+        assert message not in str(raised.value)
+        assert not target.exists()
+        assert close_calls == []
+    finally:
+        real_close(directory_descriptor)
+
+
 @pytest.mark.parametrize("collision_index", [0, 1, 2])
 def test_enroll_refuses_any_preexisting_target_without_reads_or_writes(
     monkeypatch, tmp_path: Path, collision_index: int
