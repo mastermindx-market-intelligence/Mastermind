@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
     PARENT_SCHEMA_V2,
@@ -11,7 +13,11 @@ from integrations.slack_agent_dialogue.contract_v2 import (
     render_message_v2,
     render_parent_v2,
 )
-from integrations.slack_agent_dialogue.engine import DialoguePolicy, SlackMessage
+from integrations.slack_agent_dialogue.engine import (
+    DialogueEngineError,
+    DialoguePolicy,
+    SlackMessage,
+)
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2, DialogueEngineV2
 from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
 
@@ -148,6 +154,35 @@ def _engine(client: InMemorySlackClient) -> DialogueEngineV2:
     )
 
 
+def _context(actor: dict[str, str]) -> DialogueContextV2:
+    return DialogueContextV2(
+        work_ref=WORK_REF,
+        commission_ref=_commission(),
+        session_ref=SESSION_REF,
+        operation_key=OPERATION,
+        watch_mode=TURN_WATCH_MODE_V1,
+        actor_ref=actor,
+        applies_to=_attempt(actor),
+    )
+
+
+def _client_with(*messages: tuple[str, str, dict[str, object]]) -> InMemorySlackClient:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(
+        SlackMessage(ts=THREAD_TS, author_user_id=SOL, text=render_parent_v2(_parent()))
+    )
+    for ts, author, message in messages:
+        client.add_reply(
+            SlackMessage(
+                ts=ts,
+                author_user_id=author,
+                text=render_message_v2(message),
+                thread_ts=THREAD_TS,
+            )
+        )
+    return client
+
+
 def test_v2_preserves_result_continue_then_worker_attempt_replacement() -> None:
     p1_actor = _worker("p1")
     p2_actor = _worker("p2")
@@ -179,48 +214,17 @@ def test_v2_preserves_result_continue_then_worker_attempt_replacement() -> None:
         created_at="2026-08-29T04:03:00Z",
     )
 
-    client = InMemorySlackClient(relay_bot_user_id=BOT)
-    client.add_parent(
-        SlackMessage(ts=THREAD_TS, author_user_id=SOL, text=render_parent_v2(_parent()))
-    )
-    for ts, author, message in (
+    client = _client_with(
         ("1787976100.000001", BOT, p1_result),
         ("1787976100.000002", SOL, sol_continue),
         ("1787976100.000003", BOT, p2_progress),
-    ):
-        client.add_reply(
-            SlackMessage(
-                ts=ts,
-                author_user_id=author,
-                text=render_message_v2(message),
-                thread_ts=THREAD_TS,
-            )
-        )
-
+    )
     engine = _engine(client)
-    p1_context = DialogueContextV2(
-        work_ref=WORK_REF,
-        commission_ref=_commission(),
-        session_ref=SESSION_REF,
-        operation_key=OPERATION,
-        watch_mode=TURN_WATCH_MODE_V1,
-        actor_ref=p1_actor,
-        applies_to=p1_applies,
-    )
-    p2_context = DialogueContextV2(
-        work_ref=WORK_REF,
-        commission_ref=_commission(),
-        session_ref=SESSION_REF,
-        operation_key=OPERATION,
-        watch_mode=TURN_WATCH_MODE_V1,
-        actor_ref=p2_actor,
-        applies_to=p2_applies,
-    )
 
     continuation = asyncio.run(
         engine.wait_for_reply(
             thread_ts=THREAD_TS,
-            context=p1_context,
+            context=_context(p1_actor),
             request_message_key=p1_result["message_key"],
             expected_types=("CONTINUE",),
             max_attempts=1,
@@ -234,7 +238,9 @@ def test_v2_preserves_result_continue_then_worker_attempt_replacement() -> None:
         "canonical_ref": None,
     }
 
-    read = asyncio.run(engine.read_thread(thread_ts=THREAD_TS, context=p2_context))
+    read = asyncio.run(
+        engine.read_thread(thread_ts=THREAD_TS, context=_context(p2_actor))
+    )
     assert [item.message["message_key"] for item in read.messages] == [
         p1_result["message_key"],
         sol_continue["message_key"],
@@ -244,3 +250,31 @@ def test_v2_preserves_result_continue_then_worker_attempt_replacement() -> None:
     assert read.messages[0].message["applies_to"] == p1_applies
     assert read.messages[2].message["actor_ref"] == p2_actor
     assert read.messages[2].message["applies_to"] == p2_applies
+
+
+def test_v2_history_refuses_foreign_job_inside_same_parent() -> None:
+    current_actor = _worker("p2")
+    foreign_actor = {
+        "kind": "worker_attempt",
+        "job_id": "job-foreign-dialogue",
+        "attempt_id": "attempt-foreign-dialogue",
+        "worker_id": "worker-foreign-dialogue",
+    }
+    foreign_message = _message(
+        "PROGRESS",
+        message_key="asd-progress-foreign-job",
+        actor=foreign_actor,
+        applies_to=_attempt(foreign_actor),
+        reply_to_message_key=None,
+        created_at="2026-08-29T04:04:00Z",
+    )
+    client = _client_with(("1787976100.000004", BOT, foreign_message))
+
+    with pytest.raises(DialogueEngineError) as exc:
+        asyncio.run(
+            _engine(client).read_thread(
+                thread_ts=THREAD_TS,
+                context=_context(current_actor),
+            )
+        )
+    assert exc.value.code == "THREAD_CONTEXT_MISMATCH"
