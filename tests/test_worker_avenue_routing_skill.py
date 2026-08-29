@@ -29,7 +29,8 @@ def test_worker_avenue_routing_is_canonical_and_routes_by_avenue() -> None:
         "Routine concrete placement is not Chairman labor",
         "WAITING_CAPACITY / needs_placement",
         "explicit manual exception only",
-        "Fable is for the hardest principal-level problems, not the default",
+        "Fable is for the hardest",
+        "principal-level problems, not the default",
         "Automated Executive routing is separate",
     )
     normalized = _normalized(skill)
@@ -114,9 +115,9 @@ def test_current_detailed_routing_law_is_preserved_while_placement_owner_changes
 
 
 def test_placement_law_applies_to_every_project_seat() -> None:
-    skill = _read("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
-    index = _read("docs/sol_skills/INDEX.md")
-    kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    skill = _normalized(_read("docs/sol_skills/WORKER_AVENUE_ROUTING.md"))
+    index = _normalized(_read("docs/sol_skills/INDEX.md"))
+    kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
 
     assert "Account-neutral enforcement" in skill
     assert "No ChatGPT, Codex, Claude, Fable, Grok or another surface is exempt" in kernel
