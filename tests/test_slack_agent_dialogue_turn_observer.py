@@ -1,0 +1,581 @@
+from __future__ import annotations
+
+import asyncio
+import copy
+from dataclasses import dataclass, field
+from dataclasses import replace
+from unittest.mock import patch
+
+from control_plane.session_targets import load_session_targets, route_obligation
+from control_plane.wake_dispatcher import WakeEffectUnknownError
+from integrations.slack_agent_dialogue.contract_v2 import (
+    MESSAGE_SCHEMA_V2,
+    TURN_WATCH_MODE_V1,
+    build_message_v2,
+    build_parent_v2,
+    render_message_v2,
+    render_parent_v2,
+)
+from integrations.slack_agent_dialogue.engine import DialoguePolicy, SlackMessage
+from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
+from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
+from integrations.slack_agent_dialogue.turn_observer import (
+    DialogueTurnObserver,
+    ObservationOutcome,
+    WakeCarrierState,
+)
+from integrations.slack_agent_dialogue.turn_wake_adapter import (
+    attention_to_wake_obligation,
+)
+from integrations.slack_agent_dialogue.turn_watcher import (
+    AgentDialogueAttention,
+    TurnAction,
+    TurnDecision,
+    TurnRoutingFacts,
+    classify_turn,
+)
+
+
+REPO = "mastermindx-market-intelligence/Mastermind"
+PARENT_TS = "1787961600.000001"
+PARENT_USER = "U0PARENT001"
+SOL_USER = "U0BRETDUAS2"
+RELAY_USER = "U0RELAY001"
+CHANNEL = "C0DIALOGUE1"
+
+
+def _commission() -> dict[str, str]:
+    return {
+        "repository": REPO,
+        "commit": "c" * 40,
+        "path": "research/commission.md",
+        "content_sha256": "b" * 64,
+    }
+
+
+def _parent() -> dict[str, object]:
+    return build_parent_v2(
+        {
+            "schema": "mastermind.agent_dialogue_parent.v2",
+            "work_ref": "WS:WORKER-PRESENCE",
+            "commission_ref": _commission(),
+            "session_ref": "asd-session-turnwatch0002",
+            "operation_key": "worker-presence-dialogue-wptw2-20260829-001",
+            "watch_mode": TURN_WATCH_MODE_V1,
+            "allowed_sol_user_ids": [SOL_USER],
+            "created_at": "2026-08-29T01:00:00Z",
+        }
+    )
+
+
+def _context(parent: dict[str, object]) -> DialogueContextV2:
+    return DialogueContextV2(
+        work_ref=str(parent["work_ref"]),
+        commission_ref=copy.deepcopy(parent["commission_ref"]),
+        session_ref=str(parent["session_ref"]),
+        operation_key=str(parent["operation_key"]),
+        watch_mode=str(parent["watch_mode"]),
+        actor_ref={
+            "kind": "executive_surface",
+            "seat": "coo",
+            "reasoning_surface": "claude",
+        },
+        applies_to={
+            "kind": "repository",
+            "repository": REPO,
+            "head_sha": "a" * 40,
+            "pr": f"{REPO}#209",
+        },
+    )
+
+
+def _routing(parent: dict[str, object]) -> TurnRoutingFacts:
+    return TurnRoutingFacts(
+        bound_operation_key=str(parent["operation_key"]),
+        bound_commission_fingerprint=str(parent["fingerprint"]),
+        root_job_id="JOB-001",
+        routing_workstream=None,
+        source_workstream="WS:WORKER-PRESENCE",
+        ceo_target_bound=True,
+        coo_target_bound=True,
+    )
+
+
+def _policy() -> DialoguePolicy:
+    return DialoguePolicy(
+        workspace_id="T0DIALOGUE1",
+        channel_id=CHANNEL,
+        relay_bot_user_id=RELAY_USER,
+        allowed_sol_user_ids=(SOL_USER,),
+        allowed_parent_user_ids=(PARENT_USER,),
+        max_channel_history=10,
+        max_thread_history=10,
+        method_timeout_seconds=1.0,
+    )
+
+
+def _client(parent: dict[str, object]) -> InMemorySlackClient:
+    client = InMemorySlackClient(relay_bot_user_id=RELAY_USER)
+    client.add_parent(
+        SlackMessage(
+            ts=PARENT_TS,
+            author_user_id=PARENT_USER,
+            text=render_parent_v2(parent),
+        )
+    )
+    return client
+
+
+def _result(parent: dict[str, object]) -> dict[str, object]:
+    return build_message_v2(
+        {
+            "schema": MESSAGE_SCHEMA_V2,
+            "message_key": "asd-result-00000002",
+            "message_type": "RESULT",
+            "work_ref": parent["work_ref"],
+            "commission_ref": copy.deepcopy(parent["commission_ref"]),
+            "session_ref": parent["session_ref"],
+            "actor_ref": {
+                "kind": "executive_surface",
+                "seat": "coo",
+                "reasoning_surface": "claude",
+            },
+            "reply_to_message_key": None,
+            "applies_to": {
+                "kind": "repository",
+                "repository": REPO,
+                "head_sha": "a" * 40,
+                "pr": f"{REPO}#209",
+            },
+            "summary": "The bounded classifier passed.",
+            "body": {
+                "status": "PASS",
+                "result": "WP-TW1 source classification is complete.",
+            },
+            "evidence_refs": [
+                f"https://github.com/{REPO}/pull/209",
+            ],
+            "requires_response": False,
+            "created_at": "2026-08-29T01:01:00Z",
+        }
+    )
+
+
+def _client_with_result(parent: dict[str, object]) -> InMemorySlackClient:
+    client = _client(parent)
+    client.add_reply(
+        SlackMessage(
+            ts="1787961600.000002",
+            author_user_id=RELAY_USER,
+            text=render_message_v2(_result(parent)),
+            thread_ts=PARENT_TS,
+        )
+    )
+    return client
+
+
+def _registry():
+    return load_session_targets().with_root_job_bindings(
+        {
+            "JOB-001": {
+                "ceo": "EXECUTIVE-CEO-A",
+                "coo": "EXECUTIVE-COO-A",
+            }
+        }
+    )
+
+
+@dataclass
+class RecordingWakeCarrier:
+    reconciliation: WakeCarrierState = WakeCarrierState.MISSING
+    effect_unknown: bool = False
+    reconcile_calls: list[tuple[object, object]] = field(default_factory=list)
+    submit_calls: list[tuple[object, object]] = field(default_factory=list)
+
+    async def reconcile(self, obligation, route) -> WakeCarrierState:
+        self.reconcile_calls.append((obligation, route))
+        return self.reconciliation
+
+    async def submit(self, obligation, route) -> None:
+        self.submit_calls.append((obligation, route))
+        if self.effect_unknown:
+            raise WakeEffectUnknownError("provider result is ambiguous")
+
+
+def _attention() -> AgentDialogueAttention:
+    return AgentDialogueAttention(
+        schema="mastermind.agent_dialogue_attention.v1",
+        source_kind="agent_dialogue_attention",
+        source_ref="agent_dialogue_attention:" + "a" * 64,
+        source_dialogue_schema="mastermind.agent_dialogue.v2",
+        message_key="asd-result-00000001",
+        message_fingerprint="b" * 64,
+        commission_fingerprint="c" * 64,
+        operation_key="worker-presence-dialogue-wptw2-20260829-001",
+        target_seat="ceo",
+        attention_kind="dialogue_turn_pending",
+        root_job_id="JOB-001",
+        routing_workstream=None,
+        source_workstream="WS:WORKER-PRESENCE",
+        evidence_refs=(
+            "https://github.com/mastermindx-market-intelligence/Mastermind/pull/209",
+        ),
+    )
+
+
+def test_attention_adapts_to_one_deterministic_canonical_wake_obligation() -> None:
+    attention = _attention()
+
+    first = attention_to_wake_obligation(
+        attention,
+        emitted_at="2026-08-29T01:00:00Z",
+    )
+    restarted = attention_to_wake_obligation(
+        attention,
+        emitted_at="2026-08-29T01:05:00Z",
+    )
+
+    assert first.source_kind.value == "agent_dialogue_attention"
+    assert first.wake_kind.value == "dialogue_turn_pending"
+    assert first.source_ref == attention.source_ref
+    assert first.declared_target_seat == "ceo"
+    assert first.root_job_id == "JOB-001"
+    assert first.workstream is None
+    assert first.source_workstream == "WS:WORKER-PRESENCE"
+    assert first.evidence_refs == (attention.source_ref, "JOB-001")
+    assert first.obligation_id == restarted.obligation_id
+    assert first.emitted_at != restarted.emitted_at
+
+
+def test_adapter_preserves_existing_root_workstream_seat_routing_precedence() -> None:
+    root_attention = _attention()
+    root_obligation = attention_to_wake_obligation(
+        root_attention, emitted_at="2026-08-29T01:00:00Z"
+    )
+    root_route = route_obligation(root_obligation, _registry())
+    assert root_route.session_alias == "EXECUTIVE-CEO-A"
+    assert root_route.root_job_id == "JOB-001"
+
+    workstream_attention = replace(
+        root_attention,
+        source_ref="agent_dialogue_attention:" + "e" * 64,
+        target_seat="coo",
+        root_job_id=None,
+        routing_workstream="terminal",
+    )
+    workstream_obligation = attention_to_wake_obligation(
+        workstream_attention, emitted_at="2026-08-29T01:00:00Z"
+    )
+    workstream_route = route_obligation(workstream_obligation, load_session_targets())
+    assert workstream_route.session_alias == "TERMINAL-COO-A"
+    assert workstream_route.workstream == "terminal"
+
+    seat_attention = replace(
+        root_attention,
+        source_ref="agent_dialogue_attention:" + "f" * 64,
+        root_job_id=None,
+        routing_workstream=None,
+    )
+    seat_obligation = attention_to_wake_obligation(
+        seat_attention, emitted_at="2026-08-29T01:00:00Z"
+    )
+    seat_route = route_obligation(seat_obligation, load_session_targets())
+    assert seat_route.session_alias == "EXECUTIVE-CEO-A"
+    assert seat_route.root_job_id is None
+    assert seat_route.workstream is None
+
+
+def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = RecordingWakeCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent),
+            routing=_routing(parent),
+        )
+
+        assert result.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert result.obligation is not None
+        assert result.obligation.wake_kind.value == "dialogue_turn_pending"
+        assert result.route is not None
+        assert result.route.target_seat == "coo"
+        assert len(carrier.reconcile_calls) == 1
+        assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
+def test_duplicate_polling_and_restart_reconcile_by_identity_not_cursor() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = RecordingWakeCarrier()
+        first_life = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_result(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+
+        first = await first_life.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        duplicate_poll = await first_life.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert first.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert duplicate_poll.outcome is ObservationOutcome.DUPLICATE_SUPPRESSED
+        assert first.obligation is not None
+        assert duplicate_poll.obligation is not None
+        assert first.obligation.obligation_id == duplicate_poll.obligation.obligation_id
+        assert len(carrier.submit_calls) == 1
+
+        carrier.reconciliation = WakeCarrierState.RECORDED
+        restarted = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_result(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            emitted_at=lambda: "2026-08-29T01:10:00Z",
+        )
+        after_restart = await restarted.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert after_restart.outcome is ObservationOutcome.DUPLICATE_SUPPRESSED
+        assert after_restart.obligation is not None
+        assert after_restart.obligation.obligation_id == first.obligation.obligation_id
+        assert len(carrier.submit_calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_active_waiter_suppresses_only_the_exact_attention_target() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        attention = classify_turn(
+            parent=parent,
+            messages=(),
+            routing=_routing(parent),
+        ).attention
+        assert attention is not None
+        probes: list[tuple[str, str]] = []
+
+        def exact_waiter(source_ref: str, target_seat: str) -> bool:
+            probes.append((source_ref, target_seat))
+            return (source_ref, target_seat) == (
+                attention.source_ref,
+                attention.target_seat,
+            )
+
+        carrier = RecordingWakeCarrier()
+        suppressed = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            has_active_waiter=exact_waiter,
+        )
+        result = await suppressed.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.ACTIVE_WAITER_SUPPRESSED
+        assert probes == [(attention.source_ref, "coo")]
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+        wrong_target_waiter = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            has_active_waiter=lambda source_ref, target_seat: (
+                source_ref,
+                target_seat,
+            )
+            == (attention.source_ref, "ceo"),
+        )
+        not_suppressed = await wrong_target_waiter.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert not_suppressed.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert len(carrier.submit_calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_incomplete_bounded_history_refuses_before_wake_carrier() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.thread_history_complete = False
+        carrier = RecordingWakeCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=carrier,
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert result.reason == "BOUNDED_HISTORY_INCOMPLETE"
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_unbound_root_target_refuses_without_seat_fallback_or_carrier_call() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = RecordingWakeCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=load_session_targets(),
+            wake_carrier=carrier,
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.REFUSED
+        assert result.reason.startswith("DIALOGUE_WAKE_TARGET_UNBOUND:")
+        assert "root_job_id JOB-001 has no binding for seat coo" in result.reason
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_effect_unknown_holds_same_identity_and_never_retries_submit() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = RecordingWakeCarrier(effect_unknown=True)
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+        )
+
+        first = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        held = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert first.outcome is ObservationOutcome.EFFECT_UNKNOWN_HOLD
+        assert held.outcome is ObservationOutcome.EFFECT_UNKNOWN_HOLD
+        assert first.obligation is not None and held.obligation is not None
+        assert first.obligation.obligation_id == held.obligation.obligation_id
+        assert len(carrier.reconcile_calls) == 1
+        assert len(carrier.submit_calls) == 1
+
+        carrier.effect_unknown = False
+        carrier.reconciliation = WakeCarrierState.EFFECT_UNKNOWN
+        restarted = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+        )
+        reconciled = await restarted.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert reconciled.outcome is ObservationOutcome.EFFECT_UNKNOWN_HOLD
+        assert reconciled.obligation is not None
+        assert reconciled.obligation.obligation_id == first.obligation.obligation_id
+        assert len(carrier.reconcile_calls) == 2
+        assert len(carrier.submit_calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_unavailable_wake_reconciliation_fails_closed_before_submit() -> None:
+    class UnavailableCarrier(RecordingWakeCarrier):
+        async def reconcile(self, obligation, route) -> WakeCarrierState:
+            self.reconcile_calls.append((obligation, route))
+            raise TimeoutError("carrier status unavailable")
+
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = UnavailableCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert result.reason == "WAKE_CARRIER_RECONCILIATION_UNAVAILABLE"
+        assert len(carrier.reconcile_calls) == 1
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_same_seat_source_to_target_is_refused_as_self_loop() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        message = _result(parent)
+        ordinary = classify_turn(
+            parent=parent,
+            messages=(message,),
+            routing=_routing(parent),
+        )
+        assert ordinary.attention is not None
+        forged_attention = replace(
+            ordinary.attention,
+            source_ref="agent_dialogue_attention:" + "d" * 64,
+            target_seat="coo",
+        )
+        forged = TurnDecision(
+            action=TurnAction.WAKE_COO,
+            attention=forged_attention,
+            reason="DIALOGUE_TURN_PENDING",
+            refusal_code=None,
+        )
+        carrier = RecordingWakeCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_result(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+        )
+
+        with patch(
+            "integrations.slack_agent_dialogue.turn_observer.classify_turn",
+            return_value=forged,
+        ):
+            result = await observer.reconcile_once(
+                context=_context(parent), routing=_routing(parent)
+            )
+
+        assert result.outcome is ObservationOutcome.REFUSED
+        assert result.reason == "DIALOGUE_SELF_LOOP_REFUSED"
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
