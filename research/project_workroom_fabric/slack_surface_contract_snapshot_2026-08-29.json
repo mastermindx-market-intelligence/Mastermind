@@ -1,11 +1,12 @@
 {
   "schema": "mastermind.project_workroom_platform_census.v1",
   "observed_at": "2026-08-29T09:34:34-04:00",
+  "reviewed_at": "2026-08-29T09:52:00-04:00",
   "operation_key": "mastermind-project-workroom-wr-r0-20260829-sol-001",
   "architecture_operation_key": "mastermind-project-workroom-fabric-20260829-sol-001",
   "source_revisions": {
     "mastermind_protected_basis": "dfd69451dce5e186ce05f65446023fbe21f07a58",
-    "mastermind_architecture_head": "1cc6030012f764194e4487017b2a73f69d6f32ae",
+    "mastermind_architecture_head": "17c89fa6fea64fda8ed26118248ac7cd15eec031",
     "macro_agentos_head": "e0f03255fdafcc4f3316cebdd5dde89e4599c5e3"
   },
   "workspace": {
@@ -15,25 +16,33 @@
     "channel_inventory_completeness": "ACTING_PRINCIPAL_VISIBLE_ONLY",
     "paid_feature_enablement": {
       "canvas": "CONFIRMED_BY_EXISTING_CHANNEL_TAB_AND_CONNECTED_TOOL",
-      "lists": "UNKNOWN_UNTIL_APP_CANARY_OR_ADMIN_READBACK",
-      "workflow_apps": "UNKNOWN_UNTIL_APP_CANARY_OR_ADMIN_READBACK",
+      "lists": "UNKNOWN_UNTIL_DEDICATED_APP_CANARY",
+      "workflow_apps": "UNKNOWN_UNTIL_DEDICATED_APP_CANARY_AND_ADMIN_READBACK",
       "custom_channel_templates": "TEMPORARILY_NOT_CREATABLE_OR_EDITABLE_PLATFORM_WIDE_AS_OF_2026-08-20"
     }
   },
   "v1_rulings": {
     "workroom_visibility": "PUBLIC_INTERNAL_ONLY",
     "private_workrooms": "DEFERRED_PENDING_GROUP_SCOPES_MEMBERSHIP_AND_PRIVACY_PROOF",
+    "workroom_channel_origin": "PROJECTOR_CREATED_BY_DEFAULT",
+    "existing_channel_adoption": "EXPLICIT_ONLY_IF_EXACT_MARKER_PROJECTOR_BOT_ALREADY_MEMBER_AND_MANAGED_SURFACES_APP_OWNED",
+    "automatic_channel_join": "FORBIDDEN_V1",
     "home_canvas": "STATIC_PROJECTOR_OWNED_CHARTER_ONLY",
-    "dynamic_status": "CONTROL_ROOM_PLUS_APP_OWNED_CHANNEL_READ_ONLY_RADAR",
-    "radar_list": "OPTIONAL_CORE_IF_LISTS_ENABLED; TODO_MODE_FALSE; CHANNEL_READ_ONLY",
+    "home_canvas_channel_access": "READ_ONLY_REQUIRED",
+    "home_canvas_creation": "TRY_CANVASES_CREATE_WITH_CHANNEL_THEN_DOWNGRADE_TO_READ; FALLBACK_STANDALONE_READ_ACCESS_PLUS_BOOKMARK",
+    "dynamic_status": "CONTROL_ROOM_PLUS_OPTIONAL_APP_OWNED_CHANNEL_READ_ONLY_RADAR",
+    "radar_list": "OPTIONAL_IF_LISTS_ENABLED; TODO_MODE_FALSE; APP_OWNED; CHANNEL_READ_ONLY",
     "radar_channel_presence": "BOOKMARK_LINK_TO_LIST_PERMALINK; NATIVE_LIST_TAB_ATTACHMENT_UNDOCUMENTED",
-    "working_notes_canvas": "HUMAN_EDITABLE_NONCANONICAL_SEPARATE_CANVAS",
+    "working_notes_canvas": "OPTIONAL_HUMAN_EDITABLE_NONCANONICAL_SEPARATE_CANVAS",
     "folders": "UI_ONLY_OR_UNDOCUMENTED_FOR_CREATION; NOT_V1_AUTOMATION",
     "workflows": "OPTIONAL_DEFERRED_UNTIL_PAID_PLAN_TRIGGER_AND_ADMIN_POLICY_CANARY",
     "custom_templates": "REJECTED_AS_DEPENDENCY",
     "linear_auto_project_channels": "DISABLED",
     "raw_agent_dialogue_linear_sync": "FORBIDDEN",
-    "agent_relay_and_workroom_projector": "SEPARATE_LEAST_PRIVILEGE_PRINCIPALS"
+    "agent_relay_and_workroom_projector": "SEPARATE_LEAST_PRIVILEGE_PRINCIPALS",
+    "concurrent_apply": "REFUSE_USING_ONE_SHOT_EXISTING_HOST_STYLE_EXCLUSIVE_LOCK",
+    "remote_change": "REFUSE_NO_LAST_WRITER_WINS",
+    "post_ambiguity": "EFFECT_UNKNOWN_EXACT_TARGET_READBACK_NO_FAILOVER"
   },
   "workroom_projector_v1_bot_scopes": [
     "bookmarks:read",
@@ -42,17 +51,22 @@
     "canvases:write",
     "channels:manage",
     "channels:read",
-    "channels:write.topic",
     "files:read",
     "lists:read",
     "lists:write"
   ],
+  "scope_notes": {
+    "channels_write_topic": "OMITTED_AS_REDUNDANT_BECAUSE_CHANNELS_MANAGE_IS_ALREADY_REQUIRED_AND_ACCEPTED_BY_SETTOPIC_SETPURPOSE",
+    "lists_scopes": "REMOVE_IF_DEDICATED_APP_CANARY_PROVES_LISTS_DISABLED_OR_OUT_OF_SCOPE",
+    "new_scope_behavior": "ANY_REQUIRED_SCOPE_OUTSIDE_CANDIDATE_SET_RETURNS_TO_SOL_BEFORE_APP_CREATION_OR_SECRET_ENROLLMENT"
+  },
   "explicitly_absent_v1_scopes": [
     "admin.*",
     "app_mentions:read",
     "channels:history",
     "channels:join",
     "channels:write.invites",
+    "channels:write.topic",
     "chat:write",
     "chat:write.public",
     "commands",
@@ -77,42 +91,42 @@
     },
     {
       "method": "conversations.list",
-      "purpose": "COMPLETE_PUBLIC_CHANNEL_MARKER_CENSUS",
+      "purpose": "COMPLETE_PUBLIC_CHANNEL_MARKER_CENSUS_WITH_PAGINATION",
       "scope": "channels:read"
     },
     {
       "method": "conversations.info",
-      "purpose": "READ_EXACT_PUBLIC_CHANNEL_NAME_ARCHIVE_TOPIC_PURPOSE",
+      "purpose": "READ_EXACT_PUBLIC_CHANNEL_NAME_ARCHIVE_TOPIC_PURPOSE_AND_BOT_MEMBERSHIP",
       "scope": "channels:read"
     },
     {
       "method": "conversations.create",
-      "purpose": "CREATE_ONE_PUBLIC_INTERNAL_WORKROOM",
+      "purpose": "CREATE_ONE_PUBLIC_INTERNAL_WORKROOM_AND_ESTABLISH_PROJECTOR_MEMBERSHIP",
       "scope": "channels:manage"
     },
     {
       "method": "conversations.rename",
-      "purpose": "RECONCILE_MANAGED_PUBLIC_CHANNEL_SLUG",
+      "purpose": "RECONCILE_APP_MANAGED_PUBLIC_CHANNEL_SLUG",
       "scope": "channels:manage"
     },
     {
       "method": "conversations.archive",
-      "purpose": "ARCHIVE_EXACT_TERMINAL_WORKROOM_AFTER_ACCEPTED_GATE",
+      "purpose": "ARCHIVE_EXACT_TERMINAL_APP_MANAGED_WORKROOM_AFTER_ACCEPTED_GATE",
       "scope": "channels:manage"
     },
     {
       "method": "conversations.setTopic",
       "purpose": "WRITE_CLOSED_WORKROOM_MARKER_AND_COMPACT_CONTEXT",
-      "scope": "channels:write.topic"
+      "scope": "channels:manage"
     },
     {
       "method": "conversations.setPurpose",
       "purpose": "WRITE_STABLE_PROJECT_PURPOSE",
-      "scope": "channels:write.topic"
+      "scope": "channels:manage"
     },
     {
       "method": "canvases.create",
-      "purpose": "CREATE_STATIC_HOME_OR_NONCANONICAL_NOTES_CANVAS",
+      "purpose": "CREATE_APP_OWNED_STATIC_HOME_OR_OPTIONAL_NONCANONICAL_NOTES_CANVAS",
       "scope": "canvases:write"
     },
     {
@@ -122,14 +136,41 @@
     },
     {
       "method": "canvases.edit",
-      "purpose": "BOUNDED_STATIC_CHARTER_EDIT_ONLY_AFTER_FILES_INFO_DRIFT_CHECK",
+      "purpose": "BOUNDED_STATIC_CHARTER_EDIT_ONLY_AFTER_LOCK_METADATA_AND_DRIFT_CHECK",
       "scope": "canvases:write"
     },
     {
       "method": "canvases.access.set",
-      "purpose": "SET_CHANNEL_READ_OR_WRITE_ACCESS_AS_EXPLICITLY_PLANNED",
+      "purpose": "REQUIRE_WORKROOM_CHANNEL_READ_ONLY_HOME_ACCESS_OR_REFUSE",
       "scope": "canvases:write"
     },
+    {
+      "method": "files.info",
+      "purpose": "READ_CANVAS_LIST_METADATA_UPDATED_TIMESTAMP_OWNER_AND_PERMALINK",
+      "scope": "files:read"
+    },
+    {
+      "method": "bookmarks.list",
+      "purpose": "READ_COMPLETE_WORKROOM_HEADER_LINK_SET",
+      "scope": "bookmarks:read"
+    },
+    {
+      "method": "bookmarks.add",
+      "purpose": "LINK_LINEAR_PROJECT_CONTROL_ROOM_HOME_RADAR_NOTES_AND_EVIDENCE",
+      "scope": "bookmarks:write"
+    },
+    {
+      "method": "bookmarks.edit",
+      "purpose": "RECONCILE_EXACT_PROJECTOR_OWNED_LINK",
+      "scope": "bookmarks:write"
+    },
+    {
+      "method": "bookmarks.remove",
+      "purpose": "REMOVE_ONLY_EXACT_PROJECTOR_OWNED_OBSOLETE_LINK",
+      "scope": "bookmarks:write"
+    }
+  ],
+  "optional_lists_methods": [
     {
       "method": "slackLists.create",
       "purpose": "CREATE_APP_OWNED_PROJECT_RADAR_WITH_TODO_MODE_FALSE",
@@ -147,12 +188,12 @@
     },
     {
       "method": "slackLists.items.create",
-      "purpose": "CREATE_EXACT_MANAGED_RADAR_ROW",
+      "purpose": "CREATE_EXACT_APP_MANAGED_RADAR_ROW",
       "scope": "lists:write"
     },
     {
       "method": "slackLists.items.update",
-      "purpose": "UPDATE_EXACT_MANAGED_RADAR_CELLS",
+      "purpose": "UPDATE_EXACT_APP_MANAGED_RADAR_CELLS_UNDER_APPLY_LOCK",
       "scope": "lists:write"
     },
     {
@@ -169,33 +210,29 @@
       "method": "slackLists.access.delete",
       "purpose": "REVOKE_CHANNEL_ACCESS_ON_ACCEPTED_ARCHIVAL_OR_PRIVACY_REPAIR",
       "scope": "lists:write"
-    },
-    {
-      "method": "files.info",
-      "purpose": "READ_CANVAS_LIST_METADATA_UPDATED_TIMESTAMP_AND_PERMALINK",
-      "scope": "files:read"
-    },
-    {
-      "method": "bookmarks.list",
-      "purpose": "READ_WORKROOM_HEADER_LINKS",
-      "scope": "bookmarks:read"
-    },
-    {
-      "method": "bookmarks.add",
-      "purpose": "LINK_LINEAR_PROJECT_CONTROL_ROOM_HOME_RADAR_AND_EVIDENCE",
-      "scope": "bookmarks:write"
-    },
-    {
-      "method": "bookmarks.edit",
-      "purpose": "RECONCILE_EXACT_PROJECTOR_OWNED_LINK",
-      "scope": "bookmarks:write"
-    },
-    {
-      "method": "bookmarks.remove",
-      "purpose": "REMOVE_ONLY_EXACT_PROJECTOR_OWNED_OBSOLETE_LINK",
-      "scope": "bookmarks:write"
     }
   ],
+  "actor_and_ownership_requirements": {
+    "bot_identity": "EXACT_DEDICATED_WORKROOM_PROJECTOR_APP_AND_BOT_READBACK_REQUIRED",
+    "existing_channel_management": "BOT_IS_MEMBER_TRUE_REQUIRED",
+    "managed_home": "APP_OWNED_FILE_REQUIRED",
+    "managed_radar": "APP_OWNED_LIST_REQUIRED",
+    "foreign_owner": "WORKROOM_FOREIGN_OWNER_REFUSAL",
+    "not_member": "WORKROOM_ACTOR_NOT_MEMBER_REFUSAL",
+    "automatic_join": false,
+    "human_membership_automation": false
+  },
+  "apply_lock_contract": {
+    "kind": "ONE_SHOT_EXISTING_HOST_STYLE_ADVISORY_OR_EXCLUSIVE_LOCK",
+    "state_owned": false,
+    "contains_desired_state": false,
+    "contains_lifecycle": false,
+    "contains_retry": false,
+    "contains_queue": false,
+    "concurrent_apply_behavior": "REFUSE",
+    "release": "PROCESS_EXIT_OR_EXPLICIT_FINALLY",
+    "path_owner_mode_timeout": "DEFER_TO_CURRENT_ACCEPTED_HOST_CREDENTIAL_ARCHITECTURE_AT_WR_A1"
+  },
   "optional_or_deferred_capabilities": [
     {
       "capability": "PRIVATE_RESTRICTED_WORKROOMS",
@@ -207,6 +244,11 @@
         "groups:write.invites"
       ],
       "reason": "ADDITIONAL_MEMBERSHIP_AUDIENCE_APP_ACCESS_AND_UNFURL_PRIVACY_PROOF_REQUIRED"
+    },
+    {
+      "capability": "EXISTING_PUBLIC_CHANNEL_ADOPTION",
+      "status": "EXPLICIT_ONLY",
+      "reason": "REQUIRES_EXACT_MARKER_BOT_ALREADY_MEMBER_APP_OWNED_SURFACES_COMPLETE_SNAPSHOT_AND_APPROVED_ADOPT_EXISTING_PLAN"
     },
     {
       "capability": "NATIVE_LIST_TAB_ATTACHMENT",
@@ -221,11 +263,7 @@
     {
       "capability": "WORKFLOW_APP_CUSTOM_FUNCTIONS_AND_TRIGGERS",
       "status": "PLATFORM_SUPPORTED_BUT_WORKSPACE_PLAN_ADMIN_AND_DEPLOYMENT_UNPROVEN",
-      "additional_scopes": [
-        "triggers:read",
-        "triggers:write"
-      ],
-      "reason": "NOT_REQUIRED_FOR_CORE_CHANNEL_HOME_RADAR_DIALOGUE_PILOT"
+      "reason": "NOT_REQUIRED_FOR_CORE_CHANNEL_HOME_DIALOGUE_PILOT"
     },
     {
       "capability": "CUSTOM_CHANNEL_TEMPLATES",
@@ -235,12 +273,12 @@
     {
       "capability": "AUTOMATIC_LINEAR_PROJECT_CHANNEL_CREATION",
       "status": "SUPPORTED_BUT_REJECTED_V1",
-      "reason": "CREATES_PUBLIC_CHANNEL_FOR_EVERY_PROJECT_INVITES_ALL_MEMBERS_AND_BYPASSES_WORKROOM_ELIGIBILITY_POLICY"
+      "reason": "CREATES_PUBLIC_CHANNEL_FOR_EVERY_PROJECT_INVITES_MEMBERS_AND_BYPASSES_WORKROOM_ELIGIBILITY_POLICY"
     },
     {
       "capability": "LINEAR_AGENT_CONTEXTUAL_ISSUE_CREATION",
       "status": "HUMAN_CONVENIENCE_ONLY",
-      "reason": "CONTEXTUAL_INFERENCE_AND_TITLE_CHANNEL_SIMILARITY_CANNOT BE AI MUTATION AUTHORITY"
+      "reason": "CONTEXTUAL_INFERENCE_AND_TITLE_OR_CHANNEL_SIMILARITY_CANNOT_BE_AI_MUTATION_AUTHORITY"
     },
     {
       "capability": "LINEAR_SLACK_BIDIRECTIONAL_THREAD_SYNC",
@@ -250,75 +288,16 @@
   ],
   "current_estate": {
     "visible_channels": [
-      {
-        "id": "C0BRAJUMGBD",
-        "name": "new-channel",
-        "visibility": "PUBLIC",
-        "purpose": "generic project channel",
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BRD2B2L85",
-        "name": "all-mastermind-x",
-        "visibility": "PUBLIC_GENERAL",
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BRDFZPLHK",
-        "name": "ceo-control-room",
-        "visibility": "PRIVATE",
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BRET68EH4",
-        "name": "social",
-        "visibility": "PUBLIC",
-        "observed_tabs": [
-          "CANVAS"
-        ],
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BRFC9JXK8",
-        "name": "build-events",
-        "visibility": "PUBLIC",
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BRH9VRUE6",
-        "name": "company-intelligence",
-        "visibility": "PUBLIC",
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BRUL9F2V7",
-        "name": "s0-sol-carrier-test",
-        "visibility": "PRIVATE",
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BSBM78V1N",
-        "name": "agent-dispatch",
-        "visibility": "PUBLIC",
-        "observed_tabs": [
-          "FILES"
-        ],
-        "managed_workroom_marker": false,
-        "role": "LEGACY_GLOBAL_DIALOGUE_TRANSPORT"
-      },
-      {
-        "id": "C0BSGABKBFY",
-        "name": "sol-runtime",
-        "visibility": "PRIVATE",
-        "managed_workroom_marker": false
-      },
-      {
-        "id": "C0BTD5804QK",
-        "name": "mastermind-exec-ops",
-        "visibility": "PRIVATE",
-        "managed_workroom_marker": false,
-        "role": "TRANSITION_COORDINATION_ONLY"
-      }
+      {"id": "C0BRAJUMGBD", "name": "new-channel", "visibility": "PUBLIC", "managed_workroom_marker": false},
+      {"id": "C0BRD2B2L85", "name": "all-mastermind-x", "visibility": "PUBLIC_GENERAL", "managed_workroom_marker": false},
+      {"id": "C0BRDFZPLHK", "name": "ceo-control-room", "visibility": "PRIVATE", "managed_workroom_marker": false},
+      {"id": "C0BRET68EH4", "name": "social", "visibility": "PUBLIC", "observed_surfaces": ["CANVAS"], "managed_workroom_marker": false},
+      {"id": "C0BRFC9JXK8", "name": "build-events", "visibility": "PUBLIC", "managed_workroom_marker": false},
+      {"id": "C0BRH9VRUE6", "name": "company-intelligence", "visibility": "PUBLIC", "managed_workroom_marker": false},
+      {"id": "C0BRUL9F2V7", "name": "s0-sol-carrier-test", "visibility": "PRIVATE", "managed_workroom_marker": false},
+      {"id": "C0BSBM78V1N", "name": "agent-dispatch", "visibility": "PUBLIC", "observed_surfaces": ["FILES"], "managed_workroom_marker": false, "role": "LEGACY_GLOBAL_DIALOGUE_TRANSPORT"},
+      {"id": "C0BSGABKBFY", "name": "sol-runtime", "visibility": "PRIVATE", "managed_workroom_marker": false},
+      {"id": "C0BTD5804QK", "name": "mastermind-exec-ops", "visibility": "PRIVATE", "managed_workroom_marker": false, "role": "TRANSITION_COORDINATION_ONLY"}
     ],
     "observed_actor_classes": [
       "CHAIRMAN",
@@ -333,10 +312,7 @@
       "app_name": "Mastermind Agent Relay",
       "bot_display_name": "Mastermind Relay",
       "observed_bot_user_id": "U0BTF3QGABF",
-      "manifest_bot_scopes": [
-        "channels:history",
-        "chat:write"
-      ],
+      "manifest_bot_scopes": ["channels:history", "chat:write"],
       "configured_channel_id": "C0BSBM78V1N",
       "multi_workroom_support": "NOT_BUILT",
       "scope_widening_for_workroom_projection": "FORBIDDEN"
@@ -359,12 +335,14 @@
   "known_api_limitations": [
     "CANVAS_WEB_API_HAS_NO_DOCUMENTED_ATOMIC_IF_MATCH_OR_REVISION_PRECONDITION",
     "CANVAS_SECTION_LOOKUP_RETURNS_SECTION_IDENTIFIERS_NOT_A_FULL_NORMALIZED_DOCUMENT_READ",
-    "NATIVE_LIST_TAB_ATTACHMENT_HAS_NO DOCUMENTED PUBLIC METHOD",
-    "BOOKMARK_FOLDER_CREATION_HAS_NO DOCUMENTED PUBLIC METHOD",
+    "CHANNEL_TABBED_CANVAS_WRITE_ACCESS_MUST_BE_DOWNGRADED_TO_READ_OR_FALL_BACK_TO_STANDALONE_READ_ACCESS",
+    "LIST_ITEM_WEB_API_HAS_NO_DOCUMENTED_ATOMIC_IF_MATCH_PRECONDITION",
+    "NATIVE_LIST_TAB_ATTACHMENT_HAS_NO_DOCUMENTED_PUBLIC_METHOD",
+    "BOOKMARK_FOLDER_CREATION_HAS_NO_DOCUMENTED_PUBLIC_METHOD",
     "SLACK_LISTS_AND_WORKFLOW_APPS_REQUIRE_PAID_PLAN_OR_FEATURE_ENABLEMENT",
     "CUSTOM_CHANNEL_TEMPLATE_CREATE_EDIT_IS_TEMPORARILY_UNAVAILABLE",
-    "CONNECTED_CHATGPT_SLACK_ACTIONS_DO_NOT DEFINE THE PRODUCTION_APP_SCOPE_OR_ACTOR_BOUNDARY",
-    "VISIBLE_CHANNEL_CENSUS_IS NOT A FULL ADMIN WORKSPACE CENSUS"
+    "CONNECTED_CHATGPT_SLACK_ACTIONS_DO_NOT_DEFINE_THE_PRODUCTION_APP_SCOPE_OR_ACTOR_BOUNDARY",
+    "VISIBLE_CHANNEL_CENSUS_IS_NOT_A_FULL_PROJECTOR_OR_ADMIN_PUBLIC_CHANNEL_CENSUS"
   ],
   "source_refs": [
     "https://docs.slack.dev/reference/methods/auth.test",
@@ -375,11 +353,14 @@
     "https://docs.slack.dev/reference/methods/conversations.archive/",
     "https://docs.slack.dev/reference/methods/conversations.setTopic/",
     "https://docs.slack.dev/reference/methods/conversations.setPurpose/",
+    "https://docs.slack.dev/reference/scopes/channels.manage/",
     "https://docs.slack.dev/reference/methods/canvases.create/",
     "https://docs.slack.dev/reference/methods/canvases.edit/",
     "https://docs.slack.dev/reference/methods/canvases.sections.lookup/",
+    "https://docs.slack.dev/reference/methods/canvases.access.set/",
     "https://docs.slack.dev/reference/methods/slackLists.create/",
     "https://docs.slack.dev/reference/methods/slackLists.update",
+    "https://docs.slack.dev/reference/methods/slackLists.items.list/",
     "https://docs.slack.dev/reference/methods/slackLists.items.create/",
     "https://docs.slack.dev/reference/methods/slackLists.items.update/",
     "https://docs.slack.dev/reference/methods/slackLists.items.delete/",
