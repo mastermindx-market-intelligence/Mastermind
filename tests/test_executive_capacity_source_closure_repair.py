@@ -106,7 +106,12 @@ def _tracked_symlink_repository(tmp_path: Path) -> tuple[Path, str]:
     vendor = repository / "vendor"
     vendor.mkdir()
     (vendor / "macro").symlink_to("macro_src")
-    _git(repository, "add", "vendor/macro")
+    for relative in REPAIR_CARRIER_PATHS:
+        destination = repository / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
+        destination.chmod(0o755 if relative.endswith(".sh") else 0o644)
+    _git(repository, "add", "vendor/macro", *REPAIR_CARRIER_PATHS)
     _git(repository, "commit", "-qm", "tracked symlink fixture")
     commit = _git(repository, "rev-parse", "HEAD")
     _git(repository, "update-ref", "refs/remotes/origin/master", commit)
@@ -222,6 +227,9 @@ def _run_nonprivileged_checkout_block(
         ),
         "MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b": (
             f"MACRO_COMMIT={repair_merge_sha}"
+        ),
+        "CARRIER_COMMIT_SHA='<40-lower-hex-current-protected-carrier-sha>'": (
+            f"CARRIER_COMMIT_SHA={repair_merge_sha}"
         ),
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'": (
             f"REPAIR_MERGE_SHA={repair_merge_sha}"
@@ -772,6 +780,7 @@ def _native_ceremony_command_from_runbook(
     )
     replacements = {
         "$REPAIR_CHECKOUT": str(repair_checkout),
+        "$CARRIER_COMMIT_SHA": repair_merge_sha,
         "$REPAIR_MERGE_SHA": repair_merge_sha,
         "$OPERATOR_USER": operator_user,
         "$MACRO_TRANSPORT": str(macro_transport),
@@ -1759,6 +1768,7 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
         "build-source-transport-v3",
         "32 GiB",
         "MACRO_TRANSPORT_SHA256",
+        "CARRIER_COMMIT_SHA='<40-lower-hex-current-protected-carrier-sha>'",
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'",
         "checkout --detach",
         "one native administrator dialog",
@@ -1785,7 +1795,8 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
     bootstrap = """/usr/bin/env -i \\
   HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \\
   /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \\
-  "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \\
+  "$CARRIER_COMMIT_SHA" "$REPAIR_MERGE_SHA" "$OPERATOR_USER" \\
+  "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \\
   "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"""
     assert bootstrap in runbook
     for forbidden in ("/bin/bash -s", "<<'H0_SOURCE_REPAIR'", "one root shell"):
