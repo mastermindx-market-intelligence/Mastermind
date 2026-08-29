@@ -20,7 +20,7 @@ This amendment resolves the duplicate Project Workroom architecture families dis
 - `docs/superpowers/plans/2026-08-29-project-workroom-fabric-rollout.md`;
 - the five records on Mastermind PR #233.
 
-All other accepted Product Workroom outcome, canonical ownership, public-internal V1, least-privilege Slack principal split, exact identity, effect-unknown, no-rebuild, dialogue, Steward, rollout and production-proof laws remain unchanged.
+All other accepted Project Workroom outcome, canonical ownership, public-internal V1, least-privilege Slack principal split, exact identity, effect-unknown, no-rebuild, dialogue, Steward, rollout and production-proof laws remain unchanged.
 
 This records amendment creates no Slack channel, app, Canvas, List, Workflow, Linear Initiative/Project/Issue mutation, Agent OS mutation, Executive Job/Attempt/Worker, RuntimeBinding, credential, host effect, service, worker assignment or production capability.
 
@@ -219,7 +219,6 @@ Top-level keys are exactly:
 schema
 source_records
 workspace_id
-rollout_mode
 workrooms
 ```
 
