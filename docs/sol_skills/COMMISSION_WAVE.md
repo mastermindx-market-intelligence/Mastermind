@@ -335,14 +335,22 @@ For an eligible Slack/session handoff:
    opposite-side reply for the current operation. If the scheduled surface cannot access that carrier
    at run time, the watcher is unavailable; report that concrete limitation rather than generalizing
    from the interactive Slack connector.
-4. A Slack connector lacking push/webhook subscriptions is **not** `WATCH_UNAVAILABLE` when the host
-   surface can create a native scheduled/condition watcher that polls/reads the exact carrier. Choose
-   the packet-requested cadence when supported; otherwise use the fastest lawful/practical cadence
-   the host actually supports and state it truthfully. Never claim a cadence the host cannot run.
-5. A worker/session may report `WATCH_UNAVAILABLE` only after the mechanical algorithm above reaches
+4. Watcher prompts inherit the universal law: **the watcher prompt is not a scope fence**. It may
+   constrain detection, but it may not contain a blanket “do not ACK/START/execute/continue” rule that
+   survives a qualifying carrier event. If the watcher runs as a turn of the exact bound reasoning
+   session, a qualifying event must **re-enter normal worker procedure** on the same operation/carrier;
+   otherwise the sidecar watcher wakes the exact bound session or truthfully reports the concrete
+   re-entry limitation. A valid later same-operation carrier edge outranks the stale watcher prompt.
+5. Resource class is determined by what wakes reasoning, not by how frequently a deterministic tool
+   checks. Class-E event/passive wait is preferred. Class-T tool-only polling may use a lawful API
+   cadence while suppressing unchanged samples. **Default Class-M interval is 60 minutes; the hard
+   floor is 15 minutes.** An urgent Class-M watcher backs off `15m -> 30m -> 60m` after
+   `NO_MATERIAL_CHANGE`. Never use “fastest supported” as authority to wake a reasoning model below the
+   floor. Once only an external dependency remains, the reasoning session yields.
+6. A worker/session may report `WATCH_UNAVAILABLE` only after the mechanical algorithm above reaches
    an absent tool or concrete failed arm/create result. State the mechanisms checked and the exact
    failure. Do not spend another dialogue turn asking whether a watcher should exist.
-6. A truthful temporary watcher arm must emit a human-readable receipt containing enough evidence
+7. A truthful temporary watcher arm must emit a human-readable receipt containing enough evidence
    to diagnose continuity without turning it into authority, for example:
 
    ```text
@@ -360,32 +368,36 @@ For an eligible Slack/session handoff:
    Do not claim `WATCH_ARMED` before creation/registration succeeds. Registration proves the watcher
    is armed; it does not by itself prove a future scheduled run will successfully read the carrier.
    Preserve that distinction if later production proof is required.
-7. The initial worker/COO envelope must require: acknowledge this exact operation using the currently
+8. The initial worker/COO envelope must require: acknowledge this exact operation using the currently
    accepted carrier vocabulary; read the full thread; **actually arm the continuation path and emit
    its `WATCH_ARMED` receipt before ending the pickup turn**; keep later `BLOCKED` /
    `DECISION_REQUEST` / `RESULT` and Sol replies on the same carrier; after every **nonterminal**
    return enter/re-arm the exact-thread wait/watch path rather than silently abandoning the session;
    and treat pickup acknowledgement, actual execution start and terminal STOP as distinct states
    even where the live schema has not yet implemented separate typed names for all three.
-8. On Sol `RULING` / `CONTINUE` / repair instruction, the same worker session rereads the full
+9. Before every substantive reciprocal write after pickup ACK, the worker must fresh-read the exact
+   bound carrier in the same interactive turn **after the latest local evidence-producing action**;
+   watcher silence or `WATCH_ARMED` never satisfies this freshness fence. Consume unseen opposite-side
+   semantic edges before posting START/PROGRESS/BLOCKED/DECISION_REQUEST/RESULT or equivalent state.
+10. On Sol `RULING` / `CONTINUE` / repair instruction, the same worker session rereads the full
    thread, resumes the same operation/carrier, and re-arms its wait/watch after the next
    nonterminal return. If that session cannot maintain a watcher/wait, it must return `BLOCKED`
    with reason/code `WATCH_UNAVAILABLE` (or the currently accepted equivalent typed blocker)
    rather than disappearing.
-9. **After every `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must reply in the same lawful carrier
+11. **After every `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must reply in the same lawful carrier
    with exactly one explicit edge before doing CEO-only follow-up:** either a nonterminal
    `SOL CONTINUE` / `SOL RULING / CONTINUE` / `SOL REQUEST_REPAIR`, or a terminal
    `SOL STOP` / `SOL ACCEPTED / STOP` / `SOL CLOSED / STOP`. Silence is never a terminal receipt.
-10. A nonterminal Sol edge names the exact current child operation and tells the worker to re-arm
+12. A nonterminal Sol edge names the exact current child operation and tells the worker to re-arm
    after its next nonterminal return. Verify both sides still have a continuation path.
-11. A terminal Sol edge explicitly states that the child wave is terminal, the worker must stop work,
+13. A terminal Sol edge explicitly states that the child wave is terminal, the worker must stop work,
    the temporary watcher must be disarmed, no further reply is required except any exact terminal
    consumption receipt required by current transport law or a watcher shutdown failure, and no next
    child wave is authorized by this STOP.
-12. If either side cannot actually disable its watcher, report `WATCH_STOP_FAILED` (or the currently
+14. If either side cannot actually disable its watcher, report `WATCH_STOP_FAILED` (or the currently
    accepted typed equivalent), keep the child operation terminal, ensure the counterpart still
    receives STOP, and never let the leftover watcher originate another wave/retry/merge/continuation.
-13. Terminal completion closes that watch cycle. Any independent next wave requires a new stable
+15. Terminal completion closes that watch cycle. Any independent next wave requires a new stable
    operation key, one lawful carrier, fresh collision/current-state reconciliation, explicit commission,
    fresh pickup acknowledgement, separate execution start where supported, and newly armed reciprocal
    continuation paths. Never use an old watcher as implicit authorization for the next wave.
@@ -490,8 +502,9 @@ K2 specifically fails if any regression recurs:
   permission to hop accounts after `START`; or
 * a session declares watching impossible merely because Slack lacks push subscriptions while its
   host exposes a usable native scheduled/condition watcher, stays in a watcher-planning/debate loop
-  instead of invoking the available create/arm tool, or says `WATCH_ARMED` without an actual
-  arm/registration receipt.
+  instead of invoking the available create/arm tool, says `WATCH_ARMED` without an actual
+  arm/registration receipt, or lets a watcher prompt's old “attention-only” scope suppress a later
+  valid same-operation CONTINUE/assignment instead of re-entering normal worker procedure.
 
 A gated direct receiver must ACK, read, arm its continuation path, perform only explicitly permitted
 preflight while held, and emit a separate truthful start-of-work edge when the gate clears rather
