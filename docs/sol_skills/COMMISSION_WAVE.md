@@ -362,7 +362,7 @@ For an eligible Slack/session handoff:
    cadence=<actual cadence or live-wait behavior>
    trigger=<first qualifying opposite-side reply after baseline>
    after_match=<pause/disarm/suppress duplicate alert behavior>
-   terminal=<disarm on terminal STOP>
+   terminal=<remove exact child source on STOP; keep independently valid aggregate seat/principal/sibling resource active>
    ```
 
    Do not claim `WATCH_ARMED` before creation/registration succeeds. Registration proves the watcher
@@ -391,16 +391,23 @@ For an eligible Slack/session handoff:
 12. A nonterminal Sol edge names the exact current child operation and tells the worker to re-arm
    after its next nonterminal return. Verify both sides still have a continuation path.
 13. A terminal Sol edge explicitly states that the child wave is terminal, the worker must stop work,
-   the temporary watcher must be disarmed, no further reply is required except any exact terminal
-   consumption receipt required by current transport law or a watcher shutdown failure, and no next
-   child wave is authorized by this STOP.
-14. If either side cannot actually disable its watcher, report `WATCH_STOP_FAILED` (or the currently
-   accepted typed equivalent), keep the child operation terminal, ensure the counterpart still
-   receives STOP, and never let the leftover watcher originate another wave/retry/merge/continuation.
-15. Terminal completion closes that watch cycle. Any independent next wave requires a new stable
-   operation key, one lawful carrier, fresh collision/current-state reconciliation, explicit commission,
-   fresh pickup acknowledgement, separate execution start where supported, and newly armed reciprocal
-   continuation paths. Never use an old watcher as implicit authorization for the next wave.
+   and the worker must remove/disarm the exact `operation_key + carrier` child source from its
+   continuation path. If the underlying watcher resource also serves a permanent seat inbox,
+   principal lane or sibling child sources, **keep that aggregate resource active**. Whole-resource
+   shutdown requires an explicit seat/principal deregistration, terminal principal STOP, or an order
+   targeting the aggregate resource itself. No further reply is required except any exact terminal
+   consumption receipt required by current transport law or a child-source removal failure, and no
+   next child wave is authorized by this STOP.
+14. If either side cannot remove/suppress the exact terminal child source, report `WATCH_STOP_FAILED`
+   (or the currently accepted typed equivalent), keep the child operation terminal, ensure the
+   counterpart still receives STOP, keep any independently valid aggregate seat/principal/sibling
+   watcher resource active, and suppress the leftover child source from further semantic wake. Never
+   let the leftover terminal source originate another wave/retry/merge/continuation.
+15. Terminal completion closes that child source/cycle. Any independent next wave requires a new
+   stable operation key, one lawful carrier, fresh collision/current-state reconciliation, explicit
+   commission, fresh pickup acknowledgement and separate execution start where supported. A lawful
+   aggregate seat/principal watcher resource may host the new source, but the old terminal source
+   never authorizes it and whole-resource re-creation is not required merely because one child ended.
 
 Never create one cron/automation/database per handoff as the canonical architecture. The accepted
 Worker Presence & Dialogue / Wake architecture remains the long-run owner of automatic turn
@@ -503,8 +510,10 @@ K2 specifically fails if any regression recurs:
 * a session declares watching impossible merely because Slack lacks push subscriptions while its
   host exposes a usable native scheduled/condition watcher, stays in a watcher-planning/debate loop
   instead of invoking the available create/arm tool, says `WATCH_ARMED` without an actual
-  arm/registration receipt, or lets a watcher prompt's old “attention-only” scope suppress a later
-  valid same-operation CONTINUE/assignment instead of re-entering normal worker procedure.
+  arm/registration receipt, lets a watcher prompt's old “attention-only” scope suppress a later valid
+  same-operation CONTINUE/assignment instead of re-entering normal worker procedure, or treats one
+  terminal child STOP as authority to pause/delete an independently valid aggregate seat/principal/
+  sibling watcher resource.
 
 A gated direct receiver must ACK, read, arm its continuation path, perform only explicitly permitted
 preflight while held, and emit a separate truthful start-of-work edge when the gate clears rather
