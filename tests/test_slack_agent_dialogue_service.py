@@ -583,7 +583,60 @@ def test_shared_relay_exact_peer_450_uses_0710_0660_and_cleans_on_cancel(
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+        await srv.close()
         assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_shared_relay_cancel_never_unlinks_same_metadata_replacement_inode(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        task = asyncio.create_task(srv.serve_forever())
+        await wait_for_service_start(
+            task, srv.config.socket_path, expected_mode=0o660
+        )
+
+        original_path = shared_root / "original-agent-relay.sock"
+        srv.config.socket_path.rename(original_path)
+        original_identity = (
+            original_path.lstat().st_dev,
+            original_path.lstat().st_ino,
+        )
+
+        replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        replacement.bind(os.fspath(srv.config.socket_path))
+        srv.config.socket_path.chmod(0o660)
+        replacement_info = srv.config.socket_path.lstat()
+        replacement_identity = (replacement_info.st_dev, replacement_info.st_ino)
+        assert replacement_identity != original_identity
+        assert replacement_info.st_uid == os.geteuid()
+        assert replacement_info.st_gid == os.getegid()
+        assert stat.S_IMODE(replacement_info.st_mode) == 0o660
+
+        try:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await srv.close()
+
+            surviving_info = srv.config.socket_path.lstat()
+            assert (
+                surviving_info.st_dev,
+                surviving_info.st_ino,
+            ) == replacement_identity
+            assert original_path.exists()
+            assert (
+                original_path.lstat().st_dev,
+                original_path.lstat().st_ino,
+            ) == original_identity
+        finally:
+            replacement.close()
+            srv.config.socket_path.unlink(missing_ok=True)
+            original_path.unlink(missing_ok=True)
 
     run(scenario())
 

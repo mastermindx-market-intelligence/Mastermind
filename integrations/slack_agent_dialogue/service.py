@@ -257,6 +257,7 @@ class AgentDialogueService:
         self.engine = engine
         self.engine_v2 = engine_v2
         self._server: asyncio.AbstractServer | None = None
+        self._bound_socket_identity: tuple[int, int] | None = None
         self._handled = asyncio.Event()
 
     def _prepare_socket(self) -> None:
@@ -319,7 +320,7 @@ class AgentDialogueService:
         self.config.socket_path.unlink(missing_ok=True)
 
     async def start(self) -> None:
-        if self._server is not None:
+        if self._server is not None or self._bound_socket_identity is not None:
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
         path_prepared = False
         try:
@@ -330,9 +331,24 @@ class AgentDialogueService:
                 path=str(self.config.socket_path),
                 limit=self.config.max_request_bytes + 1,
             )
+            bound_info = self.config.socket_path.lstat()
+            if (
+                not stat.S_ISSOCK(bound_info.st_mode)
+                or bound_info.st_uid != os.geteuid()
+                or (
+                    self.config.socket_group_gid is not None
+                    and bound_info.st_gid != self.config.socket_group_gid
+                )
+            ):
+                raise DialogueServiceError("SERVICE_UNAVAILABLE")
+            self._bound_socket_identity = (bound_info.st_dev, bound_info.st_ino)
             self.config.socket_path.chmod(self.config.socket_mode)
             socket_info = self.config.socket_path.lstat()
-            if stat.S_IMODE(socket_info.st_mode) != self.config.socket_mode:
+            if (
+                (socket_info.st_dev, socket_info.st_ino)
+                != self._bound_socket_identity
+                or stat.S_IMODE(socket_info.st_mode) != self.config.socket_mode
+            ):
                 raise DialogueServiceError("SERVICE_UNAVAILABLE")
             if self.config.socket_group_gid is not None and (
                 not stat.S_ISSOCK(socket_info.st_mode)
@@ -350,13 +366,20 @@ class AgentDialogueService:
             raise DialogueServiceError("SERVICE_UNAVAILABLE") from None
 
     async def close(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
+        server = self._server
+        bound_socket_identity = self._bound_socket_identity
+        self._server = None
+        self._bound_socket_identity = None
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+        if bound_socket_identity is None:
+            return
         try:
             info = self.config.socket_path.lstat()
         except (FileNotFoundError, OSError):
+            return
+        if (info.st_dev, info.st_ino) != bound_socket_identity:
             return
         owned_private_socket = (
             self.config.socket_group_gid is None
