@@ -64,3 +64,24 @@ def test_capacity_selectable_prestart_rebind_is_distinct_from_exact_session_cont
     assert "capacity-selectable" in index.lower()
     assert "capacity-selectable" in kernel.lower()
     assert "exact-session-required" in kernel.lower()
+
+
+def test_live_chairman_delivery_binds_open_pickup_without_second_slack_comment() -> None:
+    skill = _read("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
+    commission = _read("docs/sol_skills/COMMISSION_WAVE.md")
+    index = _read("docs/sol_skills/INDEX.md")
+    kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+
+    required_skill_phrases = (
+        "deliberately delivers that same `OPEN_PICKUP` commission to a concrete eligible account/session",
+        "that live delivery is the receiver-binding edge",
+        "No separate Slack comment, claim message, or second Chairman assignment is required",
+        "must not ask the Chairman to bind, claim, or comment again",
+    )
+    for phrase in required_skill_phrases:
+        assert phrase in skill, f"missing direct-delivery binding repair: {phrase}"
+
+    assert "that live delivery is the receiver assignment" in commission
+    assert "must not require a separate Slack comment" in commission
+    assert "live delivery to the selected concrete session is itself the binding edge" in index
+    assert "No separate Slack comment or second binding message is required" in kernel
