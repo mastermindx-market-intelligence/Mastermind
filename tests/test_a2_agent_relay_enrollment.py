@@ -479,6 +479,89 @@ def test_enroll_qualifies_then_commits_exact_three_files(monkeypatch, tmp_path: 
     assert TOKEN not in json.dumps(receipt)
 
 
+def test_enroll_success_releases_each_transaction_creation_descriptor_once(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    _release_sha, _paths, _qualifications = _install_operation_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    created_descriptors: list[int] = []
+    close_calls: list[int] = []
+    real_bound_write = enrollment._write_new_bound_private_file  # noqa: SLF001
+    real_absolute_write = enrollment.write_new_private_file
+    real_close = os.close
+
+    def record_bound_write(*args, **kwargs):
+        created = real_bound_write(*args, **kwargs)
+        created_descriptors.append(created.descriptor)
+        return created
+
+    def record_absolute_write(*args, **kwargs):
+        created = real_absolute_write(*args, **kwargs)
+        created_descriptors.append(created.descriptor)
+        return created
+
+    def record_close(descriptor: int):
+        close_calls.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(enrollment, "_write_new_bound_private_file", record_bound_write)
+    monkeypatch.setattr(enrollment, "write_new_private_file", record_absolute_write)
+    monkeypatch.setattr(enrollment.os, "close", record_close)
+
+    asyncio.run(
+        enrollment._enroll(  # noqa: SLF001 - descriptor lifecycle proof
+            bot_user_id=BOT,
+            stdin=io.BytesIO((TOKEN + "\n").encode("ascii")),
+        )
+    )
+
+    assert len(created_descriptors) == 3
+    assert all(close_calls.count(descriptor) == 1 for descriptor in created_descriptors)
+
+
+def test_absolute_writer_error_rolls_back_and_releases_its_descriptor_once(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    target = tmp_path / "created"
+    opened_descriptors: list[int] = []
+    close_calls: list[int] = []
+    real_open = os.open
+    real_close = os.close
+
+    def record_open(*args, **kwargs):
+        descriptor = real_open(*args, **kwargs)
+        opened_descriptors.append(descriptor)
+        return descriptor
+
+    def record_close(descriptor: int):
+        close_calls.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(enrollment.os, "open", record_open)
+    monkeypatch.setattr(enrollment.os, "close", record_close)
+    monkeypatch.setattr(
+        enrollment.os,
+        "fchmod",
+        lambda _descriptor, _mode: (_ for _ in ()).throw(OSError("forced")),
+    )
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_WRITE_REFUSED"):
+        enrollment.write_new_private_file(
+            target,
+            b"original",
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=0o600,
+        )
+
+    assert not target.exists()
+    assert len(opened_descriptors) >= 1
+    assert close_calls.count(opened_descriptors[0]) == 1
+
+
 @pytest.mark.parametrize("collision_index", [0, 1, 2])
 def test_enroll_refuses_any_preexisting_target_without_reads_or_writes(
     monkeypatch, tmp_path: Path, collision_index: int
@@ -543,18 +626,13 @@ def test_enroll_rollback_refuses_replaced_plist_and_cleans_bound_files(
     )
     token_path, config_path, plist_path = paths
     real_write = enrollment.write_new_private_file
-    replacement_identity: tuple[int, int] | None = None
 
     def write_then_replace(path, payload, *, uid, gid, mode):
-        nonlocal replacement_identity
         created = real_write(path, payload, uid=uid, gid=gid, mode=mode)
-        original = path.stat()
         path.unlink()
         path.write_bytes(payload)
         path.chmod(mode)
         replacement = path.stat()
-        replacement_identity = (replacement.st_dev, replacement.st_ino)
-        assert replacement_identity != (original.st_dev, original.st_ino)
         assert replacement.st_uid == uid
         assert replacement.st_gid == gid
         return created
@@ -576,8 +654,6 @@ def test_enroll_rollback_refuses_replaced_plist_and_cleans_bound_files(
             )
         )
 
-    surviving = plist_path.stat()
-    assert (surviving.st_dev, surviving.st_ino) == replacement_identity
     assert plist_path.read_bytes() == enrollment.render_plist(
         bot_user_id=BOT,
         release_sha="b" * 40,
@@ -638,20 +714,35 @@ def test_enroll_refuses_mutated_bound_token_during_readback(monkeypatch, tmp_pat
     assert not any(path.exists() for path in paths)
 
 
-def test_rollback_refuses_to_unlink_replaced_inode(monkeypatch, tmp_path: Path):
+def test_absolute_rollback_requires_live_creation_descriptor_and_preserves_replacement(
+    tmp_path: Path,
+):
     enrollment = _module()
     target = tmp_path / "created"
-    target.write_bytes(b"original")
-    identity = enrollment._file_identity(target)  # noqa: SLF001
+    identity = enrollment.write_new_private_file(
+        target,
+        b"original",
+        uid=os.geteuid(),
+        gid=os.getegid(),
+        mode=0o600,
+    )
     target.unlink()
     target.write_bytes(b"replacement")
+    assert os.fstat(identity.descriptor).st_nlink == 0
 
     with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_ROLLBACK_REFUSED"):
         enrollment._rollback_created([identity])  # noqa: SLF001
     assert target.read_bytes() == b"replacement"
+    with pytest.raises(OSError):
+        os.fstat(identity.descriptor)
+
+    enrollment._rollback_created([identity])  # noqa: SLF001
+    assert target.read_bytes() == b"replacement"
 
 
-def test_bound_rollback_refuses_to_unlink_replaced_inode(tmp_path: Path):
+def test_bound_rollback_requires_live_creation_descriptor_and_preserves_replacement(
+    tmp_path: Path,
+):
     enrollment = _module()
     directory_descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -663,21 +754,28 @@ def test_bound_rollback_refuses_to_unlink_replaced_inode(tmp_path: Path):
             relay_gids=frozenset({os.getegid()}),
         )
         target = tmp_path / "agent-relay.token"
-        target.write_bytes(b"original")
-        original = target.stat()
-        identity = enrollment._BoundCreatedFile(  # noqa: SLF001
-            name=target.name,
-            device=original.st_dev,
-            inode=original.st_ino,
+        identity = enrollment._write_new_bound_private_file(  # noqa: SLF001
+            binding,
+            target.name,
+            b"original",
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=0o600,
         )
         target.unlink()
         target.write_bytes(b"replacement")
+        assert os.fstat(identity.descriptor).st_nlink == 0
 
         with pytest.raises(
             enrollment.A2EnrollmentError,
             match="A2_ENROLLMENT_ROLLBACK_REFUSED",
         ):
             enrollment._rollback_bound_created(binding, [identity])  # noqa: SLF001
+        assert target.read_bytes() == b"replacement"
+        with pytest.raises(OSError):
+            os.fstat(identity.descriptor)
+
+        enrollment._rollback_bound_created(binding, [identity])  # noqa: SLF001
         assert target.read_bytes() == b"replacement"
     finally:
         os.close(directory_descriptor)

@@ -101,11 +101,12 @@ class _OpaqueParser(argparse.ArgumentParser):
         raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
 
 
-@dataclass(frozen=True)
+@dataclass
 class _CreatedFile:
     path: Path
-    device: int
-    inode: int
+    descriptor: int
+    device: int | None
+    inode: int | None
 
 
 @dataclass(frozen=True)
@@ -116,11 +117,12 @@ class _BoundDirectory:
     relay_gids: frozenset[int]
 
 
-@dataclass(frozen=True)
+@dataclass
 class _BoundCreatedFile:
     name: str
-    device: int
-    inode: int
+    descriptor: int
+    device: int | None
+    inode: int | None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -304,8 +306,15 @@ def write_new_private_file(
     identity: _CreatedFile | None = None
     try:
         descriptor = os.open(path, flags, 0o600)
+        identity = _CreatedFile(
+            path=path,
+            descriptor=descriptor,
+            device=None,
+            inode=None,
+        )
         opened = os.fstat(descriptor)
-        identity = _CreatedFile(path=path, device=opened.st_dev, inode=opened.st_ino)
+        identity.device = opened.st_dev
+        identity.inode = opened.st_ino
         if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
             raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
         if opened.st_uid != int(uid) or opened.st_gid != int(gid):
@@ -321,15 +330,11 @@ def write_new_private_file(
     except FileExistsError:
         raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
     except BaseException:
-        if descriptor >= 0:
-            os.close(descriptor)
-            descriptor = -1
         if identity is not None:
             _rollback_created((identity,))
-        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
-    finally:
-        if descriptor >= 0:
+        elif descriptor >= 0:
             os.close(descriptor)
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
 
     try:
         final = path.lstat()
@@ -375,26 +380,33 @@ def _path_present(path: Path) -> bool:
         raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
 
 
-def _file_identity(path: Path) -> _CreatedFile:
-    try:
-        info = path.lstat()
-    except OSError:
-        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
-    return _CreatedFile(path=Path(path), device=info.st_dev, inode=info.st_ino)
+def _release_created(identity: _CreatedFile | _BoundCreatedFile) -> None:
+    descriptor = identity.descriptor
+    if descriptor < 0:
+        return
+    identity.descriptor = -1
+    os.close(descriptor)
 
 
 def _rollback_created(created: Sequence[_CreatedFile]) -> None:
     failed = False
     for identity in reversed(tuple(created)):
+        if identity.descriptor < 0:
+            continue
         try:
+            original = os.fstat(identity.descriptor)
             info = identity.path.lstat()
             if (
-                stat.S_ISLNK(info.st_mode)
+                not stat.S_ISREG(original.st_mode)
+                or original.st_dev != identity.device
+                or original.st_ino != identity.inode
+                or stat.S_ISLNK(info.st_mode)
                 or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
                 or info.st_dev != identity.device
                 or info.st_ino != identity.inode
+                or info.st_dev != original.st_dev
+                or info.st_ino != original.st_ino
             ):
                 failed = True
                 continue
@@ -402,6 +414,11 @@ def _rollback_created(created: Sequence[_CreatedFile]) -> None:
             c1_enrollment._fsync_parent(identity.path)  # noqa: SLF001
         except OSError:
             failed = True
+        finally:
+            try:
+                _release_created(identity)
+            except OSError:
+                failed = True
     if failed:
         raise A2EnrollmentError("A2_ENROLLMENT_ROLLBACK_REFUSED")
 
@@ -412,17 +429,26 @@ def _rollback_bound_created(
 ) -> None:
     failed = False
     for identity in reversed(tuple(created)):
+        if identity.descriptor < 0:
+            continue
         try:
+            original = os.fstat(identity.descriptor)
             info = os.stat(
                 identity.name,
                 dir_fd=binding.descriptor,
                 follow_symlinks=False,
             )
             if (
-                stat.S_ISLNK(info.st_mode)
+                not stat.S_ISREG(original.st_mode)
+                or original.st_dev != identity.device
+                or original.st_ino != identity.inode
+                or stat.S_ISLNK(info.st_mode)
                 or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
                 or info.st_dev != identity.device
                 or info.st_ino != identity.inode
+                or info.st_dev != original.st_dev
+                or info.st_ino != original.st_ino
             ):
                 failed = True
                 continue
@@ -430,6 +456,11 @@ def _rollback_bound_created(
             os.fsync(binding.descriptor)
         except OSError:
             failed = True
+        finally:
+            try:
+                _release_created(identity)
+            except OSError:
+                failed = True
     if failed:
         raise A2EnrollmentError("A2_ENROLLMENT_ROLLBACK_REFUSED")
 
@@ -451,6 +482,21 @@ def _rollback_enrollment_files(
         failed = True
     if failed:
         raise A2EnrollmentError("A2_ENROLLMENT_ROLLBACK_REFUSED")
+
+
+def _release_enrollment_files(
+    *,
+    bound_created: Sequence[_BoundCreatedFile],
+    absolute_created: Sequence[_CreatedFile],
+) -> None:
+    failed = False
+    for identity in (*reversed(tuple(absolute_created)), *reversed(tuple(bound_created))):
+        try:
+            _release_created(identity)
+        except OSError:
+            failed = True
+    if failed:
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
 
 
 def _assert_disarmed() -> None:
@@ -597,12 +643,15 @@ def _write_new_bound_private_file(
             0o600,
             dir_fd=binding.descriptor,
         )
-        opened = os.fstat(descriptor)
         identity = _BoundCreatedFile(
             name=name,
-            device=opened.st_dev,
-            inode=opened.st_ino,
+            descriptor=descriptor,
+            device=None,
+            inode=None,
         )
+        opened = os.fstat(descriptor)
+        identity.device = opened.st_dev
+        identity.inode = opened.st_ino
         if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
             raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
         if opened.st_uid != int(uid) or opened.st_gid != int(gid):
@@ -618,15 +667,11 @@ def _write_new_bound_private_file(
     except FileExistsError:
         raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
     except BaseException:
-        if descriptor >= 0:
-            os.close(descriptor)
-            descriptor = -1
         if identity is not None:
             _rollback_bound_created(binding, (identity,))
-        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
-    finally:
-        if descriptor >= 0:
+        elif descriptor >= 0:
             os.close(descriptor)
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
 
     try:
         final = os.stat(
@@ -848,6 +893,10 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
         )
         _assert_disarmed()
         _assert_bound_config_current(binding)
+        _release_enrollment_files(
+            bound_created=bound_created,
+            absolute_created=absolute_created,
+        )
     except BaseException:
         try:
             _rollback_enrollment_files(
