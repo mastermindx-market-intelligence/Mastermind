@@ -562,6 +562,105 @@ def test_absolute_writer_error_rolls_back_and_releases_its_descriptor_once(
     assert close_calls.count(opened_descriptors[0]) == 1
 
 
+def test_absolute_writer_postopen_fileexists_rolls_back_and_releases_once(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    target = tmp_path / "created"
+    opened_descriptors: list[int] = []
+    close_calls: list[int] = []
+    real_open = os.open
+    real_close = os.close
+
+    def record_open(*args, **kwargs):
+        descriptor = real_open(*args, **kwargs)
+        opened_descriptors.append(descriptor)
+        return descriptor
+
+    def record_close(descriptor: int):
+        close_calls.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(enrollment.os, "open", record_open)
+    monkeypatch.setattr(enrollment.os, "close", record_close)
+    monkeypatch.setattr(
+        enrollment.os,
+        "fchmod",
+        lambda _descriptor, _mode: (_ for _ in ()).throw(FileExistsError("forced")),
+    )
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_WRITE_REFUSED"):
+        enrollment.write_new_private_file(
+            target,
+            b"original",
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=0o600,
+        )
+
+    assert not target.exists()
+    assert len(opened_descriptors) >= 1
+    assert close_calls.count(opened_descriptors[0]) == 1
+
+
+def test_bound_writer_postopen_fileexists_rolls_back_and_releases_once(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    directory_descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        directory_info = os.fstat(directory_descriptor)
+        binding = enrollment._BoundDirectory(  # noqa: SLF001
+            descriptor=directory_descriptor,
+            device=directory_info.st_dev,
+            inode=directory_info.st_ino,
+            relay_gids=frozenset({os.getegid()}),
+        )
+        target = tmp_path / "agent-relay.token"
+        opened_descriptors: list[int] = []
+        close_calls: list[int] = []
+        real_open = os.open
+        real_close = os.close
+
+        def record_open(*args, **kwargs):
+            descriptor = real_open(*args, **kwargs)
+            opened_descriptors.append(descriptor)
+            return descriptor
+
+        def record_close(descriptor: int):
+            close_calls.append(descriptor)
+            real_close(descriptor)
+
+        monkeypatch.setattr(enrollment.os, "open", record_open)
+        monkeypatch.setattr(enrollment.os, "close", record_close)
+        monkeypatch.setattr(
+            enrollment.os,
+            "fchmod",
+            lambda _descriptor, _mode: (_ for _ in ()).throw(
+                FileExistsError("forced")
+            ),
+        )
+
+        with pytest.raises(
+            enrollment.A2EnrollmentError,
+            match="A2_ENROLLMENT_WRITE_REFUSED",
+        ):
+            enrollment._write_new_bound_private_file(  # noqa: SLF001
+                binding,
+                target.name,
+                b"original",
+                uid=os.geteuid(),
+                gid=os.getegid(),
+                mode=0o600,
+            )
+
+        assert not target.exists()
+        assert len(opened_descriptors) == 1
+        assert close_calls.count(opened_descriptors[0]) == 1
+    finally:
+        os.close(directory_descriptor)
+
+
 @pytest.mark.parametrize("collision_index", [0, 1, 2])
 def test_enroll_refuses_any_preexisting_target_without_reads_or_writes(
     monkeypatch, tmp_path: Path, collision_index: int

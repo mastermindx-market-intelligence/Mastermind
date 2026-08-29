@@ -306,6 +306,9 @@ def write_new_private_file(
     identity: _CreatedFile | None = None
     try:
         descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
+    try:
         identity = _CreatedFile(
             path=path,
             descriptor=descriptor,
@@ -327,8 +330,6 @@ def write_new_private_file(
                 raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
             view = view[written:]
         os.fsync(descriptor)
-    except FileExistsError:
-        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
     except BaseException:
         if identity is not None:
             _rollback_created((identity,))
@@ -643,6 +644,9 @@ def _write_new_bound_private_file(
             0o600,
             dir_fd=binding.descriptor,
         )
+    except FileExistsError:
+        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
+    try:
         identity = _BoundCreatedFile(
             name=name,
             descriptor=descriptor,
@@ -664,8 +668,6 @@ def _write_new_bound_private_file(
                 raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
             view = view[written:]
         os.fsync(descriptor)
-    except FileExistsError:
-        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
     except BaseException:
         if identity is not None:
             _rollback_bound_created(binding, (identity,))
