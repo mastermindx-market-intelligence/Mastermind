@@ -10,10 +10,15 @@ import pytest
 
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
 from integrations.mastermind_secretary_mcp.adapter import SecretaryGroundingGateway
-from integrations.mastermind_secretary_mcp.schemas import TOOL_SCHEMA_DIGEST, TOOL_SPECS
+from integrations.mastermind_secretary_mcp.schemas import (
+    TOOL_SCHEMA_DIGEST,
+    TOOL_SPECS,
+    GatewayError,
+)
 from integrations.mastermind_secretary_mcp.schemas import (
     error_envelope,
     result_envelope,
+    validate_result_data,
 )
 from integrations.mastermind_secretary_mcp.server import (
     STATIC_CAPABILITIES,
@@ -79,7 +84,7 @@ def test_advertised_output_schema_matches_runtime_state_and_error_law():
     fresh_fact = {
         "subject_ref": "responsibility:alpha",
         "predicate": "attention.state",
-        "value": 1,
+        "value": "SOL_REQUIRED",
         "freshness": "FRESH",
         "sources": [source],
     }
@@ -127,6 +132,113 @@ def test_advertised_output_schema_matches_runtime_state_and_error_law():
     stale_facts_state["data"]["facts"][0]["freshness"] = "STALE"
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(stale_facts_state)
+
+
+def test_advertised_schema_and_runtime_share_one_closed_public_fact_language():
+    jsonschema = pytest.importorskip("jsonschema")
+    output_schema = TOOL_SPECS[2].output_schema
+    validator = jsonschema.Draft202012Validator(output_schema)
+    fact_schema = output_schema["properties"]["data"]["oneOf"][1]["properties"][
+        "facts"
+    ]["items"]
+    expected_predicates = {
+        "attention.state",
+        "blocker.kind",
+        "blocker.present",
+        "responsibility.priority",
+        "responsibility.requires_attention",
+        "responsibility.state",
+        "runtime.age_seconds",
+        "runtime.continuity",
+        "runtime.state",
+        "surface.health",
+        "surface.observation_age_seconds",
+        "surface.repair_required",
+    }
+    assert {
+        branch["properties"]["predicate"]["const"]
+        for branch in fact_schema["allOf"][0]["oneOf"]
+    } == expected_predicates
+
+    source = {"owner": "agent_os", "source_ref": "WS:SAFE", "observed_at": None}
+    hostile_facts = (
+        {
+            "subject_ref": "responsibility:alpha",
+            "predicate": "runtime.host",
+            "value": "Mac Studio",
+            "freshness": "FRESH",
+            "sources": [source],
+        },
+        {
+            "subject_ref": "responsibility:alpha",
+            "predicate": "runtime.state",
+            "value": "provider:codex",
+            "freshness": "FRESH",
+            "sources": [source],
+        },
+        {
+            "subject_ref": "responsibility:alpha",
+            "predicate": "surface.id",
+            "value": 1_700_000_000_000_000,
+            "freshness": "FRESH",
+            "sources": [source],
+        },
+    )
+    for fact in hostile_facts:
+        data = {"state": "FACTS", "facts": [fact], "reason_codes": []}
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(
+                {
+                    "schema": "mastermind.secretary_grounding_mcp_result.v1",
+                    "tool": "get_attention",
+                    "ok": True,
+                    "server_version": "1.0.0",
+                    "data": data,
+                    "error": None,
+                }
+            )
+        with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+            validate_result_data(data)
+
+
+@pytest.mark.parametrize("suffix_length", [32, 40, 64, 145])
+def test_advertised_and_runtime_input_contract_accept_same_opaque_refs(suffix_length):
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = TOOL_SPECS[1].input_schema
+    responsibility_ref = "responsibility:" + "a" * suffix_length
+    jsonschema.Draft202012Validator(schema).validate(
+        {"responsibility_ref": responsibility_ref}
+    )
+
+
+@pytest.mark.parametrize(
+    "source_ref",
+    [
+        "DEC:CHAIRMAN-CONTROL-ROOM-P0-ARCHITECTURE-ACCEPTED",
+        "DSC:ASD-MODEL-VISIBLE-SETTINGS-CAN-EXPOSE-LIVE-CREDENTIALS",
+        "WS:" + "A" * 64,
+    ],
+)
+def test_advertised_and_runtime_output_contract_accept_same_canonical_sources(source_ref):
+    jsonschema = pytest.importorskip("jsonschema")
+    data = {
+        "state": "FACTS",
+        "facts": [
+            {
+                "subject_ref": "responsibility:alpha",
+                "predicate": "attention.state",
+                "value": "SOL_REQUIRED",
+                "freshness": "FRESH",
+                "sources": [
+                    {"owner": "agent_os", "source_ref": source_ref, "observed_at": None}
+                ],
+            }
+        ],
+        "reason_codes": [],
+    }
+    normalized = validate_result_data(data)
+    envelope = result_envelope("get_attention", data=normalized)
+    jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema).validate(envelope)
 
 
 def test_static_contract_server_exposes_only_list_and_call():

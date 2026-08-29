@@ -12,7 +12,7 @@ from integrations.mastermind_secretary_mcp.schemas import (
     validate_tool_arguments,
 )
 
-FactValue = str | int | float | bool | None
+FactValue = str | int | bool
 
 
 class StewardUnavailableError(RuntimeError):

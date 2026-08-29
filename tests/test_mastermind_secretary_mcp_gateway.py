@@ -19,7 +19,6 @@ from integrations.mastermind_secretary_mcp.adapter import (
 )
 from integrations.mastermind_secretary_mcp.schemas import (
     MAX_FACTS,
-    MAX_FACT_VALUE_CHARS,
     MAX_RESPONSE_BYTES,
     RESULT_SCHEMA,
     TOOL_SPECS,
@@ -35,7 +34,7 @@ def _source(*, source_ref="WS:EXECUTIVE-CAPACITY-FABRIC") -> GroundingSource:
     )
 
 
-def _fact(*, value="needs_sol", freshness="FRESH") -> GroundingFact:
+def _fact(*, value="SOL_REQUIRED", freshness="FRESH") -> GroundingFact:
     return GroundingFact(
         subject_ref="responsibility:alpha",
         predicate="attention.state",
@@ -110,7 +109,7 @@ def test_each_tool_calls_exactly_one_typed_steward_read(tool_name):
                 {
                     "subject_ref": "responsibility:alpha",
                     "predicate": "attention.state",
-                    "value": "needs_sol",
+                    "value": "SOL_REQUIRED",
                     "freshness": "FRESH",
                     "sources": [
                         {
@@ -308,14 +307,79 @@ def test_identity_locator_and_secret_predicates_are_not_public_projection_fields
     assert envelope["error"]["code"] == "RESPONSE_REFUSED"
 
 
+@pytest.mark.parametrize(
+    ("predicate", "private_value"),
+    [
+        ("runtime.identity", "Codex Account 4"),
+        ("runtime.realm", "Mac Studio Personal Pro 02"),
+        ("surface.binding", "Private Conversation c-12345"),
+        ("surface.id", "1700000000.000000"),
+        ("surface.id", 1_700_000_000_000_000),
+        ("responsibility.owner", "Chairman Chris"),
+    ],
+)
+def test_semantically_private_predicate_value_pairs_are_unrepresentable(
+    predicate, private_value
+):
+    fact = GroundingFact(
+        subject_ref="responsibility:alpha",
+        predicate=predicate,
+        value=private_value,
+        freshness="FRESH",
+        sources=(_source(),),
+    )
+    envelope = _run(
+        SecretaryGroundingGateway(
+            FakeSteward(StewardGrounding(state="FACTS", facts=(fact,)))
+        ).call("get_attention", {})
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "RESPONSE_REFUSED"
+
+
+@pytest.mark.parametrize(
+    "canonical_source_ref",
+    [
+        "DEC:CHAIRMAN-CONTROL-ROOM-P0-ARCHITECTURE-ACCEPTED",
+        "DSC:ASD-MODEL-VISIBLE-SETTINGS-CAN-EXPOSE-LIVE-CREDENTIALS",
+        "WS:" + "A" * 64,
+    ],
+)
+def test_long_canonical_source_references_remain_source_attributable(
+    canonical_source_ref
+):
+    fact = GroundingFact(
+        subject_ref="responsibility:alpha",
+        predicate="attention.state",
+        value="SOL_REQUIRED",
+        freshness="FRESH",
+        sources=(_source(source_ref=canonical_source_ref),),
+    )
+    envelope = _run(
+        SecretaryGroundingGateway(
+            FakeSteward(StewardGrounding(state="FACTS", facts=(fact,)))
+        ).call("get_attention", {})
+    )
+    assert envelope["ok"] is True
+    assert envelope["data"]["facts"][0]["sources"][0]["source_ref"] == canonical_source_ref
+
+
 def test_oversize_steward_output_is_refused():
+    sources = tuple(
+        GroundingSource(
+            owner="agent_os",
+            source_ref="DEC:" + "A" * 223,
+            observed_at="2026-08-29T05:00:00Z",
+        )
+        for _ in range(8)
+    )
     facts = tuple(
         GroundingFact(
             subject_ref=f"responsibility:r{index}",
-            predicate="responsibility.summary",
-            value="x" * MAX_FACT_VALUE_CHARS,
+            predicate="attention.state",
+            value="SOL_REQUIRED",
             freshness="FRESH",
-            sources=(_source(),),
+            sources=sources,
         )
         for index in range(MAX_FACTS)
     )

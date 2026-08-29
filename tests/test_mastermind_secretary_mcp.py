@@ -133,24 +133,29 @@ def test_selector_value_smuggling_is_not_a_responsibility_reference(smuggled_ref
         )
 
 
-def test_fact_value_schema_has_no_overlapping_one_of_numeric_branches():
-    value_schema = TOOL_SPECS[0].output_schema["properties"]["data"]["oneOf"][1][
-        "properties"
-    ]["facts"]["items"]["properties"]["value"]
+@pytest.mark.parametrize("suffix_length", [32, 40, 64, 145])
+def test_canonical_opaque_responsibility_refs_accept_full_declared_range(suffix_length):
+    responsibility_ref = "responsibility:" + "a" * suffix_length
+    assert validate_tool_arguments(
+        "get_responsibility", {"responsibility_ref": responsibility_ref}
+    ) == {"responsibility_ref": responsibility_ref}
 
-    assert "oneOf" not in value_schema
-    assert value_schema["anyOf"] == [
-        {"type": "null"},
-        {"type": "boolean"},
-        {"type": "integer"},
-        {"type": "number"},
-        {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1_024,
-            "pattern": r"^[A-Za-z0-9][A-Za-z0-9 _.,:+()-]{0,1023}$",
-        },
-    ]
+
+def test_fact_value_schema_has_no_overlapping_one_of_numeric_branches():
+    fact_schema = TOOL_SPECS[0].output_schema["properties"]["data"]["oneOf"][1][
+        "properties"
+    ]["facts"]["items"]
+    predicate_schemas = {
+        branch["properties"]["predicate"]["const"]: branch["properties"]["value"]
+        for branch in fact_schema["allOf"][0]["oneOf"]
+    }
+
+    assert predicate_schemas["responsibility.priority"] == {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100,
+    }
+    assert "oneOf" not in predicate_schemas["responsibility.priority"]
 
 
 def test_live_schema_views_cannot_widen_the_canonical_contract():
