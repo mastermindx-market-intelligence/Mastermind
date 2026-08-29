@@ -10,14 +10,21 @@ import pytest
 MODULE = "ops.linear_projector.host_enrollment"
 
 
+def _module_spec():
+    try:
+        return importlib.util.find_spec(MODULE)
+    except ModuleNotFoundError:
+        return None
+
+
 def _load():
-    spec = importlib.util.find_spec(MODULE)
+    spec = _module_spec()
     assert spec is not None, "CRED0 host_enrollment module is not built yet"
     return importlib.import_module(MODULE)
 
 
 def test_linear_projector_host_enrollment_module_exists() -> None:
-    assert importlib.util.find_spec(MODULE) is not None
+    assert _module_spec() is not None, "CRED0 host_enrollment module is not built yet"
 
 
 def test_production_coordinates_and_identity_are_fixed() -> None:
