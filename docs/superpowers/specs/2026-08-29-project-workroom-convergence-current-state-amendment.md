@@ -5,8 +5,37 @@
 **Status:** `SPEC_ONLY / CHAIRMAN-APPROVED / RECORDS_ONLY`  
 **Operation key:** `project-workroom-convergence-20260829-sol-001`  
 **Carrier:** Mastermind PR #232 / `sol/project-workroom-convergence-20260829`  
-**Protected procedure pin:** `mastermindx-market-intelligence/Mastermind@2962759e8abf6bf722a8582f92af8f84013f5f40`  
+**Original protected pickup:** `mastermindx-market-intelligence/Mastermind@2962759e8abf6bf722a8582f92af8f84013f5f40`  
+**Current protected release basis:** `mastermindx-market-intelligence/Mastermind@1b99ea1d0a6232e11fd46915d348685764cb00cf`  
 **Authority:** narrow correction to the Project Workroom design and implementation plan after fresh current-code and live Linear archaeology. For the exact topics below, this amendment wins over the two earlier Workroom files on this carrier. It creates no runtime, Slack or Linear mutation authority.
+
+---
+
+## 0. Current-source reconciliation
+
+Protected Mastermind advanced from the original pickup through #215 / `1b99ea1d0a6232e11fd46915d348685764cb00cf` while PR #232 was in review.
+
+#215 changes only the current Sol Skillpack/manual-handoff placement procedure. It establishes that ordinary unbound `CAPACITY_SELECTABLE` work must surface:
+
+```text
+WAITING_CAPACITY / needs_placement
+```
+
+instead of routinely emitting `OPEN_PICKUP` or `ACCOUNT_BINDING: CHAIRMAN_SELECTS` and returning the Chairman to provider-account allocation.
+
+That protected movement is compatible with, and strengthens, the Workroom architecture. The Workroom design already requires Capacity/RuntimeBinding/Executive owners to perform routine placement and treats provider accounts as ephemeral runtime facts rather than project/channel ownership.
+
+Current interpretation:
+
+```text
+Project Workroom architecture: unchanged
+routine unbound child placement: WAITING_CAPACITY / needs_placement
+manual Chairman account allocation: explicit transition/exception only
+WR-P0 planner: no placement or provider-routing authority
+records carrier current-base lineage: reconciled to 1b99ea1d0a6232e11fd46915d348685764cb00cf
+```
+
+No #215 file or implementation is copied into this carrier.
 
 ---
 
