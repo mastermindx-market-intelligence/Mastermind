@@ -793,12 +793,54 @@ def test_request_without_delivery_is_pending_retryable():
     requested = delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation)
     assert requested.command_id == oid
     assert reconstruct_status(oid, [requested], route=route) is ObligationStatus.PENDING_RETRYABLE
-    attempted = delivery_record(
-        oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route
-    )
-    assert reconstruct_status(oid, [requested, attempted], route=route) is ObligationStatus.ATTEMPTED
     with pytest.raises(WakeDispatchError, match="no delivery evidence"):
         already_delivered_receipt(obligation, route, found=requested)
+
+
+def test_unfinished_delivery_attempt_requires_reconciliation():
+    obligation = _obligation_from_inbox()
+    oid = obligation.obligation_id
+    route = _route_for(obligation)
+    records = [
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
+        delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route),
+    ]
+
+    assert (
+        reconstruct_status(oid, records, route=route)
+        is ObligationStatus.RECONCILIATION_REQUIRED
+    )
+
+
+def test_failed_delivery_attempt_is_effect_known_and_retryable():
+    obligation = _obligation_from_inbox()
+    oid = obligation.obligation_id
+    route = _route_for(obligation)
+    records = [
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
+        delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route),
+        delivery_record(oid, LedgerPhase.FAILED, attempt_n=1, route=route),
+    ]
+
+    assert reconstruct_status(oid, records, route=route) is ObligationStatus.ATTEMPTED
+
+
+def test_target_unavailable_attempt_is_effect_known_and_retryable():
+    obligation = _obligation_from_inbox()
+    oid = obligation.obligation_id
+    route = _route_for(obligation)
+    records = [
+        delivery_record(oid, LedgerPhase.WAKE_REQUESTED, obligation=obligation),
+        delivery_record(oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route),
+        delivery_record(
+            oid,
+            LedgerPhase.TARGET_UNAVAILABLE,
+            attempt_n=1,
+            route=route,
+        ),
+    ]
+
+    assert reconstruct_status(oid, records, route=route) is ObligationStatus.ATTEMPTED
 
 
 def test_accepted_is_not_delivered():
@@ -1092,10 +1134,13 @@ def test_sibling_review_pointer_suppresses_duplicate_wake():
 
 
 def test_one_transport_implementation_authority():
-    assert all(
-        descriptor.transport_implemented is False
-        for descriptor in WAKE_TRANSPORT_DESCRIPTORS.values()
-    )
+    implemented = {
+        transport_id
+        for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
+        if descriptor.transport_implemented
+    }
+    assert implemented == {"codex-app-server"}
+    assert WAKE_TRANSPORT_DESCRIPTORS["claude-code-session"].transport_implemented is False
     sources = []
     for path in _WAKE_MODULES:
         text = path.read_text(encoding="utf-8")

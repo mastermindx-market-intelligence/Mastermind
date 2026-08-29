@@ -57,6 +57,7 @@ class ObligationStatus(str, Enum):
     NOT_SEEN = "NOT_SEEN"
     PENDING_RETRYABLE = "PENDING_RETRYABLE"
     ATTEMPTED = "ATTEMPTED"
+    RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
     ACCEPTED = "ACCEPTED"
     DELIVERED_UNACKNOWLEDGED = "DELIVERED_UNACKNOWLEDGED"
     TARGET_ACKNOWLEDGED = "TARGET_ACKNOWLEDGED"
@@ -81,6 +82,8 @@ class SourceResolutionCode(str, Enum):
 
 SNAPSHOT_DIGEST_RE = re.compile(r"^[0-9a-f]{16,64}$")
 OPERATOR_AUTHORITY_RECEIPT_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+NUDGE_ID_RE = re.compile(r"^NUDGE-[0-9a-f]{32}$")
+ATTEMPT_COMMAND_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}:A[1-9][0-9]*$")
 _RESOLUTION_CODE_BY_SOURCE = {
     SourceKind.EXECUTIVE_RUNTIME_EVENT: SourceResolutionCode.RUNTIME_REVIEW_ABSENT,
     SourceKind.EXECUTIVE_INBOX_ATTENTION: SourceResolutionCode.INBOX_ATTENTION_ABSENT,
@@ -103,6 +106,7 @@ ATTEMPT_TERMINALS = frozenset(
         LedgerPhase.TARGET_UNAVAILABLE,
     }
 )
+EFFECT_KNOWN_PHASES = ATTEMPT_TERMINALS | frozenset({LedgerPhase.ACCEPTED})
 GLOBAL_PHASES = frozenset(
     {
         LedgerPhase.WAKE_REQUESTED,
@@ -129,6 +133,8 @@ class DeliveryAttempt:
     session_alias: str
     reasoning_surface: str
     wake_transport: str
+    nudge_id: str | None = None
+    nudge_attempt_command_ids: tuple[str, ...] = ()
 
     def matches_route(self, route: WakeRoute) -> bool:
         return (
@@ -225,6 +231,8 @@ class WakeLedgerRecord:
     session_alias: str | None = None
     reasoning_surface: str | None = None
     wake_transport: str | None = None
+    nudge_id: str | None = None
+    nudge_attempt_command_ids: tuple[str, ...] = ()
     native_handle: str | None = None
     ack: WakeAcknowledgement | None = None
     source_resolution: SourceResolution | None = None
@@ -240,6 +248,9 @@ class WakeLedgerRecord:
             and self.session_alias == attempt.session_alias
             and self.reasoning_surface == attempt.reasoning_surface
             and self.wake_transport == attempt.wake_transport
+            and self.nudge_id == attempt.nudge_id
+            and self.nudge_attempt_command_ids
+            == attempt.nudge_attempt_command_ids
         )
 
 
@@ -323,6 +334,8 @@ def attempt_record(
             session_alias=attempt.session_alias,
             reasoning_surface=attempt.reasoning_surface,
             wake_transport=attempt.wake_transport,
+            nudge_id=attempt.nudge_id,
+            nudge_attempt_command_ids=attempt.nudge_attempt_command_ids,
         )
     )
 
@@ -346,6 +359,8 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
                 record.session_alias,
                 record.reasoning_surface,
                 record.wake_transport,
+                record.nudge_id,
+                record.nudge_attempt_command_ids,
                 record.native_handle,
             )
         ):
@@ -384,6 +399,27 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
         raise WakeLedgerError("attempt phase cannot carry ack or resolution evidence")
     if record.obligation is not None:
         raise WakeLedgerError("attempt phase cannot carry the obligation envelope")
+    if bool(record.nudge_id) != bool(record.nudge_attempt_command_ids):
+        raise WakeLedgerError(
+            "attempt phase must carry complete nudge group identity or none"
+        )
+    if record.nudge_id:
+        if NUDGE_ID_RE.fullmatch(record.nudge_id) is None:
+            raise WakeLedgerError("attempt phase nudge_id is malformed")
+        commands = tuple(record.nudge_attempt_command_ids)
+        if commands != tuple(sorted(set(commands))):
+            raise WakeLedgerError(
+                "nudge attempt command identities must be unique and sorted"
+            )
+        if any(ATTEMPT_COMMAND_ID_RE.fullmatch(item) is None for item in commands):
+            raise WakeLedgerError("nudge attempt command identity is malformed")
+        own_attempt = ledger_command_id(
+            oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=record.attempt_n
+        )
+        if own_attempt not in commands:
+            raise WakeLedgerError(
+                "nudge attempt command identities do not contain this attempt"
+            )
     return record
 
 
@@ -628,7 +664,20 @@ def reconstruct_status(
         return ObligationStatus.DELIVERED_UNACKNOWLEDGED
     if any(record.phase is LedgerPhase.ACCEPTED for record in matching):
         return ObligationStatus.ACCEPTED
-    if any(record.phase is LedgerPhase.DELIVERY_ATTEMPT for record in matching):
+    phases_by_attempt: dict[int, set[LedgerPhase]] = {}
+    for record in matching:
+        if record.attempt_n is not None:
+            phases_by_attempt.setdefault(record.attempt_n, set()).add(record.phase)
+    if any(
+        LedgerPhase.DELIVERY_ATTEMPT in phases
+        and not (phases & EFFECT_KNOWN_PHASES)
+        for phases in phases_by_attempt.values()
+    ):
+        return ObligationStatus.RECONCILIATION_REQUIRED
+    if any(
+        record.phase in {LedgerPhase.FAILED, LedgerPhase.TARGET_UNAVAILABLE}
+        for record in matching
+    ):
         return ObligationStatus.ATTEMPTED
     return ObligationStatus.PENDING_RETRYABLE
 
@@ -714,7 +763,7 @@ def unfinished_attempt_n(records: Sequence[WakeLedgerRecord]) -> int | None:
     for n in sorted(by_n):
         phases = by_n[n]
         if LedgerPhase.DELIVERY_ATTEMPT in phases and not (
-            phases & ATTEMPT_TERMINALS
+            phases & EFFECT_KNOWN_PHASES
         ):
             return n
     return None
@@ -749,10 +798,13 @@ def eligible_for_nudge(
     *,
     destination_digest: str | None = None,
 ) -> bool:
+    if unfinished_attempt_n(records) is not None:
+        return False
     status = reconstruct_status(
         obligation_id, records, destination_digest=destination_digest
     )
     if status in {
+        ObligationStatus.ACCEPTED,
         ObligationStatus.TARGET_ACKNOWLEDGED,
         ObligationStatus.SOURCE_RESOLVED,
         ObligationStatus.NOT_SEEN,
@@ -862,7 +914,7 @@ def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
 
 
 def attempt_event_payload(attempt: DeliveryAttempt) -> dict[str, object]:
-    return {
+    payload = {
         "obligation_id": attempt.obligation_id,
         "attempt_n": attempt.attempt_n,
         "attempt_command_id": attempt.attempt_command_id,
@@ -874,6 +926,12 @@ def attempt_event_payload(attempt: DeliveryAttempt) -> dict[str, object]:
         "reasoning_surface": attempt.reasoning_surface,
         "wake_transport": attempt.wake_transport,
     }
+    if attempt.nudge_id:
+        payload["nudge_id"] = attempt.nudge_id
+        payload["nudge_attempt_command_ids"] = list(
+            attempt.nudge_attempt_command_ids
+        )
+    return payload
 
 
 def event_payload_for(
@@ -898,7 +956,7 @@ def event_payload_for(
             raise WakeLedgerError("TARGET_ACKNOWLEDGED payload requires acknowledgement evidence")
         return ack_event_payload(record.ack)
     if record.phase in ATTEMPT_PHASES:
-        return {
+        payload = {
             "obligation_id": _obligation_id_from_command(record.command_id),
             "attempt_n": record.attempt_n,
             "attempt_command_id": ledger_command_id(
@@ -914,6 +972,12 @@ def event_payload_for(
             "reasoning_surface": record.reasoning_surface,
             "wake_transport": record.wake_transport,
         }
+        if record.nudge_id:
+            payload["nudge_id"] = record.nudge_id
+            payload["nudge_attempt_command_ids"] = list(
+                record.nudge_attempt_command_ids
+            )
+        return payload
     raise WakeLedgerError(f"unsupported ledger phase {record.phase}")
 
 
@@ -1020,6 +1084,9 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
             WakeLedgerRecord(command_id=command_id, phase=phase, ack=ack)
         )
     attempt_n = _strict_positive_int(payload.get("attempt_n"))
+    raw_group = payload.get("nudge_attempt_command_ids", ())
+    if not isinstance(raw_group, (list, tuple)):
+        raise WakeLedgerError("nudge attempt command identities must be a list")
     _assert_outer_correlation(event, None)
     return parse_ledger_record(
         WakeLedgerRecord(
@@ -1033,6 +1100,8 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
             session_alias=str(payload.get("session_alias") or "") or None,
             reasoning_surface=str(payload.get("reasoning_surface") or "") or None,
             wake_transport=str(payload.get("wake_transport") or "") or None,
+            nudge_id=str(payload.get("nudge_id") or "") or None,
+            nudge_attempt_command_ids=tuple(str(item) for item in raw_group),
         )
     )
 
