@@ -166,6 +166,66 @@ def test_unedited_history_and_thread_parse_exactly_and_preserve_limit() -> None:
     ]
 
 
+def test_history_accepts_official_ordinary_message_shape_without_team() -> None:
+    query = {"channel": CHANNEL, "limit": "1"}
+    ordinary = message(ts=THREAD_TS, user=BOT, text="parent")
+    ordinary.pop("team")
+    adapter, _transport = client(
+        lambda call: response(
+            call["path"], page_payload([ordinary]), query=query
+        )
+    )
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=1))
+
+    assert page.messages == (
+        SlackMessage(ts=THREAD_TS, author_user_id=BOT, text="parent"),
+    )
+
+
+def test_replies_accept_official_ordinary_message_shape_without_team() -> None:
+    query = {"channel": CHANNEL, "ts": THREAD_TS, "limit": "2"}
+    parent = message(ts=THREAD_TS, user=BOT, text="parent")
+    reply = message(
+        ts="1787471000.000002", text="reply", thread_ts=THREAD_TS
+    )
+    parent.pop("team")
+    reply.pop("team")
+    adapter, _transport = client(
+        lambda call: response(
+            call["path"], page_payload([parent, reply]), query=query
+        )
+    )
+
+    page = run(
+        adapter.fetch_thread(channel_id=CHANNEL, thread_ts=THREAD_TS, limit=2)
+    )
+
+    assert page.messages == (
+        SlackMessage(ts=THREAD_TS, author_user_id=BOT, text="parent"),
+        SlackMessage(
+            ts="1787471000.000002",
+            author_user_id=HUMAN,
+            text="reply",
+            thread_ts=THREAD_TS,
+        ),
+    )
+
+
+def test_present_mismatched_team_remains_refused() -> None:
+    query = {"channel": CHANNEL, "limit": "1"}
+    ordinary = message(ts=THREAD_TS)
+    ordinary["team"] = "T0000000000"
+    adapter, _transport = client(
+        lambda call: response(
+            call["path"], page_payload([ordinary]), query=query
+        )
+    )
+
+    with pytest.raises(SlackTransportUnavailable, match="^SLACK_TRANSPORT_UNAVAILABLE$"):
+        run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=1))
+
+
 @pytest.mark.parametrize(
     ("has_more", "cursor", "complete"),
     [(False, "", True), (True, "next", False), (False, "next", False)],

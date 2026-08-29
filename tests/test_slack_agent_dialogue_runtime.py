@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+import integrations.slack_agent_dialogue.service as service_module
 from integrations.slack_agent_dialogue.service import (
     CONTROL_VERSION,
     CONTROL_VERSION_V2,
@@ -55,12 +56,12 @@ def socket_root() -> Iterator[Path]:
 
 def _config(runtime, socket_root: Path, token_file: Path):
     return runtime.RelayRuntimeConfig(
-        socket_path=socket_root / "agent-relay.sock",
+        socket_path=runtime.AGENT_RELAY_SOCKET_PATH,
         token_file=token_file,
         workspace_id="T0BRD2AQXQV",
         channel_id="C0BRUL9F2V7",
         bot_user_id="U0BST4WG996",
-        allowed_peer_uids=(os.geteuid(),),
+        allowed_peer_uids=(450,),
         allowed_sol_user_ids=("U0BRETDUAS2",),
         allowed_parent_user_ids=("U0BRETDUAS2",),
     )
@@ -71,17 +72,27 @@ def _request(version: str) -> dict[str, object]:
 
 
 def test_runtime_composes_one_client_and_serves_sequential_v1_and_v2_calls(
+    monkeypatch,
     tmp_path: Path,
     socket_root: Path,
 ) -> None:
     """A second call or either accepted control version must not close the relay."""
 
     runtime = _runtime()
+    os.chown(socket_root, os.geteuid(), os.getegid())
+    socket_root.chmod(0o710)
+    monkeypatch.setattr(
+        runtime, "AGENT_RELAY_SOCKET_PATH", socket_root / "agent-relay.sock"
+    )
+    monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 450)
     token_file = _token_file(tmp_path)
     service = runtime.build_service(_config(runtime, socket_root, token_file))
     token_file.unlink()
 
     assert service.engine.client is service.engine_v2.client
+    assert service.config.socket_parent_mode == 0o710
+    assert service.config.socket_mode == 0o660
+    assert service.config.socket_group_gid == os.getegid()
     assert "opaque-relay-token" not in repr(service.engine.client)
 
     async def scenario() -> None:
@@ -167,12 +178,40 @@ def test_runtime_rejects_relative_socket_and_network_configuration(tmp_path: Pat
             workspace_id="T0BRD2AQXQV",
             channel_id="C0BRUL9F2V7",
             bot_user_id="U0BST4WG996",
-            allowed_peer_uids=(os.geteuid(),),
+            allowed_peer_uids=(450,),
             allowed_sol_user_ids=("U0BRETDUAS2",),
             allowed_parent_user_ids=("U0BRETDUAS2",),
         )
     assert not hasattr(runtime.RelayRuntimeConfig, "host")
     assert not hasattr(runtime.RelayRuntimeConfig, "port")
+
+
+def test_runtime_requires_dedicated_socket_path_and_exact_executive_peer(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime()
+    token_file = _token_file(tmp_path)
+    assert runtime.AGENT_RELAY_SOCKET_PATH == Path(
+        "/var/run/mastermind-agent-relay/agent-relay.sock"
+    )
+
+    for socket_path, peer_uids in (
+        (Path("/var/run/mastermind-executive/agent-relay.sock"), (450,)),
+        (runtime.AGENT_RELAY_SOCKET_PATH, (451,)),
+        (runtime.AGENT_RELAY_SOCKET_PATH, (450, 451)),
+    ):
+        with pytest.raises(runtime.RelayRuntimeError) as exc:
+            runtime.RelayRuntimeConfig(
+                socket_path=socket_path,
+                token_file=token_file,
+                workspace_id="T0BRD2AQXQV",
+                channel_id="C0BRUL9F2V7",
+                bot_user_id="U0BST4WG996",
+                allowed_peer_uids=peer_uids,
+                allowed_sol_user_ids=("U0BRETDUAS2",),
+                allowed_parent_user_ids=("U0BRETDUAS2",),
+            )
+        assert exc.value.code == "RUNTIME_INVALID"
 
 
 def test_launchd_template_is_private_persistent_and_secret_free() -> None:
