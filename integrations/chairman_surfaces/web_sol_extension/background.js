@@ -240,7 +240,8 @@ async function handleInspect(request) {
   if (resolved.status) {
     return receipt(request, resolved.status, unknownObservation());
   }
-  const event = await freshProbe(resolved.tabId, request.conversation_fingerprint);
+  const { tabId } = resolved;
+  const event = await freshProbe(tabId, request.conversation_fingerprint);
   return classifyProbe(request, event, "INSPECTED");
 }
 
@@ -249,21 +250,22 @@ async function handleForeground(request) {
   if (resolved.status) {
     return receipt(request, resolved.status, unknownObservation());
   }
+  const { tabId, windowId } = resolved;
 
-  const before = await freshProbe(resolved.tabId, request.conversation_fingerprint);
+  const before = await freshProbe(tabId, request.conversation_fingerprint);
   const beforeReceipt = classifyProbe(request, before, "INSPECTED");
   if (beforeReceipt.status !== "INSPECTED") {
     return beforeReceipt;
   }
 
   try {
-    await chrome.tabs.update(resolved.tabId, { active: true });
-    await chrome.windows.update(resolved.windowId, { focused: true });
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(windowId, { focused: true });
   } catch (_error) {
     return receipt(request, "UNKNOWN", before.observation);
   }
 
-  const after = await freshProbe(resolved.tabId, request.conversation_fingerprint);
+  const after = await freshProbe(tabId, request.conversation_fingerprint);
   return classifyProbe(request, after, "FOREGROUNDED_VERIFIED");
 }
 
