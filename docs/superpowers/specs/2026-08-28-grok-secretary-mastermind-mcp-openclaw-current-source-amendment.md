@@ -15,7 +15,7 @@ Skillpack mastermind.sol_skillpack.v1 1.0.1
 bootstrap major 1
 ```
 
-Protected movement after the final H0 source release is currently records-only watcher-resource design PR #205. Direct protected compare:
+Protected movement after the final H0 source release is records-only watcher-resource design PR #205. Direct protected compare:
 
 ```text
 229aebce5e8d0c1c7372f5fead9c24516b027cc1
@@ -28,7 +28,7 @@ is exactly one commit and one changed path:
 docs/superpowers/specs/2026-08-28-watcher-resource-freshness-design.md
 ```
 
-No authenticated H0 path and no Grok Secretary #188 record path moves in that protected delta. This #188 branch must still be history-preservingly reconciled to then-current protected master before release; no reset, rebase, force push or replacement carrier is permitted.
+No authenticated H0 path and no Grok Secretary #188 record path moves in that protected delta. This #188 branch has been history-preservingly reconciled to protected `dfd69451...`; no reset, rebase, force push or replacement carrier is permitted.
 
 Current watcher procedure also requires carrier-fresh reads and resource discipline. Reasoning-model watches default to 60 minutes; watcher silence never proves carrier freshness. This is procedure/attention law only, not a new lifecycle or scheduler.
 
@@ -145,24 +145,43 @@ and only creates a direct agent for loopback. It does **not** activate inherited
 
 This supersedes the earlier process-proxy-env hypothesis as an implementation plan. GS-OP1 correctly stopped before effect when the host lacked a same-server env overlay; even if that overlay had existed, `2026.5.7` remote WebSocket routing was not proven to consume it.
 
-## 6. Published stable OpenClaw candidate adds the missing managed-proxy Gateway hook
+## 6. Preferred repair target — OpenClaw 2026.6.34 extended-stable
 
-The npm registry currently publishes `openclaw@2026.7.1-2` under the `latest` dist-tag. This proves that an installable candidate version exists; it does not by itself prove exact package bytes or behavior on the Grok host.
+The preferred future target is exact `openclaw@2026.6.34`, the current npm/container `extended-stable` channel release.
 
-The corresponding current stable upstream Git release source contains a materially different Gateway client. It injects:
+This target is preferred over current npm `latest` `2026.7.1-2` because it already contains the exact capability needed here while reducing the upgrade/change surface and avoiding the Git-tag/npm patch-label mismatch observed on the later candidate.
+
+Primary-source checks on Git `v2026.6.34` show:
+
+- `package.json.version = 2026.6.34`;
+- bin `openclaw -> openclaw.mjs`;
+- Gateway host deps inject:
 
 ```text
 beforeConnect: ensureInheritedManagedProxyRoutingActive
 ```
 
-and its managed proxy lifecycle can re-install inherited proxy routing when the child receives:
+- the managed proxy lifecycle recognizes inherited managed proxy routing when the child has:
 
 ```text
 OPENCLAW_PROXY_ACTIVE=1
 HTTP_PROXY=<http-or-https forward proxy URL>
 ```
 
-The lifecycle validates an `http://` or `https://` proxy URL and installs the managed Proxyline route before Gateway connect. This is materially different from installed `2026.5.7`.
+and installs the Proxyline managed route before Gateway connect;
+- exact release commit `5c38f996d4059ebd9080cf74dc611ec3a17f4d50` is Git-signature verified;
+- the release includes proxy end-to-end fixture work, providing a materially stronger basis for this specific repair than the installed `2026.5.7`.
+
+Published release verification for exact `2026.6.34` identifies:
+
+```text
+npm package: openclaw@2026.6.34
+npm integrity: sha512-Rm4khBrWn9HYqE99NBryCFgjwlsIuwBqK5jIANn2773CGXJ1JIZkDn5twEHB+8SVFdh0FPNPHRVgZepzNJDfHg==
+release commit: 5c38f996d4059ebd9080cf74dc611ec3a17f4d50
+channel: extended-stable
+```
+
+and reports npm signatures/SLSA provenance plus successful release validation. These are review-time reference identities only. The future implementation must bind the **direct action-time npm registry metadata, signature/provenance and staged artifact bytes** before effect; it must not trust this document as a package registry.
 
 For this estate the already-proven candidate forward proxy is:
 
@@ -170,17 +189,15 @@ For this estate the already-proven candidate forward proxy is:
 http://127.0.0.1:1056
 ```
 
-No SOCKS-specific OpenClaw contract is required for the preferred repair because stable managed-proxy inheritance is explicitly HTTP-forward-proxy based.
+No SOCKS-specific OpenClaw contract is required for the preferred repair because inherited managed-proxy activation is explicitly HTTP-forward-proxy based.
 
-### Package-attestation caveat
+### Why `2026.7.1-2` is not the preferred target
 
-Do **not** equate a Git tag name with the npm artifact without verification. The checked upstream `v2026.7.1-2` source tree currently reports `package.json.version = 2026.7.1`, while npm publishes artifact version `2026.7.1-2`. The future implementation therefore must attest the exact npm artifact it will execute, not merely cite the Git tag.
+Current npm `latest` `2026.7.1-2` also contains the managed-proxy behavior in corresponding stable source, but it widens the change surface without adding a capability required by this repair. Its checked Git source tag also reports `package.json.version=2026.7.1` while npm publishes `2026.7.1-2`, which would require an additional package-label/content reconciliation. It is therefore not the approved preferred candidate for this wave. A later separate source-law amendment may revisit it if `2026.6.34` proves incompatible or unsafe; the implementation worker may not auto-fallback to it.
 
-Before any live connector change, the staged npm artifact must be integrity-bound to registry metadata and independently inspected to prove that the **actual staged executable bytes** contain the required managed-proxy Gateway hook/lifecycle. A version-label match without byte/content proof is insufficient.
+**Still unproven:** that an exact attested `openclaw@2026.6.34` npm artifact plus inherited managed-proxy env completes the private Gateway WebSocket handshake in this exact Grok/VPS host. That must be proven by the implementation canary; source comparison and release verification are not production proof.
 
-**Still unproven:** that an exact attested `openclaw@2026.7.1-2` npm artifact plus inherited managed-proxy env completes the private Gateway WebSocket handshake in this exact Grok/VPS host. That must be proven by the implementation canary; source comparison is not production proof.
-
-## 7. Frozen one-path repair contract — preferred implementation
+## 7. Frozen one-path repair contract
 
 A future implementation child may modify exactly **one canonical MCP identity**: the existing `user-openclaw` entry.
 
@@ -201,22 +218,23 @@ The approval-gated implementation operation must separate **package staging** fr
 
 Before changing the live entry:
 
-1. bind npm registry metadata for exact candidate `openclaw@2026.7.1-2`, including its immutable distribution-integrity field / tarball identity;
-2. acquire the candidate into an isolated operation-owned staging/cache boundary without overwriting or upgrading the live `2026.5.7` child/package in place;
-3. independently digest the staged tarball/package tree and verify registry integrity;
-4. verify the staged package's own `package.json` reports exactly the intended npm artifact version; any Git-tag/npm-version mismatch inside the staged artifact is a blocker, not something to normalize away;
-5. inspect the **staged executable bytes** to prove the Gateway client calls inherited managed-proxy activation and the staged proxy lifecycle accepts the required `OPENCLAW_PROXY_ACTIVE=1` + HTTP(S) `HTTP_PROXY` contract;
-6. bind the exact staged CLI entrypoint. Both upstream package families expose the `openclaw` bin as `openclaw.mjs`, but the implementation must prove that fact from the staged artifacts rather than rely on this record alone;
-7. preserve/stage an exact rollback-capable copy or otherwise network-independent executable closure of the currently running `openclaw@2026.5.7` package before live mutation, with its version and package/tree digest bound;
-8. prove both candidate and rollback executables can be selected by the existing command/args schema **without any network fetch or package mutation after the live transition starts**.
+1. bind action-time npm registry metadata for exact candidate `openclaw@2026.6.34`, including immutable distribution integrity and published provenance/signature identity;
+2. require the action-time registry identity to match the reviewed exact version/channel and expected reference integrity above, or STOP for Sol rather than silently adopting a republished/mismatched artifact;
+3. acquire the candidate into an isolated operation-owned staging/cache boundary without overwriting or upgrading the live `2026.5.7` child/package in place;
+4. independently digest the staged tarball/package tree and verify registry integrity/signature/provenance as available to the host;
+5. verify the staged package's own `package.json` reports exactly `2026.6.34`;
+6. inspect the **staged executable bytes** to prove the Gateway client calls inherited managed-proxy activation and the staged proxy lifecycle accepts the required `OPENCLAW_PROXY_ACTIVE=1` + HTTP(S) `HTTP_PROXY` contract;
+7. bind the exact staged CLI entrypoint and prove it maps to the staged `openclaw.mjs` rather than an ambient/global executable;
+8. preserve/stage an exact rollback-capable copy or otherwise network-independent executable closure of the currently running `openclaw@2026.5.7` package before live mutation, with its version and package/tree digest bound;
+9. prove both candidate and rollback executables can be selected by the existing command/args schema **without any network fetch or package mutation after the live transition starts**.
 
 Package staging is a known, separately receipted host filesystem effect inside the same approved operation (`PACKAGE_STAGE_APPLIED`), but it is not a Gateway/MCP identity change and must not restart or replace `user-openclaw`. If package staging, integrity, package-content proof, or rollback staging is ambiguous or fails, STOP before the live config transition. Do not compensate by letting `npx` fetch on demand during the live swap.
 
 A future implementation may use the existing npm/npx machinery only if it proves an exact offline/network-independent invocation for both versions after staging. Otherwise it must use another already-supported command/args form that points at the attested staged CLI entrypoint. This source law does not invent a new package manager or runtime store.
 
-### Preferred live candidate
+### Stage 1 — one live same-name configuration transition
 
-Preserve the same `serverName=user-openclaw`, same account, same endpoint semantics and same token-file coordinate. Change the same effective entry so the child executes the **attested staged** stable `openclaw@2026.7.1-2` artifact and receives only the process-local inherited managed-proxy environment required by the verified artifact contract:
+Preserve the same `serverName=user-openclaw`, same account, same endpoint semantics and same token-file coordinate. Change the same effective entry so the child executes the **attested staged** `openclaw@2026.6.34` artifact and receives only the process-local inherited managed-proxy environment required by the verified artifact contract:
 
 ```text
 OPENCLAW_PROXY_ACTIVE=1
@@ -240,7 +258,7 @@ After the live write:
 2. prove exactly one `user-openclaw` logical server remains;
 3. allow only the one same-name replacement/restart required by existing `LoadMcpServers` semantics;
 4. prove the old child is gone before accepting the new child;
-5. prove the new child executes the exact previously attested staged candidate bytes/version;
+5. prove the new child executes the exact previously attested staged `2026.6.34` bytes/version;
 6. run read-only Gateway acceptance probes.
 
 If the config write/replacement outcome is ambiguous, mark `EFFECT_UNKNOWN`, inspect the same effective entry/process state and reconcile before any retry, rollback or alternate avenue. Never blind retry and never create another MCP path as fallback.
@@ -255,14 +273,15 @@ If rollback outcome is ambiguous, preserve `EFFECT_UNKNOWN` and stop for same-ca
 
 Success requires all of:
 
-- package staging receipt proves registry identity/integrity + independent digest for the exact candidate artifact;
-- staged candidate package itself proves the managed-proxy hook/lifecycle contract;
-- exact network-independent rollback package/executable for `2026.5.7` was staged and attested before live mutation;
-- no live package fetch or package mutation occurred after the live transition began;
+- action-time registry identity/integrity/provenance for exact `openclaw@2026.6.34` matches the reviewed release identity;
+- independent staged-artifact digest/content proof;
+- staged candidate itself contains the required managed-proxy hook/lifecycle;
+- network-independent `2026.5.7` rollback was staged/attested before live mutation;
+- no package fetch or package mutation occurred after the live transition began;
 - `user-openclaw` remains the sole canonical OpenClaw MCP identity;
 - no OpenClaw entry is added to `mcpBoxServers`;
 - same serverName/account survives replacement;
-- child version/package tree is the exact approved and attested staged candidate;
+- child package/tree is the exact approved and attested staged `2026.6.34` candidate;
 - only approved process-local proxy env is added;
 - existing remote endpoint/token-file coordinate is preserved by sanitized identity;
 - live `conversations_list` succeeds from this exact Grok runtime;
@@ -283,8 +302,9 @@ Fail closed on:
 - current host/backend owner or effective entry differs from GS-OP2 evidence;
 - serverName collision or second OpenClaw MCP path;
 - current endpoint/token-file structure cannot be proven without revealing secrets;
-- npm candidate metadata/tarball/integrity cannot be bound exactly;
-- staged package version/content does not match the approved candidate or does not prove the required managed-proxy hook;
+- action-time npm candidate metadata/tarball/integrity/provenance cannot be bound exactly;
+- action-time registry identity differs from the reviewed exact `2026.6.34` release identity;
+- staged package version/content does not match `2026.6.34` or does not prove the required managed-proxy hook;
 - exact network-independent rollback executable/package closure for `2026.5.7` cannot be proven before live mutation;
 - candidate package cannot be staged without changing unrelated host state;
 - package integrity/version cannot be proven;
@@ -296,13 +316,13 @@ Fail closed on:
 - config/restart/rollback outcome becomes `EFFECT_UNKNOWN`;
 - host update would require patching opaque minified `host-main.cjs` in place rather than the supported effective-config owner.
 
-Do not weaken to a second MCP server, `mcpBoxServers`, global proxy, `/etc/hosts`, public ingress, Tailscale ACL/route/DNS/Serve/Funnel change, Mac re-pairing, or arbitrary `system.run` just to make the canary green.
+Do not weaken to current npm `latest`, another package version, a second MCP server, `mcpBoxServers`, global proxy, `/etc/hosts`, public ingress, Tailscale ACL/route/DNS/Serve/Funnel change, Mac re-pairing, or arbitrary `system.run` just to make the canary green. Any alternate package target requires fresh Sol source-law adjudication.
 
 ## 10. Current implementation/release boundary
 
 This amendment is architecture/source law only. It does not authorize a worker merely because the design is written.
 
-The intended next implementation is one fresh exact-session Grok Secretary child after this #188 carrier is current-base reconciled, exact-head validated, independently reviewed and protected/merged as source law. That child must receive a fresh operation key, exact current thread/carrier, current protected re-pin, exact pre-state/config digest, approved package-stage effect boundary, independently attested candidate + rollback packages, one logical same-entry live mutation, reciprocal watcher setup and the stop/rollback law above.
+The intended next implementation is one fresh exact-session Grok Secretary child after this #188 carrier is exact-head validated, independently reviewed and protected/merged as source law. That child must receive a fresh operation key, exact current thread/carrier, current protected re-pin, exact pre-state/config digest, approved package-stage effect boundary, independently attested candidate + rollback packages, one logical same-entry live mutation, reciprocal watcher setup and the stop/rollback law above.
 
 No implementation may start from the terminal GS-OP1 or GS-OP2 watcher/session authority.
 
