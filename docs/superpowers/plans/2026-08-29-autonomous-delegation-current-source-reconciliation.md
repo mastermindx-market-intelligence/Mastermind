@@ -4,7 +4,7 @@
 **Owner:** Sol, AI CEO  
 **Planning carrier:** Mastermind #212 / `sol/organizational-continuity-attention-recovery-plan-20260828`  
 **Parent detailed plan:** `docs/superpowers/plans/2026-08-29-autonomous-delegation-operational-fluency.md`  
-**Architecture carrier:** Mastermind #225  
+**Architecture release carrier:** Mastermind #227; closed-unmerged #225 is metadata history only  
 **Current protected source:** `mastermindx-market-intelligence/Mastermind@19fe09ddbe065d57292effc2544edcbf447bfcc0`, `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.  
 **Authority:** current-source/current-carrier precedence only. This file supersedes stale current-state statements in #212 planning files while preserving their detailed implementation contracts unless explicitly narrowed here.  
 **Capability state:** `SPEC_ONLY / RECORDS_ONLY / DRAFT-HOLD`.
@@ -46,23 +46,31 @@ Do not reopen #217 and do not commission a sibling Agent Dialogue rebound repair
 - #221 — private long-running Agent Relay runtime. It remains the runtime owner to accept/review/reconcile before AD-DLG2 touches shared Agent Relay paths.
 - #223 — stacked Agent Relay enrollment/install ceremony. It must reconcile against #221/current base on the same carrier; never create a second enrollment/runtime stack.
 - #222 / MAS-206 — OCR-6R pure Executive Steward read core. AD-CR1 waits for this exact owner to be protected before modifying Steward core paths.
-- #215 — manual-handoff/precommission Skillpack release. Automated-delegation code must not duplicate its five Skillpack paths.
+- #215 — manual-handoff/precommission Skillpack release. It remains the sole five-file policy carrier and is currently under same-carrier RED->GREEN release repair; automated-delegation code must not duplicate its Skillpack paths.
 - #170 — Session Truth only where current cross-owner joins still require it.
 - #188 / current Web-Sol/Secretary descendants — surface architecture/actuation owner; autonomous delegation must not create a browser/session owner plane.
 - Capacity Fabric / RF / HF / PF / Operator Continuity / MH lanes — exclusive provider/realm/placement/continuity owners.
 
-### New architecture/planning carrier
+### Current architecture source-law carrier
 
-Mastermind #225 is the records-only revised autonomous-delegation source law. At its initial creation it was based on `adccc544...`; a same-carrier current-source reconciliation record now names protected `19fe09dd...` and marks #217 protected.
+Closed-unmerged draft #225 is historical metadata only. The exact same branch and exact same reviewed head continue through non-draft **#227** under the same logical operation:
 
-No runtime wave is released merely because #225 exists. New runtime waves require protected #225 plus their own current-source/collision/action gates.
+```text
+operation: organizational-continuity-autonomous-delegation-operational-fluency-20260829-sol-001
+branch:    sol/autonomous-delegation-operational-fluency-20260829
+head:      0e80dd0739b2bb650ce8809669163f8854e26794
+```
+
+#225's exact-head architecture review and CI are valid evidence for these identical bytes, but #227 still requires its own current-base required `test` and final protected-source reread before release.
+
+No runtime wave is released merely because #227 exists. New runtime waves require protected #227 plus their own current-source/collision/action gates.
 
 ## 3. Current executable DAG
 
 Use this order unless a later protected source law explicitly changes it:
 
 ```text
-A. #225 exact-current source-law release
+A. #227 exact-current source-law release
 
 B. independent existing carriers continue/release under own authority:
    #221 Agent Relay runtime
@@ -71,7 +79,7 @@ B. independent existing carriers continue/release under own authority:
    #215 Skillpack manual-handoff repair
    Capacity/OCR/HF/PF/MH predecessors
 
-C. after #225 protected:
+C. after #227 protected:
    AD-ID1 transport-neutral automated CEO request identity
    AD-CHILD1 Executive Job -> company operation/dialogue identity
 
@@ -118,14 +126,15 @@ Do not:
 ## 5. Capability ledger at this reconciliation
 
 ```text
-#225 revised architecture                         SPEC_ONLY / DRAFT
+#227 revised architecture release carrier         SPEC_ONLY / OPEN RELEASE CARRIER
+#225 original draft carrier                       CLOSED UNMERGED / metadata history
 #217 cross-Attempt dialogue primitive             BUILT_NOT_PROVEN / PROTECTED implementation primitive
 #220 real Slack Web API client                    BUILT_NOT_PROVEN / production-disarmed
 #221 long-running Agent Relay runtime             BUILT_NOT_PROVEN candidate / OPEN-DRAFT
 #223 Agent Relay enrollment/install               BUILT_NOT_PROVEN candidate / OPEN-DRAFT stacked
 #222 Executive Steward read core                  BUILT_NOT_PROVEN candidate / OPEN-DRAFT
-#215 manual handoff/precommission Skillpack fix   BUILT_NOT_PROVEN procedure candidate / OPEN
-AD-ID1 transport-neutral automated root identity  NOT_BUILT
+#215 manual handoff/precommission Skillpack fix   BUILT_NOT_PROVEN procedure candidate / OPEN release repair
+AD-ID1 / MAS-208 transport-neutral root identity  NOT_BUILT / WAITING_SOURCE_LAW
 AD-CHILD1 derived child delegation identity       NOT_BUILT
 AD-DLG2 idempotent parent ensure                   NOT_BUILT
 AD-RET1/2 mechanical provider returns             NOT_BUILT
@@ -138,6 +147,6 @@ full autonomous delegation cutover                 NOT_BUILT / NOT PROVEN
 
 ## 6. Exact next action
 
-First release gate for the **new** architecture is #225 exact-head/current-base CI + Sol source-law review on protected `19fe09dd...` or later current source. In parallel, already-started #221/#223/#222/#215 and Capacity/OCR owners may continue only under their own existing scopes and gates.
+First release gate for the **new** architecture is #227 fresh non-draft current-base required `test` plus final exact-head/current-protected-source reread. In parallel, already-started #221/#223/#222/#215 and Capacity/OCR owners may continue only under their own existing scopes and gates.
 
-After #225 is protected, the first new implementation wave is **AD-ID1** because duplicate root identity must be solved before automated frontends can safely fan out new company work.
+After #227 is protected, the first new implementation wave is **AD-ID1 / MAS-208** because duplicate root identity must be solved before automated frontends can safely fan out new company work.
