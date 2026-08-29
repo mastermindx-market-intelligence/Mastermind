@@ -345,7 +345,9 @@ class SlackWebApiDialogueClient:
         self,
         raw: Mapping[str, Any],
     ) -> tuple[SlackMessage, bool]:
-        if raw.get("type") != "message" or raw.get("team") != self._workspace_id:
+        if raw.get("type") != "message" or (
+            "team" in raw and raw.get("team") != self._workspace_id
+        ):
             raise ValueError("invalid message")
         ts = raw.get("ts")
         user = raw.get("user")
