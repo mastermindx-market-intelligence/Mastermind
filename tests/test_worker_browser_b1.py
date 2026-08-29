@@ -14,7 +14,13 @@ import pytest
 from control_plane import worker_browser_b1 as browser
 
 
-def _fake_mcp(tmp_path: Path, *, snapshot_bytes: int = 24) -> tuple[str, ...]:
+def _fake_mcp(
+    tmp_path: Path,
+    *,
+    snapshot_bytes: int = 24,
+    screenshots_follow_cwd: bool = False,
+    create_profile: bool = False,
+) -> tuple[str, ...]:
     script = tmp_path / "fake_playwright_mcp.py"
     script.write_text(
         textwrap.dedent(
@@ -27,6 +33,11 @@ def _fake_mcp(tmp_path: Path, *, snapshot_bytes: int = 24) -> tuple[str, ...]:
             args = sys.argv[1:]
             output_dir = pathlib.Path(args[args.index('--output-dir') + 1])
             output_dir.mkdir(parents=True, exist_ok=True)
+            screenshot_dir = pathlib.Path.cwd() if {screenshots_follow_cwd!r} else output_dir
+            if {create_profile!r}:
+                profile = output_dir / 'playwright_fake_profile'
+                profile.mkdir()
+                (profile / 'Cookies').write_bytes(b'ephemeral')
             calls = []
             png = base64.b64decode(
                 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
@@ -48,7 +59,7 @@ def _fake_mcp(tmp_path: Path, *, snapshot_bytes: int = 24) -> tuple[str, ...]:
                     calls.append({{'name': name, 'arguments': arguments}})
                     (output_dir / 'calls.json').write_text(json.dumps(calls), encoding='utf-8')
                     if name == 'browser_take_screenshot':
-                        (output_dir / arguments['filename']).write_bytes(png)
+                        (screenshot_dir / arguments['filename']).write_bytes(png)
                         text = 'Saved screenshot to ' + arguments['filename']
                     elif name == 'browser_snapshot':
                         text = 'S' * {snapshot_bytes}
@@ -70,12 +81,14 @@ def _fake_mcp(tmp_path: Path, *, snapshot_bytes: int = 24) -> tuple[str, ...]:
 
 
 def _config(tmp_path: Path, **overrides) -> browser.BrowserRunConfig:
+    has_command_override = "command_override" in overrides
+    command_override = overrides.pop("command_override", None)
     values = {
         "origin": "http://127.0.0.1:8787",
         "repo_root": tmp_path,
         "runtime_root": tmp_path / "runtime",
         "artifact_root": tmp_path / "artifacts",
-        "command_override": _fake_mcp(tmp_path),
+        "command_override": command_override if has_command_override else _fake_mcp(tmp_path),
         "timeout_seconds": 10.0,
         "max_text_bytes": 32,
     }
@@ -135,6 +148,7 @@ def test_real_stdio_flow_is_closed_bounded_and_returns_two_hashed_screenshots(tm
     assert receipt["cleanup"] == {
         "browser_close_requested": True,
         "process_group_absent": True,
+        "profile_absent": True,
         "workspace_clean": True,
     }
 
@@ -154,6 +168,27 @@ def test_real_stdio_flow_is_closed_bounded_and_returns_two_hashed_screenshots(tm
     assert calls[5]["arguments"] == {"filename": "desktop.png", "fullPage": True, "scale": "css", "type": "png"}
     assert calls[7]["arguments"] == {"filename": "mobile.png", "fullPage": True, "scale": "css", "type": "png"}
     assert all(row["name"] in browser.ALLOWED_TOOLS for row in calls)
+
+
+def test_named_official_screenshots_resolve_inside_private_run_cwd_not_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    config = _config(
+        tmp_path,
+        repo_root=repo_root,
+        command_override=_fake_mcp(
+            tmp_path, screenshots_follow_cwd=True, create_profile=True
+        ),
+    )
+
+    receipt = browser.BrowserReviewCoordinator(config).run()
+
+    assert receipt["state"] == "COMPLETE"
+    assert not (repo_root / "desktop.png").exists()
+    assert not (repo_root / "mobile.png").exists()
+    artifact_dir = Path(receipt["artifact_dir"])
+    assert not [path for path in artifact_dir.iterdir() if path.is_dir()]
+    assert receipt["cleanup"]["profile_absent"] is True
 
 
 def test_only_fixed_loopback_origin_is_accepted(tmp_path):

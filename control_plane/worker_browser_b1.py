@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import select
+import shutil
 import signal
 import stat
 import subprocess
@@ -157,7 +158,7 @@ def _workspace_identity(repo_root: Path) -> tuple[str | None, bool]:
             timeout=10,
         ).stdout.strip()
         status_out = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
+            ["git", "status", "--porcelain", "--untracked-files=all"],
             cwd=repo_root,
             check=True,
             capture_output=True,
@@ -290,6 +291,23 @@ def _finish_process_group(process: subprocess.Popen[bytes], pgid: int) -> bool:
     return True
 
 
+def _cleanup_run_directories(output_dir: Path) -> bool:
+    """Remove disposable HOME/profile directories after group-death proof."""
+    try:
+        root = output_dir.resolve(strict=True)
+        for child in output_dir.iterdir():
+            if child.is_symlink():
+                return False
+            if child.is_dir():
+                resolved = child.resolve(strict=True)
+                if resolved.parent != root:
+                    return False
+                shutil.rmtree(resolved)
+        return not any(path.is_dir() for path in output_dir.iterdir())
+    except OSError:
+        return False
+
+
 def _screenshot_receipt(output_dir: Path, filename: str, viewport: dict[str, int]) -> dict[str, Any]:
     path = output_dir / filename
     try:
@@ -311,7 +329,13 @@ def _screenshot_receipt(output_dir: Path, filename: str, viewport: dict[str, int
     }
 
 
-def _failure_receipt(state: str, detail: str, *, cleanup_absent: bool | None = None) -> dict[str, Any]:
+def _failure_receipt(
+    state: str,
+    detail: str,
+    *,
+    cleanup_absent: bool | None = None,
+    profile_absent: bool | None = None,
+) -> dict[str, Any]:
     receipt: dict[str, Any] = {
         "schema": RECEIPT_SCHEMA,
         "ok": False,
@@ -320,6 +344,8 @@ def _failure_receipt(state: str, detail: str, *, cleanup_absent: bool | None = N
     }
     if cleanup_absent is not None:
         receipt["cleanup"] = {"process_group_absent": cleanup_absent}
+        if profile_absent is not None:
+            receipt["cleanup"]["profile_absent"] = profile_absent
     return receipt
 
 
@@ -366,7 +392,7 @@ def run_browser_review(config: BrowserRunConfig) -> dict[str, Any]:
             try:
                 process = subprocess.Popen(
                     argv,
-                    cwd=config.repo_root,
+                    cwd=output_dir,
                     env=safe_env,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
@@ -433,6 +459,7 @@ def run_browser_review(config: BrowserRunConfig) -> dict[str, Any]:
     process_group_absent = True
     if process is not None and pgid is not None:
         process_group_absent = _finish_process_group(process, pgid)
+    profile_absent = process_group_absent and _cleanup_run_directories(output_dir)
     head_after, clean_after = _workspace_identity(config.repo_root)
     workspace_clean = clean_after and head_after == head_before
 
@@ -441,14 +468,28 @@ def run_browser_review(config: BrowserRunConfig) -> dict[str, Any]:
             "CLEANUP_UNCERTAIN",
             "the browser process group is not proven absent",
             cleanup_absent=False,
+            profile_absent=False,
+        )
+    if not profile_absent:
+        return _failure_receipt(
+            "CLEANUP_UNCERTAIN",
+            "the disposable browser profile is not proven absent",
+            cleanup_absent=True,
+            profile_absent=False,
         )
     if error is not None:
-        return _failure_receipt(error.state, error.detail, cleanup_absent=True)
+        return _failure_receipt(
+            error.state,
+            error.detail,
+            cleanup_absent=True,
+            profile_absent=True,
+        )
     if not workspace_clean:
         return _failure_receipt(
             "WORKSPACE_MUTATED",
             "tracked workspace identity changed during browser review",
             cleanup_absent=True,
+            profile_absent=True,
         )
     return {
         "schema": RECEIPT_SCHEMA,
@@ -463,6 +504,7 @@ def run_browser_review(config: BrowserRunConfig) -> dict[str, Any]:
         "cleanup": {
             "browser_close_requested": browser_close_requested,
             "process_group_absent": True,
+            "profile_absent": True,
             "workspace_clean": True,
         },
     }
