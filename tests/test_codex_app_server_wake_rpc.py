@@ -9,6 +9,7 @@ import pytest
 from control_plane.wake_dispatcher import WakePreSubmitError
 from integrations.executive_wake.codex_app_server import CODEX_WAKE_INSTRUCTION
 from integrations.executive_wake.codex_app_server_rpc import CodexAppServerRpcWakeClient
+from scripts.ohf.laboratory import JsonRpcError
 
 
 NATIVE_HANDLE = "019cafe0-1111-7222-8333-abcdefabcdef"
@@ -54,8 +55,10 @@ class FakeAppServerClient:
 
     def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, Any]:
         self.calls.append((f"wait:{method}", timeout))
-        if self.fail_method == f"wait:{method}":
-            raise RuntimeError(f"timeout waiting for {method}")
+        if self.fail_method == "wait:turn/completed:timeout":
+            raise JsonRpcError("timeout waiting for notification turn/completed")
+        if self.fail_method == "wait:turn/completed:closed":
+            raise JsonRpcError("app-server exited before turn/completed")
         if self.completion is not None:
             return dict(self.completion)
         return {
@@ -155,12 +158,23 @@ def test_turn_start_failure_is_post_submit_uncertainty_not_safe_refusal() -> Non
 
 
 def test_completion_timeout_is_accepted_but_not_delivered() -> None:
-    fake = FakeAppServerClient(fail_method="wait:turn/completed")
+    fake = FakeAppServerClient(fail_method="wait:turn/completed:timeout")
 
     observation = _deliver(fake)
 
     assert observation.accepted is True
     assert observation.delivered is False
+    assert _method_names(fake).count("turn/start") == 1
+    assert _method_names(fake)[-1] == "close"
+
+
+def test_post_submit_transport_close_remains_effect_unknown() -> None:
+    fake = FakeAppServerClient(fail_method="wait:turn/completed:closed")
+
+    with pytest.raises(JsonRpcError, match="app-server exited") as error:
+        _deliver(fake)
+
+    assert not isinstance(error.value, WakePreSubmitError)
     assert _method_names(fake).count("turn/start") == 1
     assert _method_names(fake)[-1] == "close"
 
