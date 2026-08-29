@@ -895,16 +895,33 @@ def _fixed_error(code: str) -> dict[str, object]:
     }
 
 
-def run(
+def _require_native_tty(stdin: BinaryIO) -> None:
+    try:
+        descriptor = stdin.fileno()
+        if (
+            isinstance(descriptor, bool)
+            or not isinstance(descriptor, int)
+            or descriptor < 0
+            or not os.isatty(descriptor)
+        ):
+            raise A2EnrollmentError("A2_ENROLLMENT_INPUT_REFUSED")
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_INPUT_REFUSED") from None
+
+
+def _run_invocation(
     argv: Sequence[str],
     *,
     stdin: BinaryIO,
     stdout: TextIO,
     environ: Mapping[str, str],
+    require_native_tty: bool,
 ) -> int:
     try:
         assert_secret_surfaces_clean(argv=argv, environ=environ)
         args = build_parser().parse_args(list(argv))
+        if require_native_tty and args.command == "enroll":
+            _require_native_tty(stdin)
         if args.command == "enroll":
             receipt = asyncio.run(
                 _enroll(bot_user_id=args.expected_bot_user_id, stdin=stdin)
@@ -941,34 +958,31 @@ def run(
         return 2
 
 
+def run(
+    argv: Sequence[str],
+    *,
+    stdin: BinaryIO,
+    stdout: TextIO,
+    environ: Mapping[str, str],
+) -> int:
+    return _run_invocation(
+        argv,
+        stdin=stdin,
+        stdout=stdout,
+        environ=environ,
+        require_native_tty=False,
+    )
+
+
 def main() -> int:
     argv = sys.argv[1:]
     stdin = getattr(sys.stdin, "buffer", sys.stdin)
-    if argv[:1] == ["enroll"]:
-        try:
-            descriptor = stdin.fileno()
-            if (
-                isinstance(descriptor, bool)
-                or not isinstance(descriptor, int)
-                or descriptor < 0
-                or not os.isatty(descriptor)
-            ):
-                raise A2EnrollmentError("A2_ENROLLMENT_INPUT_REFUSED")
-        except Exception:
-            sys.stdout.write(
-                json.dumps(
-                    _fixed_error("A2_ENROLLMENT_INPUT_REFUSED"),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                + "\n"
-            )
-            return 2
-    return run(
+    return _run_invocation(
         argv,
         stdin=stdin,
         stdout=sys.stdout,
         environ=os.environ,
+        require_native_tty=True,
     )
 
 
