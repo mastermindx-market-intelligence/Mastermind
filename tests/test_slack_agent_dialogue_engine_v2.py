@@ -454,7 +454,7 @@ def test_v2_history_reads_only_v2_frames_and_accepts_opposite_actor() -> None:
     assert read.ineligible_count == 0
 
 
-@pytest.mark.parametrize("mutation", ["work", "commission", "session", "applicability"])
+@pytest.mark.parametrize("mutation", ["work", "commission", "session"])
 def test_v2_history_wrong_bound_context_fails_closed(mutation: str) -> None:
     client = setup_client()
     kwargs: dict[str, object] = {}
@@ -469,14 +469,44 @@ def test_v2_history_wrong_bound_context_fails_closed(mutation: str) -> None:
         }
     elif mutation == "session":
         kwargs["session_ref"] = "asd-session-fable0002"
-    else:
-        kwargs["applies_to"] = applies("d" * 40)
-
     changed = v2_message("ACK", message_key=f"asd-ack-v2-wrong-{mutation}", **kwargs)
     add_v2_reply(client, changed, author=BOT, ts="1787471000.000020")
     with pytest.raises(DialogueEngineError) as exc:
         run(make_engine(client).read_thread(thread_ts=THREAD_TS, context=context()))
     assert code(exc) == "THREAD_CONTEXT_MISMATCH"
+
+
+def test_v2_history_accepts_same_parent_applicability_advancement() -> None:
+    client = setup_client()
+    progress = v2_message(
+        "PROGRESS",
+        message_key="asd-progress-v2-applicability-p1",
+        applies_to=applies("c" * 40),
+    )
+    result = v2_message(
+        "RESULT",
+        message_key="asd-result-v2-applicability-p2",
+        applies_to=applies("d" * 40),
+        reply_to_message_key=progress["message_key"],
+    )
+    add_v2_reply(client, progress, author=BOT, ts="1787471000.000021")
+    add_v2_reply(client, result, author=BOT, ts="1787471000.000022")
+
+    read = run(
+        make_engine(client).read_thread(
+            thread_ts=THREAD_TS,
+            context=context(applies_to=applies("d" * 40)),
+        )
+    )
+
+    assert [item.message["message_key"] for item in read.messages] == [
+        progress["message_key"],
+        result["message_key"],
+    ]
+    assert [item.message["applies_to"] for item in read.messages] == [
+        applies("c" * 40),
+        applies("d" * 40),
+    ]
 
 
 def test_v2_history_mutation_requires_creation_evidence() -> None:
@@ -805,6 +835,55 @@ def test_v2_wait_continue_preserves_injected_continuation_policy() -> None:
     }
 
 
+def test_v2_wait_continue_accepts_exact_lineage_worker_result() -> None:
+    client = setup_client()
+    worker = {
+        "kind": "worker_attempt",
+        "job_id": "job-wp1r-result",
+        "attempt_id": "attempt-wp1r-result",
+        "worker_id": "worker-wp1r-result",
+    }
+    attempt = {
+        "kind": "executive_attempt",
+        "job_id": worker["job_id"],
+        "attempt_id": worker["attempt_id"],
+        "worker_id": worker["worker_id"],
+    }
+    request = v2_message(
+        "RESULT",
+        message_key="asd-result-v2-engine-continue",
+        actor_ref=worker,
+        applies_to=attempt,
+    )
+    reply = v2_message(
+        "CONTINUE",
+        message_key="asd-continue-v2-engine-from-result",
+        actor_ref=ceo_actor(),
+        applies_to=attempt,
+        reply_to_message_key=request["message_key"],
+    )
+    add_v2_reply(client, request, author=BOT, ts="1787471000.000074")
+    add_v2_reply(client, reply, author=SOL1, ts="1787471000.000075")
+
+    result = run(
+        make_engine(client).wait_for_reply(
+            thread_ts=THREAD_TS,
+            context=context(actor_ref=worker, applies_to=attempt),
+            request_message_key=request["message_key"],
+            expected_types=("CONTINUE",),
+            max_attempts=1,
+        )
+    )
+
+    assert result["reply"] == reply
+    assert result["authority"] == {
+        "disposition": "CONTINUE",
+        "executable": True,
+        "selected_option": None,
+        "canonical_ref": None,
+    }
+
+
 def test_v2_wait_continue_refuses_when_injected_policy_denies() -> None:
     client = setup_client()
     request = v2_message("PROGRESS", message_key="asd-progress-v2-engine-denied")
@@ -829,7 +908,7 @@ def test_v2_wait_continue_refuses_when_injected_policy_denies() -> None:
     assert code(exc) == "THREAD_CONTEXT_MISMATCH"
 
 
-@pytest.mark.parametrize("request_type", ["DECISION_REQUEST", "RESULT"])
+@pytest.mark.parametrize("request_type", ["DECISION_REQUEST"])
 def test_v2_wait_continue_refuses_noncontinuable_request_family(request_type: str) -> None:
     client = setup_client()
     key_suffix = request_type.lower().replace("_", "-")
