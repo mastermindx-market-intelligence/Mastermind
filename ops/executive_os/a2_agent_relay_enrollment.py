@@ -1,0 +1,603 @@
+"""Native, production-disarmed enrollment for the private A2 Agent Relay.
+
+The ceremony qualifies one stdin-only Slack bot token, installs the exact
+release-bound token/config/launchd files, and stops.  It never provisions an
+app or principal and never loads, enables, or starts the service.  The Relay
+runs as the existing ``_mastermind_exec`` owner because the accepted service
+uses an owner-private AF_UNIX directory and socket; Slack prose conveys no
+host authority.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import grp
+import io
+import json
+import os
+import plistlib
+import pwd
+import re
+import stat
+import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import BinaryIO, TextIO
+
+
+_ROOT = Path(__file__).resolve().parents[2]
+if os.fspath(_ROOT) not in sys.path:
+    sys.path.insert(0, os.fspath(_ROOT))
+
+from integrations.slack_agent_dialogue import metadata_verifier  # noqa: E402
+from integrations.slack_agent_dialogue.slack_web_api import (  # noqa: E402
+    SlackHttpTransport,
+    SlackWebApiDialogueClient,
+)
+from ops.executive_os import c1_relay_enrollment as c1_enrollment  # noqa: E402
+
+
+RELAY_USER = "_mastermind_exec"
+RELAY_GROUP = "_mastermind_exec"
+RELAY_UID = 450
+RELAY_GID = 450
+PLIST_UID = 0
+PLIST_GID = 0
+RELAY_LABEL = "com.mastermind.executive.agent-relay"
+RELAY_HOME = Path("/var/db/mastermind-executive/control/home")
+SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
+SYSTEM_RELEASE_ROOT = SYSTEM_ROOT / "releases"
+TOKEN_PATH = SYSTEM_ROOT / "config" / "agent-relay.token"
+CONFIG_PATH = SYSTEM_ROOT / "config" / "agent-relay.json"
+PLIST_PATH = Path("/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist")
+SOCKET_PATH = Path("/var/run/mastermind-executive/agent-relay.sock")
+PYTHON_BINARY = Path(
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
+)
+SLACK_WORKSPACE_ID = "T0BRD2AQXQV"
+SLACK_CHANNEL_ID = "C0BRUL9F2V7"
+REQUIRED_SCOPES = ("channels:history", "chat:write")
+ALLOWED_PEER_UIDS = (450,)
+ALLOWED_SOL_USER_IDS = ("U0BRETDUAS2", "U0BSB73JWNL")
+ALLOWED_PARENT_USER_IDS = ("U0BRETDUAS2",)
+_REVIEWED_CONTROL_GROUPS = frozenset(
+    {
+        "_mastermind_exec",
+        "_mastermind_worker",
+        "everyone",
+        "localaccounts",
+        "_lpoperator",
+        "com.apple.access_disabled",
+    }
+)
+_RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
+_PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
+
+ERROR_CODES = frozenset(
+    {
+        "A2_ENROLLMENT_ARGUMENTS_REFUSED",
+        "A2_ENROLLMENT_CHANNEL_REFUSED",
+        "A2_ENROLLMENT_COLLISION",
+        "A2_ENROLLMENT_EXISTING_REFUSED",
+        "A2_ENROLLMENT_HOST_REFUSED",
+        "A2_ENROLLMENT_IDENTITY_REFUSED",
+        "A2_ENROLLMENT_INPUT_REFUSED",
+        "A2_ENROLLMENT_INTERNAL",
+        "A2_ENROLLMENT_ROLLBACK_REFUSED",
+        "A2_ENROLLMENT_SECRET_SURFACE_REFUSED",
+        "A2_ENROLLMENT_WRITE_REFUSED",
+    }
+)
+
+
+class A2EnrollmentError(RuntimeError):
+    """One closed caller-visible enrollment refusal."""
+
+    def __init__(self, code: str) -> None:
+        if code not in ERROR_CODES:
+            raise ValueError("unknown A2 enrollment error code")
+        super().__init__(code)
+        self.code = code
+
+
+class _OpaqueParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:  # pragma: no cover - argparse path
+        del message
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+
+
+@dataclass(frozen=True)
+class _CreatedFile:
+    path: Path
+    device: int
+    inode: int
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = _OpaqueParser(description="Enroll the private A2 Agent Relay")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("enroll", "verify"):
+        child = commands.add_parser(name)
+        child.add_argument("--expected-bot-user-id", required=True)
+    return parser
+
+
+def assert_secret_surfaces_clean(
+    *, argv: Sequence[str], environ: Mapping[str, str]
+) -> None:
+    try:
+        c1_enrollment.assert_secret_surfaces_clean(argv=argv, environ=environ)
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_SECRET_SURFACE_REFUSED") from None
+
+
+def read_token_from_stdin(stream: BinaryIO) -> str:
+    try:
+        return c1_enrollment.read_token_from_stdin(stream)
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_INPUT_REFUSED") from None
+
+
+def build_config_document(*, bot_user_id: str, release_sha: str) -> dict[str, object]:
+    try:
+        metadata_verifier.validate_expectation(
+            metadata_verifier.MetadataExpectation(
+                team_id=SLACK_WORKSPACE_ID,
+                bot_user_id=bot_user_id,
+                scopes=REQUIRED_SCOPES,
+            )
+        )
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED") from None
+    if _RELEASE_RE.fullmatch(release_sha or "") is None:
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+    return {
+        "schema": "mastermind.agent_relay_enrollment.v1",
+        "release_sha": release_sha,
+        "slack_workspace_id": SLACK_WORKSPACE_ID,
+        "slack_channel_id": SLACK_CHANNEL_ID,
+        "slack_bot_user_id": bot_user_id,
+        "slack_scopes": list(REQUIRED_SCOPES),
+        "slack_token_file": os.fspath(TOKEN_PATH),
+        "relay_socket_path": os.fspath(SOCKET_PATH),
+        "relay_user": RELAY_USER,
+        "relay_uid": RELAY_UID,
+        "allowed_peer_uids": list(ALLOWED_PEER_UIDS),
+        "allowed_sol_user_ids": list(ALLOWED_SOL_USER_IDS),
+        "allowed_parent_user_ids": list(ALLOWED_PARENT_USER_IDS),
+    }
+
+
+def _replace_placeholders(value: object, replacements: Mapping[str, str]) -> object:
+    if isinstance(value, str):
+        return replacements.get(value, value)
+    if isinstance(value, list):
+        return [_replace_placeholders(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _replace_placeholders(item, replacements)
+            for key, item in value.items()
+        }
+    return value
+
+
+def render_plist(*, bot_user_id: str, release_sha: str) -> bytes:
+    build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
+    release_root = SYSTEM_RELEASE_ROOT / release_sha
+    template_path = _ROOT / "ops" / "executive_os" / (
+        "com.mastermind.executive.agent-relay.plist.template"
+    )
+    try:
+        template = plistlib.loads(template_path.read_bytes())
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
+    replacements = {
+        "__PYTHON_BINARY__": os.fspath(PYTHON_BINARY),
+        "__RELAY_ENTRYPOINT__": os.fspath(
+            release_root / "scripts" / "slack_agent_dialogue_service.py"
+        ),
+        "__RELAY_SOCKET_PATH__": os.fspath(SOCKET_PATH),
+        "__RELAY_TOKEN_FILE__": os.fspath(TOKEN_PATH),
+        "__SLACK_WORKSPACE_ID__": SLACK_WORKSPACE_ID,
+        "__SLACK_CHANNEL_ID__": SLACK_CHANNEL_ID,
+        "__SLACK_BOT_USER_ID__": bot_user_id,
+        "__ALLOWED_PEER_UID__": str(ALLOWED_PEER_UIDS[0]),
+        "__ALLOWED_SOL_USER_ID__": ALLOWED_SOL_USER_IDS[0],
+        "__ALLOWED_PARENT_USER_ID__": ALLOWED_PARENT_USER_IDS[0],
+        "__RELEASE_ROOT__": os.fspath(release_root),
+        "__RELAY_USER__": RELAY_USER,
+        "__RELAY_GROUP__": RELAY_GROUP,
+        "__RELAY_HOME__": os.fspath(RELAY_HOME),
+        "__RELAY_STDOUT__": "/var/log/mastermind-executive/agent-relay.stdout.log",
+        "__RELAY_STDERR__": "/var/log/mastermind-executive/agent-relay.stderr.log",
+    }
+    document = _replace_placeholders(template, replacements)
+    try:
+        arguments = document["ProgramArguments"]  # type: ignore[index]
+        sol_index = arguments.index("--allowed-sol-user-id")
+        arguments[sol_index : sol_index + 2] = [
+            value
+            for user_id in ALLOWED_SOL_USER_IDS
+            for value in ("--allowed-sol-user-id", user_id)
+        ]
+        encoded = plistlib.dumps(document, fmt=plistlib.FMT_XML, sort_keys=False)
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
+    if _PLACEHOLDER_RE.search(encoded.decode("utf-8")) is not None:
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+    return encoded
+
+
+async def qualify_token(
+    *,
+    token: str,
+    bot_user_id: str,
+    identity_transport: metadata_verifier.SlackAuthTestTransport | None = None,
+    history_transport: SlackHttpTransport | None = None,
+) -> dict[str, object]:
+    try:
+        identity = metadata_verifier.verify_metadata(
+            token=token,
+            expectation=metadata_verifier.MetadataExpectation(
+                team_id=SLACK_WORKSPACE_ID,
+                bot_user_id=bot_user_id,
+                scopes=REQUIRED_SCOPES,
+            ),
+            transport=identity_transport
+            or metadata_verifier.UrllibSlackAuthTestTransport(),
+        )
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_IDENTITY_REFUSED") from None
+    history = SlackWebApiDialogueClient(
+        token=token,
+        workspace_id=SLACK_WORKSPACE_ID,
+        channel_id=SLACK_CHANNEL_ID,
+        bot_user_id=bot_user_id,
+        transport=history_transport,
+    )
+    try:
+        await history.fetch_channel_history(channel_id=SLACK_CHANNEL_ID, limit=1)
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_CHANNEL_REFUSED") from None
+    return {
+        "bot_id": identity["bot_id"],
+        "bot_user_id": identity["bot_user_id"],
+        "channel_id": SLACK_CHANNEL_ID,
+        "scopes": list(REQUIRED_SCOPES),
+        "workspace_id": identity["team_id"],
+    }
+
+
+def write_new_private_file(
+    path: Path,
+    payload: bytes,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+) -> None:
+    """Create one final inode with C1's O_EXCL pattern and self-clean failures."""
+    path = Path(path)
+    if not path.is_absolute() or not payload or len(payload) > 64 * 1024:
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+    try:
+        parent = path.parent.lstat()
+    except OSError:
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+    if stat.S_ISLNK(parent.st_mode) or not stat.S_ISDIR(parent.st_mode):
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = -1
+    identity: _CreatedFile | None = None
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        opened = os.fstat(descriptor)
+        identity = _CreatedFile(path=path, device=opened.st_dev, inode=opened.st_ino)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+        if opened.st_uid != int(uid) or opened.st_gid != int(gid):
+            os.fchown(descriptor, int(uid), int(gid))
+        os.fchmod(descriptor, int(mode))
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+            view = view[written:]
+        os.fsync(descriptor)
+    except FileExistsError:
+        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+            descriptor = -1
+        if identity is not None:
+            _rollback_created((identity,))
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    try:
+        final = path.lstat()
+        if (
+            identity is None
+            or not stat.S_ISREG(final.st_mode)
+            or final.st_nlink != 1
+            or final.st_dev != identity.device
+            or final.st_ino != identity.inode
+            or final.st_uid != int(uid)
+            or final.st_gid != int(gid)
+            or stat.S_IMODE(final.st_mode) != int(mode)
+        ):
+            raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+        c1_enrollment._fsync_parent(path)  # noqa: SLF001
+    except BaseException:
+        if identity is not None:
+            _rollback_created((identity,))
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+
+
+def _canonical_json_bytes(document: Mapping[str, object]) -> bytes:
+    return (
+        json.dumps(
+            dict(document),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _path_present(path: Path) -> bool:
+    try:
+        path.lstat()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
+
+
+def _file_identity(path: Path) -> _CreatedFile:
+    try:
+        info = path.lstat()
+    except OSError:
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+    return _CreatedFile(path=Path(path), device=info.st_dev, inode=info.st_ino)
+
+
+def _rollback_created(created: Sequence[_CreatedFile]) -> None:
+    failed = False
+    for identity in reversed(tuple(created)):
+        try:
+            info = identity.path.lstat()
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_dev != identity.device
+                or info.st_ino != identity.inode
+            ):
+                failed = True
+                continue
+            identity.path.unlink()
+            c1_enrollment._fsync_parent(identity.path)  # noqa: SLF001
+        except OSError:
+            failed = True
+    if failed:
+        raise A2EnrollmentError("A2_ENROLLMENT_ROLLBACK_REFUSED")
+
+
+def _assert_disarmed() -> None:
+    try:
+        if c1_enrollment._launchd_loaded(  # noqa: SLF001
+            RELAY_LABEL
+        ) or not c1_enrollment._launchd_disabled(RELAY_LABEL):  # noqa: SLF001
+            raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+    except A2EnrollmentError:
+        raise
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
+
+
+def _assert_host_prepared() -> str:
+    if os.geteuid() != 0 or sys.platform != "darwin":
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+    try:
+        release_sha = c1_enrollment._release_identity()  # noqa: SLF001
+        account = pwd.getpwnam(RELAY_USER)
+        group = grp.getgrnam(RELAY_GROUP)
+        gids = os.getgrouplist(RELAY_USER, RELAY_GID)
+        group_names = {grp.getgrgid(gid).gr_name for gid in gids}
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        account.pw_uid != RELAY_UID
+        or account.pw_gid != RELAY_GID
+        or group.gr_gid != RELAY_GID
+        or group.gr_mem
+        or account.pw_dir != os.fspath(RELAY_HOME)
+        or account.pw_shell != "/usr/bin/false"
+        or RELAY_GROUP not in group_names
+        or not group_names.issubset(_REVIEWED_CONTROL_GROUPS)
+    ):
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+    _assert_disarmed()
+    return release_sha
+
+
+def _read_exact(path: Path, *, uid: int, gid: int, mode: int) -> bytes:
+    try:
+        return c1_enrollment.c1_runtime._read_exact_private_bytes(  # noqa: SLF001
+            path,
+            expected_uid=uid,
+            expected_gid=gid,
+            expected_mode=mode,
+            max_bytes=64 * 1024,
+        )
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
+
+
+def _existing_token() -> str:
+    raw = _read_exact(TOKEN_PATH, uid=RELAY_UID, gid=RELAY_GID, mode=0o400)
+    try:
+        return metadata_verifier.read_token_from_stdin(io.BytesIO(raw))
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
+
+
+def _validate_existing(*, bot_user_id: str, release_sha: str) -> None:
+    expected_config = _canonical_json_bytes(
+        build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
+    )
+    expected_plist = render_plist(bot_user_id=bot_user_id, release_sha=release_sha)
+    if (
+        _read_exact(CONFIG_PATH, uid=RELAY_UID, gid=RELAY_GID, mode=0o400)
+        != expected_config
+        or _read_exact(PLIST_PATH, uid=PLIST_UID, gid=PLIST_GID, mode=0o644)
+        != expected_plist
+    ):
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+
+
+async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
+    release_sha = _assert_host_prepared()
+    targets = (TOKEN_PATH, CONFIG_PATH, PLIST_PATH)
+    if any(_path_present(path) for path in targets):
+        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION")
+    token = read_token_from_stdin(stdin)
+    qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
+    payloads = (
+        (TOKEN_PATH, (token + "\n").encode("ascii"), RELAY_UID, RELAY_GID, 0o400),
+        (
+            CONFIG_PATH,
+            _canonical_json_bytes(
+                build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
+            ),
+            RELAY_UID,
+            RELAY_GID,
+            0o400,
+        ),
+        (
+            PLIST_PATH,
+            render_plist(bot_user_id=bot_user_id, release_sha=release_sha),
+            PLIST_UID,
+            PLIST_GID,
+            0o644,
+        ),
+    )
+    created: list[_CreatedFile] = []
+    try:
+        for path, payload, uid, gid, mode in payloads:
+            write_new_private_file(path, payload, uid=uid, gid=gid, mode=mode)
+            created.append(_file_identity(path))
+        _validate_existing(bot_user_id=bot_user_id, release_sha=release_sha)
+        _assert_disarmed()
+    except BaseException:
+        try:
+            _rollback_created(created)
+        except A2EnrollmentError:
+            raise
+        raise
+    return {**qualification, "action": "enrolled", "release_sha": release_sha}
+
+
+async def _verify(*, bot_user_id: str) -> dict[str, object]:
+    release_sha = _assert_host_prepared()
+    if not all(_path_present(path) for path in (TOKEN_PATH, CONFIG_PATH, PLIST_PATH)):
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+    _validate_existing(bot_user_id=bot_user_id, release_sha=release_sha)
+    token = _existing_token()
+    qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
+    _assert_disarmed()
+    return {**qualification, "action": "verified", "release_sha": release_sha}
+
+
+def _fixed_error(code: str) -> dict[str, object]:
+    return {
+        "error": code,
+        "schema": "mastermind.a2_agent_relay_enrollment.v1",
+        "status": "ERROR",
+    }
+
+
+def run(
+    argv: Sequence[str],
+    *,
+    stdin: BinaryIO,
+    stdout: TextIO,
+    environ: Mapping[str, str],
+) -> int:
+    try:
+        assert_secret_surfaces_clean(argv=argv, environ=environ)
+        args = build_parser().parse_args(list(argv))
+        if args.command == "enroll":
+            receipt = asyncio.run(
+                _enroll(bot_user_id=args.expected_bot_user_id, stdin=stdin)
+            )
+        elif args.command == "verify":
+            receipt = asyncio.run(_verify(bot_user_id=args.expected_bot_user_id))
+        else:  # pragma: no cover
+            raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+        stdout.write(
+            json.dumps(
+                {
+                    **receipt,
+                    "schema": "mastermind.a2_agent_relay_enrollment.v1",
+                    "status": "PASS",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        return 0
+    except A2EnrollmentError as exc:
+        stdout.write(json.dumps(_fixed_error(exc.code), sort_keys=True, separators=(",", ":")) + "\n")
+        return 2
+    except Exception:
+        stdout.write(
+            json.dumps(
+                _fixed_error("A2_ENROLLMENT_INTERNAL"),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        return 2
+
+
+def main() -> int:
+    return run(
+        sys.argv[1:],
+        stdin=sys.stdin.buffer,
+        stdout=sys.stdout,
+        environ=os.environ,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "A2EnrollmentError",
+    "ERROR_CODES",
+    "build_config_document",
+    "build_parser",
+    "main",
+    "qualify_token",
+    "read_token_from_stdin",
+    "render_plist",
+    "run",
+    "write_new_private_file",
+]
