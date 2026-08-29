@@ -135,7 +135,7 @@ HTTP forward proxy: http://127.0.0.1:1056
 
 The HTTP proxy reaches the private Gateway. The default VPS resolver does not resolve the private `ts.net` hostname. The built-in `user-openclaw` descriptor can appear ready/stdio/9-tools while live calls return `Not connected`.
 
-The exact upstream `openclaw@2026.5.7` Gateway client is now inspected. For a remote Gateway URL it constructs:
+The exact upstream `openclaw@2026.5.7` Git release source is inspected. For a remote Gateway URL it constructs:
 
 ```text
 new WebSocket(url, wsOptions)
@@ -145,11 +145,11 @@ and only creates a direct agent for loopback. It does **not** activate inherited
 
 This supersedes the earlier process-proxy-env hypothesis as an implementation plan. GS-OP1 correctly stopped before effect when the host lacked a same-server env overlay; even if that overlay had existed, `2026.5.7` remote WebSocket routing was not proven to consume it.
 
-## 6. Stable released OpenClaw upgrade adds the missing managed-proxy Gateway hook
+## 6. Published stable OpenClaw candidate adds the missing managed-proxy Gateway hook
 
-Current stable upstream release `v2026.7.1-2` is a concrete, released comparison point.
+The npm registry currently publishes `openclaw@2026.7.1-2` under the `latest` dist-tag. This proves that an installable candidate version exists; it does not by itself prove exact package bytes or behavior on the Grok host.
 
-Its Gateway client injects:
+The corresponding current stable upstream Git release source contains a materially different Gateway client. It injects:
 
 ```text
 beforeConnect: ensureInheritedManagedProxyRoutingActive
@@ -172,26 +172,51 @@ http://127.0.0.1:1056
 
 No SOCKS-specific OpenClaw contract is required for the preferred repair because stable managed-proxy inheritance is explicitly HTTP-forward-proxy based.
 
-**Still unproven:** that the exact Grok/VPS same-name `user-openclaw` entry upgraded to stable `2026.7.1-2` plus inherited managed-proxy env completes the private Gateway WebSocket handshake in this host. That must be proven by the implementation canary; source comparison is not production proof.
+### Package-attestation caveat
+
+Do **not** equate a Git tag name with the npm artifact without verification. The checked upstream `v2026.7.1-2` source tree currently reports `package.json.version = 2026.7.1`, while npm publishes artifact version `2026.7.1-2`. The future implementation therefore must attest the exact npm artifact it will execute, not merely cite the Git tag.
+
+Before any live connector change, the staged npm artifact must be integrity-bound to registry metadata and independently inspected to prove that the **actual staged executable bytes** contain the required managed-proxy Gateway hook/lifecycle. A version-label match without byte/content proof is insufficient.
+
+**Still unproven:** that an exact attested `openclaw@2026.7.1-2` npm artifact plus inherited managed-proxy env completes the private Gateway WebSocket handshake in this exact Grok/VPS host. That must be proven by the implementation canary; source comparison is not production proof.
 
 ## 7. Frozen one-path repair contract — preferred implementation
 
 A future implementation child may modify exactly **one canonical MCP identity**: the existing `user-openclaw` entry.
 
-Before write it must fresh-read and bind:
+Before any live write it must fresh-read and bind:
 
 - exact current host build / exec-daemon identity;
 - exact current effective `user-openclaw` config from the existing backend owner;
 - exact current `serverName=user-openclaw` and absence of another OpenClaw MCP path;
 - current `mcpBoxServers=[]` or otherwise prove it contains no second OpenClaw path;
-- exact current child package/version;
+- exact current child package/version and executable/package location;
 - current remote endpoint / token-file launch arguments by sanitized structure only;
 - current process identity and effect state;
 - current local HTTP proxy reachability to the private Gateway.
 
-### Preferred candidate
+### Stage 0 — package staging / integrity / rollback proof before the live entry moves
 
-Preserve the same `serverName=user-openclaw`, same account, same endpoint semantics and same token-file coordinate. Change the same effective entry so the child is pinned to stable `openclaw@2026.7.1-2` and receives only the process-local inherited managed-proxy environment required by the released OpenClaw contract:
+The approval-gated implementation operation must separate **package staging** from the later **live same-entry transition**. The live canonical `user-openclaw` config must remain byte/semantically unchanged throughout staging.
+
+Before changing the live entry:
+
+1. bind npm registry metadata for exact candidate `openclaw@2026.7.1-2`, including its immutable distribution-integrity field / tarball identity;
+2. acquire the candidate into an isolated operation-owned staging/cache boundary without overwriting or upgrading the live `2026.5.7` child/package in place;
+3. independently digest the staged tarball/package tree and verify registry integrity;
+4. verify the staged package's own `package.json` reports exactly the intended npm artifact version; any Git-tag/npm-version mismatch inside the staged artifact is a blocker, not something to normalize away;
+5. inspect the **staged executable bytes** to prove the Gateway client calls inherited managed-proxy activation and the staged proxy lifecycle accepts the required `OPENCLAW_PROXY_ACTIVE=1` + HTTP(S) `HTTP_PROXY` contract;
+6. bind the exact staged CLI entrypoint. Both upstream package families expose the `openclaw` bin as `openclaw.mjs`, but the implementation must prove that fact from the staged artifacts rather than rely on this record alone;
+7. preserve/stage an exact rollback-capable copy or otherwise network-independent executable closure of the currently running `openclaw@2026.5.7` package before live mutation, with its version and package/tree digest bound;
+8. prove both candidate and rollback executables can be selected by the existing command/args schema **without any network fetch or package mutation after the live transition starts**.
+
+Package staging is a known, separately receipted host filesystem effect inside the same approved operation (`PACKAGE_STAGE_APPLIED`), but it is not a Gateway/MCP identity change and must not restart or replace `user-openclaw`. If package staging, integrity, package-content proof, or rollback staging is ambiguous or fails, STOP before the live config transition. Do not compensate by letting `npx` fetch on demand during the live swap.
+
+A future implementation may use the existing npm/npx machinery only if it proves an exact offline/network-independent invocation for both versions after staging. Otherwise it must use another already-supported command/args form that points at the attested staged CLI entrypoint. This source law does not invent a new package manager or runtime store.
+
+### Preferred live candidate
+
+Preserve the same `serverName=user-openclaw`, same account, same endpoint semantics and same token-file coordinate. Change the same effective entry so the child executes the **attested staged** stable `openclaw@2026.7.1-2` artifact and receives only the process-local inherited managed-proxy environment required by the verified artifact contract:
 
 ```text
 OPENCLAW_PROXY_ACTIVE=1
@@ -203,36 +228,41 @@ HTTPS_PROXY=http://127.0.0.1:1056
 
 The exact existing remote Gateway URL / token-file args must be preserved if fresh preflight proves they are already the intended private Gateway coordinates. If they are absent, ambiguous, point elsewhere, or require secret exposure to interpret, STOP and return to Sol; do not invent or rewrite endpoint/auth coordinates inside the same operation.
 
-The write must use the existing backend/host same-name configuration owner (`SetMcpConfig` / equivalent exact owner seam) and then the existing `LoadMcpServers` same-name replacement behavior. **Do not call `AddMcpServer` with a new name and do not add `mcpBoxServers`.**
+The live write must use the existing backend/host same-name configuration owner (`SetMcpConfig` / equivalent exact owner seam) and then the existing `LoadMcpServers` same-name replacement behavior. **Do not call `AddMcpServer` with a new name and do not add `mcpBoxServers`.**
 
-### One-effect discipline
+### Live-effect discipline
 
-The modifying effect is one logical same-entry configuration transition. Bind an exact pre-state digest/identity and candidate config digest before mutation.
+The live modifying effect is one logical same-entry configuration transition. Bind an exact pre-state digest/identity and candidate config digest before mutation. Package staging is already complete and network access for package resolution is forbidden once this transition begins.
 
-After the write:
+After the live write:
 
 1. reconcile the effective backend config and prove only `user-openclaw` changed;
 2. prove exactly one `user-openclaw` logical server remains;
 3. allow only the one same-name replacement/restart required by existing `LoadMcpServers` semantics;
 4. prove the old child is gone before accepting the new child;
-5. run read-only Gateway acceptance probes.
+5. prove the new child executes the exact previously attested staged candidate bytes/version;
+6. run read-only Gateway acceptance probes.
 
 If the config write/replacement outcome is ambiguous, mark `EFFECT_UNKNOWN`, inspect the same effective entry/process state and reconcile before any retry, rollback or alternate avenue. Never blind retry and never create another MCP path as fallback.
 
 ### Rollback
 
-A definite canary failure with known applied config may restore the exact pre-state **same named entry** once, through the same owner, then prove the pre-state digest and old child version/identity are restored. Rollback is not a new server, alternate transport or retry carrier.
+Rollback capability must be proven **before** the live transition. A definite canary failure with known applied config may restore the exact pre-state **same named entry** once, through the same owner, selecting only the already-attested, already-staged `2026.5.7` rollback executable. Rollback must require no package-network access and must prove the pre-state config digest plus old child version/package identity are restored. Rollback is not a new server, alternate transport or retry carrier.
 
-If rollback outcome is ambiguous, preserve `EFFECT_UNKNOWN` and stop for same-carrier reconciliation.
+If rollback outcome is ambiguous, preserve `EFFECT_UNKNOWN` and stop for same-carrier reconciliation. Do not fetch another package, switch versions again, or create a second MCP path after ambiguity.
 
 ## 8. Acceptance proof for the future implementation child
 
 Success requires all of:
 
+- package staging receipt proves registry identity/integrity + independent digest for the exact candidate artifact;
+- staged candidate package itself proves the managed-proxy hook/lifecycle contract;
+- exact network-independent rollback package/executable for `2026.5.7` was staged and attested before live mutation;
+- no live package fetch or package mutation occurred after the live transition began;
 - `user-openclaw` remains the sole canonical OpenClaw MCP identity;
 - no OpenClaw entry is added to `mcpBoxServers`;
 - same serverName/account survives replacement;
-- child version is the exact approved stable version;
+- child version/package tree is the exact approved and attested staged candidate;
 - only approved process-local proxy env is added;
 - existing remote endpoint/token-file coordinate is preserved by sanitized identity;
 - live `conversations_list` succeeds from this exact Grok runtime;
@@ -253,8 +283,12 @@ Fail closed on:
 - current host/backend owner or effective entry differs from GS-OP2 evidence;
 - serverName collision or second OpenClaw MCP path;
 - current endpoint/token-file structure cannot be proven without revealing secrets;
-- stable package cannot be acquired/pinned without changing unrelated host state;
+- npm candidate metadata/tarball/integrity cannot be bound exactly;
+- staged package version/content does not match the approved candidate or does not prove the required managed-proxy hook;
+- exact network-independent rollback executable/package closure for `2026.5.7` cannot be proven before live mutation;
+- candidate package cannot be staged without changing unrelated host state;
 - package integrity/version cannot be proven;
+- live command would depend on post-transition network/package fetch;
 - process-local proxy env is rejected or silently dropped;
 - same-name replacement leaves two children or cannot prove old child reaped;
 - live Gateway probes remain disconnected;
@@ -268,7 +302,7 @@ Do not weaken to a second MCP server, `mcpBoxServers`, global proxy, `/etc/hosts
 
 This amendment is architecture/source law only. It does not authorize a worker merely because the design is written.
 
-The intended next implementation is one fresh exact-session Grok Secretary child after this #188 carrier is current-base reconciled, exact-head validated, independently reviewed and protected/merged as source law. That child must receive a fresh operation key, exact current thread/carrier, current protected re-pin, exact pre-state/config digest, one logical same-entry mutation, reciprocal watcher setup and the stop/rollback law above.
+The intended next implementation is one fresh exact-session Grok Secretary child after this #188 carrier is current-base reconciled, exact-head validated, independently reviewed and protected/merged as source law. That child must receive a fresh operation key, exact current thread/carrier, current protected re-pin, exact pre-state/config digest, approved package-stage effect boundary, independently attested candidate + rollback packages, one logical same-entry live mutation, reciprocal watcher setup and the stop/rollback law above.
 
 No implementation may start from the terminal GS-OP1 or GS-OP2 watcher/session authority.
 
