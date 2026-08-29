@@ -5,7 +5,6 @@ sampling, roots, elicitation, dynamic registration, or production binding.
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import mcp.types as mcp_types
@@ -17,6 +16,7 @@ from integrations.mastermind_company_mcp.schemas import (
     SERVER_NAME,
     SERVER_VERSION,
     TOOL_SPECS,
+    canonical_json,
 )
 
 
@@ -50,7 +50,7 @@ def build_mcp_server(gateway: CompanyDialogueGateway) -> Server:
         return [
             mcp_types.TextContent(
                 type="text",
-                text=json.dumps(envelope, ensure_ascii=False, sort_keys=True, indent=2),
+                text=canonical_json(envelope).decode("utf-8"),
             )
         ]
 

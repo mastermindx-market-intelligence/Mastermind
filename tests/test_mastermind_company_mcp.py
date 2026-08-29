@@ -17,6 +17,7 @@ from integrations.mastermind_company_mcp.adapter import (
 )
 from integrations.mastermind_company_mcp.schemas import (
     ERROR_CODES,
+    MAX_RESPONSE_BYTES,
     RESULT_SCHEMA,
     SCHEMA_SNAPSHOT_SHA256,
     SERVER_NAME,
@@ -24,7 +25,9 @@ from integrations.mastermind_company_mcp.schemas import (
     TOOL_SCHEMA_DIGEST,
     TOOL_SPECS,
     GatewayError,
+    canonical_json,
     error_envelope,
+    result_envelope,
     schema_snapshot_sha256,
     tool_schema_digest,
     validate_tool_arguments,
@@ -722,3 +725,89 @@ def test_mcp_server_calls_gateway_exactly_once_and_returns_one_bounded_text_resu
         "schema": RESULT_SCHEMA,
         "tool": "ack",
     }
+
+
+def test_mcp_server_enforces_response_limit_on_actual_text_content_bytes():
+    pytest.importorskip("mcp")
+    from mcp import types as mcp_types
+
+    from integrations.mastermind_company_mcp.server import build_mcp_server
+
+    messages = []
+    for index in range(43):
+        messages.append(
+            {
+                "message": {
+                    "schema": "mastermind.agent_dialogue.v2",
+                    "message_key": f"asd-mcp-{index:032x}",
+                    "message_type": "PROGRESS",
+                    "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+                    "commission_ref": {
+                        "repository": "mastermindx-market-intelligence/Mastermind",
+                        "commit": "1" * 40,
+                        "path": "docs/x.md",
+                        "content_sha256": "2" * 64,
+                    },
+                    "session_ref": "asd-session-wp2bounded01",
+                    "actor_ref": {
+                        "kind": "executive_surface",
+                        "seat": "coo",
+                        "reasoning_surface": "claude",
+                    },
+                    "reply_to_message_key": None,
+                    "applies_to": {
+                        "kind": "repository",
+                        "repository": "mastermindx-market-intelligence/Mastermind",
+                        "head_sha": "3" * 40,
+                        "pr": "mastermindx-market-intelligence/Mastermind#210",
+                    },
+                    "summary": "x",
+                    "body": {"stage": "test", "completed": "done", "next": "next"},
+                    "evidence_refs": [],
+                    "requires_response": False,
+                    "created_at": "2026-08-29T01:00:00Z",
+                    "fingerprint": f"{index:064x}",
+                },
+                "primary_ts": f"1787896{index:03d}.625239",
+                "duplicate_timestamps": [],
+            }
+        )
+    envelope = result_envelope(
+        "read_thread",
+        data={
+            "messages": messages,
+            "historical_messages": [],
+            "ineligible_count": 0,
+            "mutated_count": 0,
+            "thread_ts": "1787896128.625239",
+        },
+    )
+    assert len(canonical_json(envelope)) <= MAX_RESPONSE_BYTES
+    assert (
+        len(
+            json.dumps(
+                envelope,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            ).encode("utf-8")
+        )
+        > MAX_RESPONSE_BYTES
+    )
+
+    class Gateway:
+        async def call(self, name, arguments):
+            return envelope
+
+    server = build_mcp_server(Gateway())
+    handler = server.request_handlers[mcp_types.CallToolRequest]
+    request = mcp_types.CallToolRequest(
+        params=mcp_types.CallToolRequestParams(name="read_thread", arguments={})
+    )
+
+    response = _run(handler(request))
+    content = response.model_dump(mode="json", by_alias=True)["content"]
+
+    assert len(content) == 1
+    assert len(content[0]["text"].encode("utf-8")) <= MAX_RESPONSE_BYTES
+    assert json.loads(content[0]["text"]) == envelope
