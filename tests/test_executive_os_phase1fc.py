@@ -1559,7 +1559,7 @@ def test_raw_observation_freezes_schema_bytes_length_and_digest():
         RawRoleResultObservation(**kwargs, schema_version="wrong")
 
 
-def test_run_once_cycle_performs_one_deterministic_action_and_replays_adverse_state(
+def test_run_once_cycle_blocks_generic_failed_with_retry_evidence_and_replays(
     tmp_path,
 ):
     runtime = Runtime.at(tmp_path)
@@ -1597,37 +1597,201 @@ def test_run_once_cycle_performs_one_deterministic_action_and_replays_adverse_st
         payload={"summary": "fixture adverse", "errors": ["failed"]},
     )
 
-    requeued = cycle.run_once(root.job_id)
-    assert requeued.action == "REQUEUED"
-    assert requeued.command_id == (
-        f"coo-cycle:{root.job_id}:requeue:{planner_id}:{attempt.attempt_id}"
-    )
-    assert runtime.jobs.get_job(planner_id).status.value == "QUEUED"
-
-    second_dispatch = cycle.run_once(root.job_id)
-    assert second_dispatch.action == "DISPATCHED"
-    second_job = runtime.jobs.get_job(planner_id)
-    assert second_job.attempt_count == 2
-    second_attempt = runtime.attempts.get_attempt(str(second_job.current_attempt_id))
-    with runtime.store.read() as connection:
-        second_token = connection.execute(
-            "SELECT lease_token FROM attempts WHERE attempt_id=?",
-            (second_attempt.attempt_id,),
-        ).fetchone()[0]
-    runtime.attempts.fail_attempt(
-        second_attempt.attempt_id,
-        fence_generation=second_attempt.fence_generation,
-        lease_token=str(second_token),
-        payload={"summary": "fixture exhausted", "errors": ["failed"]},
-    )
-
+    failed_before = runtime.jobs.get_job(planner_id)
     blocked = cycle.run_once(root.job_id)
     assert blocked.action == "BLOCKED"
-    assert blocked.receipt["reason"] == "plan_terminal_adverse"
+    assert blocked.receipt["reason"] == "state_conflict"
+    retry_evidence = {
+        "retry_safety": "GENERIC_FAILED",
+        "terminal_status": "FAILED",
+        "job_id": planner_id,
+        "attempt_id": attempt.attempt_id,
+        "attempt_job_id": planner_id,
+        "current_attempt_id": attempt.attempt_id,
+        "provenance_digest": first.orchestration_provenance_digest,
+        "retry_lineage_available": True,
+        "effect_unknown": False,
+        "writer_or_provider_generation_live": False,
+        "candidate_present": False,
+        "result_present": True,
+        "seal_present": False,
+        "effective_grant_non_modifying": True,
+    }
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            retry_evidence,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert blocked.receipt["evidence"] == {
+        "retry_safety": {
+            "schema_version": "mastermind.executive_retry_safety_receipt/v1",
+            "decision": "NEEDS_RECONCILIATION",
+            "evidence": retry_evidence,
+            "evidence_digest": expected_digest,
+        }
+    }
+    assert runtime.jobs.get_job(planner_id) == failed_before
+    assert not any(
+        event.event_type == "JOB_REQUEUED"
+        for event in runtime.events.list_events(job_id=planner_id)
+    )
     events_before = runtime.events.list_events(job_id=root.job_id)
     replay = cycle.run_once(root.job_id)
     assert replay.to_dict() == blocked.to_dict()
     assert runtime.events.list_events(job_id=root.job_id) == events_before
+
+
+def test_coo_retry_gate_requeues_only_exact_tx9_detached_lost(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    root, planner, dispatch = _dispatched_planner(runtime)
+    attempt = dispatch.attempt
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE attempts SET execution_mode='OPERATOR_HARNESS',
+              requested_execution_profile_json='{}',
+              requested_execution_profile_digest=? WHERE attempt_id=?
+            """,
+            ("f" * 64, attempt.attempt_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO harness_session_epochs(
+              session_epoch_id,attempt_id,worker_id,epoch_number,
+              provider_session_id,state,created_at_ms
+            ) VALUES('EPOCH-COO-TX9',?,?,1,'SESSION-COO-TX9','CURRENT',1)
+            """,
+            (attempt.attempt_id, attempt.worker_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO process_generations(
+              process_generation_id,session_epoch_id,worker_id,
+              provider_session_id,generation_number,started_at_ms,
+              executive_writer_held,provider_writer_state,created_at_ms
+            ) VALUES('GEN-COO-TX9','EPOCH-COO-TX9',?,'SESSION-COO-TX9',1,1,1,'HELD',1)
+            """,
+            (attempt.worker_id,),
+        )
+    assert runtime.operator_harness.invalidate_after_restore() == 1
+    before_events = runtime.events.list_events(job_id=planner.job_id)
+
+    requeued = CooCycle(runtime).run_once(root.job_id)
+
+    command = (
+        f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:{attempt.attempt_id}"
+    )
+    assert requeued.action == "REQUEUED"
+    assert requeued.selected_job_id == planner.job_id
+    assert requeued.command_id == command
+    assert requeued.receipt["requeue_kind"] == "TX9_DETACHED"
+    retry_evidence = {
+        "retry_safety": "SAFE_PRE_EFFECT_INFRASTRUCTURE",
+        "terminal_status": "LOST",
+        "job_id": planner.job_id,
+        "attempt_id": attempt.attempt_id,
+        "attempt_job_id": planner.job_id,
+        "current_attempt_id": attempt.attempt_id,
+        "provenance_digest": requeued.receipt["payload"]["tx9_evidence_digest"],
+        "retry_lineage_available": True,
+        "effect_unknown": False,
+        "writer_or_provider_generation_live": False,
+        "candidate_present": False,
+        "result_present": False,
+        "seal_present": False,
+        "effective_grant_non_modifying": True,
+    }
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            retry_evidence,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    assert requeued.receipt["retry_safety"] == {
+        "schema_version": "mastermind.executive_retry_safety_receipt/v1",
+        "decision": "SAFE_REQUEUE",
+        "evidence": retry_evidence,
+        "evidence_digest": expected_digest,
+    }
+    after_events = runtime.events.list_events(job_id=planner.job_id)
+    assert [event.event_type for event in after_events[len(before_events) :]] == [
+        "JOB_REQUEUED"
+    ]
+    assert runtime.jobs.get_job(planner.job_id).status is executive_runtime.JobStatus.QUEUED
+    current_before_replay = runtime.jobs.get_job(planner.job_id)
+    replay = runtime.jobs.requeue_job(planner.job_id, command_id=command)
+    assert replay.event_id == requeued.receipt["event_id"]
+    assert runtime.jobs.get_job(planner.job_id) == current_before_replay
+
+
+@pytest.mark.parametrize(
+    ("terminal", "retry_safety", "decision"),
+    [
+        ("RATE_LIMITED", "UNKNOWN", "NEEDS_RECONCILIATION"),
+        ("LOST", "EFFECT_UNKNOWN", "NEEDS_RECONCILIATION"),
+    ],
+)
+def test_coo_retry_gate_blocks_unproven_recoverable_statuses_without_requeue(
+    tmp_path, terminal, retry_safety, decision
+):
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    root, planner, dispatch = _dispatched_planner(runtime)
+    attempt = dispatch.attempt
+    with runtime.store.read() as connection:
+        lease_token = str(
+            connection.execute(
+                "SELECT lease_token FROM attempts WHERE attempt_id=?",
+                (attempt.attempt_id,),
+            ).fetchone()[0]
+        )
+    if terminal == "RATE_LIMITED":
+        runtime.attempts.rate_limit_attempt(
+            attempt.attempt_id,
+            fence_generation=attempt.fence_generation,
+            lease_token=lease_token,
+        )
+    else:
+        with runtime.store.transaction() as connection:
+            connection.execute(
+                "UPDATE attempts SET provider_session_id='PROVIDER-LOST' WHERE attempt_id=?",
+                (attempt.attempt_id,),
+            )
+        runtime.attempts.mark_lost(
+            attempt.attempt_id,
+            fence_generation=attempt.fence_generation,
+            lease_token=lease_token,
+            reason="fixture process absent",
+            verified_process_absent=True,
+        )
+    terminal_before = runtime.jobs.get_job(planner.job_id)
+
+    blocked = CooCycle(runtime).run_once(root.job_id)
+
+    assert blocked.action == "BLOCKED"
+    assert blocked.receipt["reason"] == "state_conflict"
+    assert blocked.receipt["evidence"]["retry_safety"]["decision"] == decision
+    assert (
+        blocked.receipt["evidence"]["retry_safety"]["evidence"]["retry_safety"]
+        == retry_safety
+    )
+    assert (
+        blocked.receipt["evidence"]["retry_safety"]["evidence"]["attempt_id"]
+        == attempt.attempt_id
+    )
+    assert runtime.jobs.get_job(planner.job_id) == terminal_before
+    assert not any(
+        event.event_type == "JOB_REQUEUED"
+        for event in runtime.events.list_events(job_id=planner.job_id)
+    )
 
 
 def test_dispatch_return_crash_replays_same_claim_without_block_or_sentinel_mutation(
