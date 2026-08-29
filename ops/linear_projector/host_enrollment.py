@@ -1,13 +1,13 @@
 """Fixed, production-disarmed credential boundary for the Linear projector.
 
-The current slice owns fixed host coordinates, opaque parsing/secret input, and
-safe preparation of the projector-specific directory boundary. It performs no
-credential-file write, network access, OAuth exchange, Linear mutation or
-service control.
+The current slice owns fixed host coordinates, opaque parsing/secret input,
+safe directory preparation and create-once credential files. It performs no
+network access, OAuth exchange, Linear mutation or service control.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import stat
@@ -28,6 +28,8 @@ TEAM_KEY = "MAS"
 APP_NAME = "Mastermind Portfolio Projector"
 CONFIG_SCHEMA = "mastermind.linear_projector_host.v1"
 MAX_SECRET_BYTES = 4096
+MAX_CLIENT_ID_CHARS = 256
+MAX_PRIVATE_FILE_BYTES = 64 * 1024
 
 ERROR_CODES = frozenset(
     {
@@ -214,12 +216,183 @@ def prepare_host(
     _prepare_directory(root / "config", uid=uid, gid=gid, mode=0o750)
 
 
+def _validate_client_id(client_id: object) -> str:
+    if (
+        not isinstance(client_id, str)
+        or not 1 <= len(client_id) <= MAX_CLIENT_ID_CHARS
+        or client_id.strip() != client_id
+        or any(ord(character) < 33 or ord(character) > 126 for character in client_id)
+    ):
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+    return client_id
+
+
+def build_config_document(*, client_id: str) -> dict[str, str]:
+    """Build the exact non-secret projector identity document."""
+
+    return {
+        "schema": CONFIG_SCHEMA,
+        "app_name": APP_NAME,
+        "client_id": _validate_client_id(client_id),
+        "workspace_id": WORKSPACE_ID,
+        "team_id": TEAM_ID,
+        "team_key": TEAM_KEY,
+    }
+
+
+def _fsync_parent(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(path.parent, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def write_new_private_file(
+    path: Path,
+    payload: bytes,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+) -> None:
+    """Create one final private file exactly once and fsync its parent."""
+
+    path = Path(path)
+    if (
+        not path.is_absolute()
+        or not isinstance(payload, bytes)
+        or not payload
+        or len(payload) > MAX_PRIVATE_FILE_BYTES
+    ):
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED")
+    try:
+        parent = path.parent.lstat()
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED") from None
+    if stat.S_ISLNK(parent.st_mode) or not stat.S_ISDIR(parent.st_mode):
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED")
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = -1
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        raise ProjectorHostError("PROJECTOR_HOST_COLLISION") from None
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED") from None
+
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED")
+        if info.st_uid != int(uid) or info.st_gid != int(gid):
+            os.fchown(descriptor, int(uid), int(gid))
+        os.fchmod(descriptor, int(mode))
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED")
+            view = view[written:]
+        os.fsync(descriptor)
+    except ProjectorHostError:
+        raise
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    try:
+        final = path.lstat()
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED") from None
+    if (
+        stat.S_ISLNK(final.st_mode)
+        or not stat.S_ISREG(final.st_mode)
+        or final.st_nlink != 1
+        or final.st_uid != int(uid)
+        or final.st_gid != int(gid)
+        or stat.S_IMODE(final.st_mode) != int(mode)
+    ):
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED")
+    try:
+        _fsync_parent(path)
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_WRITE_REFUSED") from None
+
+
+def _require_final_paths_absent(config_path: Path, secret_path: Path) -> None:
+    for path in (config_path, secret_path):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise ProjectorHostError("PROJECTOR_HOST_COLLISION") from None
+        raise ProjectorHostError("PROJECTOR_HOST_COLLISION")
+
+
+def enroll(
+    *,
+    client_id: str,
+    secret: bytes,
+    root: Path = ROOT,
+    uid: int = 0,
+    gid: int = 0,
+) -> None:
+    """Create exact config + secret files once inside an already-prepared root."""
+
+    root = Path(root)
+    if not root.is_absolute():
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+    config_dir = root / "config"
+    _assert_safe_directory(root, uid=uid, gid=gid, mode=0o750)
+    _assert_safe_directory(config_dir, uid=uid, gid=gid, mode=0o750)
+
+    document = build_config_document(client_id=client_id)
+    secret = _decode_secret_bytes(secret)
+    config_payload = (
+        json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+        + b"\n"
+    )
+    config_path = config_dir / "projector.json"
+    secret_path = config_dir / "oauth-client-secret"
+    _require_final_paths_absent(config_path, secret_path)
+
+    write_new_private_file(
+        config_path,
+        config_payload,
+        uid=uid,
+        gid=gid,
+        mode=0o640,
+    )
+    write_new_private_file(
+        secret_path,
+        secret,
+        uid=uid,
+        gid=gid,
+        mode=0o600,
+    )
+
+
 __all__ = [
     "APP_NAME",
     "CONFIG_DIR",
     "CONFIG_PATH",
     "CONFIG_SCHEMA",
     "ERROR_CODES",
+    "MAX_CLIENT_ID_CHARS",
     "MAX_SECRET_BYTES",
     "ProjectorHostError",
     "ROOT",
@@ -229,7 +402,10 @@ __all__ = [
     "TEAM_KEY",
     "WORKSPACE_ID",
     "assert_secret_surfaces_clean",
+    "build_config_document",
     "build_parser",
+    "enroll",
     "prepare_host",
     "read_secret_from_stdin",
+    "write_new_private_file",
 ]
