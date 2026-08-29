@@ -1,0 +1,9 @@
+{
+  "name": "com.mastermind.web_sol_surface",
+  "description": "Mastermind Web Sol exact-surface bridge",
+  "path": "/usr/local/libexec/mastermind-web-sol-native-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://kmpbpccecbofdnhpcmjogofgmdodpnko/"
+  ]
+}
