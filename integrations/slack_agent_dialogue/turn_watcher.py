@@ -305,7 +305,7 @@ def _ceo_reply_lineage_valid(
     if message_type == "RULING":
         return previous_type == "DECISION_REQUEST"
     if message_type == "CONTINUE":
-        if previous_type not in {"ACK", "PROGRESS", "BLOCKED"}:
+        if previous_type not in {"ACK", "PROGRESS", "BLOCKED", "RESULT"}:
             return False
         return not (
             previous_type == "BLOCKED"
@@ -362,10 +362,6 @@ def classify_turn(
         if not _same_parent_context(normalized_parent, normalized):
             return _refuse("DIALOGUE_CONTEXT_MISMATCH")
         normalized_messages.append(normalized)
-
-    first_scope = normalized_messages[0]["applies_to"]
-    if any(message["applies_to"] != first_scope for message in normalized_messages[1:]):
-        return _refuse("DIALOGUE_CONTEXT_MISMATCH")
 
     leaf, previous, reduction_error = _reduce_semantic_leaf(normalized_messages)
     if reduction_error is not None:

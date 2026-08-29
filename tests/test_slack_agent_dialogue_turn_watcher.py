@@ -447,6 +447,70 @@ def test_ceo_classification_table(
     )
 
 
+def test_current_lineage_result_can_receive_a_lawful_continue() -> None:
+    parent = _parent()
+    result = _message(
+        "RESULT",
+        key="asd-result-00000001",
+        parent=parent,
+    )
+    continuation = _message(
+        "CONTINUE",
+        key="asd-continue-00000001",
+        reply_to=str(result["message_key"]),
+        parent=parent,
+    )
+
+    decision = _decision(result, continuation, parent=parent)
+
+    assert decision.action is TurnAction.WAKE_COO
+    assert decision.reason == "DIALOGUE_TURN_PENDING"
+    assert decision.refusal_code is None
+    assert decision.attention is not None
+    assert decision.attention.message_key == continuation["message_key"]
+    assert decision.attention.target_seat == "coo"
+
+
+def test_same_parent_lineage_allows_current_attempt_applicability_to_advance() -> None:
+    parent = _parent()
+    p1_progress = _message(
+        "PROGRESS",
+        key="asd-progress-00000001",
+        actor=WORKER,
+        applies_to=WORKER_APPLIES_TO,
+        parent=parent,
+    )
+    p2_worker = {
+        "kind": "worker_attempt",
+        "job_id": "JOB-001",
+        "attempt_id": "ATTEMPT-002",
+        "worker_id": "worker-02",
+    }
+    p2_applies_to = {
+        "kind": "executive_attempt",
+        "job_id": "JOB-001",
+        "attempt_id": "ATTEMPT-002",
+        "worker_id": "worker-02",
+    }
+    p2_result = _message(
+        "RESULT",
+        key="asd-result-00000002",
+        reply_to=str(p1_progress["message_key"]),
+        actor=p2_worker,
+        applies_to=p2_applies_to,
+        parent=parent,
+    )
+
+    decision = _decision(p1_progress, p2_result, parent=parent)
+
+    assert decision.action is TurnAction.WAKE_CEO
+    assert decision.reason == "DIALOGUE_TURN_PENDING"
+    assert decision.refusal_code is None
+    assert decision.attention is not None
+    assert decision.attention.message_key == p2_result["message_key"]
+    assert decision.attention.target_seat == "ceo"
+
+
 @pytest.mark.parametrize(
     ("message_type", "ceo_bound", "coo_bound"),
     [("RESULT", False, True), ("STOP", True, False)],
@@ -535,7 +599,7 @@ def test_worker_ack_cannot_launder_terminal_coo_consumption() -> None:
     )
     result = _decision(request, stop, worker_ack, parent=parent)
     assert result.action is TurnAction.REFUSE
-    assert result.refusal_code == "DIALOGUE_CONTEXT_MISMATCH"
+    assert result.refusal_code == "REPLY_LINEAGE_INVALID"
 
 
 def test_duplicate_delivery_collapses_but_changed_payload_conflicts() -> None:
@@ -609,7 +673,7 @@ def test_actionable_ceo_reply_requires_exact_current_lineage(
     assert result.refusal_code == "REPLY_LINEAGE_INVALID"
 
 
-def test_cross_thread_or_applicability_context_refuses() -> None:
+def test_cross_thread_or_invalid_message_applicability_refuses() -> None:
     parent = _parent()
     result = _message("RESULT", key="asd-result-00000001", parent=parent)
 
@@ -619,16 +683,16 @@ def test_cross_thread_or_applicability_context_refuses() -> None:
     assert invalid_parent.action is TurnAction.REFUSE
     assert invalid_parent.refusal_code == "FINGERPRINT_MISMATCH"
 
-    other_scope = _message(
+    invalid_scope = _message(
         "ACK",
         key="asd-ack-00000001",
         reply_to=str(result["message_key"]),
         parent=parent,
-        applies_to={**APPLIES_TO, "head_sha": "e" * 40},
     )
-    context = _decision(result, other_scope, parent=parent)
+    invalid_scope["actor_ref"] = copy.deepcopy(WORKER)
+    context = _decision(result, invalid_scope, parent=parent)
     assert context.action is TurnAction.REFUSE
-    assert context.refusal_code == "DIALOGUE_CONTEXT_MISMATCH"
+    assert context.refusal_code == "MESSAGE_INVALID"
 
 
 def test_attention_identity_excludes_routing_destination_and_is_restart_stable() -> None:
