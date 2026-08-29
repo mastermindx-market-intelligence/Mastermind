@@ -277,6 +277,36 @@ def test_private_or_unreviewed_source_references_are_refused(private_source_ref)
 
 
 @pytest.mark.parametrize(
+    "wrapped_credential",
+    [
+        "SAFE-ghp_abcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-eyJabcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-sb_secret_ZmQ4Yx2Kp1Rt",
+        "SAFE-xoxb-abcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-sk-abcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-AKIAIOSFODNN7EXAMPLE",
+    ],
+)
+def test_canonical_source_ref_rejects_delimiter_wrapped_credentials(
+    wrapped_credential,
+):
+    fact = GroundingFact(
+        subject_ref="responsibility:alpha",
+        predicate="attention.state",
+        value="SOL_REQUIRED",
+        freshness="FRESH",
+        sources=(_source(source_ref="DEC:" + wrapped_credential),),
+    )
+    envelope = _run(
+        SecretaryGroundingGateway(
+            FakeSteward(StewardGrounding(state="FACTS", facts=(fact,)))
+        ).call("get_attention", {})
+    )
+    assert envelope["ok"] is False
+    assert envelope["error"]["code"] == "RESPONSE_REFUSED"
+
+
+@pytest.mark.parametrize(
     "private_predicate",
     [
         "provider.account",

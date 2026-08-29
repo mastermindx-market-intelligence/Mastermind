@@ -141,6 +141,32 @@ def test_canonical_opaque_responsibility_refs_accept_full_declared_range(suffix_
     ) == {"responsibility_ref": responsibility_ref}
 
 
+@pytest.mark.parametrize(
+    "wrapped_credential",
+    [
+        "safe-ghp_abcdefghijklmnopqrstuvwxyz123456",
+        "safe-sb_secret_ZmQ4Yx2Kp1Rt",
+        "safe-xoxb-abcdefghijklmnopqrstuvwxyz123456",
+        "safe-sk-abcdefghijklmnopqrstuvwxyz123456",
+    ],
+)
+def test_canonical_responsibility_ref_rejects_delimiter_wrapped_credentials(
+    wrapped_credential,
+):
+    with pytest.raises(GatewayError, match="INVALID_REQUEST"):
+        validate_tool_arguments(
+            "get_responsibility",
+            {"responsibility_ref": "responsibility:" + wrapped_credential},
+        )
+
+
+def test_canonical_responsibility_ref_does_not_false_positive_on_risk_word():
+    responsibility_ref = "responsibility:risk-model"
+    assert validate_tool_arguments(
+        "get_responsibility", {"responsibility_ref": responsibility_ref}
+    ) == {"responsibility_ref": responsibility_ref}
+
+
 def test_fact_value_schema_has_no_overlapping_one_of_numeric_branches():
     fact_schema = TOOL_SPECS[0].output_schema["properties"]["data"]["oneOf"][1][
         "properties"

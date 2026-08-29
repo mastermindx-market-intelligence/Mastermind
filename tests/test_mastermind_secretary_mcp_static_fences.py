@@ -212,6 +212,24 @@ def test_advertised_and_runtime_input_contract_accept_same_opaque_refs(suffix_le
 
 
 @pytest.mark.parametrize(
+    "wrapped_credential",
+    [
+        "safe-ghp_abcdefghijklmnopqrstuvwxyz123456",
+        "safe-sb_secret_ZmQ4Yx2Kp1Rt",
+        "safe-xoxb-abcdefghijklmnopqrstuvwxyz123456",
+        "safe-sk-abcdefghijklmnopqrstuvwxyz123456",
+    ],
+)
+def test_advertised_and_runtime_input_contract_reject_wrapped_credentials(
+    wrapped_credential,
+):
+    jsonschema = pytest.importorskip("jsonschema")
+    arguments = {"responsibility_ref": "responsibility:" + wrapped_credential}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.Draft202012Validator(TOOL_SPECS[1].input_schema).validate(arguments)
+
+
+@pytest.mark.parametrize(
     "source_ref",
     [
         "DEC:CHAIRMAN-CONTROL-ROOM-P0-ARCHITECTURE-ACCEPTED",
@@ -239,6 +257,51 @@ def test_advertised_and_runtime_output_contract_accept_same_canonical_sources(so
     normalized = validate_result_data(data)
     envelope = result_envelope("get_attention", data=normalized)
     jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema).validate(envelope)
+
+
+@pytest.mark.parametrize(
+    "wrapped_credential",
+    [
+        "SAFE-ghp_abcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-eyJabcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-sb_secret_ZmQ4Yx2Kp1Rt",
+        "SAFE-xoxb-abcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-sk-abcdefghijklmnopqrstuvwxyz123456",
+        "SAFE-AKIAIOSFODNN7EXAMPLE",
+    ],
+)
+def test_advertised_output_contract_rejects_wrapped_source_credentials(
+    wrapped_credential,
+):
+    jsonschema = pytest.importorskip("jsonschema")
+    envelope = {
+        "schema": "mastermind.secretary_grounding_mcp_result.v1",
+        "tool": "get_attention",
+        "ok": True,
+        "server_version": "1.0.0",
+        "data": {
+            "state": "FACTS",
+            "facts": [
+                {
+                    "subject_ref": "responsibility:alpha",
+                    "predicate": "attention.state",
+                    "value": "SOL_REQUIRED",
+                    "freshness": "FRESH",
+                    "sources": [
+                        {
+                            "owner": "agent_os",
+                            "source_ref": "DEC:" + wrapped_credential,
+                            "observed_at": None,
+                        }
+                    ],
+                }
+            ],
+            "reason_codes": [],
+        },
+        "error": None,
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.Draft202012Validator(TOOL_SPECS[2].output_schema).validate(envelope)
 
 
 def test_static_contract_server_exposes_only_list_and_call():

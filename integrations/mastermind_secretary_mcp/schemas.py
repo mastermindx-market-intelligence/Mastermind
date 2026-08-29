@@ -70,12 +70,16 @@ _CANONICAL_CREDENTIAL_PREFIX = (
     r"(?:sb_secret_|sb_publishable_|sbp_|sk-ant-|sk-|github_pat_|ghp_|gho_|ghs_|"
     r"xox[abeprs]-|xapp-|eyJ|AKIA|ASIA|ABIA|ACCA)"
 )
+_CANONICAL_CREDENTIAL_FENCE = (
+    rf"(?!{_CANONICAL_CREDENTIAL_PREFIX})"
+    rf"(?![A-Za-z0-9._-]*[._-]{_CANONICAL_CREDENTIAL_PREFIX})"
+)
 _RESPONSIBILITY_REF_PATTERN = (
-    rf"^responsibility:(?!{_CANONICAL_CREDENTIAL_PREFIX})"
+    rf"^responsibility:{_CANONICAL_CREDENTIAL_FENCE}"
     r"[a-z0-9][a-z0-9._-]{0,144}$"
 )
 _RESPONSIBILITY_REF_RE = re.compile(
-    rf"\Aresponsibility:(?!{_CANONICAL_CREDENTIAL_PREFIX})"
+    rf"\Aresponsibility:{_CANONICAL_CREDENTIAL_FENCE}"
     r"[a-z0-9][a-z0-9._-]{0,144}\Z"
 )
 _SOURCE_NAMESPACE_BY_OWNER = {
@@ -93,7 +97,7 @@ _SOURCE_NAMESPACE_BY_OWNER = {
 def _source_ref_pattern(namespaces: tuple[str, ...]) -> str:
     joined = "|".join(namespaces)
     return (
-        rf"^(?:{joined}):(?!{_CANONICAL_CREDENTIAL_PREFIX})"
+        rf"^(?:{joined}):{_CANONICAL_CREDENTIAL_FENCE}"
         r"[A-Za-z0-9][A-Za-z0-9._-]{0,223}$"
     )
 
@@ -787,10 +791,10 @@ def tool_schema_digest() -> str:
 
 # Literal review tripwires. Update only when the reviewed contract changes.
 SCHEMA_SNAPSHOT_SHA256 = (
-    "52bd9d70e4eb0368011d03bd4df665736ec8c6b09f6d347ab54cbaa8e6243c86"
+    "86e3a454ce4e665cdfee5ee5c10fedbacd741df05f60af2a3a95e22622831286"
 )
 TOOL_SCHEMA_DIGEST = (
-    "1837b0857f0cecf6a46cc40af3d583a544da19df57d6ff09d001938c465abb59"
+    "504d38d80b3ea22ec0aaff76c6cd84322c4c43def0ba520a8e231c9f11a05b7e"
 )
 
 
