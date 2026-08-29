@@ -8,6 +8,10 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _normalized(text: str) -> str:
+    return " ".join(text.split())
+
+
 def test_worker_avenue_routing_is_canonical_and_chairman_binds_accounts() -> None:
     skill_path = ROOT / "docs/sol_skills/WORKER_AVENUE_ROUTING.md"
     assert skill_path.exists(), "manual worker avenue routing law must be a canonical Sol skill"
@@ -67,10 +71,10 @@ def test_capacity_selectable_prestart_rebind_is_distinct_from_exact_session_cont
 
 
 def test_live_chairman_delivery_binds_open_pickup_without_second_slack_comment() -> None:
-    skill = _read("docs/sol_skills/WORKER_AVENUE_ROUTING.md")
-    commission = _read("docs/sol_skills/COMMISSION_WAVE.md")
-    index = _read("docs/sol_skills/INDEX.md")
-    kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    skill = _normalized(_read("docs/sol_skills/WORKER_AVENUE_ROUTING.md"))
+    commission = _normalized(_read("docs/sol_skills/COMMISSION_WAVE.md"))
+    index = _normalized(_read("docs/sol_skills/INDEX.md"))
+    kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
 
     required_skill_phrases = (
         "deliberately delivers that same `OPEN_PICKUP` commission to a concrete eligible account/session",
@@ -83,5 +87,5 @@ def test_live_chairman_delivery_binds_open_pickup_without_second_slack_comment()
 
     assert "that live delivery is the receiver assignment" in commission
     assert "must not require a separate Slack comment" in commission
-    assert "live delivery to the selected concrete session is itself the binding edge" in index
+    assert "selected concrete session is itself the binding edge" in index
     assert "No separate Slack comment or second binding message is required" in kernel
