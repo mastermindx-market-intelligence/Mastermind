@@ -1,76 +1,56 @@
-# WR-R0 Adversarial Review — Least Privilege, Ownership and Concurrency Corrections
+# Project Workroom Fabric — WR-R0 Adversarial Review
 
 **Date:** 2026-08-29  
-**Reviewer:** Sol, AI CEO  
+**Owner:** Sol, AI CEO  
 **Operation:** `mastermind-project-workroom-wr-r0-20260829-sol-001`  
-**Reviewed carrier:** Mastermind PR #242  
-**Parent architecture:** Mastermind PR #240  
-**Status:** `PASS WITH CORRECTIONS APPLIED / RECORDS_ONLY`
+**Parent architecture:** Mastermind PR #240 / `mastermind-project-workroom-fabric-20260829-sol-001`  
+**Research carrier:** Mastermind PR #242 / `sol/project-workroom-wr-r0-20260829`  
+**Capability state:** `RESEARCH / RECORDS ONLY / ZERO MUTATION`
 
-This review treats the initial WR-R0 research as a candidate rather than authority and tests whether its proposed Slack scopes, object ownership and update semantics remain safe under the Project Workroom constitution.
+This review attempts to falsify the Project Workroom V1 against current Slack/Linear documentation, the real MastermindX estate and Mastermind authority boundaries. For Canvas creation order, effect handling and cleanup, this review supersedes the earlier generic access wording in the platform census. The controlling source law is the current #240 WR-R0 amendment.
 
-The corrections below are incorporated into:
-
-- the parent WR-R0 platform amendment on #240;
-- `slack_surface_contract_snapshot_2026-08-29.json` on #242.
-
-The original capability census remains useful platform archaeology. For exact scope, adoption, access and apply-lock questions, this review and the updated machine-readable contract win.
+No app, credential, channel, Canvas, List, bookmark, Workflow, Linear object, Agent OS record, Executive Job, runtime or host service was created or modified by this review.
 
 ---
 
-## 1. Finding: `channels:write.topic` was redundant
-
-### Candidate
-
-The initial scope proposal contained both:
-
-```text
-channels:manage
-channels:write.topic
-```
+## 1. Public-internal V1 is the only accepted first visibility
 
 ### Evidence
 
-Slack documents `channels:manage` as a bot scope for public channel create/rename/archive and accepts it for `conversations.setTopic` and `conversations.setPurpose`. Because the Workroom Projector already requires `channels:manage`, adding `channels:write.topic` does not unlock a necessary separate V1 capability.
+Public channel lifecycle can use a narrow dedicated bot scope set. Private Workrooms require additional private-channel read/write/topic/invite scopes, exact app membership, human audience authority and private Canvas/List/unfurl correction proof.
 
 ### Ruling
 
-Remove `channels:write.topic` from the candidate manifest and explicitly forbid it in V1 unless a later exact platform change proves `channels:manage` insufficient.
-
-Resulting public-channel scopes:
-
 ```text
-channels:manage
-channels:read
+PUBLIC_INTERNAL    = supported V1 class
+PRIVATE_RESTRICTED = typed deferred/refused class
 ```
 
-This is a least-privilege reduction, not a feature loss.
+A requested private Workroom is never silently created as public.
 
 ---
 
-## 2. Finding: public visibility does not prove bot membership or management authority
+## 2. Existing-channel adoption cannot be inferred or automated
 
-### Risk
+### Evidence
 
-A bot with `channels:read` may see public channels it cannot lawfully manage. A channel name or marker visible to the app is not enough to authorize Canvas/List/bookmark/topic mutation.
+The projector needs exact bot membership to manage an existing target. The current desired scope deliberately omits `channels:join`, invite and message authority. Name similarity does not establish a Workroom binding.
 
 ### Ruling
 
-The normal V1 path is projector-created channels. Creation establishes the projector bot's managed channel relation.
-
-Existing-channel adoption is explicit and requires:
+Existing-channel adoption requires all of:
 
 ```text
-exact valid marker
+one exact valid MMX-WR1 marker
 exact expected workroom_ref and WS:<KEY>
-one complete authoritative snapshot
-projector bot is_member == true or equivalent exact membership fact
-managed Home/Radar objects are projector-app-owned
-plan explicitly says ADOPT_EXISTING
-zero duplicate marker/channel
+complete authoritative marker census
+exact projector bot already a member
+app-owned or accepted-prior-projector managed surfaces
+explicit ADOPT_EXISTING plan
+no duplicate or conflicting object
 ```
 
-Otherwise refuse:
+Otherwise return a typed refusal such as:
 
 ```text
 WORKROOM_ACTOR_NOT_MEMBER
@@ -83,34 +63,91 @@ Do not add `channels:join`, invitation or membership-management scopes merely to
 
 ---
 
-## 3. Finding: channel-tabbed Home Canvas may initially expose write access
+## 3. Finding: attached-first Home Canvas creates an unsafe remote effect
 
 ### Evidence
 
-Slack documents that `canvases.create(channel_id=...)` can automatically add a Canvas to the channel tab with write permission. Slack also documents `canvases.access.set(access_level=read|write|owner)` for channel/user entities.
+Slack documents that `canvases.create(channel_id=...)` automatically adds the Canvas to the channel with `write` permission. Slack also documents `canvas_not_found` as a typical error when `canvases.access.set` attempts to change access for a channel Canvas.
 
-### Risk
+Therefore this sequence is unsafe as a production default:
 
-A projector-owned static Home Canvas cannot be safely managed if ordinary channel members retain write access. Manual edits would create continuous drift and blur charter authority.
+```text
+create attached/write-exposed Canvas
+-> attempt downgrade
+-> on failure create standalone fallback
+```
+
+The first step has already created a remote object. A failed downgrade does not erase that effect. Blind fallback creates a second Canvas and leaves the first write-exposed or access-unproven. Automatic deletion is not safe compensation because `canvases.delete` is irreversible and can itself return an ambiguous or partial-effect error.
 
 ### Ruling
 
-The canary must prove one of these exact safe paths:
+Production Home creation is standalone-first:
 
 ```text
-A. create with channel_id
-   -> set channel access to read
-   -> read back exact access
-
-B. if A cannot be proven:
-   create standalone app-owned Canvas
-   -> set exact Workroom channel access to read
-   -> expose by bookmark/permalink
+create standalone app-owned Canvas with no channel_id
+-> exact canvas_id/ownership/metadata readback
+-> set exact Workroom channel access to read
+-> prove accepted exact access/readback condition
+-> files.info permalink
+-> exact bookmark
+-> idempotent rerun/noop
 ```
 
-A write-exposed Home Canvas is refused. A native tab is presentation only and not required if it cannot meet read-only access.
+A standalone Canvas is usable only after the dedicated app canary proves the paid-plan/workspace path. If unavailable:
 
-Working Notes, when enabled, is a separate human-editable noncanonical Canvas and is optional.
+```text
+HOME_CANVAS_UNAVAILABLE
+SURFACE_CAPABILITY_UNAVAILABLE
+```
+
+Remove Home from an explicitly accepted reduced pilot or stop the pilot. Do not fall back to attached write exposure.
+
+Channel-tabbed creation is canary-only until a separately admitted disposable canary proves:
+
+```text
+create exact channel Canvas
+-> exact ID/readback
+-> downgrade channel access to read
+-> exact access/readback
+-> app ownership/metadata
+-> idempotent rerun
+-> accepted cleanup or historical-preservation disposition
+```
+
+### Effect and cleanup law
+
+```text
+ambiguous create
+  -> EFFECT_UNKNOWN
+  -> no second create
+
+create applied + access failed
+  -> EFFECT_APPLIED / CANVAS_ACCESS_UNSAFE
+  -> no second create or automatic fallback
+
+create applied + access unproven
+  -> EFFECT_APPLIED / CANVAS_ACCESS_UNPROVEN
+  -> no second create
+
+standalone unsupported
+  -> HOME_CANVAS_UNAVAILABLE
+  -> no attached fallback
+```
+
+Unsafe/unproven objects remain bound to their exact `canvas_id` for reconciliation. `canvases.delete` is permitted only for an exact disposable canary or separate accepted cleanup operation. It is never automatic rollback. Ambiguous deletion is `EFFECT_UNKNOWN` and forbids replacement creation until reconciled.
+
+### Required hostile tests
+
+```text
+channel_id create treated as read-only at birth
+access failure triggers standalone fallback
+ambiguous create is retried
+write-exposed Canvas is bound as Home
+missing access readback becomes success
+free-plan standalone refusal triggers attached create
+automatic delete rollback
+ambiguous delete permits replacement
+```
 
 ---
 
@@ -118,11 +155,11 @@ Working Notes, when enabled, is a separate human-editable noncanonical Canvas an
 
 ### Risk
 
-Channel/Canvas/List/bookmark APIs do not expose one uniform server-side `If-Match` precondition. Two local projector invocations could race between final read and write even if each individually performs optimistic reread.
+Channel, Canvas, List and bookmark APIs do not expose one uniform server-side `If-Match` precondition. Two local projector invocations can race between final read and write.
 
 ### Ruling
 
-Every live apply must acquire one one-shot existing-host-style exclusive/advisory lock before the final read-plan-write-readback sequence.
+Every live apply acquires one existing-host-style one-shot exclusive/advisory lock before the final read-plan-write-readback sequence.
 
 The lock:
 
@@ -133,9 +170,7 @@ The lock:
 - refuses concurrent apply;
 - never authorizes retry after `EFFECT_UNKNOWN`.
 
-The exact path/owner/mode/timeout is frozen only at WR-A1 against the current accepted host/credential architecture.
-
-Server-side remote movement still produces `remote_changed`; the local lock is not treated as ownership of Slack truth.
+The exact path/owner/mode/timeout is frozen only at WR-A1 against the then-current accepted host/credential architecture. Server-side remote movement still produces `remote_changed`; the local lock owns no Slack truth.
 
 ---
 
@@ -143,7 +178,7 @@ Server-side remote movement still produces `remote_changed`; the local lock is n
 
 ### Risk
 
-A Slack List with ordinary human write access would become a second task/project board. Manual drag/drop or checkbox changes could be mistaken for execution or completion.
+A Slack List with ordinary human write access becomes a second task/project board. Manual drag/drop or checkbox changes could be mistaken for execution or completion.
 
 ### Ruling
 
@@ -162,11 +197,11 @@ If the real Lists/app canary cannot establish these exact properties, remove Lis
 
 ---
 
-## 6. Finding: current connected-channel census cannot prove authoritative absence
+## 6. Finding: connected channel census cannot prove authoritative absence
 
 ### Risk
 
-The current Slack connector returned the channels visible to its acting principal. That is useful estate evidence but not necessarily a complete public-channel inventory for a future dedicated bot or admin actor.
+The current Slack connector returned channels visible to its acting principal. That is useful evidence but not an admin-complete or dedicated-bot-complete public-channel inventory.
 
 ### Ruling
 
@@ -174,53 +209,104 @@ The committed fixture sets:
 
 ```text
 complete_for_public_channel_absence_proof = false
+public_absence_proof_allowed              = false
+mutation_allowed                          = false
 ```
 
-WR-P0 must refuse `would_create` or authoritative zero-marker conclusions on an incomplete snapshot. The dedicated Workroom Projector's own paginated `conversations.list` read is the future apply-time source for complete public-channel marker census.
+WR-P0 must refuse authoritative `would_create_channel` or zero-marker conclusions on this incomplete snapshot. Future apply uses the dedicated Projector's complete paginated `conversations.list` read.
 
 ---
 
-## 7. Finding: optional Slack features must shrink permissions when absent
+## 7. Finding: the existing inert channel is not an accepted canary
 
-### Risk
+### Evidence
 
-Keeping `lists:*` or future `triggers:*` permissions “for later” would violate least privilege and make app review ambiguous.
-
-### Ruling
-
-The final app manifest is generated/frozen only after canary capability selection:
+Exact readback proves:
 
 ```text
-Lists disabled/unavailable -> remove lists:read and lists:write
-Workflow deferred          -> no triggers scopes and no Workflow functions
-private deferred           -> no groups:* scopes
+workspace_id = T0BRD2AQXQV
+channel_id   = C0BTQ71QEA0
+name         = canary-project-workroom-20260829
+public       = true
+archived     = false
+topic        = ""
+purpose      = ""
+history      = creator-join event only
 ```
-
-Any later feature promotion gets a new exact operation, app-manifest review, credential/installation scope confirmation and adverse canary.
-
----
-
-## 8. Finding: Workroom Projector and Agent Relay must remain separate principals
-
-### Risk
-
-Adding channel/Canvas/List/bookmark management to Agent Relay would create a Slack superbot whose semantic dialogue token could restructure the workspace.
 
 ### Ruling
 
 ```text
-Workroom Projector = presentation/provisioning only
-Agent Relay        = exact dialogue only
-Official Linear    = selected human updates/unfurls only
+effect_state  = APPLIED
+product_state = INERT / UNMANAGED / NOT A WORKROOM
 ```
 
-The Workroom Projector has no `chat:write`, history, join/invite, command, webhook, private-channel, trigger, user-read, Executive or provider authority. Agent Relay receives no Workroom presentation scopes.
+No retry, replacement, implicit adoption, marker, archive, delete, app invite, Canvas/List/bookmark or Workroom binding is authorized. A future WR-C0 operation must bind to this exact channel ID and explicitly choose preservation, gated adoption or gated archival.
 
 ---
 
-## 9. Corrected candidate V1 scope set
+## 8. Finding: Linear's automatic Project-channel feature is too broad
 
-Core plus optional Radar candidate:
+### Evidence
+
+Linear can automatically create a public Slack channel for each new Project, add Project members and configure Project updates.
+
+### Risk
+
+Global enablement bypasses Workroom eligibility, audience review, exact marker identity and the rule that only selected sustained material Projects receive Workrooms.
+
+### Ruling
+
+Keep global automatic Project-channel creation disabled. Later selected integration may attach exact existing Workrooms and Project updates only after exact readback and audience review. Raw Agent Dialogue is never synchronized into Linear.
+
+---
+
+## 9. Finding: Slack principals and membership are not runtime or authority identity
+
+The workspace contains several ChatGPT, Claude, Cursor, Grok and Mastermind app identities. One Slack identity may represent several native sessions; several sessions may share a Slack identity.
+
+Therefore:
+
+```text
+Slack user/channel membership != Worker assignment
+Slack delivery                 != target consumption
+Slack START                    != Executive Attempt running
+Slack RESULT                   != completion
+```
+
+Current runtime and action-authoritative Sol identity remain exact Executive/RuntimeBinding/dialogue facts.
+
+---
+
+## 10. Finding: navigation resources must be exact observed values
+
+Fresh direct Linear readback rejected the first resource fixture's six URL values: Project IDs matched, but URLs did not equal the values returned by the exact live Project objects.
+
+### Ruling
+
+The repaired fixture consumes exact Project-object URLs and binds each to the exact Project ID/source ref. It does not reconstruct slugs from names, IDs or earlier URLs.
+
+Exact observation hash:
+
+```text
+4464bdf459e3d795aaca6305baad016ecbbf03511d58704ea9748eb75aaef18a
+```
+
+The digest reuses:
+
+```python
+scripts.linear_portfolio_plan.canonical_bytes
+```
+
+which is sorted compact UTF-8 JSON plus one trailing newline. A second digest definition is forbidden. Stale/reconstructed URL acceptance, Project-ID-only URL trust and omitted trailing-newline bytes are hostile regressions.
+
+No Workroom-safe Control Room URL is canonically published. Private provider/chat bindings and guessed URLs remain forbidden.
+
+---
+
+## 11. Least-privilege scope review
+
+Candidate core plus optional Radar scopes:
 
 ```text
 bookmarks:read
@@ -234,50 +320,49 @@ lists:read
 lists:write
 ```
 
-If Radar/Lists are not proven, remove the two `lists:*` scopes.
+`channels:write.topic` remains intentionally absent because Slack's public-channel topic/purpose methods accept the already-required `channels:manage` bot scope.
 
-Explicitly absent:
+Lists scopes are removed if Lists are not part of the accepted production surface. `canvases.delete` uses the existing `canvases:write` scope but is method-allowed only for disposable canary or separately accepted cleanup.
 
-```text
-admin.*
-app_mentions:read
-channels:history
-channels:join
-channels:write.invites
-channels:write.topic
-chat:write
-chat:write.public
-commands
-connections:write
-groups:history
-groups:read
-groups:write
-groups:write.invites
-groups:write.topic
-incoming-webhook
-links:read
-links:write
-triggers:read
-triggers:write
-users:read
-```
+Agent Relay remains dialogue-only and receives no channel/Canvas/List/bookmark/projector scope.
 
 ---
 
-## 10. Review verdict
+## 12. Final V1 recommendation
 
-**PASS WITH CORRECTIONS APPLIED.**
+Proceed only through this reduced, fail-closed product:
 
-The corrected V1 remains feasible and stronger:
+```text
+PUBLIC_INTERNAL projector-created Workroom
++ exact managed marker/purpose
++ bounded flat bookmarks
++ standalone-first app-owned channel-read-only static Home when proven
++ optional app-owned channel-read-only Radar when proven
++ exact Agent Relay operation threads after independent gates
++ selected Linear links/updates after existing projector/MAS-189 gates
++ Control Room as dynamic present-tense truth
+```
 
-- public-internal projector-created Workrooms;
-- exact marker and app membership/ownership;
-- static read-only Home Canvas with safe fallback;
-- optional app-owned read-only Radar;
-- one-shot apply lock plus exact readback;
-- no redundant topic scope;
-- no automatic channel join/adoption;
-- optional features remove scopes when unavailable;
-- Workroom Projector and Agent Relay stay separate.
+Deferred or refused:
 
-Capability remains `SPEC_ONLY / RESEARCH`. This review does not approve app creation, credential enrollment, channel mutation, WR-P0 code, Agent Relay widening or production use. Those retain the rollout plan's exact subsequent gates.
+```text
+private Workrooms
+attached-first/write-exposed Home
+implicit adoption/join
+native List-tab dependence
+bookmark-folder automation
+custom templates
+Workflow intake as core
+broad Linear automatic channel creation
+raw dialogue synchronization
+```
+
+Capability remains:
+
+```text
+WR-R0 research                     RESEARCH / RECORDS_ONLY
+Workroom Projector app/credential  NOT BUILT
+accepted Canvas/List canary        NOT BUILT
+WR-P0 and every live wave          NOT BUILT
+real Project Workroom              NOT BUILT
+```
