@@ -126,7 +126,17 @@ def _client(parent: dict[str, object]) -> InMemorySlackClient:
     return client
 
 
-def _result(parent: dict[str, object]) -> dict[str, object]:
+def _result(
+    parent: dict[str, object],
+    *,
+    applies_to: dict[str, object] | None = None,
+) -> dict[str, object]:
+    message_applies_to = applies_to or {
+        "kind": "repository",
+        "repository": REPO,
+        "head_sha": "a" * 40,
+        "pr": f"{REPO}#209",
+    }
     return build_message_v2(
         {
             "schema": MESSAGE_SCHEMA_V2,
@@ -141,12 +151,7 @@ def _result(parent: dict[str, object]) -> dict[str, object]:
                 "reasoning_surface": "claude",
             },
             "reply_to_message_key": None,
-            "applies_to": {
-                "kind": "repository",
-                "repository": REPO,
-                "head_sha": "a" * 40,
-                "pr": f"{REPO}#209",
-            },
+            "applies_to": copy.deepcopy(message_applies_to),
             "summary": "The bounded classifier passed.",
             "body": {
                 "status": "PASS",
@@ -309,6 +314,49 @@ def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> 
         assert result.route.target_seat == "coo"
         assert len(carrier.reconcile_calls) == 1
         assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
+def test_observer_refuses_valid_foreign_repository_pr_before_wake_carrier() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_reply(
+            SlackMessage(
+                ts="1787961600.000002",
+                author_user_id=RELAY_USER,
+                text=render_message_v2(
+                    _result(
+                        parent,
+                        applies_to={
+                            "kind": "repository",
+                            "repository": "mastermindx-market-intelligence/macro",
+                            "head_sha": "d" * 40,
+                            "pr": "mastermindx-market-intelligence/macro#999",
+                        },
+                    )
+                ),
+                thread_ts=PARENT_TS,
+            )
+        )
+        carrier = RecordingWakeCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=carrier,
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.REFUSED
+        assert result.reason == "DIALOGUE_APPLICABILITY_CARRIER_MISMATCH"
+        assert result.decision is None
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
 
     asyncio.run(scenario())
 

@@ -138,6 +138,19 @@ class DialogueTurnObserver:
             raise _HistoryIncomplete("MUTATION_RECONCILIATION_INCOMPLETE")
         return message.created_text
 
+    @staticmethod
+    def _same_applicability_carrier(
+        trusted: dict[str, object], observed: dict[str, object]
+    ) -> bool:
+        if trusted["kind"] != observed["kind"]:
+            return False
+        if trusted["kind"] == "repository":
+            return all(
+                trusted[field] == observed[field]
+                for field in ("repository", "pr")
+            )
+        return trusted["job_id"] == observed["job_id"]
+
     async def _accepted_history(
         self, context: DialogueContextV2
     ) -> tuple[dict[str, object], tuple[dict[str, object], ...]]:
@@ -215,6 +228,12 @@ class DialogueTurnObserver:
                 message = parse_message_frame_v2(raw)
             except DialogueContractError:
                 raise _HistoryRefused("THREAD_MESSAGE_INVALID") from None
+            if not self._same_applicability_carrier(
+                normalized["applies_to"], message["applies_to"]
+            ):
+                raise _HistoryRefused(
+                    "DIALOGUE_APPLICABILITY_CARRIER_MISMATCH"
+                )
             actor = message["actor_ref"]
             if transport.author_user_id != self.policy.relay_bot_user_id and not (
                 actor["kind"] == "executive_surface"
