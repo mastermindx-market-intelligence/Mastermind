@@ -112,6 +112,13 @@ Once the Chairman deliberately delivers that same capacity-selectable commission
 
 ## 6. Capacity-selectable versus exact-session-required
 
+The closed binding-mode vocabulary is explicit:
+
+```text
+RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE
+RECEIVER_BINDING_MODE: EXACT_SESSION_REQUIRED
+```
+
 ### 6.1 `CAPACITY_SELECTABLE`
 
 Use when any eligible account/session in the selected avenue can perform the work and no existing provider conversation is part of the target.
