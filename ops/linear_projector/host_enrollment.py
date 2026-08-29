@@ -1,20 +1,22 @@
-"""Fixed, production-disarmed credential boundary for the Linear projector.
+"""Fixed native credential boundary for the Mastermind Linear projector.
 
-The current slice owns fixed host coordinates, opaque parsing/secret input,
-safe directory preparation and create-once credential files. It performs no
-network access, OAuth exchange, Linear mutation or service control.
+The helper owns one projector-specific root and three manual administrator
+commands. It has no network/OAuth/Linear client, daemon, scheduler, Keychain
+abstraction, token cache, retry store or Executive OS authority.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import stat
+import sys
 import termios
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, TextIO
 
 
 ROOT = Path("/Library/Application Support/MastermindPortfolioProjector")
@@ -30,6 +32,7 @@ CONFIG_SCHEMA = "mastermind.linear_projector_host.v1"
 MAX_SECRET_BYTES = 4096
 MAX_CLIENT_ID_CHARS = 256
 MAX_PRIVATE_FILE_BYTES = 64 * 1024
+MAX_CONFIG_BYTES = 16 * 1024
 
 ERROR_CODES = frozenset(
     {
@@ -62,6 +65,9 @@ _OAUTH_SECRET_RE = re.compile(
     r"(?i)(?:client[_-]?secret|access[_-]?token|refresh[_-]?token|"
     r"oauth[_-]?(?:secret|token))[=:][^\s]{4,}"
 )
+_CONFIG_KEYS = frozenset(
+    {"schema", "app_name", "client_id", "workspace_id", "team_id", "team_key"}
+)
 
 
 class ProjectorHostError(RuntimeError):
@@ -86,11 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("prepare")
 
-    enroll = commands.add_parser("enroll")
-    enroll.add_argument("--client-id", required=True)
+    enroll_parser = commands.add_parser("enroll")
+    enroll_parser.add_argument("--client-id", required=True)
 
-    verify = commands.add_parser("verify")
-    verify.add_argument("--expected-client-id", required=True)
+    verify_parser = commands.add_parser("verify")
+    verify_parser.add_argument("--expected-client-id", required=True)
     return parser
 
 
@@ -386,6 +392,192 @@ def enroll(
     )
 
 
+def _assert_safe_file_metadata(
+    path: Path, *, uid: int, gid: int, mode: int
+) -> os.stat_result:
+    try:
+        info = Path(path).lstat()
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_PERMISSIONS_REFUSED") from None
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != int(uid)
+        or info.st_gid != int(gid)
+        or stat.S_IMODE(info.st_mode) != int(mode)
+    ):
+        raise ProjectorHostError("PROJECTOR_HOST_PERMISSIONS_REFUSED")
+    return info
+
+
+def _closed_config_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> object:
+    raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+
+
+def _read_config(path: Path, *, uid: int, gid: int) -> dict[str, object]:
+    before = _assert_safe_file_metadata(path, uid=uid, gid=gid, mode=0o640)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED") from None
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or opened.st_uid != int(uid)
+            or opened.st_gid != int(gid)
+            or stat.S_IMODE(opened.st_mode) != 0o640
+        ):
+            raise ProjectorHostError("PROJECTOR_HOST_PERMISSIONS_REFUSED")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(4096, MAX_CONFIG_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > MAX_CONFIG_BYTES:
+                raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+    finally:
+        os.close(descriptor)
+
+    raw = b"".join(chunks)
+    try:
+        text = raw.decode("ascii", errors="strict")
+        document = json.loads(
+            text,
+            object_pairs_hook=_closed_config_object,
+            parse_constant=_reject_json_constant,
+        )
+    except ProjectorHostError:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED") from None
+    if not isinstance(document, dict) or set(document) != _CONFIG_KEYS:
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+    client_id = document.get("client_id")
+    try:
+        expected = build_config_document(client_id=client_id)  # type: ignore[arg-type]
+    except ProjectorHostError:
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED") from None
+    if document != expected:
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+    return document
+
+
+def verify_boundary(
+    *,
+    expected_client_id: str,
+    root: Path = ROOT,
+    uid: int = 0,
+    gid: int = 0,
+) -> str:
+    """Verify config plus secret metadata without reading secret contents."""
+
+    root = Path(root)
+    if not root.is_absolute():
+        raise ProjectorHostError("PROJECTOR_HOST_CONFIG_REFUSED")
+    config_dir = root / "config"
+    _assert_safe_directory(root, uid=uid, gid=gid, mode=0o750)
+    _assert_safe_directory(config_dir, uid=uid, gid=gid, mode=0o750)
+    document = _read_config(config_dir / "projector.json", uid=uid, gid=gid)
+    _assert_safe_file_metadata(
+        config_dir / "oauth-client-secret",
+        uid=uid,
+        gid=gid,
+        mode=0o600,
+    )
+
+    expected = _validate_client_id(expected_client_id)
+    if document["client_id"] != expected:
+        raise ProjectorHostError("PROJECTOR_HOST_CLIENT_ID_MISMATCH")
+    return hashlib.sha256(expected.encode("ascii")).hexdigest()
+
+
+def main(
+    *,
+    argv: Sequence[str] | None = None,
+    environ: Mapping[str, str] | None = None,
+    stdin: BinaryIO | None = None,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
+    """Run one fixed manual administrator command with opaque receipts."""
+
+    args = list(sys.argv[1:] if argv is None else argv)
+    environment = os.environ if environ is None else environ
+    out = sys.stdout if stdout is None else stdout
+    err = sys.stderr if stderr is None else stderr
+    input_stream = (
+        stdin
+        if stdin is not None
+        else getattr(sys.stdin, "buffer", sys.stdin)  # type: ignore[assignment]
+    )
+
+    try:
+        assert_secret_surfaces_clean(argv=args, environ=environment)
+        parsed = build_parser().parse_args(args)
+        if os.geteuid() != 0:
+            raise ProjectorHostError("PROJECTOR_HOST_PERMISSIONS_REFUSED")
+
+        if parsed.command == "prepare":
+            prepare_host(root=ROOT, uid=0, gid=0)
+            print("LINEAR_PROJECTOR_HOST_PREPARED", file=out)
+            return 0
+        if parsed.command == "enroll":
+            secret = read_secret_from_stdin(input_stream)
+            enroll(
+                client_id=parsed.client_id,
+                secret=secret,
+                root=ROOT,
+                uid=0,
+                gid=0,
+            )
+            print("LINEAR_PROJECTOR_CREDENTIAL_ENROLLED", file=out)
+            return 0
+        if parsed.command == "verify":
+            digest = verify_boundary(
+                expected_client_id=parsed.expected_client_id,
+                root=ROOT,
+                uid=0,
+                gid=0,
+            )
+            print(
+                "LINEAR_PROJECTOR_CREDENTIAL_BOUNDARY_VERIFIED "
+                f"client_id_sha256={digest}",
+                file=out,
+            )
+            return 0
+        raise ProjectorHostError("PROJECTOR_HOST_ARGUMENTS_REFUSED")
+    except ProjectorHostError as exc:
+        print(f"REFUSED: {exc.code}", file=err)
+        return 2
+    except Exception:
+        print("REFUSED: PROJECTOR_HOST_INTERNAL", file=err)
+        return 2
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised through main tests
+    raise SystemExit(main())
+
+
 __all__ = [
     "APP_NAME",
     "CONFIG_DIR",
@@ -405,7 +597,9 @@ __all__ = [
     "build_config_document",
     "build_parser",
     "enroll",
+    "main",
     "prepare_host",
     "read_secret_from_stdin",
+    "verify_boundary",
     "write_new_private_file",
 ]
