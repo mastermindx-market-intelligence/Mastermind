@@ -327,22 +327,38 @@ fi
 
 [ "$CALLER_UID" -ne 0 ] || finish 64 "INVALID_INVOCATION"
 
-if [ "$#" -ne 6 ] \
-  || ! valid_commit "$1" \
-  || ! valid_local_name "$2" \
-  || ! valid_absolute_path "$3" \
-  || ! valid_digest "$4" \
-  || ! valid_absolute_path "$5" \
-  || ! valid_digest "$6"; then
+if [ "$#" -eq 6 ] \
+  && valid_commit "$1" \
+  && valid_local_name "$2" \
+  && valid_absolute_path "$3" \
+  && valid_digest "$4" \
+  && valid_absolute_path "$5" \
+  && valid_digest "$6"; then
+  CARRIER_COMMIT_SHA="$1"
+  REPAIR_MERGE_SHA="$1"
+  OPERATOR_USER="$2"
+  MACRO_TRANSPORT="$3"
+  MACRO_TRANSPORT_SHA256="$4"
+  REPAIR_BUNDLE="$5"
+  REPAIR_BUNDLE_SHA256="$6"
+elif [ "$#" -eq 7 ] \
+  && valid_commit "$1" \
+  && valid_commit "$2" \
+  && valid_local_name "$3" \
+  && valid_absolute_path "$4" \
+  && valid_digest "$5" \
+  && valid_absolute_path "$6" \
+  && valid_digest "$7"; then
+  CARRIER_COMMIT_SHA="$1"
+  REPAIR_MERGE_SHA="$2"
+  OPERATOR_USER="$3"
+  MACRO_TRANSPORT="$4"
+  MACRO_TRANSPORT_SHA256="$5"
+  REPAIR_BUNDLE="$6"
+  REPAIR_BUNDLE_SHA256="$7"
+else
   finish 64 "INVALID_INVOCATION"
 fi
-
-REPAIR_MERGE_SHA="$1"
-OPERATOR_USER="$2"
-MACRO_TRANSPORT="$3"
-MACRO_TRANSPORT_SHA256="$4"
-REPAIR_BUNDLE="$5"
-REPAIR_BUNDLE_SHA256="$6"
 [ "$OPERATOR_USER" = "$CALLER_USER" ] || finish 64 "INVALID_INVOCATION"
 
 # The operator bundle is inert input. Refuse an initially observed symlink
@@ -418,9 +434,16 @@ safe_root_git -C "$ROOT_REPOSITORY" bundle verify "$ROOT_BUNDLE" >/dev/null \
   || finish 65 "$REFUSED_OUTPUT"
 safe_root_git -C "$ROOT_REPOSITORY" bundle unbundle "$ROOT_BUNDLE" >/dev/null \
   || finish 65 "$REFUSED_OUTPUT"
-AUTHENTICATED_COMMIT="$(safe_root_git -C "$ROOT_REPOSITORY" rev-parse --verify \
+AUTHENTICATED_CARRIER_COMMIT="$(safe_root_git -C "$ROOT_REPOSITORY" rev-parse --verify \
+  "$CARRIER_COMMIT_SHA^{commit}")" || finish 65 "$REFUSED_OUTPUT"
+[ "$AUTHENTICATED_CARRIER_COMMIT" = "$CARRIER_COMMIT_SHA" ] \
+  || finish 65 "$REFUSED_OUTPUT"
+AUTHENTICATED_REPAIR_COMMIT="$(safe_root_git -C "$ROOT_REPOSITORY" rev-parse --verify \
   "$REPAIR_MERGE_SHA^{commit}")" || finish 65 "$REFUSED_OUTPUT"
-[ "$AUTHENTICATED_COMMIT" = "$REPAIR_MERGE_SHA" ] \
+[ "$AUTHENTICATED_REPAIR_COMMIT" = "$REPAIR_MERGE_SHA" ] \
+  || finish 65 "$REFUSED_OUTPUT"
+safe_root_git -C "$ROOT_REPOSITORY" merge-base --is-ancestor \
+  "$REPAIR_MERGE_SHA" "$CARRIER_COMMIT_SHA" \
   || finish 65 "$REFUSED_OUTPUT"
 [ "$(safe_root_git -C "$ROOT_REPOSITORY" rev-parse --show-object-format)" = "sha1" ] \
   || finish 65 "$REFUSED_OUTPUT"
@@ -447,9 +470,12 @@ for MATERIAL_PATH in "${MATERIAL_PATHS[@]}"; do
       HOST_MODE=0400
       ;;
   esac
-  TREE_ROW="$(safe_root_git -C "$ROOT_REPOSITORY" ls-tree \
+  REPAIR_TREE_ROW="$(safe_root_git -C "$ROOT_REPOSITORY" ls-tree \
     "$REPAIR_MERGE_SHA" -- "$MATERIAL_PATH")" || finish 65 "$REFUSED_OUTPUT"
-  if [[ ! "$TREE_ROW" =~ ^$GIT_MODE\ blob\ ([0-9a-f]{40})$'\t'"$MATERIAL_PATH"$ ]]; then
+  CARRIER_TREE_ROW="$(safe_root_git -C "$ROOT_REPOSITORY" ls-tree \
+    "$CARRIER_COMMIT_SHA" -- "$MATERIAL_PATH")" || finish 65 "$REFUSED_OUTPUT"
+  [ "$CARRIER_TREE_ROW" = "$REPAIR_TREE_ROW" ] || finish 65 "$REFUSED_OUTPUT"
+  if [[ ! "$CARRIER_TREE_ROW" =~ ^$GIT_MODE\ blob\ ([0-9a-f]{40})$'\t'"$MATERIAL_PATH"$ ]]; then
     finish 65 "$REFUSED_OUTPUT"
   fi
   GIT_BLOB="${BASH_REMATCH[1]}"
@@ -495,7 +521,7 @@ run_root /bin/chmod 0400 "$ROOT_CARRIER/.repair-carrier-commit" \
 # authenticated commit immediately before the first Python or shell launch.
 for MATERIAL_PATH in "${MATERIAL_PATHS[@]}"; do
   TREE_ROW="$(safe_root_git -C "$ROOT_REPOSITORY" ls-tree \
-    "$REPAIR_MERGE_SHA" -- "$MATERIAL_PATH")" || finish 65 "$REFUSED_OUTPUT"
+    "$CARRIER_COMMIT_SHA" -- "$MATERIAL_PATH")" || finish 65 "$REFUSED_OUTPUT"
   if [[ ! "$TREE_ROW" =~ ^[0-9]{6}\ blob\ ([0-9a-f]{40})$'\t'"$MATERIAL_PATH"$ ]]; then
     finish 65 "$REFUSED_OUTPUT"
   fi

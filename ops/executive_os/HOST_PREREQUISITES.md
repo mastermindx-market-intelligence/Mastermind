@@ -52,14 +52,17 @@ intent around a different observed state.
 
 Complete all Git review, protected merge verification, and any network acquisition before this
 block. The local Macro repository must already contain the exact accepted commit and its complete
-reachable object graph. The local Mastermind repository must already contain the exact protected
-repair merge. This block performs no provider, service, socket, worker, P0, or root action. It
-creates a digest-bound Git bundle as inert data; no inode created here is later executed as root.
-The `git bundle create` step names the already verified protected ref whose tip is the exact merge.
+reachable object graph. The local Mastermind repository must already contain both the immutable
+accepted repair merge and the exact current protected descendant used as the carrier. This block
+performs no provider, service, socket, worker, P0, or root action. It creates a digest-bound Git
+bundle as inert data; no inode created here is later executed as root. The `git bundle create` step
+names the already verified protected ref whose tip is the exact current carrier.
 
-Set the two repository paths and replace only the repair-merge placeholder with the observed
-40-lower-hex protected merge. Do not substitute a PR head, invent a future merge SHA, or precompute
-a future generation digest.
+Set the two repository paths and replace the carrier placeholder with the observed current
+40-lower-hex protected `origin/master` commit and the repair placeholder with the immutable accepted
+40-lower-hex repair merge. The repair must be an ancestor of the carrier and all five authenticated
+H0 path modes and blob OIDs must remain identical. Do not substitute a PR head, invent a future
+merge SHA, or precompute a future generation digest.
 
 ```bash
 set -euo pipefail
@@ -68,8 +71,10 @@ MACRO_REPOSITORY=/absolute/path/to/macro
 MASTERMIND_REPOSITORY=/absolute/path/to/Mastermind
 OPERATOR_USER="$(/usr/bin/id -un)"
 MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b
+CARRIER_COMMIT_SHA='<40-lower-hex-current-protected-carrier-sha>'
 REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'
 test "$OPERATOR_USER" != root
+[[ "$CARRIER_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$REPAIR_MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
 
 safe_git() {
@@ -85,8 +90,26 @@ safe_git() {
       -c core.attributesFile=/dev/null -c diff.external=/usr/bin/false "$@"
 }
 safe_git -C "$MACRO_REPOSITORY" cat-file -e "$MACRO_COMMIT^{commit}"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse "$CARRIER_COMMIT_SHA^{commit}")" = "$CARRIER_COMMIT_SHA"
 test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse "$REPAIR_MERGE_SHA^{commit}")" = "$REPAIR_MERGE_SHA"
-test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse refs/remotes/origin/master)" = "$REPAIR_MERGE_SHA"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse refs/remotes/origin/master)" = "$CARRIER_COMMIT_SHA"
+safe_git -C "$MASTERMIND_REPOSITORY" merge-base --is-ancestor \
+  "$REPAIR_MERGE_SHA" "$CARRIER_COMMIT_SHA"
+AUTHENTICATED_H0_PATHS=(
+  ops/executive_os/repair-capacity-source-closure.sh
+  ops/executive_os/capacity_host_artifacts.py
+  ops/executive_os/capacity_source_contract.py
+  ops/executive_os/provider_worker_slots.py
+  ops/executive_os/provider_identity_policy.py
+)
+for AUTHENTICATED_H0_PATH in "${AUTHENTICATED_H0_PATHS[@]}"; do
+  REPAIR_TREE_ROW="$(safe_git -C "$MASTERMIND_REPOSITORY" ls-tree \
+    "$REPAIR_MERGE_SHA" -- "$AUTHENTICATED_H0_PATH")"
+  CARRIER_TREE_ROW="$(safe_git -C "$MASTERMIND_REPOSITORY" ls-tree \
+    "$CARRIER_COMMIT_SHA" -- "$AUTHENTICATED_H0_PATH")"
+  test -n "$REPAIR_TREE_ROW"
+  test "$CARRIER_TREE_ROW" = "$REPAIR_TREE_ROW"
+done
 safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --quiet --exit-code
 safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --cached --quiet --exit-code
 
@@ -95,10 +118,10 @@ REPAIR_CHECKOUT="$REPAIR_PARENT/mastermind"
 safe_git clone --no-local --no-hardlinks --no-checkout \
   "$MASTERMIND_REPOSITORY" "$REPAIR_CHECKOUT"
 safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
-  checkout --detach "$REPAIR_MERGE_SHA"
+  checkout --detach "$CARRIER_COMMIT_SHA"
 test -d "$REPAIR_CHECKOUT/.git"
 test ! -f "$REPAIR_CHECKOUT/.git"
-test "$(safe_git -C "$REPAIR_CHECKOUT" rev-parse HEAD)" = "$REPAIR_MERGE_SHA"
+test "$(safe_git -C "$REPAIR_CHECKOUT" rev-parse HEAD)" = "$CARRIER_COMMIT_SHA"
 test -z "$(safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
   status --porcelain=v1 --untracked-files=all)"
 test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type l -print -quit)"
@@ -109,24 +132,28 @@ safe_git -C "$MASTERMIND_REPOSITORY" bundle create \
   "$REPAIR_CARRIER" refs/remotes/origin/master
 /bin/chmod 0400 "$REPAIR_CARRIER"
 test "$(safe_git bundle list-heads "$REPAIR_CARRIER")" = \
-  "$REPAIR_MERGE_SHA refs/remotes/origin/master"
+  "$CARRIER_COMMIT_SHA refs/remotes/origin/master"
 REPAIR_CARRIER_SHA256="$(/usr/bin/shasum -a 256 "$REPAIR_CARRIER" | /usr/bin/awk '{print $1}')"
 [[ "$REPAIR_CARRIER_SHA256" =~ ^[0-9a-f]{64}$ ]]
 /usr/bin/printf 'repair_carrier_sha256=%s\n' "$REPAIR_CARRIER_SHA256"
 
-TRANSPORT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-v2-transport.XXXXXX)"
-MACRO_TRANSPORT="$TRANSPORT_PARENT/macro-complete-v2.zip"
+TRANSPORT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-v3-transport.XXXXXX)"
+MACRO_TRANSPORT="$TRANSPORT_PARENT/macro-complete-v3.zip"
 /usr/bin/python3 -I -S -B \
   "$REPAIR_CHECKOUT/ops/executive_os/capacity_host_artifacts.py" \
-  build-source-transport-v2 \
+  build-source-transport-v3 \
   --source-repository "$MACRO_REPOSITORY" \
   --output "$MACRO_TRANSPORT" \
   --commit "$MACRO_COMMIT" \
   >"$TRANSPORT_PARENT/manifest-build-output.json"
 /bin/chmod 0400 "$MACRO_TRANSPORT"
 test "$(/usr/bin/stat -f %l "$MACRO_TRANSPORT")" -eq 1
+MACRO_TRANSPORT_BYTES="$(/usr/bin/stat -f %z "$MACRO_TRANSPORT")"
+test "$MACRO_TRANSPORT_BYTES" -gt 0
+test "$MACRO_TRANSPORT_BYTES" -le 34359738368
 MACRO_TRANSPORT_SHA256="$(/usr/bin/shasum -a 256 "$MACRO_TRANSPORT" | /usr/bin/awk '{print $1}')"
 [[ "$MACRO_TRANSPORT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+/usr/bin/printf 'macro_transport_bytes=%s\n' "$MACRO_TRANSPORT_BYTES"
 /usr/bin/printf 'macro_transport_sha256=%s\n' "$MACRO_TRANSPORT_SHA256"
 ```
 
@@ -136,12 +163,16 @@ authenticated commit but is written here as an ordinary single-link file contain
 target bytes. The clean-status check uses the same interpretation. The whole-checkout symlink and
 hardlink prohibitions remain mandatory, and no privileged/root carrier verification is weakened.
 
-The builder emits `mastermind.capacity_source_transport/v2`. It requires the exact two-member ZIP,
-complete reachable object inventory, frozen eleven-path material projection, and ordinary strict
+The builder emits `mastermind.capacity_source_transport/v3`. The accepted complete Macro closure is
+larger than the ZIP32 member boundary, so v3 uses one fully reconstructed canonical ZIP64 layout
+with the same exact two members and a hard 32 GiB enclosing-carrier limit. The earlier v2 schema
+remains strict ZIP32 and is never reinterpreted as v3. V3 requires the complete reachable object
+inventory, frozen eleven-path material projection, bounded streaming reads, and ordinary strict
 closure; missing objects, promisor state, alternates, shallow state, replacement refs, grafts,
 remotes, filters, or unsafe metadata refuse. Record the emitted manifest, its object count and
-semantic inventory digest, the payload digest, and the independently calculated enclosing ZIP
-digest. These are per-carrier proof; they are not a future generation identity.
+semantic inventory digest, the payload digest, the enclosing ZIP byte count, and the independently
+calculated enclosing ZIP digest. These are per-carrier proof; they are not a future generation
+identity.
 
 ### One offline administrator ceremony
 
@@ -180,7 +211,8 @@ it and does not delete it.
 /usr/bin/env -i \
   HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
   /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \
-  "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \
+  "$CARRIER_COMMIT_SHA" "$REPAIR_MERGE_SHA" "$OPERATOR_USER" \
+  "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \
   "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"
 ```
 
