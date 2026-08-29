@@ -3,9 +3,9 @@
 The ceremony qualifies one stdin-only Slack bot token, installs the exact
 release-bound token/config/launchd files, and stops.  It never provisions an
 app or principal and never loads, enables, or starts the service.  The Relay
-runs as the existing ``_mastermind_exec`` owner because the accepted service
-uses an owner-private AF_UNIX directory and socket; Slack prose conveys no
-host authority.
+runs only as the host-prepared dedicated ``_mastermind_agent_relay`` owner;
+``_mastermind_exec`` remains the single filesystem-reachable, peer-credential-
+checked client. Slack prose conveys no host authority.
 """
 from __future__ import annotations
 
@@ -38,39 +38,33 @@ from integrations.slack_agent_dialogue.slack_web_api import (  # noqa: E402
 from ops.executive_os import c1_relay_enrollment as c1_enrollment  # noqa: E402
 
 
-RELAY_USER = "_mastermind_exec"
-RELAY_GROUP = "_mastermind_exec"
-RELAY_UID = 450
-RELAY_GID = 450
+RELAY_USER = "_mastermind_agent_relay"
+RELAY_GROUP = "_mastermind_agent_relay"
+RELAY_UID = 457
+RELAY_GID = 457
+EXEC_USER = "_mastermind_exec"
+EXEC_UID = 450
+EXEC_GID = 450
 PLIST_UID = 0
 PLIST_GID = 0
 RELAY_LABEL = "com.mastermind.executive.agent-relay"
-RELAY_HOME = Path("/var/db/mastermind-executive/control/home")
+RELAY_HOME = Path("/var/db/mastermind-agent-relay/home")
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 SYSTEM_RELEASE_ROOT = SYSTEM_ROOT / "releases"
 TOKEN_PATH = SYSTEM_ROOT / "config" / "agent-relay.token"
 CONFIG_PATH = SYSTEM_ROOT / "config" / "agent-relay.json"
 PLIST_PATH = Path("/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist")
-SOCKET_PATH = Path("/var/run/mastermind-executive/agent-relay.sock")
+SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
 PYTHON_BINARY = Path(
     "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 )
 SLACK_WORKSPACE_ID = "T0BRD2AQXQV"
-SLACK_CHANNEL_ID = "C0BRUL9F2V7"
+SLACK_CHANNEL_ID = "C0BSBM78V1N"
 REQUIRED_SCOPES = ("channels:history", "chat:write")
-ALLOWED_PEER_UIDS = (450,)
+ALLOWED_PEER_UIDS = (EXEC_UID,)
 ALLOWED_SOL_USER_IDS = ("U0BRETDUAS2", "U0BSB73JWNL")
 ALLOWED_PARENT_USER_IDS = ("U0BRETDUAS2",)
-_REVIEWED_CONTROL_GROUPS = frozenset(
-    {
-        "_mastermind_exec",
-        "_mastermind_worker",
-        "everyone",
-        "localaccounts",
-        "_lpoperator",
-        "com.apple.access_disabled",
-    }
-)
+_RELAY_GROUP_MEMBERS = (EXEC_USER,)
 _RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
 _PLACEHOLDER_RE = re.compile(r"__[A-Z0-9_]+__")
 
@@ -408,26 +402,54 @@ def _assert_disarmed() -> None:
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
 
 
+def _principal_can_traverse(path: Path, *, uid: int, gids: set[int]) -> bool:
+    """Return whether one exact principal may traverse a real directory."""
+
+    try:
+        info = Path(path).lstat()
+    except OSError:
+        return False
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        return False
+    if info.st_uid == uid:
+        required = stat.S_IXUSR
+    elif info.st_gid in gids:
+        required = stat.S_IXGRP
+    else:
+        required = stat.S_IXOTH
+    return bool(info.st_mode & required)
+
+
 def _assert_host_prepared() -> str:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
     try:
         release_sha = c1_enrollment._release_identity()  # noqa: SLF001
         account = pwd.getpwnam(RELAY_USER)
+        exec_account = pwd.getpwnam(EXEC_USER)
         group = grp.getgrnam(RELAY_GROUP)
-        gids = os.getgrouplist(RELAY_USER, RELAY_GID)
-        group_names = {grp.getgrgid(gid).gr_name for gid in gids}
+        relay_gids = set(os.getgrouplist(RELAY_USER, RELAY_GID))
+        exec_gids = set(os.getgrouplist(EXEC_USER, EXEC_GID))
+        relay_group_names = {grp.getgrgid(gid).gr_name for gid in relay_gids}
     except Exception:
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
     if (
         account.pw_uid != RELAY_UID
         or account.pw_gid != RELAY_GID
+        or exec_account.pw_uid != EXEC_UID
+        or exec_account.pw_gid != EXEC_GID
         or group.gr_gid != RELAY_GID
-        or group.gr_mem
+        or tuple(group.gr_mem) != _RELAY_GROUP_MEMBERS
         or account.pw_dir != os.fspath(RELAY_HOME)
         or account.pw_shell != "/usr/bin/false"
-        or RELAY_GROUP not in group_names
-        or not group_names.issubset(_REVIEWED_CONTROL_GROUPS)
+        or RELAY_GROUP not in relay_group_names
+        or RELAY_GID not in exec_gids
+        or TOKEN_PATH.parent != CONFIG_PATH.parent
+        or not _principal_can_traverse(
+            CONFIG_PATH.parent,
+            uid=RELAY_UID,
+            gids=relay_gids,
+        )
     ):
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
     _assert_disarmed()

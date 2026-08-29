@@ -20,7 +20,7 @@ from integrations.slack_agent_dialogue.slack_web_api import (
 
 
 WORKSPACE = "T0BRD2AQXQV"
-CHANNEL = "C0BRUL9F2V7"
+CHANNEL = "C0BSBM78V1N"
 BOT = "U0BST4WG996"
 TOKEN = "".join(("xo", "xb-", "123456789012-", "abcdefghijklmnopqrstuvwxyz"))
 SCOPES = ("channels:history", "chat:write")
@@ -66,7 +66,7 @@ class _HistoryTransport:
             status_code=200,
             final_url=(
                 SLACK_API_ROOT
-                + "conversations.history?channel=C0BRUL9F2V7&limit=1"
+                + "conversations.history?channel=C0BSBM78V1N&limit=1"
             ),
             headers={"content-type": "application/json"},
             body=b'{"ok":true,"messages":[],"has_more":false,'
@@ -127,8 +127,8 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         "slack_scopes": list(SCOPES),
         "slack_token_file": os.fspath(enrollment.TOKEN_PATH),
         "relay_socket_path": os.fspath(enrollment.SOCKET_PATH),
-        "relay_user": "_mastermind_exec",
-        "relay_uid": 450,
+        "relay_user": "_mastermind_agent_relay",
+        "relay_uid": 457,
         "allowed_peer_uids": [450],
         "allowed_sol_user_ids": ["U0BRETDUAS2", "U0BSB73JWNL"],
         "allowed_parent_user_ids": ["U0BRETDUAS2"],
@@ -138,8 +138,8 @@ def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
         enrollment.render_plist(bot_user_id=BOT, release_sha=release_sha)
     )
     assert plist["Label"] == "com.mastermind.executive.agent-relay"
-    assert plist["UserName"] == "_mastermind_exec"
-    assert plist["GroupName"] == "_mastermind_exec"
+    assert plist["UserName"] == "_mastermind_agent_relay"
+    assert plist["GroupName"] == "_mastermind_agent_relay"
     assert plist["WorkingDirectory"].endswith(release_sha)
     assert plist["ProgramArguments"] == [
         "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
@@ -365,40 +365,138 @@ def test_verify_is_read_only_and_requalifies_release_identity(monkeypatch, tmp_p
     assert receipt["release_sha"] == release_sha
 
 
-def test_host_gate_requires_root_macos_exact_principal_and_disarmed_launchd(monkeypatch):
+def test_host_gate_requires_distinct_relay_owner_exact_exec_client_and_disarmed_launchd(
+    monkeypatch, tmp_path: Path
+):
     enrollment = _module()
     monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
     monkeypatch.setattr(enrollment.sys, "platform", "darwin")
     monkeypatch.setattr(enrollment.c1_enrollment, "_release_identity", lambda: "c" * 40)
-    monkeypatch.setattr(
-        enrollment.pwd,
-        "getpwnam",
-        lambda _name: SimpleNamespace(
+
+    config_parent = tmp_path / "config"
+    config_parent.mkdir(mode=0o755)
+    monkeypatch.setattr(enrollment, "CONFIG_PATH", config_parent / "agent-relay.json")
+    monkeypatch.setattr(enrollment, "TOKEN_PATH", config_parent / "agent-relay.token")
+
+    accounts = {
+        "_mastermind_agent_relay": SimpleNamespace(
+            pw_uid=457,
+            pw_gid=457,
+            pw_dir="/var/db/mastermind-agent-relay/home",
+            pw_shell="/usr/bin/false",
+        ),
+        "_mastermind_exec": SimpleNamespace(
             pw_uid=450,
             pw_gid=450,
             pw_dir="/var/db/mastermind-executive/control/home",
             pw_shell="/usr/bin/false",
         ),
+    }
+    monkeypatch.setattr(
+        enrollment.pwd,
+        "getpwnam",
+        accounts.__getitem__,
     )
     monkeypatch.setattr(
         enrollment.grp,
         "getgrnam",
-        lambda _name: SimpleNamespace(gr_gid=450, gr_mem=[]),
+        lambda _name: SimpleNamespace(gr_gid=457, gr_mem=["_mastermind_exec"]),
     )
-    monkeypatch.setattr(enrollment.os, "getgrouplist", lambda _name, _gid: [450])
+    groups = {
+        "_mastermind_agent_relay": [457],
+        "_mastermind_exec": [450, 457],
+    }
+    monkeypatch.setattr(
+        enrollment.os, "getgrouplist", lambda name, _gid: groups[name]
+    )
     monkeypatch.setattr(
         enrollment.grp,
         "getgrgid",
-        lambda _gid: SimpleNamespace(gr_name="_mastermind_exec"),
+        lambda gid: SimpleNamespace(
+            gr_name={450: "_mastermind_exec", 457: "_mastermind_agent_relay"}[gid]
+        ),
     )
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
 
     assert enrollment._assert_host_prepared() == "c" * 40  # noqa: SLF001
 
-    monkeypatch.setattr(enrollment.pwd, "getpwnam", lambda _name: (_ for _ in ()).throw(KeyError()))
+    accounts["_mastermind_agent_relay"] = accounts["_mastermind_exec"]
     with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
         enrollment._assert_host_prepared()  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    "members,exec_gids",
+    [
+        ([], [450]),
+        (["_mastermind_exec", "foreign"], [450, 457]),
+        (["_mastermind_exec"], [450]),
+    ],
+)
+def test_host_gate_refuses_missing_or_nonexact_shared_group(
+    monkeypatch, tmp_path: Path, members: list[str], exec_gids: list[int]
+):
+    enrollment = _module()
+    monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(enrollment.sys, "platform", "darwin")
+    monkeypatch.setattr(enrollment.c1_enrollment, "_release_identity", lambda: "c" * 40)
+    config_parent = tmp_path / "config"
+    config_parent.mkdir(mode=0o755)
+    monkeypatch.setattr(enrollment, "CONFIG_PATH", config_parent / "agent-relay.json")
+    monkeypatch.setattr(enrollment, "TOKEN_PATH", config_parent / "agent-relay.token")
+    accounts = {
+        "_mastermind_agent_relay": SimpleNamespace(
+            pw_uid=457,
+            pw_gid=457,
+            pw_dir="/var/db/mastermind-agent-relay/home",
+            pw_shell="/usr/bin/false",
+        ),
+        "_mastermind_exec": SimpleNamespace(
+            pw_uid=450,
+            pw_gid=450,
+            pw_dir="/var/db/mastermind-executive/control/home",
+            pw_shell="/usr/bin/false",
+        ),
+    }
+    monkeypatch.setattr(enrollment.pwd, "getpwnam", accounts.__getitem__)
+    monkeypatch.setattr(
+        enrollment.grp,
+        "getgrnam",
+        lambda _name: SimpleNamespace(gr_gid=457, gr_mem=members),
+    )
+    monkeypatch.setattr(
+        enrollment.os,
+        "getgrouplist",
+        lambda name, _gid: [457] if name == "_mastermind_agent_relay" else exec_gids,
+    )
+    monkeypatch.setattr(
+        enrollment.grp,
+        "getgrgid",
+        lambda gid: SimpleNamespace(
+            gr_name={450: "_mastermind_exec", 457: "_mastermind_agent_relay"}[gid]
+        ),
+    )
+    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
+    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
+        enrollment._assert_host_prepared()  # noqa: SLF001
+
+
+def test_host_gate_refuses_credential_parent_not_traversable_by_relay(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    config_parent = tmp_path / "config"
+    config_parent.mkdir(mode=0o700)
+    assert not enrollment._principal_can_traverse(  # noqa: SLF001
+        config_parent, uid=457, gids={457}
+    )
+    config_parent.chmod(0o755)
+    assert enrollment._principal_can_traverse(  # noqa: SLF001
+        config_parent, uid=457, gids={457}
+    )
 
 
 def test_source_has_no_principal_creation_service_arm_or_secret_surface():
@@ -416,4 +514,4 @@ def test_source_has_no_principal_creation_service_arm_or_secret_surface():
         assert forbidden not in source
     assert "read_token_from_stdin" in source
     assert "_mastermind_exec" in source
-    assert "_mastermind_agent_relay" not in source
+    assert "_mastermind_agent_relay" in source
