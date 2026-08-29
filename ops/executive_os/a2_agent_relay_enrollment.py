@@ -108,6 +108,21 @@ class _CreatedFile:
     inode: int
 
 
+@dataclass(frozen=True)
+class _BoundDirectory:
+    descriptor: int
+    device: int
+    inode: int
+    relay_gids: frozenset[int]
+
+
+@dataclass(frozen=True)
+class _BoundCreatedFile:
+    name: str
+    device: int
+    inode: int
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _OpaqueParser(description="Enroll the private A2 Agent Relay")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -390,6 +405,53 @@ def _rollback_created(created: Sequence[_CreatedFile]) -> None:
         raise A2EnrollmentError("A2_ENROLLMENT_ROLLBACK_REFUSED")
 
 
+def _rollback_bound_created(
+    binding: _BoundDirectory,
+    created: Sequence[_BoundCreatedFile],
+) -> None:
+    failed = False
+    for identity in reversed(tuple(created)):
+        try:
+            info = os.stat(
+                identity.name,
+                dir_fd=binding.descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_dev != identity.device
+                or info.st_ino != identity.inode
+            ):
+                failed = True
+                continue
+            os.unlink(identity.name, dir_fd=binding.descriptor)
+            os.fsync(binding.descriptor)
+        except OSError:
+            failed = True
+    if failed:
+        raise A2EnrollmentError("A2_ENROLLMENT_ROLLBACK_REFUSED")
+
+
+def _rollback_enrollment_files(
+    binding: _BoundDirectory,
+    *,
+    bound_created: Sequence[_BoundCreatedFile],
+    absolute_created: Sequence[_CreatedFile],
+) -> None:
+    failed = False
+    try:
+        _rollback_created(absolute_created)
+    except A2EnrollmentError:
+        failed = True
+    try:
+        _rollback_bound_created(binding, bound_created)
+    except A2EnrollmentError:
+        failed = True
+    if failed:
+        raise A2EnrollmentError("A2_ENROLLMENT_ROLLBACK_REFUSED")
+
+
 def _assert_disarmed() -> None:
     try:
         if c1_enrollment._launchd_loaded(  # noqa: SLF001
@@ -437,6 +499,194 @@ def _credential_directory_chain() -> tuple[Path, ...] | None:
     ):
         return None
     return (library, support, SYSTEM_ROOT, config_parent)
+
+
+def _assert_bound_config_current(binding: _BoundDirectory) -> None:
+    chain = _credential_directory_chain()
+    try:
+        current = CONFIG_PATH.parent.lstat()
+    except OSError:
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
+    if (
+        chain is None
+        or not all(
+            _principal_can_traverse(
+                path,
+                uid=RELAY_UID,
+                gids=set(binding.relay_gids),
+            )
+            for path in chain
+        )
+        or stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(current.st_mode)
+        or current.st_dev != binding.device
+        or current.st_ino != binding.inode
+    ):
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+
+
+def _open_bound_config_directory() -> _BoundDirectory:
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    descriptor = -1
+    try:
+        relay_gids = frozenset(os.getgrouplist(RELAY_USER, RELAY_GID))
+        if RELAY_GID not in relay_gids or EXEC_GID in relay_gids:
+            raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+        descriptor = os.open(CONFIG_PATH.parent, flags)
+        info = os.fstat(descriptor)
+        if not stat.S_ISDIR(info.st_mode):
+            raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+        binding = _BoundDirectory(
+            descriptor=descriptor,
+            device=info.st_dev,
+            inode=info.st_ino,
+            relay_gids=relay_gids,
+        )
+        _assert_bound_config_current(binding)
+        return binding
+    except A2EnrollmentError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except Exception:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
+
+
+def _bound_path_present(binding: _BoundDirectory, name: str) -> bool:
+    try:
+        os.stat(name, dir_fd=binding.descriptor, follow_symlinks=False)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
+
+
+def _write_new_bound_private_file(
+    binding: _BoundDirectory,
+    name: str,
+    payload: bytes,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+) -> _BoundCreatedFile:
+    if (
+        name not in {TOKEN_PATH.name, CONFIG_PATH.name}
+        or Path(name).name != name
+        or not payload
+        or len(payload) > 64 * 1024
+    ):
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= os.O_NOFOLLOW
+    descriptor = -1
+    identity: _BoundCreatedFile | None = None
+    try:
+        descriptor = os.open(
+            name,
+            flags,
+            0o600,
+            dir_fd=binding.descriptor,
+        )
+        opened = os.fstat(descriptor)
+        identity = _BoundCreatedFile(
+            name=name,
+            device=opened.st_dev,
+            inode=opened.st_ino,
+        )
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+        if opened.st_uid != int(uid) or opened.st_gid != int(gid):
+            os.fchown(descriptor, int(uid), int(gid))
+        os.fchmod(descriptor, int(mode))
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+            view = view[written:]
+        os.fsync(descriptor)
+    except FileExistsError:
+        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION") from None
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+            descriptor = -1
+        if identity is not None:
+            _rollback_bound_created(binding, (identity,))
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    try:
+        final = os.stat(
+            name,
+            dir_fd=binding.descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            identity is None
+            or not stat.S_ISREG(final.st_mode)
+            or final.st_nlink != 1
+            or final.st_dev != identity.device
+            or final.st_ino != identity.inode
+            or final.st_uid != int(uid)
+            or final.st_gid != int(gid)
+            or stat.S_IMODE(final.st_mode) != int(mode)
+        ):
+            raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
+        os.fsync(binding.descriptor)
+        return identity
+    except BaseException:
+        if identity is not None:
+            _rollback_bound_created(binding, (identity,))
+        raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+
+
+def _read_bound_exact(
+    binding: _BoundDirectory,
+    name: str,
+    *,
+    uid: int,
+    gid: int,
+    mode: int,
+) -> bytes:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= os.O_NOFOLLOW
+    descriptor = -1
+    try:
+        descriptor = os.open(name, flags, dir_fd=binding.descriptor)
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_uid != int(uid)
+            or info.st_gid != int(gid)
+            or stat.S_IMODE(info.st_mode) != int(mode)
+        ):
+            raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+        raw = os.read(descriptor, 64 * 1024 + 1)
+        if not raw or len(raw) > 64 * 1024:
+            raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+        return raw
+    except A2EnrollmentError:
+        raise
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _assert_host_prepared() -> str:
@@ -489,21 +739,50 @@ def _read_exact(path: Path, *, uid: int, gid: int, mode: int) -> bytes:
         raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
 
 
-def _existing_token() -> str:
-    raw = _read_exact(TOKEN_PATH, uid=RELAY_UID, gid=RELAY_GID, mode=0o400)
+def _existing_token(binding: _BoundDirectory) -> str:
+    raw = _read_bound_exact(
+        binding,
+        TOKEN_PATH.name,
+        uid=RELAY_UID,
+        gid=RELAY_GID,
+        mode=0o400,
+    )
     try:
         return metadata_verifier.read_token_from_stdin(io.BytesIO(raw))
     except Exception:
         raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
 
 
-def _validate_existing(*, bot_user_id: str, release_sha: str) -> None:
+def _validate_existing(
+    binding: _BoundDirectory,
+    *,
+    bot_user_id: str,
+    release_sha: str,
+    expected_token: bytes | None = None,
+) -> None:
     expected_config = _canonical_json_bytes(
         build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
     )
     expected_plist = render_plist(bot_user_id=bot_user_id, release_sha=release_sha)
     if (
-        _read_exact(CONFIG_PATH, uid=RELAY_UID, gid=RELAY_GID, mode=0o400)
+        (
+            expected_token is not None
+            and _read_bound_exact(
+                binding,
+                TOKEN_PATH.name,
+                uid=RELAY_UID,
+                gid=RELAY_GID,
+                mode=0o400,
+            )
+            != expected_token
+        )
+        or _read_bound_exact(
+            binding,
+            CONFIG_PATH.name,
+            uid=RELAY_UID,
+            gid=RELAY_GID,
+            mode=0o400,
+        )
         != expected_config
         or _read_exact(PLIST_PATH, uid=PLIST_UID, gid=PLIST_GID, mode=0o644)
         != expected_plist
@@ -513,55 +792,97 @@ def _validate_existing(*, bot_user_id: str, release_sha: str) -> None:
 
 async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
     release_sha = _assert_host_prepared()
-    targets = (TOKEN_PATH, CONFIG_PATH, PLIST_PATH)
-    if any(_path_present(path) for path in targets):
-        raise A2EnrollmentError("A2_ENROLLMENT_COLLISION")
-    token = read_token_from_stdin(stdin)
-    qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
-    payloads = (
-        (TOKEN_PATH, (token + "\n").encode("ascii"), RELAY_UID, RELAY_GID, 0o400),
-        (
-            CONFIG_PATH,
-            _canonical_json_bytes(
-                build_config_document(bot_user_id=bot_user_id, release_sha=release_sha)
-            ),
-            RELAY_UID,
-            RELAY_GID,
-            0o400,
-        ),
-        (
+    binding = _open_bound_config_directory()
+    bound_created: list[_BoundCreatedFile] = []
+    absolute_created: list[_CreatedFile] = []
+    try:
+        if (
+            _bound_path_present(binding, TOKEN_PATH.name)
+            or _bound_path_present(binding, CONFIG_PATH.name)
+            or _path_present(PLIST_PATH)
+        ):
+            raise A2EnrollmentError("A2_ENROLLMENT_COLLISION")
+        token = read_token_from_stdin(stdin)
+        qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
+        _assert_bound_config_current(binding)
+        bound_created.append(
+            _write_new_bound_private_file(
+                binding,
+                TOKEN_PATH.name,
+                (token + "\n").encode("ascii"),
+                uid=RELAY_UID,
+                gid=RELAY_GID,
+                mode=0o400,
+            )
+        )
+        bound_created.append(
+            _write_new_bound_private_file(
+                binding,
+                CONFIG_PATH.name,
+                _canonical_json_bytes(
+                    build_config_document(
+                        bot_user_id=bot_user_id,
+                        release_sha=release_sha,
+                    )
+                ),
+                uid=RELAY_UID,
+                gid=RELAY_GID,
+                mode=0o400,
+            )
+        )
+        write_new_private_file(
             PLIST_PATH,
             render_plist(bot_user_id=bot_user_id, release_sha=release_sha),
-            PLIST_UID,
-            PLIST_GID,
-            0o644,
-        ),
-    )
-    created: list[_CreatedFile] = []
-    try:
-        for path, payload, uid, gid, mode in payloads:
-            write_new_private_file(path, payload, uid=uid, gid=gid, mode=mode)
-            created.append(_file_identity(path))
-        _validate_existing(bot_user_id=bot_user_id, release_sha=release_sha)
+            uid=PLIST_UID,
+            gid=PLIST_GID,
+            mode=0o644,
+        )
+        absolute_created.append(_file_identity(PLIST_PATH))
+        _validate_existing(
+            binding,
+            bot_user_id=bot_user_id,
+            release_sha=release_sha,
+            expected_token=(token + "\n").encode("ascii"),
+        )
         _assert_disarmed()
+        _assert_bound_config_current(binding)
     except BaseException:
         try:
-            _rollback_created(created)
+            _rollback_enrollment_files(
+                binding,
+                bound_created=bound_created,
+                absolute_created=absolute_created,
+            )
         except A2EnrollmentError:
             raise
         raise
+    finally:
+        os.close(binding.descriptor)
     return {**qualification, "action": "enrolled", "release_sha": release_sha}
 
 
 async def _verify(*, bot_user_id: str) -> dict[str, object]:
     release_sha = _assert_host_prepared()
-    if not all(_path_present(path) for path in (TOKEN_PATH, CONFIG_PATH, PLIST_PATH)):
-        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
-    _validate_existing(bot_user_id=bot_user_id, release_sha=release_sha)
-    token = _existing_token()
-    qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
-    _assert_disarmed()
-    return {**qualification, "action": "verified", "release_sha": release_sha}
+    binding = _open_bound_config_directory()
+    try:
+        if (
+            not _bound_path_present(binding, TOKEN_PATH.name)
+            or not _bound_path_present(binding, CONFIG_PATH.name)
+            or not _path_present(PLIST_PATH)
+        ):
+            raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+        _validate_existing(
+            binding,
+            bot_user_id=bot_user_id,
+            release_sha=release_sha,
+        )
+        token = _existing_token(binding)
+        qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
+        _assert_disarmed()
+        _assert_bound_config_current(binding)
+        return {**qualification, "action": "verified", "release_sha": release_sha}
+    finally:
+        os.close(binding.descriptor)
 
 
 def _fixed_error(code: str) -> dict[str, object]:

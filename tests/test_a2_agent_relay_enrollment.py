@@ -215,9 +215,20 @@ def test_qualification_proves_exact_identity_scopes_and_channel_history():
 
 def _install_operation_fakes(monkeypatch, enrollment, tmp_path: Path):
     release_sha = "b" * 40
-    token_path = tmp_path / "agent-relay.token"
-    config_path = tmp_path / "agent-relay.json"
+    system_root = tmp_path / "Library/Application Support/MastermindExecutive"
+    config_parent = system_root / "config"
+    config_parent.mkdir(parents=True, mode=0o755)
+    for path in (
+        tmp_path / "Library",
+        tmp_path / "Library/Application Support",
+        system_root,
+        config_parent,
+    ):
+        path.chmod(0o755)
+    token_path = config_parent / "agent-relay.token"
+    config_path = config_parent / "agent-relay.json"
     plist_path = tmp_path / "agent-relay.plist"
+    monkeypatch.setattr(enrollment, "SYSTEM_ROOT", system_root)
     monkeypatch.setattr(enrollment, "TOKEN_PATH", token_path)
     monkeypatch.setattr(enrollment, "CONFIG_PATH", config_path)
     monkeypatch.setattr(enrollment, "PLIST_PATH", plist_path)
@@ -295,24 +306,18 @@ def test_enroll_refuses_any_preexisting_target_without_reads_or_writes(
     assert [path.exists() for path in paths].count(True) == 1
 
 
-def test_failed_third_write_rolls_back_only_files_created_by_invocation(
+def test_failed_plist_write_rolls_back_only_files_created_by_invocation(
     monkeypatch, tmp_path: Path
 ):
     enrollment = _module()
     _release_sha, paths, _qualifications = _install_operation_fakes(
         monkeypatch, enrollment, tmp_path
     )
-    real_write = enrollment.write_new_private_file
-    calls = 0
+    def fail_plist(path, payload, *, uid, gid, mode):
+        del path, payload, uid, gid, mode
+        raise enrollment.A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
 
-    def fail_third(path, payload, *, uid, gid, mode):
-        nonlocal calls
-        calls += 1
-        if calls == 3:
-            raise enrollment.A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED")
-        real_write(path, payload, uid=uid, gid=gid, mode=mode)
-
-    monkeypatch.setattr(enrollment, "write_new_private_file", fail_third)
+    monkeypatch.setattr(enrollment, "write_new_private_file", fail_plist)
     unrelated = tmp_path / "unrelated"
     unrelated.write_bytes(b"preserve")
 
@@ -330,6 +335,58 @@ def test_failed_third_write_rolls_back_only_files_created_by_invocation(
     assert unrelated.read_bytes() == b"preserve"
 
 
+def test_enroll_refuses_mutated_bound_token_during_readback(monkeypatch, tmp_path: Path):
+    enrollment = _module()
+    _release_sha, paths, _qualifications = _install_operation_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    real_write = enrollment._write_new_bound_private_file  # noqa: SLF001
+
+    def write_then_mutate(binding, name, payload, *, uid, gid, mode):
+        identity = real_write(
+            binding,
+            name,
+            payload,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+        )
+        if name == enrollment.TOKEN_PATH.name:
+            os.chmod(
+                name,
+                0o600,
+                dir_fd=binding.descriptor,
+                follow_symlinks=False,
+            )
+            descriptor = os.open(
+                name,
+                os.O_WRONLY | os.O_TRUNC,
+                dir_fd=binding.descriptor,
+            )
+            try:
+                os.write(descriptor, b"mutated-token\n")
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        return identity
+
+    monkeypatch.setattr(
+        enrollment,
+        "_write_new_bound_private_file",
+        write_then_mutate,
+    )
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_EXISTING_REFUSED"):
+        asyncio.run(
+            enrollment._enroll(  # noqa: SLF001
+                bot_user_id=BOT,
+                stdin=io.BytesIO((TOKEN + "\n").encode("ascii")),
+            )
+        )
+
+    assert not any(path.exists() for path in paths)
+
+
 def test_rollback_refuses_to_unlink_replaced_inode(monkeypatch, tmp_path: Path):
     enrollment = _module()
     target = tmp_path / "created"
@@ -341,6 +398,38 @@ def test_rollback_refuses_to_unlink_replaced_inode(monkeypatch, tmp_path: Path):
     with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_ROLLBACK_REFUSED"):
         enrollment._rollback_created([identity])  # noqa: SLF001
     assert target.read_bytes() == b"replacement"
+
+
+def test_bound_rollback_refuses_to_unlink_replaced_inode(tmp_path: Path):
+    enrollment = _module()
+    directory_descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        directory_info = os.fstat(directory_descriptor)
+        binding = enrollment._BoundDirectory(  # noqa: SLF001
+            descriptor=directory_descriptor,
+            device=directory_info.st_dev,
+            inode=directory_info.st_ino,
+            relay_gids=frozenset({os.getegid()}),
+        )
+        target = tmp_path / "agent-relay.token"
+        target.write_bytes(b"original")
+        original = target.stat()
+        identity = enrollment._BoundCreatedFile(  # noqa: SLF001
+            name=target.name,
+            device=original.st_dev,
+            inode=original.st_ino,
+        )
+        target.unlink()
+        target.write_bytes(b"replacement")
+
+        with pytest.raises(
+            enrollment.A2EnrollmentError,
+            match="A2_ENROLLMENT_ROLLBACK_REFUSED",
+        ):
+            enrollment._rollback_bound_created(binding, [identity])  # noqa: SLF001
+        assert target.read_bytes() == b"replacement"
+    finally:
+        os.close(directory_descriptor)
 
 
 def test_verify_is_read_only_and_requalifies_release_identity(monkeypatch, tmp_path: Path):
@@ -401,47 +490,19 @@ def test_host_gate_refuses_missing_or_nonexact_shared_group(
     monkeypatch, tmp_path: Path, members: list[str], exec_gids: list[int]
 ):
     enrollment = _module()
-    monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(enrollment.sys, "platform", "darwin")
-    monkeypatch.setattr(enrollment.c1_enrollment, "_release_identity", lambda: "c" * 40)
-    config_parent = tmp_path / "config"
-    config_parent.mkdir(mode=0o755)
-    monkeypatch.setattr(enrollment, "CONFIG_PATH", config_parent / "agent-relay.json")
-    monkeypatch.setattr(enrollment, "TOKEN_PATH", config_parent / "agent-relay.token")
-    accounts = {
-        "_mastermind_agent_relay": SimpleNamespace(
-            pw_uid=457,
-            pw_gid=457,
-            pw_dir="/var/db/mastermind-agent-relay/home",
-            pw_shell="/usr/bin/false",
-        ),
-        "_mastermind_exec": SimpleNamespace(
-            pw_uid=450,
-            pw_gid=450,
-            pw_dir="/var/db/mastermind-executive/control/home",
-            pw_shell="/usr/bin/false",
-        ),
-    }
-    monkeypatch.setattr(enrollment.pwd, "getpwnam", accounts.__getitem__)
-    monkeypatch.setattr(
-        enrollment.grp,
-        "getgrnam",
-        lambda _name: SimpleNamespace(gr_gid=457, gr_mem=members),
+    _install_canonical_host_gate_fakes(
+        monkeypatch,
+        enrollment,
+        tmp_path,
+        members=members,
+        exec_gids=exec_gids,
     )
-    monkeypatch.setattr(
-        enrollment.os,
-        "getgrouplist",
-        lambda name, _gid: [457] if name == "_mastermind_agent_relay" else exec_gids,
+    chain = enrollment._credential_directory_chain()  # noqa: SLF001
+    assert chain is not None
+    assert all(
+        enrollment._principal_can_traverse(path, uid=457, gids={457})  # noqa: SLF001
+        for path in chain
     )
-    monkeypatch.setattr(
-        enrollment.grp,
-        "getgrgid",
-        lambda gid: SimpleNamespace(
-            gr_name={450: "_mastermind_exec", 457: "_mastermind_agent_relay"}[gid]
-        ),
-    )
-    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
-    monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
 
     with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
         enrollment._assert_host_prepared()  # noqa: SLF001
@@ -469,15 +530,19 @@ def _install_canonical_host_gate_fakes(
     *,
     intermediate_symlink: bool = False,
     relay_gids: list[int] | None = None,
+    exec_gids: list[int] | None = None,
+    members: list[str] | None = None,
+    relay_uid: int = 457,
+    relay_gid: int = 457,
 ):
     library = tmp_path / "Library"
     library.mkdir(mode=0o755)
     support = library / "Application Support"
     if intermediate_symlink:
         real_support = tmp_path / "real-application-support"
-        system_root = real_support / "MastermindExecutive"
-        (system_root / "config").mkdir(parents=True, mode=0o755)
+        (real_support / "MastermindExecutive/config").mkdir(parents=True, mode=0o755)
         support.symlink_to(real_support, target_is_directory=True)
+        system_root = support / "MastermindExecutive"
     else:
         system_root = support / "MastermindExecutive"
         (system_root / "config").mkdir(parents=True, mode=0o755)
@@ -489,13 +554,15 @@ def _install_canonical_host_gate_fakes(
     monkeypatch.setattr(enrollment, "SYSTEM_ROOT", system_root)
     monkeypatch.setattr(enrollment, "CONFIG_PATH", system_root / "config/agent-relay.json")
     monkeypatch.setattr(enrollment, "TOKEN_PATH", system_root / "config/agent-relay.token")
+    monkeypatch.setattr(enrollment, "RELAY_UID", relay_uid)
+    monkeypatch.setattr(enrollment, "RELAY_GID", relay_gid)
     monkeypatch.setattr(enrollment.os, "geteuid", lambda: 0)
     monkeypatch.setattr(enrollment.sys, "platform", "darwin")
     monkeypatch.setattr(enrollment.c1_enrollment, "_release_identity", lambda: "d" * 40)
     accounts = {
         "_mastermind_agent_relay": SimpleNamespace(
-            pw_uid=457,
-            pw_gid=457,
+            pw_uid=relay_uid,
+            pw_gid=relay_gid,
             pw_dir="/var/db/mastermind-agent-relay/home",
             pw_shell="/usr/bin/false",
         ),
@@ -510,11 +577,14 @@ def _install_canonical_host_gate_fakes(
     monkeypatch.setattr(
         enrollment.grp,
         "getgrnam",
-        lambda _name: SimpleNamespace(gr_gid=457, gr_mem=["_mastermind_exec"]),
+        lambda _name: SimpleNamespace(
+            gr_gid=relay_gid,
+            gr_mem=["_mastermind_exec"] if members is None else members,
+        ),
     )
     groups = {
-        "_mastermind_agent_relay": [457] if relay_gids is None else relay_gids,
-        "_mastermind_exec": [450, 457],
+        "_mastermind_agent_relay": [relay_gid] if relay_gids is None else relay_gids,
+        "_mastermind_exec": [450, relay_gid] if exec_gids is None else exec_gids,
     }
     monkeypatch.setattr(
         enrollment.os, "getgrouplist", lambda name, _gid: groups[name]
@@ -523,7 +593,7 @@ def _install_canonical_host_gate_fakes(
         enrollment.grp,
         "getgrgid",
         lambda gid: SimpleNamespace(
-            gr_name={450: "_mastermind_exec", 457: "_mastermind_agent_relay"}[gid]
+            gr_name={450: "_mastermind_exec", relay_gid: "_mastermind_agent_relay"}[gid]
         ),
     )
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
@@ -539,6 +609,9 @@ def test_host_gate_refuses_intermediate_credential_symlink(monkeypatch, tmp_path
         tmp_path,
         intermediate_symlink=True,
     )
+    chain = enrollment._credential_directory_chain()  # noqa: SLF001
+    assert chain is not None
+    assert chain[1].is_symlink()
 
     with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
         asyncio.run(enrollment._enroll(bot_user_id=BOT, stdin=_NoTokenRead()))  # noqa: SLF001
@@ -579,6 +652,92 @@ def test_host_gate_refuses_relay_membership_in_exec_group(monkeypatch, tmp_path:
 
     with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
         asyncio.run(enrollment._enroll(bot_user_id=BOT, stdin=_NoTokenRead()))  # noqa: SLF001
+
+
+def test_enroll_refuses_mid_qualification_ancestor_swap_without_secret_residue(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    actual_uid = os.geteuid()
+    actual_gid = os.getegid()
+    _library, _support, system_root = _install_canonical_host_gate_fakes(
+        monkeypatch,
+        enrollment,
+        tmp_path,
+        relay_uid=actual_uid,
+        relay_gid=actual_gid,
+        relay_gids=[actual_gid],
+        exec_gids=[450, actual_gid],
+    )
+    plist_path = tmp_path / "agent-relay.plist"
+    monkeypatch.setattr(enrollment, "PLIST_PATH", plist_path)
+    monkeypatch.setattr(enrollment, "PLIST_UID", actual_uid)
+    monkeypatch.setattr(enrollment, "PLIST_GID", actual_gid)
+    original_root = tmp_path / "original-mastermind-executive"
+    redirected_root = tmp_path / "redirected-mastermind-executive"
+
+    async def swap_during_qualification(*, token, bot_user_id, **_kwargs):
+        assert token == TOKEN
+        assert bot_user_id == BOT
+        system_root.rename(original_root)
+        (redirected_root / "config").mkdir(parents=True, mode=0o755)
+        system_root.symlink_to(redirected_root, target_is_directory=True)
+        return {
+            "bot_id": "B0BST4WG996",
+            "bot_user_id": bot_user_id,
+            "channel_id": CHANNEL,
+            "scopes": list(SCOPES),
+            "workspace_id": WORKSPACE,
+        }
+
+    monkeypatch.setattr(enrollment, "qualify_token", swap_during_qualification)
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
+        asyncio.run(
+            enrollment._enroll(  # noqa: SLF001
+                bot_user_id=BOT,
+                stdin=io.BytesIO((TOKEN + "\n").encode("ascii")),
+            )
+        )
+
+    for parent in (original_root / "config", redirected_root / "config"):
+        assert not (parent / "agent-relay.token").exists()
+        assert not (parent / "agent-relay.json").exists()
+    assert not plist_path.exists()
+
+
+def test_enroll_rolls_back_bound_leaves_if_ancestor_moves_after_writes(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    _release_sha, paths, _qualifications = _install_operation_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    system_root = enrollment.SYSTEM_ROOT
+    original_root = tmp_path / "postwrite-original-mastermind-executive"
+    redirected_root = tmp_path / "postwrite-redirected-mastermind-executive"
+    real_write = enrollment.write_new_private_file
+
+    def write_plist_then_swap(path, payload, *, uid, gid, mode):
+        real_write(path, payload, uid=uid, gid=gid, mode=mode)
+        system_root.rename(original_root)
+        (redirected_root / "config").mkdir(parents=True, mode=0o755)
+        system_root.symlink_to(redirected_root, target_is_directory=True)
+
+    monkeypatch.setattr(enrollment, "write_new_private_file", write_plist_then_swap)
+
+    with pytest.raises(enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"):
+        asyncio.run(
+            enrollment._enroll(  # noqa: SLF001
+                bot_user_id=BOT,
+                stdin=io.BytesIO((TOKEN + "\n").encode("ascii")),
+            )
+        )
+
+    for parent in (original_root / "config", redirected_root / "config"):
+        assert not (parent / "agent-relay.token").exists()
+        assert not (parent / "agent-relay.json").exists()
+    assert not paths[2].exists()
 
 
 def test_source_has_no_principal_creation_service_arm_or_secret_surface():
