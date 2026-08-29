@@ -1,0 +1,405 @@
+{
+  "schema": "mastermind.project_workroom_platform_census.v1",
+  "observed_at": "2026-08-29T09:34:34-04:00",
+  "operation_key": "mastermind-project-workroom-wr-r0-20260829-sol-001",
+  "architecture_operation_key": "mastermind-project-workroom-fabric-20260829-sol-001",
+  "source_revisions": {
+    "mastermind_protected_basis": "dfd69451dce5e186ce05f65446023fbe21f07a58",
+    "mastermind_architecture_head": "1cc6030012f764194e4487017b2a73f69d6f32ae",
+    "macro_agentos_head": "e0f03255fdafcc4f3316cebdd5dde89e4599c5e3"
+  },
+  "workspace": {
+    "slack_workspace_id": "T0BRD2AQXQV",
+    "slack_workspace_name": "MastermindX",
+    "workspace_plan": "UNKNOWN_FROM_READ_ONLY_CENSUS",
+    "channel_inventory_completeness": "ACTING_PRINCIPAL_VISIBLE_ONLY",
+    "paid_feature_enablement": {
+      "canvas": "CONFIRMED_BY_EXISTING_CHANNEL_TAB_AND_CONNECTED_TOOL",
+      "lists": "UNKNOWN_UNTIL_APP_CANARY_OR_ADMIN_READBACK",
+      "workflow_apps": "UNKNOWN_UNTIL_APP_CANARY_OR_ADMIN_READBACK",
+      "custom_channel_templates": "TEMPORARILY_NOT_CREATABLE_OR_EDITABLE_PLATFORM_WIDE_AS_OF_2026-08-20"
+    }
+  },
+  "v1_rulings": {
+    "workroom_visibility": "PUBLIC_INTERNAL_ONLY",
+    "private_workrooms": "DEFERRED_PENDING_GROUP_SCOPES_MEMBERSHIP_AND_PRIVACY_PROOF",
+    "home_canvas": "STATIC_PROJECTOR_OWNED_CHARTER_ONLY",
+    "dynamic_status": "CONTROL_ROOM_PLUS_APP_OWNED_CHANNEL_READ_ONLY_RADAR",
+    "radar_list": "OPTIONAL_CORE_IF_LISTS_ENABLED; TODO_MODE_FALSE; CHANNEL_READ_ONLY",
+    "radar_channel_presence": "BOOKMARK_LINK_TO_LIST_PERMALINK; NATIVE_LIST_TAB_ATTACHMENT_UNDOCUMENTED",
+    "working_notes_canvas": "HUMAN_EDITABLE_NONCANONICAL_SEPARATE_CANVAS",
+    "folders": "UI_ONLY_OR_UNDOCUMENTED_FOR_CREATION; NOT_V1_AUTOMATION",
+    "workflows": "OPTIONAL_DEFERRED_UNTIL_PAID_PLAN_TRIGGER_AND_ADMIN_POLICY_CANARY",
+    "custom_templates": "REJECTED_AS_DEPENDENCY",
+    "linear_auto_project_channels": "DISABLED",
+    "raw_agent_dialogue_linear_sync": "FORBIDDEN",
+    "agent_relay_and_workroom_projector": "SEPARATE_LEAST_PRIVILEGE_PRINCIPALS"
+  },
+  "workroom_projector_v1_bot_scopes": [
+    "bookmarks:read",
+    "bookmarks:write",
+    "canvases:read",
+    "canvases:write",
+    "channels:manage",
+    "channels:read",
+    "channels:write.topic",
+    "files:read",
+    "lists:read",
+    "lists:write"
+  ],
+  "explicitly_absent_v1_scopes": [
+    "admin.*",
+    "app_mentions:read",
+    "channels:history",
+    "channels:join",
+    "channels:write.invites",
+    "chat:write",
+    "chat:write.public",
+    "commands",
+    "connections:write",
+    "groups:history",
+    "groups:read",
+    "groups:write",
+    "groups:write.invites",
+    "groups:write.topic",
+    "incoming-webhook",
+    "links:read",
+    "links:write",
+    "triggers:read",
+    "triggers:write",
+    "users:read"
+  ],
+  "core_methods": [
+    {
+      "method": "auth.test",
+      "purpose": "QUALIFY_TOKEN_WORKSPACE_AND_BOT_IDENTITY",
+      "scope": "NONE"
+    },
+    {
+      "method": "conversations.list",
+      "purpose": "COMPLETE_PUBLIC_CHANNEL_MARKER_CENSUS",
+      "scope": "channels:read"
+    },
+    {
+      "method": "conversations.info",
+      "purpose": "READ_EXACT_PUBLIC_CHANNEL_NAME_ARCHIVE_TOPIC_PURPOSE",
+      "scope": "channels:read"
+    },
+    {
+      "method": "conversations.create",
+      "purpose": "CREATE_ONE_PUBLIC_INTERNAL_WORKROOM",
+      "scope": "channels:manage"
+    },
+    {
+      "method": "conversations.rename",
+      "purpose": "RECONCILE_MANAGED_PUBLIC_CHANNEL_SLUG",
+      "scope": "channels:manage"
+    },
+    {
+      "method": "conversations.archive",
+      "purpose": "ARCHIVE_EXACT_TERMINAL_WORKROOM_AFTER_ACCEPTED_GATE",
+      "scope": "channels:manage"
+    },
+    {
+      "method": "conversations.setTopic",
+      "purpose": "WRITE_CLOSED_WORKROOM_MARKER_AND_COMPACT_CONTEXT",
+      "scope": "channels:write.topic"
+    },
+    {
+      "method": "conversations.setPurpose",
+      "purpose": "WRITE_STABLE_PROJECT_PURPOSE",
+      "scope": "channels:write.topic"
+    },
+    {
+      "method": "canvases.create",
+      "purpose": "CREATE_STATIC_HOME_OR_NONCANONICAL_NOTES_CANVAS",
+      "scope": "canvases:write"
+    },
+    {
+      "method": "canvases.sections.lookup",
+      "purpose": "VERIFY_UNIQUE_MANAGED_SECTION_MARKERS",
+      "scope": "canvases:read"
+    },
+    {
+      "method": "canvases.edit",
+      "purpose": "BOUNDED_STATIC_CHARTER_EDIT_ONLY_AFTER_FILES_INFO_DRIFT_CHECK",
+      "scope": "canvases:write"
+    },
+    {
+      "method": "canvases.access.set",
+      "purpose": "SET_CHANNEL_READ_OR_WRITE_ACCESS_AS_EXPLICITLY_PLANNED",
+      "scope": "canvases:write"
+    },
+    {
+      "method": "slackLists.create",
+      "purpose": "CREATE_APP_OWNED_PROJECT_RADAR_WITH_TODO_MODE_FALSE",
+      "scope": "lists:write"
+    },
+    {
+      "method": "slackLists.update",
+      "purpose": "MANAGE_RADAR_NAME_DESCRIPTION_AND_TODO_MODE_FALSE",
+      "scope": "lists:write"
+    },
+    {
+      "method": "slackLists.items.list",
+      "purpose": "READ_COMPLETE_RADAR_ROWS_AND_BUILD_OBSERVATION_HASH",
+      "scope": "lists:read"
+    },
+    {
+      "method": "slackLists.items.create",
+      "purpose": "CREATE_EXACT_MANAGED_RADAR_ROW",
+      "scope": "lists:write"
+    },
+    {
+      "method": "slackLists.items.update",
+      "purpose": "UPDATE_EXACT_MANAGED_RADAR_CELLS",
+      "scope": "lists:write"
+    },
+    {
+      "method": "slackLists.items.delete",
+      "purpose": "REMOVE_ONLY_EXACT_PROJECTOR_OWNED_OBSOLETE_ROW_AFTER_RECONCILIATION",
+      "scope": "lists:write"
+    },
+    {
+      "method": "slackLists.access.set",
+      "purpose": "GRANT_WORKROOM_CHANNEL_READ_ACCESS_ONLY",
+      "scope": "lists:write"
+    },
+    {
+      "method": "slackLists.access.delete",
+      "purpose": "REVOKE_CHANNEL_ACCESS_ON_ACCEPTED_ARCHIVAL_OR_PRIVACY_REPAIR",
+      "scope": "lists:write"
+    },
+    {
+      "method": "files.info",
+      "purpose": "READ_CANVAS_LIST_METADATA_UPDATED_TIMESTAMP_AND_PERMALINK",
+      "scope": "files:read"
+    },
+    {
+      "method": "bookmarks.list",
+      "purpose": "READ_WORKROOM_HEADER_LINKS",
+      "scope": "bookmarks:read"
+    },
+    {
+      "method": "bookmarks.add",
+      "purpose": "LINK_LINEAR_PROJECT_CONTROL_ROOM_HOME_RADAR_AND_EVIDENCE",
+      "scope": "bookmarks:write"
+    },
+    {
+      "method": "bookmarks.edit",
+      "purpose": "RECONCILE_EXACT_PROJECTOR_OWNED_LINK",
+      "scope": "bookmarks:write"
+    },
+    {
+      "method": "bookmarks.remove",
+      "purpose": "REMOVE_ONLY_EXACT_PROJECTOR_OWNED_OBSOLETE_LINK",
+      "scope": "bookmarks:write"
+    }
+  ],
+  "optional_or_deferred_capabilities": [
+    {
+      "capability": "PRIVATE_RESTRICTED_WORKROOMS",
+      "status": "DEFERRED",
+      "additional_scopes": [
+        "groups:read",
+        "groups:write",
+        "groups:write.topic",
+        "groups:write.invites"
+      ],
+      "reason": "ADDITIONAL_MEMBERSHIP_AUDIENCE_APP_ACCESS_AND_UNFURL_PRIVACY_PROOF_REQUIRED"
+    },
+    {
+      "capability": "NATIVE_LIST_TAB_ATTACHMENT",
+      "status": "UNDOCUMENTED_PUBLIC_API",
+      "fallback": "LIST_CHANNEL_READ_ACCESS_PLUS_BOOKMARK_PERMALINK"
+    },
+    {
+      "capability": "BOOKMARK_FOLDER_CREATION",
+      "status": "UNDOCUMENTED_PUBLIC_API",
+      "fallback": "FLAT_BOUNDED_BOOKMARK_SET_AND_HOME_CANVAS_RESOURCES"
+    },
+    {
+      "capability": "WORKFLOW_APP_CUSTOM_FUNCTIONS_AND_TRIGGERS",
+      "status": "PLATFORM_SUPPORTED_BUT_WORKSPACE_PLAN_ADMIN_AND_DEPLOYMENT_UNPROVEN",
+      "additional_scopes": [
+        "triggers:read",
+        "triggers:write"
+      ],
+      "reason": "NOT_REQUIRED_FOR_CORE_CHANNEL_HOME_RADAR_DIALOGUE_PILOT"
+    },
+    {
+      "capability": "CUSTOM_CHANNEL_TEMPLATES",
+      "status": "TEMPORARILY_UNAVAILABLE_FOR_CREATE_OR_EDIT_AS_OF_2026-08-20",
+      "fallback": "DETERMINISTIC_DIRECT_SURFACE_PROVISIONING"
+    },
+    {
+      "capability": "AUTOMATIC_LINEAR_PROJECT_CHANNEL_CREATION",
+      "status": "SUPPORTED_BUT_REJECTED_V1",
+      "reason": "CREATES_PUBLIC_CHANNEL_FOR_EVERY_PROJECT_INVITES_ALL_MEMBERS_AND_BYPASSES_WORKROOM_ELIGIBILITY_POLICY"
+    },
+    {
+      "capability": "LINEAR_AGENT_CONTEXTUAL_ISSUE_CREATION",
+      "status": "HUMAN_CONVENIENCE_ONLY",
+      "reason": "CONTEXTUAL_INFERENCE_AND_TITLE_CHANNEL_SIMILARITY_CANNOT BE AI MUTATION AUTHORITY"
+    },
+    {
+      "capability": "LINEAR_SLACK_BIDIRECTIONAL_THREAD_SYNC",
+      "status": "SELECTED_HUMAN_DISCUSSION_ONLY_AFTER_OSC_C1",
+      "reason": "RAW_AGENT_DIALOGUE_PROTOCOL_MUST_NOT_BE_MIRRORED_OR_USED_AS_LIFECYCLE"
+    }
+  ],
+  "current_estate": {
+    "visible_channels": [
+      {
+        "id": "C0BRAJUMGBD",
+        "name": "new-channel",
+        "visibility": "PUBLIC",
+        "purpose": "generic project channel",
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BRD2B2L85",
+        "name": "all-mastermind-x",
+        "visibility": "PUBLIC_GENERAL",
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BRDFZPLHK",
+        "name": "ceo-control-room",
+        "visibility": "PRIVATE",
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BRET68EH4",
+        "name": "social",
+        "visibility": "PUBLIC",
+        "observed_tabs": [
+          "CANVAS"
+        ],
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BRFC9JXK8",
+        "name": "build-events",
+        "visibility": "PUBLIC",
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BRH9VRUE6",
+        "name": "company-intelligence",
+        "visibility": "PUBLIC",
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BRUL9F2V7",
+        "name": "s0-sol-carrier-test",
+        "visibility": "PRIVATE",
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BSBM78V1N",
+        "name": "agent-dispatch",
+        "visibility": "PUBLIC",
+        "observed_tabs": [
+          "FILES"
+        ],
+        "managed_workroom_marker": false,
+        "role": "LEGACY_GLOBAL_DIALOGUE_TRANSPORT"
+      },
+      {
+        "id": "C0BSGABKBFY",
+        "name": "sol-runtime",
+        "visibility": "PRIVATE",
+        "managed_workroom_marker": false
+      },
+      {
+        "id": "C0BTD5804QK",
+        "name": "mastermind-exec-ops",
+        "visibility": "PRIVATE",
+        "managed_workroom_marker": false,
+        "role": "TRANSITION_COORDINATION_ONLY"
+      }
+    ],
+    "observed_actor_classes": [
+      "CHAIRMAN",
+      "CHATGPT_SOL_SEATS",
+      "CLAUDE_OPERATOR_SEATS",
+      "CURSOR_OPERATOR_SEATS",
+      "GROK_SECRETARY",
+      "MASTERMIND_AGENT_RELAY",
+      "MASTERMIND_EXECUTIVE"
+    ],
+    "current_agent_relay": {
+      "app_name": "Mastermind Agent Relay",
+      "bot_display_name": "Mastermind Relay",
+      "observed_bot_user_id": "U0BTF3QGABF",
+      "manifest_bot_scopes": [
+        "channels:history",
+        "chat:write"
+      ],
+      "configured_channel_id": "C0BSBM78V1N",
+      "multi_workroom_support": "NOT_BUILT",
+      "scope_widening_for_workroom_projection": "FORBIDDEN"
+    },
+    "workroom_projector": {
+      "app_exists": false,
+      "credential_exists": false,
+      "host_runtime_exists": false,
+      "canary_exists": false
+    },
+    "managed_project_workrooms_found": 0,
+    "linear": {
+      "initiative_rollout": "EXTERNAL_OWNER_NOT_CONSUMED_BY_WR_R0",
+      "project_slack_channel_feature": "PLATFORM_SUPPORTED",
+      "automatic_project_channel_creation": "MUST_REMAIN_DISABLED_V1",
+      "selected_issue_comment_update_projection": "EXISTING_MAS_189_OWNER_NOT_PROVEN_LIVE",
+      "linear_agent_contextual_actions": "NOT_AUTHORITY"
+    }
+  },
+  "known_api_limitations": [
+    "CANVAS_WEB_API_HAS_NO_DOCUMENTED_ATOMIC_IF_MATCH_OR_REVISION_PRECONDITION",
+    "CANVAS_SECTION_LOOKUP_RETURNS_SECTION_IDENTIFIERS_NOT_A_FULL_NORMALIZED_DOCUMENT_READ",
+    "NATIVE_LIST_TAB_ATTACHMENT_HAS_NO DOCUMENTED PUBLIC METHOD",
+    "BOOKMARK_FOLDER_CREATION_HAS_NO DOCUMENTED PUBLIC METHOD",
+    "SLACK_LISTS_AND_WORKFLOW_APPS_REQUIRE_PAID_PLAN_OR_FEATURE_ENABLEMENT",
+    "CUSTOM_CHANNEL_TEMPLATE_CREATE_EDIT_IS_TEMPORARILY_UNAVAILABLE",
+    "CONNECTED_CHATGPT_SLACK_ACTIONS_DO_NOT DEFINE THE PRODUCTION_APP_SCOPE_OR_ACTOR_BOUNDARY",
+    "VISIBLE_CHANNEL_CENSUS_IS NOT A FULL ADMIN WORKSPACE CENSUS"
+  ],
+  "source_refs": [
+    "https://docs.slack.dev/reference/methods/auth.test",
+    "https://docs.slack.dev/reference/methods/conversations.list/",
+    "https://docs.slack.dev/reference/methods/conversations.info/",
+    "https://docs.slack.dev/reference/methods/conversations.create/",
+    "https://docs.slack.dev/reference/methods/conversations.rename/",
+    "https://docs.slack.dev/reference/methods/conversations.archive/",
+    "https://docs.slack.dev/reference/methods/conversations.setTopic/",
+    "https://docs.slack.dev/reference/methods/conversations.setPurpose/",
+    "https://docs.slack.dev/reference/methods/canvases.create/",
+    "https://docs.slack.dev/reference/methods/canvases.edit/",
+    "https://docs.slack.dev/reference/methods/canvases.sections.lookup/",
+    "https://docs.slack.dev/reference/methods/slackLists.create/",
+    "https://docs.slack.dev/reference/methods/slackLists.update",
+    "https://docs.slack.dev/reference/methods/slackLists.items.create/",
+    "https://docs.slack.dev/reference/methods/slackLists.items.update/",
+    "https://docs.slack.dev/reference/methods/slackLists.items.delete/",
+    "https://docs.slack.dev/reference/methods/slackLists.access.set",
+    "https://docs.slack.dev/reference/methods/slackLists.access.delete/",
+    "https://docs.slack.dev/reference/methods/files.info/",
+    "https://docs.slack.dev/reference/methods/bookmarks.add/",
+    "https://docs.slack.dev/reference/methods/bookmarks.list/",
+    "https://docs.slack.dev/reference/methods/bookmarks.edit/",
+    "https://docs.slack.dev/reference/methods/bookmarks.remove/",
+    "https://docs.slack.dev/reference/app-manifest/",
+    "https://docs.slack.dev/tools/deno-slack-sdk/guides/creating-event-triggers/",
+    "https://slack.com/help/articles/33777191777043-Create-and-share-custom-channel-templates",
+    "https://slack.com/help/articles/32562841868307-Add-and-manage-tabs-in-channels-and-direct-messages",
+    "https://linear.app/docs/slack",
+    "https://linear.app/docs/initiative-and-project-updates",
+    "https://linear.app/changelog/2026-05-21-project-slack-channels",
+    "Mastermind@dfd69451dce5e186ce05f65446023fbe21f07a58:config/slack_agent_relay_app_manifest.yaml",
+    "Mastermind@dfd69451dce5e186ce05f65446023fbe21f07a58:scripts/check_slack_agent_relay_app_manifest.py",
+    "Mastermind@dfd69451dce5e186ce05f65446023fbe21f07a58:research/AGENT_RELAY_SLACK_APP_ADMIN_CEREMONY_2026-08-27.md",
+    "Slack workspace T0BRD2AQXQV read-only connector census on 2026-08-29"
+  ]
+}
