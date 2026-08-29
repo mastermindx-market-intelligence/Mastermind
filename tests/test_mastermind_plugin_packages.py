@@ -9,13 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.validate_mastermind_plugins import (
-    MANIFESTS,
-    MARKETPLACE,
-    TEMPLATES,
-    VALIDATION_SCHEMA,
-    validate_repository,
-)
+from scripts.validate_mastermind_plugins import VALIDATION_SCHEMA, validate_repository
 
 ROOT = Path(__file__).resolve().parents[1]
 SOL_SKILLS = (
@@ -81,24 +75,73 @@ def test_repository_plugin_package_is_valid() -> None:
 
 
 def test_repository_documents_match_the_closed_contract() -> None:
-    assert json.loads((ROOT / ".agents/plugins/marketplace.json").read_text()) == MARKETPLACE
-    for plugin in ("mastermind-sol", "mastermind-operator"):
+    marketplace = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text())
+    assert marketplace == {
+        "name": "mastermind-x",
+        "interface": {"displayName": "Mastermind-X"},
+        "plugins": [
+            {
+                "name": "mastermind-sol",
+                "source": {"source": "local", "path": "./plugins/mastermind-sol"},
+            },
+            {
+                "name": "mastermind-operator",
+                "source": {
+                    "source": "local",
+                    "path": "./plugins/mastermind-operator",
+                },
+            },
+        ],
+    }
+    expected_bindings = {
+        "mastermind-sol": [
+            (
+                "mastermind-steward",
+                "integrations/mastermind_secretary_mcp/schemas.py",
+            ),
+            ("mastermind-executive", "integrations/executive_mcp/schemas.py"),
+        ],
+        "mastermind-operator": [
+            ("mastermind-dialogue", "integrations/mastermind_company_mcp/schemas.py")
+        ],
+    }
+    for plugin, display_name in (
+        ("mastermind-sol", "Mastermind Sol"),
+        ("mastermind-operator", "Mastermind Operator"),
+    ):
         manifest = json.loads(
             (ROOT / "plugins" / plugin / ".codex-plugin/plugin.json").read_text()
         )
-        expected = MANIFESTS[plugin]
-        assert manifest["name"] == expected["name"]
+        assert set(manifest) == {
+            "name",
+            "version",
+            "description",
+            "author",
+            "skills",
+            "interface",
+        }
+        assert manifest["name"] == plugin
         assert manifest["version"] == "0.1.0"
         assert manifest["author"] == {"name": "Mastermind-X"}
         assert manifest["skills"] == "./skills/"
-        assert manifest["interface"]["displayName"] == expected["interface"]["displayName"]
+        assert manifest["interface"]["displayName"] == display_name
+        assert manifest["interface"]["category"] == "Productivity"
         assert len(manifest["interface"]["longDescription"]) >= 80
         assert manifest["interface"]["capabilities"] == ["Read"]
         assert "apps" not in manifest and "mcpServers" not in manifest
         template = json.loads(
             (ROOT / "plugins" / plugin / "references/app-bindings.template.json").read_text()
         )
-        assert template == TEMPLATES[plugin]
+        assert template["schema"] == "mastermind.plugin_app_bindings_template.v1"
+        assert template["plugin"] == plugin
+        assert template["plugin_version"] == "0.1.0"
+        assert template["generated_file"] == ".app.json"
+        assert template["generated_by_wave"] == "BSC-U1"
+        assert [
+            (binding["logical_name"], binding["contract_owner"])
+            for binding in template["bindings"]
+        ] == expected_bindings[plugin]
+        assert all(binding["required"] is True for binding in template["bindings"])
         assert all(binding["app_id"] is None for binding in template["bindings"])
 
 
@@ -130,7 +173,9 @@ def test_key_workflow_semantics_are_explicit() -> None:
     assert "do not infer healthy state from absence" in _sol("open-executive-cockpit")
     assert "Do not majority-vote among sources" in _sol("reconcile-company-state")
     assert "EFFECT_UNKNOWN" in _sol("reconcile-company-state")
-    assert "explicit current Chairman confirmation" in _sol("draft-ceo-intent")
+    assert "explicit current Chairman intent" in _sol("draft-ceo-intent")
+    assert "current standing authorization may cover it" in _sol("draft-ceo-intent")
+    assert "do not invent a redundant approval loop" in _sol("draft-ceo-intent")
     assert "QUEUED is not dispatched or executing" in _sol("draft-ceo-intent")
     assert "never supply raw authority" in _sol("draft-ceo-intent")
     assert "original user and machine outcome" in _sol("review-worker-return")
@@ -142,6 +187,7 @@ def test_key_workflow_semantics_are_explicit() -> None:
     assert "No generic save-memory action exists" in _sol("close-out-program")
     assert "Agent OS through a reviewed Git carrier" in _sol("close-out-program")
     assert "explicit terminal STOP" in _sol("close-out-program")
+    assert "Emit exactly one pickup `ACK`" in _operator("receive-commission")
     assert "Pickup ACK does not claim START" in _operator("receive-commission")
     assert "START only after gates clear" in _operator("receive-commission")
     assert "RESULT is not acceptance or STOP" in _operator("finish-operation")
@@ -159,6 +205,8 @@ def test_key_workflow_semantics_are_explicit() -> None:
         ("installed_app_id", "INSTALLED_APP_ID_FORBIDDEN"),
         ("missing_sol_gate", "CURRENT_SOURCE_GATE_MISSING"),
         ("missing_operator_gate", "BOUND_OPERATION_GATE_MISSING"),
+        ("wrong_manifest_version", "INVALID_MANIFEST"),
+        ("extra_skill_directory", "SKILL_SET_MISMATCH"),
     ),
 )
 def test_structural_authority_mutations_are_refused(
@@ -179,9 +227,17 @@ def test_structural_authority_mutations_are_refused(
         (tmp_path / "plugins/mastermind-sol/skills/draft-ceo-intent/SKILL.md").write_text(
             "---\nname: draft-ceo-intent\ndescription: Broken.\n---\n\nDraft.\n"
         )
-    else:
+    elif mutation == "missing_operator_gate":
         path = tmp_path / "plugins/mastermind-operator/skills/return-progress/SKILL.md"
         path.write_text(path.read_text().replace("one already-bound operation and dialogue", "work"))
+    elif mutation == "wrong_manifest_version":
+        value = json.loads(manifest.read_text())
+        value["version"] = "0.2.0"
+        _write_json(manifest, value)
+    else:
+        extra = tmp_path / "plugins/mastermind-sol/skills/unreviewed-extra/SKILL.md"
+        extra.parent.mkdir(parents=True)
+        extra.write_text("---\nname: unreviewed-extra\ndescription: Extra.\n---\n\nExtra.\n")
     result = validate_repository(tmp_path)
     assert result["ok"] is False
     assert expected_code in {error["code"] for error in result["errors"]}
@@ -236,6 +292,28 @@ def test_forbidden_package_text_is_refused(
     target.write_text(target.read_text() + content)
     result = validate_repository(tmp_path)
     assert expected in {error["code"] for error in result["errors"]}
+
+
+def test_unexpected_package_file_is_refused(tmp_path: Path) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-sol/hooks/hidden.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("print('hidden')\n")
+    result = validate_repository(tmp_path)
+    assert "UNEXPECTED_PACKAGE_FILE" in {error["code"] for error in result["errors"]}
+
+
+def test_package_symlink_is_refused(tmp_path: Path) -> None:
+    _copy_package(tmp_path)
+    target = tmp_path / "outside.txt"
+    target.write_text("outside\n")
+    link = tmp_path / "plugins/mastermind-sol/references/linked.md"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation unavailable")
+    result = validate_repository(tmp_path)
+    assert "SYMLINK_FORBIDDEN" in {error["code"] for error in result["errors"]}
 
 
 def test_invalid_json_error_is_repository_relative(tmp_path: Path) -> None:

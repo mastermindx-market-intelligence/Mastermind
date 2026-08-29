@@ -140,6 +140,27 @@ REFERENCES = {
     "mastermind-sol": "authority-boundaries.md",
     "mastermind-operator": "dialogue-boundary.md",
 }
+
+ALLOWED_PACKAGE_FILES = frozenset(
+    {MARKETPLACE_PATH.as_posix()}
+    | {
+        f"plugins/{plugin}/.codex-plugin/plugin.json"
+        for plugin in EXPECTED_SKILLS
+    }
+    | {
+        f"plugins/{plugin}/references/app-bindings.template.json"
+        for plugin in EXPECTED_SKILLS
+    }
+    | {
+        f"plugins/{plugin}/references/{reference}"
+        for plugin, reference in REFERENCES.items()
+    }
+    | {
+        f"plugins/{plugin}/skills/{skill}/SKILL.md"
+        for plugin, skills in EXPECTED_SKILLS.items()
+        for skill in skills
+    }
+)
 SOL_GATE_MARKERS = (
     "Read protected Mastermind `master`",
     "`docs/sol_skills/INDEX.md`",
@@ -298,11 +319,23 @@ def _validate_skill(
         )
 
 
-def _package_files(root: Path) -> list[Path]:
+def _package_files(root: Path, errors: list[dict[str, str]]) -> list[Path]:
     paths: set[Path] = set()
     for package_root in (root / ".agents/plugins", root / "plugins"):
-        if package_root.exists():
-            paths.update(path for path in package_root.rglob("*") if path.is_file())
+        if not package_root.exists():
+            continue
+        for path in package_root.rglob("*"):
+            if path.is_symlink():
+                errors.append(
+                    _error(
+                        root,
+                        path,
+                        "SYMLINK_FORBIDDEN",
+                        "plugin packages may not contain symbolic links",
+                    )
+                )
+            elif path.is_file():
+                paths.add(path)
     return sorted(paths, key=lambda path: _relative(root, path))
 
 
@@ -311,7 +344,17 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
         (root / "plugins" / plugin / "references/app-bindings.template.json").resolve()
         for plugin in EXPECTED_SKILLS
     }
-    for path in _package_files(root):
+    for path in _package_files(root, errors):
+        relative = _relative(root, path)
+        if relative not in ALLOWED_PACKAGE_FILES:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "UNEXPECTED_PACKAGE_FILE",
+                    "file is outside the closed BSC-P1 package inventory",
+                )
+            )
         forbidden_code = FORBIDDEN_FILES.get(path.name)
         if forbidden_code:
             errors.append(

@@ -13,7 +13,7 @@ Require the trusted host or app binding for the exact operation, actor, Job, Att
 
 ## Procedure
 
-1. Emit one pickup `ACK` for the bound operation when required.
+1. Emit exactly one pickup `ACK` for the bound operation.
 2. Pickup ACK does not claim START, execution, completion, authority, or acceptance.
 3. Read the exact bound thread and carrier plus current commission and source law.
 4. Re-pin required repository source and run path and authority collision checks.

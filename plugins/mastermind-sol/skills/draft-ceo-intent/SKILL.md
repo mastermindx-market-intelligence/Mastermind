@@ -38,7 +38,7 @@ attempt_limit
 ```
 
 4. The model must never supply raw authority, actor, grounding SHA, branch, worktree, Job ID, status, provider, account, host, runtime binding, socket, executable argv, merge, deploy, service, or credential fields.
-5. Show the bounded packet and obtain explicit current Chairman confirmation before any modifying app call.
+5. Require explicit current Chairman intent for the exact bounded packet. A current standing authorization may cover it; do not invent a redundant approval loop. When ChatGPT surfaces native write confirmation, it must be accepted before the call.
 6. If the Executive app is missing, unauthenticated, version-mismatched, production-disabled, or current grounding is unavailable, return `EXECUTIVE_APP_UNAVAILABLE` or the exact typed refusal and stop.
 7. On acceptance, state that `QUEUED is not dispatched or executing` and preserve the returned intent and Job receipt.
 8. On response loss, query the same intent through the same app. Do not resubmit elsewhere.
@@ -49,7 +49,8 @@ attempt_limit
 bounded CEO-intent draft
 explicit non-goals
 expected admission receipt
-confirmation required = yes
+Chairman intent coverage = exact current directive | missing
+native app confirmation = required if surfaced
 submission result or exact refusal
 effect state
 canonical intent / Job identity when accepted
