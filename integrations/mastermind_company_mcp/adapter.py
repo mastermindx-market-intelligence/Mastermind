@@ -86,6 +86,7 @@ class DialogueBinding:
     applies_to: Mapping[str, Any]
     thread_ts: str
     allowed_message_types: tuple[str, ...]
+    reply_to_message_key: str | None = None
 
 
 class DialogueBindingResolver(Protocol):
@@ -188,7 +189,7 @@ class CompanyDialogueGateway:
                     "commission_ref": context["commission_ref"],
                     "session_ref": context["session_ref"],
                     "actor_ref": context["actor_ref"],
-                    "reply_to_message_key": None,
+                    "reply_to_message_key": binding.reply_to_message_key,
                     "applies_to": context["applies_to"],
                     "summary": summary,
                     "body": body,

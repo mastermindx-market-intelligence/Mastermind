@@ -80,6 +80,7 @@ FORBIDDEN_INPUT_NAMES = {
     "channel_id",
     "thread",
     "thread_ts",
+    "reply_to_message_key",
     "username",
     "display_name",
     "authority_class",
@@ -271,6 +272,16 @@ class _StaticResolver:
         return self.binding
 
 
+class _SequenceResolver:
+    def __init__(self, *bindings: DialogueBinding) -> None:
+        self._bindings = iter(bindings)
+        self.calls = 0
+
+    def resolve(self) -> DialogueBinding:
+        self.calls += 1
+        return next(self._bindings)
+
+
 class _FailingResolver:
     def __init__(self, message: str = "binding xoxb-not-a-real-secret-shaped-token missing") -> None:
         self.message = message
@@ -401,6 +412,63 @@ def test_semantic_payload_cannot_change_resolver_owned_identity_or_thread():
     assert message["actor_ref"] == binding.actor_ref
     assert message["work_ref"] == binding.work_ref
     assert message["session_ref"] == binding.session_ref
+
+
+def test_sequential_emissions_use_only_fresh_trusted_reply_lineage():
+    first_key = "asd-mcp-00000000000040008000000000000001"
+    second_key = "asd-mcp-00000000000040008000000000000002"
+    resolver = _SequenceResolver(
+        _binding(reply_to_message_key=None),
+        _binding(reply_to_message_key=first_key),
+    )
+    service = _RecordingService()
+    uuids = iter(
+        (
+            UUID("00000000-0000-4000-8000-000000000001"),
+            UUID("00000000-0000-4000-8000-000000000002"),
+        )
+    )
+    gateway = CompanyDialogueGateway(
+        resolver,
+        socket_path=Path("/private/tmp/mastermind-agent-dialogue.sock"),
+        service_call=service,
+        uuid_source=lambda: next(uuids),
+        utc_now=lambda: "2026-08-29T01:00:00Z",
+    )
+
+    first = _run(gateway.call("ack", {}))
+    second = _run(
+        gateway.call(
+            "progress",
+            {
+                "stage": "implementation",
+                "completed": f"Caller prose cannot choose {second_key} as lineage.",
+                "next": "Continue through the trusted binding.",
+            },
+        )
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert resolver.calls == 2
+    assert len(service.calls) == 2
+    first_message = service.calls[0][1]["args"]["message"]
+    second_message = service.calls[1][1]["args"]["message"]
+    assert first_message["message_key"] == first_key
+    assert first_message["reply_to_message_key"] is None
+    assert second_message["message_key"] == second_key
+    assert second_message["reply_to_message_key"] == first_key
+
+
+def test_malformed_trusted_reply_lineage_refuses_before_service_write():
+    gateway, _resolver, service = _gateway(
+        _binding(reply_to_message_key="caller-shaped-invalid-key")
+    )
+
+    response = _run(gateway.call("ack", {}))
+
+    assert response["error"]["code"] == "DIALOGUE_REFUSED"
+    assert service.calls == []
 
 
 @pytest.mark.parametrize(

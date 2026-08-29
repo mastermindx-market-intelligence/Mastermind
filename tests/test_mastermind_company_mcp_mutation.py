@@ -58,6 +58,7 @@ def test_schema_digest_kills_tool_authority_widening(mutation):
         "attempt_id",
         "worker_id",
         "thread_ts",
+        "reply_to_message_key",
         "channel",
         "display_name",
         "actor_ref",
