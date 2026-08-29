@@ -7,11 +7,12 @@
 **Parent operation:** `mastermind-project-workroom-fabric-20260829-sol-001`  
 **WR-R0 operation:** `mastermind-project-workroom-wr-r0-20260829-sol-001`  
 **Parent carrier:** Mastermind PR #240 / `sol/project-workroom-fabric-20260829`  
-**Protected source basis:** `mastermindx-market-intelligence/Mastermind@dfd69451dce5e186ce05f65446023fbe21f07a58`  
+**Original protected research basis:** `mastermindx-market-intelligence/Mastermind@dfd69451dce5e186ce05f65446023fbe21f07a58`  
+**Current protected source at Canvas-safety correction:** `mastermindx-market-intelligence/Mastermind@b8f7414e9906d6b5853640a18de68c3b91ffb44b`  
 **Research carrier:** Mastermind PR #242 / `sol/project-workroom-wr-r0-20260829`  
-**Linear:** MAS-231 / MAS-233
+**Linear:** MAS-231 / MAS-233 / MAS-235 / MAS-236
 
-This amendment records current primary-source Slack/Linear API and real-workspace falsification discovered after the parent architecture and rollout plan were written. For the exact V1 surface, visibility, permission, actor-membership and concurrency questions below, this amendment wins over generic or more ambitious wording in:
+This amendment records current primary-source Slack/Linear API and real-workspace falsification discovered after the parent architecture and rollout plan were written. For the exact V1 surface, visibility, permission, actor-membership, Canvas-safety and concurrency questions below, this amendment has narrow precedence over generic or more ambitious wording in:
 
 - `docs/superpowers/specs/2026-08-29-project-workroom-fabric-design.md`;
 - `docs/superpowers/plans/2026-08-29-project-workroom-fabric-rollout.md`.
@@ -31,9 +32,9 @@ V1 supported Workroom visibility = PUBLIC_INTERNAL
 PRIVATE_RESTRICTED                = DEFERRED
 ```
 
-Public Workrooms allow a materially narrower dedicated bot than private-channel lifecycle and membership management. Private Workrooms require additional private-channel read/write/topic/invite permissions, exact app membership, exact human audience policy, safe private Canvas/List sharing and proof that Linear unfurls or synchronized discussion cannot expose restricted information.
+Public Workrooms permit a materially narrower dedicated bot than private-channel lifecycle and membership management. Private Workrooms require additional private-channel read/write/topic/invite permissions, exact app membership, exact human audience policy, safe private Canvas/List sharing and proof that Linear unfurls or synchronized discussion cannot expose restricted information.
 
-The first Workroom pilot must therefore use Projects whose collaboration and linked evidence can lawfully appear in a public internal company channel. No projector may silently downgrade a requested private Workroom to public.
+The first Workroom pilot must use Projects whose collaboration and linked evidence can lawfully appear in a public internal company channel. No projector may silently downgrade a requested private Workroom to public.
 
 A later private-Workroom promotion must independently prove at least:
 
@@ -83,7 +84,7 @@ Channel name remains presentation only. The marker and immutable Slack channel I
 
 ## 3. Home Canvas is static charter, not dynamic current truth
 
-Slack supports Canvas creation, section lookup/edit and access control, but does not expose a documented atomic content revision/`If-Match` write contract suitable for continuously replacing current-state claims under optimistic concurrency.
+Slack supports Canvas creation, section lookup/edit, access mutation and deletion, but it does not expose a documented atomic content revision/`If-Match` write contract suitable for continuously replacing current-state claims under optimistic concurrency.
 
 The V1 ruling is:
 
@@ -104,20 +105,81 @@ The Home Canvas may contain:
 
 It must not continuously render current Worker/Attempt/runtime, current turn owner, blocker/attention, proof state or dynamic next action. Those remain Steward/Control Room facts and, when supported, Radar rows.
 
-### 3.1 Channel access must be read-only
+### 3.1 Production default is standalone-first read sharing
 
-`canvases.create(channel_id=...)` may add the created Canvas to the channel with write access. The Workroom Projector must immediately attempt to set the Workroom channel's Canvas access to `read` through the accepted `canvases.access.set` path and read back the exact access result.
+Slack documents that `canvases.create(channel_id=...)` automatically tabs the Canvas in the channel with `write` permission. Slack also documents that `canvases.access.set` may return `canvas_not_found` when attempting to change access for a channel Canvas. Therefore an attached-first production flow creates a write-exposed remote object before the required read-only invariant has been established.
 
-If the real app canary proves that a channel-tabbed Canvas cannot be downgraded safely to channel-read access, V1 must instead:
+The safe V1 production default is:
 
-1. create a standalone app-owned Canvas without channel attachment;
-2. grant the exact Workroom channel `read` access;
-3. add a bookmark to the Canvas permalink;
-4. refuse a write-exposed Home Canvas rather than lowering the ownership boundary.
+```text
+create standalone app-owned Canvas with no channel_id
+-> read back exact canvas_id, app/file ownership and metadata
+-> grant the exact Workroom channel access_level=read
+-> prove the accepted exact access/readback condition
+-> obtain permalink through files.info
+-> add exact projector-owned bookmark
+-> rerun desired state and require noop
+```
 
-A manually added native tab may be presentation convenience only. Static Home ownership does not depend on a tab.
+A standalone Canvas is supported only when the current paid workspace/app canary proves that exact path. If Slack plan or workspace policy refuses standalone creation, emit:
 
-### 3.2 Static Canvas drift law
+```text
+HOME_CANVAS_UNAVAILABLE
+SURFACE_CAPABILITY_UNAVAILABLE
+```
+
+and either remove Home from the accepted reduced pilot surface or stop that pilot. Do not use write-exposed channel attachment as an automatic fallback.
+
+A manually added native tab may be presentation convenience only. Static Home ownership and acceptance do not depend on a tab.
+
+### 3.2 Channel-tabbed Canvas is canary-only until separately promoted
+
+A channel-tabbed Home path is not production-eligible merely because the API accepts `channel_id`. It may be tested only in a separately admitted, disposable WR-SURF canary after the exact app, channel, operation, expected object and cleanup/disposition law are frozen.
+
+That canary must prove, in order:
+
+```text
+create exact channel Canvas
+-> exact create receipt and canvas_id
+-> downgrade exact Workroom channel access to read
+-> exact access/readback proof
+-> exact app ownership and metadata proof
+-> idempotent rerun/noop
+-> accepted exact cleanup or historical-preservation disposition
+```
+
+Only an accepted canary may promote `CHANNEL_TABBED_READ_ONLY` for later production use. A native tab is never required for core V1.
+
+### 3.3 Canvas creation/access effect law
+
+Canvas create and access writes are separate remote effects. The following outcomes are binding:
+
+```text
+create response ambiguous
+  -> EFFECT_UNKNOWN
+  -> no second create
+  -> exact-object reconciliation required
+
+create applied + access set failed/refused
+  -> EFFECT_APPLIED / CANVAS_ACCESS_UNSAFE
+  -> object is not a Home Canvas
+  -> no second create and no implicit standalone fallback
+
+create applied + access readback unavailable/ambiguous
+  -> EFFECT_APPLIED / CANVAS_ACCESS_UNPROVEN
+  -> object is not a Home Canvas
+  -> no second create
+
+standalone unsupported
+  -> HOME_CANVAS_UNAVAILABLE
+  -> no attached fallback without separately accepted canary
+```
+
+An unsafe or unproven Canvas is preserved as an exact reconciled object until a separate accepted cleanup/disposition operation acts on its immutable `canvas_id`. Silence, timeout or missing readback is never treated as no effect.
+
+`canvases.delete` is irreversible and is not an automatic rollback. It is permitted only in an exact disposable canary or separate accepted cleanup operation, with current app ownership, exact ID, expected effect and readback. Ambiguous deletion remains `EFFECT_UNKNOWN`; no replacement Canvas is created until reconciled.
+
+### 3.4 Static Canvas drift law
 
 The Workroom Projector owns the complete static charter Canvas it creates. Before an explicit charter update it must:
 
@@ -132,7 +194,7 @@ The Workroom Projector owns the complete static charter Canvas it creates. Befor
 
 A remote edit detected between plan and action is `remote_changed`. V1 does not attempt high-frequency Canvas synchronization or last-writer-wins.
 
-### 3.3 Working Notes are optional and noncanonical
+### 3.5 Working Notes are optional and noncanonical
 
 A separate human-editable Working Notes Canvas may be created only if the real plan/API canary supports the required access behavior. It must be clearly labeled noncanonical scratch material. The projector does not manage its content after creation/access setup.
 
@@ -180,7 +242,7 @@ If the real app canary proves Lists unavailable under the current plan or worksp
 - emit `SURFACE_CAPABILITY_UNAVAILABLE`;
 - remove `lists:read` and `lists:write` from the app manifest rather than retaining speculative scope;
 - keep Control Room as dynamic truth;
-- proceed with core channel + static Home + exact threads + bookmarks only if the accepted pilot's reduced completion law still passes;
+- proceed with core channel + exact threads + bookmarks and a standalone read-shared Home only if the accepted pilot's reduced completion law still passes;
 - do not fake Radar in Canvas or messages.
 
 ---
@@ -196,7 +258,7 @@ V1 automates only supported objects and a flat bounded bookmark set:
 ```text
 Linear Project
 Control Room
-Home Canvas when not already a safe native tab
+standalone read-shared Home Canvas
 Radar List permalink when enabled
 Working Notes Canvas when enabled
 primary GitHub/evidence landing
@@ -211,7 +273,7 @@ Slack custom functions and event/link/external triggers are platform-supported f
 Therefore:
 
 ```text
-core V1 = channel + marker/purpose + bookmarks + static read-only Home + exact threads
+core V1 = channel + marker/purpose + bookmarks + standalone read-shared static Home + exact threads
 optional V1 = app-owned read-only Radar List when enabled
 later optional = structured Workflow intake after separate app/admin canary
 ```
@@ -251,7 +313,7 @@ acquire one-shot local lock
 -> release lock
 ```
 
-Any ambiguous POST response remains `EFFECT_UNKNOWN`; the same target is read back before any further action, and there is no alternate channel/app/worker failover.
+Any ambiguous POST response remains `EFFECT_UNKNOWN`; the same exact target is reconciled before any further action, and there is no alternate channel/app/worker failover.
 
 ---
 
@@ -307,7 +369,7 @@ users:read
 
 ### 7.2 Fixed method family
 
-The first client may allow only:
+The production client may allow only:
 
 ```text
 auth.test
@@ -327,6 +389,12 @@ bookmarks.list
 bookmarks.add
 bookmarks.edit
 bookmarks.remove
+```
+
+The following destructive method is canary/cleanup-only, never automatic rollback:
+
+```text
+canvases.delete
 ```
 
 When Lists are enabled, the optional family is:
@@ -411,7 +479,10 @@ Apply these corrections to the parent rollout plan:
 - WR-A0 excludes dynamic Canvas status and all Workflow/private/message/history/join/invite methods.
 - WR-A1 manifest begins from §7 and removes optional scopes not proven necessary; it adds a one-shot apply lock using existing host patterns only.
 - WR-C0 creates one new public inert canary channel; it does not adopt `#new-channel` or another existing room.
-- WR-SURF1 proves static channel-read-only Home and optional app-owned/channel-read-only Radar; Control Room remains dynamic truth.
+- WR-SURF1 uses standalone-first read-shared Home; an attached channel-tabbed Canvas is a separately proven canary path, not fallback.
+- WR-SURF1 treats failed/ambiguous create or access as an exact object effect and forbids a second Canvas until reconciliation.
+- WR-SURF1 may use `canvases.delete` only for an exact disposable canary or separate accepted cleanup; never automatic rollback.
+- WR-SURF1 proves optional app-owned/channel-read-only Radar when enabled; Control Room remains dynamic truth.
 - WR-D0/WR-D1 remain separate Agent Relay/AD-DLG2 work and receive no Workroom Projector scope.
 - WR-WF is optional/deferred and cannot block the first pilot absent a later Sol ruling.
 - WR-P1 selections must satisfy public-internal audience safety.
@@ -419,7 +490,26 @@ Apply these corrections to the parent rollout plan:
 
 ---
 
-## 11. No other change
+## 11. Required Canvas safety falsifiers
+
+Later WR-A0/WR-A1/WR-SURF1 tests and canaries must kill at least:
+
+```text
+channel_id create is treated as read-only at birth
+access-set failure triggers a second standalone create
+ambiguous create is retried without exact reconciliation
+write-exposed attached Canvas is bound as Home
+missing access readback is treated as success
+free-plan standalone refusal falls back to attached create
+canvases.delete is used as automatic rollback
+ambiguous delete permits replacement create
+manual native tab is treated as identity or acceptance
+Home Canvas carries dynamic runtime/turn/completion truth
+```
+
+---
+
+## 12. No other change
 
 The parent architecture remains controlling for:
 
