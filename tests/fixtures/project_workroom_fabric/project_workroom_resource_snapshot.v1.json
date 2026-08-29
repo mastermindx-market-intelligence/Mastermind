@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.project_workroom_resource_snapshot.v1",
-  "observed_at": "2026-08-29T14:05:55-04:00",
+  "observed_at": "2026-08-29T19:23:08-04:00",
   "workspace_id": "T0BRD2AQXQV",
   "complete_for_responsibility_refs": [
     "WS:AGENT-OS",
@@ -14,7 +14,7 @@
     {
       "responsibility_ref": "WS:AGENT-OS",
       "linear_project_id": "3e16680c-5549-485d-a056-e07d69eaaf43",
-      "linear_project_url": "https://linear.app/mastermindx/project/ws:agent-os-mastermind-agent-os-97b24b0deaa0",
+      "linear_project_url": "https://linear.app/mastermindx/project/wsagent-os-mastermind-agent-os-9481d4d2ca74",
       "control_room_url": null,
       "linear_source_ref": "linear.project:3e16680c-5549-485d-a056-e07d69eaaf43",
       "control_room_source_ref": null
@@ -22,7 +22,7 @@
     {
       "responsibility_ref": "WS:BIOCATALYST-CORE-PRODUCT",
       "linear_project_id": "4c6706cb-edff-48f2-abcd-0c7045f1723b",
-      "linear_project_url": "https://linear.app/mastermindx/project/ws:biocatalyst-core-product-biocatalyst-core-product-1a64bcf3f058",
+      "linear_project_url": "https://linear.app/mastermindx/project/wsbiocatalyst-core-product-biocatalyst-core-product-98a65ee3d43a",
       "control_room_url": null,
       "linear_source_ref": "linear.project:4c6706cb-edff-48f2-abcd-0c7045f1723b",
       "control_room_source_ref": null
@@ -30,7 +30,7 @@
     {
       "responsibility_ref": "WS:CHAIRMAN-CONTROL-ROOM",
       "linear_project_id": "0cd5fc91-db1d-4f18-a3d1-3a3a4433f226",
-      "linear_project_url": "https://linear.app/mastermindx/project/ws:chairman-control-room-chairman-control-room-6c813b5d815d",
+      "linear_project_url": "https://linear.app/mastermindx/project/wschairman-control-room-chairman-control-room-d16bb6189090",
       "control_room_url": null,
       "linear_source_ref": "linear.project:0cd5fc91-db1d-4f18-a3d1-3a3a4433f226",
       "control_room_source_ref": null
@@ -38,7 +38,7 @@
     {
       "responsibility_ref": "WS:FINANCIAL-INTELLIGENCE-FABRIC",
       "linear_project_id": "2bbb6e6b-8394-4c35-8089-2fd673560e99",
-      "linear_project_url": "https://linear.app/mastermindx/project/ws:financial-intelligence-fabric-financial-intelligence-fabric-c63001e9bc5b",
+      "linear_project_url": "https://linear.app/mastermindx/project/wsfinancial-intelligence-fabric-financial-intelligence-fabric-0648e0cdeb4c",
       "control_room_url": null,
       "linear_source_ref": "linear.project:2bbb6e6b-8394-4c35-8089-2fd673560e99",
       "control_room_source_ref": null
@@ -46,7 +46,7 @@
     {
       "responsibility_ref": "WS:RATES-INFLATION-COMMAND",
       "linear_project_id": "ef62f66d-d4c2-4b46-9b48-13722dd57a65",
-      "linear_project_url": "https://linear.app/mastermindx/project/ws:rates-inflation-command-rates-and-inflation-command-b20f1395473c",
+      "linear_project_url": "https://linear.app/mastermindx/project/wsrates-inflation-command-rates-and-inflation-command-9cae11cd2296",
       "control_room_url": null,
       "linear_source_ref": "linear.project:ef62f66d-d4c2-4b46-9b48-13722dd57a65",
       "control_room_source_ref": null
@@ -54,11 +54,11 @@
     {
       "responsibility_ref": "WS:STOCK-IDENTITY",
       "linear_project_id": "bbc7fd3f-c98b-47f9-9edb-8a6d749545a5",
-      "linear_project_url": "https://linear.app/mastermindx/project/ws:stock-identity-stock-identity-3b74816066e9",
+      "linear_project_url": "https://linear.app/mastermindx/project/wsstock-identity-stock-identity-50dc2f74951e",
       "control_room_url": null,
       "linear_source_ref": "linear.project:bbc7fd3f-c98b-47f9-9edb-8a6d749545a5",
       "control_room_source_ref": null
     }
   ],
-  "observation_hash": "1b6eb4f27ee76aa43926ba457eeabbf1e1b55f4ef3d686e5a7c8b78a6cbf9b8f"
+  "observation_hash": "4464bdf459e3d795aaca6305baad016ecbbf03511d58704ea9748eb75aaef18a"
 }
