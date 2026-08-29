@@ -37,6 +37,11 @@ function normalizedReadyState() {
   return "complete";
 }
 
+function canonicalConversationIdentity() {
+  const path = location.pathname.endsWith("/") ? location.pathname.slice(0, -1) : location.pathname;
+  return `${location.origin.toLowerCase()}${path}`;
+}
+
 function authState(targetPresent, composerAvailable) {
   if (location.pathname.startsWith("/auth/") || location.pathname === "/login") {
     return true;
@@ -59,7 +64,7 @@ async function buildProbe(expectedConversationFingerprint = null) {
   const generationActive = firstMatch(ACTIVE_SELECTORS);
   const providerErrorPresent = firstMatch(ERROR_SELECTORS);
   const conversationFingerprint = targetPresent
-    ? await sha256Hex(`${location.origin}${location.pathname}`)
+    ? await sha256Hex(canonicalConversationIdentity())
     : null;
   const exactConversationLoaded =
     targetPresent &&
