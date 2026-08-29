@@ -285,7 +285,7 @@ def write_new_private_file(
     uid: int,
     gid: int,
     mode: int,
-) -> None:
+) -> _CreatedFile:
     """Create one final inode with C1's O_EXCL pattern and self-clean failures."""
     path = Path(path)
     if not path.is_absolute() or not payload or len(payload) > 64 * 1024:
@@ -349,6 +349,7 @@ def write_new_private_file(
         if identity is not None:
             _rollback_created((identity,))
         raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+    return identity
 
 
 def _canonical_json_bytes(document: Mapping[str, object]) -> bytes:
@@ -830,14 +831,15 @@ async def _enroll(*, bot_user_id: str, stdin: BinaryIO) -> dict[str, object]:
                 mode=0o400,
             )
         )
-        write_new_private_file(
-            PLIST_PATH,
-            render_plist(bot_user_id=bot_user_id, release_sha=release_sha),
-            uid=PLIST_UID,
-            gid=PLIST_GID,
-            mode=0o644,
+        absolute_created.append(
+            write_new_private_file(
+                PLIST_PATH,
+                render_plist(bot_user_id=bot_user_id, release_sha=release_sha),
+                uid=PLIST_UID,
+                gid=PLIST_GID,
+                mode=0o644,
+            )
         )
-        absolute_created.append(_file_identity(PLIST_PATH))
         _validate_existing(
             binding,
             bot_user_id=bot_user_id,

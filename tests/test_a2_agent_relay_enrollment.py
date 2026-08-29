@@ -335,6 +335,58 @@ def test_failed_plist_write_rolls_back_only_files_created_by_invocation(
     assert unrelated.read_bytes() == b"preserve"
 
 
+def test_enroll_rollback_refuses_replaced_plist_and_cleans_bound_files(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    _release_sha, paths, _qualifications = _install_operation_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    token_path, config_path, plist_path = paths
+    real_write = enrollment.write_new_private_file
+    replacement_identity: tuple[int, int] | None = None
+
+    def write_then_replace(path, payload, *, uid, gid, mode):
+        nonlocal replacement_identity
+        created = real_write(path, payload, uid=uid, gid=gid, mode=mode)
+        original = path.stat()
+        path.unlink()
+        path.write_bytes(payload)
+        path.chmod(mode)
+        replacement = path.stat()
+        replacement_identity = (replacement.st_dev, replacement.st_ino)
+        assert replacement_identity != (original.st_dev, original.st_ino)
+        assert replacement.st_uid == uid
+        assert replacement.st_gid == gid
+        return created
+
+    def refuse_disarmed_check():
+        raise enrollment.A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+
+    monkeypatch.setattr(enrollment, "write_new_private_file", write_then_replace)
+    monkeypatch.setattr(enrollment, "_assert_disarmed", refuse_disarmed_check)
+
+    with pytest.raises(
+        enrollment.A2EnrollmentError,
+        match="A2_ENROLLMENT_ROLLBACK_REFUSED",
+    ):
+        asyncio.run(
+            enrollment._enroll(  # noqa: SLF001
+                bot_user_id=BOT,
+                stdin=io.BytesIO((TOKEN + "\n").encode("ascii")),
+            )
+        )
+
+    surviving = plist_path.stat()
+    assert (surviving.st_dev, surviving.st_ino) == replacement_identity
+    assert plist_path.read_bytes() == enrollment.render_plist(
+        bot_user_id=BOT,
+        release_sha="b" * 40,
+    )
+    assert not token_path.exists()
+    assert not config_path.exists()
+
+
 def test_enroll_refuses_mutated_bound_token_during_readback(monkeypatch, tmp_path: Path):
     enrollment = _module()
     _release_sha, paths, _qualifications = _install_operation_fakes(
@@ -719,10 +771,11 @@ def test_enroll_rolls_back_bound_leaves_if_ancestor_moves_after_writes(
     real_write = enrollment.write_new_private_file
 
     def write_plist_then_swap(path, payload, *, uid, gid, mode):
-        real_write(path, payload, uid=uid, gid=gid, mode=mode)
+        created = real_write(path, payload, uid=uid, gid=gid, mode=mode)
         system_root.rename(original_root)
         (redirected_root / "config").mkdir(parents=True, mode=0o755)
         system_root.symlink_to(redirected_root, target_is_directory=True)
+        return created
 
     monkeypatch.setattr(enrollment, "write_new_private_file", write_plist_then_swap)
 
