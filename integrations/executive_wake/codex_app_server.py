@@ -13,7 +13,9 @@ from typing import Protocol, Sequence, runtime_checkable
 from control_plane.wake_dispatcher import (
     TransportOutcome,
     TransportReceipt,
+    WakeEffectUnknownError,
     WakeNudge,
+    WakePreSubmitError,
 )
 from control_plane.wake_events import utc_now_iso
 
@@ -110,27 +112,27 @@ class CodexAppServerWakeDispatcher:
                 opaque_ids=opaque_ids,
                 instruction=CODEX_WAKE_INSTRUCTION,
             )
-        except Exception:
+        except WakePreSubmitError as exc:
             return self._receipt(
-                TransportOutcome.FAILED,
-                "transport_failed",
+                exc.outcome,
+                exc.reason_code,
                 nudge_id=wake.nudge_id,
             )
+        except Exception as exc:
+            raise WakeEffectUnknownError(
+                "Codex turn/start effect is unknown after provider call began"
+            ) from exc
 
         if not isinstance(observation, CodexWakeDeliveryObservation):
-            return self._receipt(
-                TransportOutcome.FAILED,
-                "transport_failed",
-                nudge_id=wake.nudge_id,
+            raise WakeEffectUnknownError(
+                "Codex provider returned an untyped observation after possible write"
             )
         if (
             observation.native_handle != native_handle
             or observation.nudge_id != wake.nudge_id
         ):
-            return self._receipt(
-                TransportOutcome.FAILED,
-                "transport_failed",
-                nudge_id=wake.nudge_id,
+            raise WakeEffectUnknownError(
+                "Codex provider observation identity does not match the attempted nudge"
             )
         if observation.delivered:
             return self._receipt(
@@ -149,7 +151,6 @@ class CodexAppServerWakeDispatcher:
             "target_unavailable",
             nudge_id=wake.nudge_id,
         )
-
 
 __all__ = [
     "CODEX_WAKE_INSTRUCTION",

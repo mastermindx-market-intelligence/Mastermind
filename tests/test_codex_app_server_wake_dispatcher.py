@@ -6,7 +6,12 @@ import dataclasses
 
 import pytest
 
-from control_plane.wake_dispatcher import TransportOutcome, WakeNudge
+from control_plane.wake_dispatcher import (
+    TransportOutcome,
+    WakeEffectUnknownError,
+    WakeNudge,
+    WakePreSubmitError,
+)
 from control_plane.wake_transport import transport_implemented
 from integrations.executive_wake.codex_app_server import (
     CODEX_WAKE_INSTRUCTION,
@@ -121,25 +126,35 @@ def test_exact_bound_thread_confirmation_is_delivered():
     assert len(client.calls) == 1
 
 
-def test_provider_echo_mismatch_fails_closed_and_never_retries():
+def test_provider_echo_mismatch_is_effect_unknown_after_possible_write():
     client = _FakeClient(_observation(native_handle="wrong-thread"))
     dispatcher = CodexAppServerWakeDispatcher(client)
 
-    receipt = _nudge(dispatcher, _wake())
-
-    assert receipt.outcome is TransportOutcome.FAILED
-    assert receipt.reason_code == "transport_failed"
+    with pytest.raises(WakeEffectUnknownError, match="identity"):
+        _nudge(dispatcher, _wake())
     assert len(client.calls) == 1
 
 
-def test_provider_timeout_is_failed_and_never_causes_second_call():
+def test_provider_timeout_is_effect_unknown_and_never_terminal_failed():
     client = _FakeClient(_observation(), fail=TimeoutError("provider timeout"))
+    dispatcher = CodexAppServerWakeDispatcher(client)
+
+    with pytest.raises(WakeEffectUnknownError, match="effect is unknown"):
+        _nudge(dispatcher, _wake())
+    assert len(client.calls) == 1
+
+
+def test_typed_pre_submit_absence_can_terminalize_target_unavailable():
+    client = _FakeClient(
+        _observation(),
+        fail=WakePreSubmitError("thread absent before turn/start"),
+    )
     dispatcher = CodexAppServerWakeDispatcher(client)
 
     receipt = _nudge(dispatcher, _wake())
 
-    assert receipt.outcome is TransportOutcome.FAILED
-    assert receipt.reason_code == "transport_failed"
+    assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
+    assert receipt.reason_code == "target_unavailable"
     assert len(client.calls) == 1
 
 

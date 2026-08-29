@@ -796,7 +796,10 @@ def test_request_without_delivery_is_pending_retryable():
     attempted = delivery_record(
         oid, LedgerPhase.DELIVERY_ATTEMPT, attempt_n=1, route=route
     )
-    assert reconstruct_status(oid, [requested, attempted], route=route) is ObligationStatus.ATTEMPTED
+    assert (
+        reconstruct_status(oid, [requested, attempted], route=route)
+        is ObligationStatus.RECONCILIATION_REQUIRED
+    )
     with pytest.raises(WakeDispatchError, match="no delivery evidence"):
         already_delivered_receipt(obligation, route, found=requested)
 
