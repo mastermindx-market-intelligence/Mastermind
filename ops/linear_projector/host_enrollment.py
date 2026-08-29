@@ -542,6 +542,8 @@ def main(
             print("LINEAR_PROJECTOR_HOST_PREPARED", file=out)
             return 0
         if parsed.command == "enroll":
+            if stdin is None and _tty_fd(input_stream) is None:
+                raise ProjectorHostError("PROJECTOR_HOST_INPUT_REFUSED")
             secret = read_secret_from_stdin(input_stream)
             enroll(
                 client_id=parsed.client_id,
