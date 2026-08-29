@@ -4,7 +4,7 @@ Checked-in Git identity is logical only:
 
 - ``session_alias`` — Mastermind's stable executive-target name
 - ``target_seat`` — chairman | ceo | coo
-- ``reasoning_surface`` — who reasons (chatgpt-sol, codex, workspace-agent, human)
+- ``reasoning_surface`` — who reasons (chatgpt-sol, codex, claude, workspace-agent, human)
 - ``wake_transport`` — how a nudge is delivered (grok-computer, chatgpt-gui, ...)
 
 Native/provider handles, accounts, and Codex App Server thread ids are
@@ -58,7 +58,7 @@ _WORKSTREAM_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 BINDING_ID_RE = re.compile(r"^bind-[a-z0-9][a-z0-9._-]{7,63}$")
 
 REASONING_SURFACES = frozenset(
-    {"chatgpt-sol", "codex", "workspace-agent", "human"}
+    {"chatgpt-sol", "codex", "claude", "workspace-agent", "human"}
 )
 
 

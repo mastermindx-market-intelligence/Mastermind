@@ -778,3 +778,55 @@ kbd {
   .ccr-stamps { grid-template-columns: 1fr 1fr; }
   .ccr-alarm { grid-template-columns: 1fr; }
 }
+
+/* remote read-only projection ------------------------------------------- */
+html[data-control-room-mode="remote-read-only"] {
+  overflow-x: hidden;
+}
+html[data-control-room-mode="remote-read-only"] .ccr-remote-layout {
+  grid-template-columns: var(--sidebar) minmax(0,1fr);
+  max-width: var(--max);
+  margin: 0 auto;
+}
+html[data-control-room-mode="remote-read-only"] .ccr-main {
+  width: 100%;
+  min-width: 0;
+}
+html[data-control-room-mode="remote-read-only"] .ccr-remote-badge {
+  display: inline-flex;
+  color: var(--slate-ink);
+  border-color: color-mix(in srgb, var(--slate) 38%, var(--line));
+  background: var(--slate-wash);
+}
+html[data-control-room-mode="remote-read-only"] .ccr-stamps dd {
+  overflow-wrap: anywhere;
+}
+html[data-control-room-mode="remote-read-only"] .ccr-detail-drawer {
+  transform: none;
+  visibility: hidden;
+}
+html[data-control-room-mode="remote-read-only"] .ccr-detail-drawer.is-open {
+  visibility: visible;
+}
+
+@media (max-width: 1600px) {
+  html[data-control-room-mode="remote-read-only"] .ccr-source-pulse {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  html[data-control-room-mode="remote-read-only"] .ccr-remote-badge {
+    display: none;
+  }
+  html[data-control-room-mode="remote-read-only"] .ccr-remote-layout {
+    display: block;
+    grid-template-columns: minmax(0,1fr);
+  }
+  html[data-control-room-mode="remote-read-only"] .ccr-nav-group {
+    grid-template-columns: repeat(3,minmax(0,1fr));
+  }
+  html[data-control-room-mode="remote-read-only"] .ccr-stamps {
+    grid-template-columns: minmax(0,1fr);
+  }
+}

@@ -80,6 +80,19 @@ completion. Reviews against original outcome, not merely implementation quality.
 Use when Chairman intent authorizes Sol to send bounded work to Fable/another operator or,
 once production-proven, to create one Executive CEO request.
 
+### `WORKER_AVENUE_ROUTING.md`
+Mandatory companion for every Chairman-mediated/manual Slack worker handoff or routing
+recommendation. Sol states a preferred capability avenue, never autonomously chooses the
+quota-bearing account/session. For manual Slack routing it supplies the closed Chairman-facing
+avenue vocabulary, distinguishes capacity-selectable pre-START receiver binding from
+exact-session-required continuation, and takes precedence over generic worker/model examples on
+account binding.
+
+### `WATCHER_ACTION_LOOP.md`
+Use whenever Sol arms/operates a watcher/condition-watch for a worker or COO dialogue, or a
+scheduled watcher detects a material return. It prevents a notification-only watcher from stopping
+at “Sol action required” when current authority and gates already permit same-carrier CEO action.
+
 ### `RECONCILE_STATE.md`
 Use when sources disagree, a modifying response is ambiguous, transport reconnects, state is
 stale, a duplicate appears, or a projection may be false-green.
@@ -108,6 +121,8 @@ routing receipt including `WHY NOT FABLE` or `WHY FABLE`.
 
 When a loaded skill commissions, reviews, continues or closes a worker dialogue, apply these
 universal source laws at the same protected commit. Do not substitute older pasted copies.
+For Chairman-mediated/manual Slack delegation, also load `WORKER_AVENUE_ROUTING.md` from that
+same commit; its account-binding and Chairman-facing avenue vocabulary is the more specific law.
 
 ## Hard laws shared by every skill
 
@@ -136,6 +151,22 @@ universal source laws at the same protected commit. Do not substitute older past
 16. Capability disputes are tool-first. When a procedure requires an available native watcher/task/
     automation, inspect the actual current tool surface and attempt the bounded create/arm action
     before declaring the capability unavailable; connector push limitations alone are not proof.
+17. A Sol-owned watcher is not a notification-only watcher when current Chairman-authorized scope
+    and gates permit action. On a qualifying return, re-pin current procedure, adjudicate the return,
+    execute the lawful same-carrier Sol edge, then report; escalate without acting only at a genuine
+    Chairman-only/new-authority/missing-gate boundary.
+18. Chairman-mediated/manual Slack delegation recommends an avenue, not a quota account. Unless the
+    current live Chairman directive explicitly names the receiver, Sol must state one
+    `PREFERRED_AVENUE` from `Fable`, `Opus`, `Grok`, `CTO Sol`, or `Terra` and leave the concrete
+    account/session binding to the Chairman. Prefer Terra/CTO Sol when sufficient; Fable remains
+    reserved for the hardest principal-level work.
+19. Manual receiver binding is explicit. `CAPACITY_SELECTABLE` ordinary new work may receive a
+    Chairman `PRESTART_REBIND` to another eligible concrete quota account before `START` while the
+    operation key, carrier, scope and logical responsibility stay unchanged; the newest explicit live
+    Chairman assignment wins and a numbered-account mismatch alone is not a blocker. Use
+    `EXACT_SESSION_REQUIRED` when the provider conversation/session itself is part of the target.
+    After `START`, the concrete runtime binding is sticky until canonically reconciled; never silently
+    hop accounts, and `EFFECT_UNKNOWN` always blocks receiver change.
 
 ## Modification handshake
 
