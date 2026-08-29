@@ -79,6 +79,60 @@ Do not end the turn saying the watcher is “planned,” “should be possible,�
 
 The temporary scheduled watcher must remain bounded to the exact current operation/carrier. On each run it reads that exact carrier using the scheduled surface's available connector/read capability, ignores the baseline and older messages, and reacts only to the first qualifying opposite-side reply for the current operation. If that scheduled execution surface cannot access the carrier at run time, report that concrete limitation; do not infer it merely from the interactive connector lacking push.
 
+### 3.1 Resource classes — detect cheaply, reason only on change
+
+Classify the thing doing the waiting rather than treating every poll as equivalent.
+
+**Class E — event-driven / passive wait.** A provider/webhook/native waiter or deterministic blocking tool that does not re-invoke a reasoning model on unchanged state. Prefer this whenever available.
+
+**Class T — tool-only polling.** A deterministic process may poll at a lawful API cadence, but unchanged samples are suppressed and do not instantiate a new reasoning-model turn. Tight tool polling never justifies tight model-wake polling.
+
+**Class M — reasoning-model scheduled polling.** A Task/Automation/background completion that invokes Fable/Opus/Claude/Codex/Sol merely to determine whether something changed.
+
+- **Default interval: 60 minutes.**
+- **Absolute minimum interval: 15 minutes** unless a later explicit source-law exception names a safety-critical condition.
+- An urgent Class-M watcher may begin at 15 minutes, but `NO_MATERIAL_CHANGE` backs off `15m -> 30m -> 60m` and remains at 60 minutes until a material event resets the cycle.
+- Once only an external dependency remains, the reasoning session yields instead of running `check -> no change -> wait a few seconds -> check again` inside one long turn.
+- A `NO_MATERIAL_CHANGE` wake performs one bounded exact-carrier/status delta read and exits. It does not redo repo archaeology, launch subagents, rewrite summaries, or manufacture progress.
+
+**Fable/Opus/Claude/Codex/Sol reasoning sessions are principals, not polling daemons.**
+
+### 3.2 Watcher prompt is attention, never a surviving scope fence
+
+A **watcher prompt is not a scope fence**. It may narrow what the watcher inspects and what counts as a qualifying event, but it **cannot override a later valid same-operation carrier edge** or the current protected procedure governing that operation.
+
+A watcher prompt must therefore never encode an unconditional instruction such as “do not locate, ACK, watch, START, execute, continue, or act” that survives after the watcher detects a qualifying carrier event. That shape turns an attention bridge into a self-blocking control instruction.
+
+On a qualifying carrier event for the current operation:
+
+1. fresh-read the exact carrier and identify the latest valid semantic edge;
+2. if the watcher is running as a turn of the exact bound reasoning session, **re-enter normal worker procedure** for that same child: reconcile identity/binding, ACK when pickup is owed, arm/update the lawful continuation path, emit a separate truthful START when gates clear, or return the required typed blocker;
+3. if the watcher runs in a sidecar/scheduled surface that cannot safely perform the interactive procedure, wake/foreground the exact bound session or return the concrete watcher/runtime inability; the sidecar's limited scope does not bind the subsequently awakened interactive session;
+4. do not create a new operation, carrier, receiver, retry, branch, PR, lifecycle state or authority merely because the watcher fired.
+
+A watcher that detects a valid `CONTINUE`, assignment, ruling, repair request or other action-required edge and then only says “attention required” while the same exact reasoning session could continue is the **notification-only anti-pattern**. The correct path is detection -> re-entry -> fresh procedure -> same-carrier action or truthful blocker.
+
+### 3.3 Read-before-substantive-write carrier freshness fence
+
+Pickup ACK may remain ACK-before-full-read when the controlling commission explicitly requires that order; the ACK asserts receipt/current identity only and no substantive gate or execution state.
+
+Before any later substantive/stateful reciprocal write—including `START`, material `PROGRESS`, `BLOCKED`, `DECISION_REQUEST`, `RESULT`, CI/proof completion, `CONTINUE`, `RULING`, repair, `PARK`, or terminal `STOP`—the sender must:
+
+1. **Fresh-read the exact bound carrier/thread in the same interactive turn.**
+2. Perform that read **after the latest local evidence-producing action** the outbound message is about.
+3. Compare the result with the last consumed baseline and consume/adjudicate every unseen opposite-side semantic edge before composing the outbound message.
+4. Only then write the substantive edge to the same lawful carrier.
+
+An armed watcher, a `WATCH_ARMED` receipt, absence of a notification, local memory, or “I would have been woken if the other side replied” **never satisfies this freshness fence**.
+
+If the carrier cannot be freshly read, do not assert stale state. Preserve the operation and return the accepted read/transport blocker where possible; do not blind retry or fail over.
+
+### 3.4 One-watcher discipline and missed-fire behavior
+
+For one side of one reciprocal dialogue there may be at most one active watcher for the same `side + operation_key + exact carrier + purpose`. Reuse/update an existing equivalent watcher rather than stacking another one.
+
+If multiple expected Class-M fire opportunities pass with no observed run while the dialogue remains nonterminal, watcher silence is degraded evidence, not proof of no change. Fresh-read the exact carrier before the next substantive action; do not compensate by shortening below the resource floor.
+
 Before returning `WATCH_UNAVAILABLE`, the worker/session must therefore reach an actual absent-tool or failed-create result under the sequence above. State which mechanism/surface was checked and the exact failure instead of disappearing.
 
 After receiving a nonterminal Sol continuation, the worker must reread the lawful thread/context, continue only the same authorized child operation, and re-arm its watcher after its next nonterminal return.
@@ -175,6 +229,8 @@ This law exists because a returned worker result was left waiting after Sol deci
 
 A later production incident exposed the reciprocal arming ambiguity: a session equated “Slack has no push subscription” with “watching is unavailable” even though its host surface could create a native scheduled watcher. A second session then stalled while reasoning about how to create that watcher instead of invoking the available host-native create/arm path. The universal repair is tool-first and bounded: attempt the actual capability, then return a concrete receipt or failure.
 
+The 2026-08-29 Codex fleet incident added a third failure class: native Codex task heartbeats were armed with an “attention-only / do not ACK/START/execute” prompt and continued obeying that self-blocking clause even after valid same-operation `SOL-DIR-PRO` continuations existed. Exact tasks were alive but obligations remained unconsumed until manually foregrounded. The repair is explicit: watcher prompts detect; they do not become surviving scope fences. A qualifying event re-enters the exact bound session's normal procedure or truthfully reports that re-entry is unavailable.
+
 Universal repair:
 
-> **Every reciprocal dialogue loop gets an explicit terminal edge, and every promised continuation path must actually be armed. Never require another agent to infer completion or watcher availability from silence.**
+> **Every reciprocal dialogue loop gets an explicit terminal edge, every promised continuation path must actually be armed, watcher prompts never outrank later valid carrier edges, and a qualifying watcher event re-enters normal procedure instead of becoming notification-only dead air.**
