@@ -50,12 +50,13 @@ The message must explicitly state all of:
 
 - the current child wave is terminal;
 - the worker must stop work on that child operation;
-- the worker must disarm its temporary watcher/wait path;
-- no further reply is required unless watcher shutdown itself fails or the current transport contract requires one exact terminal consumption receipt;
+- the worker must remove/disarm the **exact child operation + carrier source** from its temporary watcher/wait path;
+- if the underlying watcher resource also serves a permanent seat inbox, principal lane, or sibling child sources, the child STOP must **not** pause, delete, cancel or disable that aggregate resource;
+- no further reply is required unless child-source removal itself fails or the current transport contract requires one exact terminal consumption receipt;
 - this STOP does not authorize a next child wave;
 - any independent next wave requires fresh lawful operation identity, carrier reconciliation, commission/pickup and reciprocal watcher setup.
 
-A parent program may remain active while one child operation is terminal.
+A parent program may remain active while one child operation is terminal. A principal/seat watcher resource may likewise remain active while one or all child sources are terminal.
 
 ## 3. Worker/COO reciprocal behavior
 
@@ -107,8 +108,9 @@ On a qualifying carrier event for the current operation:
 
 1. fresh-read the exact carrier and identify the latest valid semantic edge;
 2. if the watcher is running as a turn of the exact bound reasoning session, **re-enter normal worker procedure** for that same child: reconcile identity/binding, ACK when pickup is owed, arm/update the lawful continuation path, emit a separate truthful START when gates clear, or return the required typed blocker;
-3. if the watcher runs in a sidecar/scheduled surface that cannot safely perform the interactive procedure, wake/foreground the exact bound session or return the concrete watcher/runtime inability; the sidecar's limited scope does not bind the subsequently awakened interactive session;
-4. do not create a new operation, carrier, receiver, retry, branch, PR, lifecycle state or authority merely because the watcher fired.
+3. if the watcher runs in a sidecar/scheduled surface that cannot safely perform the interactive procedure, prefer an accepted **exact-native-task wake/resume action** when the current host/provider surface exposes one. Bind that nudge only to the verified current RuntimeBinding/native task; never choose the newest visible tab/session and never fall back to a different task. The native nudge is attention only: the awakened task must fresh-read the canonical carrier and perform normal procedure before any substantive act;
+4. if exact wake/resume is unavailable or the current RuntimeBinding cannot be proven, return the accepted `SESSION_LOST / RUNTIME_BINDING_RECONCILIATION_REQUIRED` or the concrete wake/runtime limitation rather than treating Slack delivery as consumption or silently failing over;
+5. do not create a new operation, carrier, receiver, retry, branch, PR, lifecycle state or authority merely because the watcher fired.
 
 A watcher that detects a valid `CONTINUE`, assignment, ruling, repair request or other action-required edge and then only says “attention required” while the same exact reasoning session could continue is the **notification-only anti-pattern**. The correct path is detection -> re-entry -> fresh procedure -> same-carrier action or truthful blocker.
 
@@ -137,9 +139,30 @@ Before returning `WATCH_UNAVAILABLE`, the worker/session must therefore reach an
 
 After receiving a nonterminal Sol continuation, the worker must reread the lawful thread/context, continue only the same authorized child operation, and re-arm its watcher after its next nonterminal return.
 
-After receiving terminal `STOP` / `ACCEPTED / STOP` / `CLOSED / STOP`, the worker must stop that child operation and disarm its temporary watcher. A terminal receipt, when required by the currently accepted transport schema, acknowledges consumption of STOP only; it does not create another wave.
+After receiving terminal `STOP` / `ACCEPTED / STOP` / `CLOSED / STOP`, the worker must stop that child operation and remove the exact child source from its temporary watcher/wait path. A terminal receipt, when required by the currently accepted transport schema, acknowledges consumption of STOP only; it does not create another wave.
 
 If the worker cannot maintain or enter the required watcher/wait path after the checks above, it must return the currently accepted typed blocker such as `WATCH_UNAVAILABLE` rather than disappear.
+
+### 3.5 Watcher resource lifetime and watched-source lifetime are distinct
+
+A temporary or combined watcher **resource** may observe several independent sources, for example:
+
+```text
+permanent seat inbox
+principal-lane carrier
+child A carrier
+child B carrier
+```
+
+Those source lifetimes are not the resource lifetime.
+
+- A terminal child STOP removes/disarms **only that exact child operation + carrier source**.
+- If the watcher resource also serves a permanent seat inbox, principal lane, or sibling sources, the **aggregate resource remains ACTIVE** after the child STOP. Do not pause/delete/cancel the whole heartbeat merely because one child ended.
+- **Zero remaining child sources is quiescent, not seat termination.** A permanent seat/principal inbox may continue observing for valid future assignment/continuation edges under its own authority.
+- The whole aggregate watcher resource may pause/stop only on explicit seat/principal deregistration, a terminal principal STOP, or an explicit watcher-removal order that targets the aggregate resource itself.
+- If removing child A's source fails, report `WATCH_STOP_FAILED` for child A, keep child A terminal, keep the aggregate resource ACTIVE, and continue observing child B/principal/seat sources. The leftover child A source is suppressed from producing a second wake and may not authorize a retry, successor or new wave.
+
+This is resource/attention discipline only. It creates no watcher registry, source database, seat lifecycle, queue or authority owner.
 
 ## 4. Critical anti-pattern
 
@@ -154,7 +177,8 @@ Required behavior:
 ```text
 SOL STOP — <child operation>
 Worker portion complete. This child wave is terminal.
-Disarm the temporary watcher. No next child wave is authorized.
+Remove this exact child source from the temporary watcher. No next child wave is authorized.
+Keep any independent seat/principal/sibling watcher sources active under their own contracts.
 Final CEO adjudication now occurs outside this child operation.
 ```
 
@@ -167,27 +191,29 @@ For every watcher-enabled handoff expected to return:
 - the commissioning side has a continuation path;
 - the executing side has a continuation path;
 - every nonterminal reply preserves the same current dialogue cycle;
-- every terminal reply explicitly closes that cycle and tells the counterpart to stop waiting.
+- every terminal reply explicitly closes that cycle and tells the counterpart to stop waiting on that child source.
 
 A watcher owns **no** Job, Attempt, Worker, completion, retry, provider choice, queue, authority, current work status, durable session identity or next-wave right.
 
-Do not create one watcher daemon/database/cron/automation per handoff **as a second control plane**. This prohibition is about giving a watcher durable semantic/lifecycle authority; it does **not** forbid the explicitly temporary, non-authoritative host-native condition watcher described above. Such a bridge owns no lifecycle/cursor/inbox/retry/truth state, must stay bound to the exact current operation/carrier, and must be disarmed on terminal STOP.
+Do not create one watcher daemon/database/cron/automation per handoff **as a second control plane**. This prohibition is about giving a watcher durable semantic/lifecycle authority; it does **not** forbid the explicitly temporary, non-authoritative host-native condition watcher described above. Such a bridge owns no lifecycle/cursor/inbox/retry/truth state. Child sources must be removed on terminal child STOP; an aggregate seat/principal watcher resource may remain active only under the independently valid source contracts described in §3.5.
 
-## 6. Watcher shutdown failure
+## 6. Watcher shutdown / child-source removal failure
 
-If either side cannot actually disable its watcher:
+If either side cannot actually remove/disable the watcher state targeted by the terminal edge:
 
-1. do not pretend it is disabled;
-2. explicitly report `WATCH_STOP_FAILED` or the currently accepted typed equivalent;
+1. do not pretend it is removed/disabled;
+2. explicitly report `WATCH_STOP_FAILED` or the currently accepted typed equivalent for the exact child/source;
 3. keep the underlying child operation terminal;
 4. ensure the counterpart nevertheless receives the terminal STOP so it is not kept waiting;
-5. do not let the leftover watcher originate another wave, retry, merge, continuation or authority transition.
+5. if the watcher resource is aggregate, keep the aggregate resource ACTIVE and continue observing valid sibling/principal/seat sources;
+6. suppress the leftover terminal child source from generating another semantic wake;
+7. do not let the leftover child source originate another wave, retry, merge, continuation or authority transition.
 
-Watcher cleanup failure is an attention/transport defect, not permission to reopen completed work.
+Watcher cleanup failure is an attention/transport defect, not permission to reopen completed work or to disable unrelated continuation sources.
 
 ## 7. New-wave law
 
-Terminal completion of child operation A closes A's watcher cycle.
+Terminal completion of child operation A closes A's watcher **source/cycle**.
 
 Independent child operation B requires, under the currently accepted carrier vocabulary:
 
@@ -197,9 +223,9 @@ Independent child operation B requires, under the currently accepted carrier voc
 4. explicit commission;
 5. fresh pickup acknowledgement (`PICKUP_ACK`, `ACK <operation_key>`, or the exact currently accepted typed equivalent — never invent a message type the live contract does not support);
 6. a separate explicit start-of-work receipt/state where the current carrier contract supports it;
-7. newly armed reciprocal continuation paths/watchers.
+7. a fresh B source registered in the lawful continuation resource/path.
 
-An old watcher, old thread state, provider session, worker seat or prior STOP never implicitly authorizes B.
+An aggregate permanent seat/principal watcher resource may be reused as the **resource** for B if current law permits it, but an old child A source, old thread state, provider session, worker seat or prior STOP never implicitly authorizes B.
 
 Where the current machine schema has not yet implemented a distinct typed `START`, the human/session procedure must still keep pickup acknowledgement and actual execution start conceptually separate; do not claim a runtime `START` receipt exists when it does not.
 
@@ -210,10 +236,11 @@ Before any watcher-enabled Sol or worker session considers the current dialogue/
 - Is the latest state explicitly terminal or nonterminal?
 - If nonterminal, did I tell the counterpart the exact next action?
 - If terminal, did I explicitly send `STOP`, `ACCEPTED / STOP`, or `CLOSED / STOP`?
-- Did I tell the counterpart to disarm its watcher/wait path?
-- Did I disarm my own temporary watcher, or explicitly report watcher shutdown failure?
-- Is anyone still saying or semantically indicating “awaiting your ruling/return”?
-- Am I accidentally using an old watcher/session/thread as authorization for a new child operation?
+- Did I tell the counterpart to remove/disarm the exact terminal child source?
+- Did I remove/disarm my own terminal child source, or explicitly report watcher shutdown/source-removal failure?
+- If this is an aggregate watcher, did I preserve independent seat/principal/sibling sources instead of pausing the whole resource?
+- Is anyone still saying or semantically indicating “awaiting your ruling/return” for the terminal child?
+- Am I accidentally using an old watcher source/session/thread as authorization for a new child operation?
 
 If any answer is unresolved, the dialogue is **not cleanly closed**.
 
@@ -231,6 +258,8 @@ A later production incident exposed the reciprocal arming ambiguity: a session e
 
 The 2026-08-29 Codex fleet incident added a third failure class: native Codex task heartbeats were armed with an “attention-only / do not ACK/START/execute” prompt and continued obeying that self-blocking clause even after valid same-operation `SOL-DIR-PRO` continuations existed. Exact tasks were alive but obligations remained unconsumed until manually foregrounded. The repair is explicit: watcher prompts detect; they do not become surviving scope fences. A qualifying event re-enters the exact bound session's normal procedure or truthfully reports that re-entry is unavailable.
 
+Independent adversarial review of that repair exposed a fourth incident-causal defect: a combined Codex heartbeat serving a permanent seat inbox plus child sources was paused wholesale when one child reached terminal STOP. That conflated child-source lifetime with aggregate watcher-resource lifetime and caused a later valid Exec Ops directive to go unseen. The repair is equally explicit: child STOP removes the child source; it does not terminate the seat/principal watcher resource or sibling sources.
+
 Universal repair:
 
-> **Every reciprocal dialogue loop gets an explicit terminal edge, every promised continuation path must actually be armed, watcher prompts never outrank later valid carrier edges, and a qualifying watcher event re-enters normal procedure instead of becoming notification-only dead air.**
+> **Every reciprocal dialogue loop gets an explicit terminal edge, every promised continuation path must actually be armed, watcher prompts never outrank later valid carrier edges, qualifying events re-enter normal procedure, and child-source termination never silently kills an independently valid aggregate seat/principal watcher resource.**
