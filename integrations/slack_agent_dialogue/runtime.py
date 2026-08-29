@@ -3,7 +3,7 @@
 The runtime owns no dialogue, worker, retry, Wake, queue, or durable lifecycle
 state. It reads one host-provisioned token exactly once at startup, injects one
 Slack client into the existing V1 and V2 engines, and serves their closed
-request surface over one owner-private Unix-domain socket.
+request surface over one group-reachable, peer-credentialled Unix socket.
 """
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ from integrations.slack_agent_dialogue.slack_web_api import (
 )
 
 _TOKEN_MAX_BYTES = 2048
+AGENT_RELAY_SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
+EXECUTIVE_CLIENT_UID = 450
 _RUNTIME_ERROR_CODES = frozenset(
     {
         "RUNTIME_INVALID",
@@ -89,14 +91,27 @@ class RelayRuntimeConfig:
     allowed_parent_user_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        try:
+            socket_path = Path(self.socket_path)
+        except (TypeError, ValueError):
+            raise RelayRuntimeError("RUNTIME_INVALID") from None
+        if (
+            socket_path != AGENT_RELAY_SOCKET_PATH
+            or self.allowed_peer_uids != (EXECUTIVE_CLIENT_UID,)
+        ):
+            raise RelayRuntimeError("RUNTIME_INVALID")
+
         token_file = Path(self.token_file)
         if not token_file.is_absolute() or "\x00" in os.fspath(token_file):
             raise RelayRuntimeError("RUNTIME_INVALID")
         object.__setattr__(self, "token_file", token_file)
 
         service_config = ServiceConfig(
-            socket_path=Path(self.socket_path),
+            socket_path=socket_path,
             allowed_peer_uids=self.allowed_peer_uids,
+            socket_parent_mode=0o710,
+            socket_mode=0o660,
+            socket_group_gid=os.getegid(),
         )
         object.__setattr__(self, "socket_path", service_config.socket_path)
         DialoguePolicy(
@@ -185,6 +200,9 @@ def build_service(
         ServiceConfig(
             socket_path=config.socket_path,
             allowed_peer_uids=config.allowed_peer_uids,
+            socket_parent_mode=0o710,
+            socket_mode=0o660,
+            socket_group_gid=os.getegid(),
         ),
         DialogueEngine(policy, client, authority_policy=authority),
         engine_v2=DialogueEngineV2(policy, client, authority_policy=authority),
@@ -234,6 +252,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
+    "AGENT_RELAY_SOCKET_PATH",
+    "EXECUTIVE_CLIENT_UID",
     "PrivateRelayAuthorityPolicy",
     "RelayRuntimeConfig",
     "RelayRuntimeError",

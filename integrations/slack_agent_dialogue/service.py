@@ -1,4 +1,4 @@
-"""Command-scoped AF_UNIX service/client for Active-Session Dialogue A1.
+"""Command-scoped AF_UNIX service/client for Active-Session Dialogue.
 
 The service owns no token, lifecycle state, queue, cursor, or background loop.
 A caller composes it with an injected ``DialogueEngine`` for one bounded command
@@ -77,6 +77,9 @@ class ServiceConfig:
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     request_timeout_seconds: float = 15.0
+    socket_parent_mode: int = 0o700
+    socket_mode: int = 0o600
+    socket_group_gid: int | None = None
 
     def __post_init__(self) -> None:
         path = Path(self.socket_path)
@@ -104,6 +107,20 @@ class ServiceConfig:
             raise ValueError("max_response_bytes out of range")
         if not 0.1 <= self.request_timeout_seconds <= 120:
             raise ValueError("request_timeout_seconds out of range")
+        private_modes = (
+            self.socket_parent_mode == 0o700
+            and self.socket_mode == 0o600
+            and self.socket_group_gid is None
+        )
+        shared_modes = (
+            self.socket_parent_mode == 0o710
+            and self.socket_mode == 0o660
+            and isinstance(self.socket_group_gid, int)
+            and not isinstance(self.socket_group_gid, bool)
+            and self.socket_group_gid >= 0
+        )
+        if not private_modes and not shared_modes:
+            raise ValueError("socket reachability configuration is invalid")
 
 
 def _peer_uid(connection: socket.socket) -> int | None:
@@ -227,7 +244,7 @@ def _context_v2(value: Any) -> DialogueContextV2:
 
 
 class AgentDialogueService:
-    """Owner-only one-request-at-a-time service over injected dialogue engines."""
+    """Peer-authorized one-request-at-a-time service over injected engines."""
 
     def __init__(
         self,
@@ -244,16 +261,35 @@ class AgentDialogueService:
 
     def _prepare_socket(self) -> None:
         parent = self.config.socket_path.parent
-        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.config.socket_group_gid is None:
+            parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        else:
+            created = False
+            try:
+                parent.mkdir(
+                    mode=self.config.socket_parent_mode,
+                    parents=True,
+                    exist_ok=False,
+                )
+                created = True
+            except FileExistsError:
+                pass
+            if created:
+                parent.chmod(self.config.socket_parent_mode)
         info = parent.lstat()
         if (
             not stat.S_ISDIR(info.st_mode)
             or stat.S_ISLNK(info.st_mode)
             or info.st_uid != os.geteuid()
+            or (
+                self.config.socket_group_gid is not None
+                and info.st_gid != self.config.socket_group_gid
+            )
         ):
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
-        parent.chmod(0o700)
-        if stat.S_IMODE(parent.lstat().st_mode) != 0o700:
+        if self.config.socket_group_gid is None:
+            parent.chmod(0o700)
+        if stat.S_IMODE(parent.lstat().st_mode) != self.config.socket_parent_mode:
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
         try:
             socket_info = self.config.socket_path.lstat()
@@ -262,6 +298,13 @@ class AgentDialogueService:
         if (
             not stat.S_ISSOCK(socket_info.st_mode)
             or socket_info.st_uid != os.geteuid()
+            or (
+                self.config.socket_group_gid is not None
+                and (
+                    socket_info.st_gid != self.config.socket_group_gid
+                    or stat.S_IMODE(socket_info.st_mode) != self.config.socket_mode
+                )
+            )
         ):
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
         probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -287,8 +330,15 @@ class AgentDialogueService:
                 path=str(self.config.socket_path),
                 limit=self.config.max_request_bytes + 1,
             )
-            self.config.socket_path.chmod(0o600)
-            if stat.S_IMODE(self.config.socket_path.lstat().st_mode) != 0o600:
+            self.config.socket_path.chmod(self.config.socket_mode)
+            socket_info = self.config.socket_path.lstat()
+            if stat.S_IMODE(socket_info.st_mode) != self.config.socket_mode:
+                raise DialogueServiceError("SERVICE_UNAVAILABLE")
+            if self.config.socket_group_gid is not None and (
+                not stat.S_ISSOCK(socket_info.st_mode)
+                or socket_info.st_uid != os.geteuid()
+                or socket_info.st_gid != self.config.socket_group_gid
+            ):
                 raise DialogueServiceError("SERVICE_UNAVAILABLE")
         except DialogueServiceError:
             if path_prepared:
@@ -308,7 +358,19 @@ class AgentDialogueService:
             info = self.config.socket_path.lstat()
         except (FileNotFoundError, OSError):
             return
-        if stat.S_ISSOCK(info.st_mode) and info.st_uid == os.geteuid():
+        owned_private_socket = (
+            self.config.socket_group_gid is None
+            and stat.S_ISSOCK(info.st_mode)
+            and info.st_uid == os.geteuid()
+        )
+        owned_shared_socket = (
+            self.config.socket_group_gid is not None
+            and stat.S_ISSOCK(info.st_mode)
+            and info.st_uid == os.geteuid()
+            and info.st_gid == self.config.socket_group_gid
+            and stat.S_IMODE(info.st_mode) == self.config.socket_mode
+        )
+        if owned_private_socket or owned_shared_socket:
             self.config.socket_path.unlink()
 
     async def serve_one(self) -> None:

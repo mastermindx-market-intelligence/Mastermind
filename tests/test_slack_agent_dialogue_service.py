@@ -172,7 +172,11 @@ def multibyte_oversize_socket_path(root: Path) -> Path:
 
 
 async def wait_for_service_start(
-    task: asyncio.Task[None], socket_path: Path, *, timeout_seconds: float = 1.0
+    task: asyncio.Task[None],
+    socket_path: Path,
+    *,
+    expected_mode: int = 0o600,
+    timeout_seconds: float = 1.0,
 ) -> None:
     """Observe startup success, task failure, or a bounded timeout."""
 
@@ -186,7 +190,10 @@ async def wait_for_service_start(
             except FileNotFoundError:
                 pass
             else:
-                if stat.S_ISSOCK(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600:
+                if (
+                    stat.S_ISSOCK(info.st_mode)
+                    and stat.S_IMODE(info.st_mode) == expected_mode
+                ):
                     return
             await asyncio.sleep(0)
 
@@ -400,6 +407,34 @@ def service_with_v2(
     )
 
 
+def shared_relay_service(
+    socket_root: Path, *, socket_path: Path | None = None
+) -> tuple[AgentDialogueService, InMemorySlackClient]:
+    engine, client = engine_and_client()
+    return (
+        AgentDialogueService(
+            ServiceConfig(
+                socket_path=socket_path or socket_root / "agent-relay.sock",
+                allowed_peer_uids=(450,),
+                request_timeout_seconds=1,
+                socket_parent_mode=0o710,
+                socket_mode=0o660,
+                socket_group_gid=os.getegid(),
+            ),
+            engine,
+        ),
+        client,
+    )
+
+
+def prepare_shared_socket_root(socket_root: Path) -> Path:
+    shared_root = socket_root / "shared"
+    shared_root.mkdir(mode=0o710)
+    os.chown(shared_root, os.geteuid(), os.getegid())
+    shared_root.chmod(0o710)
+    return shared_root
+
+
 def request_envelope(operation: str, args: dict[str, object]) -> dict[str, object]:
     return {"version": CONTROL_VERSION, "operation": operation, "args": args}
 
@@ -463,6 +498,170 @@ def test_target_max_encoded_path_real_bind_connect_and_cleanup(
         assert response["ok"] is True
         await task
         assert not path.exists()
+
+    run(scenario())
+
+
+def test_service_config_default_modes_remain_private_and_shared_is_exact(
+    socket_root: Path,
+) -> None:
+    private = ServiceConfig(
+        socket_path=socket_root / "private.sock",
+        allowed_peer_uids=(os.geteuid(),),
+    )
+    assert private.socket_parent_mode == 0o700
+    assert private.socket_mode == 0o600
+    assert private.socket_group_gid is None
+
+    shared = ServiceConfig(
+        socket_path=socket_root / "shared.sock",
+        allowed_peer_uids=(450,),
+        socket_parent_mode=0o710,
+        socket_mode=0o660,
+        socket_group_gid=os.getegid(),
+    )
+    assert shared.socket_parent_mode == 0o710
+    assert shared.socket_mode == 0o660
+    assert shared.socket_group_gid == os.getegid()
+
+    invalid = (
+        {
+            "socket_parent_mode": 0o711,
+            "socket_mode": 0o660,
+            "socket_group_gid": os.getegid(),
+        },
+        {
+            "socket_parent_mode": 0o710,
+            "socket_mode": 0o600,
+            "socket_group_gid": os.getegid(),
+        },
+        {
+            "socket_parent_mode": 0o710,
+            "socket_mode": 0o660,
+            "socket_group_gid": None,
+        },
+        {
+            "socket_parent_mode": 0o700,
+            "socket_mode": 0o600,
+            "socket_group_gid": os.getegid(),
+        },
+    )
+    for values in invalid:
+        with pytest.raises(ValueError):
+            ServiceConfig(
+                socket_path=socket_root / "invalid.sock",
+                allowed_peer_uids=(450,),
+                **values,
+            )
+
+
+def test_shared_relay_exact_peer_450_uses_0710_0660_and_cleans_on_cancel(
+    monkeypatch, socket_root: Path
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 450)
+
+        task = asyncio.create_task(srv.serve_forever())
+        await wait_for_service_start(
+            task, srv.config.socket_path, expected_mode=0o660
+        )
+        socket_info = srv.config.socket_path.lstat()
+        parent_info = shared_root.lstat()
+        assert stat.S_ISSOCK(socket_info.st_mode)
+        assert stat.S_IMODE(socket_info.st_mode) == 0o660
+        assert socket_info.st_uid == os.geteuid()
+        assert socket_info.st_gid == os.getegid()
+        assert stat.S_IMODE(parent_info.st_mode) == 0o710
+        assert parent_info.st_uid == os.geteuid()
+        assert parent_info.st_gid == os.getegid()
+        assert (
+            await call_service(srv.config.socket_path, request_envelope("status", {}))
+        )["ok"] is True
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+@pytest.mark.parametrize("invalid_metadata", ["owner", "group", "mode"])
+def test_shared_relay_refuses_wrong_parent_metadata_before_bind(
+    monkeypatch, socket_root: Path, invalid_metadata: str
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        expected_gid = os.getegid()
+        if invalid_metadata == "owner":
+            monkeypatch.setattr(service_module.os, "geteuid", lambda: os.getuid() + 1000)
+        elif invalid_metadata == "group":
+            expected_gid += 1000
+        else:
+            shared_root.chmod(0o700)
+
+        engine, _client = engine_and_client()
+        srv = AgentDialogueService(
+            ServiceConfig(
+                socket_path=shared_root / "agent-relay.sock",
+                allowed_peer_uids=(450,),
+                socket_parent_mode=0o710,
+                socket_mode=0o660,
+                socket_group_gid=expected_gid,
+            ),
+            engine,
+        )
+        with pytest.raises(DialogueServiceError) as exc:
+            await srv.start()
+        assert exc.value.code == "SERVICE_UNAVAILABLE"
+        assert not srv.config.socket_path.exists()
+
+    run(scenario())
+
+
+def test_shared_relay_refuses_wrong_stale_socket_metadata_without_unlink(
+    socket_root: Path,
+) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        socket_path = shared_root / "agent-relay.sock"
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(os.fspath(socket_path))
+        socket_path.chmod(0o600)
+        try:
+            srv, _client = shared_relay_service(
+                shared_root, socket_path=socket_path
+            )
+            with pytest.raises(DialogueServiceError) as exc:
+                await srv.start()
+            assert exc.value.code == "SERVICE_UNAVAILABLE"
+            assert socket_path.exists()
+            assert stat.S_IMODE(socket_path.lstat().st_mode) == 0o600
+        finally:
+            stale.close()
+            socket_path.unlink(missing_ok=True)
+
+    run(scenario())
+
+
+def test_shared_relay_foreign_peer_remains_denied(monkeypatch, socket_root: Path) -> None:
+    async def scenario() -> None:
+        shared_root = prepare_shared_socket_root(socket_root)
+        srv, _client = shared_relay_service(shared_root)
+        monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 999999)
+        await srv.start()
+        try:
+            reader, writer = await asyncio.open_unix_connection(
+                os.fspath(srv.config.socket_path)
+            )
+            response = json.loads(await reader.readline())
+            assert response == {"ok": False, "error": {"code": "PEER_DENIED"}}
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await srv.close()
 
     run(scenario())
 
