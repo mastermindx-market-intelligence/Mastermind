@@ -8,7 +8,9 @@
 
 **Tech Stack:** Python 3.11+, existing Wake Fabric contracts, Codex App Server/OHF seams, Claude Code CLI, asyncio/subprocess, pytest.
 
-**Spec:** `docs/superpowers/specs/2026-08-27-executive-workforce-hybrid-role-topology-design.md`
+**Spec:**
+- `docs/superpowers/specs/2026-08-27-executive-workforce-hybrid-role-topology-design.md`
+- `docs/superpowers/specs/2026-08-27-wake-pr3-transport-ack-boundary-split-design.md`
 
 ## Global Constraints
 
@@ -21,6 +23,7 @@
 - Provider-native timeout/disconnect is not permission to nudge another surface. Reconcile the same wake attempt/destination first.
 - Personal ChatGPT/Claude Slack accounts and ASD remain dialogue transport, not Wake delivery authority.
 - Production `production_armed` and target enablement remain false until a separate exact canary release.
+- PR #174 transport acceptance may end truthfully at `DELIVERED_UNACKNOWLEDGED`; target ACK ingress and source resolution are a later separately approved wave.
 
 ---
 
@@ -337,7 +340,7 @@ git commit -m "test(exec): pin hybrid executive wake routing law"
 
 ---
 
-### Task 6: Real canaries remain separate from implementation merge
+### Task 6: Exact-head review and transport-only live proof
 
 **Files:**
 - Sanitized proof artifacts only under existing review-evidence conventions.
@@ -346,18 +349,27 @@ git commit -m "test(exec): pin hybrid executive wake routing law"
 
 Run full Wake/OHF/adapter suites and require independent attacks on: forged delivered receipts, wrong RuntimeBinding, ABA generation reuse, provider retry, nudge prose leakage, transport-success laundering into ACK/source resolution, and hidden session persistence.
 
-- [ ] **Step 2: Codex-Sol harmless live canary**
+- [ ] **Step 2: Codex-Sol harmless live delivery canary**
 
-With a dedicated non-production Codex App Server runtime binding, create one canonical harmless wake obligation, route it to a `ceo`-seat Codex reasoning target, deliver exactly one nudge, prove the correct thread receives it, acknowledge it through the accepted Wake acknowledgement path, and resolve only when the source fact is actually resolved.
+With a dedicated non-production in-memory Codex App Server runtime binding, create one canonical harmless Wake obligation and route it to a `ceo`-seat Codex reasoning target. The checked-in production registry remains `production_armed=false` and all checked-in targets remain disabled; only the isolated canary process may construct the bounded delivery-eligible route required to exercise the transport.
 
-- [ ] **Step 3: Claude/Fable harmless live canary**
+Prove exactly this sequence:
 
-Only if the Claude preflight proved native resume: bind one dedicated safe Claude session, create one harmless COO continuation obligation, deliver/resume exactly that provider session, prove no second Claude session was created, and ACK/resolve through existing Wake law. If native resume is unsupported, keep the Claude transport unimplemented and return that exact capability gap; do not substitute tmux polling as permanent Wake.
+```text
+canonical harmless Wake obligation
+-> exact ceo/codex route + current RuntimeBinding
+-> one provider-native Codex transport attempt
+-> authenticated exact-thread DELIVERED evidence
+-> reconstructed status DELIVERED_UNACKNOWLEDGED
+-> stop; do not author TARGET_ACKNOWLEDGED or SOURCE_RESOLVED
+```
+
+The canary must prove the exact native thread received the one bounded nudge, no substitute thread/session was minted, and no second provider turn/failover occurred. Do not synthesize an ACK in the canary harness.
+
+- [ ] **Step 3: Claude/Fable verdict and optional delivery canary**
+
+Only if the installed-host Claude preflight proves exact discovery/binding, same-conversation resurrection, and one scriptable same-conversation nudge ingress may a dedicated safe Claude/Fable delivery canary run. Its accepted claim is transport delivery only and likewise stops at `DELIVERED_UNACKNOWLEDGED`. If any native sub-capability is unproven, keep `claude-code-session` `UNSUPPORTED / UNIMPLEMENTED`; do not substitute tmux, Slack, GUI automation, a guessed flag, or a new session manager.
 
 - [ ] **Step 4: Stop and return**
 
-Return exact head, transport descriptors, host-preflight receipts, live canary obligation/route/delivery/ACK/source-resolution identities, full hosted tests, security review, and confirmation `NO NEW WAKE QUEUE/SESSION DB/SCHEDULER`.
-
-## Stop Condition
-
-Wake PR3 stops when at least Codex App Server has a production-proven bounded wake transport, Claude native resume is either production-proven or explicitly retained as unsupported/unimplemented, and the existing Wake identity/retry/ACK/source-resolution laws remain intact. It does not implement MH1 multi-host execution or replace ASD dialogue.
+Return exact head, transport descriptors, host-preflight receipts, sanitized live canary obligation/route/delivery identities, reconstructed `DELIVERED_UNACKNOWLEDGED` status, full hosted tests, security review, and confirmation `NO NEW WAKE QUEUE/SESSION DB/SCHEDULER`. State explicitly that target reasoning-session ACK ingress and source resolution remain later-wave `NOT_BUILT`, and production Wake remains disarmed.
