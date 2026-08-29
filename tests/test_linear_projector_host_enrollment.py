@@ -4,8 +4,10 @@ import importlib
 import importlib.util
 import io
 import os
+import stat
 import termios
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -153,3 +155,71 @@ def test_secret_decoder_accepts_maximum_ascii_value() -> None:
     mod = _load()
     raw = b"x" * 4096 + b"\n"
     assert mod._decode_secret_bytes(raw) == b"x" * 4096
+
+
+def test_prepare_host_creates_only_exact_safe_directories(tmp_path: Path) -> None:
+    mod = _load()
+    root = tmp_path / "projector"
+    mod.prepare_host(root=root, uid=os.geteuid(), gid=os.getegid())
+
+    config_dir = root / "config"
+    assert root.is_dir()
+    assert config_dir.is_dir()
+    assert stat.S_IMODE(root.lstat().st_mode) == 0o750
+    assert stat.S_IMODE(config_dir.lstat().st_mode) == 0o750
+    assert root.lstat().st_uid == os.geteuid()
+    assert root.lstat().st_gid == os.getegid()
+    assert not (config_dir / "projector.json").exists()
+    assert not (config_dir / "oauth-client-secret").exists()
+
+    mod.prepare_host(root=root, uid=os.geteuid(), gid=os.getegid())
+
+
+def test_prepare_host_refuses_symlink_non_directory_and_unsafe_mode(tmp_path: Path) -> None:
+    mod = _load()
+    uid = os.geteuid()
+    gid = os.getegid()
+
+    target = tmp_path / "target"
+    target.mkdir()
+    symlink_root = tmp_path / "symlink-root"
+    symlink_root.symlink_to(target, target_is_directory=True)
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.prepare_host(root=symlink_root, uid=uid, gid=gid)
+    assert exc.value.code == "PROJECTOR_HOST_PERMISSIONS_REFUSED"
+
+    file_root = tmp_path / "file-root"
+    file_root.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.prepare_host(root=file_root, uid=uid, gid=gid)
+    assert exc.value.code == "PROJECTOR_HOST_PERMISSIONS_REFUSED"
+
+    unsafe_root = tmp_path / "unsafe-root"
+    unsafe_root.mkdir()
+    unsafe_root.chmod(0o700)
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod.prepare_host(root=unsafe_root, uid=uid, gid=gid)
+    assert exc.value.code == "PROJECTOR_HOST_PERMISSIONS_REFUSED"
+
+
+def test_safe_directory_validator_refuses_wrong_owner(monkeypatch, tmp_path: Path) -> None:
+    mod = _load()
+    path = tmp_path / "prepared"
+    path.mkdir()
+    path.chmod(0o750)
+    real = path.lstat()
+    fake = SimpleNamespace(
+        st_mode=real.st_mode,
+        st_uid=os.geteuid() + 1,
+        st_gid=os.getegid(),
+    )
+    monkeypatch.setattr(Path, "lstat", lambda self: fake)
+
+    with pytest.raises(mod.ProjectorHostError) as exc:
+        mod._assert_safe_directory(
+            path,
+            uid=os.geteuid(),
+            gid=os.getegid(),
+            mode=0o750,
+        )
+    assert exc.value.code == "PROJECTOR_HOST_PERMISSIONS_REFUSED"
