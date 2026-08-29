@@ -130,7 +130,7 @@ def test_h0_topology_and_contract_clis_run_with_macos_system_python(
     sys.platform != "darwin" or not SYSTEM_PYTHON.is_file(),
     reason="macOS system Python is unavailable",
 )
-def test_python39_runs_v2_manifest_inventory_closure_intent_receipt_and_recovery(
+def test_python39_runs_v3_manifest_inventory_closure_intent_receipt_and_recovery(
     tmp_path: Path,
 ) -> None:
     probe = tmp_path / "python39-capacity-probe.py"
@@ -191,7 +191,7 @@ artifacts.PRODUCER_COMMIT = commit
 contract.PRODUCER_COMMIT = commit
 
 transport = workspace / "transport.zip"
-manifest = artifacts.build_source_transport_v2(repository, transport, commit=commit)
+manifest = artifacts.build_source_transport_v3(repository, transport, commit=commit)
 rows = artifacts.enumerate_reachable_objects(repository, commit)
 expected_inventory = b"".join(
     ("%s %s %d\\n" % (row.oid, row.object_type, row.size)).encode("ascii")
@@ -201,7 +201,7 @@ assert manifest["object_count"] == len(rows)
 assert manifest["object_inventory_sha256"] == hashlib.sha256(expected_inventory).hexdigest()
 
 installed = workspace / "installed"
-artifacts.materialize_source_transport_v2(transport, installed, expected_commit=commit)
+artifacts.materialize_source_transport_v3(transport, installed, expected_commit=commit)
 evidence = artifacts.verify_complete_repository(installed, manifest)
 assert evidence.object_count == manifest["object_count"]
 assert evidence.object_inventory_sha256 == manifest["object_inventory_sha256"]
@@ -253,6 +253,6 @@ print(json.dumps({"schema": manifest["schema_version"], "status": "pass"}, sort_
     completed = _system_python(str(probe), str(ROOT), str(tmp_path / "workspace"))
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout) == {
-        "schema": "mastermind.capacity_source_transport/v2",
+        "schema": "mastermind.capacity_source_transport/v3",
         "status": "pass",
     }

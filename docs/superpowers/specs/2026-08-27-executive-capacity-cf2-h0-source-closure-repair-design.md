@@ -178,6 +178,38 @@ Git may choose different valid delta layouts. Two accepted carriers for the same
 the same object count, object-inventory digest, and material rows, while their payload/ZIP hashes
 may differ and remain independently receipted.
 
+### 6.1 Native large-closure amendment: transport v3
+
+The first inert build from the accepted full Macro repository proved that its complete reachable
+Git pack is approximately 21 GiB. The v2 writer correctly refused that pack because v2 freezes a
+ZIP32-only layout with no extra fields. That refusal is truthful evidence that v2 cannot be the
+native carrier; v2 remains unchanged and must never accept or reinterpret ZIP64 records.
+
+The same H0 carrier therefore adds `mastermind.capacity_source_transport/v3` solely as the
+large-closure envelope. Its manifest fields and complete-object/material semantics are identical to
+v2 except for the explicit schema value. It retains exactly `manifest.json` then `payload.pack`,
+stored and unencrypted, but freezes one canonical ZIP64 byte layout:
+
+- `manifest.json` uses the existing exact ZIP32 local and central records;
+- `payload.pack` always uses version-needed/version-made-by 45, `0xffffffff` legacy size fields,
+  and one exact ZIP64 size extra containing only the repeated 64-bit uncompressed/compressed size;
+- one exact ZIP64 end-of-central-directory record and locator follow the central directory;
+- the legacy EOCD retains exact counts and central size, uses only `0xffffffff` for the overflowing
+  central offset, and has no comment;
+- the writer and reader reconstruct every local, central, ZIP64 and legacy end record, reject every
+  prefix/suffix/alternate field, stream the pack in bounded chunks, and revalidate the retained
+  source descriptor before publishing the carrier;
+- the enclosing transport is capped at 32 GiB both before privileged copy and during archive
+  validation, and its privileged copy requires three carrier-sized free-space units plus a 2 GiB
+  reserve before output, providing bounded headroom for Git pack-layout variation without
+  unbounded root copy or a predictably underprovisioned materialization.
+
+The privileged source repair consumes v3 for a new candidate. Installed-manifest verification
+accepts the exact v2 or v3 schema only so a genuinely durable pre-intent v2 candidate can be
+reconciled; the new native ceremony always builds v3. This is a versioned envelope repair inside
+the existing transport/source owner, not a second source root, lifecycle, queue, identity, retry or
+control plane.
+
 ## 7. Ordinary complete installed repository
 
 Materialization creates a new direct repository from the v2 pack and never clones/copies the

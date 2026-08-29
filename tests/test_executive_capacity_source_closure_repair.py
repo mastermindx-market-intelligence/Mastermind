@@ -1404,8 +1404,9 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
     required = (
         "Alternative B",
         "dcdd939c45b23abce5ba04f95e330ac914a3904b",
-        "mastermind.capacity_source_transport/v2",
-        "build-source-transport-v2",
+        "mastermind.capacity_source_transport/v3",
+        "build-source-transport-v3",
+        "32 GiB",
         "MACRO_TRANSPORT_SHA256",
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'",
         "checkout --detach",

@@ -114,19 +114,23 @@ REPAIR_CARRIER_SHA256="$(/usr/bin/shasum -a 256 "$REPAIR_CARRIER" | /usr/bin/awk
 [[ "$REPAIR_CARRIER_SHA256" =~ ^[0-9a-f]{64}$ ]]
 /usr/bin/printf 'repair_carrier_sha256=%s\n' "$REPAIR_CARRIER_SHA256"
 
-TRANSPORT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-v2-transport.XXXXXX)"
-MACRO_TRANSPORT="$TRANSPORT_PARENT/macro-complete-v2.zip"
+TRANSPORT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-v3-transport.XXXXXX)"
+MACRO_TRANSPORT="$TRANSPORT_PARENT/macro-complete-v3.zip"
 /usr/bin/python3 -I -S -B \
   "$REPAIR_CHECKOUT/ops/executive_os/capacity_host_artifacts.py" \
-  build-source-transport-v2 \
+  build-source-transport-v3 \
   --source-repository "$MACRO_REPOSITORY" \
   --output "$MACRO_TRANSPORT" \
   --commit "$MACRO_COMMIT" \
   >"$TRANSPORT_PARENT/manifest-build-output.json"
 /bin/chmod 0400 "$MACRO_TRANSPORT"
 test "$(/usr/bin/stat -f %l "$MACRO_TRANSPORT")" -eq 1
+MACRO_TRANSPORT_BYTES="$(/usr/bin/stat -f %z "$MACRO_TRANSPORT")"
+test "$MACRO_TRANSPORT_BYTES" -gt 0
+test "$MACRO_TRANSPORT_BYTES" -le 34359738368
 MACRO_TRANSPORT_SHA256="$(/usr/bin/shasum -a 256 "$MACRO_TRANSPORT" | /usr/bin/awk '{print $1}')"
 [[ "$MACRO_TRANSPORT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+/usr/bin/printf 'macro_transport_bytes=%s\n' "$MACRO_TRANSPORT_BYTES"
 /usr/bin/printf 'macro_transport_sha256=%s\n' "$MACRO_TRANSPORT_SHA256"
 ```
 
@@ -136,12 +140,16 @@ authenticated commit but is written here as an ordinary single-link file contain
 target bytes. The clean-status check uses the same interpretation. The whole-checkout symlink and
 hardlink prohibitions remain mandatory, and no privileged/root carrier verification is weakened.
 
-The builder emits `mastermind.capacity_source_transport/v2`. It requires the exact two-member ZIP,
-complete reachable object inventory, frozen eleven-path material projection, and ordinary strict
+The builder emits `mastermind.capacity_source_transport/v3`. The accepted complete Macro closure is
+larger than the ZIP32 member boundary, so v3 uses one fully reconstructed canonical ZIP64 layout
+with the same exact two members and a hard 32 GiB enclosing-carrier limit. The earlier v2 schema
+remains strict ZIP32 and is never reinterpreted as v3. V3 requires the complete reachable object
+inventory, frozen eleven-path material projection, bounded streaming reads, and ordinary strict
 closure; missing objects, promisor state, alternates, shallow state, replacement refs, grafts,
 remotes, filters, or unsafe metadata refuse. Record the emitted manifest, its object count and
-semantic inventory digest, the payload digest, and the independently calculated enclosing ZIP
-digest. These are per-carrier proof; they are not a future generation identity.
+semantic inventory digest, the payload digest, the enclosing ZIP byte count, and the independently
+calculated enclosing ZIP digest. These are per-carrier proof; they are not a future generation
+identity.
 
 ### One offline administrator ceremony
 
