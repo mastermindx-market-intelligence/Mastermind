@@ -129,21 +129,31 @@ def _ts_order(value: str) -> Decimal:
         raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
 
 
-def _message_context_matches(
+def _message_matches_history_parent(
     message: Mapping[str, Any], context: Mapping[str, Any]
 ) -> bool:
     return (
         message.get("work_ref") == context["work_ref"]
         and message.get("commission_ref") == context["commission_ref"]
         and message.get("session_ref") == context["session_ref"]
+    )
+
+
+def _message_matches_current_context(
+    message: Mapping[str, Any], context: Mapping[str, Any]
+) -> bool:
+    return (
+        _message_matches_history_parent(message, context)
         and message.get("applies_to") == context["applies_to"]
     )
 
 
-def _messages_share_context(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+def _messages_share_reply_lineage(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> bool:
     return all(
         left.get(key) == right.get(key)
-        for key in ("work_ref", "commission_ref", "session_ref", "applies_to")
+        for key in ("work_ref", "commission_ref", "session_ref")
     )
 
 
@@ -188,7 +198,7 @@ def _adjudicate_ruling_v2(
         request_message["message_type"] != "DECISION_REQUEST"
         or reply_message["message_type"] != "RULING"
         or reply_message["reply_to_message_key"] != request_message["message_key"]
-        or not _messages_share_context(request_message, reply_message)
+        or not _messages_share_reply_lineage(request_message, reply_message)
     ):
         raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
 
@@ -265,7 +275,7 @@ def _adjudicate_reply_v2(
 
     if (
         reply_message["reply_to_message_key"] != request_message["message_key"]
-        or not _messages_share_context(request_message, reply_message)
+        or not _messages_share_reply_lineage(request_message, reply_message)
         or not _reply_direction_is_valid(request_message, reply_message)
     ):
         raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
@@ -278,7 +288,12 @@ def _adjudicate_reply_v2(
             authority_policy=authority_policy,
         )
     if message_type == "CONTINUE":
-        if request_message["message_type"] not in {"ACK", "PROGRESS", "BLOCKED"}:
+        if request_message["message_type"] not in {
+            "ACK",
+            "PROGRESS",
+            "BLOCKED",
+            "RESULT",
+        }:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
         if (
             request_message["message_type"] == "BLOCKED"
@@ -471,7 +486,7 @@ class DialogueEngineV2:
             except DialogueContractError:
                 raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
 
-            if not _message_context_matches(message, normalized_context):
+            if not _message_matches_history_parent(message, normalized_context):
                 raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
             if not self._sender_is_eligible(transport, message):
                 ineligible_count += 1
@@ -535,7 +550,7 @@ class DialogueEngineV2:
             raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
         normalized = context.normalized()
         if (
-            not _message_context_matches(validated, normalized)
+            not _message_matches_current_context(validated, normalized)
             or validated["actor_ref"] != normalized["actor_ref"]
         ):
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
