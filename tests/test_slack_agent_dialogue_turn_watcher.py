@@ -59,23 +59,30 @@ WORKER_APPLIES_TO = {
 }
 
 
-def _commission() -> dict[str, str]:
+def _commission(*, content_sha256: str = "b" * 64) -> dict[str, str]:
     return {
         "repository": REPO,
         "commit": "c" * 40,
         "path": "research/commission.md",
-        "content_sha256": "b" * 64,
+        "content_sha256": content_sha256,
     }
 
 
-def _parent(*, watch_mode: object = TURN_WATCH_MODE_V1) -> dict[str, object]:
+def _parent(
+    *,
+    watch_mode: object = TURN_WATCH_MODE_V1,
+    operation_key: str = "worker-presence-dialogue-wptw1-20260829-001",
+    commission_content_sha256: str = "b" * 64,
+) -> dict[str, object]:
     return build_parent_v2(
         {
             "schema": "mastermind.agent_dialogue_parent.v2",
             "work_ref": "WS:CHAIRMAN-CONTROL-ROOM",
-            "commission_ref": _commission(),
+            "commission_ref": _commission(
+                content_sha256=commission_content_sha256
+            ),
             "session_ref": "asd-session-turnwatch0001",
-            "operation_key": "worker-presence-dialogue-wptw1-20260829-001",
+            "operation_key": operation_key,
             "watch_mode": watch_mode,
             "allowed_sol_user_ids": ["U0BRETDUAS2"],
             "created_at": "2026-08-29T00:00:00Z",
@@ -180,8 +187,16 @@ def _message(
     )
 
 
-def _routing(*, ceo: bool = True, coo: bool = True) -> TurnRoutingFacts:
+def _routing(
+    *,
+    parent: dict[str, object] | None = None,
+    ceo: bool = True,
+    coo: bool = True,
+) -> TurnRoutingFacts:
+    thread_parent = _parent() if parent is None else parent
     return TurnRoutingFacts(
+        bound_operation_key=str(thread_parent["operation_key"]),
+        bound_commission_fingerprint=str(thread_parent["fingerprint"]),
         root_job_id="JOB-001",
         routing_workstream="WS:CHAIRMAN-CONTROL-ROOM",
         source_workstream="WS:WORKER-PRESENCE",
@@ -195,10 +210,11 @@ def _decision(
     parent: dict[str, object] | None = None,
     routing: TurnRoutingFacts | None = None,
 ) -> TurnDecision:
+    thread_parent = _parent() if parent is None else parent
     return classify_turn(
-        parent=_parent() if parent is None else parent,
+        parent=thread_parent,
         messages=list(messages),
-        routing=_routing() if routing is None else routing,
+        routing=_routing(parent=thread_parent) if routing is None else routing,
     )
 
 
@@ -235,6 +251,15 @@ def test_contract_vocabulary_and_shapes_are_closed() -> None:
     assert ATTENTION_SCHEMA == "mastermind.agent_dialogue_attention.v1"
     assert ATTENTION_SOURCE_KIND == "agent_dialogue_attention"
     assert ATTENTION_WAKE_KIND == "dialogue_turn_pending"
+    assert [field.name for field in fields(TurnRoutingFacts)] == [
+        "bound_operation_key",
+        "bound_commission_fingerprint",
+        "root_job_id",
+        "routing_workstream",
+        "source_workstream",
+        "ceo_target_bound",
+        "coo_target_bound",
+    ]
     assert [field.name for field in fields(AgentDialogueAttention)] == [
         "schema",
         "source_kind",
@@ -307,6 +332,48 @@ def test_unbound_initial_commission_is_no_action_without_fallback() -> None:
         reason="DIALOGUE_WAKE_TARGET_UNBOUND",
         refusal_code="DIALOGUE_WAKE_TARGET_UNBOUND",
     )
+
+
+def test_replacement_parent_operation_key_cannot_rebind_unchanged_messages() -> None:
+    original_parent = _parent()
+    message = _message(
+        "RESULT",
+        key="asd-result-00000001",
+        parent=original_parent,
+    )
+    replacement_parent = _parent(
+        operation_key="worker-presence-dialogue-wptw1-20260829-002"
+    )
+
+    result = _decision(
+        message,
+        parent=replacement_parent,
+        routing=_routing(parent=original_parent),
+    )
+
+    assert result.action is TurnAction.REFUSE
+    assert result.attention is None
+    assert result.refusal_code == "DIALOGUE_BINDING_MISMATCH"
+
+
+def test_replacement_parent_fingerprint_refuses_before_history_classification() -> None:
+    original_parent = _parent()
+    message = _message(
+        "RESULT",
+        key="asd-result-00000001",
+        parent=original_parent,
+    )
+    replacement_parent = _parent(commission_content_sha256="d" * 64)
+
+    result = _decision(
+        message,
+        parent=replacement_parent,
+        routing=_routing(parent=original_parent),
+    )
+
+    assert result.action is TurnAction.REFUSE
+    assert result.attention is None
+    assert result.refusal_code == "DIALOGUE_BINDING_MISMATCH"
 
 
 @pytest.mark.parametrize(
@@ -572,6 +639,8 @@ def test_attention_identity_excludes_routing_destination_and_is_restart_stable()
         copy.deepcopy(result),
         parent=copy.deepcopy(parent),
         routing=TurnRoutingFacts(
+            bound_operation_key=str(parent["operation_key"]),
+            bound_commission_fingerprint=str(parent["fingerprint"]),
             root_job_id="JOB-ROTATED",
             routing_workstream="WS:ROTATED-ROUTE",
             source_workstream="WS:ROTATED-SOURCE",

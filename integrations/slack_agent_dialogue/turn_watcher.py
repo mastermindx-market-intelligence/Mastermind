@@ -36,6 +36,8 @@ class TurnAction(str, Enum):
 class TurnRoutingFacts:
     """Trusted, caller-derived correlation and target-binding facts."""
 
+    bound_operation_key: str
+    bound_commission_fingerprint: str
     root_job_id: str | None
     routing_workstream: str | None
     source_workstream: str | None
@@ -104,6 +106,22 @@ def _no_action(reason: str, *, code: str | None = None) -> TurnDecision:
 
 def _routing_is_valid(routing: TurnRoutingFacts) -> bool:
     if not isinstance(routing, TurnRoutingFacts):
+        return False
+    if (
+        not isinstance(routing.bound_operation_key, str)
+        or not routing.bound_operation_key
+        or routing.bound_operation_key != routing.bound_operation_key.strip()
+        or len(routing.bound_operation_key) > 128
+    ):
+        return False
+    if (
+        not isinstance(routing.bound_commission_fingerprint, str)
+        or len(routing.bound_commission_fingerprint) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in routing.bound_commission_fingerprint
+        )
+    ):
         return False
     if not isinstance(routing.ceo_target_bound, bool) or not isinstance(
         routing.coo_target_bound, bool
@@ -309,10 +327,16 @@ def classify_turn(
     except DialogueContractError as error:
         return _refuse(error.code)
 
-    if normalized_parent["watch_mode"] != TURN_WATCH_MODE_V1:
-        return _no_action("WATCH_DISABLED")
     if not _routing_is_valid(routing):
         return _refuse("ROUTING_FACTS_INVALID")
+    if (
+        routing.bound_operation_key != normalized_parent["operation_key"]
+        or routing.bound_commission_fingerprint
+        != normalized_parent["fingerprint"]
+    ):
+        return _refuse("DIALOGUE_BINDING_MISMATCH")
+    if normalized_parent["watch_mode"] != TURN_WATCH_MODE_V1:
+        return _no_action("WATCH_DISABLED")
     if not messages:
         parent_fingerprint = str(normalized_parent["fingerprint"])
         initial_source = {
