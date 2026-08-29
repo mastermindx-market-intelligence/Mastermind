@@ -49,6 +49,37 @@ def test_universal_dialogue_law_requires_fresh_read_before_substantive_write() -
         assert phrase in law
 
 
+def test_aggregate_watcher_resource_survives_child_stop() -> None:
+    law = _flat("docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md")
+    for phrase in (
+        "Watcher resource lifetime and watched-source lifetime are distinct",
+        "permanent seat inbox",
+        "principal lane",
+        "sibling sources",
+        "aggregate resource remains ACTIVE",
+        "Zero remaining child sources is quiescent, not seat termination",
+        "explicit seat/principal deregistration",
+        "WATCH_STOP_FAILED",
+        "keep child A terminal",
+        "continue observing child B",
+    ):
+        assert phrase in law
+
+
+def test_exact_native_wake_is_attention_only_and_never_fails_over() -> None:
+    law = _flat("docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md")
+    for phrase in (
+        "exact-native-task wake/resume action",
+        "verified current RuntimeBinding/native task",
+        "never choose the newest visible tab/session",
+        "never fall back to a different task",
+        "native nudge is attention only",
+        "SESSION_LOST / RUNTIME_BINDING_RECONCILIATION_REQUIRED",
+        "treating Slack delivery as consumption",
+    ):
+        assert phrase in law
+
+
 def test_commission_wave_rejects_fastest_supported_reasoning_polling() -> None:
     commission = _flat("docs/sol_skills/COMMISSION_WAVE.md")
     assert "fastest lawful/practical cadence" not in commission
