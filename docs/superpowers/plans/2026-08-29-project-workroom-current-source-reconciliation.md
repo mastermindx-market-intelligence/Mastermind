@@ -234,12 +234,15 @@ The branch must not advance protected master ahead of #245 and #228. After those
 ### 4.2 #242 — bounded WR-R0 research child
 
 ```text
-operation = mastermind-project-workroom-wr-r0-20260829-sol-001
-PR        = Mastermind #242
-branch    = sol/project-workroom-wr-r0-20260829
-head      = ef55dba7f61ee85fc3cc1edb3b143dc526d184ec
-state     = OPEN / DRAFT / STACKED / HOLD
+operation                 = mastermind-project-workroom-wr-r0-20260829-sol-001
+PR                        = Mastermind #242
+branch                    = sol/project-workroom-wr-r0-20260829
+pre-parent-movement head  = ef55dba7f61ee85fc3cc1edb3b143dc526d184ec
+first restack receipt     = bca66278001e11b0927ef2a6c330f48561f411ad
+state                     = OPEN / DRAFT / STACKED / HOLD
 ```
+
+The first restack receipt is an immutable proof that the exact seven-file child delta consumed parent #240 head `88e91e7789e0991199ac40b666c8000a90ca4131` without rewriting research bytes. It is not declared the permanent current child head because any later #240 source correction necessarily requires another same-branch restack. Before action, read the exact current head from PR #242 and prove it is zero-behind its current #240 parent.
 
 #242 contains exactly seven research/fixture paths:
 
@@ -253,7 +256,7 @@ tests/fixtures/project_workroom_fabric/project_workroom_resource_snapshot.v1.jso
 research/project_workroom_fabric/WR_P0_CURRENT_ESTATE_REFERENCE_COMPOSITION_2026-08-29.md
 ```
 
-The same #242 branch must consume this #240 parent movement history-preservingly. After #240 protects, retarget the same PR to protected `master`, verify the exact seven-file research delta, validate both snapshots and reference-composition claims, and obtain fresh exact-head/current-base proof and Sol acceptance.
+The same #242 branch must consume every later #240 parent movement history-preservingly. After #240 protects, retarget the same PR to protected `master`, verify the exact seven-file research delta, validate both snapshots and reference-composition claims, and obtain fresh exact-head/current-base proof and Sol acceptance.
 
 ### 4.3 #6661 — Agent OS decision/discovery/handoff
 
