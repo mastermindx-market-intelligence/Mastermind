@@ -1,8 +1,8 @@
 """Fixed, production-disarmed credential boundary for the Linear projector.
 
-The current slice owns compile-time coordinates, opaque CLI parsing, secret-
-surface refusal, and one bounded no-echo stdin reader. It performs no
-filesystem mutation, network access, OAuth exchange, Linear mutation or
+The current slice owns fixed host coordinates, opaque parsing/secret input, and
+safe preparation of the projector-specific directory boundary. It performs no
+credential-file write, network access, OAuth exchange, Linear mutation or
 service control.
 """
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import stat
 import termios
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -163,6 +164,56 @@ def read_secret_from_stdin(stream: BinaryIO) -> bytes:
     return _decode_secret_bytes(raw)
 
 
+def _assert_safe_directory(
+    path: Path, *, uid: int, gid: int, mode: int
+) -> None:
+    """Require one real directory with exact owner/group/mode metadata."""
+
+    try:
+        info = Path(path).lstat()
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_PERMISSIONS_REFUSED") from None
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != int(uid)
+        or info.st_gid != int(gid)
+        or stat.S_IMODE(info.st_mode) != int(mode)
+    ):
+        raise ProjectorHostError("PROJECTOR_HOST_PERMISSIONS_REFUSED")
+
+
+def _prepare_directory(path: Path, *, uid: int, gid: int, mode: int) -> None:
+    path = Path(path)
+    created = False
+    try:
+        path.mkdir(mode=mode)
+        created = True
+    except FileExistsError:
+        pass
+    except OSError:
+        raise ProjectorHostError("PROJECTOR_HOST_PREPARE_REFUSED") from None
+
+    if created:
+        try:
+            path.chmod(mode)
+        except OSError:
+            raise ProjectorHostError("PROJECTOR_HOST_PREPARE_REFUSED") from None
+    _assert_safe_directory(path, uid=uid, gid=gid, mode=mode)
+
+
+def prepare_host(
+    *, root: Path = ROOT, uid: int = 0, gid: int = 0
+) -> None:
+    """Create/check only the fixed root and config directory boundary."""
+
+    root = Path(root)
+    if not root.is_absolute():
+        raise ProjectorHostError("PROJECTOR_HOST_PREPARE_REFUSED")
+    _prepare_directory(root, uid=uid, gid=gid, mode=0o750)
+    _prepare_directory(root / "config", uid=uid, gid=gid, mode=0o750)
+
+
 __all__ = [
     "APP_NAME",
     "CONFIG_DIR",
@@ -179,5 +230,6 @@ __all__ = [
     "WORKSPACE_ID",
     "assert_secret_surfaces_clean",
     "build_parser",
+    "prepare_host",
     "read_secret_from_stdin",
 ]
