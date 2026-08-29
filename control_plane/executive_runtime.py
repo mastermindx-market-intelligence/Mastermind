@@ -13927,6 +13927,19 @@ class ResourceBroker:
 
 
 @dataclasses.dataclass(frozen=True)
+class ActiveOperatorBindingFacts:
+    """One read-snapshot of the accepted current OHF binding source."""
+
+    attempt_id: str
+    session_epoch_id: str
+    generation_number: int
+    provider_session_id: str
+    provider: str
+    account_label: str
+    owner_seat: str
+
+
+@dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
     workers: WorkerRegistry
@@ -13970,8 +13983,201 @@ class Runtime:
             )
         )
 
+    def current_harness_binding_source(
+        self,
+        attempt_id: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveOperatorBindingFacts:
+        """Read exactly one current, admitted OHF writer from one snapshot.
+
+        The caller may pass an already-open ``RuntimeStore.read()`` or
+        ``RuntimeStore.transaction()`` connection.  In that case this method opens
+        no nested read and all source facts remain from the caller's snapshot.
+        """
+
+        token = str(attempt_id or "").strip()
+        if not token:
+            raise StateConflict("runtime binding source requires an attempt_id")
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_binding_source(
+                    token, connection=owned_connection
+                )
+
+        rows = connection.execute(
+            """
+            SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
+                   j.owner_seat,j.orchestration_role,
+                   w.provider AS worker_provider,w.account_label AS worker_account_label,
+                   e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
+                   e.provider_session_id AS epoch_provider_session,
+                   g.process_generation_id,g.worker_id AS generation_worker,
+                   g.generation_number,g.provider_session_id AS generation_provider_session,
+                   g.pid AS generation_pid,g.pgid AS generation_pgid,
+                   g.process_start_identity AS generation_process_start_identity,
+                   g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
+                   g.observed_attestation_digest
+            FROM attempts a
+            JOIN jobs j ON j.job_id=a.job_id
+            JOIN workers w ON w.worker_id=a.worker_id
+            LEFT JOIN harness_session_epochs e ON e.attempt_id=a.attempt_id
+              AND e.state='CURRENT'
+            LEFT JOIN process_generations g ON g.session_epoch_id=e.session_epoch_id
+              AND g.executive_writer_held=1
+            WHERE a.attempt_id=?
+            """,
+            (token,),
+        ).fetchall()
+        cardinality = connection.execute(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM jobs WHERE current_attempt_id=?) AS current_jobs,
+              (SELECT COUNT(*) FROM harness_session_epochs
+                 WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
+              (SELECT COUNT(*) FROM process_generations g
+                 JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers
+            """,
+            (token, token, token),
+        ).fetchone()
+        if len(rows) != 1 or cardinality is None:
+            raise StateConflict("runtime binding source cardinality is not exact")
+        row = rows[0]
+        if (
+            int(cardinality["current_jobs"]) != 1
+            or int(cardinality["current_epochs"]) != 1
+            or int(cardinality["held_writers"]) != 1
+            or row["job_current_attempt_id"] != token
+            or row["status"]
+            not in {
+                AttemptStatus.CLAIMED.value,
+                AttemptStatus.RUNNING.value,
+                AttemptStatus.CHECKPOINTED.value,
+                AttemptStatus.CANCEL_REQUESTED.value,
+            }
+            or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+            or row["orchestration_role"] is None
+            or row["session_epoch_id"] is None
+            or row["process_generation_id"] is None
+            or row["epoch_state"] != SessionEpochState.CURRENT.value
+            or row["epoch_worker"] != row["worker_id"]
+            or row["generation_worker"] != row["worker_id"]
+            or not row["executive_writer_held"]
+            or row["ended_at_ms"] is not None
+            or not row["epoch_provider_session"]
+            or row["generation_provider_session"] != row["epoch_provider_session"]
+            or not row["observed_attestation_digest"]
+        ):
+            raise StateConflict("runtime binding source is not one current actionable OHF writer")
+
+        try:
+            placement = _load_canonical_digest_pair(
+                row["placement_snapshot_json"],
+                row["placement_snapshot_digest"],
+                name="runtime binding placement snapshot",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(f"runtime binding placement evidence is invalid: {exc}") from exc
+        if (
+            not isinstance(placement, dict)
+            or placement.get("worker_id") != row["worker_id"]
+            or placement.get("quota_class") != row["quota_class"]
+            or placement.get("provider") != row["worker_provider"]
+            or placement.get("account_label") != row["worker_account_label"]
+        ):
+            raise StateConflict("runtime binding placement evidence drifted")
+
+        admissions = connection.execute(
+            """SELECT * FROM events
+               WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+            (row["process_generation_id"],),
+        ).fetchall()
+        decisions = connection.execute(
+            """SELECT * FROM events
+               WHERE event_type='OHF_LAUNCH_DECISION'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+            (row["process_generation_id"],),
+        ).fetchall()
+        seals = connection.execute(
+            """SELECT 1 FROM events
+               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
+            (token,),
+        ).fetchall()
+        if len(admissions) != 1 or len(decisions) != 1 or seals:
+            raise StateConflict("runtime binding source lacks one active work admission")
+        admission_event = admissions[0]
+        admission = _strict_canonical_json_loads(
+            str(admission_event["payload_json"]), name="runtime binding work admission"
+        )
+        decision = _strict_canonical_json_loads(
+            str(decisions[0]["payload_json"]), name="runtime binding launch decision"
+        )
+        admission_keys = {
+            "schema_version", "job_id", "attempt_id", "worker_id", "quota_class",
+            "orchestration_role", "process_generation_id", "provider_session_id",
+            "tx3_applied_command_id", "observed_attestation_digest",
+            "principal_observation", "principal_observation_digest",
+            "execution_principal_snapshot_digest", "placement_snapshot_digest",
+            "effective_grant_digest", "policy_sha", "launch_decision",
+        }
+        observation = _validated_admission_principal(row, admission)
+        if (
+            set(admission) != admission_keys
+            or admission_event["command_id"]
+            != f"ohf-work-admit:{row['process_generation_id']}"
+            or admission_event["job_id"] != row["job_id"]
+            or admission_event["attempt_id"] != token
+            or admission_event["worker_id"] != row["worker_id"]
+            or admission_event["quota_class"] != row["quota_class"]
+            or admission.get("schema_version")
+            != "mastermind.orchestration_work_admission/v1"
+            or admission.get("job_id") != row["job_id"]
+            or admission.get("attempt_id") != token
+            or admission.get("worker_id") != row["worker_id"]
+            or admission.get("quota_class") != row["quota_class"]
+            or admission.get("orchestration_role") != row["orchestration_role"]
+            or admission.get("process_generation_id") != row["process_generation_id"]
+            or admission.get("provider_session_id") != row["epoch_provider_session"]
+            or admission.get("observed_attestation_digest")
+            != row["observed_attestation_digest"]
+            or admission.get("placement_snapshot_digest")
+            != row["placement_snapshot_digest"]
+            or admission.get("effective_grant_digest") != row["effective_grant_digest"]
+            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or admission.get("launch_decision") != LaunchDecision.ALLOW.value
+            or decision
+            != {
+                "decision": LaunchDecision.ALLOW.value,
+                "attestation_digest": row["observed_attestation_digest"],
+            }
+            or observation["process_generation_id"] != row["process_generation_id"]
+            or observation["provider_session_id"] != row["epoch_provider_session"]
+            or observation["process_identity"]
+            != {
+                "pid": row["generation_pid"],
+                "pgid": row["generation_pgid"],
+                "process_start_identity": row["generation_process_start_identity"],
+                "boot_id": row["generation_boot_id"],
+            }
+        ):
+            raise StateConflict("runtime binding admission evidence drifted")
+        return ActiveOperatorBindingFacts(
+            attempt_id=token,
+            session_epoch_id=str(row["session_epoch_id"]),
+            generation_number=int(row["generation_number"]),
+            provider_session_id=str(row["epoch_provider_session"]),
+            provider=str(placement["provider"]),
+            account_label=str(placement["account_label"]),
+            owner_seat=str(row["owner_seat"]),
+        )
+
 
 __all__ = [
+    "ActiveOperatorBindingFacts",
     "Attempt",
     "AttemptLease",
     "AttemptRegistry",
