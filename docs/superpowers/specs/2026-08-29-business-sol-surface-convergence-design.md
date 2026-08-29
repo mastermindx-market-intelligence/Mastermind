@@ -24,7 +24,7 @@ At authoring time:
 - no existing branch or pull request named for Business Sol Surface Convergence, Business Premium, a Mastermind plugin marketplace or a Mastermind Sol plugin was found;
 - this document changes one new spec path only.
 
-Therefore this carrier may remain draft and reviewable in parallel, but it must not merge through the active release serialization gate without a fresh current-source reconciliation and explicit Sol release. It must never redirect, stop, commission or absorb the four-CTO fleet.
+This carrier may remain draft and reviewable in parallel, but it must not merge through the active release serialization gate without a fresh current-source reconciliation and explicit Sol release. It must never redirect, stop, commission or absorb the four-CTO fleet.
 
 ---
 
@@ -59,7 +59,7 @@ For the Chairman:
 - one primary conversational operating surface;
 - no routine Slack archaeology, provider-session hunting or account selection;
 - visible source disagreements rather than false-green summaries;
-- one coherent control-room composition inside ChatGPT;
+- one coherent Control Room composition inside ChatGPT;
 - explicit confirmation and scope for modifying CEO actions;
 - graceful continuation across many concurrent projects.
 
@@ -127,7 +127,7 @@ These were verified against current official OpenAI documentation on 2026-08-29.
 10. A plugin imported from a GitHub marketplace can be pinned to a branch, tag or exact commit. Marketplace sync imports plugin content but does not grant app access or authenticate users.
 11. MCP Apps UI is optional and must not be required for the underlying tools to remain useful.
 12. Authenticated MCP servers are expected to use OAuth 2.1-compatible MCP authorization: protected-resource metadata, authorization-server metadata, PKCE, exact resource/audience binding and token verification on every request.
-13. Current official custom-MCP documentation does not expose a trusted durable ChatGPT conversation identifier to the MCP server. Therefore conversation/tab identity cannot be assumed to be available for authority or exact session registration.
+13. No trusted durable ChatGPT conversation identifier is currently documented in the reviewed official custom-MCP contracts. Conversation/tab identity therefore cannot be assumed to be available for authority or exact session registration.
 
 The architectural consequence of item 13 is important: write ability alone does not automatically give Mastermind exact per-chat identity. Business gives us a strong authenticated user and app boundary. Exact reasoning-surface identity still requires a separate RuntimeBinding-compatible seam and must fail closed when that seam is unavailable.
 
@@ -137,8 +137,8 @@ The architectural consequence of item 13 is important: write ability alone does 
 
 | Capability | Current state | Business convergence disposition |
 |---|---|---|
-| Executive Job / Attempt / Worker / Event lifecycle | `BUILT_NOT_PROVEN` as full company loop | preserve as sole lifecycle authority |
-| CeoIngress | `BUILT_NOT_PROVEN / production-unarmed or partially armed by current host lane` | sole Business CEO write destination |
+| Executive Job / Attempt / Worker / Event lifecycle | `BUILT_NOT_PROVEN` as a complete company loop | preserve as sole lifecycle authority |
+| CeoIngress source/contract | `PARTIAL`; implementation exists, while current production arm/host acceptance is owned by active lanes and not established by this F0 | sole Business CEO write destination after accepted host proof |
 | Executive MCP five-tool gateway | `BUILT_NOT_PROVEN`; read/fixture modes; no production write mode | extend only through a separately reviewed production identity/host arm |
 | Executive Steward read core | `BUILT_NOT_PROVEN`; active release carrier | adopt after protection; do not create another Steward |
 | Secretary six-tool read MCP contract | `BUILT_NOT_PROVEN / production-inert` | use as the initial Steward Business app contract |
@@ -149,7 +149,8 @@ The architectural consequence of item 13 is important: write ability alone does 
 | Web-Sol Personal-seat adapter | `BUILT_NOT_PROVEN / production-inert` | transition/fallback surface; not the final Business backend |
 | SessionTargetRegistry / RuntimeBinding | `PARTIAL`; logical model exists, production persistence/Business binding incomplete | extend existing owner for Business surface targeting |
 | Wake Fabric | `PARTIAL / production rollout in progress` | remains exact attention-delivery owner |
-| Agent OS | `PROVEN_LIVE` as repository-backed organizational knowledge plane, with known freshness/performance degradations | read through canonical compilation; typed Git-record writes only |
+| Agent OS record schema, validation and generated views | `PROVEN_LIVE` | preserve as organizational knowledge plane |
+| Complete/fresh Agent OS cross-company projection | `PARTIAL`; current joins and performance can degrade | expose freshness/degradation through Steward; do not claim complete state from absence |
 | Linear project/issue projection | `PARTIAL / active rollout lanes` | keep as selected human portfolio projection |
 | Slack Workrooms / richer collaboration | `SPEC_ONLY / active independent carrier` | continue independently; likely retained after Business cutover |
 | Mastermind plugin marketplace | `NOT_BUILT` | new BSC ownership |
@@ -157,7 +158,7 @@ The architectural consequence of item 13 is important: write ability alone does 
 | Business OAuth resource server and caller policy | `NOT_BUILT` | new BSC ownership |
 | Secure MCP Tunnel installation | `NOT_BUILT` | new BSC deployment wave |
 | Business-native Control Room MCP UI | `NOT_BUILT` | new product wave over Steward |
-| Exact Business Sol surface registration | `NOT_BUILT`; platform lacks trusted conversation ID | later RuntimeBinding-compatible wave; not assumed by V1 |
+| Exact Business Sol surface registration | `NOT_BUILT`; no trusted conversation ID is currently documented | later RuntimeBinding-compatible wave; not assumed by V1 |
 | Workspace Agents as Mastermind lifecycle | `REJECTED_BY_DESIGN` | would duplicate Executive OS |
 | Generic direct Agent OS write MCP | `REJECTED_BY_DESIGN` | would bypass record/Git review and create an unsafe memory writer |
 | One giant Mastermind super-MCP | `REJECTED_BY_DESIGN` | mixes incompatible authority classes and blast radii |
@@ -219,7 +220,7 @@ A separate visible plugin for every owner would preserve isolation but force the
 
 ### 6.3 Accepted: one experience, federated authority
 
-The accepted architecture is:
+The accepted target architecture is:
 
 ```text
 Mastermind Sol plugin
@@ -232,6 +233,8 @@ Mastermind Operator plugin
 ```
 
 The user experience is coherent, but each authority surface is independently versioned, authenticated, tested, published, disabled and rolled back.
+
+**Versioned dependency ruling:** `Mastermind Sol` v1 must not depend on the not-yet-built Surface app. Initial v1 packages Steward and Executive references only. Surface becomes an explicit plugin-generation update only after BSC-RB1/RB2 is accepted. A missing future Surface app therefore cannot block initial read/root-admission rollout.
 
 ---
 
@@ -249,7 +252,7 @@ Mastermind Sol plugin
     ├───────────────┬─────────────────┬───────────────────┐
     ▼               ▼                 ▼                   ▼
 Steward app     Surface app       Executive app      native GitHub /
-read-only       bounded runtime    bounded intent     Linear / Slack apps
+read-only       later bounded      bounded intent     Linear / Slack apps
                 presence           submission          when useful
     │               │                 │
     │               │                 ▼
@@ -346,7 +349,7 @@ Recommended source shape:
 plugins/
   mastermind-sol/
     .codex-plugin/plugin.json
-    .app.json or app-template references
+    app.template.json
     skills/
       bootstrap-mastermind/SKILL.md
       open-executive-cockpit/SKILL.md
@@ -357,13 +360,15 @@ plugins/
       close-out-program/SKILL.md
   mastermind-operator/
     .codex-plugin/plugin.json
-    .app.json or app-template references
+    app.template.json
     skills/
       receive-commission/SKILL.md
       return-progress/SKILL.md
       escalate-decision/SKILL.md
       finish-operation/SKILL.md
 ```
+
+`app.template.json` is a Mastermind source template, not an OpenAI-recognized installed binding. It contains symbolic app-generation names only and no live app ID or secret. BSC-U1 generates the exact installed `.app.json` after the Business admin creates the approved workspace apps. No literal placeholder URL or app ID may be published as a working binding.
 
 Canary import uses an exact reviewed commit. A later production marketplace may follow protected `master` only after plugin-update review and rollback are proven. Automatic marketplace sync never grants new app access or authentication.
 
@@ -539,7 +544,7 @@ Production write remains unavailable until all of these pass:
 
 ## 11. `Mastermind Surface` app and exact Sol-session truth
 
-This surface is needed because the Chairman wants sister Sols to know which sessions exist, what each is focusing on and which exact session may act. Business write access makes a governed presence projection possible, but the platform does not currently provide a trusted durable conversation ID to the MCP server.
+This surface is needed because the Chairman wants sister Sols to know which sessions exist, what each is focusing on and which exact session may act. Business write access makes a governed presence projection possible, but the platform does not currently document a trusted durable conversation ID to the MCP server.
 
 ### 11.1 Separation of concepts
 
@@ -668,23 +673,23 @@ Every customer-specific read or write app uses OAuth 2.1-compatible MCP authoriz
 
 ### 13.2 App separation
 
-Recommended resources/scopes:
+The following resource URLs are conceptual names only. BSC-U1 supplies the accepted exact deployment origin; literal bracketed values never ship in a published app.
 
 ```text
 Mastermind Steward v1
-  resource: https://<private-edge>/mcp/steward/v1
+  resource: https://[approved-private-edge]/mcp/steward/v1
   scopes: mastermind.steward.read
 
 Mastermind Surface v1
-  resource: https://<private-edge>/mcp/surface/v1
+  resource: https://[approved-private-edge]/mcp/surface/v1
   scopes: mastermind.surface.read, mastermind.surface.presence
 
 Mastermind Executive v1
-  resource: https://<private-edge>/mcp/executive/v1
+  resource: https://[approved-private-edge]/mcp/executive/v1
   scopes: mastermind.executive.read, mastermind.executive.intent.submit
 
 Mastermind Dialogue v1
-  resource: https://<private-edge>/mcp/dialogue/v1
+  resource: https://[approved-private-edge]/mcp/dialogue/v1
   scopes: mastermind.dialogue.read, mastermind.dialogue.write
 ```
 
@@ -981,9 +986,16 @@ No generic `save memory` action exists.
 
 ---
 
-## 19. Implementation program
+## 19. Implementation program and planning decomposition
 
-Implementation begins only after this design is protected and an implementation plan is reviewed. Each wave is independently useful or closes one explicit safety gate.
+This architecture spans multiple independently releasable subsystems and is too large for one monolithic implementation plan or PR. After the written architecture is reviewed, create:
+
+1. one top-level Business Surface Convergence program DAG that freezes dependencies, current owners, collision gates and cutover stages; and
+2. a separate TDD implementation plan for each wave immediately before that wave begins.
+
+The first executable plan is BSC-P1 only. BSC-A1, S1, E1, RB2 and later waves receive their own plans after current-source re-pin. No wave widens merely because the complete program is broad.
+
+Implementation begins only after this design is protected, the top-level DAG is reviewed and the applicable wave plan is reviewed. Each wave is independently useful or closes one explicit safety gate.
 
 ### BSC-F0 — architecture/source-law carrier
 
@@ -991,19 +1003,32 @@ This document only.
 
 Stop at `SPEC_ONLY / RECORDS_ONLY`.
 
+### BSC-O0 — organizational parent and portfolio projection reconciliation
+
+After F0 is protected, resolve the Business program against current Agent OS and Linear owners.
+
+Preferred organizational parent is the existing `WS:CHAIRMAN-CONTROL-ROOM` only if current Agent OS semantics and the current accountable owner confirm that Business convergence belongs there. Do not create a title-similar new workstream merely to obtain a row.
+
+Expected output:
+
+- one existing parent + bounded new wave/hand-off, or a typed `ORGANIZATIONAL_PARENT_UNRESOLVED` return;
+- one selected human-visible Linear projection through the existing projector/Initiative owner when eligible;
+- zero direct F0 mutation of Agent OS or Linear;
+- no new task/project database.
+
 ### BSC-P1 — private plugin marketplace and production-inert packages
 
 Build:
 
 - `.agents/plugins/marketplace.json`;
-- `Mastermind Sol` manifest;
-- `Mastermind Operator` manifest;
+- `Mastermind Sol` v1 manifest;
+- `Mastermind Operator` v1 manifest;
 - thin current-Skillpack bootstrap skills;
 - workflow skills listed above;
-- app-reference/template placeholders that contain no live app ID or secret;
+- secret-free `app.template.json` files;
 - manifest/skill/static-policy tests.
 
-No app connection, OAuth or runtime action.
+`Mastermind Sol` v1 contains only Steward and Executive symbolic app dependencies. It contains no Surface dependency. No actual `.app.json`, live app ID, app connection, OAuth or runtime action is created in this wave.
 
 ### BSC-A1 — OAuth/resource-server library
 
@@ -1060,7 +1085,7 @@ Build deterministic admin tooling/runbook for:
 - OAuth redirect/resource configuration;
 - Secure MCP Tunnel setup;
 - plugin marketplace import pinned to exact commit;
-- `.app.json` generation from approved IDs;
+- generation of exact installed `.app.json` bindings from approved IDs;
 - verify-only mode and redacted receipts.
 
 ### BSC-C1 — real Business read canary
@@ -1102,7 +1127,7 @@ This is a falsifier wave, not production authority.
 
 Only if RB1 yields an accepted safe seam.
 
-Implement presence/focus events through existing RuntimeBinding/Executive event ownership. Prove stale/observer/non-authoritative behavior and no new session database.
+Implement presence/focus events through existing RuntimeBinding/Executive event ownership. Prove stale/observer/non-authoritative behavior and no new session database. Only after RB2 acceptance may a later `Mastermind Sol` plugin generation reference the Surface app.
 
 ### BSC-D1 — dual-run
 
@@ -1316,7 +1341,7 @@ This F0 carrier stops after:
 - this single design file is committed;
 - placeholder, contradiction, scope and ambiguity review passes;
 - the Chairman reviews the written repository artifact;
-- a separate implementation plan is authored through the required planning procedure;
+- a top-level program DAG and first-wave BSC-P1 implementation plan are authored through the required planning procedure;
 - current protected source and active carrier collisions are re-pinned before any implementation START.
 
 F0 does not create the plugin or apps, mutate Agent OS/Linear/Slack, arm a tunnel, enroll OAuth, change CeoIngress, claim a Business session identity, commission a worker or merge itself.
