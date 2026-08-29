@@ -129,6 +129,23 @@ def _ts_order(value: str) -> Decimal:
         raise DialogueEngineError("THREAD_MESSAGE_INVALID") from None
 
 
+def _same_applicability_carrier(
+    trusted: Mapping[str, Any], observed: Mapping[str, Any]
+) -> bool:
+    """Allow continuity movement only inside one accepted applicability carrier."""
+
+    if trusted.get("kind") != observed.get("kind"):
+        return False
+    if trusted.get("kind") == "repository":
+        return all(
+            trusted.get(field) == observed.get(field)
+            for field in ("repository", "pr")
+        )
+    if trusted.get("kind") == "executive_attempt":
+        return trusted.get("job_id") == observed.get("job_id")
+    return False
+
+
 def _message_matches_history_parent(
     message: Mapping[str, Any], context: Mapping[str, Any]
 ) -> bool:
@@ -136,6 +153,9 @@ def _message_matches_history_parent(
         message.get("work_ref") == context["work_ref"]
         and message.get("commission_ref") == context["commission_ref"]
         and message.get("session_ref") == context["session_ref"]
+        and _same_applicability_carrier(
+            context["applies_to"], message.get("applies_to", {})
+        )
     )
 
 
@@ -151,9 +171,14 @@ def _message_matches_current_context(
 def _messages_share_reply_lineage(
     left: Mapping[str, Any], right: Mapping[str, Any]
 ) -> bool:
-    return all(
-        left.get(key) == right.get(key)
-        for key in ("work_ref", "commission_ref", "session_ref")
+    return (
+        all(
+            left.get(key) == right.get(key)
+            for key in ("work_ref", "commission_ref", "session_ref")
+        )
+        and _same_applicability_carrier(
+            left.get("applies_to", {}), right.get("applies_to", {})
+        )
     )
 
 
