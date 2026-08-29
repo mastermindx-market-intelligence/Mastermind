@@ -14008,8 +14008,11 @@ class Runtime:
         rows = connection.execute(
             """
             SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
-                   j.owner_seat,j.orchestration_role,
+                   j.status AS job_status,j.owner_seat,j.orchestration_role,
                    w.provider AS worker_provider,w.account_label AS worker_account_label,
+                   q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
+                   q.provider AS quota_provider,q.status AS quota_status,
+                   q.held_attempt_id,q.fence_counter AS quota_fence_counter,
                    e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
                    e.provider_session_id AS epoch_provider_session,
                    g.process_generation_id,g.worker_id AS generation_worker,
@@ -14021,6 +14024,8 @@ class Runtime:
             FROM attempts a
             JOIN jobs j ON j.job_id=a.job_id
             JOIN workers w ON w.worker_id=a.worker_id
+            JOIN worker_quota_classes q
+              ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
             LEFT JOIN harness_session_epochs e ON e.attempt_id=a.attempt_id
               AND e.state='CURRENT'
             LEFT JOIN process_generations g ON g.session_epoch_id=e.session_epoch_id
@@ -14037,27 +14042,40 @@ class Runtime:
                  WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
               (SELECT COUNT(*) FROM process_generations g
                  JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
-                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers
+                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
+              (SELECT MAX(g.generation_number) FROM process_generations g
+                 JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
             """,
-            (token, token, token),
+            (token, token, token, token),
         ).fetchone()
         if len(rows) != 1 or cardinality is None:
             raise StateConflict("runtime binding source cardinality is not exact")
         row = rows[0]
+        accepted_statuses = {
+            AttemptStatus.RUNNING.value: JobStatus.RUNNING.value,
+            AttemptStatus.CHECKPOINTED.value: JobStatus.CHECKPOINTED.value,
+            AttemptStatus.CANCEL_REQUESTED.value: JobStatus.CANCEL_REQUESTED.value,
+        }
+        expected_job_status = accepted_statuses.get(str(row["status"]))
         if (
             int(cardinality["current_jobs"]) != 1
             or int(cardinality["current_epochs"]) != 1
             or int(cardinality["held_writers"]) != 1
+            or cardinality["current_epoch_max_generation"] is None
             or row["job_current_attempt_id"] != token
-            or row["status"]
-            not in {
-                AttemptStatus.CLAIMED.value,
-                AttemptStatus.RUNNING.value,
-                AttemptStatus.CHECKPOINTED.value,
-                AttemptStatus.CANCEL_REQUESTED.value,
-            }
+            or expected_job_status is None
+            or row["job_status"] != expected_job_status
+            or row["lease_token"] is None
+            or int(row["lease_expires_at_ms"]) <= self.store.now_ms()
             or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
             or row["orchestration_role"] is None
+            or row["quota_worker_id"] != row["worker_id"]
+            or row["quota_quota_class"] != row["quota_class"]
+            or row["quota_provider"] != row["worker_provider"]
+            or row["quota_status"] != WorkerStatus.BUSY.value
+            or row["held_attempt_id"] != token
+            or int(row["quota_fence_counter"]) != int(row["fence_generation"])
             or row["session_epoch_id"] is None
             or row["process_generation_id"] is None
             or row["epoch_state"] != SessionEpochState.CURRENT.value
@@ -14067,6 +14085,8 @@ class Runtime:
             or row["ended_at_ms"] is not None
             or not row["epoch_provider_session"]
             or row["generation_provider_session"] != row["epoch_provider_session"]
+            or int(row["generation_number"])
+            != int(cardinality["current_epoch_max_generation"])
             or not row["observed_attestation_digest"]
         ):
             raise StateConflict("runtime binding source is not one current actionable OHF writer")
@@ -14124,6 +14144,18 @@ class Runtime:
             "execution_principal_snapshot_digest", "placement_snapshot_digest",
             "effective_grant_digest", "policy_sha", "launch_decision",
         }
+        immutable_digests = (
+            "observed_attestation_digest",
+            "principal_observation_digest",
+            "execution_principal_snapshot_digest",
+            "placement_snapshot_digest",
+            "effective_grant_digest",
+            "policy_sha",
+        )
+        tx3_rows = connection.execute(
+            "SELECT * FROM events WHERE command_id=? ORDER BY event_id",
+            (admission.get("tx3_applied_command_id"),),
+        ).fetchall()
         observation = _validated_admission_principal(row, admission)
         if (
             set(admission) != admission_keys
@@ -14147,7 +14179,17 @@ class Runtime:
             or admission.get("placement_snapshot_digest")
             != row["placement_snapshot_digest"]
             or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or any(
+                not isinstance(admission.get(field), str)
+                or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
+                for field in immutable_digests
+            )
+            or len(tx3_rows) != 1
+            or tx3_rows[0]["event_type"] != OperationReceiptKind.APPLIED.value
+            or tx3_rows[0]["aggregate_type"] != "operator_operation"
+            or tx3_rows[0]["attempt_id"] != token
+            or tx3_rows[0]["worker_id"] != row["worker_id"]
+            or tx3_rows[0]["quota_class"] != row["quota_class"]
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {

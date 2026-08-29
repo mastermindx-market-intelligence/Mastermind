@@ -43,11 +43,21 @@ def active_operator_binding_facts(
 
 
 def project_runtime_binding(
-    runtime: Runtime, attempt_id: str, target: SessionTarget
+    runtime: Runtime,
+    attempt_id: str,
+    target: SessionTarget,
+    *,
+    connection: sqlite3.Connection | None = None,
 ) -> RuntimeBinding:
-    """Project one runtime-only binding; this function persists nothing."""
+    """Project one runtime-only binding; this function persists nothing.
 
-    facts = active_operator_binding_facts(runtime, attempt_id, target)
+    Supplying a connection is intentionally part of the public projection seam:
+    the caller's exact read snapshot flows all the way through source validation.
+    """
+
+    facts = active_operator_binding_facts(
+        runtime, attempt_id, target, connection=connection
+    )
     binding_id = "bind-" + hashlib.sha256(
         f"{facts.attempt_id}:{facts.session_epoch_id}".encode("utf-8")
     ).hexdigest()[:40]
