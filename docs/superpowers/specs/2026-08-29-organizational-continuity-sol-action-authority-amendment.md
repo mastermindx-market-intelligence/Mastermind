@@ -5,7 +5,7 @@
 **Chairman:** Chris  
 **Parent operation:** `mastermind-operating-surface-continuity-incident-amendment-20260828-sol-001`  
 **Canonical carrier:** Mastermind PR #214, same branch as closed metadata-only predecessor #211  
-**Current protected re-pin:** `Mastermind@613fcc9176cb93a93734540fbd43ce8d8a13d417`, Skillpack `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap major 1  
+**Current protected re-pin:** `Mastermind@73acf73902f6d925e49908058b47baf3d586f479`, Skillpack `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap major 1  
 **Authority:** narrow same-carrier amendment requested by the Sol architecture review of #211 and explicitly approved by the Chairman. For watcher cardinality, exact Sol action authority, transfer/recovery and conflict behavior, this amendment wins over the earlier two #214 specs.  
 **Capability state:** `SPEC_ONLY`. No watcher/runtime/session/owner registry, lifecycle, Wake obligation, Slack message, provider session, queue, database or production behavior is created here.
 
