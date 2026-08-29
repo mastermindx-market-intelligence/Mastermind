@@ -1,0 +1,283 @@
+from __future__ import annotations
+
+import inspect
+import json
+import socket
+import threading
+
+import pytest
+
+from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import chatgpt
+from integrations.chairman_surfaces import web_sol_native_host as native
+from integrations.chairman_surfaces import web_sol_protocol as wsp
+
+
+OPERATION = "web-sol-surface-adapter-s0s1-20260829-sol-001"
+ISSUED = "2026-08-29T06:00:00Z"
+EXPIRES = "2026-08-29T06:05:00Z"
+NONCE = "nonce-0000000000000001"
+PROFILE = "aaaaaaaaaaaaaaaaaaaaaaaa"
+
+
+def binding(*, url: str = "https://chatgpt.com/c/session-alpha", profile_id: str = PROFILE) -> dict:
+    return sb.new_binding(
+        work_ref="WS:CCR",
+        role="ceo",
+        provider="chatgpt",
+        locator_kind="chatgpt_managed_env",
+        locator={"env_manager": "gologin", "profile_id": profile_id, "url": url},
+        observed_at="2026-08-29T05:55:00Z",
+        seat_ref="chatgpt-seat-1",
+        binding_id="11111111-1111-4111-8111-111111111111",
+    )
+
+
+def observation() -> dict:
+    return {
+        "schema": wsp.PROBE_SCHEMA,
+        "target_present": True,
+        "exact_conversation_loaded": True,
+        "page_responsive": True,
+        "document_ready_state": "complete",
+        "visibility": "visible",
+        "composer_available": True,
+        "generation_state": "idle",
+        "auth_required": False,
+        "provider_error_present": False,
+    }
+
+
+def receipt_for(request: dict, *, status: str | None = None, **overrides) -> dict:
+    if status is None:
+        status = "FOREGROUNDED_VERIFIED" if request["action"] == "FOREGROUND" else "INSPECTED"
+    result = {
+        "schema": wsp.RECEIPT_SCHEMA,
+        "binding_id": request["binding_id"],
+        "conversation_fingerprint": request["conversation_fingerprint"],
+        "binding_fingerprint": request["binding_fingerprint"],
+        "binding_revision": request["binding_revision"],
+        "action": request["action"],
+        "operation_key": request["operation_key"],
+        "nonce": request["nonce"],
+        "status": status,
+        "observed_at": "2026-08-29T06:00:01Z",
+        "observation": observation(),
+    }
+    result.update(overrides)
+    return result
+
+
+def call_kwargs() -> dict:
+    return {
+        "operation_key": OPERATION,
+        "issued_at": ISSUED,
+        "expires_at": EXPIRES,
+        "nonce": NONCE,
+    }
+
+
+def test_public_extension_seam_is_explicit_and_does_not_accept_transport_or_target_overrides():
+    assert chatgpt.WEB_SOL_SOCKET_PATH == native.SOCKET_PATH
+    for function in (chatgpt.inspect_via_extension, chatgpt.foreground_via_extension):
+        signature = inspect.signature(function)
+        assert list(signature.parameters) == [
+            "binding",
+            "operation_key",
+            "issued_at",
+            "expires_at",
+            "nonce",
+        ]
+        for forbidden in ("socket_path", "bridge", "provider", "account", "profile_id", "url", "retry"):
+            assert forbidden not in signature.parameters
+
+
+def test_conversation_identity_is_canonical_and_trailing_slash_equivalent():
+    plain = binding(url="https://chatgpt.com/c/session-alpha")
+    slash = binding(url="https://chatgpt.com/c/session-alpha/")
+    assert chatgpt.conversation_fingerprint(plain) == chatgpt.conversation_fingerprint(slash)
+    assert len(chatgpt.conversation_fingerprint(plain)) == 64
+
+
+def test_binding_fingerprint_is_deterministic_but_changes_on_exact_surface_drift():
+    original = binding()
+    same = json.loads(json.dumps(original))
+    changed_profile = binding(profile_id="bbbbbbbbbbbbbbbbbbbbbbbb")
+    changed_url = binding(url="https://chatgpt.com/c/session-beta")
+
+    assert chatgpt.binding_fingerprint(original) == chatgpt.binding_fingerprint(same)
+    assert len(chatgpt.binding_fingerprint(original)) == 64
+    assert chatgpt.binding_fingerprint(original) != chatgpt.binding_fingerprint(changed_profile)
+    assert chatgpt.binding_fingerprint(original) != chatgpt.binding_fingerprint(changed_url)
+
+
+def test_inspect_builds_one_closed_request_without_raw_locator_values(monkeypatch):
+    row = binding()
+    seen: list[dict] = []
+
+    def exchange(request):
+        seen.append(request)
+        return receipt_for(request)
+
+    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
+    result = chatgpt.inspect_via_extension(row, **call_kwargs())
+
+    assert result["status"] == "INSPECTED"
+    assert len(seen) == 1
+    request = seen[0]
+    assert request["action"] == "INSPECT"
+    assert request["binding_revision"] == 0
+    assert request["binding_id"] == row["binding_id"]
+    serialized = json.dumps(request, sort_keys=True)
+    assert row["locator"]["url"] not in serialized
+    assert row["locator"]["profile_id"] not in serialized
+    assert row["seat_ref"] not in serialized
+
+
+def test_foreground_builds_one_closed_request_and_never_retries(monkeypatch):
+    row = binding()
+    calls = 0
+
+    def exchange(request):
+        nonlocal calls
+        calls += 1
+        return receipt_for(request)
+
+    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
+    result = chatgpt.foreground_via_extension(row, **call_kwargs())
+    assert result["status"] == "FOREGROUNDED_VERIFIED"
+    assert calls == 1
+
+
+def test_invalid_binding_refuses_before_transport(monkeypatch):
+    row = binding()
+    row["status"] = "running"
+    calls = 0
+
+    def exchange(_request):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("transport must not be reached")
+
+    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(chatgpt.WebSolExtensionError, match="invalid_binding"):
+        chatgpt.inspect_via_extension(row, **call_kwargs())
+    assert calls == 0
+
+
+def test_non_chatgpt_binding_refuses_before_transport(monkeypatch):
+    row = binding()
+    row["provider"] = "codex"
+    calls = 0
+
+    def exchange(_request):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("transport must not be reached")
+
+    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(chatgpt.WebSolExtensionError, match="invalid_binding"):
+        chatgpt.inspect_via_extension(row, **call_kwargs())
+    assert calls == 0
+
+
+def test_mismatched_receipt_identity_is_refused(monkeypatch):
+    row = binding()
+
+    def exchange(request):
+        return receipt_for(request, nonce="different-nonce-00000001")
+
+    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(chatgpt.WebSolExtensionError, match="receipt_identity_mismatch"):
+        chatgpt.inspect_via_extension(row, **call_kwargs())
+
+
+def test_protocol_error_is_laundered_without_locator_or_payload(monkeypatch):
+    row = binding()
+
+    def exchange(_request):
+        raise native.NativeHostError("inspect_timeout")
+
+    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", exchange)
+    with pytest.raises(chatgpt.WebSolExtensionError) as caught:
+        chatgpt.inspect_via_extension(row, **call_kwargs())
+    assert caught.value.code == "inspect_timeout"
+    assert str(caught.value) == "inspect_timeout"
+    assert row["locator"]["url"] not in str(caught.value)
+    assert row["locator"]["profile_id"] not in str(caught.value)
+
+
+def test_legacy_open_surface_remains_fail_closed_and_never_calls_extension(monkeypatch, tmp_path):
+    row = binding()
+    root = tmp_path / "gologin"
+    (root / PROFILE).mkdir(parents=True)
+
+    def forbidden_exchange(_request):
+        raise AssertionError("legacy open_surface must never use extension transport")
+
+    monkeypatch.setattr(chatgpt, "_exchange_web_sol_socket", forbidden_exchange)
+    outcome = chatgpt.open_surface(
+        row,
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runner must not be called")),
+        gologin_profiles_root=str(root),
+        process_args_reader=lambda: [f"orbita --user-data-dir=/x/{PROFILE}"],
+    )
+    assert outcome["ok"] is False
+    assert outcome["failure_kind"] == "unsupported_surface"
+
+
+def test_fixed_socket_exchange_round_trips_one_request_without_retry(monkeypatch, tmp_path):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    private.chmod(0o700)
+    path = private / "web_sol_surface.sock"
+    monkeypatch.setattr(chatgpt, "WEB_SOL_SOCKET_PATH", str(path))
+
+    ready = threading.Event()
+    received: list[dict] = []
+
+    def server():
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(path))
+        path.chmod(0o600)
+        listener.listen(1)
+        ready.set()
+        client, _ = listener.accept()
+        with client:
+            reader = client.makefile("rb", buffering=0)
+            writer = client.makefile("wb", buffering=0)
+            request = native.read_frame(reader)
+            received.append(request)
+            native.write_frame(writer, receipt_for(request))
+            reader.close()
+            writer.close()
+        listener.close()
+        path.unlink(missing_ok=True)
+
+    thread = threading.Thread(target=server, daemon=True)
+    thread.start()
+    assert ready.wait(timeout=2)
+
+    request = wsp.validate_request({
+        "schema": wsp.ACTION_SCHEMA,
+        "binding_id": "11111111-1111-4111-8111-111111111111",
+        "conversation_fingerprint": "a" * 64,
+        "binding_fingerprint": "b" * 64,
+        "binding_revision": 0,
+        "action": "INSPECT",
+        "operation_key": OPERATION,
+        "issued_at": ISSUED,
+        "expires_at": EXPIRES,
+        "nonce": NONCE,
+    })
+    result = chatgpt._exchange_web_sol_socket(request)
+    thread.join(timeout=2)
+    assert result["status"] == "INSPECTED"
+    assert received == [request]
+
+
+def test_explicit_seam_source_contains_no_browser_launch_retry_or_openclaw_fallback():
+    source = inspect.getsource(chatgpt.inspect_via_extension) + inspect.getsource(chatgpt.foreground_via_extension)
+    lowered = source.lower()
+    for forbidden in ("retry", "openclaw", "osascript", "subprocess", "launch", "start_browser", "click", "type("):
+        assert forbidden not in lowered
