@@ -216,7 +216,6 @@ def _require_exact(
     if actual != expected:
         errors.append(_error(root, path, code, "document differs from the closed BSC-P1 contract"))
 
-
 MANIFEST_KEYS = {"name", "version", "description", "author", "skills", "interface"}
 INTERFACE_KEYS = {
     "displayName", "shortDescription", "longDescription", "developerName",
