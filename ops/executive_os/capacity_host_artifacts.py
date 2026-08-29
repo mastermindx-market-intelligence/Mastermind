@@ -89,6 +89,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct Apple Python execution
 
 TRANSPORT_SCHEMA = "mastermind.capacity_source_transport/v1"
 TRANSPORT_SCHEMA_V2 = "mastermind.capacity_source_transport/v2"
+TRANSPORT_SCHEMA_V3 = "mastermind.capacity_source_transport/v3"
 RECOVERY_INTENT_SCHEMA = "mastermind.executive_capacity_h0_recovery_intent/v1"
 RECOVERY_RECEIPT_SCHEMA = "mastermind.executive_capacity_h0_recovery/v1"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -131,6 +132,13 @@ _V2_SPARSE_CHECKOUT = b"".join(
     f"/{path}\n".encode("utf-8") for path in PRODUCER_MATERIAL_PATHS
 )
 _V2_ZIP32_ERROR = "TRANSPORT_V2_ZIP32_LIMIT_EXCEEDED"
+# The accepted Macro commit currently produces an approximately 21 GiB complete
+# pack. Keep a hard pre-copy and archive bound while leaving enough deterministic
+# headroom for Git pack-layout variation across the supported macOS Git estate.
+_V3_TRANSPORT_MAX_BYTES = 32 * 1024 * 1024 * 1024
+_V3_ZIP64_VERSION = 45
+_V3_REPAIR_SPACE_MULTIPLIER = 3
+_V3_REPAIR_SPACE_RESERVE_BYTES = 2 * 1024 * 1024 * 1024
 _SOURCE_REPAIR_INTENT_NAME = "source-repair-intent.json"
 _SOURCE_REPAIR_RECEIPT_NAME = "source-repair-receipt.json"
 _ARCHIVED_SOURCE_NAME = "archived-source"
@@ -721,6 +729,8 @@ def copy_closed_input(
     operator_uid: int,
     expected_sha256: str,
     maximum_bytes: int = 65 * 1024 * 1024,
+    minimum_free_multiplier: int = 0,
+    minimum_free_reserve_bytes: int = 0,
 ) -> dict[str, Any]:
     """Copy one operator file through a no-follow descriptor and bind its bytes."""
 
@@ -729,6 +739,12 @@ def copy_closed_input(
         or operator_uid < 1
         or _DIGEST_RE.fullmatch(expected_sha256) is None
         or maximum_bytes < 1
+        or isinstance(minimum_free_multiplier, bool)
+        or not isinstance(minimum_free_multiplier, int)
+        or minimum_free_multiplier < 0
+        or isinstance(minimum_free_reserve_bytes, bool)
+        or not isinstance(minimum_free_reserve_bytes, int)
+        or minimum_free_reserve_bytes < 0
     ):
         raise CapacityHostArtifactError("CLOSED_INPUT_ARGUMENT_INVALID")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
@@ -745,6 +761,15 @@ def copy_closed_input(
             or info.st_size > maximum_bytes
         ):
             raise CapacityHostArtifactError("CLOSED_INPUT_METADATA_INVALID")
+        if minimum_free_multiplier:
+            filesystem = os.statvfs(destination.parent)
+            available = filesystem.f_bavail * filesystem.f_frsize
+            required = (
+                info.st_size * minimum_free_multiplier
+                + minimum_free_reserve_bytes
+            )
+            if available < required:
+                raise CapacityHostArtifactError("CLOSED_INPUT_SPACE_INSUFFICIENT")
         output_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         output_descriptor = os.open(destination, output_flags, 0o400)
         if os.geteuid() == 0:
@@ -2603,7 +2628,7 @@ def _verify_retained_prior_generation(
 def _load_complete_manifest(source_root: Path, expected_commit: str) -> dict[str, Any]:
     manifest_path = source_root / ".git" / "cf2-h0-transport-manifest.json"
     raw = json.loads(_read_small_nofollow(manifest_path, _V2_MANIFEST_MAX_BYTES))
-    return validate_transport_manifest_v2(raw, expected_commit=expected_commit)
+    return validate_complete_transport_manifest(raw, expected_commit=expected_commit)
 
 
 def _verify_installed_repair_source(
@@ -2628,7 +2653,7 @@ def _verify_installed_repair_source(
             or stat.S_IMODE(info.st_mode) != 0o444
         ):
             raise CapacityHostArtifactError("SOURCE_MANIFEST_MISMATCH")
-        manifest = validate_transport_manifest_v2(
+        manifest = validate_complete_transport_manifest(
             json.loads(_read_descriptor(descriptor, _V2_MANIFEST_MAX_BYTES)),
             expected_commit=expected_commit,
         )
@@ -4874,7 +4899,9 @@ def run_source_repair_host(
                     staged_transport,
                     operator_uid=resolved_operator_uid,
                     expected_sha256=transport_sha256,
-                    maximum_bytes=4 * 1024 * 1024 * 1024,
+                    maximum_bytes=_V3_TRANSPORT_MAX_BYTES,
+                    minimum_free_multiplier=_V3_REPAIR_SPACE_MULTIPLIER,
+                    minimum_free_reserve_bytes=_V3_REPAIR_SPACE_RESERVE_BYTES,
                 )
                 os.fsync(parents.staging)
             elif sha256_file(staged_transport) != transport_sha256:
@@ -4882,7 +4909,7 @@ def run_source_repair_host(
             if crash_at == "after_transport_fsync":
                 raise SourceRepairIncomplete(crash_at)
             if not _path_lexists(staged_source):
-                manifest = materialize_source_transport_v2(
+                manifest = materialize_source_transport_v3(
                     staged_transport,
                     staged_source,
                     expected_commit=expected_source_commit,
@@ -6335,6 +6362,231 @@ def _write_transport_v2_archive(
         os.close(descriptor)
 
 
+def _write_all(descriptor: int, payload: bytes | memoryview) -> None:
+    view = memoryview(payload)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            raise CapacityHostArtifactError("SHORT_WRITE")
+        view = view[written:]
+
+
+def _zip64_size_extra(size: int) -> bytes:
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        raise CapacityHostArtifactError("TRANSPORT_V3_SIZE_INVALID")
+    return struct.pack("<HHQQ", 0x0001, 16, size, size)
+
+
+def _require_v3_transport_size(size: int) -> None:
+    if (
+        isinstance(size, bool)
+        or not isinstance(size, int)
+        or size < 1
+        or size > _V3_TRANSPORT_MAX_BYTES
+    ):
+        raise CapacityHostArtifactError("TRANSPORT_V3_SIZE_LIMIT_EXCEEDED")
+
+
+def _write_transport_v3_archive(
+    output: Path, manifest: Mapping[str, Any], payload_path: Path
+) -> None:
+    """Write one deterministic two-member ZIP64 envelope without buffering its pack."""
+
+    manifest_bytes = canonical_json(manifest)
+    if len(manifest_bytes) > _V2_MANIFEST_MAX_BYTES:
+        raise CapacityHostArtifactError("TRANSPORT_MANIFEST_TOO_LARGE")
+    payload_flags = (
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    )
+    payload_descriptor = os.open(payload_path, payload_flags)
+    output_descriptor: int | None = None
+    try:
+        payload_before = os.fstat(payload_descriptor)
+        payload_size = payload_before.st_size
+        if (
+            not stat.S_ISREG(payload_before.st_mode)
+            or payload_before.st_nlink != 1
+            or payload_size < 32
+        ):
+            raise CapacityHostArtifactError("PACK_INVALID")
+        _require_v3_transport_size(payload_size)
+
+        payload_digest = hashlib.sha256()
+        payload_crc32 = 0
+        remaining = payload_size
+        while remaining:
+            chunk = os.read(payload_descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                raise CapacityHostArtifactError("PACK_INVALID")
+            payload_digest.update(chunk)
+            payload_crc32 = zlib.crc32(chunk, payload_crc32)
+            remaining -= len(chunk)
+        if payload_digest.hexdigest() != str(manifest.get("payload_sha256")):
+            raise CapacityHostArtifactError("TRANSPORT_PAYLOAD_DIGEST_MISMATCH")
+        payload_crc32 &= 0xFFFFFFFF
+        os.lseek(payload_descriptor, 0, os.SEEK_SET)
+
+        manifest_name = b"manifest.json"
+        payload_name = b"payload.pack"
+        manifest_crc32 = zlib.crc32(manifest_bytes) & 0xFFFFFFFF
+        manifest_local_header = struct.pack(
+            "<IHHHHHIIIHH",
+            0x04034B50,
+            20,
+            0,
+            zipfile.ZIP_STORED,
+            0,
+            33,
+            manifest_crc32,
+            len(manifest_bytes),
+            len(manifest_bytes),
+            len(manifest_name),
+            0,
+        ) + manifest_name
+        payload_extra = _zip64_size_extra(payload_size)
+        payload_local_header = struct.pack(
+            "<IHHHHHIIIHH",
+            0x04034B50,
+            _V3_ZIP64_VERSION,
+            0,
+            zipfile.ZIP_STORED,
+            0,
+            33,
+            payload_crc32,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            len(payload_name),
+            len(payload_extra),
+        ) + payload_name + payload_extra
+        payload_offset = len(manifest_local_header) + len(manifest_bytes)
+        central_offset = payload_offset + len(payload_local_header) + payload_size
+
+        manifest_central = struct.pack(
+            "<IHHHHHHIIIHHHHHII",
+            0x02014B50,
+            (3 << 8) | 20,
+            20,
+            0,
+            zipfile.ZIP_STORED,
+            0,
+            33,
+            manifest_crc32,
+            len(manifest_bytes),
+            len(manifest_bytes),
+            len(manifest_name),
+            0,
+            0,
+            0,
+            0,
+            (stat.S_IFREG | 0o400) << 16,
+            0,
+        ) + manifest_name
+        payload_central = struct.pack(
+            "<IHHHHHHIIIHHHHHII",
+            0x02014B50,
+            (3 << 8) | _V3_ZIP64_VERSION,
+            _V3_ZIP64_VERSION,
+            0,
+            zipfile.ZIP_STORED,
+            0,
+            33,
+            payload_crc32,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            len(payload_name),
+            len(payload_extra),
+            0,
+            0,
+            0,
+            (stat.S_IFREG | 0o400) << 16,
+            payload_offset,
+        ) + payload_name + payload_extra
+        central = manifest_central + payload_central
+        zip64_eocd_offset = central_offset + len(central)
+        zip64_eocd = struct.pack(
+            "<IQHHIIQQQQ",
+            0x06064B50,
+            44,
+            (3 << 8) | _V3_ZIP64_VERSION,
+            _V3_ZIP64_VERSION,
+            0,
+            0,
+            2,
+            2,
+            len(central),
+            central_offset,
+        )
+        zip64_locator = struct.pack(
+            "<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1
+        )
+        legacy_eocd = struct.pack(
+            "<IHHHHIIH",
+            0x06054B50,
+            0,
+            0,
+            2,
+            2,
+            len(central),
+            0xFFFFFFFF,
+            0,
+        )
+        archive_size = (
+            zip64_eocd_offset
+            + len(zip64_eocd)
+            + len(zip64_locator)
+            + len(legacy_eocd)
+        )
+        _require_v3_transport_size(archive_size)
+
+        output_flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        )
+        output_descriptor = os.open(output, output_flags, 0o600)
+        _write_all(output_descriptor, manifest_local_header)
+        _write_all(output_descriptor, manifest_bytes)
+        _write_all(output_descriptor, payload_local_header)
+        observed_digest = hashlib.sha256()
+        observed_crc32 = 0
+        remaining = payload_size
+        while remaining:
+            chunk = os.read(payload_descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                raise CapacityHostArtifactError("PACK_INVALID")
+            observed_digest.update(chunk)
+            observed_crc32 = zlib.crc32(chunk, observed_crc32)
+            _write_all(output_descriptor, chunk)
+            remaining -= len(chunk)
+        _write_all(output_descriptor, central)
+        _write_all(output_descriptor, zip64_eocd)
+        _write_all(output_descriptor, zip64_locator)
+        _write_all(output_descriptor, legacy_eocd)
+        os.fsync(output_descriptor)
+
+        payload_after = os.fstat(payload_descriptor)
+        output_info = os.fstat(output_descriptor)
+        if (
+            payload_after.st_dev != payload_before.st_dev
+            or payload_after.st_ino != payload_before.st_ino
+            or payload_after.st_size != payload_before.st_size
+            or payload_after.st_mtime_ns != payload_before.st_mtime_ns
+            or payload_after.st_ctime_ns != payload_before.st_ctime_ns
+            or observed_digest.hexdigest() != payload_digest.hexdigest()
+            or (observed_crc32 & 0xFFFFFFFF) != payload_crc32
+            or output_info.st_size != archive_size
+        ):
+            raise CapacityHostArtifactError("TRANSPORT_V3_SOURCE_DRIFT")
+    except Exception:
+        if output_descriptor is not None:
+            os.close(output_descriptor)
+            output_descriptor = None
+        output.unlink(missing_ok=True)
+        raise
+    finally:
+        if output_descriptor is not None:
+            os.close(output_descriptor)
+        os.close(payload_descriptor)
+
+
 def build_source_transport_v2(
     source_repository: Path,
     output: Path,
@@ -6374,6 +6626,54 @@ def build_source_transport_v2(
             "material": material,
         }
         _write_transport_v2_archive(output, manifest, temporary)
+        return manifest
+    except Exception:
+        output.unlink(missing_ok=True)
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def build_source_transport_v3(
+    source_repository: Path,
+    output: Path,
+    *,
+    commit: str,
+) -> dict[str, Any]:
+    """Build the complete large-closure transport without changing v2 semantics."""
+
+    if commit != PRODUCER_COMMIT or _COMMIT_RE.fullmatch(commit) is None:
+        raise CapacityHostArtifactError("COMMIT_MISMATCH")
+    if output.exists() or output.is_symlink():
+        raise CapacityHostArtifactError("OUTPUT_EXISTS")
+    source = source_repository.resolve(strict=True)
+    rows = enumerate_reachable_objects(source, commit)
+    material = _material_rows(
+        source, commit=commit, material_paths=PRODUCER_MATERIAL_PATHS
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.payload-", dir=os.fspath(output.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    temporary.unlink()
+    try:
+        _write_complete_pack(source, rows, temporary)
+        _validate_pack_file(temporary, expected_count=len(rows))
+        manifest = {
+            "schema_version": TRANSPORT_SCHEMA_V3,
+            "repository": PRODUCER_REPOSITORY,
+            "commit": commit,
+            "object_format": "sha1",
+            "closure_kind": "complete_reachable_commit_graph",
+            "payload_sha256": sha256_file(temporary),
+            "object_count": len(rows),
+            "object_inventory_sha256": _inventory_digest(rows),
+            "material": material,
+        }
+        validate_transport_manifest_v3(manifest, expected_commit=commit)
+        _write_transport_v3_archive(output, manifest, temporary)
         return manifest
     except Exception:
         output.unlink(missing_ok=True)
@@ -6434,6 +6734,75 @@ def validate_transport_manifest_v2(
         ):
             raise CapacityHostArtifactError("TRANSPORT_MATERIAL_ROW_INVALID")
     return dict(value)
+
+
+def validate_transport_manifest_v3(
+    value: Any, *, expected_commit: str
+) -> dict[str, Any]:
+    """Validate the large-closure schema without reinterpreting v1 or v2."""
+
+    fields = {
+        "schema_version",
+        "repository",
+        "commit",
+        "object_format",
+        "closure_kind",
+        "payload_sha256",
+        "object_count",
+        "object_inventory_sha256",
+        "material",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise CapacityHostArtifactError("TRANSPORT_V3_MANIFEST_FIELDS_INVALID")
+    count = value.get("object_count")
+    if (
+        expected_commit != PRODUCER_COMMIT
+        or value.get("schema_version") != TRANSPORT_SCHEMA_V3
+        or value.get("repository") != PRODUCER_REPOSITORY
+        or value.get("commit") != expected_commit
+        or value.get("object_format") != "sha1"
+        or value.get("closure_kind") != "complete_reachable_commit_graph"
+        or _DIGEST_RE.fullmatch(str(value.get("payload_sha256"))) is None
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or count < 1
+        or _DIGEST_RE.fullmatch(str(value.get("object_inventory_sha256"))) is None
+    ):
+        raise CapacityHostArtifactError("TRANSPORT_V3_MANIFEST_MISMATCH")
+    rows = value.get("material")
+    if (
+        not isinstance(rows, list)
+        or [row.get("path") for row in rows if isinstance(row, Mapping)]
+        != list(PRODUCER_MATERIAL_PATHS)
+    ):
+        raise CapacityHostArtifactError("TRANSPORT_MATERIAL_INVENTORY_INVALID")
+    row_fields = {"path", "mode", "git_blob", "sha256", "size"}
+    for row in rows:
+        if (
+            not isinstance(row, Mapping)
+            or set(row) != row_fields
+            or row.get("mode") not in _MATERIAL_MODES
+            or _OBJECT_RE.fullmatch(str(row.get("git_blob"))) is None
+            or _DIGEST_RE.fullmatch(str(row.get("sha256"))) is None
+            or isinstance(row.get("size"), bool)
+            or not isinstance(row.get("size"), int)
+            or row["size"] < 0
+        ):
+            raise CapacityHostArtifactError("TRANSPORT_MATERIAL_ROW_INVALID")
+    return dict(value)
+
+
+def validate_complete_transport_manifest(
+    value: Any, *, expected_commit: str
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CapacityHostArtifactError("TRANSPORT_COMPLETE_MANIFEST_INVALID")
+    schema = value.get("schema_version")
+    if schema == TRANSPORT_SCHEMA_V2:
+        return validate_transport_manifest_v2(value, expected_commit=expected_commit)
+    if schema == TRANSPORT_SCHEMA_V3:
+        return validate_transport_manifest_v3(value, expected_commit=expected_commit)
+    raise CapacityHostArtifactError("TRANSPORT_COMPLETE_MANIFEST_SCHEMA_INVALID")
 
 
 def _validate_transport_v2_zip_layout(
@@ -6517,6 +6886,147 @@ def _validate_transport_v2_zip_layout(
         or before.st_size != local_offset + len(expected_tail)
     ):
         raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
+
+
+def _validate_transport_v3_zip_layout(
+    descriptor: int,
+    infos: Sequence[zipfile.ZipInfo],
+    *,
+    manifest_bytes: bytes,
+    payload_crc32: int,
+) -> None:
+    """Reconstruct every accepted ZIP64 record and reject all other bytes."""
+
+    if [info.filename for info in infos] != ["manifest.json", "payload.pack"]:
+        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_INVENTORY_INVALID")
+    manifest_info, payload_info = infos
+    manifest_name = b"manifest.json"
+    payload_name = b"payload.pack"
+    manifest_crc32 = zlib.crc32(manifest_bytes) & 0xFFFFFFFF
+    payload_extra = _zip64_size_extra(payload_info.file_size)
+
+    manifest_local = struct.pack(
+        "<IHHHHHIIIHH",
+        0x04034B50,
+        20,
+        0,
+        zipfile.ZIP_STORED,
+        0,
+        33,
+        manifest_crc32,
+        len(manifest_bytes),
+        len(manifest_bytes),
+        len(manifest_name),
+        0,
+    ) + manifest_name
+    if manifest_info.header_offset != 0 or os.pread(
+        descriptor, len(manifest_local), 0
+    ) != manifest_local:
+        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
+    manifest_data_offset = len(manifest_local)
+    if os.pread(
+        descriptor, len(manifest_bytes), manifest_data_offset
+    ) != manifest_bytes:
+        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
+
+    payload_offset = manifest_data_offset + len(manifest_bytes)
+    payload_local = struct.pack(
+        "<IHHHHHIIIHH",
+        0x04034B50,
+        _V3_ZIP64_VERSION,
+        0,
+        zipfile.ZIP_STORED,
+        0,
+        33,
+        payload_crc32,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+        len(payload_name),
+        len(payload_extra),
+    ) + payload_name + payload_extra
+    if payload_info.header_offset != payload_offset or os.pread(
+        descriptor, len(payload_local), payload_offset
+    ) != payload_local:
+        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
+
+    central_offset = payload_offset + len(payload_local) + payload_info.file_size
+    manifest_central = struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014B50,
+        (3 << 8) | 20,
+        20,
+        0,
+        zipfile.ZIP_STORED,
+        0,
+        33,
+        manifest_crc32,
+        len(manifest_bytes),
+        len(manifest_bytes),
+        len(manifest_name),
+        0,
+        0,
+        0,
+        0,
+        (stat.S_IFREG | 0o400) << 16,
+        0,
+    ) + manifest_name
+    payload_central = struct.pack(
+        "<IHHHHHHIIIHHHHHII",
+        0x02014B50,
+        (3 << 8) | _V3_ZIP64_VERSION,
+        _V3_ZIP64_VERSION,
+        0,
+        zipfile.ZIP_STORED,
+        0,
+        33,
+        payload_crc32,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+        len(payload_name),
+        len(payload_extra),
+        0,
+        0,
+        0,
+        (stat.S_IFREG | 0o400) << 16,
+        payload_offset,
+    ) + payload_name + payload_extra
+    central = manifest_central + payload_central
+    zip64_eocd_offset = central_offset + len(central)
+    zip64_eocd = struct.pack(
+        "<IQHHIIQQQQ",
+        0x06064B50,
+        44,
+        (3 << 8) | _V3_ZIP64_VERSION,
+        _V3_ZIP64_VERSION,
+        0,
+        0,
+        2,
+        2,
+        len(central),
+        central_offset,
+    )
+    zip64_locator = struct.pack(
+        "<IIQI", 0x07064B50, 0, zip64_eocd_offset, 1
+    )
+    legacy_eocd = struct.pack(
+        "<IHHHHIIH",
+        0x06054B50,
+        0,
+        0,
+        2,
+        2,
+        len(central),
+        0xFFFFFFFF,
+        0,
+    )
+    expected_tail = central + zip64_eocd + zip64_locator + legacy_eocd
+    before = os.fstat(descriptor)
+    if (
+        os.pread(descriptor, len(expected_tail), central_offset) != expected_tail
+        or before.st_size != central_offset + len(expected_tail)
+    ):
+        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_NONCANONICAL")
+    _require_v3_transport_size(before.st_size)
 
 
 def _stream_zip_member(
@@ -6621,6 +7131,97 @@ def extract_source_transport_v2(
         os.close(archive_descriptor)
 
 
+def extract_source_transport_v3(
+    archive_path: Path,
+    destination: Path,
+    *,
+    expected_commit: str,
+) -> dict[str, Any]:
+    """Stream and authenticate the exact canonical ZIP64 complete transport."""
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    archive_descriptor = os.open(archive_path, flags)
+    archive_info = os.fstat(archive_descriptor)
+    if (
+        not stat.S_ISREG(archive_info.st_mode)
+        or archive_info.st_nlink != 1
+        or stat.S_IMODE(archive_info.st_mode) & 0o022
+        or archive_info.st_size > _V3_TRANSPORT_MAX_BYTES
+    ):
+        os.close(archive_descriptor)
+        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_FILE_INVALID")
+    destination_created = False
+    try:
+        destination.mkdir(mode=0o700, parents=False, exist_ok=False)
+        destination_created = True
+        with os.fdopen(os.dup(archive_descriptor), "rb") as raw:
+            with zipfile.ZipFile(raw, "r") as archive:
+                infos = archive.infolist()
+                if [info.filename for info in infos] != ["manifest.json", "payload.pack"]:
+                    raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_INVENTORY_INVALID")
+                manifest_info, payload_info = infos
+                for info in infos:
+                    mode = info.external_attr >> 16
+                    if (
+                        info.date_time != (1980, 1, 1, 0, 0, 0)
+                        or info.create_system != 3
+                        or not stat.S_ISREG(mode)
+                        or stat.S_IMODE(mode) != 0o400
+                        or info.flag_bits != 0
+                        or info.compress_type != zipfile.ZIP_STORED
+                        or info.compress_size != info.file_size
+                        or info.comment != b""
+                    ):
+                        raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_MEMBER_INVALID")
+                if (
+                    archive.comment != b""
+                    or manifest_info.extract_version != 20
+                    or manifest_info.create_version != 20
+                    or manifest_info.extra != b""
+                    or manifest_info.file_size > _V2_MANIFEST_MAX_BYTES
+                    or payload_info.extract_version != _V3_ZIP64_VERSION
+                    or payload_info.create_version != _V3_ZIP64_VERSION
+                    or payload_info.extra != _zip64_size_extra(payload_info.file_size)
+                ):
+                    raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_MEMBER_INVALID")
+                with archive.open(manifest_info, "r") as manifest_source:
+                    manifest_bytes = manifest_source.read(_V2_MANIFEST_MAX_BYTES + 1)
+                if len(manifest_bytes) > _V2_MANIFEST_MAX_BYTES:
+                    raise CapacityHostArtifactError("TRANSPORT_MANIFEST_TOO_LARGE")
+                manifest = validate_transport_manifest_v3(
+                    json.loads(manifest_bytes), expected_commit=expected_commit
+                )
+                if manifest_bytes != canonical_json(manifest):
+                    raise CapacityHostArtifactError("TRANSPORT_MANIFEST_NONCANONICAL")
+                _write_bytes_exclusive(destination / "manifest.json", manifest_bytes, 0o400)
+                observed_payload, payload_crc32 = _stream_zip_member(
+                    archive, "payload.pack", destination / "payload.pack"
+                )
+                _validate_transport_v3_zip_layout(
+                    archive_descriptor,
+                    infos,
+                    manifest_bytes=manifest_bytes,
+                    payload_crc32=payload_crc32,
+                )
+        after = os.fstat(archive_descriptor)
+        if _descriptor_directory_state(archive_info) != _descriptor_directory_state(after):
+            raise CapacityHostArtifactError("TRANSPORT_ARCHIVE_FILE_INVALID")
+        if observed_payload != manifest["payload_sha256"]:
+            raise CapacityHostArtifactError("TRANSPORT_PAYLOAD_DIGEST_MISMATCH")
+        _validate_pack_file(
+            destination / "payload.pack", expected_count=manifest["object_count"]
+        )
+        return manifest
+    except Exception:
+        if destination_created and destination.exists():
+            for child in destination.iterdir():
+                child.unlink(missing_ok=True)
+            destination.rmdir()
+        raise
+    finally:
+        os.close(archive_descriptor)
+
+
 def _run_git_file_input(repository: Path, input_path: Path, *arguments: str) -> bytes:
     with input_path.open("rb") as source:
         completed = subprocess.run(
@@ -6635,11 +7236,13 @@ def _run_git_file_input(repository: Path, input_path: Path, *arguments: str) -> 
     return completed.stdout
 
 
-def _normalize_complete_repository_modes(source_root: Path) -> None:
+def _normalize_complete_repository_modes(
+    source_root: Path, manifest: Mapping[str, Any]
+) -> None:
     executable_paths = {
-        os.fspath(source_root / str(row))
-        for row in PRODUCER_MATERIAL_PATHS
-        if str(row).startswith("scripts/")
+        os.fspath(source_root / str(row["path"]))
+        for row in manifest["material"]
+        if row["mode"] == "100755"
     }
     for current, directory_names, file_names in os.walk(
         source_root, topdown=False, followlinks=False
@@ -7995,7 +8598,7 @@ def verify_complete_repository(
 ) -> SourceClosureEvidence:
     """Descriptor-first proof of a direct, complete, sparse ordinary repository."""
 
-    validated = validate_transport_manifest_v2(
+    validated = validate_complete_transport_manifest(
         manifest, expected_commit=str(manifest.get("commit"))
     )
     owns_view = retained_view is None
@@ -8085,6 +8688,54 @@ def verify_complete_repository(
             view.close()
 
 
+def _verify_materialized_complete_repository(
+    source_root: Path, manifest: Mapping[str, Any]
+) -> SourceClosureEvidence:
+    """Verify through one retained destination-parent capability.
+
+    The destination parent may be a separate mounted filesystem. Retaining the
+    exact parent descriptor keeps the child relation fail-closed without
+    weakening absolute ancestor traversal for other repository reads.
+    """
+
+    parent_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        parent_descriptor = os.open(source_root.parent, parent_flags)
+    except OSError as exc:
+        raise CapacityHostArtifactError("SOURCE_METADATA_INVALID") from exc
+    try:
+        parent_info = os.fstat(parent_descriptor)
+        _require_source_repair_ancestor(
+            parent_descriptor,
+            parent_info,
+            expected_uid=os.geteuid(),
+            expected_gid=os.getegid(),
+            expected_device=parent_info.st_dev,
+            reason="SOURCE_METADATA_INVALID",
+        )
+        _require_secure_descriptor(
+            parent_descriptor, parent_info, reason="SOURCE_METADATA_INVALID"
+        )
+        view = _RepositoryView(
+            source_root,
+            parent_descriptor=parent_descriptor,
+            root_name=source_root.name,
+        )
+        try:
+            return verify_complete_repository(
+                source_root, manifest, retained_view=view
+            )
+        finally:
+            view.close()
+    finally:
+        os.close(parent_descriptor)
+
+
 def materialize_source_transport_v2(
     archive_path: Path,
     source_root: Path,
@@ -8128,8 +8779,64 @@ def materialize_source_transport_v2(
         (source_root / ".git" / "cf2-h0-transport-manifest.json").write_bytes(
             canonical_json(manifest)
         )
-        _normalize_complete_repository_modes(source_root)
-        verify_complete_repository(source_root, manifest)
+        _normalize_complete_repository_modes(source_root, manifest)
+        _verify_materialized_complete_repository(source_root, manifest)
+        return manifest
+    finally:
+        if transport.exists():
+            for child in transport.iterdir():
+                child.unlink(missing_ok=True)
+            transport.rmdir()
+
+
+def materialize_source_transport_v3(
+    archive_path: Path,
+    source_root: Path,
+    *,
+    expected_commit: str,
+) -> dict[str, Any]:
+    """Materialize one complete direct repository from the large transport."""
+
+    transport = source_root.with_name(f".{source_root.name}.transport-v3")
+    if source_root.exists() or source_root.is_symlink() or transport.exists():
+        raise CapacityHostArtifactError("SOURCE_DESTINATION_EXISTS")
+    manifest = extract_source_transport_v3(
+        archive_path, transport, expected_commit=expected_commit
+    )
+    try:
+        source_root.mkdir(mode=0o700, parents=False, exist_ok=False)
+        _run_git(source_root, "init", "--quiet")
+        hooks = source_root / ".git" / "hooks"
+        for hook in hooks.iterdir():
+            if not hook.is_file() or hook.is_symlink():
+                raise CapacityHostArtifactError("SOURCE_DEFAULT_HOOK_INVENTORY_INVALID")
+            hook.unlink()
+        (source_root / ".git" / "config").write_bytes(_V2_CONFIG)
+        (source_root / ".git" / "config.worktree").write_bytes(_V2_WORKTREE_CONFIG)
+        pack_output = _run_git_file_input(
+            source_root,
+            transport / "payload.pack",
+            "index-pack",
+            "--stdin",
+            "--fix-thin",
+        ).decode("ascii", "strict").strip()
+        match = re.fullmatch(r"(?:pack\s+)?([0-9a-f]{40})", pack_output)
+        if match is None:
+            raise CapacityHostArtifactError("SOURCE_PACK_IDENTITY_INVALID")
+        pack_base = source_root / ".git" / "objects" / "pack" / f"pack-{match.group(1)}"
+        if (
+            not pack_base.with_suffix(".pack").is_file()
+            or not pack_base.with_suffix(".idx").is_file()
+        ):
+            raise CapacityHostArtifactError("SOURCE_PACK_INSTALL_INVALID")
+        sparse = source_root / ".git" / "info" / "sparse-checkout"
+        sparse.write_bytes(_V2_SPARSE_CHECKOUT)
+        _run_git(source_root, "checkout", "--detach", expected_commit)
+        (source_root / ".git" / "cf2-h0-transport-manifest.json").write_bytes(
+            canonical_json(manifest)
+        )
+        _normalize_complete_repository_modes(source_root, manifest)
+        _verify_materialized_complete_repository(source_root, manifest)
         return manifest
     finally:
         if transport.exists():
@@ -8294,6 +9001,18 @@ def _parser() -> argparse.ArgumentParser:
     materialize_v2.add_argument("--archive", type=Path, required=True)
     materialize_v2.add_argument("--destination", type=Path, required=True)
     materialize_v2.add_argument("--commit", required=True)
+    build_v3 = commands.add_parser("build-source-transport-v3")
+    build_v3.add_argument("--source-repository", type=Path, required=True)
+    build_v3.add_argument("--output", type=Path, required=True)
+    build_v3.add_argument("--commit", required=True)
+    extract_v3 = commands.add_parser("extract-source-transport-v3")
+    extract_v3.add_argument("--archive", type=Path, required=True)
+    extract_v3.add_argument("--destination", type=Path, required=True)
+    extract_v3.add_argument("--commit", required=True)
+    materialize_v3 = commands.add_parser("materialize-source-transport-v3")
+    materialize_v3.add_argument("--archive", type=Path, required=True)
+    materialize_v3.add_argument("--destination", type=Path, required=True)
+    materialize_v3.add_argument("--commit", required=True)
     verify_complete = commands.add_parser("verify-complete-repository")
     verify_complete.add_argument("--source-root", type=Path, required=True)
     verify_complete.add_argument("--manifest", type=Path, required=True)
@@ -8389,8 +9108,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.destination,
                 expected_commit=args.commit,
             )
+        elif args.command == "build-source-transport-v3":
+            value = build_source_transport_v3(
+                args.source_repository,
+                args.output,
+                commit=args.commit,
+            )
+        elif args.command == "extract-source-transport-v3":
+            value = extract_source_transport_v3(
+                args.archive,
+                args.destination,
+                expected_commit=args.commit,
+            )
+        elif args.command == "materialize-source-transport-v3":
+            value = materialize_source_transport_v3(
+                args.archive,
+                args.destination,
+                expected_commit=args.commit,
+            )
         elif args.command == "verify-complete-repository":
-            manifest = validate_transport_manifest_v2(
+            manifest = validate_complete_transport_manifest(
                 json.loads(_read_small_nofollow(args.manifest, _V2_MANIFEST_MAX_BYTES)),
                 expected_commit=args.commit,
             )

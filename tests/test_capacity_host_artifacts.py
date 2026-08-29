@@ -303,6 +303,36 @@ def test_closed_input_copy_binds_open_descriptor_owner_mode_and_digest(tmp_path:
         )
 
 
+def test_closed_input_copy_refuses_insufficient_declared_free_space_before_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "large-input"
+    source.write_bytes(b"authenticated transport")
+    source.chmod(0o400)
+    destination = tmp_path / "staging" / "copied"
+    destination.parent.mkdir()
+
+    class NoSpace:
+        f_bavail = 1
+        f_frsize = 1
+
+    monkeypatch.setattr(os, "statvfs", lambda _path: NoSpace())
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="CLOSED_INPUT_SPACE_INSUFFICIENT",
+    ):
+        artifacts.copy_closed_input(
+            source,
+            destination,
+            operator_uid=os.getuid(),
+            expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+            maximum_bytes=1024,
+            minimum_free_multiplier=3,
+            minimum_free_reserve_bytes=1,
+        )
+    assert not destination.exists()
+
+
 def test_recovery_intent_resumes_after_interruption_and_is_idempotent(tmp_path: Path) -> None:
     first = tmp_path / "worker-codex-pro-01.json"
     second = tmp_path / "worker-codex-pro-02.json"
@@ -650,9 +680,11 @@ def test_runtime_tree_digest_rejects_symlinks_and_hardlinks(tmp_path: Path) -> N
         artifacts.runtime_tree_digest(runtime)
 
 
-def test_v2_transport_schema_is_explicit_and_does_not_reinterpret_v1() -> None:
+def test_complete_transport_schemas_are_explicit_and_not_reinterpreted() -> None:
     assert artifacts.TRANSPORT_SCHEMA == "mastermind.capacity_source_transport/v1"
     assert artifacts.TRANSPORT_SCHEMA_V2 == "mastermind.capacity_source_transport/v2"
+    assert artifacts.TRANSPORT_SCHEMA_V3 == "mastermind.capacity_source_transport/v3"
+    assert artifacts._V3_TRANSPORT_MAX_BYTES > zipfile.ZIP64_LIMIT
 
 
 def test_closed_tree_digest_uses_exact_canonical_rows_and_descriptor_reads(
@@ -1081,6 +1113,91 @@ def _v2_checkout(
         archive, checkout, expected_commit=commit
     )
     return checkout, manifest, commit
+
+
+def _v3_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, dict[str, object], str]:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    archive = tmp_path / "complete-transport-v3.zip"
+    manifest = artifacts.build_source_transport_v3(source, archive, commit=commit)
+    checkout = tmp_path / "complete-checkout-v3"
+    artifacts.materialize_source_transport_v3(
+        archive, checkout, expected_commit=commit
+    )
+    return checkout, manifest, commit
+
+
+@pytest.mark.parametrize("transport_version", ("v2", "v3"))
+def test_complete_materializer_preserves_manifest_nonexecutable_script_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transport_version: str,
+) -> None:
+    source, _commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    script_relative = next(
+        relative
+        for relative in contract.PRODUCER_MATERIAL_PATHS
+        if relative.startswith("scripts/")
+    )
+    script = source / script_relative
+    script.chmod(0o644)
+    _git(source, "add", script_relative)
+    _git(source, "commit", "-qm", "fixture nonexecutable script")
+    commit = _git(source, "rev-parse", "HEAD")
+    monkeypatch.setattr(artifacts, "PRODUCER_COMMIT", commit, raising=False)
+    archive = tmp_path / f"complete-transport-{transport_version}.zip"
+    checkout = tmp_path / f"complete-checkout-{transport_version}"
+    builder = getattr(artifacts, f"build_source_transport_{transport_version}")
+    materializer = getattr(
+        artifacts, f"materialize_source_transport_{transport_version}"
+    )
+
+    manifest = builder(source, archive, commit=commit)
+    assert next(
+        row["mode"] for row in manifest["material"] if row["path"] == script_relative
+    ) == "100644"
+
+    materializer(archive, checkout, expected_commit=commit)
+
+    assert stat.S_IMODE((checkout / script_relative).stat().st_mode) == 0o444
+    assert _git(checkout, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+@pytest.mark.parametrize("transport_version", ("v2", "v3"))
+def test_complete_materializer_verifies_through_retained_destination_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transport_version: str,
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    archive = tmp_path / f"retained-parent-{transport_version}.zip"
+    checkout = tmp_path / f"retained-parent-{transport_version}"
+    builder = getattr(artifacts, f"build_source_transport_{transport_version}")
+    materializer = getattr(
+        artifacts, f"materialize_source_transport_{transport_version}"
+    )
+    manifest = builder(source, archive, commit=commit)
+    original_view = artifacts._RepositoryView
+    observed: list[tuple[int | None, str | None]] = []
+
+    def observe_view(
+        root: Path, *args: object, **kwargs: object
+    ) -> artifacts._RepositoryView:
+        observed.append(
+            (
+                kwargs.get("parent_descriptor"),
+                kwargs.get("root_name"),
+            )
+        )
+        return original_view(root, *args, **kwargs)
+
+    monkeypatch.setattr(artifacts, "_RepositoryView", observe_view)
+
+    assert materializer(archive, checkout, expected_commit=commit) == manifest
+    assert len(observed) == 1
+    assert isinstance(observed[0][0], int)
+    assert observed[0][1] == checkout.name
 
 
 def _replace_closed_file(path: Path, payload: bytes) -> None:
@@ -1631,6 +1748,30 @@ def test_v2_cli_names_are_separate_and_accept_no_material_override() -> None:
     assert refusal.value.code == 2
 
 
+def test_v3_cli_names_are_separate_and_accept_no_material_override() -> None:
+    parser = artifacts._parser()
+    for command, path_flag in (
+        ("build-source-transport-v3", "--source-repository"),
+        ("extract-source-transport-v3", "--archive"),
+        ("materialize-source-transport-v3", "--archive"),
+    ):
+        arguments = [
+            command,
+            path_flag,
+            "/operator/input",
+            "--output" if command.startswith("build-") else "--destination",
+            "/operator/output",
+            "--commit",
+            "a" * 40,
+        ]
+        parsed = parser.parse_args(arguments)
+        assert parsed.command == command
+        assert not hasattr(parsed, "material_path")
+        with pytest.raises(SystemExit) as refusal:
+            parser.parse_args([*arguments, "--material-path", "attacker-selected.py"])
+        assert refusal.value.code == 2
+
+
 def test_complete_repository_refuses_dangling_loose_object_before_git(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1644,7 +1785,7 @@ def test_complete_repository_refuses_dangling_loose_object_before_git(
         capture_output=True,
         env=artifacts._git_environment(),
     )
-    artifacts._normalize_complete_repository_modes(checkout)
+    artifacts._normalize_complete_repository_modes(checkout, manifest)
 
     def git_must_not_run(*args: object, **kwargs: object) -> bytes:
         raise AssertionError("physical object namespace must refuse before Git")
@@ -1842,6 +1983,257 @@ def test_v2_zip32_effective_boundary_refuses_before_python_writes_zip64(
     ):
         artifacts._write_transport_v2_archive(unsafe_output, {}, unsafe_payload)
     assert not unsafe_output.exists()
+
+
+def test_complete_transport_v3_is_canonical_zip64_and_materializes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    archive_path = tmp_path / "complete-v3.zip"
+    manifest = artifacts.build_source_transport_v3(
+        source, archive_path, commit=commit
+    )
+    assert manifest["schema_version"] == artifacts.TRANSPORT_SCHEMA_V3
+
+    with zipfile.ZipFile(archive_path) as archive:
+        infos = archive.infolist()
+        assert [info.filename for info in infos] == ["manifest.json", "payload.pack"]
+        assert archive.comment == b""
+        assert infos[0].extract_version == 20
+        assert infos[0].create_version == 20
+        assert infos[0].extra == b""
+        assert infos[1].extract_version == 45
+        assert infos[1].create_version == 45
+        assert infos[1].extra == struct.pack(
+            "<HHQQ", 0x0001, 16, infos[1].file_size, infos[1].file_size
+        )
+        assert all(info.flag_bits == 0 for info in infos)
+        assert all(info.compress_type == zipfile.ZIP_STORED for info in infos)
+
+    raw = archive_path.read_bytes()
+    assert raw.count(b"PK\x06\x06") == 1
+    assert raw.count(b"PK\x06\x07") == 1
+    assert raw.count(b"PK\x05\x06") == 1
+    assert raw.endswith(b"\x00\x00")
+    legacy_eocd = raw.rindex(b"PK\x05\x06")
+    assert struct.unpack_from("<I", raw, legacy_eocd + 16)[0] == 0xFFFFFFFF
+
+    extracted = tmp_path / "v3-extracted"
+    assert artifacts.extract_source_transport_v3(
+        archive_path, extracted, expected_commit=commit
+    ) == manifest
+    checkout = tmp_path / "v3-checkout"
+    assert artifacts.materialize_source_transport_v3(
+        archive_path, checkout, expected_commit=commit
+    ) == manifest
+    evidence = artifacts.verify_complete_repository(checkout, manifest)
+    assert evidence.object_count == manifest["object_count"]
+    assert evidence.object_inventory_sha256 == manifest["object_inventory_sha256"]
+
+
+def test_v3_writer_crosses_zip32_boundary_without_buffering_or_schema_reinterpretation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 10_000)
+    payload = tmp_path / "large-for-artificial-zip32.pack"
+    payload.write_bytes(b"p" * 9_524)
+    output = tmp_path / "canonical-v3.zip"
+    manifest = {
+        "schema_version": artifacts.TRANSPORT_SCHEMA_V3,
+        "payload_sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+    }
+    original_read_bytes = Path.read_bytes
+
+    def reject_pack_buffer(path: Path) -> bytes:
+        if path.suffix == ".pack":
+            raise AssertionError("v3 payload must be streamed")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_pack_buffer)
+    artifacts._write_transport_v3_archive(output, manifest, payload)
+    with zipfile.ZipFile(output) as archive:
+        info = archive.getinfo("payload.pack")
+        assert info.file_size == 9_524
+        assert info.extra == struct.pack("<HHQQ", 0x0001, 16, 9_524, 9_524)
+        with archive.open(info) as source:
+            assert hashlib.sha256(source.read()).hexdigest() == manifest["payload_sha256"]
+
+
+def test_v2_and_v3_complete_transports_refuse_cross_schema_interpretation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    v2 = tmp_path / "v2.zip"
+    v3 = tmp_path / "v3.zip"
+    artifacts.build_source_transport_v2(source, v2, commit=commit)
+    artifacts.build_source_transport_v3(source, v3, commit=commit)
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.extract_source_transport_v3(
+            v2, tmp_path / "v2-as-v3", expected_commit=commit
+        )
+    with pytest.raises(artifacts.CapacityHostArtifactError):
+        artifacts.extract_source_transport_v2(
+            v3, tmp_path / "v3-as-v2", expected_commit=commit
+        )
+
+
+@pytest.mark.parametrize("record", ("zip64_eocd", "zip64_locator", "legacy_eocd"))
+def test_complete_transport_v3_refuses_noncanonical_end_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record: str
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    valid = tmp_path / "valid-v3.zip"
+    artifacts.build_source_transport_v3(source, valid, commit=commit)
+    raw = bytearray(valid.read_bytes())
+    offsets = {
+        "zip64_eocd": raw.rindex(b"PK\x06\x06"),
+        "zip64_locator": raw.rindex(b"PK\x06\x07"),
+        "legacy_eocd": raw.rindex(b"PK\x05\x06"),
+    }
+    raw[offsets[record] + 4] ^= 0x01
+    invalid = tmp_path / f"invalid-{record}.zip"
+    invalid.write_bytes(raw)
+    with pytest.raises(
+        (artifacts.CapacityHostArtifactError, zipfile.BadZipFile, RuntimeError)
+    ):
+        artifacts.extract_source_transport_v3(
+            invalid, tmp_path / f"extract-{record}", expected_commit=commit
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "manifest_local_version",
+        "manifest_local_flag",
+        "manifest_local_crc",
+        "manifest_local_size",
+        "payload_local_version",
+        "payload_local_flag",
+        "payload_local_crc",
+        "payload_local_size",
+        "payload_local_extra_length",
+        "payload_local_extra_tag",
+        "manifest_central_version",
+        "manifest_central_extract_version",
+        "manifest_central_flag",
+        "manifest_central_crc",
+        "manifest_central_attributes",
+        "manifest_central_offset",
+        "payload_central_version",
+        "payload_central_extract_version",
+        "payload_central_flag",
+        "payload_central_crc",
+        "payload_central_size",
+        "payload_central_extra_length",
+        "payload_central_attributes",
+        "payload_central_offset",
+        "payload_central_extra_tag",
+        "zip64_record_size",
+        "zip64_version",
+        "zip64_disk",
+        "zip64_count",
+        "zip64_central_size",
+        "zip64_central_offset",
+        "locator_disk",
+        "locator_offset",
+        "locator_total_disks",
+        "legacy_count",
+        "legacy_central_size",
+        "legacy_central_offset",
+        "prefix",
+        "suffix",
+    ),
+)
+def test_complete_transport_v3_refuses_every_noncanonical_record_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    source, commit, _nonmaterial_oid = _complete_repository(tmp_path, monkeypatch)
+    valid = tmp_path / "canonical-v3.zip"
+    artifacts.build_source_transport_v3(source, valid, commit=commit)
+    with zipfile.ZipFile(valid) as archive:
+        manifest_local = archive.getinfo("manifest.json").header_offset
+        payload_local = archive.getinfo("payload.pack").header_offset
+    raw = bytearray(valid.read_bytes())
+    legacy = raw.rindex(b"PK\x05\x06")
+    locator = legacy - 20
+    zip64 = struct.unpack_from("<Q", raw, locator + 8)[0]
+    central = struct.unpack_from("<Q", raw, zip64 + 48)[0]
+    manifest_central = central
+    payload_central = manifest_central + 46 + len("manifest.json")
+    offsets = {
+        "manifest_local_version": manifest_local + 4,
+        "manifest_local_flag": manifest_local + 6,
+        "manifest_local_crc": manifest_local + 14,
+        "manifest_local_size": manifest_local + 18,
+        "payload_local_version": payload_local + 4,
+        "payload_local_flag": payload_local + 6,
+        "payload_local_crc": payload_local + 14,
+        "payload_local_size": payload_local + 18,
+        "payload_local_extra_length": payload_local + 28,
+        "payload_local_extra_tag": payload_local + 30 + len("payload.pack"),
+        "manifest_central_version": manifest_central + 4,
+        "manifest_central_extract_version": manifest_central + 6,
+        "manifest_central_flag": manifest_central + 8,
+        "manifest_central_crc": manifest_central + 16,
+        "manifest_central_attributes": manifest_central + 38,
+        "manifest_central_offset": manifest_central + 42,
+        "payload_central_version": payload_central + 4,
+        "payload_central_extract_version": payload_central + 6,
+        "payload_central_flag": payload_central + 8,
+        "payload_central_crc": payload_central + 16,
+        "payload_central_size": payload_central + 20,
+        "payload_central_extra_length": payload_central + 30,
+        "payload_central_attributes": payload_central + 38,
+        "payload_central_offset": payload_central + 42,
+        "payload_central_extra_tag": payload_central + 46 + len("payload.pack"),
+        "zip64_record_size": zip64 + 4,
+        "zip64_version": zip64 + 12,
+        "zip64_disk": zip64 + 16,
+        "zip64_count": zip64 + 24,
+        "zip64_central_size": zip64 + 40,
+        "zip64_central_offset": zip64 + 48,
+        "locator_disk": locator + 4,
+        "locator_offset": locator + 8,
+        "locator_total_disks": locator + 16,
+        "legacy_count": legacy + 8,
+        "legacy_central_size": legacy + 12,
+        "legacy_central_offset": legacy + 16,
+    }
+    if mutation == "prefix":
+        raw = bytearray(b"x") + raw
+    elif mutation == "suffix":
+        raw.extend(b"x")
+    else:
+        raw[offsets[mutation]] ^= 0x01
+    invalid = tmp_path / f"noncanonical-v3-{mutation}.zip"
+    invalid.write_bytes(raw)
+    with pytest.raises(
+        (artifacts.CapacityHostArtifactError, zipfile.BadZipFile, RuntimeError)
+    ):
+        artifacts.extract_source_transport_v3(
+            invalid, tmp_path / f"extract-{mutation}", expected_commit=commit
+        )
+
+
+def test_v3_transport_cap_is_finite_and_inclusive() -> None:
+    artifacts._require_v3_transport_size(artifacts._V3_TRANSPORT_MAX_BYTES)
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="TRANSPORT_V3_SIZE_LIMIT_EXCEEDED",
+    ):
+        artifacts._require_v3_transport_size(artifacts._V3_TRANSPORT_MAX_BYTES + 1)
+
+
+def test_complete_manifest_dispatch_refuses_unknown_schema() -> None:
+    with pytest.raises(
+        artifacts.CapacityHostArtifactError,
+        match="TRANSPORT_COMPLETE_MANIFEST_SCHEMA_INVALID",
+    ):
+        artifacts.validate_complete_transport_manifest(
+            {"schema_version": "mastermind.capacity_source_transport/v999"},
+            expected_commit="a" * 40,
+        )
 
 
 @pytest.mark.parametrize(
@@ -2137,7 +2529,7 @@ def _repair_host_fixture(
     source, commit, _ = _complete_repository(tmp_path, monkeypatch)
     monkeypatch.setattr(contract, "PRODUCER_COMMIT", commit)
     transport = tmp_path / "operator-transport.zip"
-    manifest = artifacts.build_source_transport_v2(source, transport, commit=commit)
+    manifest = artifacts.build_source_transport_v3(source, transport, commit=commit)
     system_root = tmp_path / "host"
     for relative, mode in (
         ("capacity-sources/macro", 0o755),
@@ -2316,6 +2708,45 @@ def _repair_arguments(
         "transport_sha256": hashlib.sha256(transport.read_bytes()).hexdigest(),
         "test_adapter": True,
     }
+
+
+def test_source_repair_threads_exact_v3_capacity_bound_to_closed_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_root, transport, commit, _manifest = _repair_host_fixture(
+        tmp_path, monkeypatch
+    )
+
+    class Observed(Exception):
+        pass
+
+    def observe_copy(
+        source: Path,
+        destination: Path,
+        *,
+        operator_uid: int,
+        expected_sha256: str,
+        maximum_bytes: int,
+        minimum_free_multiplier: int,
+        minimum_free_reserve_bytes: int,
+    ) -> dict[str, object]:
+        assert source == transport
+        assert destination.parent == system_root / "capacity-staging"
+        assert operator_uid == os.getuid()
+        assert expected_sha256 == hashlib.sha256(transport.read_bytes()).hexdigest()
+        assert maximum_bytes == artifacts._V3_TRANSPORT_MAX_BYTES
+        assert minimum_free_multiplier == artifacts._V3_REPAIR_SPACE_MULTIPLIER
+        assert (
+            minimum_free_reserve_bytes
+            == artifacts._V3_REPAIR_SPACE_RESERVE_BYTES
+        )
+        raise Observed
+
+    monkeypatch.setattr(artifacts, "copy_closed_input", observe_copy)
+    with pytest.raises(Observed):
+        artifacts.run_source_repair_host(
+            **_repair_arguments(system_root, transport, commit)
+        )
 
 
 @pytest.mark.parametrize(
@@ -6683,7 +7114,7 @@ def test_verify_only_has_no_reachable_program_mutation_api(
             "_durable_source_repair_rename",
             "_write_generation_payload",
             "copy_closed_input",
-            "materialize_source_transport_v2",
+            "materialize_source_transport_v3",
         ):
             mutation_guard.setattr(artifacts, name, forbidden_mutation)
         assert artifacts.run_source_repair_host(
