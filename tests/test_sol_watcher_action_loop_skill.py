@@ -34,3 +34,19 @@ def test_watcher_action_loop_is_canonical_and_action_oriented() -> None:
 
     assert "notification-only watcher" in index
     assert "detect -> re-pin -> adjudicate -> act -> report" in kernel.lower()
+
+
+def test_watcher_lifetime_survives_nonterminal_events_until_stop() -> None:
+    skill = _read("docs/sol_skills/WATCHER_ACTION_LOOP.md")
+    normalized = " ".join(skill.split())
+
+    required_lifetime_phrases = (
+        "ACK, WATCH_ARMED, START, and PROGRESS are nonterminal watcher events",
+        "advance the consumed baseline and keep or re-arm the Sol watcher",
+        "BLOCKED, DECISION_REQUEST, and RESULT are action-required watcher events",
+        "Never disable Sol's continuation watcher before sending the worker's terminal STOP.",
+        "ACK -> WATCH_ARMED -> START -> RESULT -> STOP",
+        "Only after the terminal STOP edge is sent may Sol disarm its watcher for that child operation",
+    )
+    for phrase in required_lifetime_phrases:
+        assert phrase in normalized, f"missing watcher lifetime invariant: {phrase}"

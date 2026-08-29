@@ -21,6 +21,263 @@ run `sudo`, create service accounts, replace Python, create worker credentials,
 or load a LaunchDaemon from the unmerged PR checkout. Merge alone is not host
 acceptance and does not make Phase 1C-A complete or live.
 
+## Alternative B — CF2-H0 complete-source closure repair
+
+This is the selected, bounded source repair for an already prepared H0 host. It is separate from
+the broader Stage 2 provisioning procedure below. It rematerializes the accepted Macro commit as
+an ordinary complete repository, archives the superseded installed source and generation, and
+publishes a new six-file generation without changing the existing topology. Its endpoint is H0
+source-closure proof, not P0 acceptance.
+
+The old installed state must match every gate below under the H0 lock before the carrier may
+publish its one durable repair intent or mutate installed state:
+
+| Old installed gate | Required identity |
+|---|---|
+| generation basename and `source-config.json` | `2b05a61f54c876f00c3f03d51bd9df72de4a73e76bc06b2e7bc13a11ee203d60` |
+| `components.json` SHA-256 | `02886a6c79f22534ac24234d8adb3224329976342393988541c2a50d7e297f29` |
+| `host-preparation-receipt.json` | `51c58d18869663d90c593e416c7fc7833b3725378870f576abd3647f62f40830` |
+| `broker-topology.json` | `981e880ba7d21a0003fe2dd8322c5793f2643b815d094374dd6fad3fed31e453` |
+| `rollback-contract.json` | `18d83b0e164ac2e917d84c01fe1d53fc5c1ce0c33ac9580f11d684e16e495093` |
+| `rollback-drill-receipt.json` | `7efba70495cbbf8bcad0c4e47e894a23f4b1618756d8c3e23cae85ad6b7250ba` |
+| receipt outcome | `H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED` |
+| topology/release/preparer commit | `e4e44867ace335ac9208a3990a10c163e199492d` |
+| accepted Macro commit | `dcdd939c45b23abce5ba04f95e330ac914a3904b` |
+| material digest | `35931b4ef965c5d67a7e01444dd483804e48671784716ea8196c94e925466650` |
+
+Any mismatch refuses before installed mutation and returns to Sol. The carrier never rewrites an
+intent around a different observed state.
+
+### Nonprivileged v2 transport and inert exact-commit carrier
+
+Complete all Git review, protected merge verification, and any network acquisition before this
+block. The local Macro repository must already contain the exact accepted commit and its complete
+reachable object graph. The local Mastermind repository must already contain the exact protected
+repair merge. This block performs no provider, service, socket, worker, P0, or root action. It
+creates a digest-bound Git bundle as inert data; no inode created here is later executed as root.
+The `git bundle create` step names the already verified protected ref whose tip is the exact merge.
+
+Set the two repository paths and replace only the repair-merge placeholder with the observed
+40-lower-hex protected merge. Do not substitute a PR head, invent a future merge SHA, or precompute
+a future generation digest.
+
+```bash
+set -euo pipefail
+test "$(/usr/bin/id -u)" -ne 0
+MACRO_REPOSITORY=/absolute/path/to/macro
+MASTERMIND_REPOSITORY=/absolute/path/to/Mastermind
+OPERATOR_USER="$(/usr/bin/id -un)"
+MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b
+REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'
+test "$OPERATOR_USER" != root
+[[ "$REPAIR_MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+safe_git() {
+  /usr/bin/env -i \
+    HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_LOCAL=/dev/null \
+    GIT_ATTR_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+    SSH_ASKPASS=/usr/bin/false GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 \
+    GIT_NO_REPLACE_OBJECTS=1 GIT_EXTERNAL_DIFF=/usr/bin/false GIT_ALLOW_PROTOCOL=file \
+    /usr/bin/git --no-replace-objects \
+      -c protocol.allow=never -c protocol.file.allow=always \
+      -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+      -c core.attributesFile=/dev/null -c diff.external=/usr/bin/false "$@"
+}
+safe_git -C "$MACRO_REPOSITORY" cat-file -e "$MACRO_COMMIT^{commit}"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse "$REPAIR_MERGE_SHA^{commit}")" = "$REPAIR_MERGE_SHA"
+test "$(safe_git -C "$MASTERMIND_REPOSITORY" rev-parse refs/remotes/origin/master)" = "$REPAIR_MERGE_SHA"
+safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --quiet --exit-code
+safe_git -C "$MASTERMIND_REPOSITORY" diff --no-ext-diff --no-textconv --cached --quiet --exit-code
+
+REPAIR_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-source-repair.XXXXXX)"
+REPAIR_CHECKOUT="$REPAIR_PARENT/mastermind"
+safe_git clone --no-local --no-hardlinks --no-checkout \
+  "$MASTERMIND_REPOSITORY" "$REPAIR_CHECKOUT"
+safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
+  checkout --detach "$REPAIR_MERGE_SHA"
+test -d "$REPAIR_CHECKOUT/.git"
+test ! -f "$REPAIR_CHECKOUT/.git"
+test "$(safe_git -C "$REPAIR_CHECKOUT" rev-parse HEAD)" = "$REPAIR_MERGE_SHA"
+test -z "$(safe_git -c core.symlinks=false -C "$REPAIR_CHECKOUT" \
+  status --porcelain=v1 --untracked-files=all)"
+test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type l -print -quit)"
+test -z "$(/usr/bin/find "$REPAIR_CHECKOUT" -type f -links +1 -print -quit)"
+
+REPAIR_CARRIER="$REPAIR_PARENT/mastermind-exact-commit.bundle"
+safe_git -C "$MASTERMIND_REPOSITORY" bundle create \
+  "$REPAIR_CARRIER" refs/remotes/origin/master
+/bin/chmod 0400 "$REPAIR_CARRIER"
+test "$(safe_git bundle list-heads "$REPAIR_CARRIER")" = \
+  "$REPAIR_MERGE_SHA refs/remotes/origin/master"
+REPAIR_CARRIER_SHA256="$(/usr/bin/shasum -a 256 "$REPAIR_CARRIER" | /usr/bin/awk '{print $1}')"
+[[ "$REPAIR_CARRIER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+/usr/bin/printf 'repair_carrier_sha256=%s\n' "$REPAIR_CARRIER_SHA256"
+
+TRANSPORT_PARENT="$(/usr/bin/mktemp -d /private/tmp/mastermind-h0-v2-transport.XXXXXX)"
+MACRO_TRANSPORT="$TRANSPORT_PARENT/macro-complete-v2.zip"
+/usr/bin/python3 -I -S -B \
+  "$REPAIR_CHECKOUT/ops/executive_os/capacity_host_artifacts.py" \
+  build-source-transport-v2 \
+  --source-repository "$MACRO_REPOSITORY" \
+  --output "$MACRO_TRANSPORT" \
+  --commit "$MACRO_COMMIT" \
+  >"$TRANSPORT_PARENT/manifest-build-output.json"
+/bin/chmod 0400 "$MACRO_TRANSPORT"
+test "$(/usr/bin/stat -f %l "$MACRO_TRANSPORT")" -eq 1
+MACRO_TRANSPORT_SHA256="$(/usr/bin/shasum -a 256 "$MACRO_TRANSPORT" | /usr/bin/awk '{print $1}')"
+[[ "$MACRO_TRANSPORT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+/usr/bin/printf 'macro_transport_sha256=%s\n' "$MACRO_TRANSPORT_SHA256"
+```
+
+The explicit `core.symlinks=false` setting applies only while materializing and checking this
+disposable unprivileged checkout. A tracked Git symlink remains a mode-`120000` blob in the
+authenticated commit but is written here as an ordinary single-link file containing the exact link
+target bytes. The clean-status check uses the same interpretation. The whole-checkout symlink and
+hardlink prohibitions remain mandatory, and no privileged/root carrier verification is weakened.
+
+The builder emits `mastermind.capacity_source_transport/v2`. It requires the exact two-member ZIP,
+complete reachable object inventory, frozen eleven-path material projection, and ordinary strict
+closure; missing objects, promisor state, alternates, shallow state, replacement refs, grafts,
+remotes, filters, or unsafe metadata refuse. Record the emitted manifest, its object count and
+semantic inventory digest, the payload digest, and the independently calculated enclosing ZIP
+digest. These are per-carrier proof; they are not a future generation identity.
+
+### One offline administrator ceremony
+
+Keep the same Terminal and invoke the checked-in bootstrap once as the unprivileged operator.
+Before reading the bundle or creating the fixed root namespace, the bootstrap resolves its own UID
+and username through absolute `/usr/bin/id` calls. UID 0 or any mismatch with `OPERATOR_USER`
+returns `64 INVALID_INVOCATION` with empty stderr. `sudo` may open one native administrator dialog,
+but root never receives a shell, heredoc, interpreter `-c`, or operator stdin. Before the carrier
+is authenticated, each privileged call is one reviewed absolute macOS system-tool argv. The
+bootstrap copies the inert bundle without preserving metadata into the exclusive fixed literal
+`/private/var/root/mastermind-h0-root-carrier`, authenticates its digest and exact commit with fully
+closed Git configuration, and materializes the complete five-file local-module closure into new
+root-owned inodes:
+
+- `repair-capacity-source-closure.sh`;
+- `capacity_host_artifacts.py`;
+- `capacity_source_contract.py`;
+- `provider_worker_slots.py`; and
+- `provider_identity_policy.py`.
+
+Every retained carrier file is rebound to its expected Git mode and Git blob OID before the first
+carrier Python or shell launch. The authenticated Python verifier independently repeats the exact
+commit/mode/blob checks from the root-created bare repository. Only then does the bootstrap execute
+one repair and two verify-only passes. Their output is buffered until the fixed root namespace has
+been removed successfully; cleanup failure is a typed non-success and cannot emit a clean pass.
+HUP, INT, TERM, ordinary refusal, and success all enter this same cleanup lifecycle. Each
+authenticated repair or verify-only child starts behind an unreleased execution gate and is tracked
+as one process group. Signals received while the bootstrap registers the PID and process-group ID
+are deferred to a pending flag. A pending signal prevents gate release and terminates/reaps the
+still-gated group; after release, a signal delivered to the bootstrap PID terminates that child and
+its descendants and reaps them before namespace cleanup. No delayed child mutation can follow the
+exit-70 receipt. A preexisting fixed namespace is unknown residue: the no-replace `mkdir` refuses
+it and does not delete it.
+
+```bash
+/usr/bin/env -i \
+  HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \
+  /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \
+  "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \
+  "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"
+```
+
+The closed launch environment is part of the ceremony boundary. In particular, ambient
+`BASH_ENV`, shell startup files, functions, aliases, and test scheduler hooks are not inherited by
+the noninteractive bootstrap. If execution-gate removal fails after child registration, the still-
+gated process group is terminated and reaped before namespace cleanup and the fixed refusal is
+emitted. An interrupt received during that teardown retains the fixed incomplete/reconcile receipt.
+No post-spawn refusal, interrupt, or unexpected-exit receipt is emitted until the direct child has
+been waited exactly once and absence of the complete process group is proven. The exclusive root
+namespace remains in place while termination proof is unavailable. Fixed success and typed-return
+paths use the same boundary:
+the direct-child wait retains the process-group identity, any surviving member is killed immediately,
+KILL is repeated until whole-group absence is proven, and only then is buffered output parsed and the
+identity cleared. Additional HUP, INT, or TERM
+signals during this proof are deferred; they cannot restore default signal behavior or bypass reap.
+
+The copied bundle remains inert data. An initially observed symlink refuses before privileged
+namespace creation and source-path metadata is never changed. A pre-opened writable descriptor or
+source race can only change the operator bundle and therefore either changes the frozen source
+relation, loses the copied root inode's recorded SHA-256, or leaves the already copied root inode
+unchanged. All privileged Git uses the root-created bundle and bare repository, has
+local/system/global config, hooks, fsmonitor, attributes, replacements, external diff/textconv,
+prompts, lazy fetch, optional locks, locale, `HOME`, `PATH`, and protocols closed, and permits only
+local file transport. No installed release executable or Python module is launched; the reviewed
+carrier verifies the preserved release strictly as inert data.
+
+The carrier reuses exactly
+`/Library/Application Support/MastermindExecutive/locks/cf2-h0.lock`. While holding it, the repair
+verifies the exact old gates and fixed principal/service/socket state, materializes and verifies the
+complete candidate, publishes one durable repair intent, performs the archive-only no-replace
+source/generation swap, and retains all superseded or failed evidence. It does not install a release
+and does not rerender topology. The final generation rename is the last semantic filesystem mutation.
+Its immediately following capacity-generations parent `fsync` is the durability barrier.
+
+If the final rename is visible but that parent `fsync` fails or is ambiguous, exit 70 is not
+completion and must never trigger rollback. Re-enter only the same carrier, exact merge, intent,
+transport, and archive; it fully reverifies the visible committed graph and reconciles forward.
+Never create a second intent/carrier/archive, auto-fail over, or restore the archived promisor
+source after the visible commit. A precommit definite failure restores only the uniquely
+intent-bound old source/generation by no-replace rename and retains the failed candidate in the
+same archive; nothing is deleted or overwritten.
+
+The fixed exit, stdout, and stderr grammar is:
+
+```text
+0  H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED\n  (repair)
+0  H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED\n       (verify-only)
+64 INVALID_INVOCATION\n
+65 H0_SOURCE_CLOSURE_REPAIR_REFUSED\n
+70 H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER\n
+75 H0_LOCK_HELD\n
+77 ROOT_REQUIRED\n
+```
+
+Stderr is empty for every fixed carrier outcome. Any other stdout, any stderr, or a mismatched exit
+is a refusal, not proof.
+
+### Verify-only mutation and identity proof law
+
+Verify-only performs zero program-directed and zero semantic mutation. Kernel-induced access-time
+advancement from required reads is the sole permitted observable metadata delta. Atime is
+non-authoritative, may only remain equal or advance, and is never set, restored, decreased, or used
+to conceal another change. Namespace, bytes/digests, device/inode identity, type, mode, UID/GID,
+links, size, flags, ACLs, xattrs, mtime, ctime, topology/rollback evidence, launchd state, sockets,
+and legacy state remain exact. The shared lock is opened read-only and is neither created nor
+written by verify-only.
+
+This exception applies only to the fixed installed H0 root. Primary host evidence proves that root
+is on writable APFS, is not mounted `MNT_RDONLY`, and its mount does not expose `MNT_NOATIME`;
+mandatory full independent content verification necessarily reads installed bytes. The exception
+does not apply to any other filesystem, root, provider, or worker surface.
+
+The sanitized proof packet preserves two distinct identity axes:
+
+- `e4e44867ace335ac9208a3990a10c163e199492d` remains the exact current
+  topology-preparer/topology-release identity because topology, rollback, release, and preparer
+  bytes are unchanged; and
+- the observed protected repair merge is the exact source-closure/generation-repair identity.
+
+Record only the exact merge, transport/manifest/payload and semantic inventory identities, intent
+and receipt hashes, archive/source/generation semantic digests, new generation basename and six
+hashes, unchanged topology/rollback hashes, UID/GID/common-device facts, exact repair sentinel,
+both verify sentinels, and the permitted atime observation for each verify pass. Do not record a
+provider-home path, account, credential, secret, or invented generation digest.
+
+This H0 principal check is attribute-scoped to fixed record names, UIDs, primary GIDs, and fixed
+membership/nonmembership facts. It never requests a home-directory attribute and never resolves,
+stats, reads, traverses, or enumerates any provider-home. The later P0 carrier must separately
+re-prove provider-home ownership, mode, and non-traversal.
+
+Stop after both verify-only passes. H0 source closure is not P0 acceptance. A distinct P0 re-pin is
+required to bind both exact merge/install identities and replace its constant closure assertion
+with the pure verifier. P0, provider-home proof, every credential and OAuth ceremony, provider
+calls, service mutation/start, socket creation/connection, routing, worker execution, fan-out,
+failover, and CF2-I all remain held.
+
 ## Stage 2 — exact `origin/master` provisioning, install, and acceptance
 
 Start in a fresh Terminal after the delivery pull request merges and paste every
@@ -730,7 +987,8 @@ only after source, runtime, release, topology, legacy-state and rollback proof
 pass. The successful install and each successful verification report
 `H0_INSTALLED_HOST_PASS_NOT_P0_ACCEPTED`.
 
-Run `--verify-only` a second time to prove zero-mutation idempotence. Then rerun
+Run `--verify-only` a second time to prove zero-write and zero semantic mutation idempotence under
+the sole kernel read-atime observer effect defined above. Then rerun
 the independently governed, read-only CF2-P0 census. Proceed only if that
 census—not this preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Even
 then, CF2-I-A is the next separate carrier. OAuth/device ceremonies,

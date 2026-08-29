@@ -84,7 +84,9 @@ once production-proven, to create one Executive CEO request.
 Mandatory companion for every Chairman-mediated/manual Slack worker handoff or routing
 recommendation. Sol states a preferred capability avenue, never autonomously chooses the
 quota-bearing account/session. For manual Slack routing it supplies the closed Chairman-facing
-avenue vocabulary and takes precedence over generic worker/model examples on account binding.
+avenue vocabulary, distinguishes capacity-selectable pre-START receiver binding from
+exact-session-required continuation, and takes precedence over generic worker/model examples on
+account binding.
 
 ### `WATCHER_ACTION_LOOP.md`
 Use whenever Sol arms/operates a watcher/condition-watch for a worker or COO dialogue, or a
@@ -158,6 +160,13 @@ same commit; its account-binding and Chairman-facing avenue vocabulary is the mo
     `PREFERRED_AVENUE` from `Fable`, `Opus`, `Grok`, `CTO Sol`, or `Terra` and leave the concrete
     account/session binding to the Chairman. Prefer Terra/CTO Sol when sufficient; Fable remains
     reserved for the hardest principal-level work.
+19. Manual receiver binding is explicit. `CAPACITY_SELECTABLE` ordinary new work may receive a
+    Chairman `PRESTART_REBIND` to another eligible concrete quota account before `START` while the
+    operation key, carrier, scope and logical responsibility stay unchanged; the newest explicit live
+    Chairman assignment wins and a numbered-account mismatch alone is not a blocker. Use
+    `EXACT_SESSION_REQUIRED` when the provider conversation/session itself is part of the target.
+    After `START`, the concrete runtime binding is sticky until canonically reconciled; never silently
+    hop accounts, and `EFFECT_UNKNOWN` always blocks receiver change.
 
 ## Modification handshake
 

@@ -118,6 +118,7 @@ Before posting a Chairman-mediated/manual Slack handoff, record:
 PREFERRED_AVENUE: <Fable|Opus|Grok|CTO Sol|Terra>
 WHY: <why this avenue can reliably satisfy the bounded mission>
 ACCOUNT_BINDING: CHAIRMAN_SELECTS
+RECEIVER_BINDING_MODE: <CAPACITY_SELECTABLE|EXACT_SESSION_REQUIRED>
 ```
 
 For non-Fable routes also record:
@@ -147,16 +148,94 @@ Do not create a second handoff or second logical operation merely because the Ch
 account binding after the packet was posted. Preserve the same operation key and carrier unless current
 reconciliation law requires otherwise.
 
-## 6. Exact-receiver exception
+## 6. Receiver binding mode — capacity-selectable vs exact-session-required
 
-If the current live Chairman directive explicitly says, for example, `send this to claude8` or otherwise
-names the exact receiver/session, Sol may honor that explicit assignment and use the existing
-`DIRECT_TARGETED` path. Sol must not substitute a different account based on its own quota guess.
+Every Chairman-mediated/manual handoff must distinguish the logical responsibility from the concrete
+quota-bearing runtime account by declaring exactly one:
+
+```text
+RECEIVER_BINDING_MODE: CAPACITY_SELECTABLE
+RECEIVER_BINDING_MODE: EXACT_SESSION_REQUIRED
+```
+
+### 6.1 `CAPACITY_SELECTABLE` — default for new bounded work
+
+Use `CAPACITY_SELECTABLE` when the mission can be performed by any eligible account/session in the
+selected avenue and no existing provider-native conversation/session is part of the operation target.
+This is the default for new bounded implementation, research, review and other work whose required
+context is fully carried by the commission and canonical sources.
+
+Before `START`, the Chairman may replace the concrete account/session while preserving the **same
+operation key and carrier**. The **newest explicit live Chairman assignment** to the current session is
+the receiver-binding edge for that unstarted operation.
+
+This is `PRESTART_REBIND`, not retry/failover:
+
+```text
+PRESTART_REBIND
+precondition = no START / no modifying effect / no effect uncertainty
+operation_key = unchanged
+carrier = unchanged
+logical responsibility = unchanged
+concrete account/session = Chairman-selected current receiver
+```
+
+A numbered-account mismatch is not a blocker for `CAPACITY_SELECTABLE` work when all of the following
+are true:
+
+- the current live Chairman deliberately delivered/assigned the same operation to this session;
+- no prior receiver has emitted `START` or otherwise begun an operation effect;
+- there is no `EFFECT_UNKNOWN` or conflicting active pickup;
+- the current session is eligible for the selected avenue and required capability;
+- the operation key, scope, carrier and logical responsibility are unchanged.
+
+The receiving worker must ACK using its **actual** current communication/runtime identity. It must not
+pretend to be the previously suggested numbered account. When useful for audit clarity, the ACK may
+state `PRESTART_REBIND` and the actual receiver while keeping the same operation key.
+
+If it is unknown whether the prior receiver started, fail closed and reconcile that same operation;
+do not call the uncertainty a harmless pre-START rebind.
+
+### 6.2 `EXACT_SESSION_REQUIRED` — strict continuation target
+
+Use `EXACT_SESSION_REQUIRED` when the **exact provider conversation/session is part of the target**,
+including provider-native continuation/resume, effect reconciliation, conversation-local state that
+cannot be lawfully reconstructed elsewhere, or an acceptance proof that specifically requires that
+bound account/session.
+
+For `EXACT_SESSION_REQUIRED`, a different numbered account/session is a real target mismatch and must
+block or reconcile under the owning continuity/RuntimeBinding law. Chairman preference for a fresher
+quota account does not silently rewrite an exact-session target.
+
+Do not label ordinary new work `EXACT_SESSION_REQUIRED` merely because Sol happened to mention or tag a
+numbered account in an earlier packet. Exactness comes from the operation's real target requirement,
+not from accidental transport wording.
+
+### 6.3 START freezes the concrete runtime for this operation
+
+After `START`, the selected concrete runtime binding is sticky for the current operation unless the
+accepted RuntimeBinding/Capacity/continuation owner explicitly reconciles and rebinds it.
+
+A later quota or provider-limit event must return a truthful blocker such as `CAPACITY_EXHAUSTED` (or
+the currently accepted equivalent) and enter canonical reconciliation. Do not manually paste the
+same started operation into another Claude/Codex account and call it continuation. Do not turn
+`CAPACITY_SELECTABLE` into permission for mid-effect account hopping.
+
+`EFFECT_UNKNOWN` always blocks a receiver change until the original effect is reconciled.
+
+## 7. Exact-receiver exception
+
+If the current live Chairman directive explicitly names a concrete receiver/session for ordinary
+capacity-selectable work, that is the current account binding; the Chairman may still issue a newer
+explicit `PRESTART_REBIND` before `START` under Section 6.1.
+
+If the operation is `EXACT_SESSION_REQUIRED`, or the Chairman explicitly freezes the exact session as
+part of the target, Sol must not substitute a different account based on its own quota guess.
 
 Likewise, if the Chairman explicitly delegates concrete account-selection authority for one operation,
 Sol may exercise only that bounded authority and must record the basis for the selection.
 
-## 7. Automated Executive routing is separate
+## 8. Automated Executive routing is separate
 
 This law does not make the Chairman manually choose workers for Executive OS Jobs. When a
 production-proven Executive route lawfully performs deterministic worker/quota claim, Executive OS
@@ -165,7 +244,9 @@ canonical policy.
 
 Do not copy manual account-selection rules into a second router or quota ledger.
 
-## 8. Default principle
+## 9. Default principle
 
-> **Sol recommends the capability avenue; the Chairman spends the account quota. Prefer Terra and CTO
-> Sol when they are sufficient. Fable is for the hardest principal-level problems, not the default.**
+> **Sol recommends the capability avenue; the Chairman spends the account quota. Ordinary new work is
+> capacity-selectable before START; exact-session continuation stays exact; after START, runtime changes
+> require canonical reconciliation. Prefer Terra and CTO Sol when sufficient.
+> Fable is for the hardest principal-level problems, not the default.**
