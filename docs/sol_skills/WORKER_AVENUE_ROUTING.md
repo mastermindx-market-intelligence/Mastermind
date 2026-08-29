@@ -140,9 +140,19 @@ existing `COMMISSION_WAVE.md` receiver vocabulary, use:
 RECEIVER_MODE: OPEN_PICKUP
 ```
 
-and state plainly that **no worker may self-claim merely from `PREFERRED_AVENUE`**. The Chairman's later
-same-carrier account/session assignment creates the receiver-binding edge; after that, the selected
-worker performs the normal pickup ACK, watcher/readiness and START discipline.
+and state plainly that **no worker may self-claim merely from `PREFERRED_AVENUE`**. The posted packet
+or Slack message is still unassigned merely because it exists. For `CAPACITY_SELECTABLE` work, when
+the Chairman later deliberately delivers that same `OPEN_PICKUP` commission to a concrete eligible account/session
+in a live interaction with execution intent, **that live delivery is the receiver-binding edge**.
+No separate Slack comment, claim message, or second Chairman assignment is required. The receiving
+session performs the normal pickup ACK, read, watcher/readiness and START discipline and **must not ask
+the Chairman to bind, claim, or comment again**. Merely discovering the packet in Slack, GitHub,
+history or another retrieved source remains non-authoritative and does not self-assign a worker.
+
+The immutable packet may therefore still say `RECEIVER_MODE: OPEN_PICKUP` because that was truthful at
+posting time. A later live Chairman handoff to the selected eligible session supplies the binding edge;
+do not require the Chairman to edit/repost the packet as `DIRECT_TARGETED` merely to repeat the same
+assignment.
 
 Do not create a second handoff or second logical operation merely because the Chairman supplied the
 account binding after the packet was posted. Preserve the same operation key and carrier unless current
@@ -167,7 +177,9 @@ context is fully carried by the commission and canonical sources.
 
 Before `START`, the Chairman may replace the concrete account/session while preserving the **same
 operation key and carrier**. The **newest explicit live Chairman assignment** to the current session is
-the receiver-binding edge for that unstarted operation.
+the receiver-binding edge for that unstarted operation. That assignment may be expressed by naming
+the receiver or by deliberately handing/delivering the same commission to that concrete eligible
+session with execution intent; it does not require a transport-specific Slack comment.
 
 This is `PRESTART_REBIND`, not retry/failover:
 
@@ -227,7 +239,9 @@ same started operation into another Claude/Codex account and call it continuatio
 
 If the current live Chairman directive explicitly names a concrete receiver/session for ordinary
 capacity-selectable work, that is the current account binding; the Chairman may still issue a newer
-explicit `PRESTART_REBIND` before `START` under Section 6.1.
+explicit `PRESTART_REBIND` before `START` under Section 6.1. For ordinary capacity-selectable work,
+deliberate live delivery of the commission to a concrete eligible session with execution intent is
+also an explicit current assignment; the worker must not demand mutation of the original Slack packet.
 
 If the operation is `EXACT_SESSION_REQUIRED`, or the Chairman explicitly freezes the exact session as
 part of the target, Sol must not substitute a different account based on its own quota guess.
@@ -247,6 +261,7 @@ Do not copy manual account-selection rules into a second router or quota ledger.
 ## 9. Default principle
 
 > **Sol recommends the capability avenue; the Chairman spends the account quota. Ordinary new work is
-> capacity-selectable before START; exact-session continuation stays exact; after START, runtime changes
-> require canonical reconciliation. Prefer Terra and CTO Sol when sufficient.
+> capacity-selectable before START; a deliberate live Chairman handoff to the selected eligible
+> session is the binding edge without a second Slack ceremony; exact-session continuation stays exact;
+> after START, runtime changes require canonical reconciliation. Prefer Terra and CTO Sol when sufficient.
 > Fable is for the hardest principal-level problems, not the default.**
