@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 from integrations.slack_agent_dialogue.contract import DialogueContractError
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
+    PARENT_SCHEMA_V2,
     TURN_WATCH_MODE_V1,
     validate_message_v2,
     validate_parent_v2,
@@ -65,7 +66,8 @@ class AgentDialogueAttention:
         if (
             self.schema != ATTENTION_SCHEMA
             or self.source_kind != ATTENTION_SOURCE_KIND
-            or self.source_dialogue_schema != MESSAGE_SCHEMA_V2
+            or self.source_dialogue_schema
+            not in {MESSAGE_SCHEMA_V2, PARENT_SCHEMA_V2}
             or self.target_seat not in {"ceo", "coo"}
             or self.attention_kind != ATTENTION_WAKE_KIND
         ):
@@ -312,7 +314,20 @@ def classify_turn(
     if not _routing_is_valid(routing):
         return _refuse("ROUTING_FACTS_INVALID")
     if not messages:
-        return _refuse("DIALOGUE_HISTORY_EMPTY")
+        parent_fingerprint = str(normalized_parent["fingerprint"])
+        initial_source = {
+            "schema": PARENT_SCHEMA_V2,
+            "message_key": f"asd-initial-{parent_fingerprint}",
+            "fingerprint": parent_fingerprint,
+            "evidence_refs": (),
+        }
+        return _requires_attention(
+            action=TurnAction.WAKE_COO,
+            target_seat="coo",
+            parent=normalized_parent,
+            message=initial_source,
+            routing=routing,
+        )
 
     normalized_messages: list[Mapping[str, Any]] = []
     for message in messages:

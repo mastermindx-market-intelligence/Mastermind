@@ -253,7 +253,7 @@ def test_contract_vocabulary_and_shapes_are_closed() -> None:
     ]
 
 
-def test_watch_disabled_is_no_action_and_empty_watched_history_refuses() -> None:
+def test_watch_disabled_is_no_action() -> None:
     disabled = _decision(parent=_parent(watch_mode=None))
     assert disabled == TurnDecision(
         action=TurnAction.NO_ACTION,
@@ -261,9 +261,52 @@ def test_watch_disabled_is_no_action_and_empty_watched_history_refuses() -> None
         reason="WATCH_DISABLED",
         refusal_code=None,
     )
-    empty = _decision()
-    assert empty.action is TurnAction.REFUSE
-    assert empty.refusal_code == "DIALOGUE_HISTORY_EMPTY"
+
+
+def test_bound_initial_commission_projects_parent_attention_to_coo() -> None:
+    from integrations.slack_agent_dialogue.contract_v2 import PARENT_SCHEMA_V2
+
+    parent = _parent()
+    result = _decision(parent=parent)
+    expected_key = f"asd-initial-{parent['fingerprint']}"
+    expected_identity = {
+        "attention_kind": ATTENTION_WAKE_KIND,
+        "commission_fingerprint": parent["fingerprint"],
+        "message_key": expected_key,
+        "source_kind": ATTENTION_SOURCE_KIND,
+        "target_seat": "coo",
+    }
+    expected_source_ref = ATTENTION_SOURCE_KIND + ":" + hashlib.sha256(
+        json.dumps(
+            expected_identity,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+    ).hexdigest()
+
+    assert result.action is TurnAction.WAKE_COO
+    assert result.reason == "DIALOGUE_TURN_PENDING"
+    assert result.refusal_code is None
+    assert result.attention is not None
+    assert result.attention.source_dialogue_schema == PARENT_SCHEMA_V2
+    assert result.attention.message_key == expected_key
+    assert result.attention.message_fingerprint == parent["fingerprint"]
+    assert result.attention.commission_fingerprint == parent["fingerprint"]
+    assert result.attention.target_seat == "coo"
+    assert result.attention.evidence_refs == ()
+    assert result.attention.source_ref == expected_source_ref
+
+
+def test_unbound_initial_commission_is_no_action_without_fallback() -> None:
+    result = _decision(routing=_routing(ceo=True, coo=False))
+
+    assert result == TurnDecision(
+        action=TurnAction.NO_ACTION,
+        attention=None,
+        reason="DIALOGUE_WAKE_TARGET_UNBOUND",
+        refusal_code="DIALOGUE_WAKE_TARGET_UNBOUND",
+    )
 
 
 @pytest.mark.parametrize(
