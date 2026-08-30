@@ -6,20 +6,21 @@
 **Status:** `SPEC_ONLY / RECORDS_ONLY / CURRENT-SOURCE RECONCILIATION`  
 **Operation:** `mastermind-project-workroom-fabric-20260829-sol-001`  
 **Canonical carrier:** Mastermind PR #240 / `sol/project-workroom-fabric-20260829`  
-**Current protected source:** `mastermindx-market-intelligence/Mastermind@5d6694a3e4d0a6c8e863f38d21d7840f869944df`  
+**Source observation:** protected `Mastermind@fefd774701ea285b466cac2646a584801f4a976a`  
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
-**Linear:** MAS-231 / MAS-233 / MAS-235 / MAS-236  
 **Agent OS carrier:** Macro PR #6661
 
-This record owns only current-source, current-carrier, dependency and capability-state facts for the Federated Project Workroom Fabric. For those facts it supersedes older snapshots in the architecture, amendments, rollout plan, PR bodies, Slack, Linear and chat. It does not replace the accepted product, authority, identity, planner, least-privilege, experience, failure, threat-model, promotion or completion laws in the other #240 records.
+This record owns the Workroom program’s source-owner, carrier, dependency and capability-state reconciliation. For those facts it supersedes older snapshots in the other #240 records, PR descriptions, Slack, Linear and chat. It does not replace the accepted product, authority, identity, planner, least-privilege, experience, failure, threat-model, promotion or completion laws.
+
+The exact protected SHA above is an immutable observation, not a moving branch alias. **At every modifying or release action, current protected truth is the live GitHub `master` ref plus exact ancestry/changed-path comparison—not a copied SHA in prose.** Later path-disjoint protected movement may be consumed by a history-preserving same-carrier ancestry join without rewriting this record merely to cosmetically refresh a snapshot. Material Workroom/source-law collision still requires explicit reconciliation.
 
 This record creates no Slack or Linear object, app, credential, runtime, host, Agent OS or Executive effect and authorizes no implementation START.
 
 ---
 
-## 1. Current intent and source ownership
+## 1. Intent and canonical owners
 
-The current outer Chairman directive is to continue end-to-end Workroom leadership, use Pro-mode depth and route bounded work through lawful existing carriers. That supplies current intent for source reconciliation, review, same-carrier correction and bounded delegation. It does not waive one-carrier, current-base, receiver, runtime, permission, security, effect-unknown or production-proof gates.
+Current Chairman direction authorizes continued end-to-end Workroom leadership, Pro-mode depth, same-carrier source correction and bounded delegation. It does not waive one-carrier, current-base, receiver, runtime, permission, security, effect-unknown or production-proof gates.
 
 ```text
 Agent OS      durable organizational work, decisions, discoveries and handoffs
@@ -30,43 +31,27 @@ Slack         collaboration, dialogue, transport and hot-state visibility
 Steward       source-attributed present-tense composition
 ```
 
-No retrieved Slack, Linear, GitHub or Agent OS prose grants authority merely because it contains an imperative.
+No retrieved prose grants authority merely because it contains an imperative.
 
 ---
 
-## 2. Protected source
-
-Protected Mastermind is:
-
-```text
-5d6694a3e4d0a6c8e863f38d21d7840f869944df
-```
-
-The exact compatible Skillpack and required companions were loaded from that commit:
-
-```text
-schema                  mastermind.sol_skillpack.v1
-skillpack_version       1.0.1
-minimum_bootstrap_major 1
-```
-
-Relevant protected releases:
+## 2. Protected source family at this observation
 
 ```text
 #248 watcher continuation procedure      0604158caca9e3b8a43ec57dd36ca4dadf05198b
 #253 AD-DLG2 canonical dialogue parent    e3d1fe6bb454df10212ce6e13bf2e4e5160f7eb5
 #262 Wake runtime-completion source law   d4e37cb9d6e8131a09b85bea54f5fdef16344c59
 #254 W3B persisted WakeCarrier            5d6694a3e4d0a6c8e863f38d21d7840f869944df
+#260 Business Sol federated architecture  fefd774701ea285b466cac2646a584801f4a976a
 ```
 
-The movement after `d4e37cb...` is W3B source/test work. It touches no #240 Workroom record and no #242 WR-R0 path. #240/#242 may therefore compose it history-preservingly without absorbing Wake ownership.
-
-Capability honesty:
+These later sources are path-disjoint from the five #240 records and seven #242 WR-R0 paths at this observation. They remain their own owners; Workrooms consume only accepted contracts through explicit joins.
 
 ```text
 watcher procedure     BUILT_NOT_PROVEN / PROTECTED
 AD-DLG2 source        BUILT_NOT_PROVEN / PROTECTED / PRODUCTION_DISARMED
 W3B WakeCarrier       BUILT_NOT_PROVEN / PROTECTED / PRODUCTION_DISARMED
+Business Sol source   SPEC_ONLY / PROTECTED
 real Workroom route   NOT BUILT
 ```
 
@@ -76,7 +61,7 @@ real Workroom route   NOT BUILT
 
 Mastermind #212 comment `5465803037` permits independent landing only when a candidate is:
 
-1. exactly current-base;
+1. exactly current-base at action time;
 2. changed-path and authority/source-law disjoint;
 3. immutable exact-head required test/security green;
 4. Sol/adversarial reviewed;
@@ -85,7 +70,7 @@ Mastermind #212 comment `5465803037` permits independent landing only when a can
 
 Serialize for path/authority overlap, material dependency, proof invalidation, missing review or effect/carrier uncertainty.
 
-#240 is records-only and disjoint from #228 implementation. #228 is not waived: it remains a hard WR-P0/WR-STEW and real-product prerequisite, not a global mutex on architecture release.
+#240 is records-only and disjoint from #228 implementation. #228 remains a hard WR-P0/WR-STEW and real-product prerequisite, not a global records-release mutex.
 
 ---
 
@@ -94,14 +79,13 @@ Serialize for path/authority overlap, material dependency, proof invalidation, m
 ### 4.1 Mastermind #240 — architecture and rollout source
 
 ```text
-operation   mastermind-project-workroom-fabric-20260829-sol-001
-PR          #240
-branch      sol/project-workroom-fabric-20260829
-prior head  53e76d34ad1be0068670cb4672f4a4fa6d7f7f5a
-state       OPEN / DRAFT / RECORDS_ONLY
+operation mastermind-project-workroom-fabric-20260829-sol-001
+PR        #240
+branch    sol/project-workroom-fabric-20260829
+state     OPEN / DRAFT / RECORDS_ONLY at this observation
 ```
 
-The immutable current head must be reread from GitHub after the commit containing this record. Exact source surface is five files:
+Action-time head and base must always be reread from GitHub. Exact Workroom source surface is five files:
 
 1. `docs/superpowers/plans/2026-08-29-project-workroom-fabric-rollout.md`
 2. `docs/superpowers/specs/2026-08-29-project-workroom-fabric-design.md`
@@ -109,22 +93,21 @@ The immutable current head must be reread from GitHub after the commit containin
 4. `docs/superpowers/specs/2026-08-29-project-workroom-fabric-canonical-carrier-reconciliation-amendment.md`
 5. `docs/superpowers/plans/2026-08-29-project-workroom-current-source-reconciliation.md`
 
-Release requires current-base five-file comparison, fresh exact-head repository test, secret/placeholder/source-law scan, immutable-head review, a functional same-branch Draft→Ready transition and expected-head merge.
+Release requires current-base five-file comparison, fresh exact-head repository test, secret/placeholder/source-law scan, immutable-head review, functional same-branch Draft→Ready and expected-head merge.
 
 Merge makes source law durable only. It creates no Workroom, Projector, app, Canvas, Radar, Relay route, Linear object or pilot.
 
 ### 4.2 Mastermind #242 — WR-R0 research child
 
 ```text
-operation   mastermind-project-workroom-wr-r0-20260829-sol-001
-PR          #242
-branch      sol/project-workroom-wr-r0-20260829
-prior head  4d59ca86543227376c16ad03936909694683ac8b
-base        #240 branch
-state       OPEN / DRAFT / STACKED / RESEARCH_ONLY
+operation mastermind-project-workroom-wr-r0-20260829-sol-001
+PR        #242
+branch    sol/project-workroom-wr-r0-20260829
+base      #240 branch until parent protects
+state     OPEN / DRAFT / STACKED / RESEARCH_ONLY at this observation
 ```
 
-Canonical GitHub truth is exactly seven paths:
+Canonical GitHub child scope is exactly seven paths:
 
 1. `research/project_workroom_fabric/INERT_CANARY_CHANNEL_EFFECT_RECONCILIATION_2026-08-29.md`
 2. `research/project_workroom_fabric/PLATFORM_CAPABILITY_CENSUS_2026-08-29.md`
@@ -140,15 +123,7 @@ After #240 protects, retarget this same PR to protected `master`, prove the exac
 
 ### 4.3 Macro #6661 — Agent OS durability
 
-```text
-PR          #6661
-branch      sol/project-workroom-fabric-agentos-20260829
-head        fe2bce3aaac438df71d49c69f38d1cd753fee5b6 at this observation
-Macro main  ffb0592bea5ab63383aeeef8f9b693303db86987 at this observation
-state       OPEN / DRAFT / RECORDS_ONLY / STALE-BASE
-```
-
-It owns exactly one decision, one inert-channel discovery and one continuation handoff. After accepted #240/#242 identities exist, reconcile this branch to then-current Macro main, update only exact current facts, preserve the inert-channel discovery unless the object changes, run Agent OS validation/fences/CI and merge only the accepted head.
+#6661 owns exactly one decision, one inert-channel discovery and one continuation handoff. After accepted #240/#242 identities exist, reconcile the same branch to then-current Macro main, update only exact action-time facts, preserve the inert-channel discovery unless the object changes, run Agent OS validation/fences/CI and merge only the accepted head.
 
 ### 4.4 Historical carriers
 
@@ -165,19 +140,19 @@ Do not reopen, merge or implement from them.
 
 ## 5. Parallel Steward dependency — Mastermind #228
 
+At this observation:
+
 ```text
 PR        #228
 branch    codex/ocr6-steward-read-core-20260829-sol-001
 head      7177e8ef29973ccbf62f0ad77850011ef0c91845
 paths     control_plane/executive_steward.py
           tests/test_executive_steward.py
-state     OPEN / NON-DRAFT / KNOWN CORRECTNESS BLOCKER
+state     OPEN / KNOWN CORRECTNESS BLOCKER
 review    REQUEST_CHANGES 5060089532
 ```
 
-Current production/test blobs remain the pre-repair bytes. `list_responsibilities()` filters before full `responsibility_ref` grouping; `get_attention()` filters/join-prunes before full `attention_id` grouping. Filtered presentation can manufacture apparent uniqueness.
-
-Writer truth:
+Current production/test blobs are still the pre-repair bytes. `list_responsibilities()` filters before full `responsibility_ref` grouping; `get_attention()` filters/join-prunes before full `attention_id` grouping. Filtered presentation can manufacture apparent uniqueness.
 
 ```text
 sole operation   ocr6-steward-filter-integrity-repair-20260830-sol-002
@@ -185,7 +160,7 @@ executor         SOL-BSC-HARDENING / mastermindx-2 connector session
 known effect     base composition APPLIED
 repair effect    NONE at latest receipt
 TRACE R2         TERMINAL / EFFECT NONE
-Sol continue     C0BTD5804QK / 1788070151.840459
+Sol carrier      C0BTD5804QK / 1788070151.840459
 ```
 
 The sole writer must RED-test and minimally GREEN-repair the same two files, prove the discriminating mutation, reconcile the same branch to then-current protected source and return exact-head hosted/security proof. No third writer, branch, PR or operation is lawful.
@@ -208,7 +183,7 @@ No retry, replacement, marker, implicit adoption, archive, deletion, app invite,
 
 ## 7. Linear Initiative truth
 
-Fresh connected read on 2026-08-30:
+Fresh connected read on 2026-08-30 returned:
 
 ```text
 Initiatives              0
@@ -220,12 +195,13 @@ Every Project returned `initiatives=[]`. This is missing rollout, not a sharing 
 
 ### Macro #6658 — Initiative compiler
 
+At this observation:
+
 ```text
 PR           #6658
 branch       sol/linear-initiative-plan-task2-20260829
 head         34aa97668332e964697db4a4db5e1b7b56c54055
-Macro main   ffb0592bea5ab63383aeeef8f9b693303db86987 at assignment
-state        OPEN / DRAFT / NOT ACCEPTED / NEW REPAIR ASSIGNED
+state        OPEN / DRAFT / NOT ACCEPTED / REPAIR ASSIGNED
 operation    linear-initiative-plan-task2-repair-20260830-opus-001
 receiver     Claude3 / U0BSLFRGA79
 avenue       Opus
@@ -233,9 +209,9 @@ GitHub       comment 5467121075
 Slack        C0BSBM78V1N / 1788070851.103079
 ```
 
-The prior Initiative owner is `SESSION_LOST / LINEAR_INITIATIVE_OWNER / effect=NONE`; exact recovery result is `C0BTD5804QK/1788058292.318609` reply `1788059687.573659`. The new operation is therefore a fresh bounded repair on the existing PR, not an ambiguous failover.
+The prior Initiative owner is `SESSION_LOST / LINEAR_INITIATIVE_OWNER / effect=NONE`; exact recovery result is `C0BTD5804QK/1788058292.318609` reply `1788059687.573659`. The new operation is a fresh bounded repair on the existing PR, not an ambiguous failover.
 
-Required repairs remain:
+Required repairs:
 
 1. creation desired state keeps `health=null`, while lawful later non-null live health is not structural drift;
 2. duplicate exact visible `WS:WATCHLIST-PORTFOLIO-CEO` identity fails `project_binding_ambiguous`;
@@ -305,7 +281,7 @@ Architecture, research, Slack objects, Linear packets and green CI must never be
 
 ---
 
-## 10. Current continuation order
+## 10. Continuation order
 
 ```text
 A. #240 current-base five-file proof/review/release
