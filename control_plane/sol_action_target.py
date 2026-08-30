@@ -278,12 +278,25 @@ def resolve_sol_action_target(
 
 
 def require_sol_action_authority(
-    resolution: SolActionTargetResolution,
+    *,
+    root_job_id: str,
+    registry: SessionTargetRegistry,
+    binding_snapshot: RuntimeBindingSnapshot,
+    actor_binding: RuntimeBinding | None,
 ) -> SolActionTargetResolution:
-    """Return an exact authoritative resolution or raise a typed refusal."""
+    """Re-resolve current evidence and return authority or a typed refusal.
 
-    if not isinstance(resolution, SolActionTargetResolution):
-        raise TypeError("resolution must be a SolActionTargetResolution")
+    A :class:`SolActionTargetResolution` is evidence, not a reusable authority
+    token.  Enforcement therefore accepts only the canonical current inputs and
+    resolves them immediately before deciding whether the actor may act.
+    """
+
+    resolution = resolve_sol_action_target(
+        root_job_id=root_job_id,
+        registry=registry,
+        binding_snapshot=binding_snapshot,
+        actor_binding=actor_binding,
+    )
     if (
         resolution.state is not ActionTargetState.RESOLVED
         or not resolution.action_authoritative

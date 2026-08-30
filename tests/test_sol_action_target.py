@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import inspect
 
 import pytest
@@ -100,12 +101,14 @@ def test_exact_root_target_and_runtime_binding_resolve_action_authority():
     )
 
     target_binding = _binding()
+    registry = _registry()
+    snapshot = RuntimeBindingSnapshot.current(
+        (target_binding, _binding(_SISTER_ALIAS, binding_id="bind-sol-b-000001"))
+    )
     result = resolve_sol_action_target(
         root_job_id=_ROOT_JOB_ID,
-        registry=_registry(),
-        binding_snapshot=RuntimeBindingSnapshot.current(
-            (target_binding, _binding(_SISTER_ALIAS, binding_id="bind-sol-b-000001"))
-        ),
+        registry=registry,
+        binding_snapshot=snapshot,
         actor_binding=target_binding,
     )
 
@@ -120,7 +123,12 @@ def test_exact_root_target_and_runtime_binding_resolve_action_authority():
     assert result.action_authoritative is True
     assert result.observer_only is False
     assert len(result.evidence_digest) == 64
-    assert require_sol_action_authority(result) is result
+    assert require_sol_action_authority(
+        root_job_id=_ROOT_JOB_ID,
+        registry=registry,
+        binding_snapshot=snapshot,
+        actor_binding=target_binding,
+    ) == result
 
 
 def test_sister_sol_with_same_account_family_remains_observer_only():
@@ -139,12 +147,12 @@ def test_sister_sol_with_same_account_family_remains_observer_only():
         binding_id="bind-sol-b-000001",
         account_label=target_binding.account_label or "",
     )
+    registry = _registry()
+    snapshot = RuntimeBindingSnapshot.current((target_binding, sister_binding))
     result = resolve_sol_action_target(
         root_job_id=_ROOT_JOB_ID,
-        registry=_registry(),
-        binding_snapshot=RuntimeBindingSnapshot.current(
-            (target_binding, sister_binding)
-        ),
+        registry=registry,
+        binding_snapshot=snapshot,
         actor_binding=sister_binding,
     )
 
@@ -154,8 +162,13 @@ def test_sister_sol_with_same_account_family_remains_observer_only():
     assert result.action_authoritative is False
     assert result.observer_only is True
     with pytest.raises(SolActionAuthorityError) as exc_info:
-        require_sol_action_authority(result)
-    assert exc_info.value.resolution is result
+        require_sol_action_authority(
+            root_job_id=_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            actor_binding=sister_binding,
+        )
+    assert exc_info.value.resolution == result
 
 
 @pytest.mark.parametrize("root_job_id", ["", "not-a-job", " JOB-001 "])
@@ -292,6 +305,63 @@ def test_binding_surface_mismatch_is_conflict():
     assert result.action_authoritative is False
 
 
+def test_root_target_bound_to_non_ceo_target_is_conflict():
+    from control_plane.sol_action_target import (
+        ActionTargetReason,
+        ActionTargetState,
+        RuntimeBindingSnapshot,
+        SolActionAuthorityError,
+        require_sol_action_authority,
+        resolve_sol_action_target,
+    )
+
+    registry = dataclasses.replace(
+        _registry(),
+        root_job_bindings={
+            _ROOT_JOB_ID: {"ceo": "EXECUTIVE-COO-A"},
+        },
+    )
+    snapshot = RuntimeBindingSnapshot.current(())
+    result = resolve_sol_action_target(
+        root_job_id=_ROOT_JOB_ID,
+        registry=registry,
+        binding_snapshot=snapshot,
+        actor_binding=None,
+    )
+
+    assert result.state is ActionTargetState.CONFLICT
+    assert result.reason is ActionTargetReason.ROOT_TARGET_CONFLICT
+    assert result.action_authoritative is False
+    with pytest.raises(SolActionAuthorityError):
+        require_sol_action_authority(
+            root_job_id=_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            actor_binding=None,
+        )
+
+
+def test_exact_binding_without_reasoning_surface_is_unknown():
+    from control_plane.sol_action_target import (
+        ActionTargetReason,
+        ActionTargetState,
+        RuntimeBindingSnapshot,
+        resolve_sol_action_target,
+    )
+
+    binding = _binding(surface=None)
+    result = resolve_sol_action_target(
+        root_job_id=_ROOT_JOB_ID,
+        registry=_registry(),
+        binding_snapshot=RuntimeBindingSnapshot.current((binding,)),
+        actor_binding=binding,
+    )
+
+    assert result.state is ActionTargetState.UNKNOWN
+    assert result.reason is ActionTargetReason.RUNTIME_BINDING_SURFACE_UNKNOWN
+    assert result.action_authoritative is False
+
+
 @pytest.mark.parametrize(
     "actor",
     [
@@ -315,10 +385,12 @@ def test_stale_or_wrong_actor_binding_cannot_act(actor: RuntimeBinding):
     )
 
     current = _binding()
+    registry = _registry()
+    snapshot = RuntimeBindingSnapshot.current((current,))
     result = resolve_sol_action_target(
         root_job_id=_ROOT_JOB_ID,
-        registry=_registry(),
-        binding_snapshot=RuntimeBindingSnapshot.current((current,)),
+        registry=registry,
+        binding_snapshot=snapshot,
         actor_binding=actor,
     )
 
@@ -326,7 +398,71 @@ def test_stale_or_wrong_actor_binding_cannot_act(actor: RuntimeBinding):
     assert result.reason is ActionTargetReason.ACTOR_OBSERVER_ONLY
     assert result.action_authoritative is False
     with pytest.raises(SolActionAuthorityError):
-        require_sol_action_authority(result)
+        require_sol_action_authority(
+            root_job_id=_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            actor_binding=actor,
+        )
+
+
+def test_actor_surface_mismatch_remains_observer_only():
+    from control_plane.sol_action_target import (
+        ActionTargetReason,
+        RuntimeBindingSnapshot,
+        SolActionAuthorityError,
+        require_sol_action_authority,
+        resolve_sol_action_target,
+    )
+
+    current = _binding()
+    actor = _binding(surface="chatgpt-sol")
+    registry = _registry()
+    snapshot = RuntimeBindingSnapshot.current((current,))
+    result = resolve_sol_action_target(
+        root_job_id=_ROOT_JOB_ID,
+        registry=registry,
+        binding_snapshot=snapshot,
+        actor_binding=actor,
+    )
+
+    assert result.reason is ActionTargetReason.ACTOR_OBSERVER_ONLY
+    assert result.action_authoritative is False
+    with pytest.raises(SolActionAuthorityError):
+        require_sol_action_authority(
+            root_job_id=_ROOT_JOB_ID,
+            registry=registry,
+            binding_snapshot=snapshot,
+            actor_binding=actor,
+        )
+
+
+def test_constructed_resolution_is_evidence_not_an_authority_token():
+    from control_plane.sol_action_target import (
+        ActionTargetReason,
+        ActionTargetState,
+        RuntimeBindingSnapshot,
+        require_sol_action_authority,
+        resolve_sol_action_target,
+    )
+
+    unavailable = resolve_sol_action_target(
+        root_job_id=_ROOT_JOB_ID,
+        registry=_registry(),
+        binding_snapshot=RuntimeBindingSnapshot.current(()),
+        actor_binding=None,
+    )
+    forged = dataclasses.replace(
+        unavailable,
+        state=ActionTargetState.RESOLVED,
+        reason=ActionTargetReason.EXACT_RUNTIME_BINDING,
+        action_authoritative=True,
+        observer_only=False,
+        evidence_digest="0" * 64,
+    )
+
+    with pytest.raises(TypeError):
+        require_sol_action_authority(forged)
 
 
 def test_resolution_is_deterministic_and_has_no_untrusted_election_inputs():
@@ -356,16 +492,18 @@ def test_resolution_is_deterministic_and_has_no_untrusted_election_inputs():
     )
 
     current = _binding()
+    registry = _registry()
+    sister = _binding(_SISTER_ALIAS, binding_id="bind-sol-b-000001")
     first = resolve_sol_action_target(
         root_job_id=_ROOT_JOB_ID,
-        registry=_registry(),
-        binding_snapshot=RuntimeBindingSnapshot.current((current,)),
+        registry=registry,
+        binding_snapshot=RuntimeBindingSnapshot.current((current, sister)),
         actor_binding=current,
     )
     second = resolve_sol_action_target(
         root_job_id=_ROOT_JOB_ID,
-        registry=_registry(),
-        binding_snapshot=RuntimeBindingSnapshot.current((current,)),
+        registry=registry,
+        binding_snapshot=RuntimeBindingSnapshot.current((sister, current)),
         actor_binding=current,
     )
     assert first == second
