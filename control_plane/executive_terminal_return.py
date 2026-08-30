@@ -98,15 +98,20 @@ def _validated_completed_result(job: Job, attempt: Attempt) -> tuple[dict[str, A
     if not _same_canonical_json(job.result, receipt):
         _refuse("EVIDENCE_REFUSED")
     role = job.orchestration_role
-    execution_mode = attempt.execution_mode or "SEALED_WORKER"
-    expected_seal_command = (
-        f"orchestration-result-seal:{attempt.attempt_id}"
-        if execution_mode == "OPERATOR_HARNESS"
-        else f"sealed-worker-result:{attempt.attempt_id}"
-    )
+    execution_mode = attempt.execution_mode
+    if execution_mode is None:
+        _refuse("BINDING_REFUSED")
+    # The Runtime-owned SEALED_WORKER validator currently closes over durable
+    # receipt rows and is not exposed as a pure read-only contract.  Do not
+    # duplicate or weaken that owner here: this bounded projector accepts only
+    # the OPERATOR_HARNESS receipt family it can validate completely.  A later
+    # current-source integration may add SEALED_WORKER only by consuming the
+    # canonical Runtime validator.
+    if execution_mode != "OPERATOR_HARNESS":
+        _refuse("EVIDENCE_REFUSED")
+    expected_seal_command = f"orchestration-result-seal:{attempt.attempt_id}"
     if (
-        execution_mode not in {"OPERATOR_HARNESS", "SEALED_WORKER"}
-        or receipt.get("schema_version")
+        receipt.get("schema_version")
         != "mastermind.orchestration_terminal_receipt/v1"
         or receipt.get("status") != "COMPLETED"
         or receipt.get("job_id") != job.job_id
@@ -126,14 +131,7 @@ def _validated_completed_result(job: Job, attempt: Attempt) -> tuple[dict[str, A
             )
         )
         or receipt.get("effective_grant_digest") != attempt.effective_grant_digest
-        or (
-            execution_mode == "OPERATOR_HARNESS"
-            and receipt.get("result_evidence") is not None
-        )
-        or (
-            execution_mode == "SEALED_WORKER"
-            and not isinstance(receipt.get("result_evidence"), dict)
-        )
+        or receipt.get("result_evidence") is not None
     ):
         _refuse("EVIDENCE_REFUSED")
     unsigned = dict(receipt)

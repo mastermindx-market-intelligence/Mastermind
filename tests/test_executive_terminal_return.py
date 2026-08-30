@@ -5,6 +5,7 @@ import dataclasses
 
 import pytest
 
+from control_plane.executive_orchestration_result import canonical_digest
 from control_plane.executive_runtime import AttemptStatus, JobStatus, Runtime
 from control_plane.executive_terminal_return import (
     TerminalReturnError,
@@ -148,6 +149,46 @@ def test_reducer_refuses_nan_nested_in_the_terminal_receipt(tmp_path) -> None:
         reduce_terminal_return(
             job=dataclasses.replace(job, result=changed),
             attempt=dataclasses.replace(attempt, result=changed),
+            worker=worker,
+        )
+
+    assert raised.value.code == "EVIDENCE_REFUSED"
+
+
+def test_reducer_refuses_missing_execution_mode_binding(tmp_path) -> None:
+    job, attempt, worker = _completed_planner(tmp_path)
+
+    with pytest.raises(TerminalReturnError) as raised:
+        reduce_terminal_return(
+            job=job,
+            attempt=dataclasses.replace(attempt, execution_mode=None),
+            worker=worker,
+        )
+
+    assert raised.value.code == "BINDING_REFUSED"
+
+
+def test_reducer_refuses_unvalidated_sealed_worker_evidence(tmp_path) -> None:
+    job, attempt, worker = _completed_planner(tmp_path)
+    changed = dict(attempt.result)
+    changed["execution_mode"] = "SEALED_WORKER"
+    changed["result_seal_command_id"] = f"sealed-worker-result:{attempt.attempt_id}"
+    changed["result_evidence"] = {
+        "schema_version": "fixture",
+        "secret": "must-not-project",
+    }
+    unsigned = dict(changed)
+    unsigned.pop("terminal_evidence_digest")
+    changed["terminal_evidence_digest"] = canonical_digest(unsigned)
+
+    with pytest.raises(TerminalReturnError) as raised:
+        reduce_terminal_return(
+            job=dataclasses.replace(job, result=changed),
+            attempt=dataclasses.replace(
+                attempt,
+                execution_mode="SEALED_WORKER",
+                result=changed,
+            ),
             worker=worker,
         )
 

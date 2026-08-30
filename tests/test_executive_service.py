@@ -447,7 +447,7 @@ def test_cycle_immediate_terminal_outcome_uses_the_same_projection_pickup(
     asyncio.run(exercise())
 
 
-def test_service_pickup_accepts_a_fresh_sealed_worker_terminal_receipt_shape(
+def test_service_pickup_refuses_unvalidated_sealed_worker_terminal_receipt_shape(
     tmp_path: Path,
 ) -> None:
     async def exercise() -> None:
@@ -468,7 +468,10 @@ def test_service_pickup_accepts_a_fresh_sealed_worker_terminal_receipt_shape(
         receipt = dict(attempt.result)
         receipt["execution_mode"] = "SEALED_WORKER"
         receipt["result_seal_command_id"] = f"sealed-worker-result:{attempt.attempt_id}"
-        receipt["result_evidence"] = {"schema_version": "fixture"}
+        receipt["result_evidence"] = {
+            "schema_version": "fixture",
+            "secret": "must-not-project",
+        }
         unsigned = dict(receipt)
         unsigned.pop("terminal_evidence_digest")
         receipt["terminal_evidence_digest"] = canonical_digest(unsigned)
@@ -500,8 +503,10 @@ def test_service_pickup_accepts_a_fresh_sealed_worker_terminal_receipt_shape(
         await service._project_terminal_return(
             child.job_id, expected_attempt_id=attempt.attempt_id
         )
-        assert [candidate.result_status for candidate in received] == ["RESULT"]
-        assert received[0].terminal_digest == receipt["terminal_evidence_digest"]
+        assert received == []
+        assert service._terminal_return_last_diagnostic == (
+            "terminal-return:EVIDENCE_REFUSED"
+        )
         await service.close()
 
     asyncio.run(exercise())
