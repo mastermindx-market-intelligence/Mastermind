@@ -138,6 +138,93 @@ interactive Sol surface as a transport bridge. On that first interactive turn, S
 adjudicate and act before reporting to the Chairman whenever current authority permits. Do not turn
 a write-capability limitation into permanent Chairman relay work.
 
+### Structured temporary-Sol watcher contract
+
+Every newly created or materially updated temporary Sol Task/Automation/condition-watch must begin
+with this closed, machine-auditable header:
+
+```text
+MMX_SOL_WATCHER_V1
+WATCHER_ROLE: <ACTION_AUTHORITATIVE|OBSERVER_ONLY|PARENT_ORCHESTRATOR|TRIAGE_ONLY>
+OPERATION_KEY: <stable current operation key>
+CARRIER: slack:<channel-id>/<parent-message-ts>
+LATEST_HANDLED_EDGE: <Slack ts, semantic edge id, or NONE>
+ACTION_REQUIRED_EVENTS: <closed value required by role>
+ACTION_REQUIRED_OUTCOME: <closed value required by role>
+SISTER_SOL_POLICY: <closed value required by role>
+```
+
+The header owns no authority or task state. It makes the prompt's claimed role and safety contract
+auditable against the already-existing responsibility, action-target, carrier and runtime owners.
+
+#### `ACTION_AUTHORITATIVE`
+
+Use only for the exact currently resolved Sol action target for the named child/turn:
+
+```text
+ACTION_REQUIRED_EVENTS: BLOCKED,DECISION_REQUEST,RESULT
+ACTION_REQUIRED_OUTCOME: SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER
+SISTER_SOL_POLICY: OBSERVE_ONLY_UNLESS_EXACT_ACTION_TARGET
+```
+
+On an action-required event, this watcher turn must end with either the lawful same-carrier Sol edge
+or a typed blocker naming the real boundary, for example `CHAIRMAN_ONLY`,
+`ATTENTION_OWNER_CONFLICT`, `EFFECT_UNKNOWN`, `CARRIER_UNREADABLE`, `WRITE_UNAVAILABLE`, or
+`SOURCE_LAW_CONFLICT`. A terminal output such as “Sol action required,” “waiting for Sol,” or “stand
+by for Sol's ruling” is `NOTIFICATION_ONLY_SELF_DEADLOCK`: the watcher has identified its own role as
+the missing actor and then waited for itself.
+
+#### `OBSERVER_ONLY`
+
+Use for a sister Sol/account/surface allowed to inspect the same child but not modify it:
+
+```text
+ACTION_REQUIRED_EVENTS: NONE
+ACTION_REQUIRED_OUTCOME: OBSERVE_ONLY_NO_MODIFY
+SISTER_SOL_POLICY: NEVER_ACT_WITHOUT_CANONICAL_TRANSFER
+```
+
+It may read, reconcile and report, but it may not issue `CONTINUE`, `RULING`, `REQUEST_REPAIR`,
+`STOP`, merge/release, retry or commission a successor. Another Sol becomes action-authoritative only
+after canonical action-target transfer; never elect by recency, responsiveness, newest tab, newest
+Slack message or apparent quota.
+
+#### `PARENT_ORCHESTRATOR`
+
+Use for a program-level loop that acts only on parent transitions and does not race a dedicated
+child action watcher:
+
+```text
+ACTION_REQUIRED_EVENTS: PARENT_TRANSITION
+ACTION_REQUIRED_OUTCOME: PARENT_EDGE_ONLY_NO_CHILD_RACE
+SISTER_SOL_POLICY: NEVER_ACT_ON_DEDICATED_CHILD_RETURN
+```
+
+#### `TRIAGE_ONLY`
+
+Use for an estate/continuity audit that detects unconsumed returns without creating duplicate child
+authority:
+
+```text
+ACTION_REQUIRED_EVENTS: UNCONSUMED_RETURN
+ACTION_REQUIRED_OUTCOME: RECONCILE_OR_REPORT_NO_DUPLICATE
+SISTER_SOL_POLICY: NEVER_ELECT_BY_RECENCY
+```
+
+Triage may post a child semantic edge only when current source law plus exact action-target evidence
+makes that triage surface authoritative for the turn. Otherwise it reports/reconciles the defect.
+
+Validate an account-local JSON task export with:
+
+```text
+python3 scripts/audit_sol_watchers.py <tasks.json>
+```
+
+The validator is read-only and account-local. A passing prompt audit proves contract conformance,
+not that a scheduled turn fired, consumed Slack, wrote an edge or made the event-driven Wake path
+production-live. Each ChatGPT account may repair only its own native task store unless a separately
+accepted host capability explicitly proves broader authority.
+
 ## Common mistakes
 
 | Failure | Correct response |
@@ -145,6 +232,8 @@ a write-capability limitation into permanent Chairman relay work.
 | Watcher detects `PICKUP_ACK` and is disabled because the first reply arrived | Advance the baseline and keep/re-arm the watcher; ACK is nonterminal |
 | A one-shot watcher matches `START` or `PROGRESS` and is not re-registered | Re-arm against the newest consumed baseline before ending the turn |
 | Watcher detects `RESULT` and only tells Chairman what Sol should do | Re-pin, review, post the lawful Sol edge, then report material outcome |
+| Action-authoritative watcher says “waiting for Sol” | Classify `NOTIFICATION_ONLY_SELF_DEADLOCK`; act or return a typed blocker |
+| Observer sister Sol acts because the authoritative account looks idle | Fail closed until canonical action-target transfer; never elect by recency |
 | Worker is waiting and Sol says “the next step is mine” | Send explicit CONTINUE or STOP first |
 | Watcher sees terminal completion and starts the next wave | STOP/disarm; independent wave needs fresh commission law |
 | Wake is treated as permission to merge/retry/fail over | Reconcile authority/carrier first; watcher grants none |
@@ -160,3 +249,9 @@ Given the sequence `ACK -> WATCH_ARMED -> START -> RESULT`, a fresh Sol must kee
 continuation watcher after each nonterminal event, adjudicate the `RESULT`, send the required same-
 carrier terminal or nonterminal edge, and disarm the child watcher only after terminal STOP. A Sol
 that disables its watcher on ACK/START and therefore misses the later RESULT fails this skill.
+
+A structured `ACTION_AUTHORITATIVE` watcher fails K3 if it returns
+`NOTIFICATION_ONLY_SELF_DEADLOCK` instead of `SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER`. In a
+three-account canary, only the canonically resolved action target may act; both observer accounts must
+remain read-only until canonical action-target transfer, and timestamp/recency may never elect a
+replacement.
