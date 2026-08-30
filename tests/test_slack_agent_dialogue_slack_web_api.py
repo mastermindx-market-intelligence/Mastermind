@@ -7,6 +7,7 @@ import urllib.request
 
 import pytest
 
+import integrations.slack_agent_dialogue.slack_web_api as slack_web_api_module
 from integrations.slack_agent_dialogue.engine import (
     HistoryPage,
     SlackEffectUnknown,
@@ -14,6 +15,7 @@ from integrations.slack_agent_dialogue.engine import (
     SlackTransportUnavailable,
 )
 from integrations.slack_agent_dialogue.slack_web_api import (
+    MAX_CURSOR_CHARS,
     MAX_RESPONSE_BYTES,
     SLACK_API_ROOT,
     SlackHttpResponse,
@@ -245,6 +247,314 @@ def test_history_complete_requires_both_terminal_cursor_signals(
     assert page.complete is complete
 
 
+def test_channel_history_collects_multiple_pages_with_bounded_cursor_progress() -> None:
+    first_ts = "1787471000.000003"
+    second_ts = "1787471000.000002"
+
+    def handler(call):
+        if call["query"].get("cursor") is None:
+            return response(
+                call["path"],
+                page_payload([message(ts=first_ts)], has_more=True, cursor="cursor-1"),
+                query={"channel": CHANNEL, "limit": "3"},
+            )
+        return response(
+            call["path"],
+            page_payload([message(ts=second_ts)], has_more=False, cursor=""),
+            query={"channel": CHANNEL, "cursor": "cursor-1", "limit": "2"},
+        )
+
+    adapter, transport = client(handler)
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=3))
+
+    assert page.complete is True
+    assert [item.ts for item in page.messages] == [first_ts, second_ts]
+    assert [call["query"] for call in transport.calls] == [
+        {"channel": CHANNEL, "limit": "3"},
+        {"channel": CHANNEL, "cursor": "cursor-1", "limit": "2"},
+    ]
+
+
+def test_channel_history_traverses_empty_intermediate_cursor_page() -> None:
+    parent_ts = "1787471000.000003"
+
+    def handler(call):
+        cursor = call["query"].get("cursor")
+        if cursor is None:
+            payload = page_payload([], has_more=True, cursor="cursor-1")
+            query = {"channel": CHANNEL, "limit": "2"}
+        else:
+            payload = page_payload(
+                [message(ts=parent_ts, user=BOT, text="parent")],
+                has_more=False,
+                cursor="",
+            )
+            query = {"channel": CHANNEL, "cursor": "cursor-1", "limit": "2"}
+        return response(call["path"], payload, query=query)
+
+    adapter, transport = client(handler)
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=2))
+
+    assert page.complete is True
+    assert [item.ts for item in page.messages] == [parent_ts]
+    assert len(transport.calls) == 2
+
+
+def test_thread_history_collects_reply_only_continuation_page() -> None:
+    reply_one = "1787471000.000002"
+    reply_two = "1787471000.000003"
+
+    def handler(call):
+        if call["query"].get("cursor") is None:
+            return response(
+                call["path"],
+                page_payload(
+                    [
+                        message(ts=THREAD_TS, user=BOT, text="parent"),
+                        message(ts=reply_one, thread_ts=THREAD_TS),
+                    ],
+                    has_more=True,
+                    cursor="cursor-1",
+                ),
+                query={"channel": CHANNEL, "ts": THREAD_TS, "limit": "3"},
+            )
+        return response(
+            call["path"],
+            page_payload(
+                [message(ts=reply_two, thread_ts=THREAD_TS)],
+                has_more=False,
+                cursor="",
+            ),
+            query={
+                "channel": CHANNEL,
+                "cursor": "cursor-1",
+                "ts": THREAD_TS,
+                "limit": "1",
+            },
+        )
+
+    adapter, transport = client(handler)
+
+    page = run(
+        adapter.fetch_thread(channel_id=CHANNEL, thread_ts=THREAD_TS, limit=3)
+    )
+
+    assert page.complete is True
+    assert [item.ts for item in page.messages] == [THREAD_TS, reply_one, reply_two]
+    assert len(transport.calls) == 2
+
+
+def test_thread_history_traverses_empty_intermediate_cursor_page() -> None:
+    reply_ts = "1787471000.000002"
+
+    def handler(call):
+        cursor = call["query"].get("cursor")
+        if cursor is None:
+            payload = page_payload([], has_more=True, cursor="cursor-1")
+            query = {"channel": CHANNEL, "ts": THREAD_TS, "limit": "2"}
+        else:
+            payload = page_payload(
+                [
+                    message(ts=THREAD_TS, user=BOT, text="parent"),
+                    message(ts=reply_ts, thread_ts=THREAD_TS),
+                ],
+                has_more=False,
+                cursor="",
+            )
+            query = {
+                "channel": CHANNEL,
+                "cursor": "cursor-1",
+                "ts": THREAD_TS,
+                "limit": "2",
+            }
+        return response(call["path"], payload, query=query)
+
+    adapter, transport = client(handler)
+
+    page = run(
+        adapter.fetch_thread(channel_id=CHANNEL, thread_ts=THREAD_TS, limit=2)
+    )
+
+    assert page.complete is True
+    assert [item.ts for item in page.messages] == [THREAD_TS, reply_ts]
+    assert len(transport.calls) == 2
+
+
+def test_history_repeated_cursor_is_incomplete() -> None:
+    def repeated_cursor(call):
+        cursor = call["query"].get("cursor")
+        ts = "1787471000.000003" if cursor is None else "1787471000.000002"
+        return response(
+            call["path"],
+            page_payload([message(ts=ts)], has_more=True, cursor="cursor-loop"),
+            query=(
+                {"channel": CHANNEL, "limit": "3"}
+                if cursor is None
+                else {"channel": CHANNEL, "cursor": "cursor-loop", "limit": "2"}
+            ),
+        )
+
+    adapter, transport = client(repeated_cursor)
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=3))
+    assert page.complete is False
+    assert len(transport.calls) == 2
+
+
+def test_history_two_cursor_cycle_is_incomplete() -> None:
+    def cursor_cycle(call):
+        cursor = call["query"].get("cursor")
+        if cursor is None:
+            ts, next_cursor, remaining = "1787471000.000004", "cursor-1", "5"
+        elif cursor == "cursor-1":
+            ts, next_cursor, remaining = "1787471000.000003", "cursor-2", "4"
+        else:
+            ts, next_cursor, remaining = "1787471000.000002", "cursor-1", "3"
+        return response(
+            call["path"],
+            page_payload([message(ts=ts)], has_more=True, cursor=next_cursor),
+            query={
+                "channel": CHANNEL,
+                **({"cursor": cursor} if cursor is not None else {}),
+                "limit": remaining,
+            },
+        )
+
+    adapter, transport = client(cursor_cycle)
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=5))
+
+    assert page.complete is False
+    assert len(transport.calls) == 3
+
+
+@pytest.mark.parametrize(
+    "next_cursor",
+    ["", " cursor", "cursor ", "cursor\nnext", "x" * (MAX_CURSOR_CHARS + 1)],
+)
+def test_history_invalid_continuation_cursor_is_incomplete(next_cursor: str) -> None:
+    query = {"channel": CHANNEL, "limit": "2"}
+    adapter, transport = client(
+        lambda call: response(
+            call["path"],
+            page_payload(
+                [message(ts=THREAD_TS)],
+                has_more=True,
+                cursor=next_cursor,
+            ),
+            query=query,
+        )
+    )
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=2))
+
+    assert page.complete is False
+    assert len(transport.calls) == 1
+
+
+def test_history_duplicate_timestamp_across_pages_is_incomplete() -> None:
+    def duplicate_timestamp(call):
+        cursor = call["query"].get("cursor")
+        return response(
+            call["path"],
+            page_payload(
+                [message(ts="1787471000.000003")],
+                has_more=cursor is None,
+                cursor="cursor-1" if cursor is None else "",
+            ),
+            query=(
+                {"channel": CHANNEL, "limit": "3"}
+                if cursor is None
+                else {"channel": CHANNEL, "cursor": "cursor-1", "limit": "2"}
+            ),
+        )
+
+    adapter, transport = client(duplicate_timestamp)
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=3))
+    assert page.complete is False
+    assert len(transport.calls) == 2
+
+
+def test_history_page_bound_exhaustion_is_incomplete(monkeypatch) -> None:
+    monkeypatch.setattr(slack_web_api_module, "MAX_HISTORY_PAGES", 2)
+
+    def handler(call):
+        cursor = call["query"].get("cursor")
+        if cursor is None:
+            ts, next_cursor, remaining = "1787471000.000003", "cursor-1", "3"
+        else:
+            ts, next_cursor, remaining = "1787471000.000002", "cursor-2", "2"
+        return response(
+            call["path"],
+            page_payload([message(ts=ts)], has_more=True, cursor=next_cursor),
+            query={
+                "channel": CHANNEL,
+                **({"cursor": cursor} if cursor is not None else {}),
+                "limit": remaining,
+            },
+        )
+
+    adapter, transport = client(handler)
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=3))
+
+    assert page.complete is False
+    assert len(transport.calls) == 2
+
+
+def test_history_raw_page_overflow_is_incomplete() -> None:
+    query = {"channel": CHANNEL, "limit": "1"}
+    adapter, transport = client(
+        lambda call: response(
+            call["path"],
+            page_payload(
+                [
+                    message(ts="1787471000.000003"),
+                    message(ts="1787471000.000002"),
+                ]
+            ),
+            query=query,
+        )
+    )
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=1))
+
+    assert page.complete is False
+    assert len(page.messages) == 1
+    assert len(transport.calls) == 1
+
+
+def test_later_page_mutation_incompleteness_is_accumulated() -> None:
+    first_ts = "1787471000.000003"
+    second_ts = "1787471000.000002"
+
+    def handler(call):
+        cursor = call["query"].get("cursor")
+        if cursor is None:
+            payload = page_payload(
+                [message(ts=first_ts)],
+                has_more=True,
+                cursor="cursor-1",
+            )
+            query = {"channel": CHANNEL, "limit": "3"}
+        else:
+            edited = message(ts=second_ts, text="current")
+            edited["edited"] = {"user": HUMAN, "ts": "1787471001.000001"}
+            payload = page_payload([edited])
+            query = {"channel": CHANNEL, "cursor": "cursor-1", "limit": "2"}
+        return response(call["path"], payload, query=query)
+
+    adapter, transport = client(handler)
+
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=3))
+
+    assert page.complete is True
+    assert page.mutation_evidence_complete is False
+    assert [item.ts for item in page.messages] == [first_ts, second_ts]
+    assert len(transport.calls) == 2
+
+
 def test_mutation_evidence_is_exact_or_explicitly_incomplete() -> None:
     edited = message(ts=THREAD_TS, text="current")
     edited["edited"] = {"user": HUMAN, "ts": "1787471001.000001"}
@@ -352,8 +662,20 @@ def test_history_refuses_wrong_identity_or_duplicate_message(mutation: str) -> N
             call["path"], page_payload([first, second]), query=query
         )
     )
-    with pytest.raises(SlackTransportUnavailable, match="^SLACK_TRANSPORT_UNAVAILABLE$"):
-        run(adapter.fetch_thread(channel_id=CHANNEL, thread_ts=THREAD_TS, limit=3))
+    if mutation == "duplicate_ts":
+        page = run(
+            adapter.fetch_thread(channel_id=CHANNEL, thread_ts=THREAD_TS, limit=3)
+        )
+        assert page.complete is False
+    else:
+        with pytest.raises(
+            SlackTransportUnavailable, match="^SLACK_TRANSPORT_UNAVAILABLE$"
+        ):
+            run(
+                adapter.fetch_thread(
+                    channel_id=CHANNEL, thread_ts=THREAD_TS, limit=3
+                )
+            )
 
 
 @pytest.mark.parametrize(
@@ -428,6 +750,81 @@ def test_post_success_returns_only_exact_bound_bot_reply() -> None:
             "json_body": {"channel": CHANNEL, "thread_ts": THREAD_TS, "text": text},
         }
     ]
+
+
+def test_post_parent_uses_top_level_shape_and_validates_exact_bot_receipt() -> None:
+    text = "MMX/AGENT_DIALOGUE_PARENT_V2\n{}"
+
+    def handler(call):
+        return response(
+            call["path"],
+            {
+                "ok": True,
+                "channel": CHANNEL,
+                "ts": "1787471000.000003",
+                "message": message(
+                    ts="1787471000.000003",
+                    user=BOT,
+                    text=text,
+                ),
+            },
+        )
+
+    adapter, transport = client(handler)
+
+    result = run(adapter.post_parent(channel_id=CHANNEL, text=text))
+
+    assert result == SlackMessage(
+        ts="1787471000.000003",
+        author_user_id=BOT,
+        text=text,
+    )
+    assert transport.calls == [
+        {
+            "method": "POST",
+            "path": "chat.postMessage",
+            "token": TOKEN,
+            "query": None,
+            "json_body": {"channel": CHANNEL, "text": text},
+        }
+    ]
+
+
+@pytest.mark.parametrize("field", ["channel", "user", "ts", "thread_ts", "text"])
+def test_post_parent_untrustworthy_receipt_is_effect_unknown(field: str) -> None:
+    text = "MMX/AGENT_DIALOGUE_PARENT_V2\n{}"
+    raw_message = message(ts="1787471000.000003", user=BOT, text=text)
+    payload = {
+        "ok": True,
+        "channel": CHANNEL,
+        "ts": "1787471000.000003",
+        "message": raw_message,
+    }
+    if field == "channel":
+        payload["channel"] = "C0000000000"
+    elif field == "user":
+        raw_message["user"] = HUMAN
+    elif field == "ts":
+        raw_message["ts"] = "1787471000.000004"
+    elif field == "thread_ts":
+        raw_message["thread_ts"] = THREAD_TS
+    else:
+        raw_message["text"] = "drift"
+    adapter, transport = client(lambda call: response(call["path"], payload))
+
+    with pytest.raises(SlackEffectUnknown, match="^SLACK_EFFECT_UNKNOWN$"):
+        run(adapter.post_parent(channel_id=CHANNEL, text=text))
+
+    assert len(transport.calls) == 1
+
+
+def test_post_parent_wrong_channel_refuses_before_transport() -> None:
+    adapter, transport = client(lambda _call: pytest.fail("transport was called"))
+
+    with pytest.raises(SlackTransportUnavailable):
+        run(adapter.post_parent(channel_id="C0000000000", text="frame"))
+
+    assert transport.calls == []
 
 
 @pytest.mark.parametrize("field", ["channel", "team", "user", "ts", "thread_ts", "text"])

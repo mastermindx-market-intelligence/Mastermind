@@ -86,6 +86,20 @@ class FakeV2Engine:
             "operation_key": normalized["operation_key"],
         }
 
+    async def ensure_thread(self, context, *, created_at: str) -> dict[str, object]:
+        normalized = context.normalized()
+        self.calls.append(
+            (
+                "ensure_thread",
+                {"context": normalized, "created_at": created_at},
+            )
+        )
+        return {
+            "action": "REUSED",
+            "thread_ts": THREAD_TS,
+            "operation_key": normalized["operation_key"],
+        }
+
     async def send_message(self, *, thread_ts: str, context, message) -> dict[str, object]:
         normalized = context.normalized()
         self.calls.append(
@@ -1230,7 +1244,7 @@ def test_v2_without_engine_returns_existing_fixed_request_invalid(socket_root: P
     assert str(exc.value) == "REQUEST_INVALID"
 
 
-def test_v2_dispatches_only_the_five_closed_operations(socket_root: Path) -> None:
+def test_v2_dispatches_only_the_six_closed_operations(socket_root: Path) -> None:
     srv, fake = service_with_v2(socket_root)
     context = context_v2_dict()
     message = v2_message_dict()
@@ -1244,6 +1258,20 @@ def test_v2_dispatches_only_the_five_closed_operations(socket_root: Path) -> Non
         )
     )
     assert bound == {
+        "thread_ts": THREAD_TS,
+        "operation_key": context["operation_key"],
+    }
+
+    ensured = run(
+        srv._dispatch(
+            request_envelope_v2(
+                "ensure_thread",
+                {"context": context, "created_at": "2026-08-29T18:00:00Z"},
+            )
+        )
+    )
+    assert ensured == {
+        "action": "REUSED",
         "thread_ts": THREAD_TS,
         "operation_key": context["operation_key"],
     }
@@ -1288,10 +1316,35 @@ def test_v2_dispatches_only_the_five_closed_operations(socket_root: Path) -> Non
     assert [call[0] for call in fake.calls] == [
         "status",
         "bind_or_verify_thread",
+        "ensure_thread",
         "send_message",
         "read_thread",
         "wait_for_reply",
     ]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"context": {}},
+        {"context": {}, "created_at": 123},
+        {
+            "context": {},
+            "created_at": "2026-08-29T18:00:00Z",
+            "channel_id": "C0000000000",
+        },
+    ],
+)
+def test_v2_ensure_thread_service_arguments_are_closed(
+    args: dict[str, object], socket_root: Path
+) -> None:
+    srv, fake = service_with_v2(socket_root)
+
+    with pytest.raises(DialogueServiceError) as exc:
+        run(srv._dispatch(request_envelope_v2("ensure_thread", args)))
+
+    assert exc.value.code == "REQUEST_INVALID"
+    assert fake.calls == []
 
 
 @pytest.mark.parametrize(
