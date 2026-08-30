@@ -99,6 +99,17 @@ def test_semantic_contract_is_closed_storeless_and_effect_safe() -> None:
         assert required in text
 
 
+def test_prepared_token_binds_normalized_effect_and_digest_without_a_store() -> None:
+    text = _text(SEMANTICS)
+    token_section = text.split("### 7.3 Token bindings", 1)[1].split(
+        "### 7.4 Commit law", 1
+    )[0]
+    normalized = "\n".join(line.strip() for line in token_section.splitlines())
+    assert "\nnormalized_requested_effect\nnormalized_requested_effect_digest\n" in normalized
+    assert "no durable prepared-action store" in text
+    assert "commit_github_prepared_action(prepared_token)" in text
+
+
 def test_gh1_plan_freezes_pure_release_collision_engine_before_live_composition() -> None:
     text = _text(GH1_PLAN)
     for required in (
