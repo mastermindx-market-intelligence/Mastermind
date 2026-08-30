@@ -117,3 +117,32 @@ def test_overlay_preserves_the_pure_report_only_no_rebuild_boundary() -> None:
     assert "No Executive OS, Agent OS, Wake, RuntimeBinding, Capacity, Steward, Control Room, watcher, retry, or Runtime Observability mutation" in text
     assert "all reachable cyclic SCCs" in text
     assert "descriptive gate prose alone never legalizes a dead state" in text
+
+
+def test_fair_lasso_search_uses_a_closed_walk_product() -> None:
+    text = _text()
+    assert "fairness-valid closed walk" in text
+    assert "may combine multiple simple cycles" in text
+    assert "seen-or-disabled fairness mask" in text
+    assert "shortest fair violating lasso" in text
+
+
+def test_report_identity_is_non_circular_and_deterministic() -> None:
+    text = _text()
+    assert "report_hash is computed from the canonical report body excluding report_id and report_hash" in text
+    assert "report_id is oar_ plus the first 24 hexadecimal characters of report_hash" in text
+    assert "duration_ms is excluded from the OLS-A1 canonical report" in text
+    assert "deterministic work counts" in text
+
+
+def test_structural_refusal_and_semantic_gate_gap_are_distinct() -> None:
+    text = _text()
+    assert "a missing required gate field is parser refusal" in text
+    assert "a syntactically complete gate without a realizable release or terminal assessment boundary is EXTERNAL_GATE_INCOMPLETE" in text
+
+
+def test_redundant_assumption_references_must_agree() -> None:
+    text = _text()
+    assert "transition fairness_ref and fairness assumption transition_ids must agree exactly" in text
+    assert "transition external_assumption_ref and environment assumption transition_ids must agree exactly" in text
+    assert "duplicate effects for the same state variable are rejected" in text

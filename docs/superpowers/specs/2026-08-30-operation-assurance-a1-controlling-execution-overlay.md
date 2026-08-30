@@ -148,6 +148,12 @@ progress tags, source references, optional declared fairness reference, optional
 reference, and required-reachability flag. Arbitrary Python, shell, SQL, regular expressions, dynamic
 imports, or model-generated executable predicates are forbidden.
 
+The bidirectional reference law is fail-closed: transition fairness_ref and fairness assumption
+transition_ids must agree exactly, and transition external_assumption_ref and environment assumption
+transition_ids must agree exactly. A one-sided or mismatched reference is a parser error, not an
+implicit assumption. Effects are simultaneous assignments, and duplicate effects for the same state
+variable are rejected rather than ordered.
+
 Safety properties have exactly one of two closed shapes:
 
 - `STATE_FORBIDDEN` with `violation_when`;
@@ -197,6 +203,10 @@ source_refs
 escalation, cancellation, refusal, or lawful closure, unless the model declares an explicit terminal
 assessment boundary. The controlling rule is exact: descriptive gate prose alone never legalizes a
 dead state.
+
+The structural and semantic boundaries remain distinct: a missing required gate field is parser
+refusal; a syntactically complete gate without a realizable release or terminal assessment boundary
+is EXTERNAL_GATE_INCOMPLETE and a load-bearing model gap.
 
 An environment assumption has a stable ID, closed kind, transition IDs, required property IDs, and
 source references. An external-event assumption does not create fairness and does not promise that a
@@ -256,6 +266,14 @@ report_hash
 
 `progress_disposition` and `admission_recommendation` are immutable generation-time findings. They do
 not claim current applicability and never mutate the model-analysis result.
+
+Report identity has no circular dependency. report_hash is computed from the canonical report body
+excluding report_id and report_hash. report_id is oar_ plus the first 24 hexadecimal characters of
+report_hash. Both are then serialized into the final immutable report. The exploration receipt uses
+deterministic work counts such as states discovered, transitions considered, maximum depth, and peak
+frontier. duration_ms is excluded from the OLS-A1 canonical report because wall-clock timing would
+break byte-identical output for a fixed model and generated_at; performance timing may be separate
+non-authoritative diagnostic evidence.
 
 model_analysis_verdict has exactly four values:
 
@@ -412,6 +430,16 @@ OLS-A1 analyzes all reachable cyclic SCCs and candidate obligation-preserving cy
 SCCs. A cycle may be a valid infinite non-progress execution even when its component has an outgoing
 completion edge, unless declared weak fairness excludes that exact lasso.
 
+The witness search is over a fairness-valid closed walk, not only a simple cycle. A valid ultimately
+periodic execution may combine multiple simple cycles to take different weak-fair transitions while
+still preserving the violating obligation. For each candidate entry, deterministic BFS runs over an
+augmented state `(graph_state, seen_or_disabled_fairness_mask, violation_progress_mask)`. The
+seen-or-disabled fairness mask records, for each declared weak-fair transition, whether the closed
+walk takes it or visits a state where it is disabled. Returning to the entry is accepted only when
+every weak-fair transition is seen or disabled and the property-specific violation remains true.
+Search ordering chooses the shortest fair violating lasso, then canonical transition sequence and
+state fingerprint.
+
 For each candidate lasso:
 
 1. select the shortest reachable prefix;
@@ -440,7 +468,8 @@ assumptions, and model gaps. Reject strong fairness and all unknown enum values.
 Use `model_analysis_verdict` and `source_applicability_at_generation`. Do not implement
 `assurance_verdict`, `current_projection_verdict`, bare `source_applicability`, or
 `mastermind.operation_assurance_status.v1`. Include realizability and invalidating-gap fields on
-counterexamples. Report hashes cover all immutable report content except the hash field itself.
+counterexamples. Compute report identity from the non-circular canonical body defined in Section 4;
+do not include wall-clock duration in the canonical exploration receipt.
 
 ### Task 3 — deterministic BFS and safety
 
@@ -456,9 +485,10 @@ the exact persistent obligation/resource IDs it owns.
 
 ### Task 5 — liveness and fairness
 
-Analyze all reachable cyclic SCCs. Produce deterministic prefix-plus-cycle witnesses. Weak fairness
-can exclude only a cycle where its named transition is enabled in every cycle state and never occurs.
-Strong fairness remains outside the wave.
+Analyze all reachable cyclic SCCs and search the augmented fairness product for the shortest fair
+violating closed walk. A lasso may combine simple cycles. Weak fairness can exclude only a closed walk
+where its named transition is enabled in every visited cycle state and never occurs. Strong fairness
+remains outside the wave.
 
 ### Task 6 — final composition
 
@@ -513,17 +543,22 @@ OLS-A1 tests must fail under at least these forbidden mutations:
 11. mutate or re-hash an existing report because a current source later changes;
 12. emit `mastermind.operation_assurance_status.v1` from OLS-A1;
 13. treat telemetry alone as `RUNTIME_REPLAY_CONFIRMED`;
-14. search only closed SCCs and miss a spin cycle with an outgoing completion edge;
+14. search only simple or closed SCC cycles and miss a fair violating closed walk that combines
+    multiple cycles or ignores an outgoing completion edge;
 15. infer weak fairness without a declaration;
 16. accept strong fairness;
-17. accept a gate with no release transition or terminal assessment boundary;
-18. ignore terminal non-persistent residue;
-19. ignore a pending parent-continuation obligation;
-20. accept retry or failover from `EFFECT_UNKNOWN`;
-21. select the first discovered instead of the shortest canonical counterexample;
-22. omit the cycle from a liveness witness;
-23. return non-zero for a valid unsafe report and thereby create an implicit gate;
-24. perform network, socket, subprocess, telemetry, filesystem-write, SQLite, runtime, or
+17. accept a gate with a missing required field instead of refusing the model;
+18. accept a syntactically complete gate with no realizable release or terminal assessment boundary;
+19. ignore terminal non-persistent residue;
+20. ignore a pending parent-continuation obligation;
+21. accept retry or failover from `EFFECT_UNKNOWN`;
+22. select the first discovered instead of the shortest canonical counterexample;
+23. omit the cycle from a liveness witness;
+24. compute report identity circularly or include nondeterministic wall-clock duration;
+25. allow one-sided or mismatched fairness/environment-assumption references;
+26. order duplicate effects instead of rejecting them;
+27. return non-zero for a valid unsafe report and thereby create an implicit gate;
+28. perform network, socket, subprocess, telemetry, filesystem-write, SQLite, runtime, or
     source-owner I/O in the core.
 
 ## 11. Completion and later-wave boundary
