@@ -225,7 +225,7 @@ Agent Relay start/reconnect
 -> active-waiter suppression when exact waiter exists
 -> W3B PersistedWakeCarrier
 -> exact current MAS-237 RuntimeBinding
--> W3A Codex App Server dispatcher for codex targets
+-> W3A current-writer dispatcher for codex targets
 -> one persisted delivery outcome
 -> continue serving existing AF_UNIX dialogue API
 ```
@@ -241,12 +241,14 @@ valid watched opposite-side turn
 -> deterministic AgentDialogueAttention
 -> same Wake obligation on repeats/restart
 -> exact current RuntimeBinding
--> one App Server thread/resume on exact id
--> one turn/start on same id
+-> existing ExecutiveWorkerBroker-owned current CodexOperatorAdapter generation
+-> worker-local revalidation of exact generation / provider session / native handle / Attempt immediately before provider I/O
+-> one governed attention turn through that already-owned generation/client
+-> one turn/start through the existing owner
 -> ACCEPTED or DELIVERED persisted
 ```
 
-Chairman/manual GUI/tab selection = zero. A second identical observation/provider submission = zero.
+The canary must prove that the provider write occurs through the exact already-owned current writer. It must perform zero independent `thread/resume`, zero fresh App Server/process/client creation, zero daemon/bootstrap or GUI/title/recency fallback, and zero active-writer replacement. Chairman/manual GUI/tab selection = zero. A second identical observation/provider submission = zero. Any current-writer/generation/session/native-handle/Attempt drift before provider I/O refuses pre-submit; ambiguity after the first provider write remains effect-unknown with zero blind resend.
 
 MAS-229 is still required afterward to prove exact target-turn consumption and source resolution. Do not call W3C delivery `TARGET_ACKNOWLEDGED`.
 
