@@ -23,6 +23,7 @@
 - One Experience, Federated Authority remains controlling.
 - Deliver one independently useful capability per PR, or one explicitly records-only source-law slice.
 - Every modifying family has paired status/reconciliation and never blind-retries `EFFECT_UNKNOWN`.
+- Prepared-action semantics are implemented per canonical owner/app; no universal cross-owner action router or durable prepared-action store is permitted.
 - No model input selects credential, numbered provider account, arbitrary host/root/executable/endpoint, shell, SQL or browser selector.
 - No plugin memory, super-MCP, process spawner, duplicate scheduler, retry ledger, session registry, capability registry or lifecycle.
 - Green CI, merge, install, delivery, ACK, START, execution, production proof and acceptance remain distinct.
