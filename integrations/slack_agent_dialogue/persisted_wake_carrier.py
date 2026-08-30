@@ -5,8 +5,9 @@ ledger, retry state, binding registry, provider discovery, or lifecycle state.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
+from control_plane.executive_runtime import StateConflict
 from control_plane.session_targets import RuntimeBinding, WakeRoute
 from control_plane.wake_dispatcher import (
     PersistedNudgeState,
@@ -18,9 +19,11 @@ from control_plane.wake_events import WakeObligation
 from control_plane.wake_ledger import (
     LedgerPhase,
     WakeRetryPolicy,
+    event_payload_for,
+    payloads_equivalent,
     requested_record,
 )
-from control_plane.wake_persist import WakeLedgerRepository
+from control_plane.wake_persist import PersistedWakeEvent, WakeLedgerRepository
 from integrations.executive_wake.registry import WakeDispatcherRegistry
 from integrations.slack_agent_dialogue.turn_observer import WakeCarrierState
 
@@ -55,12 +58,12 @@ class PersistedWakeCarrier:
         route: WakeRoute,
     ) -> WakeCarrierState:
         _assert_pair(obligation, route)
-        records = tuple(
-            item.record for item in self._repository.list_records(obligation.obligation_id)
-        )
-        if not records:
+        persisted = self._repository.list_records(obligation.obligation_id)
+        if not persisted:
             return WakeCarrierState.MISSING
 
+        _assert_requested_replay(obligation, persisted)
+        records = tuple(item.record for item in persisted)
         phases = tuple(record.phase for record in records)
         if phases == (LedgerPhase.WAKE_REQUESTED,):
             # A crash between durable request persistence and delivery-attempt
@@ -91,12 +94,16 @@ class PersistedWakeCarrier:
 
     async def submit(self, obligation: WakeObligation, route: WakeRoute) -> None:
         _assert_pair(obligation, route)
-        records = self._repository.list_records(obligation.obligation_id)
-        if not any(item.record.phase is LedgerPhase.WAKE_REQUESTED for item in records):
-            self._repository.append_record(
-                requested_record(obligation),
-                obligation=obligation,
-            )
+        # Always traverse the canonical repository replay boundary.  WAKE-* is
+        # source-identity scoped rather than a full-envelope hash; an existing
+        # command id is therefore not proof that this caller supplied the same
+        # frozen target/correlation envelope.  The repository's idempotent
+        # append validates exact correlation and payload equivalence without
+        # creating a second row for an identical replay.
+        self._repository.append_record(
+            requested_record(obligation),
+            obligation=obligation,
+        )
 
         binding = self._current_binding_for(route)
         _assert_current_binding(binding, route)
@@ -119,6 +126,29 @@ class PersistedWakeCarrier:
 def _assert_pair(obligation: WakeObligation, route: WakeRoute) -> None:
     if route.obligation_id != obligation.obligation_id:
         raise ValueError("Wake route obligation_id does not match the obligation")
+
+
+def _assert_requested_replay(
+    obligation: WakeObligation,
+    persisted: Sequence[PersistedWakeEvent],
+) -> None:
+    """Read-validate one supplied obligation against the frozen request envelope."""
+
+    requested = tuple(
+        item for item in persisted if item.record.phase is LedgerPhase.WAKE_REQUESTED
+    )
+    if len(requested) != 1:
+        raise StateConflict("wake stream requires exactly one WAKE_REQUESTED event")
+    proposed = event_payload_for(
+        requested_record(obligation),
+        obligation=obligation,
+    )
+    if not payloads_equivalent(
+        requested[0].event.payload,
+        proposed,
+        phase=LedgerPhase.WAKE_REQUESTED,
+    ):
+        raise StateConflict("command_id collision: existing payload disagrees")
 
 
 def _assert_current_binding(
