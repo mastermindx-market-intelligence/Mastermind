@@ -80,7 +80,9 @@ Absence of such proof is `SESSION_LOST / RUNTIME_BINDING_RECONCILIATION_REQUIRED
 
 ## 5. W3B remains independent and transport-agnostic
 
-W3B / PR #251 may land independently if current-base, exact-head green and review-clean because it owns only:
+W3B remains the SAME logical operation and implementation branch `wptw2-persisted-wake-carrier-20260829-sol-001`. PR #251 is closed, unmerged historical RED/draft evidence only; it must not be revived or treated as the release carrier. As of this correction, the current same-branch release carrier is PR #254. At any later action time, re-read canonical GitHub and continue only the current same-operation/same-branch carrier rather than hard-coding a superseded PR number.
+
+The current W3B release carrier may land independently if current-base, exact-head green and review-clean because it owns only:
 
 `Agent Dialogue observer -> canonical Wake obligation -> Executive events ledger -> persisted dispatcher selection`.
 
@@ -100,7 +102,7 @@ No second Agent Relay daemon/service and no provider SDK inside the turn observe
 
 ## 7. Completion ruler unchanged
 
-Native continuity is not complete when #250/#251 merge. Required production proof remains:
+Native continuity is not complete when the current W3A/W3B source carriers merge. Required production proof remains:
 
 ```text
 valid watched turn
