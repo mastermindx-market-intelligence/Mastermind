@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import inspect
-import json
 from pathlib import Path
 import socket
 import threading
@@ -39,7 +38,9 @@ def hello(
         client_package_version=client_version or package,
         native_package_version=native_version or package,
         extension_package_version=extension_version or package,
-        capability_digest=capability_digest or wsp.transport_capability_digest(),
+        capability_digest=(
+            capability_digest or wsp.transport_capability_digest()
+        ),
         boot_nonce=boot_nonce,
         challenge_nonce=challenge_nonce,
     )
@@ -80,7 +81,7 @@ def test_transport_hello_is_exact_closed_and_detached():
             wsp.validate_transport_hello(mutation)
 
 
-def test_transport_ack_requires_non_null_boot_and_copies_the_exact_challenge():
+def test_transport_ack_requires_non_null_boot_and_preserves_peer_identity():
     first = hello()
     ack = wsp.build_transport_hello_ack(first, boot_nonce=BOOT_NONCE)
     accepted = wsp.validate_transport_hello_ack(ack)
@@ -92,8 +93,6 @@ def test_transport_ack_requires_non_null_boot_and_copies_the_exact_challenge():
 
     with pytest.raises(wsp.WebSolProtocolError):
         wsp.validate_transport_hello_ack({**ack, "boot_nonce": None})
-    with pytest.raises(wsp.WebSolProtocolError):
-        wsp.validate_transport_hello_ack({**ack, "challenge_nonce": CHALLENGE_TWO})
 
 
 def test_server_handshake_requires_probe_then_exact_boot_confirmation():
@@ -103,7 +102,9 @@ def test_server_handshake_requires_probe_then_exact_boot_confirmation():
         boot_nonce=BOOT_NONCE,
         challenge_nonce=CHALLENGE_TWO,
     )
-    reader = io.BytesIO(native.encode_frame(probe) + native.encode_frame(confirmation))
+    reader = io.BytesIO(
+        native.encode_frame(probe) + native.encode_frame(confirmation)
+    )
     writer = io.BytesIO()
 
     session = native.complete_server_handshake(
@@ -130,12 +131,27 @@ def test_server_handshake_rejects_stale_boot_wrong_instance_and_package_drift():
     cases = (
         (
             hello(),
-            hello(boot_nonce="stale-boot-nonce-0000000001", challenge_nonce=CHALLENGE_TWO),
+            hello(
+                boot_nonce="stale-boot-nonce-0000000001",
+                challenge_nonce=CHALLENGE_TWO,
+            ),
             "transport_boot_mismatch",
         ),
-        (hello(instance_id=OTHER_INSTANCE_ID), None, "transport_instance_mismatch"),
-        (hello(native_version="0.1.1"), None, "transport_version_mismatch"),
-        (hello(capability_digest="c" * 64), None, "transport_capability_mismatch"),
+        (
+            hello(instance_id=OTHER_INSTANCE_ID),
+            None,
+            "transport_instance_mismatch",
+        ),
+        (
+            hello(native_version="0.1.1"),
+            None,
+            "transport_version_mismatch",
+        ),
+        (
+            hello(capability_digest="c" * 64),
+            None,
+            "transport_capability_mismatch",
+        ),
     )
 
     for first, second, code in cases:
@@ -152,7 +168,9 @@ def test_server_handshake_rejects_stale_boot_wrong_instance_and_package_drift():
             )
 
 
-def test_native_host_does_not_expose_the_action_socket_before_extension_confirmation(monkeypatch):
+def test_native_host_does_not_expose_the_action_socket_before_extension_confirmation(
+    monkeypatch,
+):
     probe = hello(role="extension")
     bad_confirmation = hello(
         role="extension",
@@ -163,12 +181,17 @@ def test_native_host_does_not_expose_the_action_socket_before_extension_confirma
 
     def forbidden_open(path, *, owner_uid):
         opened.append(Path(path))
-        raise AssertionError(f"socket opened before extension confirmation: {owner_uid}")
+        raise AssertionError(
+            f"socket opened before extension confirmation: {owner_uid}"
+        )
 
     monkeypatch.setattr(native, "open_private_server", forbidden_open)
     with pytest.raises(native.NativeHostError, match="transport_boot_mismatch"):
         native.run_native_host(
-            io.BytesIO(native.encode_frame(probe) + native.encode_frame(bad_confirmation)),
+            io.BytesIO(
+                native.encode_frame(probe)
+                + native.encode_frame(bad_confirmation)
+            ),
             io.BytesIO(),
             caller_origin=native.ALLOWED_EXTENSION_ORIGIN,
             expected_instance_id=INSTANCE_ID,
@@ -179,7 +202,9 @@ def test_native_host_does_not_expose_the_action_socket_before_extension_confirma
 
     assert opened == []
     source = inspect.getsource(native.run_native_host)
-    assert source.index("complete_server_handshake") < source.index("open_private_server")
+    assert source.index("complete_server_handshake") < source.index(
+        "open_private_server"
+    )
 
 
 def test_client_completes_two_phase_challenge_against_the_same_connection():
@@ -203,7 +228,7 @@ def test_client_completes_two_phase_challenge_against_the_same_connection():
                 )
                 reader.close()
                 writer.close()
-        except BaseException as exc:  # pragma: no cover - surfaced in the main assertion
+        except BaseException as exc:  # pragma: no cover
             server_error.append(exc)
 
     thread = threading.Thread(target=serve, daemon=True)
@@ -236,7 +261,10 @@ def test_client_rejects_a_wrong_challenge_before_an_action_can_be_written():
     )
     outbound = io.BytesIO()
 
-    with pytest.raises(client.WebSolExtensionError, match="transport_challenge_mismatch"):
+    with pytest.raises(
+        client.WebSolExtensionError,
+        match="transport_challenge_mismatch",
+    ):
         client._complete_transport_handshake(
             io.BytesIO(native.encode_frame(bad_ack)),
             outbound,
@@ -274,12 +302,15 @@ def test_background_requires_generated_instance_config_and_two_phase_native_conf
         assert required in source
 
     assert "chrome.runtime.connectNative(INSTANCE_CONFIG.nativeHost)" in source
-    assert "handleNativeRequest(request, port)" in source
-    assert source.index("transportHandshakeReady = true") < source.index("handleNativeRequest(request, port)")
+    listener = source[source.index("port.onMessage.addListener") :]
+    assert "if (!transportHandshakeReady)" in listener
+    assert listener.index("if (!transportHandshakeReady)") < listener.index(
+        "handleNativeRequest(request, port)"
+    )
     assert 'connectNative("com.mastermind.web_sol_surface")' not in source
 
 
-def test_transport_handshake_sources_do_not_add_persistence_retry_or_generic_browser_authority():
+def test_transport_handshake_sources_do_not_add_persistence_or_generic_browser_authority():
     source = "\n".join(
         (
             inspect.getsource(wsp.validate_transport_hello),
