@@ -136,6 +136,15 @@ def _normalize_jwk(value: object) -> dict[str, object]:
     return normalized
 
 
+def _copy_jwk(value: Mapping[str, object]) -> dict[str, object]:
+    """Return a caller-owned copy of the closed JWK shape."""
+
+    return {
+        name: list(item) if isinstance(item, list) else item
+        for name, item in value.items()
+    }
+
+
 def _parse_jwks(payload: bytes) -> dict[str, dict[str, object]]:
     if not isinstance(payload, bytes) or not payload or len(payload) > MAX_JWKS_BYTES:
         raise _error(AuthErrorCode.JWKS_REFUSED)
@@ -288,7 +297,19 @@ class BoundedJwksCache:
             )
             raise _error(AuthErrorCode.JWKS_UNAVAILABLE) from None
 
-        replacement = _parse_jwks(payload)
+        try:
+            replacement = _parse_jwks(payload)
+        except AuthError:
+            self._fetch_retry_not_before = (
+                now + self._policy.fetch_failure_backoff_seconds
+            )
+            raise
+        except Exception:
+            self._fetch_retry_not_before = (
+                now + self._policy.fetch_failure_backoff_seconds
+            )
+            raise _error(AuthErrorCode.JWKS_UNAVAILABLE) from None
+
         self._keys = replacement
         self._fetched_at = now
         self._fetch_retry_not_before = None
@@ -301,7 +322,7 @@ class BoundedJwksCache:
             now = _monotonic_value(self._monotonic)
             fresh = self._is_fresh(now)
             if fresh and key_id in self._keys:
-                return dict(self._keys[key_id])
+                return _copy_jwk(self._keys[key_id])
 
             if fresh:
                 last = self._last_unknown_kid_refresh_at
@@ -315,7 +336,7 @@ class BoundedJwksCache:
                 await self._fetch_replacement(now)
                 if key_id not in self._keys:
                     raise _error(AuthErrorCode.KEY_NOT_FOUND)
-                return dict(self._keys[key_id])
+                return _copy_jwk(self._keys[key_id])
 
             had_stale_generation = self._fetched_at is not None
             await self._fetch_replacement(now)
@@ -326,7 +347,7 @@ class BoundedJwksCache:
             if key_id not in self._keys:
                 self._last_unknown_kid_refresh_at = now
                 raise _error(AuthErrorCode.KEY_NOT_FOUND)
-            return dict(self._keys[key_id])
+            return _copy_jwk(self._keys[key_id])
 
 
 __all__ = [
