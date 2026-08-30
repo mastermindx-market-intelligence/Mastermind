@@ -117,6 +117,12 @@ Unknown dimensions prevent false dominance. Incomparable options remain visible.
 recommendation exists only when exactly one eligible option remains non-dominated; otherwise the
 Meta-CEO must reason explicitly over the surviving frontier or return a genuine Chairman fork.
 
+V1 treats `PORTFOLIO_HOLD` as a first-class no-effect option. It also distinguishes
+`PROGRAM_START`, `PROGRAM_PAUSE`, `PROGRAM_RESUME`, `PROGRAM_RETIRE`, `PROGRAM_COMBINE`,
+`PROGRAM_SPLIT`, `RESOURCE_REALLOCATION`, and `ORGANIZATIONAL_RESTRUCTURE` rather than
+hiding these Chairman-level moves behind a generic task label. This vocabulary changes no canonical
+owner; each modifying effect still enters through the existing owner of the affected responsibility.
+
 ## 6. Delegation envelope
 
 A durable `mastermind.chairman_delegation_envelope.v1` is the machine-readable projection of an
@@ -132,6 +138,8 @@ mode: SUPERVISED_LIVE_CANARY or BOUNDED_AUTONOMOUS
 allowed action classes
 allowed reversibility classes
 repository/path scope
+canonical affected-scope prefixes
+allowed exact-carrier prefixes
 budget ceiling
 maximum active children
 exact-carrier requirement
@@ -139,8 +147,10 @@ expiry/review boundary
 ```
 
 Without a current accepted envelope, modifying strategic options remain `CHAIRMAN_REQUIRED`.
-Read-only research, audit, analysis and architecture proposals remain eligible without modification
-authority.
+Read-only research, audit, analysis, architecture proposals and `PORTFOLIO_HOLD` remain eligible without modification
+authority. Every modifying option must name at least one canonical affected-scope reference. Every
+existing carrier must match the envelope carrier scope; every new program or Executive child must use
+explicit `NEW_CHILD` semantics under an allowed parent scope.
 
 The first production integration must re-read the accepted envelope from its canonical owner at the
 actual effect boundary. Caller/model prose and a previously emitted Chairman Cognition packet are
@@ -224,9 +234,11 @@ vertical:
 
 - closed source-receipt, delegation-envelope and strategic-option grammar;
 - owner-attributed current/stale/conflict/unknown behavior;
-- `EFFECT_UNKNOWN` and duplicate-control-plane refusal;
+- `EFFECT_UNKNOWN`, already-applied effect and duplicate-control-plane refusal;
 - standing production/live-capital constraint enforcement;
 - exact operation, carrier, expected-head, path, budget and child-ceiling checks;
+- explicit `NEW_CHILD` carrier state for Executive child commission;
+- Chairman-owned current source required for every delegation envelope;
 - supervised-live-canary stop/rollback/falsifier requirements;
 - Pareto frontier with no hidden total score;
 - deterministic evidence digests and fixed opaque invalid-input CLI failure;
@@ -261,6 +273,7 @@ At minimum preserve:
 SOURCE_NOT_CURRENT
 SOURCE_CONFLICT
 EFFECT_UNKNOWN_RECONCILE_FIRST
+EFFECT_ALREADY_APPLIED
 DUPLICATE_CONTROL_PLANE_REFUSED
 MISSING_DELEGATION_ENVELOPE
 ENVELOPE_SOURCE_NOT_CURRENT
@@ -272,6 +285,7 @@ ACTIVE_CHILDREN_EXCEED_ENVELOPE
 EXACT_CARRIER_REQUIRED
 STABLE_OPERATION_REQUIRED
 EXPECTED_HEAD_REQUIRED
+NEW_CHILD_CARRIER_REQUIRED
 CANARY_CONTROLS_REQUIRED
 CONSTITUTIONAL_CHAIRMAN_BOUNDARY
 STRATEGIC_CONSTRAINT_PROHIBITS
