@@ -21,6 +21,10 @@ class InMemorySlackClient:
     thread_history_complete: bool = True
     channel_mutation_evidence_complete: bool = True
     thread_mutation_evidence_complete: bool = True
+    channel_history_call_count: int = 0
+    thread_history_call_count: int = 0
+    parent_post_behaviors: list[str] = field(default_factory=list)
+    parent_post_call_count: int = 0
     post_behaviors: list[str] = field(default_factory=list)
     post_call_count: int = 0
     next_timestamp: Decimal = Decimal("1787472000.000001")
@@ -28,6 +32,7 @@ class InMemorySlackClient:
     async def fetch_channel_history(
         self, *, channel_id: str, limit: int
     ) -> HistoryPage:
+        self.channel_history_call_count += 1
         messages = tuple(reversed(self.channel_messages[-limit:]))
         return HistoryPage(
             messages=messages,
@@ -38,6 +43,7 @@ class InMemorySlackClient:
     async def fetch_thread(
         self, *, channel_id: str, thread_ts: str, limit: int
     ) -> HistoryPage:
+        self.thread_history_call_count += 1
         parent = [
             message for message in self.channel_messages if message.ts == thread_ts
         ]
@@ -48,6 +54,39 @@ class InMemorySlackClient:
             complete=self.thread_history_complete,
             mutation_evidence_complete=self.thread_mutation_evidence_complete,
         )
+
+    async def post_parent(self, *, channel_id: str, text: str) -> SlackMessage:
+        self.parent_post_call_count += 1
+        behavior = (
+            self.parent_post_behaviors.pop(0)
+            if self.parent_post_behaviors
+            else "success"
+        )
+        if behavior == "definitive_error":
+            raise SlackTransportUnavailable("definitive failure")
+        if behavior == "unknown_no_commit":
+            raise SlackEffectUnknown("parent lost before commit")
+        message = SlackMessage(
+            ts=self._mint_ts(),
+            author_user_id=self.relay_bot_user_id,
+            text=text,
+        )
+        self.add_parent(message)
+        if behavior == "commit_unknown":
+            raise SlackEffectUnknown("parent receipt lost after commit")
+        if behavior == "wrong_author":
+            return SlackMessage(
+                ts=message.ts,
+                author_user_id="U0000000000",
+                text=text,
+            )
+        if behavior == "wrong_text":
+            return SlackMessage(
+                ts=message.ts,
+                author_user_id=message.author_user_id,
+                text=text + " drift",
+            )
+        return message
 
     async def post_reply(
         self, *, channel_id: str, thread_ts: str, text: str

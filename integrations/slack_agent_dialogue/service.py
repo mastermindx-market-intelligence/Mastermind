@@ -642,6 +642,16 @@ class AgentDialogueService:
             return self.engine_result(
                 await engine.bind_or_verify_thread(_context_v2(values["context"]))
             )
+        if operation == "ensure_thread":
+            values = _exact_mapping(args, {"context", "created_at"})
+            if not isinstance(values["created_at"], str):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.ensure_thread(
+                    _context_v2(values["context"]),
+                    created_at=values["created_at"],
+                )
+            )
         if operation == "send_message":
             values = _exact_mapping(args, {"context", "thread_ts", "message"})
             if not isinstance(values["thread_ts"], str) or not isinstance(
