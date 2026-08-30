@@ -64,7 +64,6 @@ _RECEIPT_KEYS = frozenset(
         "schema",
         "observed_at",
         "grok_binary_sha256",
-        "grok_version",
         "acp_protocol_version",
         "cached_token_offered",
         "oauth_ready",
@@ -122,8 +121,6 @@ class PreflightError(RuntimeError):
     """Bounded fail-closed preflight refusal with a closed public code."""
 
     def __init__(self, code: str) -> None:
-        # Never expose arbitrary exception text. Only a compile-time closed code
-        # may cross the CLI boundary, even if a future caller passes tainted text.
         self.public_code = code if code in REASON_CODES else PUBLIC_FAILURE
         super().__init__(self.public_code)
 
@@ -233,8 +230,6 @@ def sanitized_provider_env(source: Mapping[str, str] | None = None) -> dict[str,
         for key, value in incoming.items()
         if key in _ALLOWED_ENV_KEYS and isinstance(value, str)
     }
-    # Belt-and-suspenders guard: these names are never forwarded even if a
-    # future allowlist edit accidentally includes them.
     for key in tuple(result):
         upper = key.upper()
         if upper == "XAI_API_KEY" or "AUTH_TOKEN" in upper or "ACCESS_TOKEN" in upper:
@@ -440,8 +435,6 @@ def observe_acp_cached_oauth(binary: Path) -> AcpAuthObservation:
         authenticated = _read_json_line(proc.stdout, _ACP_RESPONSE_TIMEOUT_SECONDS)
         return normalize_authenticate_response(authenticated)
     finally:
-        # Authentication may refresh provider-owned OAuth state. We only ensure
-        # the local ACP process group is reaped; no model session exists to cancel.
         if proc.poll() is None:
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
@@ -471,7 +464,6 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     digest = result["grok_binary_sha256"]
     if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
         _raise("RECEIPT_INVALID")
-    result["grok_version"] = _normalize_version(str(result["grok_version"]))
     if result["acp_protocol_version"] != ACP_PROTOCOL_VERSION:
         _raise("RECEIPT_INVALID")
     for key in (
@@ -511,14 +503,15 @@ def validate_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
 def build_receipt(binary: Path) -> dict[str, Any]:
     binary_path = _require_binary(binary)
     digest = _hash_binary(binary_path)
-    version = observe_version(binary_path)
+    # Validate provider-owned version output internally but never publish raw
+    # provider-derived text. The binary SHA-256 is the public attestation.
+    observe_version(binary_path)
     auth = observe_acp_cached_oauth(binary_path)
     return validate_receipt(
         {
             "schema": SCHEMA,
             "observed_at": now_iso(),
             "grok_binary_sha256": digest,
-            "grok_version": version,
             "acp_protocol_version": ACP_PROTOCOL_VERSION,
             "cached_token_offered": auth.cached_token_offered,
             "oauth_ready": auth.oauth_ready,
@@ -541,8 +534,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         receipt = build_receipt(args.grok_binary)
     except PreflightError:
-        # No exception-derived text crosses stdout. Expected auth/protocol refusal
-        # is represented by a validated receipt; exceptional failures are opaque.
         print(json.dumps({"ok": False, "error": PUBLIC_FAILURE}, sort_keys=True))
         return 2
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
