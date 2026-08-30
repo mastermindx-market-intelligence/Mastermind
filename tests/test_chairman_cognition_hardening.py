@@ -37,6 +37,7 @@ def _option(**changes) -> dict:
         "action": "SOURCE_BRANCH_WRITE",
         "reversibility": "REVERSIBLE",
         "source_refs": ["SRC-CHAIRMAN", "SRC-GITHUB"],
+        "scope_refs": ["WS:CHAIRMAN-CONTROL-ROOM"],
         "effect_state": "NONE",
         "operation_key": "ccl-hardening-001",
         "carrier_state": "EXACT_EXISTING",
@@ -72,6 +73,8 @@ def _envelope(**changes) -> dict:
         "allowed_path_prefixes": {
             "mastermindx-market-intelligence/Mastermind": ["control_plane"]
         },
+        "allowed_scope_prefixes": ["WS:CHAIRMAN-CONTROL-ROOM"],
+        "allowed_carrier_prefixes": ["github:Mastermind:", "agentos:", "executive:"],
         "max_budget_units": 5,
         "max_active_children": 3,
         "require_exact_carrier": True,
@@ -164,6 +167,7 @@ def test_read_only_action_cannot_claim_an_applied_effect() -> None:
     option = _option(
         action="READ_ONLY_RESEARCH",
         reversibility="READ_ONLY",
+        scope_refs=[],
         effect_state="KNOWN_APPLIED",
         operation_key=None,
         carrier_state="NOT_APPLICABLE",
@@ -189,3 +193,84 @@ def test_source_receipt_cannot_postdate_decision_snapshot() -> None:
     document["source_receipts"][1]["observed_at"] = "2026-08-30T16:00:01Z"
     with pytest.raises(ChairmanCognitionError, match="postdate"):
         evaluate_document(document)
+
+
+def test_portfolio_hold_is_a_first_class_no_effect_option() -> None:
+    option = _option(
+        action="PORTFOLIO_HOLD",
+        reversibility="READ_ONLY",
+        scope_refs=[],
+        operation_key=None,
+        carrier_state="NOT_APPLICABLE",
+        carrier_ref=None,
+        repositories=[],
+        paths=[],
+        budget_units=0,
+        active_children_after=0,
+    )
+    packet = evaluate_document(_document(option, envelope=None))
+    assert packet["recommended_option_id"] == "OPT-HARDEN"
+    assert packet["adjudications"][0]["disposition"] == "READ_ONLY_ELIGIBLE"
+
+
+def test_modifying_organizational_action_requires_canonical_scope_ref() -> None:
+    with pytest.raises(ChairmanCognitionError, match="scope_ref"):
+        evaluate_document(_document(_option(scope_refs=[])))
+
+
+def test_scope_ref_must_be_inside_delegation_envelope() -> None:
+    option = _option(scope_refs=["WS:PROPHET-US-V4-RECOVERY"])
+    assert _result(_document(option))["reason"] == "SCOPE_OUTSIDE_ENVELOPE"
+
+
+def test_exact_carrier_must_be_inside_delegation_envelope() -> None:
+    option = _option(carrier_ref="slack:C0OTHER/123.456")
+    assert _result(_document(option))["reason"] == "SCOPE_OUTSIDE_ENVELOPE"
+
+
+def test_program_start_uses_new_child_semantics() -> None:
+    allowed = _envelope(
+        allowed_actions=_envelope()["allowed_actions"] + ["PROGRAM_START"]
+    )
+    wrong = _option(
+        action="PROGRAM_START",
+        carrier_state="EXACT_EXISTING",
+        carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+        repositories=[],
+        paths=[],
+    )
+    assert _result(_document(wrong, allowed))["reason"] == "NEW_CHILD_CARRIER_REQUIRED"
+
+    valid = _option(
+        action="PROGRAM_START",
+        carrier_state="NEW_CHILD",
+        carrier_ref=None,
+        repositories=[],
+        paths=[],
+    )
+    assert _result(_document(valid, allowed))["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "PROGRAM_PAUSE",
+        "PROGRAM_RESUME",
+        "PROGRAM_RETIRE",
+        "PROGRAM_COMBINE",
+        "PROGRAM_SPLIT",
+        "RESOURCE_REALLOCATION",
+        "ORGANIZATIONAL_RESTRUCTURE",
+    ],
+)
+def test_chairman_organizational_actions_are_modeled_without_generic_task_aliases(action: str) -> None:
+    allowed = _envelope(
+        allowed_actions=_envelope()["allowed_actions"] + [action]
+    )
+    option = _option(
+        action=action,
+        carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+        repositories=[],
+        paths=[],
+    )
+    assert _result(_document(option, allowed))["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
