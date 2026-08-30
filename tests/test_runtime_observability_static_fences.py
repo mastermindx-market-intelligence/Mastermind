@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
+import shutil
+import socket
+import stat
+import uuid
 from pathlib import Path
 
 import pytest
 
+from scripts import runtime_observability_sidecar as sidecar_cli
 from scripts.runtime_observability_sidecar import (
     CliConfigurationError,
+    _remove_owned_socket,
     parse_args,
     validate_cli_configuration,
 )
@@ -130,7 +137,9 @@ def test_cli_accepts_only_absolute_disposable_unix_socket_path() -> None:
         ]
     )
     validated = validate_cli_configuration(args, effective_uid=501)
-    assert validated.socket_path == Path("/tmp/mastermind-observability.sock")
+    assert validated.socket_path == Path("/tmp/mastermind-observability.sock").resolve(
+        strict=False
+    )
     assert validated.max_events == 3
 
 
@@ -140,6 +149,7 @@ def test_cli_accepts_only_absolute_disposable_unix_socket_path() -> None:
         ["--socket-path", "relative.sock"],
         ["--socket-path", "https://example.com/socket"],
         ["--socket-path", "/var/run/mastermind.sock"],
+        ["--socket-path", "/tmp/../var/tmp/mastermind.sock"],
         ["--socket-path", "/tmp/mastermind.sock", "--max-events", "0"],
         ["--socket-path", "/tmp/mastermind.sock", "--max-events", "10001"],
     ],
@@ -148,6 +158,77 @@ def test_cli_refuses_unsafe_configuration(argv: list[str]) -> None:
     args = parse_args(argv)
     with pytest.raises(CliConfigurationError):
         validate_cli_configuration(args, effective_uid=501)
+
+
+def test_cli_refuses_symlinked_ancestor_below_disposable_root() -> None:
+    sandbox = Path("/tmp") / f"mmx-observability-{uuid.uuid4().hex}"
+    target = sandbox / "target"
+    link = sandbox / "link"
+    try:
+        target.mkdir(parents=True)
+        link.symlink_to(target, target_is_directory=True)
+        args = parse_args(["--socket-path", str(link / "diagnostics.sock")])
+        with pytest.raises(CliConfigurationError, match="symlink"):
+            validate_cli_configuration(args, effective_uid=501)
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_cleanup_does_not_unlink_replacement_socket() -> None:
+    path = Path("/tmp") / f"mmx-observability-{uuid.uuid4().hex}.sock"
+    first = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    replacement = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        first.bind(str(path))
+        observed = path.lstat()
+        expected_identity = (
+            int(observed.st_dev),
+            int(observed.st_ino),
+            int(observed.st_uid),
+            int(stat.S_IFMT(observed.st_mode)),
+        )
+        first.close()
+        path.unlink()
+        replacement.bind(str(path))
+
+        removed = _remove_owned_socket(
+            path,
+            effective_uid=os.geteuid(),
+            expected_identity=expected_identity,
+        )
+
+        assert removed is False
+        assert path.exists()
+    finally:
+        first.close()
+        replacement.close()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def test_main_restores_umask_when_socket_construction_fails(monkeypatch) -> None:
+    path = Path("/tmp") / f"mmx-observability-{uuid.uuid4().hex}.sock"
+    previous = os.umask(0o027)
+    try:
+        monkeypatch.setattr(sidecar_cli.os, "geteuid", lambda: 501)
+
+        def fail_socket(*_args, **_kwargs):
+            raise OSError("forced socket constructor failure")
+
+        monkeypatch.setattr(sidecar_cli.socket, "socket", fail_socket)
+        with pytest.raises(OSError, match="forced socket constructor failure"):
+            sidecar_cli.main(["--socket-path", str(path)])
+
+        observed = os.umask(0o027)
+        assert observed == 0o027
+    finally:
+        os.umask(previous)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def test_cli_refuses_root_execution() -> None:
