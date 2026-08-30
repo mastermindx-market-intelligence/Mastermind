@@ -17,14 +17,13 @@ def test_background_has_closed_native_action_listener_and_exact_request_schema()
     text = source(BACKGROUND)
     assert 'ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1"' in text
     assert 'RECEIPT_SCHEMA = "mastermind.web_sol_surface_receipt.v1"' in text
-    assert "nativePort = chrome.runtime.connectNative(NATIVE_HOST)" in text
+    assert 'importScripts("instance_config.js")' in text
+    assert "nativePort = chrome.runtime.connectNative(INSTANCE_CONFIG.nativeHost)" in text
     assert "const port = nativePort" in text
     assert "port.onMessage.addListener" in text
+    assert "if (!transportHandshakeReady)" in text
     assert "handleNativeRequest(request, port)" in text
     assert "validActionRequest" in text
-    # The dispatcher freezes the validated request before selecting one of the
-    # two closed actions. Assert the accepted dispatch vocabulary rather than
-    # the pre-validation variable name.
     assert 'accepted.action === "INSPECT"' in text
     assert 'accepted.action === "FOREGROUND"' in text
 
@@ -86,7 +85,9 @@ def test_content_script_supports_request_aware_reprobe_without_content_export():
     assert "chrome.runtime.onMessage.addListener" in text
     assert "expected_conversation_fingerprint" in text
     assert "exact_conversation_loaded" in text
-    assert "conversationFingerprint === expectedConversationFingerprint" in text
+    assert (
+        "conversationFingerprint === expectedConversationFingerprint" in text
+    )
 
     for forbidden in (
         "innerText",
@@ -115,8 +116,6 @@ def test_background_receipts_copy_request_identity_and_never_expose_browser_hand
     ):
         assert f"{field}: request.{field}" in text
 
-    # Browser-local handles are permitted only for internal target resolution;
-    # they must not appear as receipt keys or native payload fields.
     assert "tab_id:" not in text
     assert "window_id:" not in text
     assert "tabId:" not in text
