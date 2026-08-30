@@ -1,6 +1,6 @@
 """Deterministic preflight for Mastermind Chairman-cognition decisions.
 
-This module is a read-only policy projector. It accepts a closed, source-attributed
+This module is a read-only policy projector.  It accepts a closed, source-attributed
 snapshot plus candidate strategic options and returns:
 
 * a Pareto frontier without inventing a hidden global priority score;
@@ -10,7 +10,7 @@ snapshot plus candidate strategic options and returns:
 
 It grants no organizational authority and performs no I/O, persistence, scheduling,
 routing, admission, wake, retry, provider, GitHub, Slack, Linear, Agent OS, or
-Executive OS action. A downstream owner must re-read current canonical evidence and
+Executive OS action.  A downstream owner must re-read current canonical evidence and
 apply its own existing mutation/authority contract immediately before any effect.
 """
 from __future__ import annotations
@@ -34,9 +34,7 @@ ERROR_SCHEMA = "mastermind.chairman_cognition_error.v1"
 _OPTION_ID_RE = re.compile(r"^[A-Z][A-Z0-9_.:-]{2,127}$")
 _OPERATION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{2,191}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_PATH_PREFIX_RE = re.compile(
-    r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\x00-\x1f]{1,240}$"
-)
+_PATH_PREFIX_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\x00-\x1f]{1,240}$")
 _ISO_UTC_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]00:00)$"
 )
@@ -178,6 +176,7 @@ class ReasonCode(str, enum.Enum):
     ACTION_NOT_DELEGATED = "ACTION_NOT_DELEGATED"
     SOURCE_NOT_CURRENT = "SOURCE_NOT_CURRENT"
     EFFECT_UNKNOWN_RECONCILE_FIRST = "EFFECT_UNKNOWN_RECONCILE_FIRST"
+    EFFECT_ALREADY_APPLIED = "EFFECT_ALREADY_APPLIED"
     DUPLICATE_CONTROL_PLANE_REFUSED = "DUPLICATE_CONTROL_PLANE_REFUSED"
     STRATEGIC_CONSTRAINT_PROHIBITS = "STRATEGIC_CONSTRAINT_PROHIBITS"
     CONSTITUTIONAL_CHAIRMAN_BOUNDARY = "CONSTITUTIONAL_CHAIRMAN_BOUNDARY"
@@ -189,6 +188,7 @@ class ReasonCode(str, enum.Enum):
     EXACT_CARRIER_REQUIRED = "EXACT_CARRIER_REQUIRED"
     STABLE_OPERATION_REQUIRED = "STABLE_OPERATION_REQUIRED"
     EXPECTED_HEAD_REQUIRED = "EXPECTED_HEAD_REQUIRED"
+    NEW_CHILD_CARRIER_REQUIRED = "NEW_CHILD_CARRIER_REQUIRED"
     CANARY_CONTROLS_REQUIRED = "CANARY_CONTROLS_REQUIRED"
 
 
@@ -306,9 +306,8 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         tuple(
             option
             for option in options
-            if adjudication_by_id[option.option_id].source_state
-            is SourceState.CURRENT
-            and option.effect_state is not EffectState.EFFECT_UNKNOWN
+            if adjudication_by_id[option.option_id].source_state is SourceState.CURRENT
+            and option.effect_state is EffectState.NONE
             and not option.creates_duplicate_control_plane
         )
     )
@@ -361,17 +360,13 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         "execution_authority_granted": False,
         "next_effect_requires_owner_revalidation": True,
     }
-    packet["packet_digest"] = hashlib.sha256(
-        canonical_json_bytes(packet)
-    ).hexdigest()
+    packet["packet_digest"] = hashlib.sha256(canonical_json_bytes(packet)).hexdigest()
     return packet
 
 
 def _parse_source_receipts(value: Any) -> dict[str, SourceReceipt]:
     if not isinstance(value, list) or not value or len(value) > MAX_SOURCE_RECEIPTS:
-        raise ChairmanCognitionError(
-            "source_receipts must be a bounded non-empty list"
-        )
+        raise ChairmanCognitionError("source_receipts must be a bounded non-empty list")
     out: dict[str, SourceReceipt] = {}
     for index, raw in enumerate(value):
         item = _closed_mapping(
@@ -411,9 +406,7 @@ def _parse_source_receipts(value: Any) -> dict[str, SourceReceipt]:
 
 def _parse_constraints(value: Any) -> dict[str, str]:
     if not isinstance(value, Mapping) or not value:
-        raise ChairmanCognitionError(
-            "strategic_constraints must be a non-empty mapping"
-        )
+        raise ChairmanCognitionError("strategic_constraints must be a non-empty mapping")
     out: dict[str, str] = {}
     for raw_key, raw_value in value.items():
         key = _nonempty(raw_key, "constraint name", 128)
@@ -427,9 +420,7 @@ def _parse_constraints(value: Any) -> dict[str, str]:
         "duplicate_control_planes",
     ):
         if required not in out:
-            raise ChairmanCognitionError(
-                "missing load-bearing strategic constraint"
-            )
+            raise ChairmanCognitionError("missing load-bearing strategic constraint")
     return out
 
 
@@ -460,38 +451,28 @@ def _parse_envelope(
         where="delegation_envelope",
     )
     if item["schema"] != ENVELOPE_SCHEMA:
-        raise ChairmanCognitionError(
-            "unsupported delegation envelope schema"
-        )
+        raise ChairmanCognitionError("unsupported delegation envelope schema")
     envelope_id = _nonempty(item["envelope_id"], "envelope_id", 128)
     authority_source_refs = _str_tuple(
         item["authority_source_refs"], "authority_source_refs", 1, 8, 256
     )
     for ref in authority_source_refs:
         if ref not in source_receipts:
+            raise ChairmanCognitionError("envelope references unknown authority source")
+        if source_receipts[ref].owner != "CHAIRMAN_DIRECTIVE":
             raise ChairmanCognitionError(
-                "envelope references unknown authority source"
+                "delegation authority must come from Chairman directive"
             )
     mode = _enum(EnvelopeMode, item["mode"], "envelope mode")
     allowed_actions = frozenset(
-        _str_tuple(
-            item["allowed_actions"],
-            "allowed_actions",
-            1,
-            len(ALL_ACTIONS),
-            64,
-        )
+        _str_tuple(item["allowed_actions"], "allowed_actions", 1, len(ALL_ACTIONS), 64)
     )
     if not allowed_actions <= ALL_ACTIONS:
         raise ChairmanCognitionError("envelope contains unknown action")
     allowed_reversibility = frozenset(
         _enum(Reversibility, raw, "allowed reversibility")
         for raw in _str_tuple(
-            item["allowed_reversibility"],
-            "allowed_reversibility",
-            1,
-            5,
-            32,
+            item["allowed_reversibility"], "allowed_reversibility", 1, 5, 32
         )
     )
     allowed_repositories = frozenset(
@@ -505,30 +486,19 @@ def _parse_envelope(
     )
     prefixes_raw = item["allowed_path_prefixes"]
     if not isinstance(prefixes_raw, Mapping):
-        raise ChairmanCognitionError(
-            "allowed_path_prefixes must be a mapping"
-        )
+        raise ChairmanCognitionError("allowed_path_prefixes must be a mapping")
     prefixes: dict[str, tuple[str, ...]] = {}
     for repository, raw_prefixes in prefixes_raw.items():
-        repo = _nonempty(
-            repository, "allowed_path_prefixes repository", 160
-        )
+        repo = _nonempty(repository, "allowed_path_prefixes repository", 160)
         if repo not in allowed_repositories:
-            raise ChairmanCognitionError(
-                "path-prefix repository is not allowed"
-            )
-        parsed = _str_tuple(
-            raw_prefixes, "path prefixes", 0, MAX_SCOPE_PATHS, 240
-        )
+            raise ChairmanCognitionError("path-prefix repository is not allowed")
+        parsed = _str_tuple(raw_prefixes, "path prefixes", 0, MAX_SCOPE_PATHS, 240)
         for prefix in parsed:
             if _PATH_PREFIX_RE.fullmatch(prefix) is None:
                 raise ChairmanCognitionError("invalid path prefix")
         prefixes[repo] = parsed
     max_budget_units = _bounded_int(
-        item["max_budget_units"],
-        "max_budget_units",
-        0,
-        MAX_BUDGET_UNITS,
+        item["max_budget_units"], "max_budget_units", 0, MAX_BUDGET_UNITS
     )
     max_active_children = _bounded_int(
         item["max_active_children"],
@@ -536,9 +506,9 @@ def _parse_envelope(
         0,
         MAX_ACTIVE_CHILDREN,
     )
-    if type(item["require_exact_carrier"]) is not bool:
+    if item["require_exact_carrier"] is not True:
         raise ChairmanCognitionError(
-            "require_exact_carrier must be boolean"
+            "delegation envelope must require exact carrier"
         )
     expires_at = _iso_utc(item["expires_at"], "expires_at")
     envelope = DelegationEnvelope(
@@ -566,9 +536,7 @@ def _parse_envelope(
 
 def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
     if not isinstance(value, list) or not value or len(value) > MAX_OPTIONS:
-        raise ChairmanCognitionError(
-            "options must be a bounded non-empty list"
-        )
+        raise ChairmanCognitionError("options must be a bounded non-empty list")
     out: list[StrategicOption] = []
     seen: set[str] = set()
     for index, raw in enumerate(value):
@@ -608,38 +576,27 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
         action = _nonempty(item["action"], "action", 64)
         if action not in ALL_ACTIONS:
             raise ChairmanCognitionError("unknown option action")
+        effect_state = _enum(
+            EffectState, item["effect_state"], "effect_state"
+        )
         reversibility = _enum(
             Reversibility, item["reversibility"], "reversibility"
         )
-        if (
-            action in READ_ONLY_ACTIONS
-            and reversibility is not Reversibility.READ_ONLY
-        ):
+        if action in READ_ONLY_ACTIONS and reversibility is not Reversibility.READ_ONLY:
+            raise ChairmanCognitionError("read-only action must use READ_ONLY reversibility")
+        if action in MODIFYING_ACTIONS and reversibility is Reversibility.READ_ONLY:
+            raise ChairmanCognitionError("modifying action cannot use READ_ONLY reversibility")
+        if action in READ_ONLY_ACTIONS and effect_state is not EffectState.NONE:
             raise ChairmanCognitionError(
-                "read-only action must use READ_ONLY reversibility"
+                "read-only action must use NONE effect_state"
             )
-        if (
-            action in MODIFYING_ACTIONS
-            and reversibility is Reversibility.READ_ONLY
-        ):
-            raise ChairmanCognitionError(
-                "modifying action cannot use READ_ONLY reversibility"
-            )
-        operation_key = _nullable_str(
-            item["operation_key"], "operation_key", 192
-        )
-        if (
-            operation_key is not None
-            and _OPERATION_KEY_RE.fullmatch(operation_key) is None
-        ):
+        operation_key = _nullable_str(item["operation_key"], "operation_key", 192)
+        if operation_key is not None and _OPERATION_KEY_RE.fullmatch(operation_key) is None:
             raise ChairmanCognitionError("invalid operation_key")
         expected_head_sha = _nullable_str(
             item["expected_head_sha"], "expected_head_sha", 40
         )
-        if (
-            expected_head_sha is not None
-            and _SHA_RE.fullmatch(expected_head_sha) is None
-        ):
+        if expected_head_sha is not None and _SHA_RE.fullmatch(expected_head_sha) is None:
             raise ChairmanCognitionError("invalid expected_head_sha")
         repositories = _str_tuple(
             item["repositories"],
@@ -648,15 +605,17 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
             MAX_SCOPE_REPOSITORIES,
             160,
         )
-        paths = _str_tuple(
-            item["paths"], "paths", 0, MAX_SCOPE_PATHS, 240
-        )
+        paths = _str_tuple(item["paths"], "paths", 0, MAX_SCOPE_PATHS, 240)
         for path in paths:
             if _PATH_PREFIX_RE.fullmatch(path) is None:
                 raise ChairmanCognitionError("invalid scope path")
         if paths and not repositories:
+            raise ChairmanCognitionError("paths require at least one repository")
+        if action in {"SOURCE_BRANCH_WRITE", "SOURCE_MERGE"} and (
+            len(repositories) != 1 or not paths
+        ):
             raise ChairmanCognitionError(
-                "paths require at least one repository"
+                "source actions require one repository and explicit paths"
             )
         if type(item["creates_duplicate_control_plane"]) is not bool:
             raise ChairmanCognitionError(
@@ -665,19 +624,11 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
         carrier_state = _enum(
             CarrierState, item["carrier_state"], "carrier_state"
         )
-        carrier_ref = _nullable_str(
-            item["carrier_ref"], "carrier_ref", 256
-        )
+        carrier_ref = _nullable_str(item["carrier_ref"], "carrier_ref", 256)
+        if carrier_state is CarrierState.EXACT_EXISTING and carrier_ref is None:
+            raise ChairmanCognitionError("exact existing carrier requires carrier_ref")
         if (
-            carrier_state is CarrierState.EXACT_EXISTING
-            and carrier_ref is None
-        ):
-            raise ChairmanCognitionError(
-                "exact existing carrier requires carrier_ref"
-            )
-        if (
-            carrier_state
-            in {CarrierState.NOT_APPLICABLE, CarrierState.NEW_CHILD}
+            carrier_state in {CarrierState.NOT_APPLICABLE, CarrierState.NEW_CHILD}
             and carrier_ref is not None
         ):
             raise ChairmanCognitionError(
@@ -696,11 +647,7 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                     MAX_SOURCE_REFS_PER_OPTION,
                     256,
                 ),
-                effect_state=_enum(
-                    EffectState,
-                    item["effect_state"],
-                    "effect_state",
-                ),
+                effect_state=effect_state,
                 operation_key=operation_key,
                 carrier_state=carrier_state,
                 carrier_ref=carrier_ref,
@@ -708,10 +655,7 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                 repositories=repositories,
                 paths=paths,
                 budget_units=_bounded_int(
-                    item["budget_units"],
-                    "budget_units",
-                    0,
-                    MAX_BUDGET_UNITS,
+                    item["budget_units"], "budget_units", 0, MAX_BUDGET_UNITS
                 ),
                 active_children_after=_bounded_int(
                     item["active_children_after"],
@@ -728,15 +672,11 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                 rollback_plan=_nullable_str(
                     item["rollback_plan"], "rollback_plan", 500
                 ),
-                falsifier=_nullable_str(
-                    item["falsifier"], "falsifier", 500
-                ),
+                falsifier=_nullable_str(item["falsifier"], "falsifier", 500),
                 benefits=_parse_dimensions(
                     item["benefits"], BENEFIT_DIMENSIONS, "benefits"
                 ),
-                costs=_parse_dimensions(
-                    item["costs"], COST_DIMENSIONS, "costs"
-                ),
+                costs=_parse_dimensions(item["costs"], COST_DIMENSIONS, "costs"),
             )
         )
     return tuple(out)
@@ -755,16 +695,20 @@ def _adjudicate(
     )
     if source_state is not SourceState.CURRENT:
         return _decision(
-            option,
-            Disposition.REFUSED,
-            ReasonCode.SOURCE_NOT_CURRENT,
-            source_state,
+            option, Disposition.REFUSED, ReasonCode.SOURCE_NOT_CURRENT, source_state
         )
     if option.effect_state is EffectState.EFFECT_UNKNOWN:
         return _decision(
             option,
             Disposition.REFUSED,
             ReasonCode.EFFECT_UNKNOWN_RECONCILE_FIRST,
+            source_state,
+        )
+    if option.effect_state is EffectState.KNOWN_APPLIED:
+        return _decision(
+            option,
+            Disposition.REFUSED,
+            ReasonCode.EFFECT_ALREADY_APPLIED,
             source_state,
         )
     if option.creates_duplicate_control_plane:
@@ -774,24 +718,18 @@ def _adjudicate(
             ReasonCode.DUPLICATE_CONTROL_PLANE_REFUSED,
             source_state,
         )
-    if (
-        option.action == "PRODUCTION_DEPLOY"
-        and strategic_constraints.get("autonomous_production_deploy")
-        == "prohibited"
-    ):
+    if option.action == "PRODUCTION_DEPLOY" and strategic_constraints.get(
+        "autonomous_production_deploy"
+    ) == "prohibited":
         return _decision(
             option,
             Disposition.REFUSED,
             ReasonCode.STRATEGIC_CONSTRAINT_PROHIBITS,
             source_state,
         )
-    if (
-        option.action == "LIVE_CAPITAL_EXECUTION"
-        and strategic_constraints.get(
-            "autonomous_live_capital_execution"
-        )
-        == "prohibited"
-    ):
+    if option.action == "LIVE_CAPITAL_EXECUTION" and strategic_constraints.get(
+        "autonomous_live_capital_execution"
+    ) == "prohibited":
         return _decision(
             option,
             Disposition.REFUSED,
@@ -805,10 +743,7 @@ def _adjudicate(
             ReasonCode.CONSTITUTIONAL_CHAIRMAN_BOUNDARY,
             source_state,
         )
-    if option.reversibility in {
-        Reversibility.IRREVERSIBLE,
-        Reversibility.UNKNOWN,
-    }:
+    if option.reversibility in {Reversibility.IRREVERSIBLE, Reversibility.UNKNOWN}:
         return _decision(
             option,
             Disposition.CHAIRMAN_REQUIRED,
@@ -887,10 +822,7 @@ def _adjudicate(
             ReasonCode.STABLE_OPERATION_REQUIRED,
             source_state,
         )
-    if (
-        option.action == "SOURCE_MERGE"
-        and option.expected_head_sha is None
-    ):
+    if option.action == "SOURCE_MERGE" and option.expected_head_sha is None:
         return _decision(
             option,
             Disposition.REFUSED,
@@ -898,8 +830,17 @@ def _adjudicate(
             source_state,
         )
     if (
-        envelope.require_exact_carrier
-        and option.action != "EXECUTIVE_CHILD_COMMISSION"
+        option.action == "EXECUTIVE_CHILD_COMMISSION"
+        and option.carrier_state is not CarrierState.NEW_CHILD
+    ):
+        return _decision(
+            option,
+            Disposition.REFUSED,
+            ReasonCode.NEW_CHILD_CARRIER_REQUIRED,
+            source_state,
+        )
+    if (
+        option.action != "EXECUTIVE_CHILD_COMMISSION"
         and option.carrier_state is not CarrierState.EXACT_EXISTING
     ):
         return _decision(
@@ -951,13 +892,8 @@ def _decision(
     )
 
 
-def _scope_allowed(
-    option: StrategicOption, envelope: DelegationEnvelope
-) -> bool:
-    if (
-        option.repositories
-        and not set(option.repositories) <= envelope.allowed_repositories
-    ):
+def _scope_allowed(option: StrategicOption, envelope: DelegationEnvelope) -> bool:
+    if option.repositories and not set(option.repositories) <= envelope.allowed_repositories:
         return False
     if not option.paths:
         return True
@@ -966,23 +902,16 @@ def _scope_allowed(
     repository = option.repositories[0]
     prefixes = envelope.allowed_path_prefixes.get(repository, ())
     return bool(prefixes) and all(
-        any(
-            path == prefix
-            or path.startswith(prefix.rstrip("/") + "/")
-            for prefix in prefixes
-        )
+        any(path == prefix or path.startswith(prefix.rstrip("/") + "/") for prefix in prefixes)
         for path in option.paths
     )
 
 
-def _frontier(
-    options: tuple[StrategicOption, ...]
-) -> tuple[str, ...]:
+def _frontier(options: tuple[StrategicOption, ...]) -> tuple[str, ...]:
     frontier: list[str] = []
     for candidate in sorted(options, key=lambda item: item.option_id):
         if any(
-            other.option_id != candidate.option_id
-            and _dominates(other, candidate)
+            other.option_id != candidate.option_id and _dominates(other, candidate)
             for other in options
         ):
             continue
@@ -1009,12 +938,8 @@ def _dominates(left: StrategicOption, right: StrategicOption) -> bool:
     return better
 
 
-def _aggregate_source_state(
-    receipts: Sequence[SourceReceipt],
-) -> SourceState:
-    load_bearing = [
-        receipt for receipt in receipts if receipt.load_bearing
-    ]
+def _aggregate_source_state(receipts: Sequence[SourceReceipt]) -> SourceState:
+    load_bearing = [receipt for receipt in receipts if receipt.load_bearing]
     relevant = load_bearing or list(receipts)
     states = {receipt.state for receipt in relevant}
     if SourceState.CONFLICT in states:
@@ -1027,9 +952,7 @@ def _aggregate_source_state(
 
 
 def _parse_dimensions(
-    value: Any,
-    expected_keys: Sequence[str],
-    where: str,
+    value: Any, expected_keys: Sequence[str], where: str
 ) -> dict[str, int | None]:
     item = _closed_mapping(
         value,
@@ -1043,9 +966,7 @@ def _parse_dimensions(
         if raw is None:
             out[key] = None
         else:
-            out[key] = _bounded_int(
-                raw, f"{where}.{key}", 0, 100
-            )
+            out[key] = _bounded_int(raw, f"{where}.{key}", 0, 100)
     return out
 
 
@@ -1062,13 +983,9 @@ def _closed_mapping(
     missing = required - keys
     extra = keys - required - optional
     if missing:
-        raise ChairmanCognitionError(
-            f"{where} is missing required fields"
-        )
+        raise ChairmanCognitionError(f"{where} is missing required fields")
     if extra:
-        raise ChairmanCognitionError(
-            f"{where} contains unknown fields"
-        )
+        raise ChairmanCognitionError(f"{where} contains unknown fields")
     return value
 
 
@@ -1079,13 +996,8 @@ def _str_tuple(
     maximum: int,
     max_len: int,
 ) -> tuple[str, ...]:
-    if (
-        not isinstance(value, list)
-        or not minimum <= len(value) <= maximum
-    ):
-        raise ChairmanCognitionError(
-            f"{name} must be a bounded list"
-        )
+    if not isinstance(value, list) or not minimum <= len(value) <= maximum:
+        raise ChairmanCognitionError(f"{name} must be a bounded list")
     out = tuple(_nonempty(item, name, max_len) for item in value)
     if len(set(out)) != len(out):
         raise ChairmanCognitionError(f"{name} contains duplicates")
@@ -1093,43 +1005,26 @@ def _str_tuple(
 
 
 def _nonempty(value: Any, name: str, max_len: int) -> str:
-    if (
-        not isinstance(value, str)
-        or not value
-        or value != value.strip()
-    ):
-        raise ChairmanCognitionError(
-            f"{name} must be a non-empty trimmed string"
-        )
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ChairmanCognitionError(f"{name} must be a non-empty trimmed string")
     if len(value) > max_len or any(ord(ch) < 32 for ch in value):
         raise ChairmanCognitionError(f"{name} is out of bounds")
     return value
 
 
-def _nullable_str(
-    value: Any, name: str, max_len: int
-) -> str | None:
+def _nullable_str(value: Any, name: str, max_len: int) -> str | None:
     if value is None:
         return None
     return _nonempty(value, name, max_len)
 
 
-def _bounded_int(
-    value: Any,
-    name: str,
-    minimum: int,
-    maximum: int,
-) -> int:
+def _bounded_int(value: Any, name: str, minimum: int, maximum: int) -> int:
     if type(value) is not int or not minimum <= value <= maximum:
-        raise ChairmanCognitionError(
-            f"{name} must be a bounded integer"
-        )
+        raise ChairmanCognitionError(f"{name} must be a bounded integer")
     return value
 
 
-def _enum(
-    enum_type: type[enum.Enum], value: Any, name: str
-):
+def _enum(enum_type: type[enum.Enum], value: Any, name: str):
     if not isinstance(value, str):
         raise ChairmanCognitionError(f"{name} must be a string")
     try:
@@ -1141,19 +1036,14 @@ def _enum(
 def _iso_utc(value: Any, name: str) -> str:
     text = _nonempty(value, name, 40)
     if _ISO_UTC_RE.fullmatch(text) is None:
-        raise ChairmanCognitionError(
-            f"{name} must be UTC ISO-8601"
-        )
+        raise ChairmanCognitionError(f"{name} must be UTC ISO-8601")
     _parse_time(text)
     return text
 
 
 def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if (
-        parsed.tzinfo is None
-        or parsed.utcoffset() != timezone.utc.utcoffset(parsed)
-    ):
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
         raise ChairmanCognitionError("timestamp must use UTC")
     return parsed
 
@@ -1167,7 +1057,6 @@ __all__ = [
     "EffectState",
     "ENVELOPE_SCHEMA",
     "EnvelopeMode",
-    "ERROR_SCHEMA",
     "INPUT_SCHEMA",
     "PACKET_SCHEMA",
     "ReasonCode",
