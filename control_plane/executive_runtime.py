@@ -1974,6 +1974,10 @@ class RuntimeStore:
     ) -> None:
         """Prove a supplied snapshot's ``main`` is this store's stable file."""
 
+        if connection.in_transaction is not True:
+            raise StateConflict(
+                "supplied connection must already own an active SQLite transaction"
+            )
         try:
             database_rows = connection.execute("PRAGMA database_list").fetchall()
             main_rows = [row for row in database_rows if str(row[1]) == "main"]
@@ -14280,6 +14284,8 @@ class Runtime:
             or job_write_paths
             or grant["write_paths"]
             or grant["validation_argv"] != job_validation_argv
+            or bool(grant["validation_argv"])
+            != ("RUN_TESTS" in grant["authorities"])
         ):
             raise StateConflict("runtime binding effective grant role semantics drifted")
 

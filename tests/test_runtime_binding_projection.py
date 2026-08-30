@@ -266,6 +266,24 @@ def test_public_projection_refuses_snapshot_connection_owned_by_another_runtime(
             )
 
 
+def test_public_projection_refuses_owned_connection_without_an_active_snapshot(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    connection = runtime.store._open()
+    try:
+        assert connection.in_transaction is False
+        with pytest.raises(StateConflict, match="transaction"):
+            project_runtime_binding(
+                runtime,
+                sealed.attempt_id,
+                _target(),
+                connection=connection,
+            )
+    finally:
+        connection.close()
+
+
 @pytest.mark.parametrize("mutation", ["moved", "replaced"])
 def test_public_projection_refuses_snapshot_after_owned_database_identity_changes(
     tmp_path, mutation
@@ -818,6 +836,79 @@ def test_projection_refuses_noncanonical_frozen_job_authority_arrays(
         connection.execute(
             f"UPDATE jobs SET {column}=? WHERE current_attempt_id=?",
             (corrupt_json, sealed.attempt_id),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    ("authorities", "validation_argv"),
+    [
+        (["READ"], [["pytest"]]),
+        (["READ", "RUN_TESTS"], []),
+    ],
+    ids=["validation-without-run-tests", "run-tests-without-validation"],
+)
+def test_projection_refuses_review_grant_validation_run_tests_mismatch(
+    tmp_path, authorities, validation_argv
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER jobs_orchestration_fields_immutable")
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            """UPDATE jobs
+               SET orchestration_role='review',requested_authorities_json=?,
+                   allowed_write_paths_json='[]',validation_commands_json=?
+               WHERE current_attempt_id=?""",
+            (
+                json.dumps(authorities, separators=(",", ":")),
+                json.dumps(validation_argv, separators=(",", ":")),
+                sealed.attempt_id,
+            ),
+        )
+        attempt = connection.execute(
+            "SELECT effective_grant_json FROM attempts WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert attempt is not None
+        grant = json.loads(str(attempt["effective_grant_json"]))
+        grant.update(
+            {
+                "role": "review",
+                "authorities": authorities,
+                "write_paths": [],
+                "validation_argv": validation_argv,
+            }
+        )
+        grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+        grant_digest = hashlib.sha256(grant_json.encode("utf-8")).hexdigest()
+        connection.execute(
+            "UPDATE attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (grant_json, grant_digest, sealed.attempt_id),
+        )
+        admission = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert admission is not None
+        admission_payload = json.loads(str(admission["payload_json"]))
+        admission_payload["orchestration_role"] = "review"
+        admission_payload["effective_grant_digest"] = grant_digest
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    admission_payload, sort_keys=True, separators=(",", ":")
+                ),
+                admission["event_id"],
+            ),
         )
 
     with pytest.raises(StateConflict, match="effective grant"):
