@@ -82,6 +82,15 @@ The JSON input shape is:
 }
 ```
 
+The native task ID must be present and unique. Do not invent a replacement ID when the native
+surface omits one, and do not collapse two returned records with the same ID. Duplicate native task
+IDs are an export/identity ambiguity and fail the complete account audit even when both entries are
+disabled.
+
+The enabled state must be a JSON boolean (`true` or `false`). Strings such as `"false"`, numeric
+values, a missing field, or conflicting `is_enabled` and `enabled` fields fail closed; the validator
+must not coerce them with language truthiness.
+
 `SOL_WATCHER` is the default when `audit_kind` is omitted for backward compatibility. Use
 `NON_WATCHER` only after directly verifying that the task is not a Sol/CEO/worker continuation,
 program, parent, triage or account-hardening watcher. Unknown classifications fail closed.
@@ -134,9 +143,13 @@ status=$?
 
 Exit codes:
 
-- `0` — every enabled `SOL_WATCHER` task conforms to the structured prompt contract;
-- `1` — at least one enabled watcher has a contract finding;
-- `2` — malformed/unreadable audit input.
+- `0` — every enabled `SOL_WATCHER` task conforms and the export identity/classification envelope is valid;
+- `1` — at least one watcher or export entry has a contract finding;
+- `2` — malformed/unreadable top-level audit input.
+
+The report summary separates `invalid_enabled_tasks`, `invalid_classification_tasks`, and
+`invalid_export_tasks`, and lists `duplicate_task_ids`. An audit is not green when wrapper identity or
+boolean typing is ambiguous merely because no enabled prompt was evaluated.
 
 Enabled `NON_WATCHER` entries remain visible in the report but are excluded from watcher-conformance
 counts. The validator is intentionally unable to inspect whether a native task really fired, whether
@@ -153,13 +166,14 @@ For each invalid enabled watcher:
    otherwise healthy.
 4. Replace or prepend the prompt with the exact `MMX_SOL_WATCHER_V1` header required by its role.
 5. Remove positive notification-only instructions that cause an action-authoritative watcher to say
-   “Sol action required,” “waiting for Sol,” or “stand by for Sol's ruling.” A prohibition such as
-   “do not wait for Sol” is valid and should remain explicit.
+   “Sol action required,” “waiting for Sol,” “await Sol,” “defer to Sol,” “escalate to Sol,” or
+   “pause for Sol.” A prohibition such as “do not wait for Sol” is valid and should remain explicit.
 6. Add the exact-carrier fresh-read fence, current-Skillpack re-pin, same-carrier/no-blind-retry/no-
    lifecycle-inference laws, and terminal STOP-before-disarm sequence.
-7. For observer/parent/triage tasks, remove any authority to `CONTINUE`, `RULING`,
-   `REQUEST_REPAIR`, `STOP`, merge/release, retry or commission a successor outside the declared
-   role.
+7. For every non-authoritative role (`OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, and `TRIAGE_ONLY`), remove
+   positive authority to emit child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, `STOP`, merge/release,
+   retry/resubmit/requeue/fail over, or commission/start a successor. Explicit prohibitions remain
+   valid and should be preserved.
 8. Save the prompt through the native task surface and read it back. A local draft or proposed text
    is not a completed repair.
 
@@ -173,7 +187,7 @@ After all native writes:
 
 1. re-export the current account task census;
 2. rerun `python3 scripts/audit_sol_watchers.py`;
-3. require exit `0` for enabled temporary Sol watchers;
+3. require exit `0` for enabled temporary Sol watchers and the export envelope;
 4. compare native watcher IDs and schedules before/after;
 5. identify every changed or disabled watcher ID;
 6. preserve any unresolved action-authority conflicts rather than forcing them green.
