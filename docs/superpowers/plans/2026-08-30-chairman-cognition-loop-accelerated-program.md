@@ -54,29 +54,34 @@ tests/test_chairman_cognition_source_contract.py
 2. freeze one-office/two-mode, owner composition, accelerated-canary and delegation law;
 3. implement closed schemas and deterministic canonical digests;
 4. implement source-state/effect/duplicate-owner/strategic-constraint refusal, including
-   terminal already-applied effects;
-5. implement Chairman-owned envelope, scope, budget, child, operation, carrier and expected-head
-   checks, including explicit `NEW_CHILD` commission state;
-6. implement supervised-live-canary controls;
-7. implement truthful Pareto frontier and unique-only mechanical recommendation;
-8. expose a no-side-effect JSON CLI with opaque invalid-input failure;
-9. prove focused, hostile-boundary, source-contract, AST/static and existing strategic-state tests;
-10. publish one current-base branch/PR, obtain hosted/security proof and independent review.
+   terminal already-applied effects and future-dated source rejection;
+5. implement Chairman-owned/load-bearing envelope authority, repository/path scope, canonical
+   affected-scope prefixes, allowed exact-carrier prefixes, budget, child, operation and expected-head
+   checks, including explicit `NEW_CHILD` state for new Programs and Executive children;
+6. model `PORTFOLIO_HOLD`, Program pause/resume/retire/combine/split, resource reallocation and
+   organizational restructure as distinct strategic actions rather than generic tasks;
+7. implement supervised-live-canary controls;
+8. implement truthful Pareto frontier and unique-only mechanical recommendation;
+9. expose a no-side-effect JSON CLI with opaque invalid-input failure;
+10. prove focused, hostile-boundary, source-contract, AST/static and existing strategic-state tests;
+11. publish one current-base branch/PR, obtain hosted/security proof and independent review.
 
 ### Acceptance tests
 
 - same input produces byte-equivalent packet and digest;
 - every output says `execution_authority_granted=false`;
 - no envelope blocks modifying actions but not read-only cognition;
-- stale/conflicting source and `EFFECT_UNKNOWN` block action;
+- stale/conflicting/future-dated source and `EFFECT_UNKNOWN` block action;
 - already-applied effects remain terminal and never re-enter a frontier;
+- `PORTFOLIO_HOLD` is a first-class no-effect alternative;
+- organizational actions require canonical affected scope;
+- new Programs and Executive children require explicit `NEW_CHILD`;
+- exact existing carriers must remain inside the envelope carrier scope;
 - production deploy/live capital stay refused under current constraints;
 - constitutional/terminal/budget/admin changes stay Chairman-only;
-- delegation authority must resolve to a current Chairman-owned source;
+- delegation authority must be current, Chairman-owned and load-bearing;
 - duplicate control plane is refused even inside an envelope;
 - scope, budget, child, operation, carrier and expected-head boundaries fail closed;
-- new Executive children require explicit `NEW_CHILD` carrier state;
-- exact-carrier law cannot be disabled by an envelope;
 - canary requires stop, rollback and falsifier;
 - incomparable options remain visible and unselected;
 - dominated options are removed only with complete known dimensions;
