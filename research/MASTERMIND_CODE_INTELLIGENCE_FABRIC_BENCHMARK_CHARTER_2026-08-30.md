@@ -176,10 +176,10 @@ Seed: Mastermind PR #214.
 Question: Starting from organizational continuity amendments, find all current consumers of responsibility, SessionTargetRegistry, RuntimeBinding and dialogue applicability that could accidentally elect two Sols.  
 Success: distinguish observer multiplicity from one action-authoritative target per unresolved child turn.
 
-**A3 — Serena/worktree cross-read hostile review**  
-Seed: the future C0 semantic facade.  
-Question: Given two simultaneous worktrees with identical symbols and divergent sentinels, prove each Attempt can read only its own sentinel and cannot activate/switch to the other project.  
-Success: any cross-read, path argument, project switch, repository-controlled command or candidate-tree write is a hard failure.
+**A3 — Exact workspace identity impact review**  
+Seed: current protected `control_plane/codex_operator_adapter.py`, `control_plane/operator_harness_contract.py`, and their tests.  
+Question: Starting from a proposal to attach a local semantic child, trace every current owner and consumer of workspace root, Git HEAD/base SHA, device/inode, thread CWD, capability manifest and Attempt replacement. Which exact checks prevent one worker from reading another worktree, and which missing test must C0 add?  
+Success: identify the existing Attempt/workspace authority boundary, prove CodeIntel must attach beneath it, and derive the hostile two-worktree falsifier without attributing lifecycle or workspace-selection authority to CodeIntel.
 
 ## 4. Run conditions
 
