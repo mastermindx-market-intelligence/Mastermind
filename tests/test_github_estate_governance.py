@@ -127,6 +127,41 @@ def _repo_merge_spec(before: dict) -> AdministrationSpec:
     )
 
 
+def _actions_spec(before: dict) -> AdministrationSpec:
+    payload = {
+        "default_workflow_permissions": "read",
+        "can_approve_pull_request_reviews": False,
+    }
+    return AdministrationSpec(
+        family=AdministrationFamily.ACTIONS_DEFAULT_PERMISSIONS,
+        endpoint=(
+            "repos/mastermindx-market-intelligence/Mastermind/"
+            "actions/permissions/workflow"
+        ),
+        method="PUT",
+        expected_before_sha256=canonical_digest(before),
+        payload=payload,
+        expected_after=payload,
+    )
+
+
+def _security_spec(before: dict) -> AdministrationSpec:
+    payload = {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "enabled"},
+            "secret_scanning_push_protection": {"status": "enabled"},
+        }
+    }
+    return AdministrationSpec(
+        family=AdministrationFamily.SECURITY_AND_ANALYSIS,
+        endpoint="repos/mastermindx-market-intelligence/Mastermind",
+        method="PATCH",
+        expected_before_sha256=canonical_digest(before),
+        payload=payload,
+        expected_after=payload,
+    )
+
+
 def test_administration_family_reads_before_once_mutates_once_and_reads_back_once():
     before = {
         "allow_merge_commit": True,
@@ -145,6 +180,85 @@ def test_administration_family_reads_before_once_mutates_once_and_reads_back_onc
     assert receipt["before_sha256"] == canonical_digest(before)
     assert receipt["after_sha256"] == canonical_digest(after)
     assert transport.read_count == 2
+    assert len(transport.mutations) == 1
+
+
+def test_actions_family_applies_and_reads_back_exact_safe_projection():
+    before = {
+        "default_workflow_permissions": "write",
+        "can_approve_pull_request_reviews": True,
+    }
+    after = dict(_actions_spec(before).expected_after)
+    transport = FakeTransport(before, after=after)
+
+    receipt = apply_administration_family(transport, _actions_spec(before))
+
+    assert receipt["verdict"] == "APPLIED"
+    assert receipt["effect"] == "CONFIRMED"
+    assert len(transport.mutations) == 1
+
+
+def test_security_family_allows_only_governance_feature_names_and_nested_readback():
+    before = {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "disabled"},
+            "secret_scanning_push_protection": {"status": "disabled"},
+            "dependabot_security_updates": {"status": "disabled"},
+        }
+    }
+    after = {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "enabled"},
+            "secret_scanning_push_protection": {"status": "enabled"},
+            "dependabot_security_updates": {"status": "disabled"},
+            "secret_scanning_validity_checks": {"status": "enabled"},
+        }
+    }
+    transport = FakeTransport(before, after=after)
+
+    receipt = apply_administration_family(transport, _security_spec(before))
+
+    assert receipt["verdict"] == "APPLIED"
+    assert receipt["effect"] == "CONFIRMED"
+    assert len(transport.mutations) == 1
+
+
+def test_security_family_is_idempotent_with_additional_server_fields():
+    current = {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "enabled"},
+            "secret_scanning_push_protection": {"status": "enabled"},
+            "dependabot_security_updates": {"status": "disabled"},
+        }
+    }
+    transport = FakeTransport(current)
+
+    receipt = apply_administration_family(transport, _security_spec(current))
+
+    assert receipt["verdict"] == "ALREADY_CONFIGURED"
+    assert receipt["effect"] == "NONE"
+    assert transport.mutations == []
+
+
+def test_security_family_readback_mismatch_is_not_confirmed():
+    before = {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "disabled"},
+            "secret_scanning_push_protection": {"status": "disabled"},
+        }
+    }
+    after = {
+        "security_and_analysis": {
+            "secret_scanning": {"status": "enabled"},
+            "secret_scanning_push_protection": {"status": "disabled"},
+        }
+    }
+    transport = FakeTransport(before, after=after)
+
+    receipt = apply_administration_family(transport, _security_spec(before))
+
+    assert receipt["verdict"] == "READBACK_MISMATCH"
+    assert receipt["effect"] == "UNKNOWN"
     assert len(transport.mutations) == 1
 
 
@@ -388,6 +502,37 @@ def test_missing_server_version_refuses_before_mutation():
     transport = FakeTransport(before, before_etag="")
 
     with pytest.raises(GovernanceRefusal, match="server version"):
+        apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert transport.mutations == []
+
+
+@pytest.mark.parametrize("invalid_etag", ["*", "not-an-entity-tag", '"unterminated'])
+def test_non_entity_tag_server_version_refuses_before_mutation(invalid_etag: str):
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = FakeTransport(before, before_etag=invalid_etag)
+
+    with pytest.raises(GovernanceRefusal, match="server version"):
+        apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert transport.mutations == []
+
+
+def test_weak_entity_tag_refuses_before_mutation():
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = FakeTransport(before, before_etag='W/"before-v1"')
+
+    with pytest.raises(GovernanceRefusal, match="strong atomic server version"):
         apply_administration_family(transport, _repo_merge_spec(before))
 
     assert transport.mutations == []

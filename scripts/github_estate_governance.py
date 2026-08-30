@@ -69,7 +69,7 @@ _ACTIONS_ENDPOINT = re.compile(
     r"repos/[^/]+/[^/]+/actions/permissions/workflow\Z"
 )
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_SERVER_VERSION = re.compile(r"[^\r\n]{1,512}\Z")
+_ENTITY_TAG = re.compile(r'(?:W/)?"[\x21\x23-\x7e\x80-\xff]*"\Z')
 _RFC3339_UTC = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z"
 )
@@ -123,16 +123,30 @@ def canonical_digest(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _assert_secret_free(value: Any, *, path: str = "payload") -> None:
+def _assert_secret_free(
+    value: Any,
+    *,
+    path: str = "payload",
+    allowed_secret_like_paths: frozenset[str] = frozenset(),
+) -> None:
     if isinstance(value, Mapping):
         for raw_key, item in value.items():
             key = str(raw_key)
-            if _SECRET_KEY.search(key):
-                raise GovernanceRefusal(f"secret-bearing field refused at {path}.{key}")
-            _assert_secret_free(item, path=f"{path}.{key}")
+            item_path = f"{path}.{key}"
+            if _SECRET_KEY.search(key) and item_path not in allowed_secret_like_paths:
+                raise GovernanceRefusal(f"secret-bearing field refused at {item_path}")
+            _assert_secret_free(
+                item,
+                path=item_path,
+                allowed_secret_like_paths=allowed_secret_like_paths,
+            )
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
-            _assert_secret_free(item, path=f"{path}[{index}]")
+            _assert_secret_free(
+                item,
+                path=f"{path}[{index}]",
+                allowed_secret_like_paths=allowed_secret_like_paths,
+            )
 
 
 def _assert_family_contract(spec: AdministrationSpec) -> None:
@@ -145,8 +159,20 @@ def _assert_family_contract(spec: AdministrationSpec) -> None:
         raise GovernanceRefusal("administration method is outside the family contract")
     payload = _plain_mapping(spec.payload)
     expected_after = _plain_mapping(spec.expected_after)
-    _assert_secret_free(payload)
-    _assert_secret_free(expected_after, path="expected_after")
+    secret_like_paths = frozenset()
+    if spec.family is AdministrationFamily.SECURITY_AND_ANALYSIS:
+        features = {"secret_scanning", "secret_scanning_push_protection"}
+        secret_like_paths = frozenset(
+            f"{root}.security_and_analysis.{feature}"
+            for root in ("payload", "expected_after")
+            for feature in features
+        )
+    _assert_secret_free(payload, allowed_secret_like_paths=secret_like_paths)
+    _assert_secret_free(
+        expected_after,
+        path="expected_after",
+        allowed_secret_like_paths=secret_like_paths,
+    )
     if set(payload) != allowed_keys:
         raise GovernanceRefusal("administration payload keys drifted from the family contract")
     if expected_after != payload:
@@ -183,7 +209,15 @@ def _assert_family_contract(spec: AdministrationSpec) -> None:
 
 def _matches_expected(current: Mapping[str, Any], expected: Mapping[str, Any]) -> bool:
     for key, expected_value in expected.items():
-        if key not in current or current[key] != expected_value:
+        if key not in current:
+            return False
+        actual_value = current[key]
+        if isinstance(expected_value, Mapping):
+            if not isinstance(actual_value, Mapping) or not _matches_expected(
+                actual_value, expected_value
+            ):
+                return False
+        elif actual_value != expected_value:
             return False
     return True
 
@@ -192,7 +226,7 @@ def _observed_document(value: Any) -> tuple[dict[str, Any], str]:
     if not isinstance(value, GitHubRead):
         raise GovernanceRefusal("GitHub read did not return an observed document")
     body = _plain_mapping(value.body)
-    if not isinstance(value.etag, str) or _SERVER_VERSION.fullmatch(value.etag) is None:
+    if not isinstance(value.etag, str) or _ENTITY_TAG.fullmatch(value.etag) is None:
         raise GovernanceRefusal("GitHub read lacks an atomic server version")
     return body, value.etag
 
@@ -253,6 +287,10 @@ def apply_administration_family(
             effect="NONE",
             before=before,
             before_version=before_version,
+        )
+    if before_version.startswith("W/"):
+        raise GovernanceRefusal(
+            "GitHub read lacks a strong atomic server version for mutation"
         )
 
     try:
