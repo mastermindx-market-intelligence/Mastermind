@@ -51,7 +51,7 @@ ACTION_REQUIRED_OUTCOME: SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER
 SISTER_SOL_POLICY: OBSERVE_ONLY_UNLESS_EXACT_ACTION_TARGET
 ```
 
-On an action-required event, a positive terminal instruction equivalent to `Sol action required`, `waiting for Sol`, or `stand by for Sol's ruling` is a contract failure. A prohibition or regression sentence such as `do not wait for Sol` is not itself a finding. Positive and negated phrases are adjudicated within their local semantic clause so a preceding unrelated `do not` cannot hide a later instruction to wait. Valid completion of that watcher turn requires one of:
+On an action-required event, a positive terminal instruction equivalent to `Sol action required`, `waiting for Sol`, `await Sol`, `defer to Sol`, `escalate to Sol`, `pause for Sol`, or `stand by for Sol's ruling` is a contract failure. A prohibition or regression sentence such as `do not wait for Sol` is not itself a finding. Positive and negated phrases are adjudicated within their local semantic clause so a preceding unrelated `do not` or `no` cannot hide a later instruction to wait. Valid completion of that watcher turn requires one of:
 
 1. a lawful same-carrier `CONTINUE`, `RULING`, `REQUEST_REPAIR`, `PARK/HOLD`, or terminal `STOP`; or
 2. a typed blocker naming the actual boundary, such as `CHAIRMAN_ONLY`, `ATTENTION_OWNER_CONFLICT`, `EFFECT_UNKNOWN`, `CARRIER_UNREADABLE`, `WRITE_UNAVAILABLE`, or `SOURCE_LAW_CONFLICT`.
@@ -65,8 +65,6 @@ ACTION_REQUIRED_EVENTS: NONE
 ACTION_REQUIRED_OUTCOME: OBSERVE_ONLY_NO_MODIFY
 SISTER_SOL_POLICY: NEVER_ACT_WITHOUT_CANONICAL_TRANSFER
 ```
-
-Positive observer modification instructions are rejected, while explicit prohibitions such as `never issue a Sol ruling` remain valid.
 
 ### `PARENT_ORCHESTRATOR`
 
@@ -92,6 +90,10 @@ SISTER_SOL_POLICY: NEVER_ELECT_BY_RECENCY
 
 A triage task may use an aggregate scope. The exact child action surface must act or receive canonical transfer before a modifying child edge is written.
 
+### Non-authoritative body fence
+
+Every non-authoritative role—observer, parent orchestrator, and triage—must also be checked for positive authority hidden in body prose. It may not post/send/issue child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, or `STOP`; merge/release or arm auto-merge; retry/resubmit/requeue/fail over; or commission/start a successor. Explicit prohibitions remain valid. The header therefore cannot be used to launder a modifying body.
+
 ## Contract validation
 
 `control_plane.sol_watcher_contract.validate_watcher_prompt()` is deterministic and standard-library only. It verifies:
@@ -103,9 +105,20 @@ A triage task may use an aggregate scope. The exact child action surface must ac
 - exact-carrier fresh-read instruction;
 - same-carrier/no-blind-retry/no-lifecycle-inference/terminal-STOP laws;
 - clause-local positive notification-only anti-patterns without false-rejecting explicit prohibitions;
-- observer/parent/triage authority widening.
+- all non-authoritative body authority widening.
 
-`scripts/audit_sol_watchers.py` accepts an account-local JSON export and emits a machine-readable report. Every wrapper entry declares `audit_kind: SOL_WATCHER | NON_WATCHER`; omission defaults to `SOL_WATCHER` for backward compatibility. Enabled `NON_WATCHER` tasks remain visible but are excluded from watcher-conformance counts. Unknown audit kinds fail closed even when the wrapped native task is disabled, because the export classification itself is ambiguous. The CLI never connects to ChatGPT, Slack, GitHub, Executive OS, or a provider and never mutates a task.
+`scripts/audit_sol_watchers.py` accepts an account-local JSON export and emits a machine-readable report. Every wrapper entry declares `audit_kind: SOL_WATCHER | NON_WATCHER`; omission defaults to `SOL_WATCHER` for backward compatibility. Enabled `NON_WATCHER` tasks remain visible but are excluded from watcher-conformance counts.
+
+The export envelope is fail-closed:
+
+- a native `id` or `task_id` must be present, non-empty, and unique;
+- conflicting `id` and `task_id` values refuse;
+- `is_enabled` or `enabled` must be a real JSON boolean; strings, numbers, missing values, or conflicting aliases refuse;
+- unknown audit kinds refuse even when disabled;
+- duplicate task IDs refuse even when disabled/non-watcher;
+- non-object task entries refuse.
+
+The report separates `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and `duplicate_task_ids`. A malformed wrapper cannot be coerced into a green watcher count. The CLI never connects to ChatGPT, Slack, GitHub, Executive OS, or a provider and never mutates a task.
 
 ## Three-account deployment
 
@@ -145,15 +158,17 @@ Existing W3A/W3C/MAS-229/AD-SOL1 carriers must be continued rather than duplicat
 ## Acceptance
 
 1. The FF/FIF notification-only prompt is rejected with `NOTIFICATION_ONLY_SELF_DEADLOCK`.
-2. A valid action-authoritative watcher passes, including explicit `do not wait for Sol` law.
-3. An unrelated negation earlier in the same line cannot conceal a later positive `wait for Sol` instruction.
-4. A sister-Sol observer that can modify the child is rejected, while explicit observer prohibitions pass.
-5. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
-6. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
-7. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts; unknown classifications fail the report even when disabled.
-8. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
-9. Focused tests and repository CI are green on the exact final head.
-10. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
+2. A valid action-authoritative watcher passes, including explicit `do not wait for Sol` and `no blind retry` law.
+3. An unrelated negation earlier in the same line cannot conceal a later positive self-deferral instruction.
+4. Every self-deferral synonym above is rejected.
+5. Every non-authoritative role rejects positive child modification/retry/release/successor instructions, while explicit prohibitions pass.
+6. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
+7. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
+8. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts.
+9. Missing/duplicate native IDs, non-boolean enabled flags, conflicting aliases, unknown classifications, and non-object entries fail the overall audit.
+10. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
+11. Focused tests and repository CI are green on the exact final head.
+12. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
 
 ## Non-goals
 
