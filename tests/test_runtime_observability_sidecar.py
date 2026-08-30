@@ -3,7 +3,6 @@ from __future__ import annotations
 import socket
 import threading
 import time
-from collections.abc import Callable
 
 import pytest
 
@@ -15,7 +14,7 @@ from integrations.runtime_observability.sidecar import (
     RuntimeDiagnosticSidecar,
 )
 from integrations.runtime_observability.sinks import (
-    BrokenDiagnosticSinkForTests,
+    CompositeSink,
     InMemorySink,
 )
 
@@ -133,7 +132,7 @@ def test_dedupe_entry_ceiling_evicts_oldest() -> None:
         dedupe_max_age_seconds=900.0,
     )
     raws = []
-    for index in range(3):
+    for _index in range(3):
         event_id = next(ids)
         raws.append(packet(event_id_factory=lambda value=event_id: value))
         assert sidecar.process_packet(raws[-1]).accepted is True
@@ -143,14 +142,18 @@ def test_dedupe_entry_ceiling_evicts_oldest() -> None:
     assert sidecar.process_packet(raws[0]).accepted is True
 
 
+class BrokenSink:
+    def emit(self, event) -> None:
+        raise RuntimeError("sk-ant-abcdefghijklmnopqrstuvwxyz")
+
+    def close(self) -> None:
+        return None
+
+
 def test_sink_failure_is_counted_but_packet_remains_accepted() -> None:
     healthy = InMemorySink()
-    sidecar = RuntimeDiagnosticSidecar(
-        sink=BrokenDiagnosticSinkForTests(
-            healthy_sink=healthy,
-            secret="sk-ant-abcdefghijklmnopqrstuvwxyz",
-        )
-    )
+    composite = CompositeSink((BrokenSink(), healthy))
+    sidecar = RuntimeDiagnosticSidecar(sink=composite)
 
     result = sidecar.process_packet(packet())
 
