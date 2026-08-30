@@ -39,29 +39,44 @@ Before changing any watcher on an account:
 ## Step 1 — Export the account-local task census
 
 Export every native task visible to the current account, including disabled tasks where the native
-surface exposes them. The minimum JSON input shape is:
+surface exposes them. Wrap each item with an audit classification so ordinary reminders and unrelated
+scheduled work are not misrepresented as Sol watcher defects.
+
+The JSON input shape is:
 
 ```json
 {
   "tasks": [
     {
-      "id": "native-task-id",
+      "id": "native-watcher-id",
       "title": "Human-readable title",
       "is_enabled": true,
+      "audit_kind": "SOL_WATCHER",
       "prompt": "Full current prompt text"
+    },
+    {
+      "id": "ordinary-reminder-id",
+      "title": "Ordinary reminder",
+      "is_enabled": true,
+      "audit_kind": "NON_WATCHER",
+      "prompt": "Unrelated task text"
     }
   ]
 }
 ```
 
+`SOL_WATCHER` is the default when `audit_kind` is omitted for backward compatibility. Use
+`NON_WATCHER` only after directly verifying that the task is not a Sol/CEO/worker continuation,
+program, parent, triage or account-hardening watcher. Unknown classifications fail closed.
+
 Do not include credentials, cookies, account tokens, private provider session payloads or unrelated
 chat transcripts. The export is an ephemeral audit input, not durable organizational truth.
 
 Record the export time in UTC. If the native task surface cannot export JSON, transcribe only the
-four fields above into a local temporary file and preserve the direct native task read as the source
+five fields above into a local temporary file and preserve the direct native task read as the source
 receipt.
 
-## Step 2 — Classify every enabled watcher
+## Step 2 — Classify every enabled Sol watcher
 
 Assign exactly one role from the current Skillpack:
 
@@ -71,6 +86,23 @@ Assign exactly one role from the current Skillpack:
   dedicated child watcher.
 - `TRIAGE_ONLY` — estate audit detects unconsumed returns and reconciles/reports without electing a
   child owner.
+
+`ACTION_AUTHORITATIVE` requires one exact Slack carrier:
+
+```text
+CARRIER: slack:<channel-id>/<parent-message-ts>
+```
+
+The other three roles may use either one exact Slack carrier or a closed aggregate scope:
+
+```text
+CARRIER: aggregate:<stable-scope-id>
+```
+
+An aggregate scope is only a bounded read/oversight label. It never makes the task authoritative for
+every child it can see. A parent or triage task that discovers an unconsumed child return must route
+or reconcile the attention defect; the exact child action surface acts only after current action-
+target proof or canonical transfer.
 
 If current canonical evidence cannot resolve whether a watcher is action-authoritative, classify it
 `OBSERVER_ONLY` or hold it disabled until canonical action-target transfer is proven. Do not upgrade
@@ -85,25 +117,27 @@ status=$?
 
 Exit codes:
 
-- `0` — every enabled task conforms to the structured prompt contract;
-- `1` — at least one enabled task has a contract finding;
+- `0` — every enabled `SOL_WATCHER` task conforms to the structured prompt contract;
+- `1` — at least one enabled watcher has a contract finding;
 - `2` — malformed/unreadable audit input.
 
-The validator is intentionally unable to inspect whether a native task really fired, whether a
-scheduled surface can use Slack, or whether a Sol edge committed. Those remain direct runtime and
+Enabled `NON_WATCHER` entries remain visible in the report but are excluded from watcher-conformance
+counts. The validator is intentionally unable to inspect whether a native task really fired, whether
+a scheduled surface can use Slack, or whether a Sol edge committed. Those remain direct runtime and
 transport facts.
 
 ## Step 4 — Repair invalid prompts in place
 
 For each invalid enabled watcher:
 
-1. Re-read its exact operation and Slack carrier.
+1. Re-read its exact operation and Slack carrier or closed aggregate scope.
 2. Reconcile the latest valid semantic edge and current action-target role.
 3. Preserve the existing native watcher ID, schedule, operation key and carrier whenever the task is
    otherwise healthy.
 4. Replace or prepend the prompt with the exact `MMX_SOL_WATCHER_V1` header required by its role.
-5. Remove notification-only instructions that cause an action-authoritative watcher to say “Sol
-   action required,” “waiting for Sol,” or “stand by for Sol's ruling.”
+5. Remove positive notification-only instructions that cause an action-authoritative watcher to say
+   “Sol action required,” “waiting for Sol,” or “stand by for Sol's ruling.” A prohibition such as
+   “do not wait for Sol” is valid and should remain explicit.
 6. Add the exact-carrier fresh-read fence, current-Skillpack re-pin, same-carrier/no-blind-retry/no-
    lifecycle-inference laws, and terminal STOP-before-disarm sequence.
 7. For observer/parent/triage tasks, remove any authority to `CONTINUE`, `RULING`,
