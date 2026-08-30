@@ -30,6 +30,11 @@ def test_three_account_runbook_is_account_local_and_receipted() -> None:
         "does not identify or authorize all three ChatGPT web accounts",
         "audit each exact web account's native Tasks/Automations store",
         "Codex availability is not a watcher-store prerequisite",
+        "native task ID must be present and unique",
+        "enabled state must be a JSON boolean",
+        "duplicate native task IDs",
+        "invalid_export_tasks",
+        "every non-authoritative role",
     )
     for phrase in required_phrases:
         assert phrase in text, f"missing account hardening law: {phrase}"
