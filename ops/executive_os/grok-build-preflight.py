@@ -540,10 +540,10 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         receipt = build_receipt(args.grok_binary)
-    except PreflightError as exc:
-        # `public_code` is closed at exception construction; never log exception
-        # text, provider output, paths, credentials, or raw user-controlled data.
-        print(json.dumps({"ok": False, "error": exc.public_code}, sort_keys=True))
+    except PreflightError:
+        # No exception-derived text crosses stdout. Expected auth/protocol refusal
+        # is represented by a validated receipt; exceptional failures are opaque.
+        print(json.dumps({"ok": False, "error": PUBLIC_FAILURE}, sort_keys=True))
         return 2
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
     return 0 if receipt["oauth_ready"] else 1
