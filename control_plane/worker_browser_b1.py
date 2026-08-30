@@ -162,6 +162,20 @@ _CLEANUP_GRACE_SECONDS = 3.0
 _CLEANUP_PROOF_SECONDS = 3.0
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_HTTP_FIELD_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_PROXY_RESPONSE_HOP_BY_HOP_HEADERS = frozenset(
+    {
+        "connection",
+        "content-length",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
 _REQUIRED_EGRESS_FALSIFIERS = frozenset(
     {
         "external_fetch",
@@ -735,6 +749,38 @@ def _validate_origin(origin: str) -> None:
         raise ValueError("origin must be an exact loopback origin")
 
 
+def _validated_proxy_response_headers(
+    headers: Sequence[tuple[object, object]],
+) -> tuple[tuple[str, str], ...]:
+    """Reject an upstream response atomically instead of rewriting unsafe fields."""
+
+    forwarded: list[tuple[str, str]] = []
+    for field in headers:
+        if not isinstance(field, (tuple, list)) or len(field) != 2:
+            raise ValueError("upstream response header is malformed")
+        name, value = field
+        if not isinstance(name, str) or _HTTP_FIELD_NAME_RE.fullmatch(name) is None:
+            raise ValueError("upstream response header name is invalid")
+        if not isinstance(value, str):
+            raise ValueError("upstream response header value is invalid")
+        try:
+            encoded_value = value.encode("latin-1")
+        except UnicodeEncodeError as exc:
+            raise ValueError("upstream response header value is invalid") from exc
+        if any(
+            byte != 0x09 and not 0x20 <= byte <= 0x7E and not 0x80 <= byte <= 0xFF
+            for byte in encoded_value
+        ):
+            raise ValueError("upstream response header value is invalid")
+        if name.lower() not in _PROXY_RESPONSE_HOP_BY_HOP_HEADERS:
+            # Unsafe fields are rejected above. These are identity copies for accepted
+            # fields, while also making the line-break barrier explicit to CodeQL.
+            safe_name = name.replace("\n", "").replace("\r", "")
+            safe_value = value.replace("\n", "").replace("\r", "")
+            forwarded.append((safe_name, safe_value))
+    return tuple(forwarded)
+
+
 def _canonical_bytes(value: object) -> bytes:
     return json.dumps(
         value,
@@ -920,6 +966,13 @@ class LoopbackEnforcingProxy:
                 self.end_headers()
                 self.close_connection = True
 
+            def _bad_gateway(self) -> None:
+                self.send_response(502, "Bad Gateway")
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+
             @staticmethod
             def _external_reason(hostname: str | None) -> str:
                 return _EGRESS_PROBE_HOSTS.get(
@@ -987,39 +1040,27 @@ class LoopbackEnforcingProxy:
                 try:
                     upstream.request(self.command, path, headers=forwarded_headers)
                     response = upstream.getresponse()
+                    response_headers = _validated_proxy_response_headers(
+                        response.getheaders()
+                    )
                     body = response.read(MAX_PROXY_RESPONSE_BYTES + 1)
-                except (OSError, http.client.HTTPException):
-                    self.send_response(502, "Bad Gateway")
-                    self.send_header("Content-Length", "0")
-                    self.send_header("Connection", "close")
-                    self.end_headers()
-                    self.close_connection = True
-                    return
+                except (
+                    OSError,
+                    TypeError,
+                    UnicodeError,
+                    ValueError,
+                    http.client.HTTPException,
+                ):
+                    return self._bad_gateway()
                 finally:
                     upstream.close()
                 if len(body) > MAX_PROXY_RESPONSE_BYTES:
-                    self.send_response(502, "Bad Gateway")
-                    self.send_header("Content-Length", "0")
-                    self.send_header("Connection", "close")
-                    self.end_headers()
-                    self.close_connection = True
-                    return
+                    return self._bad_gateway()
                 with owner._lock:
                     owner._allowed_requests += 1
-                self.send_response(response.status, response.reason)
-                for name, value in response.getheaders():
-                    if name.lower() not in {
-                        "connection",
-                        "content-length",
-                        "keep-alive",
-                        "proxy-authenticate",
-                        "proxy-authorization",
-                        "te",
-                        "trailer",
-                        "transfer-encoding",
-                        "upgrade",
-                    }:
-                        self.send_header(name, value)
+                self.send_response(response.status)
+                for name, value in response_headers:
+                    self.send_header(name, value)
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Connection", "close")
                 self.end_headers()

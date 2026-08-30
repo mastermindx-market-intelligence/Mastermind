@@ -1747,6 +1747,210 @@ def _raw_proxy_request(proxy_url: str, request: bytes) -> bytes:
             chunks.append(chunk)
 
 
+def _install_fake_upstream(
+    monkeypatch,
+    *,
+    status: int,
+    reason: str,
+    headers: list[tuple[str, str]],
+    body: bytes,
+) -> list[tuple[str, str, dict[str, str]]]:
+    observed: list[tuple[str, str, dict[str, str]]] = []
+
+    class FakeResponse:
+        def read(self, limit: int) -> bytes:
+            assert limit == browser.MAX_PROXY_RESPONSE_BYTES + 1
+            return body
+
+        def getheaders(self) -> list[tuple[str, str]]:
+            return list(headers)
+
+    FakeResponse.status = status
+    FakeResponse.reason = reason
+
+    class FakeConnection:
+        def __init__(self, host: str, port: int, *, timeout: int):
+            assert host == "127.0.0.1"
+            assert port == 48101
+            assert timeout == 10
+
+        def request(
+            self, method: str, path: str, *, headers: dict[str, str]
+        ) -> None:
+            observed.append((method, path, dict(headers)))
+
+        def getresponse(self) -> FakeResponse:
+            return FakeResponse()
+
+        def close(self) -> None:
+            return
+
+    monkeypatch.setattr(browser.http.client, "HTTPConnection", FakeConnection)
+    return observed
+
+
+@pytest.mark.parametrize(
+    ("hostile_name", "hostile_value"),
+    [
+        pytest.param(
+            "X-Upstream\r\nX-Injected",
+            "never-reflect-name",
+            id="hostile-name-crlf",
+        ),
+        pytest.param(
+            "Bad Header", "never-reflect-name", id="hostile-name-nontoken"
+        ),
+        pytest.param(
+            "X-Upstream",
+            "never-reflect-value\rX-Injected: 1",
+            id="hostile-value-cr",
+        ),
+        pytest.param(
+            "X-Upstream",
+            "never-reflect-value\nX-Injected: 1",
+            id="hostile-value-lf",
+        ),
+        pytest.param(
+            "X-Upstream",
+            "never-reflect-value\x00X",
+            id="hostile-value-nul",
+        ),
+        pytest.param(
+            "X-Upstream",
+            "never-reflect-value\u2028X",
+            id="hostile-value-non-latin1",
+        ),
+    ],
+)
+def test_proxy_rejects_complete_hostile_upstream_header_set_before_starting_response(
+    monkeypatch, hostile_name: str, hostile_value: str
+):
+    """A late hostile field must fail before any upstream 2xx bytes are emitted."""
+
+    body = b"never-reflect-body"
+    observed = _install_fake_upstream(
+        monkeypatch,
+        status=200,
+        reason="OK",
+        headers=[
+            ("Content-Type", "text/plain"),
+            ("X-Early-Safe", "must-not-leak"),
+            (hostile_name, hostile_value),
+        ],
+        body=body,
+    )
+    origin = "http://127.0.0.1:48101"
+    proxy = browser.LoopbackEnforcingProxy(origin)
+    proxy.start()
+    try:
+        raw = _raw_proxy_request(
+            proxy.proxy_url,
+            (
+                f"GET {origin}/product?view=review HTTP/1.1\r\n"
+                "Host: 127.0.0.1:48101\r\nConnection: close\r\n\r\n"
+            ).encode(),
+        )
+        receipt = proxy.receipt()
+    finally:
+        proxy.stop()
+
+    head, separator, payload = raw.partition(b"\r\n\r\n")
+    assert raw.startswith(b"HTTP/1.1 502 Bad Gateway\r\n")
+    assert raw.count(b"HTTP/1.1 ") == 1
+    assert b"HTTP/1.1 200" not in raw
+    assert separator == b"\r\n\r\n"
+    assert b"Content-Length: 0" in head
+    assert b"Connection: close" in head
+    assert payload == b""
+    assert observed == [
+        (
+            "GET",
+            "/product?view=review",
+            {"Host": "127.0.0.1:48101"},
+        )
+    ]
+    assert receipt["allowed_requests"] == 0
+    for forbidden in (
+        b"X-Early-Safe",
+        b"must-not-leak",
+        b"X-Injected",
+        b"never-reflect-name",
+        b"never-reflect-value",
+        body,
+    ):
+        assert forbidden not in raw
+
+
+def test_proxy_forwards_only_valid_end_to_end_upstream_headers_and_reframes_body(
+    monkeypatch,
+):
+    body = b"safe-upstream-body"
+    observed = _install_fake_upstream(
+        monkeypatch,
+        status=201,
+        reason="Created\r\nX-Reason-Injected: never-reflect-reason",
+        headers=[
+            ("Content-Type", "text/plain; charset=utf-8"),
+            ("X-Upstream-Trace", "safe-visible"),
+            ("Set-Cookie", "first=safe"),
+            ("Set-Cookie", "second=safe"),
+            ("Connection", "keep-alive"),
+            ("Content-Length", "999999"),
+            ("Keep-Alive", "timeout=60"),
+            ("Proxy-Authenticate", "Basic realm=upstream"),
+            ("Proxy-Authorization", "secret"),
+            ("TE", "trailers"),
+            ("Trailer", "X-Late"),
+            ("Transfer-Encoding", "chunked"),
+            ("Upgrade", "websocket"),
+        ],
+        body=body,
+    )
+    origin = "http://127.0.0.1:48101"
+    proxy = browser.LoopbackEnforcingProxy(origin)
+    proxy.start()
+    try:
+        raw = _raw_proxy_request(
+            proxy.proxy_url,
+            (
+                f"GET {origin}/product HTTP/1.1\r\n"
+                "Host: 127.0.0.1:48101\r\nConnection: close\r\n\r\n"
+            ).encode(),
+        )
+        receipt = proxy.receipt()
+    finally:
+        proxy.stop()
+
+    head, separator, payload = raw.partition(b"\r\n\r\n")
+    assert raw.startswith(b"HTTP/1.1 201 Created\r\n")
+    assert raw.count(b"HTTP/1.1 ") == 1
+    assert separator == b"\r\n\r\n"
+    assert b"Content-Type: text/plain; charset=utf-8" in head
+    assert b"X-Upstream-Trace: safe-visible" in head
+    assert head.count(b"Set-Cookie: ") == 2
+    assert b"Set-Cookie: first=safe" in head
+    assert b"Set-Cookie: second=safe" in head
+    assert f"Content-Length: {len(body)}".encode() in head
+    assert b"Connection: close" in head
+    for stripped in (
+        b"keep-alive",
+        b"999999",
+        b"timeout=60",
+        b"realm=upstream",
+        b"Proxy-Authorization",
+        b"TE: trailers",
+        b"Trailer: X-Late",
+        b"Transfer-Encoding",
+        b"Upgrade: websocket",
+        b"X-Reason-Injected",
+        b"never-reflect-reason",
+    ):
+        assert stripped not in raw
+    assert payload == body
+    assert observed == [("GET", "/product", {"Host": "127.0.0.1:48101"})]
+    assert receipt["allowed_requests"] == 1
+
+
 def test_attempt_local_proxy_allows_only_exact_origin_and_refuses_every_escape_class():
     """Removing any proxy refusal branch must make a hostile request observable."""
 
