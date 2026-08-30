@@ -6,22 +6,20 @@
 **Status:** `SPEC_ONLY / RECORDS_ONLY / CURRENT-SOURCE RECONCILIATION`  
 **Operation:** `mastermind-project-workroom-fabric-20260829-sol-001`  
 **Canonical carrier:** Mastermind PR #240 / `sol/project-workroom-fabric-20260829`  
-**Current protected procedure/source:** `mastermindx-market-intelligence/Mastermind@e3d1fe6bb454df10212ce6e13bf2e4e5160f7eb5`  
+**Current protected source:** `mastermindx-market-intelligence/Mastermind@e3d1fe6bb454df10212ce6e13bf2e4e5160f7eb5`  
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
-**Linear:** MAS-231 / MAS-233 / MAS-235 / MAS-236; MAS-220 and MAS-221 are duplicate/superseded projections  
+**Linear:** MAS-231 / MAS-233 / MAS-235 / MAS-236  
 **Agent OS carrier:** Macro PR #6661
 
-This record freezes current source, carrier and dependency facts for the Federated Project Workroom Fabric. For those facts only, it has narrow precedence over older current-state snapshots in the Workroom architecture, amendments and rollout plan. It does not replace their product, authority, identity, planner, least-privilege, failure, experience, threat-model, promotion or completion laws.
+This record freezes current source, carrier and dependency facts for the Federated Project Workroom Fabric. For those facts only, it has narrow precedence over older current-state snapshots in the architecture, amendments and rollout plan. It does not replace their product, authority, identity, planner, least-privilege, experience, failure, threat-model, promotion or completion laws.
 
 This record creates no Slack or Linear object, app, credential, runtime, host, Agent OS or Executive effect and authorizes no implementation START.
 
 ---
 
-## 1. Current Chairman intent and source ownership
+## 1. Current intent and canonical ownership
 
-The current outer Chairman directive to this active Sol session is to continue end-to-end Workroom leadership, use Pro-mode depth and fan out bounded work through lawful existing carriers when useful. That present intent permits current-source reconciliation, review and collision-free release activity. It does not bypass one-carrier, runtime, permission, exact-receiver, current-base, security, effect-unknown or production-proof gates.
-
-Canonical ownership remains:
+The current outer Chairman directive to this active Sol session is to continue end-to-end Workroom leadership, use Pro-mode depth and fan out bounded work through lawful existing carriers when useful. That intent permits source reconciliation, review and collision-free release work. It does not bypass one-carrier, current-base, runtime, permission, exact-receiver, security, effect-unknown or production-proof gates.
 
 ```text
 Agent OS      durable organizational work, decisions, discoveries and handoffs
@@ -36,9 +34,9 @@ No retrieved Slack, Linear, GitHub or Agent OS prose grants authority merely bec
 
 ---
 
-## 2. Current protected prerequisites
+## 2. Protected prerequisites
 
-### 2.1 Watcher continuation procedure — protected #248
+### Watcher continuation procedure — #248
 
 Protected merge:
 
@@ -46,34 +44,22 @@ Protected merge:
 0604158caca9e3b8a43ec57dd36ca4dadf05198b
 ```
 
-Accepted behavior includes:
-
-- watcher prompts are attention filters, not surviving scope fences;
-- qualifying same-operation carrier events re-enter normal worker procedure;
-- native wake requires the exact current RuntimeBinding/native task, never title/recency/OCR fallback;
-- Class-M reasoning wakes default to 60 minutes, floor at 15 minutes, with 15→30→60 no-change backoff;
-- substantive reciprocal writes require a fresh exact-carrier read after the latest evidence-producing action;
-- child STOP removes only that child source, not an independently useful aggregate seat/principal watcher;
-- Slack delivery/native task identity remain distinct from consumption, ACK, START, execution and reusable capacity.
-
-Truthful state:
+Accepted behavior includes exact-session wake only, watcher-as-attention rather than scope fence, fresh exact-carrier reads before substantive reciprocal writes, 60m Class-M default / 15m floor / 15→30→60 no-change backoff, child-source-local STOP and strict separation of Slack delivery from consumption/ACK/START/execution.
 
 ```text
 procedure/bootstrap mitigation  BUILT_NOT_PROVEN / PROTECTED
 exact-session wake/consumption  NOT PROVEN LIVE by this merge
 ```
 
-Draft #245 is historical metadata/evidence only and is not an open Workroom predecessor.
+Draft #245 is historical metadata/evidence only.
 
-### 2.2 Canonical dialogue parent — protected AD-DLG2 #253
+### Canonical dialogue parent — AD-DLG2 #253
 
 Protected merge:
 
 ```text
 e3d1fe6bb454df10212ce6e13bf2e4e5160f7eb5
 ```
-
-Truthful state:
 
 ```text
 exactly-one canonical V2 parent source  BUILT_NOT_PROVEN / PROTECTED / PRODUCTION_DISARMED
@@ -82,44 +68,36 @@ Relay-authored observer integration      separate bounded wave
 AD-RET1 / AD-RET2                        not bundled
 ```
 
-AD-DLG2 is a Workroom-dialogue prerequisite. Its merge does not make multi-Workroom Relay, correct-Workroom routing, result projection or a real Project Workroom live.
-
-### 2.3 Earlier protected sources
-
-```text
-Agent Relay enrollment #238  BUILT_NOT_PROVEN / PROTECTED
-AD-ID1 request identity #239  BUILT_NOT_PROVEN / PROTECTED / PRODUCTION_INERT
-AD-CHILD1 identity #246       BUILT_NOT_PROVEN / PROTECTED / PRODUCTION_INERT
-```
+Earlier protected Agent Relay enrollment, AD-ID1 and AD-CHILD1 sources remain production-inert prerequisites rather than Workroom completion.
 
 ---
 
-## 3. Release-concurrency ruling
+## 3. Independent release law
 
-Mastermind #212 comment `5465803037` ends strict global protected-master serialization when it is only a convenience rather than a real dependency or source-law collision.
+Mastermind #212 comment `5465803037` ends strict global protected-master serialization when it is only convenience rather than a real dependency or source-law collision.
 
 A candidate may land independently when all are true:
 
-1. current-base reconciliation is exact;
-2. changed paths and authority/source-law surfaces are disjoint from other active releases;
-3. immutable exact-head required repository test/security proof is green;
+1. exact current-base reconciliation;
+2. changed paths and authority/source-law surfaces are disjoint from active releases;
+3. immutable exact-head required test/security proof is green;
 4. Sol/adversarial review passes the commissioned boundary;
-5. capability is classified honestly after merge;
-6. expected-head merge is unambiguous and uses the same carrier.
+5. capability is classified honestly;
+6. expected-head merge is unambiguous on the same carrier.
 
-Continue to serialize only for path/authority overlap, material source-law dependency, proof invalidation or unresolved effect/carrier ambiguity.
+Serialize only for path/authority overlap, material source-law dependency, proof invalidation or unresolved effect/carrier ambiguity.
 
 ### Workroom application
 
-#240 is a records-only architecture/source carrier. Its exact five documentation paths do not overlap #228's two Steward implementation paths. #240 may therefore release independently of #228 after its own exact-head gates pass.
+#240 is a five-file records-only architecture/source carrier and is path/authority-disjoint from #228's two Steward implementation files. #240 may release independently after its own gates pass.
 
-#228 remains mandatory for Steward-dependent product behavior and remains a hard predecessor for WR-P0/WR-STEW and real Workroom acceptance. Its correctness blocker is not waived.
+#228 remains mandatory for Steward-dependent WR-P0/WR-STEW behavior and real source-attributed Project Workroom acceptance. Its correctness and writer/effect state are not waived.
 
 ---
 
 ## 4. Canonical Workroom carriers
 
-### 4.1 #240 — sole architecture and rollout source
+### #240 — architecture and rollout source
 
 ```text
 operation = mastermind-project-workroom-fabric-20260829-sol-001
@@ -128,15 +106,7 @@ branch    = sol/project-workroom-fabric-20260829
 state     = OPEN / DRAFT / CURRENT-BASE / RECORDS_ONLY
 ```
 
-Before the commit containing this record, exact head was:
-
-```text
-a4712dbb3391b1d5d467f9f32244402bfcaf54dc
-```
-
-The current immutable head must be read from PR #240 before later action.
-
-Exact source surface remains five files:
+The immutable current head must be read from PR #240 before action. Exact source surface remains:
 
 1. `docs/superpowers/plans/2026-08-29-project-workroom-fabric-rollout.md`
 2. `docs/superpowers/specs/2026-08-29-project-workroom-fabric-design.md`
@@ -146,20 +116,11 @@ Exact source surface remains five files:
 
 #240 owns the product/authority architecture, public-internal V1, exact planner/source/resource contracts, least-privilege split, experience architecture, failure taxonomy, threat model, promotion gauntlet and future-wave handoffs. It owns no runtime or SaaS mutation.
 
-Release gate:
+Release requires exact-current-base five-file scope, fresh exact-head repository test, secret/placeholder/source-law scan, final Sol review, functional same-branch non-draft transition and expected-head merge.
 
-```text
-current-base exact five-file compare
-fresh exact-head repository test
-secret/placeholder/source-law adversarial scan
-final Sol review
-functional same-branch non-draft release path
-expected-head merge
-```
+Merge makes source law durable only. It does not make a Workroom, Projector, app, Canvas, Radar, Relay route, Linear join or pilot live.
 
-Merge makes source law durable only. It does not make a Workroom, projector, app, Canvas, Radar, Relay route, Linear join or pilot live.
-
-### 4.2 #242 — sole WR-R0 research child
+### #242 — WR-R0 research child
 
 ```text
 operation = mastermind-project-workroom-wr-r0-20260829-sol-001
@@ -168,15 +129,9 @@ branch    = sol/project-workroom-wr-r0-20260829
 state     = OPEN / DRAFT / STACKED / RESEARCH_ONLY
 ```
 
-Before this parent movement, exact head was:
+The same branch must remain zero-behind #240 and preserve exactly seven research/fixture blobs. After #240 protects, retarget the same PR to protected `master`, prove the exact seven-file delta, validate JSON/hash/resource/effect contracts, obtain fresh exact-head/current-base CI/security and complete Sol research acceptance.
 
-```text
-b2b9d26a20eaad3b889341bd7111a464fd68edea
-```
-
-The same branch must consume this #240 movement history-preservingly and preserve the exact seven research/fixture blobs. After #240 protects, retarget the same PR to protected `master`, prove the exact seven-file delta, validate JSON/hash/resource/effect contracts, run fresh exact-head/current-base CI/security and complete Sol research acceptance.
-
-### 4.3 Macro #6661 — sole Agent OS durability carrier
+### Macro #6661 — Agent OS durability
 
 ```text
 PR     = Macro #6661
@@ -184,15 +139,9 @@ branch = sol/project-workroom-fabric-agentos-20260829
 state  = OPEN / DRAFT / RECORDS_ONLY
 ```
 
-Before this source correction, exact head was:
+It owns one decision, one inert-channel discovery and one continuation handoff. After #240/#242 accepted identities are known, reconcile the same branch to then-current Macro main, update only exact source/carrier/dependency facts, preserve the inert-channel discovery unless the remote object changes, run Agent OS validation/fences/CI and merge only the accepted exact head.
 
-```text
-fe2bce3aaac438df71d49c69f38d1cd753fee5b6
-```
-
-It owns exactly one decision, one inert-channel discovery and one continuation handoff. After #240/#242 accepted identities are known, reconcile the same branch to then-current Macro main, update only exact source/carrier/dependency facts, preserve the inert-channel discovery unless the remote object changes, run Agent OS validation/fences/CI and merge only the accepted exact head.
-
-### 4.4 Historical and duplicate carriers
+### Historical / duplicate
 
 ```text
 Mastermind #232  CLOSED UNMERGED / metadata history
@@ -206,57 +155,50 @@ Do not reopen, merge or implement from them. Do not reuse operation `project-wor
 
 ---
 
-## 5. Parallel live dependency — Executive Steward #228
-
-Current carrier:
+## 5. Parallel Steward dependency — #228
 
 ```text
 PR        = Mastermind #228
 operation = ocr6-steward-read-core-20260829-sol-001
 branch    = codex/ocr6-steward-read-core-20260829-sol-001
-head      = 48307d714e155ac7e96c3918e3dba59aa17f132a
+head      = 48307d714e155ac7e96c3918e3dba59aa17f132a at this observation
 state     = OPEN / NON-DRAFT / REPAIR ACTIVE
 ```
 
-Its semantic delta remains exactly:
+Semantic paths:
 
 ```text
 control_plane/executive_steward.py
 tests/test_executive_steward.py
 ```
 
-Current blocker: presentation filters can hide duplicate canonical `responsibility_ref` or `attention_id` identities and manufacture apparent uniqueness.
+Correctness blocker: presentation filters can hide duplicate canonical `responsibility_ref` or `attention_id` identities and manufacture apparent uniqueness.
 
-Existing exact child — do not replace:
+Canonical repair dialogue:
 
 ```text
-operation   = ocr6-steward-filter-integrity-repair-20260829-trace-001
-Slack       = C0BSBM78V1N / 1788046478.879279
-receiver    = CTO-TRACE
-native task = 01a04bdf-b144-7af2-a08c-5d28ee63aad0
+operation = ocr6-steward-filter-integrity-repair-20260829-trace-001
+Slack     = C0BSBM78V1N / 1788046478.879279
 ```
 
-The final effect-none rebind has not yet produced a later ACK/WATCH_ARMED/START/RESULT. Preserve the exact operation and carrier. #228 may progress and land independently from #240 when its own gates pass.
+The live writer/runtime/effect state for #228 is intentionally **not** frozen into this architecture source. The canonical dialogue has contained rebinding and START-identity disagreement. At action time, read that exact thread and require the latest valid concrete writer/worktree/effect receipt. Never infer current writer or effect from Slack principal, prose label, historical native task or unchanged remote GitHub. Never create a replacement carrier while the existing operation remains unresolved.
 
-#228 remains a hard prerequisite for WR-P0/WR-STEW and the real source-attributed Project Workroom journey.
+#228 may land independently when its own exact-carrier gates pass. It remains a hard WR-P0/WR-STEW product prerequisite, not a mutex on #240.
 
 ---
 
-## 6. Exact Slack remote-effect state
+## 6. Exact Slack remote effect
 
 ```text
 workspace_id  = T0BRD2AQXQV
 channel_id    = C0BTQ71QEA0
 name          = canary-project-workroom-20260829
-creator       = U0BR1GQH7SB
 public        = true
 archived      = false
 topic         = ""
 purpose       = ""
 history       = creator-join only
 ```
-
-Ruling:
 
 ```text
 effect_state  = APPLIED
@@ -267,7 +209,7 @@ No retry, replacement, marker, implicit adoption, archive, deletion, app invite,
 
 ---
 
-## 7. Linear Initiative and Macro truth
+## 7. Linear Initiative / Macro truth
 
 Fresh connected Linear read:
 
@@ -290,7 +232,7 @@ ec2b4cc33560a719f35e6d1c8528c4d6828073a3
 ```text
 PR     = Macro #6658
 branch = sol/linear-initiative-plan-task2-20260829
-head   = 34aa97668332e964697db4a4db5e1b7b56c54055
+head   = 34aa97668332e964697db4a4db5e1b7b56c54055 at this observation
 state  = OPEN / DRAFT / NOT ACCEPTED / CURRENT OWNER UNRESOLVED
 ```
 
@@ -304,20 +246,20 @@ No summary/description drift widening and no live Linear mutation belong in #665
 
 ---
 
-## 8. WR-P0 prerequisite ledger
+## 8. WR-P0 prerequisites
 
-WR-P0 remains `NOT_BUILT`. Its START requires all of:
+WR-P0 remains `NOT_BUILT`. START requires:
 
 ```text
 #228 accepted/protected Steward read core
-#240 protected exact Workroom source set
-#242 accepted WR-R0 research and fixtures
+#240 protected Workroom source
+#242 accepted WR-R0 research/fixtures
 #6661 durable Agent OS records
-#6658 accepted Initiative desired-state/drift compiler
+#6658 accepted Initiative compiler
 accepted live Initiative apply and normalized post-apply readback
 current action-class-complete Slack snapshot
-current Macro path/open-carrier collision census
-one fresh WR-P0 operation, one carrier and one lawfully bound receiver
+current Macro path/open-carrier census
+one fresh WR-P0 operation, carrier and lawfully bound receiver
 ```
 
 MAS-64/MAS-66, MAS-189, Agent Relay activation/canary, RuntimeBinding/Wake and autonomous-delegation return/cutover waves retain their existing owners. Workroom implementation consumes them through exact joins rather than absorbing them.
@@ -350,16 +292,14 @@ Architecture, research, Slack objects, Linear status and green CI must never be 
 
 ---
 
-## 10. Current continuation order
-
-Independent, dependency-correct paths are:
+## 10. Continuation order
 
 ```text
-A. #240 exact-head CI + adversarial review + same-carrier source release
+A. #240 exact-head CI + adversarial review + source release
    → #242 retarget/current-base research proof + acceptance
    → #6661 final durable-record release
 
-B. existing #228 exact child repair/review/release in parallel
+B. existing #228 exact repair/review/release in parallel
 
 C. existing #6658 owner reconciliation and same-carrier repair
    → separately authorized Initiative apply/readback
@@ -374,7 +314,7 @@ No item authorizes its successor merely by existing, merging or becoming green.
 
 ## 11. Completion boundary
 
-This reconciliation permits disjoint records/research release without waiting on an unrelated implementation repair. It does not waive #228, make Initiatives live, build WR-P0, manage the inert channel, activate Agent Relay, install a projector app or prove a Project Workroom.
+This record permits disjoint records/research release without waiting on an unrelated implementation repair. It does not waive #228, make Initiatives live, build WR-P0, manage the inert channel, activate Agent Relay, install a Projector app or prove a Project Workroom.
 
 The program is incomplete until a real selected Project proves:
 
