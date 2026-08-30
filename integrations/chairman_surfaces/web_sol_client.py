@@ -2,7 +2,7 @@
 
 This module is intentionally separate from :mod:`chatgpt`: the historical
 managed-browser ``open_surface`` path remains fail-closed and gains no hidden
-promotion/fallback behavior.  OCR-6 may later call this seam only after it has
+promotion/fallback behavior. OCR-6 may later call this seam only after it has
 already resolved an exact Web-Sol surface binding.
 """
 from __future__ import annotations
@@ -18,10 +18,10 @@ from urllib.parse import urlsplit
 
 from control_plane import surface_bindings as sb
 
+from . import web_sol_instance as wsi
 from . import web_sol_native_host as native
 from . import web_sol_protocol as wsp
 
-WEB_SOL_SOCKET_PATH = native.SOCKET_PATH
 _SOCKET_TIMEOUT_SECONDS = 5.0
 _BINDING_REVISION_V1 = 0
 _MATCH_FIELDS = (
@@ -130,11 +130,16 @@ def _transport_failure_code(request: dict[str, Any], *, sent: bool) -> str:
     return "inspect_timeout"
 
 
-def _exchange_web_sol_socket(request: dict[str, Any]) -> dict[str, Any]:
-    """Exchange exactly one closed action/receipt over the fixed private socket."""
+def _exchange_web_sol_socket(
+    request: dict[str, Any],
+    *,
+    path: Path,
+) -> dict[str, Any]:
+    """Exchange exactly one closed action/receipt over one derived socket."""
 
     accepted = wsp.validate_request(request)
-    path = Path(WEB_SOL_SOCKET_PATH).expanduser()
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise WebSolExtensionError("socket_path_invalid")
     _private_socket_info(path)
 
     peer = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -200,6 +205,14 @@ def _validate_matching_receipt(request: dict[str, Any], receipt: Any) -> dict[st
     return accepted
 
 
+def _instance_socket(binding: dict[str, Any]) -> Path:
+    try:
+        instance_id = wsi.adapter_instance_id(binding)
+        return wsi.socket_path(instance_id)
+    except wsi.WebSolInstanceError as exc:
+        raise WebSolExtensionError(exc.code) from exc
+
+
 def _invoke(
     binding: dict[str, Any],
     *,
@@ -209,16 +222,18 @@ def _invoke(
     expires_at: str,
     nonce: str,
 ) -> dict[str, Any]:
+    accepted_binding = _valid_binding(binding)
     request = _compose_request(
-        binding,
+        accepted_binding,
         action=action,
         operation_key=operation_key,
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,
     )
+    path = _instance_socket(accepted_binding)
     try:
-        receipt = _exchange_web_sol_socket(request)
+        receipt = _exchange_web_sol_socket(request, path=path)
     except WebSolExtensionError:
         raise
     except native.NativeHostError as exc:
