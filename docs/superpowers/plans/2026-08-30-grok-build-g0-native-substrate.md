@@ -61,7 +61,7 @@ The preflight is provider-work-free in the model/inference sense. It may contact
 Allowed provider commands are exactly:
 
 ```text
-<absolute-grok-binary> version
+<absolute-grok-binary> --no-auto-update version
 <absolute-grok-binary> --no-auto-update agent stdio
 ```
 
@@ -78,7 +78,7 @@ Forbidden G0 actions include `session/new`, `session/prompt`, resume/continue, w
 
 - Grok/xAI remains the OAuth credential owner.
 - Mastermind never reads, copies, serializes, logs or transports cached token contents.
-- The child process environment is allowlisted and explicitly excludes `XAI_API_KEY`.
+- The child process environment is allowlisted and explicitly excludes `XAI_API_KEY`; `GROK_HOME` may pass through so an already-approved provider home can be honored without exposing that path in the receipt.
 - A successful G0 receipt proves only that ACP cached OAuth was usable for this preflight.
 - It **does not prove** that every future model invocation is OAuth-only, because provider config/model credential precedence may differ from the G0 environment.
 - Before a real Grok Executive worker is admitted, the actual execution realm must separately prove a provider-supported OAuth-only precedence/policy or fail closed. A managed `requirements.toml` policy may be used when supported by the enrolled xAI plan/estate; do not assume that enterprise control exists on every subscription.
@@ -118,7 +118,7 @@ It cannot be interpreted as Provider Capacity eligibility, Worker claim, Executi
 - `observed_at` is current UTC receipt time;
 - ACP protocol version is fixed to v1 for this contract;
 - missing `cached_token` is `CACHED_TOKEN_METHOD_UNAVAILABLE`, never inferred from other auth methods;
-- authentication error is `LOGIN_REQUIRED` unless a stronger bounded protocol failure is proven;
+- ACP initialize error is `ACP_INITIALIZE_FAILED`; protocol-version mismatch is `ACP_PROTOCOL_UNSUPPORTED`; cached-token authenticate error is `ACP_AUTHENTICATION_FAILED`; none is mislabeled as a definite login problem;
 - malformed/oversized/secret-shaped provider wire data fails closed and is never echoed;
 - source or provider contract drift requires a new reviewed preflight version or source repair rather than permissive parsing.
 
@@ -133,9 +133,9 @@ The provider owns OAuth state, token refresh, advertised ACP auth methods and au
 - `BINARY_UNAVAILABLE` / `BINARY_INVALID`
 - `PROVIDER_TIMEOUT` / `PROVIDER_COMMAND_FAILED`
 - `ACP_RESPONSE_INVALID` / `ACP_PROCESS_EXITED`
-- `ACP_PROTOCOL_UNSUPPORTED`
+- `ACP_INITIALIZE_FAILED` / `ACP_PROTOCOL_UNSUPPORTED`
 - `CACHED_TOKEN_METHOD_UNAVAILABLE`
-- `LOGIN_REQUIRED`
+- `ACP_AUTHENTICATION_FAILED`
 - secret-shaped wire/refusal
 
 Any provider-process ambiguity remains local G0 evidence only. Because G0 performs no model turn or company mutation, it never authorizes retry/failover of an Executive Attempt.
@@ -156,8 +156,8 @@ On the intended Grok Build worker host:
 
 1. resolve the exact installed Grok binary through the approved host/operator path;
 2. run the exact accepted preflight once;
-3. if `LOGIN_REQUIRED`, stop. A human/admin performs provider-native `grok login` or `grok login --device-auth` without exposing OAuth/browser/device secrets to the worker/model;
-4. rerun the read-only preflight after login;
+3. if cached OAuth is unavailable or authentication fails, stop and diagnose the provider-owned login state. When the cause is an absent/expired local login, a human/admin performs provider-native `grok login` or `grok login --device-auth` without exposing OAuth/browser/device secrets to the worker/model;
+4. rerun the read-only preflight after the provider-native login/repair;
 5. accept only `LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE` with the exact binary/version digest and `model_turn_performed=false`.
 
 No model canary is performed inside G0-B.
@@ -206,11 +206,11 @@ Focused source proof must include:
 
 - absolute regular executable / symlink / missing / size checks;
 - API-key and unrelated-secret environment suppression;
-- exact `version` and `--no-auto-update agent stdio` command allowlist;
+- exact `--no-auto-update version` and `--no-auto-update agent stdio` command allowlist;
 - exact ACP initialize request and protocol v1 check;
 - exact cached-token headless authenticate request;
 - cached-token missing / protocol mismatch / malformed / duplicate auth-method refusal;
-- authentication success and login-required behavior;
+- authentication success plus typed initialize/protocol/authentication failure behavior;
 - secret-shaped provider-wire rejection;
 - receipt rejects any `model_turn_performed=true` or `executive_routing_ready=true` claim;
 - static/procedural proof that G0 emits only `initialize` then `authenticate`, never session/prompt methods;
@@ -232,4 +232,4 @@ Return to Sol with:
 - independent review verdict;
 - any official Grok CLI/ACP contract drift discovered;
 - explicit confirmation of zero model prompt, zero Executive lifecycle effect and zero credential-content handling;
-- the exact host action required next: G0-B preflight or provider-native human login if the read-only preflight returns `LOGIN_REQUIRED`.
+- the exact host action required next: G0-B preflight, or provider-native human login/repair only after the read-only result establishes cached OAuth is unavailable or cannot authenticate.
