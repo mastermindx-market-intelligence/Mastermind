@@ -281,6 +281,33 @@ def test_v2_preserves_result_continue_then_worker_attempt_replacement() -> None:
     assert read.messages[2].message["applies_to"] == p2_applies
 
 
+def test_v2_ensure_thread_reuses_parent_across_attempt_rebound() -> None:
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(
+        SlackMessage(ts=THREAD_TS, author_user_id=BOT, text=render_parent_v2(_parent()))
+    )
+    engine = _engine(client)
+
+    async def scenario():
+        first = await engine.ensure_thread(
+            _attempt_context(_worker("p1")),
+            created_at="2026-08-29T04:00:00Z",
+        )
+        second = await engine.ensure_thread(
+            _attempt_context(_worker("p2")),
+            created_at="2026-08-29T04:05:00Z",
+        )
+        return first, second
+
+    first, second = asyncio.run(scenario())
+
+    assert first.action == second.action == "REUSED"
+    assert first.thread_ts == second.thread_ts == THREAD_TS
+    assert first.parent_fingerprint == second.parent_fingerprint
+    assert client.parent_post_call_count == 0
+    assert len(client.channel_messages) == 1
+
+
 def test_v2_history_refuses_foreign_job_inside_same_parent() -> None:
     current_actor = _worker("p2")
     foreign_actor = {
