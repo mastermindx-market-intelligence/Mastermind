@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from pathlib import Path
 import socket
 import threading
 
@@ -10,6 +11,7 @@ import pytest
 from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import chatgpt
 from integrations.chairman_surfaces import web_sol_client as client
+from integrations.chairman_surfaces import web_sol_instance as instance
 from integrations.chairman_surfaces import web_sol_native_host as native
 from integrations.chairman_surfaces import web_sol_protocol as wsp
 
@@ -79,7 +81,7 @@ def call_kwargs() -> dict:
 
 
 def test_public_extension_seam_is_explicit_and_does_not_accept_transport_or_target_overrides():
-    assert client.WEB_SOL_SOCKET_PATH == native.SOCKET_PATH
+    assert not hasattr(client, "WEB_SOL_SOCKET_PATH")
     for function in (client.inspect_via_extension, client.foreground_via_extension):
         signature = inspect.signature(function)
         assert list(signature.parameters) == [
@@ -89,7 +91,17 @@ def test_public_extension_seam_is_explicit_and_does_not_accept_transport_or_targ
             "expires_at",
             "nonce",
         ]
-        for forbidden in ("socket_path", "bridge", "provider", "account", "profile_id", "url", "retry"):
+        for forbidden in (
+            "socket_path",
+            "socket_root",
+            "instance_id",
+            "bridge",
+            "provider",
+            "account",
+            "profile_id",
+            "url",
+            "retry",
+        ):
             assert forbidden not in signature.parameters
 
 
@@ -114,10 +126,10 @@ def test_binding_fingerprint_is_deterministic_but_changes_on_exact_surface_drift
 
 def test_inspect_builds_one_closed_request_without_raw_locator_values(monkeypatch):
     row = binding()
-    seen: list[dict] = []
+    seen: list[tuple[dict, Path]] = []
 
-    def exchange(request):
-        seen.append(request)
+    def exchange(request, *, path):
+        seen.append((request, path))
         return receipt_for(request)
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
@@ -125,10 +137,11 @@ def test_inspect_builds_one_closed_request_without_raw_locator_values(monkeypatc
 
     assert result["status"] == "INSPECTED"
     assert len(seen) == 1
-    request = seen[0]
+    request, path = seen[0]
     assert request["action"] == "INSPECT"
     assert request["binding_revision"] == 0
     assert request["binding_id"] == row["binding_id"]
+    assert path == instance.socket_path(instance.adapter_instance_id(row))
     serialized = json.dumps(request, sort_keys=True)
     assert row["locator"]["url"] not in serialized
     assert row["locator"]["profile_id"] not in serialized
@@ -139,9 +152,10 @@ def test_foreground_builds_one_closed_request_and_never_retries(monkeypatch):
     row = binding()
     calls = 0
 
-    def exchange(request):
+    def exchange(request, *, path):
         nonlocal calls
         calls += 1
+        assert path == instance.socket_path(instance.adapter_instance_id(row))
         return receipt_for(request)
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
@@ -155,10 +169,10 @@ def test_invalid_binding_refuses_before_transport(monkeypatch):
     row["status"] = "running"
     calls = 0
 
-    def exchange(_request):
+    def exchange(_request, *, path):
         nonlocal calls
         calls += 1
-        raise AssertionError("transport must not be reached")
+        raise AssertionError(f"transport must not be reached: {path}")
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
     with pytest.raises(client.WebSolExtensionError, match="invalid_binding"):
@@ -171,10 +185,10 @@ def test_non_chatgpt_binding_refuses_before_transport(monkeypatch):
     row["provider"] = "codex"
     calls = 0
 
-    def exchange(_request):
+    def exchange(_request, *, path):
         nonlocal calls
         calls += 1
-        raise AssertionError("transport must not be reached")
+        raise AssertionError(f"transport must not be reached: {path}")
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
     with pytest.raises(client.WebSolExtensionError, match="invalid_binding"):
@@ -185,7 +199,8 @@ def test_non_chatgpt_binding_refuses_before_transport(monkeypatch):
 def test_mismatched_receipt_identity_is_refused(monkeypatch):
     row = binding()
 
-    def exchange(request):
+    def exchange(request, *, path):
+        assert path == instance.socket_path(instance.adapter_instance_id(row))
         return receipt_for(request, nonce="different-nonce-00000001")
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
@@ -196,7 +211,8 @@ def test_mismatched_receipt_identity_is_refused(monkeypatch):
 def test_protocol_error_is_laundered_without_locator_or_payload(monkeypatch):
     row = binding()
 
-    def exchange(_request):
+    def exchange(_request, *, path):
+        assert path == instance.socket_path(instance.adapter_instance_id(row))
         raise native.NativeHostError("inspect_timeout")
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
@@ -225,12 +241,11 @@ def test_legacy_open_surface_remains_fail_closed_and_chatgpt_module_stays_socket
     assert "AF_UNIX" not in source
 
 
-def test_fixed_socket_exchange_round_trips_one_request_without_retry(monkeypatch, tmp_path):
+def test_derived_socket_exchange_round_trips_one_request_without_retry(tmp_path):
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
     private.chmod(0o700)
-    path = private / "web_sol_surface.sock"
-    monkeypatch.setattr(client, "WEB_SOL_SOCKET_PATH", str(path))
+    path = private / "wsx-fixture.sock"
 
     ready = threading.Event()
     received: list[dict] = []
@@ -269,7 +284,7 @@ def test_fixed_socket_exchange_round_trips_one_request_without_retry(monkeypatch
         "expires_at": EXPIRES,
         "nonce": NONCE,
     })
-    result = client._exchange_web_sol_socket(request)
+    result = client._exchange_web_sol_socket(request, path=path)
     thread.join(timeout=2)
     assert result["status"] == "INSPECTED"
     assert received == [request]
