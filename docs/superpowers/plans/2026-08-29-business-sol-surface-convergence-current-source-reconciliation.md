@@ -1,119 +1,240 @@
 # Business Sol Surface Convergence — Current-Source Reconciliation
 
-**Date:** 2026-08-29  
-**Owner:** Sol, AI CEO  
-**Chairman:** Chris  
-**Parent architecture:** Mastermind PR #234 / exact approved head `063585120844ed02f57129770dd964744a4db97a`  
-**Planning branch before this record:** `sol/business-sol-surface-convergence-plan-20260829`  
-**Current protected Mastermind:** `a3053115c1cf75fa7e67279cb22c18e861e721ec`  
-**Current Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1 loaded atomically from that exact commit  
-**Capability:** `SPEC_ONLY / RECORDS_ONLY`
+**Program:** Business Sol Surface Convergence  
+**Architecture carrier:** Mastermind PR #234  
+**Program carrier:** Mastermind PR #236  
+**Capability:** `SPEC_ONLY / RECORDS_ONLY`  
+**Reconciled:** 2026-08-29
 
-## 1. Why this reconciliation exists
+## Purpose
 
-Protected Mastermind advanced after the architecture and initial planning pickup:
+This record makes the current Business Sol implementation and release state recoverable from
+Git rather than from the authoring chat. It supersedes older current-source statements in the BSC
+records where they conflict. The detailed architecture and task contracts remain controlling where
+this record does not amend them.
 
-```text
-1b99ea1d0a6232e11fd46915d348685764cb00cf
-  -> a3053115c1cf75fa7e67279cb22c18e861e721ec
-```
-
-The new protected commit is Mastermind PR #218 / MAS-188, the fixed Linear Portfolio Projector credential host boundary. The movement occurred while the stacked Business planning carrier was being authored, so current source was re-pinned before opening the planning PR.
-
-## 2. Exact changed-path census
-
-The protected movement adds exactly:
+## Current protected procedure
 
 ```text
-docs/LINEAR_PORTFOLIO_PROJECTOR_HOST.md
-ops/linear_projector/__init__.py
-ops/linear_projector/host_enrollment.py
-tests/test_linear_projector_host_enrollment.py
-tests/test_linear_projector_host_enrollment_fences.py
+repository = mastermindx-market-intelligence/Mastermind
+protected branch = master
+protected commit = 0604158caca9e3b8a43ec57dd36ca4dadf05198b
+Skillpack = mastermind.sol_skillpack.v1
+Skillpack version = 1.0.1
+minimum bootstrap major = 1
 ```
 
-It changes no:
+Protected `0604158...` contains accepted watcher continuation/resource hardening from PR #248.
+It does not contain the BSC architecture, program plans, plugin package, OAuth library, HC0 server,
+Business apps or a cockpit migration.
+
+## Exact current BSC carriers
+
+### BSC-F0 architecture
 
 ```text
-docs/sol_skills/**
-docs/superpowers/specs/2026-08-29-business-sol-surface-convergence-design.md
-docs/superpowers/plans/2026-08-29-business-sol-*.md
-.agents/plugins/**
-plugins/mastermind-sol/**
-plugins/mastermind-operator/**
-scripts/validate_mastermind_plugins.py
-tests/test_mastermind_plugin_packages.py
-Executive MCP / CeoIngress / CEO request identity
-Steward / Secretary MCP
-Company Dialogue MCP
-RuntimeBinding / Wake / Agent Relay
+PR = #234
+operation = business-sol-surface-convergence-f0-20260829-sol-001
+branch = sol/business-sol-surface-convergence-20260829
+head = d34c2fb6558b99ef5b37c405ca8bcb561416fd2e
+base = protected 0604158caca9e3b8a43ec57dd36ca4dadf05198b
+status = OPEN / DRAFT / HOLD
+scope = exactly three BSC specification files
+capability = SPEC_ONLY / CURRENT_BASE / UNPROTECTED
 ```
 
-The Skillpack INDEX, COLD_START and RECONCILE_STATE blobs remain compatible and unchanged from the planning pickup.
+The current-base composition removes stale comparison noise from Capacity and Linear projector paths.
+The exact protected-to-head delta is now only:
 
-## 3. Material architecture effect
+1. `2026-08-29-business-sol-surface-convergence-design.md`;
+2. `2026-08-29-business-sol-surface-fabric-attestation-amendment.md`;
+3. `2026-08-29-business-sol-host-metadata-contract-correction.md`.
 
-The movement is materially compatible with the approved Business architecture:
-
-- Linear remains selected human portfolio/project projection, not organizational or runtime truth.
-- The new credential host boundary remains `BUILT_NOT_PROVEN / PRODUCTION_INERT`; it creates no Linear app, real credential enrollment, OAuth exchange, network call or project mutation.
-- BSC does not rebuild or absorb that owner. BSC-O0 and later projection work continue to use the existing Linear projector lane.
-- The Business plugin package and OAuth/Steward/Executive architecture is unchanged.
-
-Therefore the BSC architecture and planning contents remain valid. No semantic amendment to the approved design is required from this movement.
-
-## 4. Branch and merge behavior
-
-The architecture branch and stacked planning branch intentionally preserve their accepted ancestry. Do not reset, rebase, force-update or silently rewrite them over the protected movement.
-
-Before any final architecture merge:
+### BSC program / P1 / HC0 / canary plans
 
 ```text
-re-read current protected master
-history-preservingly reconcile the same #234 branch
-verify exact one-file architecture diff relative to current protected source
-rerun affected exact-head checks
-obtain the current release-owner edge
+PR = #236
+operation = business-sol-surface-convergence-plan-20260829
+branch = sol/business-sol-surface-convergence-plan-20260829
+restacked head before this reconciliation edit = d26c0cd648b5713cee87df4d5115a81ac96f5c5f
+base = architecture head d34c2fb6558b99ef5b37c405ca8bcb561416fd2e
+status = OPEN / DRAFT / HOLD
+scope = exactly eight BSC plan/amendment files
+capability = SPEC_ONLY / CURRENT_STACK / UNPROTECTED
 ```
 
-After #234 protects, reconcile this same stacked planning carrier to that exact protected architecture merge before any planning readiness/merge edge. No stale check run authorizes release after either head moves.
+The eight-record stack contains the program DAG, the complete P1 plan set, HC0 plan/amendment and
+the Chairman-approved three-cockpit reversible canary amendment. It creates no runtime or account
+effect.
 
-## 5. Active release serialization remains unresolved for BSC
-
-Current `#mastermind-exec-ops` evidence still identifies `SOL-DIR-PRO` / epoch `20260829-pro-001` as the current autonomy release director. Its freeze permits independent branches to build and run CI but withholds nonurgent Automation / Executive / Control Room / Workroom / Secretary merges merely to create movement while AD-ID1 and Agent Relay enrollment advance.
-
-The independent #218 merge does not by itself release BSC-F0, this planning carrier, BSC-P1, or another Business wave. No current authoritative BSC release edge was found.
-
-A new same-principal attention-owner conflict is also visible on an unrelated CI carrier. BSC takes no direction, continuation, STOP, retry, merge or transfer action on that fleet.
-
-## 6. Current planning-source precedence
-
-For current source and release facts, this record has narrow precedence over the original protected-source sentences in:
+### BSC-O0 Agent OS parent record
 
 ```text
-docs/superpowers/plans/2026-08-29-business-sol-surface-convergence-program.md
-docs/superpowers/plans/2026-08-29-business-sol-plugin-packages.md
+repository = mastermindx-market-intelligence/macro
+PR = #6657
+operation = business-sol-surface-convergence-o0-20260829-sol-001
+head = 248bd7fec2660b1dc106b8e00fc50380a332993d
+base at reconciliation = Macro main 98067eeba4be191f853958d265b33621f314069f
+scope = exactly two Agent OS records
+status = OPEN / DRAFT / HOLD / CI RUNNING
 ```
 
-The complete BSC planning content remains:
+O0 preserves `WS:CHAIRMAN-CONTROL-ROOM` as the sole parent and does not edit the active workstream
+file.
+
+### BSC-P1 skills-only package
 
 ```text
-approved architecture PR #234
-program DAG
-P1 parent implementation plan
-P1 self-review amendment
-P1 current OpenAI platform-contract amendment
-this current-source reconciliation
+PR = #243
+operation = business-sol-plugin-packages-p1-20260829-sol-001
+branch = sol/business-sol-plugin-packages-p1-20260829
+head = 518e0036950156040e5d82c25b6f8f70d3f3a978
+parents = protected 0604158c... + reviewed payload 53569ec317cd7fe197e9a9c65897787c5122bc1e
+scope = exactly 20 added files / 1,653 additions / zero deletions
+status = OPEN / DRAFT / HOLD / fresh CI running
+capability = BUILT_NOT_PROVEN / PAYLOAD_RECOVERED_CURRENT_BASE / PRODUCTION_INERT
 ```
 
-Every later modifying boundary re-pins then-current protected source again; `a3053115...` is current evidence, not a permanent execution pin.
+The earlier destructive close/force movement did not reject the product. The same branch and PR were
+recovered with a non-force fast-forward, using every exact reviewed Git blob. No package byte was
+regenerated from prose. Historical review `5058669700` and green checks support the exact payload;
+current head still requires fresh test/security and final release review.
 
-## 7. Exact next action
+### BSC-A1 shared OAuth resource server
 
-Open the stacked planning PR against the architecture branch as `DRAFT / HOLD-FOR-SOL`, preserving the exact five-file planning scope and current source receipt. Do not start BSC-P1 until:
+```text
+planning PR = #237
+planning head = c7dfd3cc6a58a96d3c9e257e4a390a51f5eeaacd
+Linear = MAS-241
+implementation = NOT BUILT
+```
 
-1. #234 is protected on then-current master;
-2. the stacked planning carrier is reconciled to that protected architecture;
-3. the active release serialization permits an independent BSC implementation carrier;
-4. current OpenAI marketplace/plugin contracts are re-verified; and
-5. a fresh P1 path/authority collision census is clean.
+A1 owns the first implementation change to the shared maintained MCP v1 floor:
+`mcp==1.28.0 -> mcp==1.28.1`, plus pure resource-policy/auth contracts and full existing MCP
+regressions. Do not create a separate SDK wave and do not migrate to MCP 2.x inside A1.
+
+### BSC-HC0 host-context falsifier
+
+```text
+PR = #247
+head = a2775bf589c8a053c50943e52f97c16ea6ee316b
+Linear = MAS-240
+capability = PARTIAL / PURE CORE PASS / PRODUCTION INERT
+```
+
+The current four-file core safely reduces approved request `_meta` hints without exposing raw values
+or inferring identity/authorization. Missing: FastMCP wrapper, MCP-surface tests, loopback launcher,
+runbook and real registered-ChatGPT proof. HC0 server work waits for the accepted A1 Task-1 MCP floor.
+
+### Executive Steward dependency
+
+```text
+PR = #228
+current-base head = 48307d714e155ac7e96c3918e3dba59aa17f132a
+review blocker = 5059441389
+repair operation = ocr6-steward-filter-integrity-repair-20260829-trace-001
+repair carrier = C0BSBM78V1N/1788046478.879279
+current repair state = delivery-only / pre-START / effect NONE
+Linear = MAS-206
+```
+
+The Steward branch is current-based but is not release-ready. Presentation filtering may hide
+conflicting canonical responsibility or attention identity if filtering precedes grouping. Only the
+existing TRACE repair child may modify the two Steward paths. Baseline green CI cannot waive this
+correctness blocker.
+
+### BSC-SHADOW1 one-cockpit canary
+
+```text
+Linear = MAS-242
+state = NOT BUILT / ADMIN PREFLIGHT / COCKPIT SELECTION UNRESOLVED
+allowed first action = JOIN BUSINESS / KEEP PERSONAL WORKSPACE SEPARATE
+other cockpits = two retained controls
+account effect = NONE
+```
+
+Current official OpenAI workspace law distinguishes reversible workspace membership/switching from
+irreversible Personal-to-Business merge. The first canary preserves the Personal workspace and proves
+Personal -> Business -> Personal switching. No exact cockpit is selected until an account/workspace,
+active-operation and watcher census proves one zero-obligation target.
+
+Personal-to-Business merge requires the separate exact Chairman authorization frozen in the canary
+amendment. Successful workspace switching, P1 import, OAuth or MCP proof never implies that authority.
+
+## Current capability ledger
+
+```text
+BSC-F0 architecture               SPEC_ONLY / CURRENT_BASE / DRAFT
+BSC program                       SPEC_ONLY / CURRENT_STACK / DRAFT
+BSC-O0 Agent OS                   SPEC_ONLY / CURRENT_BASE / CI RUNNING
+BSC-P1 package source             BUILT_NOT_PROVEN / RECOVERED / CI RUNNING
+BSC-A1 OAuth boundary             SPEC_ONLY / NOT BUILT
+BSC-HC0 host-context probe        PARTIAL / CORE PASS / SURFACE INCOMPLETE
+Executive Steward                 BUILT_NOT_PROVEN / KNOWN CORRECTNESS BLOCKER
+BSC-SHADOW1 workspace canary      NOT BUILT / SELECTION UNRESOLVED
+Steward Business app              NOT BUILT
+Executive Business app            NOT BUILT
+workspace enrollment/auth/tunnel  NOT BUILT
+read/admission canaries            NOT BUILT
+dual run / RuntimeBinding          NOT BUILT
+Business-first cutover             NOT BUILT
+legacy subtraction                 NOT BUILT
+```
+
+## Superseded current-state assumptions
+
+The following older BSC statements are no longer current:
+
+- `BSC-P1 remains NOT_BUILT` — false; exact package source is recovered current-base and in fresh proof.
+- `#245 watcher continuity remains ahead of Steward` — false; #248 is protected as `0604158...`.
+- `Project Workrooms #232` is the current owner — false; canonical architecture/research is #240/#242.
+- `SOL-DIR-PRO` or another retrieved label automatically owns BSC release — false; current action
+  authority must be established at each release edge rather than inferred from stale prose.
+- `one Business cockpit implies whole-company/account cutover` — false; one reversible shadow cockpit
+  plus two controls is now the accepted topology.
+
+## Release and implementation order
+
+Current preferred ordering, subject to fresh action-time authority and collision checks:
+
+```text
+1. finish exact Steward #228 filter-integrity repair
+2. current-head Steward proof/review and expected-head release
+3. current-head BSC-F0 #234 proof/review and source-law release
+4. current-head BSC program #236 proof/review and stacked release
+5. finish P1 #243 fresh proof/review and protect exact 20-file package
+6. BSC-SHADOW1 Stage 0/1: select one zero-obligation cockpit and prove reversible workspace switch
+7. BSC-A1 Task 1: supported MCP v1.28.1 floor + pure auth foundation
+8. finish HC0 server/launcher/runbook and real host proof
+9. build authenticated Steward and Executive Business edges over existing owners
+10. run package, read, harmless admission and dual-run canaries
+11. implement only the accepted RuntimeBinding seam
+12. Business-first cutover, then proven legacy subtraction
+```
+
+P1 branch-local proof, O0 CI and read-only cockpit/account census may proceed in parallel because they
+create no protected-source, account or runtime effect. No protected merge should overtake a current
+serialized blocker merely to create movement.
+
+## No-rebuild / no-shortcut boundaries
+
+Do not:
+
+- create `WS:BUSINESS-SOL`, a super-MCP, Business session database or plugin memory store;
+- create another P1 PR/branch or regenerate the reviewed package;
+- create another Steward writer, auth library owner, RuntimeBinding registry, queue, retry plane or
+  Linear/Workroom synchronizer;
+- import/install P1 before its protected release and the one-cockpit canary gate;
+- select a cockpit from Slack sender, account nickname, tab recency or browser convenience;
+- merge a Personal workspace into Business as part of the reversible canary;
+- infer authority from workspace role, plugin install, OAuth, tunnel, ChatGPT confirmation, Slack
+  delivery, Linear state, CI or merge;
+- call `QUEUED` execution, a green MCP test host proof, or a source merge production acceptance.
+
+## Exact next action
+
+The blocking protected release is the existing Steward #228 correction. Preserve TRACE as the sole
+repair receiver and close review `5059441389` on one fresh immutable current-base head. While that
+proceeds, allow P1 #243 and O0 #6657 checks to finish and keep BSC-F0/program branches DRAFT/HOLD.
+No cockpit/account mutation is currently authorized because the exact zero-obligation selection
+receipt is still missing.
