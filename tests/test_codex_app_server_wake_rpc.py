@@ -19,10 +19,12 @@ from control_plane.executive_worker_broker import (
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
+    LaunchDecision,
     ProcessGenerationRef,
     ProcessIdentityObservation,
     ProviderWriterState,
     SessionEpochRef,
+    TurnRef,
     runtime_binding_id_for,
 )
 from control_plane.session_targets import RuntimeBinding
@@ -106,6 +108,10 @@ class FakeOwnedAppServerClient:
             },
         }
 
+    def drain_notifications(self) -> list[dict[str, Any]]:
+        self.calls.append(("drain_notifications", None))
+        return []
+
 
 def _owned_adapter(
     client: FakeOwnedAppServerClient,
@@ -118,6 +124,8 @@ def _owned_adapter(
     adapter.worker_id = GENERATION.worker_id
     adapter.workspace_root = Path("/tmp/mastermind-w3a-owned-workspace")
     adapter.process_identity_observer = lambda _pid: observed_process
+    requested = SimpleNamespace(approval_policy="never")
+    attestation = object()
     adapter._generations = {
         GENERATION.process_generation_id: SimpleNamespace(
             epoch=EPOCH,
@@ -126,14 +134,36 @@ def _owned_adapter(
             writer_state=writer_state,
             client=client,
             process=PROCESS,
-            requested=SimpleNamespace(approval_policy="never"),
+            requested=requested,
+            attestation=attestation,
             events=[],
             turns={},
+            turn_subordinates={},
             attention_inflight=False,
             attention_native_turn_id=None,
         )
     }
     return adapter
+
+
+def _begin_ordinary_turn(adapter: codex_adapter.CodexOperatorAdapter) -> None:
+    state = adapter._generations[GENERATION.process_generation_id]
+    adapter.turn_input_loader = lambda _turn: "ordinary governed turn"
+    adapter.begin_turn(
+        operation_id=object(),
+        turn=TurnRef(
+            turn_id="ordinary-turn-1",
+            session_epoch_id=EPOCH.session_epoch_id,
+            process_generation_id=GENERATION.process_generation_id,
+            attempt_id=ATTEMPT_ID,
+        ),
+        generation=GENERATION,
+        launch=SimpleNamespace(
+            decision=LaunchDecision.ALLOW,
+            observed=state.attestation,
+            requested=state.requested,
+        ),
+    )
 
 
 def test_attention_observation_is_closed_and_delivery_requires_acceptance() -> None:
@@ -445,6 +475,114 @@ def test_completion_timeout_blocks_a_second_attention_provider_write() -> None:
     assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
     assert error.value.effect_unknown is False
     assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_completion_timeout_blocks_ordinary_turn_provider_write() -> None:
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    adapter = _owned_adapter(client)
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.accepted is True
+    assert observation.delivered is False
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        _begin_ordinary_turn(adapter)
+
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert error.value.effect_unknown is False
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_post_submit_effect_unknown_blocks_ordinary_turn_provider_write() -> None:
+    client = FakeOwnedAppServerClient(fail_request=True)
+    adapter = _owned_adapter(client)
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as attention_error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert attention_error.value.effect_unknown is True
+    client.fail_request = False
+    with pytest.raises(codex_adapter.CodexAdapterError) as ordinary_error:
+        _begin_ordinary_turn(adapter)
+
+    assert ordinary_error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert ordinary_error.value.effect_unknown is False
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_mismatched_completion_blocks_ordinary_turn_provider_write() -> None:
+    client = FakeOwnedAppServerClient(
+        completion={
+            "method": "turn/completed",
+            "params": {
+                "threadId": NATIVE_HANDLE,
+                "turn": {"id": "stale-turn", "status": "completed"},
+            },
+        }
+    )
+    adapter = _owned_adapter(client)
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as attention_error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert attention_error.value.effect_unknown is True
+    with pytest.raises(codex_adapter.CodexAdapterError) as ordinary_error:
+        _begin_ordinary_turn(adapter)
+
+    assert ordinary_error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert ordinary_error.value.effect_unknown is False
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_exact_completion_allows_later_ordinary_turn() -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(client)
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.delivered is True
+    _begin_ordinary_turn(adapter)
+    assert [name for name, _payload in client.calls].count("turn/start") == 2
 
 
 @dataclass

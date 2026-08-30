@@ -1326,6 +1326,11 @@ class CodexOperatorAdapter:
         del operation_id
         state = self._state(generation)
         self._assert_turn(state, turn)
+        if state.attention_inflight:
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "turn refused while attention completion is unresolved",
+            )
         if launch.decision is not LaunchDecision.ALLOW:
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
