@@ -39,9 +39,9 @@ CACHED_TOKEN_METHOD = "cached_token"
 VERDICTS = frozenset(
     {
         "LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE",
-        "LOGIN_REQUIRED",
         "CACHED_TOKEN_METHOD_UNAVAILABLE",
         "ACP_AUTHENTICATION_FAILED",
+        "ACP_INITIALIZE_FAILED",
         "ACP_PROTOCOL_UNSUPPORTED",
     }
 )
@@ -103,6 +103,7 @@ _ALLOWED_ENV_KEYS = frozenset(
         "no_proxy",
         "XDG_CONFIG_HOME",
         "XDG_CACHE_HOME",
+        "GROK_HOME",
         "SSL_CERT_FILE",
         "SSL_CERT_DIR",
     }
@@ -208,7 +209,7 @@ def _hash_binary(binary: Path) -> str:
 def build_allowed_argv(binary: Path, operation: str) -> tuple[str, ...]:
     resolved = _require_binary(binary)
     if operation == "version":
-        return (str(resolved), "version")
+        return (str(resolved), "--no-auto-update", "version")
     if operation == "acp_stdio":
         return (str(resolved), "--no-auto-update", "agent", "stdio")
     _raise("COMMAND_NOT_ALLOWED")
@@ -327,7 +328,7 @@ def normalize_initialize_response(payload: Mapping[str, Any]) -> tuple[bool, str
     if not isinstance(payload, Mapping) or payload.get("jsonrpc") != "2.0" or payload.get("id") != 1:
         _raise("ACP_RESPONSE_INVALID")
     if "error" in payload:
-        return False, "ACP_PROTOCOL_UNSUPPORTED"
+        return False, "ACP_INITIALIZE_FAILED"
     result = payload.get("result")
     if not isinstance(result, Mapping):
         _raise("ACP_RESPONSE_INVALID")
@@ -348,8 +349,8 @@ def normalize_authenticate_response(payload: Mapping[str, Any]) -> AcpAuthObserv
         return AcpAuthObservation(
             cached_token_offered=True,
             oauth_ready=False,
-            verdict="LOGIN_REQUIRED",
-            reason_codes=("LOGIN_REQUIRED",),
+            verdict="ACP_AUTHENTICATION_FAILED",
+            reason_codes=("ACP_AUTHENTICATION_FAILED",),
         )
     if "result" not in payload:
         _raise("ACP_RESPONSE_INVALID")
