@@ -7,7 +7,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from control_plane.session_targets import load_session_targets, route_obligation
-from control_plane.wake_dispatcher import WakeEffectUnknownError
+from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
     PARENT_DISCRIMINATOR_V2,
@@ -439,6 +439,41 @@ def test_relay_parent_without_creation_mutation_evidence_refuses_without_wake() 
     asyncio.run(scenario())
 
 
+def test_relay_parent_with_creation_mutation_evidence_uses_original_and_wakes() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        for edited, deleted in ((True, False), (False, True)):
+            client = InMemorySlackClient(relay_bot_user_id=RELAY_USER)
+            client.add_parent(
+                SlackMessage(
+                    ts=PARENT_TS,
+                    author_user_id=RELAY_USER,
+                    text=f"{PARENT_DISCRIMINATOR_V2}{{malformed",
+                    edited=edited,
+                    deleted=deleted,
+                    created_text=render_parent_v2(parent),
+                )
+            )
+            carrier = RecordingWakeCarrier()
+            observer = DialogueTurnObserver(
+                policy=_policy(),
+                client=client,
+                registry=_registry(),
+                wake_carrier=carrier,
+            )
+
+            result = await observer.reconcile_once(
+                context=_context(parent), routing=_routing(parent)
+            )
+
+            assert result.outcome is ObservationOutcome.WAKE_SUBMITTED
+            assert result.obligation is not None
+            assert len(carrier.reconcile_calls) == 1
+            assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
 def test_observer_refuses_valid_foreign_repository_pr_before_wake_carrier() -> None:
     async def scenario() -> None:
         parent = _parent()
@@ -673,6 +708,46 @@ def test_effect_unknown_holds_same_identity_and_never_retries_submit() -> None:
         assert reconciled.obligation.obligation_id == first.obligation.obligation_id
         assert len(carrier.reconcile_calls) == 2
         assert len(carrier.submit_calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_pre_submit_failure_retries_same_identity_and_submits_on_next_poll() -> None:
+    class FailOncePreSubmitCarrier(RecordingWakeCarrier):
+        def __init__(self) -> None:
+            super().__init__()
+            self.failures_remaining = 1
+
+        async def submit(self, obligation, route) -> None:
+            self.submit_calls.append((obligation, route))
+            if self.failures_remaining:
+                self.failures_remaining -= 1
+                raise WakePreSubmitError("target was unavailable before submit")
+
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = FailOncePreSubmitCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent, parent_author=RELAY_USER),
+            registry=_registry(),
+            wake_carrier=carrier,
+        )
+
+        first = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        retried = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert first.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert first.reason == "WAKE_TARGET_UNAVAILABLE"
+        assert retried.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert first.obligation is not None and retried.obligation is not None
+        assert first.obligation.obligation_id == retried.obligation.obligation_id
+        assert len(carrier.reconcile_calls) == 2
+        assert len(carrier.submit_calls) == 2
 
     asyncio.run(scenario())
 
