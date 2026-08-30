@@ -1732,6 +1732,104 @@ def test_coo_retry_gate_requeues_only_exact_tx9_detached_lost(tmp_path):
     assert runtime.jobs.get_job(planner.job_id) == current_before_replay
 
 
+def test_coo_retry_gate_blocks_tx9_when_prior_effect_unknown_is_unresolved(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    root, planner, dispatch = _dispatched_planner(runtime)
+    attempt = dispatch.attempt
+    assert dispatch.lease_token is not None
+    operation = OperationId("ohf-op:coo-tx9-effect-unknown")
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE attempts SET execution_mode='OPERATOR_HARNESS',
+              requested_execution_profile_json='{}',
+              requested_execution_profile_digest=? WHERE attempt_id=?
+            """,
+            (hashlib.sha256(b"{}").hexdigest(), attempt.attempt_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO harness_session_epochs(
+              session_epoch_id,attempt_id,worker_id,epoch_number,
+              provider_session_id,state,created_at_ms
+            ) VALUES('EPOCH-COO-TX9-UNKNOWN',?,?,1,
+              'SESSION-COO-TX9-UNKNOWN','CURRENT',1)
+            """,
+            (attempt.attempt_id, attempt.worker_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO process_generations(
+              process_generation_id,session_epoch_id,worker_id,
+              provider_session_id,generation_number,started_at_ms,
+              executive_writer_held,provider_writer_state,created_at_ms
+            ) VALUES('GEN-COO-TX9-UNKNOWN','EPOCH-COO-TX9-UNKNOWN',?,
+              'SESSION-COO-TX9-UNKNOWN',1,1,1,'HELD',1)
+            """,
+            (attempt.worker_id,),
+        )
+        runtime.store.append_event(
+            connection,
+            aggregate_type="operator_operation",
+            aggregate_id=operation.command_id,
+            event_type="OPERATOR_OPERATION_INTENT",
+            command_id=operation.command_id,
+            actor="supervisor",
+            job_id=planner.job_id,
+            attempt_id=attempt.attempt_id,
+            worker_id=attempt.worker_id,
+            quota_class=attempt.quota_class,
+            payload={
+                "schema_version": "mastermind.operator_harness_intent/v1",
+                "operation_kind": "begin_turn",
+                "attempt_id": attempt.attempt_id,
+                "session_epoch_id": "EPOCH-COO-TX9-UNKNOWN",
+                "process_generation_id": "GEN-COO-TX9-UNKNOWN",
+                "worker_id": attempt.worker_id,
+                "provider_session_id": "SESSION-COO-TX9-UNKNOWN",
+            },
+        )
+    assert runtime.operator_harness.record_effect_unknown(
+        attempt_id=attempt.attempt_id,
+        operation_id=operation,
+        fence_generation=attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        phase="provider_response_missing",
+        detail="fixture call may have taken effect",
+    )
+    assert runtime.operator_harness.invalidate_after_restore() == 1
+    assert any(
+        event.event_type == "OPERATOR_OPERATION_EFFECT_UNKNOWN"
+        for event in runtime.events.list_events(attempt_id=attempt.attempt_id)
+    )
+    attempts_before = runtime.attempts.list_attempts(planner.job_id)
+
+    blocked = CooCycle(runtime).run_once(root.job_id)
+
+    assert blocked.action == "BLOCKED"
+    retry_receipt = blocked.receipt["evidence"]["retry_safety"]
+    assert retry_receipt["decision"] == "NEEDS_RECONCILIATION"
+    assert retry_receipt["evidence"]["retry_safety"] == (
+        "SAFE_PRE_EFFECT_INFRASTRUCTURE"
+    )
+    assert retry_receipt["evidence"]["effect_unknown"] is True
+    assert retry_receipt["evidence"]["attempt_id"] == attempt.attempt_id
+    assert not any(
+        event.event_type == "JOB_REQUEUED"
+        for event in runtime.events.list_events(job_id=planner.job_id)
+    )
+    assert runtime.attempts.list_attempts(planner.job_id) == attempts_before
+    assert len(attempts_before) == 1
+    events_after_block = runtime.events.list_events()
+
+    replay = CooCycle(runtime).run_once(root.job_id)
+
+    assert replay.to_dict() == blocked.to_dict()
+    assert runtime.events.list_events() == events_after_block
+    assert runtime.attempts.list_attempts(planner.job_id) == attempts_before
+
+
 @pytest.mark.parametrize(
     ("terminal", "retry_safety", "decision"),
     [

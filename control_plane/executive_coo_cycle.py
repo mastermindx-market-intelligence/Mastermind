@@ -208,6 +208,9 @@ class CooCycle:
             }
             candidate_present = "OHF_CANDIDATE_RESULT_RECORDED" in event_types
             seal_present = "ORCHESTRATION_ROLE_RESULT_SEALED" in event_types
+            operation_effect_unknown_present = (
+                "OPERATOR_OPERATION_EFFECT_UNKNOWN" in event_types
+            )
             result_present = bool(
                 (job_row is not None and job_row["result_json"] is not None)
                 or (attempt_row is not None and attempt_row["result_json"] is not None)
@@ -292,9 +295,12 @@ class CooCycle:
             provenance_digest=provenance_digest,
             retry_lineage_available=retry_lineage_available,
             effect_unknown=(
-                tx9_evidence_digest is None
-                and terminal_status
-                in {JobStatus.RATE_LIMITED.value, JobStatus.LOST.value}
+                operation_effect_unknown_present
+                or (
+                    tx9_evidence_digest is None
+                    and terminal_status
+                    in {JobStatus.RATE_LIMITED.value, JobStatus.LOST.value}
+                )
             ),
             writer_or_provider_generation_live=writer_or_provider_generation_live,
             candidate_present=candidate_present,
