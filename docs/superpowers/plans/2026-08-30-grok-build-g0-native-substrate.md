@@ -8,15 +8,15 @@
 
 ## Observable mission
 
-Prove, without a model turn or Executive lifecycle effect, that one exact installed Grok Build executable can be attested by its binary digest, can speak ACP v1 over stdio, exposes the provider-owned `cached_token` OAuth method, and can authenticate it headlessly; then use that evidence to unlock a separately bounded manual Grok Build canary while canonical automatic Executive routing continues through CF2 -> RF1 -> HF1.
+Prove, without a model turn or Executive lifecycle effect, that one exact installed Grok Build executable can be attested by stable binary identity, can speak ACP v1 over stdio, exposes the provider-owned `cached_token` OAuth method, and can authenticate it headlessly. Use that evidence to unlock a separately bounded manual Grok Build canary while canonical automatic Executive routing continues through CF2 -> RF1 -> HF1.
 
 ## Why this matters
 
-Mastermind already has substantial subscription-backed Grok capacity, but the canonical heterogeneous Executive worker path is still blocked behind Capacity Fabric and common-harness gates. Waiting for the entire automatic-routing stack before learning whether the official Grok Build execution surface is suitable would leave prepaid capacity idle and would couple provider discovery to the highest-collision control-plane paths.
+Mastermind has substantial subscription-backed Grok capacity, while canonical heterogeneous Executive placement still has Capacity Fabric and common-harness gates ahead of it. Waiting for the entire automatic-routing stack before learning or using the official Grok Build seam would strand prepaid capacity and would couple provider discovery to high-collision control-plane paths.
 
 G0 therefore creates **only the provider-native compatibility substrate** that HF1 can later consume. It does not create a Grok broker, provider router, lifecycle, queue, retry path, account store, credential bridge, capacity claim, or runtime alias.
 
-## Current canonical state and dependency boundary
+## Current canonical dependency boundary
 
 At the protected source pin:
 
@@ -26,23 +26,23 @@ At the protected source pin:
 - RF1 remains gated on accepted CF2-I and owns provider-neutral suitability tiers.
 - HF1 remains gated on accepted CF2-I and owns the provider-neutral WorkerExecutionAdapter/broker extraction.
 - PF1 currently names Claude as the preferred first real non-Codex Executive worker after RF1/HF1.
-- current common broker/router paths have active neighboring carriers and must not be touched by G0.
+- common broker/router paths have neighboring active carriers and are outside G0.
 - Grok Secretary/OpenClaw (#188 family) is a separate Chairman/operator-surface program and is not a Grok Build worker carrier.
 
-G0 changes none of those dependencies. A later source-law amendment may reorder the first real heterogeneous provider only after G0 host/canary evidence exists; this plan does not silently replace Claude PF1.
+G0 changes none of those dependencies. A later source-law amendment may reorder the first real heterogeneous provider only after real G0 host/canary evidence exists; this carrier does not silently replace Claude PF1.
 
 ## Official provider contract used by G0
 
 Current xAI Grok Build documentation exposes:
 
-- provider-native browser/device OAuth login through `grok login` / `grok login --device-auth`;
-- a headless CLI with explicit cwd/session/output/turn controls;
-- ACP over JSON-RPC stdin/stdout through `grok agent stdio`;
-- ACP initialization that advertises authentication methods, including `cached_token` when local OAuth exists;
-- headless authentication of that cached credential before any `session/new` or `session/prompt` is required;
+- browser/device OAuth through `grok login` / `grok login --device-auth`;
+- headless CLI controls;
+- ACP over newline-delimited JSON-RPC stdin/stdout through `grok agent stdio`;
+- ACP v1 initialization with advertised authentication methods;
+- explicit `cached_token` headless authentication before any model session is required;
 - `--no-auto-update` for stable automated/headless operation.
 
-Provider documentation is capability evidence, not organizational authority. Runtime admission still belongs to Mastermind owners.
+Provider documentation is capability evidence, not organizational authority. Runtime admission remains with Mastermind owners.
 
 ## Exact G0 source scope
 
@@ -52,11 +52,9 @@ New paths only:
 2. `tests/test_grok_build_preflight.py`
 3. `docs/superpowers/plans/2026-08-30-grok-build-g0-native-substrate.md`
 
-No existing `control_plane/**`, Model Router, Worker Broker, Worker adapter, Capacity, RuntimeBinding, Wake, Agent OS, Slack, Linear, provider configuration, credential, host installer, or production source changes.
+No existing `control_plane/**`, Model Router, Worker Broker, Worker adapter, Capacity, RuntimeBinding, Wake, Agent OS, Slack, Linear, provider configuration, credential, host installer, or production service changes.
 
-## G0 contract
-
-The preflight is provider-work-free in the model/inference sense. It may contact the provider during cached-OAuth authentication or refresh, but it must never create an ACP model session or submit a prompt.
+## G0 command and ACP contract
 
 Allowed provider commands are exactly:
 
@@ -72,18 +70,40 @@ initialize(protocolVersion=1, closed client metadata)
 authenticate(methodId="cached_token", _meta.headless=true)
 ```
 
-Forbidden G0 actions include `session/new`, `session/prompt`, resume/continue, worktree creation, model enumeration, login/logout, tool use, MCP, browser work, subagents, shell work, file editing, Git mutation, Executive Job creation or provider fallback.
+Forbidden G0 actions include `session/new`, `session/prompt`, resume/continue, worktree creation, model enumeration, login/logout, tool use, MCP, browser work, subagents, shell work, file editing, Git mutation, Executive Job creation, capacity claim, or provider fallback.
 
-## Secret/auth boundary
+## Stable executable identity / TOCTOU law
+
+Before provider interaction G0 snapshots the exact absolute regular executable:
+
+```text
+sha256
+size
+device
+inode
+mtime_ns
+```
+
+`--no-auto-update` disables the normal self-update path. G0 then rechecks the complete identity plus a fresh SHA-256:
+
+1. after `grok --no-auto-update version`;
+2. after ACP initialize/authenticate.
+
+Any drift fails closed as `BINARY_CHANGED_DURING_PREFLIGHT`; no readiness receipt is emitted. The public executable attestation is the SHA-256 only. This is an anti-race check, not a claim to defeat a privileged adversary capable of atomically swapping and restoring executable bytes between checks.
+
+## Secret/auth and provider-taint boundary
 
 - Grok/xAI remains the OAuth credential owner.
 - Mastermind never reads, copies, serializes, logs or transports cached token contents.
-- The child process environment is allowlisted and explicitly excludes `XAI_API_KEY`; `GROK_HOME` may pass through so an already-approved provider home can be honored without exposing that path in the receipt.
-- `grok version` output is validated internally and then discarded; raw provider-derived text is never published in the receipt. The exact executable is attested publicly by SHA-256 instead.
-- Exceptional preflight failures publish only the fixed `PREFLIGHT_FAILED` marker; no exception, provider output, path or credential-derived text crosses the public error channel.
-- A successful G0 receipt proves only that ACP cached OAuth was usable for this preflight.
-- It **does not prove** that every future model invocation is OAuth-only, because provider config/model credential precedence may differ from the G0 environment.
-- Before a real Grok Executive worker is admitted, the actual execution realm must separately prove a provider-supported OAuth-only precedence/policy or fail closed. A managed `requirements.toml` policy may be used when supported by the enrolled xAI plan/estate; do not assume that enterprise control exists on every subscription.
+- The child environment is allowlisted and excludes `XAI_API_KEY` and token-like environment auth.
+- `GROK_HOME` may pass through so an already-approved provider home can be honored, but no home path appears in the public receipt.
+- `grok version` output is bounded, internally validated, secret-scanned, then discarded.
+- ACP provider wire is bounded and secret-shaped values fail closed.
+- **Provider-derived ACP state is control-flow only.** It may select one of a closed set of literal receipt renderers, but no provider-derived value is passed into a renderer or serialized to stdout.
+- Every renderer receives only non-provider inputs: stable binary SHA-256 and UTC observation time.
+- Exceptional failures publish only fixed `PREFLIGHT_FAILED`; no exception/provider/path/credential-derived text crosses stdout.
+- A successful G0 result proves only cached-OAuth ACP readiness for this preflight.
+- It does **not** prove every future model invocation is OAuth-only. Current xAI credential precedence can select model-specific credentials before an active session, so the real Worker realm must separately prove the accepted OAuth-only policy/precedence or fail closed.
 
 ## Public receipt
 
@@ -102,53 +122,61 @@ verdict
 reason_codes
 ```
 
-It contains no raw provider text, version text, email, account identifier, token, home path, provider session id, host-private address, auth-file coordinate or raw provider output.
-
-The positive verdict is intentionally:
+Positive verdict:
 
 ```text
 LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE
 ```
 
-It cannot be interpreted as Provider Capacity eligibility, Worker claim, Executive routing readiness or production proof.
+Closed non-ready verdicts:
 
-## Data, time, null and correction behavior
+```text
+CACHED_TOKEN_METHOD_UNAVAILABLE
+ACP_AUTHENTICATION_FAILED
+ACP_INITIALIZE_FAILED
+ACP_PROTOCOL_UNSUPPORTED
+```
 
-- binary identity is SHA-256 of the exact regular executable bytes under a bounded maximum size;
-- symlink, relative, missing, non-regular, non-executable or oversized binaries fail closed;
-- provider version output must pass the bounded internal validator, but is never persisted or printed;
-- `observed_at` is current UTC receipt time;
-- ACP protocol version is fixed to v1 for this contract;
-- missing `cached_token` is `CACHED_TOKEN_METHOD_UNAVAILABLE`, never inferred from other auth methods;
-- ACP initialize error is `ACP_INITIALIZE_FAILED`; protocol-version mismatch is `ACP_PROTOCOL_UNSUPPORTED`; cached-token authenticate error is `ACP_AUTHENTICATION_FAILED`; none is mislabeled as a definite login problem;
-- malformed/oversized/secret-shaped provider wire data fails closed and is never echoed;
-- source or provider contract drift requires a new reviewed preflight version or source repair rather than permissive parsing.
+The receipt contains no provider/version text, email, account identifier, token, home path, provider session ID, host-private address, auth-file coordinate, or raw provider output. It cannot be interpreted as Provider Capacity eligibility, Worker claim, Executive routing readiness, model execution proof, or production acceptance.
 
 ## Deterministic versus provider behavior
 
-Deterministic Mastermind code owns binary checks, hashing, environment construction, JSON-RPC request bytes, closed response validation, secret fences and receipt validation.
+Deterministic Mastermind code owns:
 
-The provider owns OAuth state, token refresh, advertised ACP auth methods and authentication success. Provider output has **zero authority** over Executive lifecycle, routing, merge/release, Agent OS or company completion.
+- executable validation/snapshot/revalidation;
+- environment construction;
+- exact JSON-RPC request bytes;
+- closed response parsing;
+- secret fences;
+- closed ACP outcome enum;
+- closed literal receipt rendering;
+- process-group cleanup;
+- public output.
+
+The provider owns OAuth state, token refresh, advertised ACP auth methods, and authentication success. Provider output has **zero authority** over Executive lifecycle, routing, merge/release, Agent OS, or company completion.
 
 ## Failure states
 
-- `BINARY_UNAVAILABLE` / `BINARY_INVALID`
-- `PROVIDER_TIMEOUT` / `PROVIDER_COMMAND_FAILED`
-- `ACP_RESPONSE_INVALID` / `ACP_PROCESS_EXITED`
-- `ACP_INITIALIZE_FAILED` / `ACP_PROTOCOL_UNSUPPORTED`
-- `CACHED_TOKEN_METHOD_UNAVAILABLE`
-- `ACP_AUTHENTICATION_FAILED`
-- secret-shaped wire/refusal
+Exceptional/fail-closed states include:
 
-Any provider-process ambiguity remains local G0 evidence only. Because G0 performs no model turn or company mutation, it never authorizes retry/failover of an Executive Attempt.
+- `BINARY_UNAVAILABLE`
+- `BINARY_INVALID`
+- `BINARY_CHANGED_DURING_PREFLIGHT`
+- `PROVIDER_TIMEOUT`
+- `PROVIDER_COMMAND_FAILED`
+- `ACP_RESPONSE_INVALID`
+- `ACP_PROCESS_EXITED`
+- secret-shaped provider wire
+
+Expected ACP non-ready states return only the closed public receipts above. Because G0 performs no model turn or company mutation, provider ambiguity never authorizes retry/failover of an Executive Attempt.
 
 ## Accelerated rollout sequence
 
 ### G0-A — source implementation
 
-1. land the three-path provider-work-free preflight with RED->GREEN focused tests;
-2. require hosted repository CI/security on the exact head;
-3. independent review must confirm no model turn, no credential content access, no common-broker/router modification and no duplicate owner.
+1. land the three-path provider-work-free preflight with focused RED->GREEN tests;
+2. require hosted repository CI and current CodeQL/security on the exact head;
+3. require independent review confirming no model turn, no credential-content access, no provider-taint serialization, no common-broker/router modification, and no duplicate owner.
 
 Completion: `BUILT_NOT_PROVEN / PRODUCTION_INERT`.
 
@@ -158,9 +186,10 @@ On the intended Grok Build worker host:
 
 1. resolve the exact installed Grok binary through the approved host/operator path;
 2. run the exact accepted preflight once;
-3. if cached OAuth is unavailable or authentication fails, stop and diagnose the provider-owned login state. When the cause is an absent/expired local login, a human/admin performs provider-native `grok login` or `grok login --device-auth` without exposing OAuth/browser/device secrets to the worker/model;
-4. rerun the read-only preflight after the provider-native login/repair;
-5. accept only `LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE` bound to the exact binary SHA-256 with `model_turn_performed=false`.
+3. if cached OAuth is unavailable or authentication fails, stop and diagnose provider-owned login state;
+4. only when absent/expired native login is actually established, a human/admin performs provider-native `grok login` or `grok login --device-auth` without exposing OAuth/browser/device secrets to the worker/model;
+5. rerun the read-only preflight;
+6. accept only `LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE` bound to the exact stable binary SHA-256 with `model_turn_performed=false`.
 
 No model canary is performed inside G0-B.
 
@@ -178,14 +207,14 @@ Required controls:
 - explicit allow/deny/sandbox/permission policy appropriate to the task;
 - no hidden provider fallback;
 - no API-key authentication unless a separately reviewed exception explicitly authorizes it;
-- result goes through normal GitHub PR/CI and Sol review;
-- no model result may self-authorize merge, release or next work.
+- normal GitHub PR/CI/Sol review;
+- no model result may self-authorize merge, release, or next work.
 
 This canary proves useful Grok Build labor can be consumed **before** automatic Executive placement is ready.
 
-### G0-D — manual capacity exploitation
+### G0-D — immediate manual capacity exploitation
 
-Once the canary is accepted, bounded implementation/research/review waves may preferentially route to the Grok avenue when it is the least-scarce capable route. This remains manual/direct assignment under current routing law; it is never mislabeled Executive automatic routing.
+Once the canary is accepted, bounded implementation/research/review waves may preferentially route to the Grok avenue when it is the least-scarce capable route. This remains manual/direct assignment under current routing law and is never mislabeled Executive automatic routing.
 
 ### Automatic-routing track — continue in parallel
 
@@ -200,26 +229,30 @@ CF2-H0 native proof
 -> only then general Grok Executive routing
 ```
 
-After G0 evidence, Sol should explicitly adjudicate whether the first real non-Codex PF vertical remains Claude-first, becomes Grok-first, or runs disjoint Claude/Grok canaries after HF1. Do not change PF1 source law implicitly.
+The already-active CTO-FORGE principal lane owns this critical path. G0 is coordination evidence for that lane, not a second capacity/routing program.
+
+After real G0 evidence, Sol should explicitly adjudicate whether the first real non-Codex PF vertical remains Claude-first, becomes Grok-first, or uses disjoint Claude/Grok canaries after HF1. Do not change PF1 source law implicitly.
 
 ## Acceptance tests
 
-Focused source proof must include:
+Focused source proof must cover:
 
-- absolute regular executable / symlink / missing / size checks;
+- absolute regular executable / symlink / missing / executable / size checks;
+- stable binary identity and in-place mutation refusal;
 - API-key and unrelated-secret environment suppression;
 - exact `--no-auto-update version` and `--no-auto-update agent stdio` command allowlist;
 - internal version validation with zero provider-version publication;
 - exact ACP initialize request and protocol v1 check;
 - exact cached-token headless authenticate request;
 - cached-token missing / protocol mismatch / malformed / duplicate auth-method refusal;
-- authentication success plus typed initialize/protocol/authentication failure behavior;
+- authentication success and typed failure outcomes;
 - secret-shaped provider-wire rejection;
-- receipt rejects any `model_turn_performed=true` or `executive_routing_ready=true` claim;
-- public exceptional failures remain fixed/opaque;
-- static/procedural proof that G0 emits only `initialize` then `authenticate`, never session/prompt methods.
+- five closed public receipt renderers with no provider-derived parameters;
+- receipt invariants `model_turn_performed=false` and `executive_routing_ready=false`;
+- fixed/opaque exceptional output;
+- transcript proof that only `initialize -> authenticate` is emitted, never session/prompt methods.
 
-A host receipt is required before claiming local OAuth/ACP usable. A real bounded Grok coding result through GitHub/CI is required before claiming the Grok avenue operationally useful. Neither receipt proves automatic Executive routing.
+A host receipt is required before claiming local OAuth/ACP usable. A real bounded Grok coding result through GitHub/CI is required before claiming the Grok avenue operationally useful. Neither proves automatic Executive routing.
 
 ## Stop condition
 
@@ -231,8 +264,8 @@ Return to Sol with:
 
 - exact protected pickup and exact G0 head;
 - exact three-file census;
-- focused/hosted test + security receipts;
+- focused local + hosted CI/security receipts;
 - independent review verdict;
 - any official Grok CLI/ACP contract drift discovered;
-- explicit confirmation of zero model prompt, zero Executive lifecycle effect, zero credential-content handling and zero raw provider-text publication;
+- explicit confirmation of zero model prompt, zero Executive lifecycle effect, zero credential-content handling, zero raw provider-text publication, and stable binary identity;
 - the exact host action required next: G0-B preflight, or provider-native human login/repair only after the read-only result establishes cached OAuth is unavailable or cannot authenticate.
