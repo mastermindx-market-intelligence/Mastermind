@@ -14120,14 +14120,14 @@ class Runtime:
                    g.process_start_identity AS generation_process_start_identity,
                    g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
                    g.observed_attestation_digest
-            FROM attempts a
-            JOIN jobs j ON j.job_id=a.job_id
-            JOIN workers w ON w.worker_id=a.worker_id
-            JOIN worker_quota_classes q
+            FROM main.attempts a
+            JOIN main.jobs j ON j.job_id=a.job_id
+            JOIN main.workers w ON w.worker_id=a.worker_id
+            JOIN main.worker_quota_classes q
               ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
-            LEFT JOIN harness_session_epochs e ON e.attempt_id=a.attempt_id
+            LEFT JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
               AND e.state='CURRENT'
-            LEFT JOIN process_generations g ON g.session_epoch_id=e.session_epoch_id
+            LEFT JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
               AND g.executive_writer_held=1
             WHERE a.attempt_id=?
             """,
@@ -14136,14 +14136,14 @@ class Runtime:
         cardinality = connection.execute(
             """
             SELECT
-              (SELECT COUNT(*) FROM jobs WHERE current_attempt_id=?) AS current_jobs,
-              (SELECT COUNT(*) FROM harness_session_epochs
+              (SELECT COUNT(*) FROM main.jobs WHERE current_attempt_id=?) AS current_jobs,
+              (SELECT COUNT(*) FROM main.harness_session_epochs
                  WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
-              (SELECT COUNT(*) FROM process_generations g
-                 JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+              (SELECT COUNT(*) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
                  WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
-              (SELECT MAX(g.generation_number) FROM process_generations g
-                 JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+              (SELECT MAX(g.generation_number) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
                  WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
             """,
             (token, token, token, token),
@@ -14290,21 +14290,21 @@ class Runtime:
             raise StateConflict("runtime binding effective grant role semantics drifted")
 
         admissions = connection.execute(
-            """SELECT * FROM events
+            """SELECT * FROM main.events
                WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
                  AND aggregate_type='process_generation' AND aggregate_id=?
                ORDER BY event_id""",
             (row["process_generation_id"],),
         ).fetchall()
         decisions = connection.execute(
-            """SELECT * FROM events
+            """SELECT * FROM main.events
                WHERE event_type='OHF_LAUNCH_DECISION'
                  AND aggregate_type='process_generation' AND aggregate_id=?
                ORDER BY event_id""",
             (row["process_generation_id"],),
         ).fetchall()
         seals = connection.execute(
-            """SELECT 1 FROM events
+            """SELECT 1 FROM main.events
                WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
             (token,),
         ).fetchall()
@@ -14374,7 +14374,7 @@ class Runtime:
                 }
             if expected_tx3_applied is not None and expected_tx3_intent is not None:
                 tx3_rows = connection.execute(
-                    """SELECT * FROM events
+                    """SELECT * FROM main.events
                        WHERE event_type=? AND attempt_id=?
                          AND json_extract(payload_json,'$.operation_kind')=?
                          AND json_extract(payload_json,'$.process_generation_id')=?
@@ -14387,7 +14387,7 @@ class Runtime:
                     ),
                 ).fetchall()
                 tx3_intent_rows = connection.execute(
-                    """SELECT * FROM events
+                    """SELECT * FROM main.events
                        WHERE event_type=? AND attempt_id=?
                          AND json_extract(payload_json,'$.operation_kind')=?
                          AND json_extract(payload_json,'$.process_generation_id')=?

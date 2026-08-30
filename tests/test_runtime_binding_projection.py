@@ -284,6 +284,36 @@ def test_public_projection_refuses_owned_connection_without_an_active_snapshot(t
         connection.close()
 
 
+def test_public_projection_refuses_temp_job_shadow_of_authoritative_main(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    with runtime.store.read() as connection:
+        main_job = connection.execute(
+            "SELECT owner_seat FROM main.jobs WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert main_job is not None and main_job["owner_seat"] == "coo"
+        connection.execute("CREATE TEMP TABLE jobs AS SELECT * FROM main.jobs")
+        connection.execute(
+            "UPDATE temp.jobs SET owner_seat='ceo' WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        )
+        temp_job = connection.execute(
+            "SELECT owner_seat FROM temp.jobs WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert temp_job is not None and temp_job["owner_seat"] == "ceo"
+
+        with pytest.raises(StateConflict):
+            project_runtime_binding(
+                runtime,
+                sealed.attempt_id,
+                _target(seat="ceo"),
+                connection=connection,
+            )
+
+
 @pytest.mark.parametrize("mutation", ["moved", "replaced"])
 def test_public_projection_refuses_snapshot_after_owned_database_identity_changes(
     tmp_path, mutation
