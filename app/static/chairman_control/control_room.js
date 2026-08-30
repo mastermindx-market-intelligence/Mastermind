@@ -185,54 +185,6 @@
     });
   }
 
-  function getBinary(path) {
-    if (REMOTE_READ_ONLY) return Promise.reject(new Error("remote_read_only"));
-    return fetch(path, {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { "X-CCR-Token": TOKEN },
-    }).then(function (resp) {
-      if (!resp.ok) throw new Error("artifact_unavailable");
-      return resp.blob();
-    });
-  }
-
-  function setBrowserPreview(img, path) {
-    getBinary(path).then(function (blob) {
-      var oldUrl = img.getAttribute("data-object-url");
-      if (oldUrl) window.URL.revokeObjectURL(oldUrl);
-      var objectUrl = window.URL.createObjectURL(blob);
-      img.setAttribute("data-object-url", objectUrl);
-      img.src = objectUrl;
-    }).catch(function () {
-      img.removeAttribute("src");
-    });
-  }
-
-  function renderBrowserReview(receipt) {
-    var result = document.getElementById("browser-review-result");
-    var previews = document.getElementById("browser-review-previews");
-    if (!receipt || receipt.state === "NOT_RUN") {
-      result.className = "ccr-browser-result";
-      result.textContent = "No review has run in this Control Room process.";
-      previews.hidden = true;
-      return;
-    }
-    if (!receipt.ok) {
-      result.className = "ccr-browser-result ccr-problem";
-      result.textContent = safeText(receipt.state, "REFUSED") + " · " + safeText(receipt.detail, "No detail");
-      previews.hidden = true;
-      return;
-    }
-    var desktop = (receipt.screenshots || [])[0] || {};
-    var mobile = (receipt.screenshots || [])[1] || {};
-    result.className = "ccr-browser-result";
-    result.textContent = "Complete · desktop " + safeText(desktop.bytes, "?") + " bytes · mobile " + safeText(mobile.bytes, "?") + " bytes · process group absent";
-    previews.hidden = false;
-    setBrowserPreview(document.getElementById("browser-review-desktop"), "/api/browser-review/artifact/desktop.png");
-    setBrowserPreview(document.getElementById("browser-review-mobile"), "/api/browser-review/artifact/mobile.png");
-  }
-
   // source pulse / system -------------------------------------------------
   var SOURCE_STAMPS = [
     { key: "mastermind_sha", label: "Mastermind", sha: true, extra: "mastermind_branch" },
@@ -1498,21 +1450,6 @@
         result.textContent = "Did not refresh · local server unavailable";
         result.className = "ccr-problem";
       }).finally(function () { btn.disabled = false; });
-    });
-
-      document.getElementById("browser-review-run").addEventListener("click", function () {
-      var btn = this;
-      var result = document.getElementById("browser-review-result");
-      btn.disabled = true;
-      result.className = "ccr-browser-result";
-      result.textContent = "Starting a fresh isolated browser…";
-      postJSON("/api/browser-review", {}).then(renderBrowserReview).catch(function () {
-        renderBrowserReview({ ok: false, state: "REQUEST_FAILED", detail: "local server unavailable" });
-      }).finally(function () { btn.disabled = false; });
-    });
-
-      getJSON("/api/browser-review").then(renderBrowserReview).catch(function () {
-      renderBrowserReview({ ok: false, state: "RUNTIME_UNAVAILABLE", detail: "local server unavailable" });
     });
 
       document.getElementById("bind-provider").addEventListener("change", updateBindFieldVisibility);

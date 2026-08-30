@@ -66,11 +66,6 @@ repair, 2026-08-22)
 * ``POST /api/open`` accepts only a ``binding_id`` — never a URL, argv, path,
   or profile from the browser; the actual navigation argv is built entirely
   server-side by :mod:`integrations.chairman_surfaces`.
-* ``POST /api/browser-review`` accepts only an empty object. It invokes the
-  bounded :mod:`control_plane.worker_browser_b1` resource adapter against
-  this server's own exact loopback origin. Browser output is ephemeral,
-  process-memory referenced evidence under ``/Volumes/Mastermind``; it is
-  never canonical organizational/runtime state and creates no new lifecycle.
 
 Usage
 -----
@@ -106,7 +101,6 @@ from control_plane import ceo_boot_packet  # noqa: E402  (after sys.path bootstr
 from control_plane import chairman_control_room as ccr  # noqa: E402
 from control_plane import executive_inbox  # noqa: E402
 from control_plane import surface_bindings as sb  # noqa: E402
-from control_plane import worker_browser_b1  # noqa: E402
 from integrations.chairman_surfaces import capability, chatgpt, contract  # noqa: E402
 from integrations.chairman_surfaces import runner as surfaces_runner  # noqa: E402
 
@@ -357,10 +351,6 @@ class ServerConfig:
     #: ``None``. Cleared on the next successful recompose. Never raised into
     #: a serving thread — surfaced only in the ``/api/state`` envelope.
     state_refresh_error: str | None = None
-    #: Optional bounded Worker Browser B1 resource adapter. It is attached
-    #: only after the real loopback port is known; ``--check`` never starts
-    #: or probes the browser runtime.
-    browser_review: worker_browser_b1.BrowserReviewCoordinator | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -966,15 +956,6 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             if not self._api_auth_ok():
                 return
             return self._handle_discover()
-        if path == "/api/browser-review":
-            if not self._api_auth_ok():
-                return
-            return self._handle_browser_review_state()
-        if path.startswith("/api/browser-review/artifact/"):
-            if not self._api_auth_ok():
-                return
-            name = path.removeprefix("/api/browser-review/artifact/")
-            return self._handle_browser_review_artifact(name)
         self._not_found()
 
     def _serve_index(self) -> None:
@@ -1024,30 +1005,6 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
         self._send_json(200, _discover_document(config), no_store=True)
 
-    def _handle_browser_review_state(self) -> None:
-        config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        if config.browser_review is None:
-            return self._send_json(
-                503,
-                {
-                    "schema": worker_browser_b1.RECEIPT_SCHEMA,
-                    "ok": False,
-                    "state": "RUNTIME_UNAVAILABLE",
-                    "detail": "Worker Browser B1 runtime is not configured",
-                },
-                no_store=True,
-            )
-        self._send_json(200, config.browser_review.snapshot(), no_store=True)
-
-    def _handle_browser_review_artifact(self, name: str) -> None:
-        config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        if config.browser_review is None or name not in {"desktop.png", "mobile.png"}:
-            return self._not_found()
-        body = config.browser_review.read_artifact(name)
-        if body is None:
-            return self._not_found()
-        self._write(200, body, content_type="image/png", no_store=True)
-
     # -- POST ------------------------------------------------------------------
 
     def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
@@ -1064,31 +1021,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._handle_unbind()
         if path == "/api/refresh-builds":
             return self._handle_refresh_builds()
-        if path == "/api/browser-review":
-            return self._handle_browser_review()
         self._not_found()
-
-    def _handle_browser_review(self) -> None:
-        data, err = self._read_json_body()
-        if err:
-            return self._bad_request(err)
-        try:
-            worker_browser_b1.validate_request(data)
-        except ValueError as exc:
-            return self._bad_request(str(exc))
-        config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        if config.browser_review is None:
-            return self._send_json(
-                503,
-                {
-                    "schema": worker_browser_b1.RECEIPT_SCHEMA,
-                    "ok": False,
-                    "state": "RUNTIME_UNAVAILABLE",
-                    "detail": "Worker Browser B1 runtime is not configured",
-                },
-                no_store=True,
-            )
-        self._send_json(200, config.browser_review.run(), no_store=True)
 
     def _handle_open(self) -> None:
         data, err = self._read_json_body()
@@ -1400,12 +1333,6 @@ def main(argv: list[str] | None = None) -> int:
 
     config.port = bound_port
     config.origin = f"http://{HOST}:{bound_port}"
-    config.browser_review = worker_browser_b1.BrowserReviewCoordinator(
-        worker_browser_b1.BrowserRunConfig(
-            origin=config.origin,
-            repo_root=config.repo_root,
-        )
-    )
     url = f"http://{HOST}:{bound_port}/"
     print(f"{url} — loopback-only; no canonical writes; Ctrl-C to stop.")
 

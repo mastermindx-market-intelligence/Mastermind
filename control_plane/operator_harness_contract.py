@@ -879,6 +879,7 @@ class CapabilityIdentity:
     mcp_server_identity: str | None = None
     mcp_server_version: str | None = None
     mcp_auth_status: str | None = None
+    resource_contract_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -892,6 +893,7 @@ class ObservedCapabilityIdentity:
     mcp_server_identity: str | None = None
     mcp_server_version: str | None = None
     mcp_auth_status: str | None = None
+    resource_contract_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2479,6 +2481,11 @@ def _identity_proven(
     if requested.mcp_server_version and requested.mcp_server_version != observed.mcp_server_version:
         return False
     if requested.mcp_auth_status and requested.mcp_auth_status != observed.mcp_auth_status:
+        return False
+    if (
+        requested.resource_contract_digest
+        and requested.resource_contract_digest != observed.resource_contract_digest
+    ):
         return False
     return True
 

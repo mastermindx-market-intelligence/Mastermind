@@ -43,6 +43,7 @@ from control_plane.operator_harness_contract import (
     ObservedTriState,
     OperationId,
     OperationReceiptKind,
+    ProcessGenerationRef,
     ProcessIdentityObservation,
     ProcessLiveness,
     ProfileValidation,
@@ -50,12 +51,19 @@ from control_plane.operator_harness_contract import (
     ProviderWriterState,
     ReconcileObservation,
     RequestedExecutionProfile,
+    SessionEpochRef,
     SessionStartObservation,
     TurnRef,
     TurnStartObservation,
     WorkspaceIdentity,
 )
-from control_plane.operator_harness_orchestrator import OperatorOperationApplied
+from control_plane.operator_harness_orchestrator import (
+    OperatorOperationApplied,
+    OperatorSessionReceipt,
+)
+from control_plane.operator_harness_wire import to_wire
+from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
+from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
 class _Clock:
@@ -119,6 +127,7 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
             mcp_server_identity=item.mcp_server_identity,
             mcp_server_version=item.mcp_server_version,
             mcp_auth_status=item.mcp_auth_status,
+            resource_contract_digest=item.resource_contract_digest,
         )
         for item in profile.capabilities.required
     )
@@ -1021,3 +1030,177 @@ def test_restart_cancellation_before_session_releases_without_provider_call(
     job = runtime.jobs.get_job(planner.job_id)
     assert attempt is not None and attempt.status is AttemptStatus.CANCELLED
     assert job is not None and job.status is JobStatus.CANCELLED
+
+
+def test_browser_terminal_binds_post_sweep_receipt_without_replacing_candidate_digest():
+    generation = ProcessGenerationRef("generation-browser", "epoch-browser", 1, "worker-a")
+    epoch = SessionEpochRef("epoch-browser", "attempt-browser", "worker-a", 1)
+    resource = ObservedCapabilityIdentity(
+        kind="resource",
+        name="worker-browser-b1-local",
+        resource_contract_digest="a" * 64,
+    )
+    observed = ObservedHarnessAttestation(
+        served_model="gpt-5.6-sol",
+        harness_version="0.147.0",
+        harness_binary_digest="b" * 64,
+        capabilities=(resource,),
+        effective_skills=(),
+        effective_mcp=(),
+        effective_plugins_or_apps=(),
+        sandbox_state="read-only",
+        approval_state="never",
+        network_state="loopback-browser-only",
+        effective_config_digest="c" * 64,
+        auth=AuthRealmFact(worker_id="worker-a", provider="openai-codex"),
+        workspace=WorkspaceIdentity("/tmp/browser", "d" * 40, 1, 2, 3, 4),
+    )
+    session = OperatorSessionReceipt(
+        attempt_id="attempt-browser",
+        epoch=epoch,
+        generation=generation,
+        observation=SessionStartObservation(
+            "provider-browser", ProcessIdentityObservation(1001, 1001, "start", "boot")
+        ),
+        observed=observed,
+        launch=None,  # type: ignore[arg-type] - digest helper does not inspect launch
+    )
+    receipt = BrowserReviewReceipt(
+        schema_version="mastermind.browser_review_receipt/v1",
+        attempt_id="attempt-browser",
+        session_epoch_id="epoch-browser",
+        process_generation_id="generation-browser",
+        workspace=observed.workspace,
+        devserver={},
+        capability={},
+        playwright_mcp={},
+        browser={},
+        viewports=(),
+        artifacts={},
+        egress_falsifiers={},
+        external_egress_observed=False,
+        visual_judgment={},
+        cleanup={},
+        tracked_workspace_changes_after_review=False,
+    )
+
+    class Adapter:
+        def terminal_artifact_receipt(self, observed_generation):
+            assert observed_generation == generation
+            return receipt
+
+    assert ExecutiveOperatorSupervisor._terminal_artifact_receipt_digest(
+        session=session, adapter=Adapter()  # type: ignore[arg-type]
+    ) == receipt.digest
+    assert receipt.digest not in {"e" * 64, hashlib.sha256(b"[]").hexdigest()}
+
+    class MissingAdapter:
+        def terminal_artifact_receipt(self, _generation):
+            return None
+
+    with pytest.raises(
+        Exception, match="lacks its post-sweep artifact receipt"
+    ):
+        ExecutiveOperatorSupervisor._terminal_artifact_receipt_digest(
+            session=session, adapter=MissingAdapter()  # type: ignore[arg-type]
+        )
+
+
+def test_remote_adapter_caches_closed_browser_receipt_only_after_stop():
+    generation = ProcessGenerationRef("generation-remote", "epoch-remote", 1, "worker-a")
+    receipt = BrowserReviewReceipt(
+        schema_version="mastermind.browser_review_receipt/v1",
+        attempt_id="attempt-remote",
+        session_epoch_id="epoch-remote",
+        process_generation_id="generation-remote",
+        workspace=WorkspaceIdentity("/tmp/browser", "a" * 40, 1, 2, 3, 4),
+        devserver={"local_origin": "http://127.0.0.1:48101", "manifest_digest": "b" * 64},
+        capability={"manifest_digest": "c" * 64, "profile_digest": "d" * 64, "profile_id": "operator.browser.local-review.v1"},
+        playwright_mcp={"identity": "playwright", "tool_schema_digest": "e" * 64, "version": "1.63.0-alpha-2026-08-05"},
+        browser={
+            "executable": "/tmp/chromium",
+            "executable_sha256": "f" * 64,
+            "revision": "1237",
+            "runtime_manifest_digest": "7" * 64,
+        },
+        viewports=({"width": 1440, "height": 900}, {"width": 390, "height": 844}),
+        artifacts={
+            "screenshots": [
+                {
+                    "bytes": 10,
+                    "relative_path": "desktop.png",
+                    "sha256": "3" * 64,
+                    "viewport": {"width": 1440, "height": 900},
+                },
+                {
+                    "bytes": 10,
+                    "relative_path": "mobile.png",
+                    "sha256": "4" * 64,
+                    "viewport": {"width": 390, "height": 844},
+                },
+            ],
+            "console": {
+                "bytes": 2,
+                "observed": True,
+                "rows": 0,
+                "sha256": "5" * 64,
+            },
+            "network": {
+                "bytes": 2,
+                "observed": True,
+                "rows": 0,
+                "sha256": "6" * 64,
+            },
+        },
+        egress_falsifiers={
+            "external_fetch": "REFUSED",
+            "external_http": "REFUSED",
+            "external_https": "REFUSED",
+            "external_redirect": "REFUSED",
+            "external_subresource": "REFUSED",
+            "external_websocket": "REFUSED",
+            "file_url": "REFUSED",
+            "proxy_override": "REFUSED",
+        },
+        external_egress_observed=False,
+        visual_judgment={
+            "defective_variant": "B",
+            "fixture_nonce": "opaque-remote",
+            "image_sha256": ["0" * 64, "1" * 64],
+            "reason": "visible clipping",
+            "source": "model_image_content",
+        },
+        cleanup={
+            "browser_absent": True,
+            "devserver_absent": True,
+            "mcp_absent": True,
+            "proxy_absent": True,
+            "uid_sweep_digest": "2" * 64,
+            "uid_sweep_passed": True,
+        },
+        tracked_workspace_changes_after_review=False,
+    )
+    observation = ReconcileObservation(
+        ProcessLiveness.PROVEN_DEAD,
+        ProcessIdentityObservation(1001, 1001, "start", "boot"),
+        False,
+        ProviderWriterState.RELEASED,
+        "provider-remote",
+        "3" * 64,
+    )
+
+    class Client:
+        def request_sync(self, operation, _payload, **_kwargs):
+            assert operation == "ohf-stop"
+            return {
+                "observation": to_wire(observation),
+                "artifact_receipt": receipt.to_wire(),
+            }
+
+    adapter = RemoteCodexOperatorAdapter(Client(), turn_input_loader=lambda _turn: "")  # type: ignore[arg-type]
+    with pytest.raises(Exception, match="not observed in protocol order"):
+        adapter.terminal_artifact_receipt(generation)
+    assert adapter.graceful_stop(
+        generation, operation_id=OperationId("ohf-op:stop-remote")
+    ) == observation
+    assert adapter.terminal_artifact_receipt(generation) == receipt

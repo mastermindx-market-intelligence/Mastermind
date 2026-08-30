@@ -79,7 +79,6 @@ def _make_config(
     codex_sessions_dir=None,
     mlx_profiles_root=None,
     gologin_profiles_root=None,
-    browser_review=None,
 ) -> "server_mod.ServerConfig":
     repo_root = tmp_path / "mastermind_repo"
     repo_root.mkdir(exist_ok=True)
@@ -110,7 +109,6 @@ def _make_config(
         codex_sessions_dir=codex_sessions_dir,
         mlx_profiles_root=mlx_profiles_root if mlx_profiles_root is not None else str(tmp_path / "empty_mlx"),
         gologin_profiles_root=gologin_profiles_root if gologin_profiles_root is not None else str(tmp_path / "empty_gologin"),
-        browser_review=browser_review,
     )
 
 
@@ -174,85 +172,20 @@ def _auth_headers(config, extra=None):
     return headers
 
 
-class FakeBrowserReview:
-    def __init__(self):
-        self.run_calls = 0
-        self.receipt = {
-            "schema": "mastermind.worker_browser_b1.receipt.v1",
-            "ok": True,
-            "state": "COMPLETE",
-            "screenshots": [
-                {"name": "desktop.png", "sha256": "d" * 64, "bytes": 11},
-                {"name": "mobile.png", "sha256": "m" * 64, "bytes": 12},
-            ],
-        }
-        self.artifacts = {"desktop.png": b"desktop-png", "mobile.png": b"mobile-png"}
+def test_browser_resource_cannot_be_started_from_control_room_presentation_process(tmp_path):
+    """Removing the OHF boundary must not recreate a Control Room launch API."""
 
-    def run(self):
-        self.run_calls += 1
-        return self.receipt
-
-    def snapshot(self):
-        return self.receipt
-
-    def read_artifact(self, name):
-        return self.artifacts.get(name)
-
-
-def test_browser_review_api_is_nonce_gated_accepts_only_empty_object_and_serves_fixed_artifacts(tmp_path):
-    browser_review = FakeBrowserReview()
-    config = _make_config(tmp_path, browser_review=browser_review)
+    config = _make_config(tmp_path)
     with _running_server(config) as (_httpd, port):
-        forbidden, _headers, _body = _post(port, "/api/browser-review", {})
-        bad, _headers, bad_body = _post(
-            port,
-            "/api/browser-review",
-            {"url": "https://example.com"},
-            headers=_auth_headers(config),
-        )
-        started, started_headers, started_body = _post(
+        post_status, _headers, _body = _post(
             port, "/api/browser-review", {}, headers=_auth_headers(config)
         )
-        latest, latest_headers, latest_body = _get(
+        get_status, _headers, _body = _get(
             port, "/api/browser-review", headers=_auth_headers(config)
         )
-        desktop, desktop_headers, desktop_body = _get(
-            port, "/api/browser-review/artifact/desktop.png", headers=_auth_headers(config)
-        )
-        missing, _missing_headers, _missing_body = _get(
-            port, "/api/browser-review/artifact/not-an-artifact", headers=_auth_headers(config)
-        )
 
-    assert forbidden == 403
-    assert bad == 400
-    assert "unknown key" in json.loads(bad_body)["detail"]
-    assert started == 200
-    assert json.loads(started_body)["state"] == "COMPLETE"
-    assert started_headers["Cache-Control"] == "no-store"
-    assert browser_review.run_calls == 1
-    assert latest == 200
-    assert json.loads(latest_body)["screenshots"][0]["name"] == "desktop.png"
-    assert latest_headers["Cache-Control"] == "no-store"
-    assert desktop == 200
-    assert desktop_body == b"desktop-png"
-    assert desktop_headers["Content-Type"] == "image/png"
-    assert desktop_headers["Cache-Control"] == "no-store"
-    assert missing == 404
-
-
-def test_browser_review_absent_runtime_is_truthful_not_found(tmp_path):
-    config = _make_config(tmp_path, browser_review=None)
-    with _running_server(config) as (_httpd, port):
-        status, _headers, body = _post(
-            port, "/api/browser-review", {}, headers=_auth_headers(config)
-        )
-    assert status == 503
-    assert json.loads(body) == {
-        "schema": "mastermind.worker_browser_b1.receipt.v1",
-        "ok": False,
-        "state": "RUNTIME_UNAVAILABLE",
-        "detail": "Worker Browser B1 runtime is not configured",
-    }
+    assert post_status == 404
+    assert get_status == 404
 
 
 # ---------------------------------------------------------------------------

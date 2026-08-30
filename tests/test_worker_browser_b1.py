@@ -1,104 +1,285 @@
 """Worker Browser B1: one isolated official-Playwright-MCP review vertical."""
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
+import socket
 import stat
+import struct
+import subprocess
 import sys
 import textwrap
 import threading
+import zlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from control_plane import worker_browser_b1 as browser
+from control_plane import executive_agent_capabilities as capabilities
+from control_plane.executive_worker_broker import UIDSweepReceipt, UID_SWEEP_SCHEMA_VERSION
+from control_plane.operator_harness_contract import (
+    CapabilityManifest,
+    ProcessGenerationRef,
+    SessionEpochRef,
+    WorkspaceIdentity,
+)
 
 
-def _fake_mcp(
-    tmp_path: Path,
-    *,
-    snapshot_bytes: int = 24,
-    screenshots_follow_cwd: bool = False,
-    create_profile: bool = False,
-    screenshot_bytes: int | None = None,
-) -> tuple[str, ...]:
-    script = tmp_path / "fake_playwright_mcp.py"
-    script.write_text(
-        textwrap.dedent(
-            f"""
-            import base64
-            import json
-            import pathlib
-            import sys
+def _png(width: int, height: int, *, color: bytes = b"\x00\x00\x00\xff") -> bytes:
+    """Build a small, fully decodable RGBA PNG for receipt boundary tests."""
 
-            args = sys.argv[1:]
-            output_dir = pathlib.Path(args[args.index('--output-dir') + 1])
-            output_dir.mkdir(parents=True, exist_ok=True)
-            screenshot_dir = pathlib.Path.cwd() if {screenshots_follow_cwd!r} else output_dir
-            if {create_profile!r}:
-                profile = output_dir / 'playwright_fake_profile'
-                profile.mkdir()
-                (profile / 'Cookies').write_bytes(b'ephemeral')
-            calls = []
-            png = base64.b64decode(
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
-            )
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+        )
 
-            def reply(request, result):
-                print(json.dumps({{'jsonrpc': '2.0', 'id': request['id'], 'result': result}}, separators=(',', ':')), flush=True)
-
-            for line in sys.stdin:
-                request = json.loads(line)
-                method = request.get('method')
-                if method == 'initialize':
-                    reply(request, {{'protocolVersion': '2025-06-18', 'capabilities': {{'tools': {{}}}}, 'serverInfo': {{'name': 'Playwright', 'version': '1.63.0-alpha-2026-08-05'}}}})
-                elif method == 'tools/list':
-                    reply(request, {{'tools': [{{'name': name}} for name in {sorted(browser.ALLOWED_TOOLS)!r}]}})
-                elif method == 'tools/call':
-                    name = request['params']['name']
-                    arguments = request['params']['arguments']
-                    calls.append({{'name': name, 'arguments': arguments}})
-                    (output_dir / 'calls.json').write_text(json.dumps(calls), encoding='utf-8')
-                    if name == 'browser_take_screenshot':
-                        screenshot = screenshot_dir / arguments['filename']
-                        screenshot.write_bytes(png)
-                        if {screenshot_bytes!r} is not None:
-                            with screenshot.open('r+b') as artifact:
-                                artifact.truncate({screenshot_bytes!r})
-                        text = 'Saved screenshot to ' + arguments['filename']
-                    elif name == 'browser_snapshot':
-                        text = 'S' * {snapshot_bytes}
-                    elif name == 'browser_console_messages':
-                        text = 'console clean'
-                    elif name == 'browser_network_requests':
-                        text = '[GET] http://127.0.0.1:8787/ => [200] OK'
-                    else:
-                        text = 'ok'
-                    reply(request, {{'content': [{{'type': 'text', 'text': text}}]}})
-                    if name == 'browser_close':
-                        break
-            """
-        ),
-        encoding="utf-8",
+    scanline = b"\x00" + (color * width)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(
+            b"IHDR",
+            struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0),
+        )
+        + chunk(b"IDAT", zlib.compress(scanline * height))
+        + chunk(b"IEND", b"")
     )
-    script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    return (sys.executable, os.fspath(script))
 
 
 def _config(tmp_path: Path, **overrides) -> browser.BrowserRunConfig:
-    has_command_override = "command_override" in overrides
     command_override = overrides.pop("command_override", None)
     values = {
         "origin": "http://127.0.0.1:8787",
         "repo_root": tmp_path,
         "runtime_root": tmp_path / "runtime",
         "artifact_root": tmp_path / "artifacts",
-        "command_override": command_override if has_command_override else _fake_mcp(tmp_path),
-        "timeout_seconds": 10.0,
-        "max_text_bytes": 32,
+        "command_override": command_override,
     }
     values.update(overrides)
     return browser.BrowserRunConfig(**values)
+
+
+def _fixture_urls(origin: str) -> dict[str, str]:
+    return {
+        "A": f"{origin}/__mastermind_browser_visual_fixture__/{'a' * 32}",
+        "B": f"{origin}/__mastermind_browser_visual_fixture__/{'b' * 32}",
+    }
+
+
+def _runtime_install_fixture(
+    tmp_path: Path,
+    *,
+    node_payload: bytes = b"fixture node executable",
+) -> tuple[Path, Path, dict[str, object]]:
+    runtime_container = tmp_path / "worker-browser-b1"
+    runtime_container.mkdir(mode=0o700)
+    (runtime_container / "artifacts").mkdir(mode=0o700)
+    runtime = runtime_container / "runtime"
+    runtime.mkdir(mode=0o700)
+    (runtime / "bin").mkdir(mode=0o700)
+    (runtime / "lib").mkdir(mode=0o700)
+    (runtime / "browsers" / "chromium-1237").mkdir(parents=True)
+    (runtime / "node_modules" / "@playwright" / "mcp").mkdir(parents=True)
+
+    launcher = runtime / "bin" / "worker-browser-b1-launcher"
+    manifest_path = runtime / "worker-browser-b1-install-manifest.json"
+    installer = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "install_worker_browser_b1_runtime.sh"
+    ).read_text(encoding="utf-8")
+    launcher_generator = installer.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    subprocess.run(
+        [sys.executable, "-", os.fspath(launcher), os.fspath(manifest_path)],
+        input=launcher_generator,
+        text=True,
+        check=True,
+    )
+    node = runtime / "bin" / "node"
+    node.write_bytes(node_payload)
+    node.chmod(0o500)
+    node_library = runtime / "lib" / "libnode.147.dylib"
+    node_library.write_bytes(b"fixture node dynamic library")
+    node_library.chmod(0o400)
+    mcp = runtime / "node_modules" / "@playwright" / "mcp" / "cli.js"
+    mcp.write_bytes(b"fixture locked playwright mcp")
+    mcp.chmod(0o500)
+    mcp_link = runtime / "node_modules" / ".bin" / "playwright-mcp"
+    mcp_link.parent.mkdir()
+    mcp_link.symlink_to(Path("../@playwright/mcp/cli.js"))
+    package_lock = runtime / "package-lock.json"
+    package_lock.write_bytes(b'{"lockfileVersion":3}\n')
+    package_lock.chmod(0o400)
+    chromium = runtime / "browsers" / "chromium-1237" / "Chromium"
+    chromium.write_bytes(b"fixture locked chromium")
+    chromium.chmod(0o500)
+
+    _add_loaded_runtime_closure(runtime)
+    browser.normalize_runtime_closure_for_install(runtime)
+    closure_inventory = browser.runtime_closure_inventory(runtime)
+
+    def identity(path: Path) -> dict[str, object]:
+        info = path.stat()
+        return {
+            "gid": info.st_gid,
+            "mode": stat.S_IMODE(info.st_mode),
+            "path": os.fspath(path.resolve()),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "uid": info.st_uid,
+        }
+
+    manifest: dict[str, object] = {
+        "browser": {
+            "executable": identity(chromium),
+            "name": "chromium",
+            "revision": "1237",
+        },
+        "closure_inventory": [dict(row) for row in closure_inventory],
+        "closure_tree_digest": browser.runtime_closure_tree_digest(closure_inventory),
+        "launcher": identity(launcher),
+        "mcp": {
+            "executable": identity(mcp),
+            "package": "@playwright/mcp",
+            "package_lock": identity(package_lock),
+            "version": "0.0.79",
+        },
+        "node": {
+            "dynamic_library": identity(node_library),
+            "executable": identity(node),
+        },
+        "runtime_container": {
+            "device": runtime_container.stat().st_dev,
+            "gid": runtime_container.stat().st_gid,
+            "inode": runtime_container.stat().st_ino,
+            "mode": 0o500,
+            "uid": runtime_container.stat().st_uid,
+        },
+        "runtime_root": os.fspath(runtime.resolve()),
+        "schema_version": "mastermind.worker_browser_runtime_install/v1",
+        "tmp_install_postcondition": "absent",
+    }
+    manifest_path.write_bytes(browser._canonical_bytes(manifest) + b"\n")
+    manifest_path.chmod(0o400)
+    (runtime / "bin").chmod(0o500)
+    runtime.chmod(0o500)
+    runtime_container.chmod(0o500)
+    return runtime, manifest_path, manifest
+
+
+def _attempt_launch_environment(
+    *,
+    workspace: Path,
+    artifact: Path,
+    runtime: Path,
+    runtime_manifest: Path,
+    container_fd: int | None = None,
+) -> dict[str, str]:
+    environment = {
+        "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(artifact),
+        "MASTERMIND_BROWSER_FIXTURE_A_URL": (
+            "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/"
+            + "a" * 32
+        ),
+        "MASTERMIND_BROWSER_FIXTURE_B_URL": (
+            "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/"
+            + "b" * 32
+        ),
+        "MASTERMIND_BROWSER_FIXTURE_NONCE": "c" * 32,
+        "MASTERMIND_BROWSER_ORIGIN": "http://127.0.0.1:48101",
+        "MASTERMIND_BROWSER_PROXY_URL": "http://127.0.0.1:48102",
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH": os.fspath(runtime_manifest),
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": hashlib.sha256(
+            runtime_manifest.read_bytes()
+        ).hexdigest(),
+        "MASTERMIND_BROWSER_RUNTIME_ROOT": os.fspath(runtime),
+        "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(workspace),
+        "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+    }
+    if container_fd is not None:
+        environment["MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD"] = str(container_fd)
+    return environment
+
+
+def _add_loaded_runtime_closure(runtime: Path) -> dict[str, Path]:
+    """Populate non-entrypoint bytes that the real MCP/browser process loads."""
+
+    paths = {
+        "mcp_core_bundle": runtime
+        / "node_modules"
+        / "@playwright"
+        / "mcp"
+        / "lib"
+        / "coreBundle.js",
+        "mcp_other": runtime
+        / "node_modules"
+        / "@playwright"
+        / "mcp"
+        / "lib"
+        / "transport.js",
+        "playwright": runtime / "node_modules" / "playwright" / "index.js",
+        "utils_bundle": runtime
+        / "node_modules"
+        / "playwright-core"
+        / "lib"
+        / "utilsBundle.js",
+        "playwright_core_other": runtime
+        / "node_modules"
+        / "playwright-core"
+        / "lib"
+        / "server"
+        / "browserType.js",
+        "chromium_framework": runtime
+        / "browsers"
+        / "chromium-1237"
+        / "Chromium.app"
+        / "Contents"
+        / "Frameworks"
+        / "Chromium Framework.framework"
+        / "Versions"
+        / "A"
+        / "Chromium Framework",
+        "chromium_helper": runtime
+        / "browsers"
+        / "chromium-1237"
+        / "Chromium.app"
+        / "Contents"
+        / "Frameworks"
+        / "Chromium Helper.app"
+        / "Contents"
+        / "MacOS"
+        / "Chromium Helper",
+        "headless_shell": runtime
+        / "browsers"
+        / "chromium_headless_shell-1237"
+        / "chrome-headless-shell-mac-arm64"
+        / "chrome-headless-shell",
+        "ffmpeg": runtime / "browsers" / "ffmpeg-1011" / "ffmpeg-mac-arm64",
+    }
+    for label, path in paths.items():
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f"fixture closure byte {label}\n".encode("ascii"))
+            path.chmod(
+                0o500
+                if label.startswith("chromium_")
+                or label in {"headless_shell", "ffmpeg"}
+                else 0o400
+            )
+    framework_root = paths["chromium_framework"].parents[2]
+    current_version = framework_root / "Versions" / "Current"
+    exposed_binary = framework_root / "Chromium Framework"
+    if not os.path.lexists(current_version):
+        current_version.symlink_to("A", target_is_directory=True)
+    if not os.path.lexists(exposed_binary):
+        exposed_binary.symlink_to("Versions/Current/Chromium Framework")
+    return paths
 
 
 def test_build_mcp_argv_is_exact_pinned_isolated_and_has_no_identity_import(tmp_path):
@@ -111,7 +292,7 @@ def test_build_mcp_argv_is_exact_pinned_isolated_and_has_no_identity_import(tmp_
         "--isolated",
         "--headless",
         "--browser",
-        "chrome",
+        "chromium",
         "--sandbox",
         "--block-service-workers",
         "--image-responses",
@@ -128,51 +309,29 @@ def test_build_mcp_argv_is_exact_pinned_isolated_and_has_no_identity_import(tmp_
     assert browser.PLAYWRIGHT_MCP_VERSION == "0.0.79"
 
 
-def test_real_stdio_flow_is_closed_bounded_and_returns_two_hashed_screenshots(tmp_path):
-    coordinator = browser.BrowserReviewCoordinator(_config(tmp_path, max_text_bytes=12))
-
-    receipt = coordinator.run()
-
-    assert receipt["schema"] == "mastermind.worker_browser_b1.receipt.v1"
-    assert receipt["ok"] is True
-    assert receipt["state"] == "COMPLETE"
-    assert receipt["origin"] == "http://127.0.0.1:8787"
-    assert receipt["runtime"]["package"] == "@playwright/mcp"
-    assert receipt["runtime"]["version"] == "0.0.79"
-    assert len(receipt["evidence"]["snapshot"].encode()) <= 12
-    assert len(receipt["evidence"]["console"].encode()) <= 12
-    assert len(receipt["evidence"]["network"].encode()) <= 12
-    assert [(row["name"], row["viewport"]) for row in receipt["screenshots"]] == [
-        ("desktop.png", {"width": 1440, "height": 900}),
-        ("mobile.png", {"width": 390, "height": 844}),
-    ]
-    for screenshot in receipt["screenshots"]:
-        assert screenshot["bytes"] > 0
-        assert len(screenshot["sha256"]) == 64
-        assert coordinator.read_artifact(screenshot["name"]).startswith(b"\x89PNG")
-    assert receipt["cleanup"] == {
-        "browser_close_requested": True,
-        "process_group_absent": True,
-        "profile_absent": True,
-        "workspace_clean": True,
-    }
-
-    calls = json.loads((Path(receipt["artifact_dir"]) / "calls.json").read_text(encoding="utf-8"))
-    assert [row["name"] for row in calls] == [
-        "browser_navigate",
-        "browser_snapshot",
+def test_tool_surface_contains_required_review_interactions_but_no_unsafe_code_or_upload():
+    assert browser.ALLOWED_TOOLS == {
+        "browser_click",
+        "browser_close",
         "browser_console_messages",
+        "browser_fill_form",
+        "browser_hover",
+        "browser_navigate",
         "browser_network_requests",
         "browser_resize",
+        "browser_snapshot",
+        "browser_tabs",
         "browser_take_screenshot",
-        "browser_resize",
-        "browser_take_screenshot",
-        "browser_close",
-    ]
-    assert calls[0]["arguments"] == {"url": "http://127.0.0.1:8787"}
-    assert calls[5]["arguments"] == {"filename": "desktop.png", "fullPage": True, "scale": "css", "type": "png"}
-    assert calls[7]["arguments"] == {"filename": "mobile.png", "fullPage": True, "scale": "css", "type": "png"}
-    assert all(row["name"] in browser.ALLOWED_TOOLS for row in calls)
+        "browser_wait_for",
+    }
+    assert browser.ALLOWED_TOOLS.isdisjoint(
+        {
+            "browser_evaluate",
+            "browser_file_upload",
+            "browser_run_code_unsafe",
+            "browser_type",
+        }
+    )
 
 
 def test_zero_length_screenshot_is_refused_before_receipt(tmp_path):
@@ -181,10 +340,12 @@ def test_zero_length_screenshot_is_refused_before_receipt(tmp_path):
     (output_dir / "desktop.png").write_bytes(b"")
 
     with pytest.raises(browser.BrowserReviewError) as raised:
-        browser._screenshot_receipt(output_dir, "desktop.png", {"width": 1440, "height": 900})
+        browser.screenshot_artifact(
+            output_dir, "desktop.png", viewport={"width": 1440, "height": 900}
+        )
 
-    assert raised.value.state == "SCREENSHOT_OVERSIZE"
-    assert raised.value.detail == "screenshot evidence size is outside the reviewed bound"
+    assert raised.value.state == "BROWSER_ARTIFACT_OVERSIZE"
+    assert raised.value.detail == "screenshot artifact is outside the reviewed bound"
 
 
 def test_oversized_screenshot_is_refused_before_reading_bytes(tmp_path, monkeypatch):
@@ -208,65 +369,52 @@ def test_oversized_screenshot_is_refused_before_reading_bytes(tmp_path, monkeypa
     monkeypatch.setattr(Path, "read_bytes", fail_if_oversized_is_read)
 
     with pytest.raises(browser.BrowserReviewError) as raised:
-        browser._screenshot_receipt(output_dir, "desktop.png", {"width": 1440, "height": 900})
+        browser.screenshot_artifact(
+            output_dir, "desktop.png", viewport={"width": 1440, "height": 900}
+        )
 
-    assert raised.value.state == "SCREENSHOT_OVERSIZE"
-    assert raised.value.detail == "screenshot evidence size is outside the reviewed bound"
+    assert raised.value.state == "BROWSER_ARTIFACT_OVERSIZE"
+    assert raised.value.detail == "screenshot artifact is outside the reviewed bound"
     assert read_attempts == 0
     assert browser.MAX_SCREENSHOT_BYTES > 202_184
 
 
-def test_oversized_screenshot_returns_no_complete_receipt_or_retry_and_cleans(tmp_path, monkeypatch):
-    launch_count = 0
-    original_popen = browser.subprocess.Popen
-
-    def count_browser_launches(*args, **kwargs):
-        nonlocal launch_count
-        argv = args[0] if args else kwargs.get("args", ())
-        if "--output-dir" in argv:
-            launch_count += 1
-        return original_popen(*args, **kwargs)
-
-    monkeypatch.setattr(browser.subprocess, "Popen", count_browser_launches)
-    config = _config(
-        tmp_path,
-        command_override=_fake_mcp(tmp_path, screenshot_bytes=12 * 1024 * 1024),
-    )
-    coordinator = browser.BrowserReviewCoordinator(config)
-
-    receipt = coordinator.run()
-
-    assert receipt == {
-        "schema": "mastermind.worker_browser_b1.receipt.v1",
-        "ok": False,
-        "state": "SCREENSHOT_OVERSIZE",
-        "detail": "screenshot evidence size is outside the reviewed bound",
-        "cleanup": {"process_group_absent": True, "profile_absent": True},
-    }
-    assert coordinator.snapshot() == receipt
-    assert coordinator.read_artifact("desktop.png") is None
-    assert launch_count == 1
-
-
-def test_named_official_screenshots_resolve_inside_private_run_cwd_not_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    config = _config(
-        tmp_path,
-        repo_root=repo_root,
-        command_override=_fake_mcp(
-            tmp_path, screenshots_follow_cwd=True, create_profile=True
-        ),
+def test_screenshot_refuses_png_signature_without_decodable_image(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "desktop.png").write_bytes(
+        b"\x89PNG\r\n\x1a\nnot-a-decoded-image"
     )
 
-    receipt = browser.BrowserReviewCoordinator(config).run()
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.screenshot_artifact(
+            output_dir, "desktop.png", viewport={"width": 1440, "height": 900}
+        )
 
-    assert receipt["state"] == "COMPLETE"
-    assert not (repo_root / "desktop.png").exists()
-    assert not (repo_root / "mobile.png").exists()
-    artifact_dir = Path(receipt["artifact_dir"])
-    assert not [path for path in artifact_dir.iterdir() if path.is_dir()]
-    assert receipt["cleanup"]["profile_absent"] is True
+    assert raised.value.state == "BROWSER_SCREENSHOT_FAILED"
+
+
+def test_screenshot_refuses_decodable_png_with_wrong_viewport_dimensions(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "desktop.png").write_bytes(_png(390, 844))
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.screenshot_artifact(
+            output_dir, "desktop.png", viewport={"width": 1440, "height": 900}
+        )
+
+    assert raised.value.state == "BROWSER_SCREENSHOT_FAILED"
+    assert raised.value.detail == "screenshot dimensions do not match the bound viewport"
+
+
+def test_chairman_process_cannot_own_the_retired_direct_browser_lifecycle():
+    for forbidden in (
+        "BrowserReviewCoordinator",
+        "_JsonLineMcpClient",
+        "run_browser_review",
+    ):
+        assert not hasattr(browser, forbidden)
 
 
 def test_only_fixed_loopback_origin_is_accepted(tmp_path):
@@ -278,7 +426,7 @@ def test_only_fixed_loopback_origin_is_accepted(tmp_path):
         "http://127.0.0.1:8787?query=1",
     ):
         with pytest.raises(ValueError, match="exact loopback origin"):
-            browser.BrowserReviewCoordinator(_config(tmp_path, origin=origin))
+            browser._validate_origin(origin)
 
 
 def test_caller_cannot_supply_url_command_profile_or_other_input(tmp_path):
@@ -291,60 +439,6 @@ def test_caller_cannot_supply_url_command_profile_or_other_input(tmp_path):
     ):
         with pytest.raises(ValueError, match="unknown key"):
             browser.validate_request(body)
-
-
-def test_cleanup_uncertain_is_terminally_refused_and_blocks_second_launch(tmp_path):
-    calls = 0
-
-    def unclean(_config):
-        nonlocal calls
-        calls += 1
-        return {
-            "schema": "mastermind.worker_browser_b1.receipt.v1",
-            "ok": False,
-            "state": "CLEANUP_UNCERTAIN",
-            "cleanup": {"process_group_absent": False},
-        }
-
-    coordinator = browser.BrowserReviewCoordinator(_config(tmp_path), run_fn=unclean)
-    first = coordinator.run()
-    second = coordinator.run()
-
-    assert first["state"] == "CLEANUP_UNCERTAIN"
-    assert second == {
-        "schema": "mastermind.worker_browser_b1.receipt.v1",
-        "ok": False,
-        "state": "BLOCKED_CLEANUP_UNCERTAIN",
-        "detail": "the prior browser process group is not proven absent",
-    }
-    assert calls == 1
-
-
-def test_single_flight_refuses_concurrent_run(tmp_path):
-    entered = threading.Event()
-    release = threading.Event()
-
-    def slow(_config):
-        entered.set()
-        assert release.wait(5)
-        return {"schema": "mastermind.worker_browser_b1.receipt.v1", "ok": True, "state": "COMPLETE", "cleanup": {"process_group_absent": True}}
-
-    coordinator = browser.BrowserReviewCoordinator(_config(tmp_path), run_fn=slow)
-    result: list[dict] = []
-    thread = threading.Thread(target=lambda: result.append(coordinator.run()))
-    thread.start()
-    assert entered.wait(5)
-    refused = coordinator.run()
-    release.set()
-    thread.join(5)
-
-    assert refused == {
-        "schema": "mastermind.worker_browser_b1.receipt.v1",
-        "ok": False,
-        "state": "BUSY",
-        "detail": "one browser review is already running",
-    }
-    assert result[0]["state"] == "COMPLETE"
 
 
 def test_package_manifest_and_lock_pin_exact_release():
@@ -362,17 +456,2333 @@ def test_package_manifest_and_lock_pin_exact_release():
     )
 
 
-def test_control_room_ui_exposes_one_bounded_review_and_two_exact_previews():
-    root = Path(__file__).resolve().parents[1] / "app" / "static" / "chairman_control"
-    html = (root / "index.html").read_text(encoding="utf-8")
-    js = (root / "control_room.js").read_text(encoding="utf-8")
+def test_installer_provisions_only_the_locked_chromium_revision_at_install_time():
+    installer = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "install_worker_browser_b1_runtime.sh"
+    ).read_text(encoding="utf-8")
 
-    assert 'id="browser-review-run"' in html
-    assert 'id="browser-review-result"' in html
-    assert 'id="browser-review-desktop"' in html
-    assert 'id="browser-review-mobile"' in html
-    assert "fresh isolated browser" in html.lower()
-    assert "does not use your browser profile" in html.lower()
-    assert 'postJSON("/api/browser-review", {})' in js
-    assert '"/api/browser-review/artifact/desktop.png"' in js
-    assert '"/api/browser-review/artifact/mobile.png"' in js
+    assert 'PLAYWRIGHT_BROWSERS_PATH="$runtime_root/browsers"' in installer
+    assert '"$node_executable" "$runtime_root/node_modules/playwright/cli.js" install chromium' in installer
+    assert '"$node_executable" "$runtime_root/node_modules/@playwright/mcp/cli.js" --version' in installer
+    assert '"$node_executable" "$npm_cli" ci' in installer
+    assert "command -v node" not in installer
+    assert "node_modules/.bin/playwright\" install" not in installer
+    assert "node_modules/.bin/playwright-mcp --version" not in installer
+    assert "\n  npm ci" not in installer
+    assert '"$browser_root"/chromium-1237/*' in installer
+    assert 'shasum -a 256 "$browser_executable"' in installer
+    assert 'worker-browser-b1-launcher' in installer
+    assert 'worker-browser-b1-install-manifest.json' in installer
+    assert "exec /usr/bin/env -i" in installer
+    assert 'runpy.run_module("control_plane.worker_browser_b1"' in installer
+    assert installer.index("exec /usr/bin/env -i") < installer.index(
+        'runpy.run_module("control_plane.worker_browser_b1"'
+    )
+    assert 'chmod 0400 "$runtime_root/package-lock.json"' in installer
+    assert "install firefox" not in installer
+    assert "install webkit" not in installer
+
+
+def test_installer_uses_trusted_node_then_seals_copied_runtime_before_execution():
+    installer = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "install_worker_browser_b1_runtime.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "validate_node_macho_pair()" in installer
+    assert "validate_node_macho_dependency_closure" in installer
+    assert (
+        'validate_node_macho_pair "$node_executable" "$node_library_source"'
+        in installer
+    )
+    assert (
+        'validate_node_macho_pair "$runtime_root/bin/node" "$node_library"'
+        in installer
+    )
+    assert '@rpath/libnode.147.dylib' in installer
+    assert '"$runtime_root/lib/libnode.147.dylib"' in installer
+    assert '/usr/bin/install -m 0400 "$node_library_source"' in installer
+    assert '/usr/bin/cmp -s "$node_library_source" "$node_library"' in installer
+    assert 'refusing loader-path Node dynamic library shadow' in installer
+    assert 'node_executable="$runtime_root/bin/node"' not in installer
+    assert "load_runtime_install_attestation" in installer
+    external_install_execution = installer.index(
+        '"$node_executable" "$npm_cli" ci'
+    )
+    launcher_start = installer.index(
+        'launcher="$runtime_root/bin/worker-browser-b1-launcher"'
+    )
+    launcher_complete = installer.index("\nPY\n\nmcp_executable=")
+    node_copy = installer.index(
+        '/usr/bin/install -m 0500 "$node_executable" "$runtime_root/bin/node"'
+    )
+    library_copy = installer.index(
+        '/usr/bin/install -m 0400 "$node_library_source"'
+    )
+    manifest_seal = installer.index("write_runtime_install_manifest(")
+    trap_clear = installer.index("trap - EXIT", manifest_seal)
+    copied_pair_post_seal = installer.index(
+        'validate_node_macho_pair "$runtime_root/bin/node" "$node_library"'
+    )
+    post_seal_attestation = installer.index(
+        "load_runtime_install_attestation(", manifest_seal
+    )
+    assert external_install_execution < launcher_start < launcher_complete
+    assert launcher_complete < node_copy < library_copy < manifest_seal
+    assert manifest_seal < trap_clear < copied_pair_post_seal < post_seal_attestation
+
+
+def test_node_macho_parser_accepts_only_exact_relative_and_trusted_host_closure():
+    node_dependencies = """/opt/homebrew/Cellar/node/26.5.0/bin/node:
+\t@rpath/libnode.147.dylib (compatibility version 0.0.0, current version 0.0.0)
+\t/opt/homebrew/opt/libuv/lib/libuv.1.dylib (compatibility version 1.0.0, current version 1.0.0)
+\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 1.0.0)
+\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)
+"""
+    node_load_commands = """Load command 40
+          cmd LC_RPATH
+      cmdsize 32
+         path @loader_path (offset 12)
+Load command 41
+          cmd LC_RPATH
+      cmdsize 40
+         path @loader_path/../lib (offset 12)
+"""
+    library_dependencies = """/opt/homebrew/Cellar/node/26.5.0/lib/libnode.147.dylib:
+\t/opt/homebrew/opt/node/lib/libnode.147.dylib (compatibility version 0.0.0, current version 0.0.0)
+\t/opt/homebrew/opt/libuv/lib/libuv.1.dylib (compatibility version 1.0.0, current version 1.0.0)
+\t/System/Library/Frameworks/Security.framework/Versions/A/Security (compatibility version 1.0.0, current version 1.0.0)
+\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1.0.0)
+"""
+
+    node_path = Path("/opt/homebrew/Cellar/node/26.5.0/bin/node")
+    library_path = Path(
+        "/opt/homebrew/Cellar/node/26.5.0/lib/libnode.147.dylib"
+    )
+    browser.validate_node_macho_dependency_closure(
+        node_path=node_path,
+        library_path=library_path,
+        node_dependencies=node_dependencies,
+        node_load_commands=node_load_commands,
+        library_dependencies=library_dependencies,
+    )
+
+    hostile_rows = {
+        "relative_node_dependency": node_dependencies.replace(
+            "/opt/homebrew/opt/libuv/lib/libuv.1.dylib", "libuv.1.dylib"
+        ),
+        "untrusted_absolute_node_dependency": node_dependencies.replace(
+            "/opt/homebrew/opt/libuv/lib/libuv.1.dylib", "/tmp/libuv.1.dylib"
+        ),
+        "escaping_trusted_prefix_node_dependency": node_dependencies.replace(
+            "/opt/homebrew/opt/libuv/lib/libuv.1.dylib",
+            "/opt/homebrew/opt/../../tmp/libuv.1.dylib",
+        ),
+        "relative_library_id": library_dependencies.replace(
+            "/opt/homebrew/opt/node/lib/libnode.147.dylib",
+            "@rpath/libnode.147.dylib",
+            1,
+        ),
+        "relative_library_dependency": library_dependencies.replace(
+            "/opt/homebrew/opt/libuv/lib/libuv.1.dylib", "../lib/libuv.1.dylib"
+        ),
+        "untrusted_absolute_library_dependency": library_dependencies.replace(
+            "/opt/homebrew/opt/libuv/lib/libuv.1.dylib", "/tmp/libuv.1.dylib"
+        ),
+    }
+    for label, hostile in hostile_rows.items():
+        node_payload = (
+            hostile
+            if label.endswith("node_dependency")
+            else node_dependencies
+        )
+        library_payload = (
+            hostile
+            if "library" in label
+            else library_dependencies
+        )
+        with pytest.raises(browser.BrowserReviewError, match="Mach-O"):
+            browser.validate_node_macho_dependency_closure(
+                node_path=node_path,
+                library_path=library_path,
+                node_dependencies=node_payload,
+                node_load_commands=node_load_commands,
+                library_dependencies=library_payload,
+            )
+
+    with pytest.raises(browser.BrowserReviewError, match="Mach-O"):
+        browser.validate_node_macho_dependency_closure(
+            node_path=node_path,
+            library_path=library_path,
+            node_dependencies=node_dependencies,
+            node_load_commands=node_load_commands.replace(
+                "@loader_path/../lib", "@loader_path/../untrusted"
+            ),
+            library_dependencies=library_dependencies,
+        )
+
+
+def test_installer_never_uses_ambient_tmpdir_and_declares_absent_postcondition():
+    installer = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "install_worker_browser_b1_runtime.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'tmp_install="$runtime_root/tmp-install"' in installer
+    assert installer.count('TMPDIR="$tmp_install"') >= 7
+    assert "${TMPDIR" not in installer
+    assert "prepare_runtime_install_tmp" in installer
+    assert "cleanup_runtime_install_tmp" in installer
+    assert "tmp_install_postcondition" in installer
+    assert 'runtime_container="/Volumes/Mastermind/worker-browser-b1"' in installer
+    assert '/usr/bin/install -m 0500 "$node_executable" "$runtime_root/bin/node"' in installer
+    assert 'node_executable="$runtime_root/bin/node"' not in installer
+
+
+def test_runtime_tmp_install_is_exact_private_contained_and_absent_after_cleanup(
+    tmp_path, monkeypatch
+):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    ambient = tmp_path / "ambient-tmp"
+    ambient.mkdir()
+    marker = ambient / "must-survive"
+    marker.write_text("ambient", encoding="utf-8")
+    monkeypatch.setenv("TMPDIR", os.fspath(ambient))
+
+    identity = browser.prepare_runtime_install_tmp(runtime)
+
+    exact = runtime / "tmp-install"
+    info = exact.lstat()
+    assert identity == (info.st_dev, info.st_ino)
+    assert not exact.is_symlink()
+    assert info.st_uid == os.geteuid()
+    assert stat.S_IMODE(info.st_mode) == 0o700
+    (exact / "nested").mkdir()
+    (exact / "nested" / "temporary").write_text("contained", encoding="utf-8")
+    browser.cleanup_runtime_install_tmp(runtime, identity)
+    assert not os.path.lexists(exact)
+    assert marker.read_text(encoding="utf-8") == "ambient"
+
+    exact.symlink_to(ambient, target_is_directory=True)
+    with pytest.raises(browser.BrowserReviewError):
+        browser.prepare_runtime_install_tmp(runtime)
+
+
+def test_runtime_tmp_cleanup_refuses_path_swap_and_preserves_both_inodes(
+    tmp_path, monkeypatch
+):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    identity = browser.prepare_runtime_install_tmp(runtime)
+    install_tmp = runtime / "tmp-install"
+    (install_tmp / "temporary").write_text("contained", encoding="utf-8")
+    captured = runtime / "captured-original"
+    original_clear = browser._clear_directory_descriptor
+
+    def swap_after_exact_clear(descriptor: int) -> None:
+        original_clear(descriptor)
+        install_tmp.rename(captured)
+        install_tmp.mkdir(mode=0o700)
+
+    monkeypatch.setattr(browser, "_clear_directory_descriptor", swap_after_exact_clear)
+
+    with pytest.raises(browser.BrowserReviewError, match="cleanup failed"):
+        browser.cleanup_runtime_install_tmp(runtime, identity)
+    assert captured.is_dir()
+    assert (captured.stat().st_dev, captured.stat().st_ino) == identity
+    assert install_tmp.is_dir()
+    assert (install_tmp.stat().st_dev, install_tmp.stat().st_ino) != identity
+
+
+def test_runtime_tmp_cleanup_refuses_missing_name_when_captured_inode_survives(
+    tmp_path,
+):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    identity = browser.prepare_runtime_install_tmp(runtime)
+    captured = runtime / "captured-original"
+    (runtime / "tmp-install").rename(captured)
+
+    with pytest.raises(browser.BrowserReviewError, match="cleanup failed"):
+        browser.cleanup_runtime_install_tmp(runtime, identity)
+    assert (captured.stat().st_dev, captured.stat().st_ino) == identity
+
+
+@pytest.mark.parametrize("entry_kind", ["directory", "file"])
+def test_runtime_tmp_cleanup_quarantines_recursive_entry_before_delete(
+    tmp_path, monkeypatch, entry_kind
+):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    identity = browser.prepare_runtime_install_tmp(runtime)
+    install_tmp = runtime / "tmp-install"
+    target = install_tmp / f"nested-{entry_kind}"
+    if entry_kind == "directory":
+        target.mkdir()
+    else:
+        target.write_text("original", encoding="utf-8")
+    captured = install_tmp / f"captured-{entry_kind}"
+    original_rename = browser.os.rename
+    injected = False
+
+    def swap_at_quarantine(src, dst, *args, **kwargs):
+        nonlocal injected
+        if not injected and src == target.name:
+            injected = True
+            original_rename(target, captured)
+            if entry_kind == "directory":
+                target.mkdir()
+            else:
+                target.write_text("replacement", encoding="utf-8")
+        return original_rename(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(browser.os, "rename", swap_at_quarantine)
+
+    with pytest.raises(browser.BrowserReviewError, match="cleanup failed"):
+        browser.cleanup_runtime_install_tmp(runtime, identity)
+    assert injected is True
+    assert captured.exists()
+    assert target.exists()
+    if entry_kind == "file":
+        assert captured.read_text(encoding="utf-8") == "original"
+        assert target.read_text(encoding="utf-8") == "replacement"
+
+
+def test_runtime_manifest_writer_freezes_complete_closure_and_cleans_exact_tmpdir(
+    tmp_path,
+):
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    runtime.parent.chmod(0o700)
+    runtime.chmod(0o700)
+    (runtime / "bin").chmod(0o700)
+    manifest_path.unlink()
+    tmp_identity = browser.prepare_runtime_install_tmp(runtime)
+    install_tmp = runtime / "tmp-install"
+    (install_tmp / "npm-temporary").write_text("temporary", encoding="utf-8")
+
+    manifest_digest = browser.write_runtime_install_manifest(
+        manifest_path=manifest_path,
+        runtime_root=runtime,
+        launcher=Path(manifest["launcher"]["path"]),
+        node=Path(manifest["node"]["executable"]["path"]),
+        node_library=Path(manifest["node"]["dynamic_library"]["path"]),
+        mcp=Path(manifest["mcp"]["executable"]["path"]),
+        package_lock=Path(manifest["mcp"]["package_lock"]["path"]),
+        browser=Path(manifest["browser"]["executable"]["path"]),
+        tmp_identity=tmp_identity,
+    )
+
+    assert not os.path.lexists(install_tmp)
+    assert stat.S_IMODE(runtime.stat().st_mode) == 0o500
+    assert stat.S_IMODE((runtime / "bin").stat().st_mode) == 0o500
+    assert stat.S_IMODE((runtime / "lib").stat().st_mode) == 0o500
+    assert stat.S_IMODE(runtime.parent.stat().st_mode) == 0o500
+    assert stat.S_IMODE(manifest_path.stat().st_mode) == 0o400
+    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert persisted["tmp_install_postcondition"] == "absent"
+    assert persisted["closure_inventory"] == sorted(
+        persisted["closure_inventory"], key=lambda row: row["path"]
+    )
+    assert persisted["closure_tree_digest"] == browser.runtime_closure_tree_digest(
+        persisted["closure_inventory"]
+    )
+    assert hashlib.sha256(manifest_path.read_bytes()).hexdigest() == manifest_digest
+    assert browser.load_runtime_install_attestation(
+        runtime, expected_manifest_digest=manifest_digest
+    ).closure_entry_count == len(persisted["closure_inventory"])
+
+
+def test_runtime_manifest_writer_refuses_unrequired_adjacent_node_library(tmp_path):
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    runtime.parent.chmod(0o700)
+    runtime.chmod(0o700)
+    (runtime / "bin").chmod(0o700)
+    (runtime / "lib").chmod(0o700)
+    manifest_path.unlink()
+    extra = runtime / "lib" / "libnode-unrequired.dylib"
+    extra.write_bytes(b"not in the copied Node Mach-O closure")
+    extra.chmod(0o400)
+    tmp_identity = browser.prepare_runtime_install_tmp(runtime)
+
+    with pytest.raises(browser.BrowserReviewError, match="dynamic library closure"):
+        browser.write_runtime_install_manifest(
+            manifest_path=manifest_path,
+            runtime_root=runtime,
+            launcher=Path(manifest["launcher"]["path"]),
+            node=Path(manifest["node"]["executable"]["path"]),
+            node_library=Path(manifest["node"]["dynamic_library"]["path"]),
+            mcp=Path(manifest["mcp"]["executable"]["path"]),
+            package_lock=Path(manifest["mcp"]["package_lock"]["path"]),
+            browser=Path(manifest["browser"]["executable"]["path"]),
+            tmp_identity=tmp_identity,
+        )
+
+
+def test_runtime_manifest_seals_execution_parents_against_swap_restore(tmp_path):
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    browser.load_runtime_install_attestation(
+        runtime, expected_manifest_digest=manifest_digest
+    )
+
+    assert stat.S_IMODE(runtime.parent.stat().st_mode) == 0o500
+    assert Path(manifest["node"]["executable"]["path"]) == runtime / "bin" / "node"
+    assert Path(manifest["node"]["dynamic_library"]["path"]) == (
+        runtime / "lib" / "libnode.147.dylib"
+    )
+    with pytest.raises(PermissionError):
+        runtime.rename(runtime.parent / "runtime.attested")
+    with pytest.raises(PermissionError):
+        (runtime / "node_modules").rename(runtime / "node_modules.attested")
+    with pytest.raises(PermissionError):
+        (runtime / "bin").rename(runtime / "bin.attested")
+    with pytest.raises(PermissionError):
+        (runtime / "bin" / "worker-browser-b1-launcher").rename(
+            runtime / "bin" / "launcher.attested"
+        )
+    with pytest.raises(PermissionError):
+        (runtime / "bin" / "node").rename(runtime / "bin" / "node.attested")
+    with pytest.raises(PermissionError):
+        (runtime / "lib").rename(runtime / "lib.attested")
+    with pytest.raises(PermissionError):
+        (runtime / "lib" / "libnode.147.dylib").rename(
+            runtime / "lib" / "libnode.147.dylib.attested"
+        )
+
+
+def test_runtime_manifest_binds_exact_outer_container_identity(tmp_path):
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    container = runtime.parent
+    info = container.stat()
+    expected = {
+        "device": info.st_dev,
+        "gid": info.st_gid,
+        "inode": info.st_ino,
+        "mode": 0o500,
+        "uid": info.st_uid,
+    }
+
+    assert manifest["runtime_container"] == expected
+    attestation = browser.load_runtime_install_attestation(
+        runtime,
+        expected_manifest_digest=hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+    )
+    assert attestation.runtime_container_device == info.st_dev
+    assert attestation.runtime_container_inode == info.st_ino
+    assert attestation.runtime_container_uid == info.st_uid
+    assert attestation.runtime_container_gid == info.st_gid
+    assert attestation.runtime_container_mode == 0o500
+
+
+def test_outer_bootstrap_holds_opened_container_across_whole_name_swap(
+    tmp_path, monkeypatch
+):
+    bootstrap = getattr(capabilities, "WORKER_BROWSER_MCP_BOOTSTRAP", "")
+    assert bootstrap
+    canonical = tmp_path / "worker-browser-b1"
+    launcher = canonical / "runtime" / "bin" / browser.RUNTIME_LAUNCHER_NAME
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\nprintf 'ORIGINAL\\n'\n", encoding="utf-8")
+    launcher.chmod(0o500)
+    manifest_path = canonical / "runtime" / browser.RUNTIME_INSTALL_MANIFEST_NAME
+    container_info = canonical.stat()
+    launcher_info = launcher.stat()
+    manifest_value = {
+        "launcher": {
+            "gid": launcher_info.st_gid,
+            "mode": 0o500,
+            "path": os.fspath(launcher),
+            "sha256": hashlib.sha256(launcher.read_bytes()).hexdigest(),
+            "uid": launcher_info.st_uid,
+        },
+        "runtime_container": {
+            "device": container_info.st_dev,
+            "gid": container_info.st_gid,
+            "inode": container_info.st_ino,
+            "mode": 0o500,
+            "uid": container_info.st_uid,
+        }
+    }
+    manifest_path.write_bytes(browser._canonical_bytes(manifest_value) + b"\n")
+    manifest_path.chmod(0o400)
+    launcher.parent.chmod(0o500)
+    launcher.parent.parent.chmod(0o500)
+    canonical.chmod(0o500)
+    replacement = tmp_path / "replacement"
+    replacement_launcher = (
+        replacement / "runtime" / "bin" / browser.RUNTIME_LAUNCHER_NAME
+    )
+    replacement_launcher.parent.mkdir(parents=True)
+    replacement_launcher.write_text(
+        "#!/bin/sh\nprintf 'REPLACEMENT\\n'\n", encoding="utf-8"
+    )
+    replacement_launcher.chmod(0o500)
+    replacement.chmod(0o500)
+    reviewed_env = {
+        "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(tmp_path / "artifact"),
+        "MASTERMIND_BROWSER_FIXTURE_A_URL": "http://127.0.0.1:48101/a",
+        "MASTERMIND_BROWSER_FIXTURE_B_URL": "http://127.0.0.1:48101/b",
+        "MASTERMIND_BROWSER_FIXTURE_NONCE": "c" * 32,
+        "MASTERMIND_BROWSER_ORIGIN": "http://127.0.0.1:48101",
+        "MASTERMIND_BROWSER_PROXY_URL": "http://127.0.0.1:48102",
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH": os.fspath(manifest_path),
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": hashlib.sha256(
+            manifest_path.read_bytes()
+        ).hexdigest(),
+        "MASTERMIND_BROWSER_RUNTIME_ROOT": os.fspath(canonical / "runtime"),
+        "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(tmp_path / "workspace"),
+        "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+    }
+    monkeypatch.setattr(os, "environ", reviewed_env)
+    real_open = os.open
+    swapped = False
+    captured_exec: dict[str, object] = {}
+
+    def swap_after_container_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        if (
+            not swapped
+            and dir_fd is None
+            and os.fspath(path) == os.fspath(canonical)
+        ):
+            swapped = True
+            canonical.rename(tmp_path / "worker-browser-b1.attested")
+            replacement.rename(canonical)
+        return descriptor
+
+    class ExecCaptured(RuntimeError):
+        pass
+
+    def capture_exec(path, argv, environment):
+        captured_exec.update(
+            path=path,
+            argv=list(argv),
+            environment=dict(environment),
+            launcher=Path(path).read_text(encoding="utf-8"),
+        )
+        raise ExecCaptured
+
+    monkeypatch.setattr(os, "open", swap_after_container_open)
+    monkeypatch.setattr(os, "execve", capture_exec)
+    cwd_fd = real_open(".", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(ExecCaptured):
+            exec(bootstrap, {"__name__": "__main__"})
+    finally:
+        os.fchdir(cwd_fd)
+        os.close(cwd_fd)
+
+    assert swapped is True
+    assert captured_exec["path"] == "runtime/bin/worker-browser-b1-launcher"
+    assert captured_exec["argv"] == ["runtime/bin/worker-browser-b1-launcher"]
+    assert "ORIGINAL" in captured_exec["launcher"]
+    assert "REPLACEMENT" not in captured_exec["launcher"]
+    assert (
+        captured_exec["environment"]["MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD"]
+        .isdigit()
+    )
+
+
+def test_outer_bootstrap_refuses_complete_launcher_replacement_before_exec(tmp_path):
+    """A replacement launcher may not act before manifest-bound verification."""
+
+    runtime, runtime_manifest, manifest = _runtime_install_fixture(tmp_path)
+    launcher = Path(manifest["launcher"]["path"])
+    runtime.parent.chmod(0o700)
+    runtime.chmod(0o700)
+    launcher.parent.chmod(0o700)
+    launcher.chmod(0o700)
+    launcher.write_text(
+        "#!/bin/sh\nprintf 'REPLACEMENT-LAUNCHER-EXECUTED\\n'\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o500)
+    launcher.parent.chmod(0o500)
+    runtime.chmod(0o500)
+    runtime.parent.chmod(0o500)
+
+    result = subprocess.run(
+        [capabilities.WORKER_BROWSER_MCP_COMMAND, *capabilities.WORKER_BROWSER_MCP_ARGS],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_attempt_launch_environment(
+            workspace=tmp_path,
+            artifact=tmp_path / "artifact",
+            runtime=runtime,
+            runtime_manifest=runtime_manifest,
+        ),
+        timeout=10,
+    )
+
+    assert result.returncode != 0
+    assert "runtime container bootstrap refused" in result.stderr
+    assert "REPLACEMENT-LAUNCHER-EXECUTED" not in result.stdout
+
+
+def test_runtime_install_attestation_binds_launcher_node_lock_mcp_and_browser(tmp_path):
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+    attestation = browser.load_runtime_install_attestation(
+        runtime, expected_manifest_digest=manifest_digest
+    )
+
+    assert attestation.runtime_root == runtime.resolve()
+    assert attestation.manifest_path == manifest_path.resolve()
+    assert attestation.manifest_digest == hashlib.sha256(
+        browser._canonical_bytes(manifest) + b"\n"
+    ).hexdigest()
+    assert attestation.launcher_path == runtime / "bin" / "worker-browser-b1-launcher"
+    assert attestation.node_path == Path(manifest["node"]["executable"]["path"])
+    assert attestation.node_library_path == Path(
+        manifest["node"]["dynamic_library"]["path"]
+    )
+    assert attestation.node_library_sha256 == manifest["node"]["dynamic_library"][
+        "sha256"
+    ]
+    assert attestation.mcp_executable == Path(manifest["mcp"]["executable"]["path"])
+    assert attestation.package_lock_sha256 == manifest["mcp"]["package_lock"]["sha256"]
+    assert attestation.closure_tree_digest == manifest["closure_tree_digest"]
+    assert attestation.closure_entry_count == len(manifest["closure_inventory"])
+    assert {
+        row["link"]
+        for row in manifest["closure_inventory"]
+        if row["type"] == "symlink"
+    } >= {
+        "../@playwright/mcp/cli.js",
+        "A",
+        "Versions/Current/Chromium Framework",
+    }
+    assert attestation.browser_revision == "1237"
+    assert attestation.browser_executable == Path(
+        manifest["browser"]["executable"]["path"]
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing", "extra", "mode", "tamper", "swap"],
+)
+def test_runtime_attestation_refuses_node_dynamic_library_closure_drift(
+    tmp_path, mutation
+):
+    """A copied Node is unusable unless its exact @rpath libnode is closed."""
+
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    expected_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    library = Path(manifest["node"]["dynamic_library"]["path"])
+    library_root = library.parent
+    runtime.parent.chmod(0o700)
+    runtime.chmod(0o700)
+    library_root.chmod(0o700)
+
+    if mutation == "missing":
+        library.unlink()
+    elif mutation == "extra":
+        extra = library_root / "libnode-unmanifested.dylib"
+        extra.write_bytes(b"unmanifested adjacent Node library")
+        extra.chmod(0o400)
+    elif mutation == "mode":
+        library.chmod(0o600)
+    elif mutation == "tamper":
+        library.chmod(0o600)
+        library.write_bytes(library.read_bytes() + b" tampered")
+        library.chmod(0o400)
+    else:
+        captured = library.with_suffix(".captured")
+        library.rename(captured)
+        library.write_bytes(b"replacement Node dynamic library")
+        library.chmod(0o400)
+
+    library_root.chmod(0o500)
+    runtime.chmod(0o500)
+    runtime.parent.chmod(0o500)
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=expected_manifest_digest
+        )
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+
+def test_runtime_attestation_refuses_loader_path_shadow_before_runtime_lib(tmp_path):
+    """The first @loader_path search slot may not shadow the attested ../lib copy."""
+
+    runtime, manifest_path, _manifest = _runtime_install_fixture(tmp_path)
+    expected_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    runtime.parent.chmod(0o700)
+    runtime.chmod(0o700)
+    (runtime / "bin").chmod(0o700)
+    shadow = runtime / "bin" / "libnode.147.dylib"
+    shadow.write_bytes(b"unattested first-rpath shadow")
+    shadow.chmod(0o400)
+    (runtime / "bin").chmod(0o500)
+    runtime.chmod(0o500)
+    runtime.parent.chmod(0o500)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=expected_manifest_digest
+        )
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+
+@pytest.mark.parametrize(
+    "closure_label",
+    [
+        "mcp_core_bundle",
+        "mcp_other",
+        "playwright",
+        "utils_bundle",
+        "playwright_core_other",
+        "chromium_framework",
+        "chromium_helper",
+        "headless_shell",
+        "ffmpeg",
+    ],
+)
+def test_runtime_attestation_refuses_any_loaded_closure_mutation(
+    tmp_path, closure_label
+):
+    runtime, manifest_path, _manifest = _runtime_install_fixture(tmp_path)
+    closure = _add_loaded_runtime_closure(runtime)
+    expected_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    target = closure[closure_label]
+    prior_mode = stat.S_IMODE(target.stat().st_mode)
+    target.chmod(0o700)
+    target.write_bytes(target.read_bytes() + b"tampered")
+    target.chmod(prior_mode)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=expected_manifest_digest
+        )
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+
+def test_runtime_attestation_refuses_coordinated_closure_and_manifest_rewrite(
+    tmp_path,
+):
+    """The independent grant digest wins over a self-consistent rewritten receipt."""
+
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    expected_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    target = _add_loaded_runtime_closure(runtime)["mcp_core_bundle"]
+    target.chmod(0o700)
+    target.write_bytes(target.read_bytes() + b" coordinated closure tamper")
+    target.chmod(0o400)
+    target_relative = target.relative_to(runtime).as_posix()
+    row = next(
+        item for item in manifest["closure_inventory"] if item["path"] == target_relative
+    )
+    row["sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
+    row["size"] = target.stat().st_size
+    manifest["closure_tree_digest"] = browser.runtime_closure_tree_digest(
+        manifest["closure_inventory"]
+    )
+    manifest_path.chmod(0o600)
+    manifest_path.write_bytes(browser._canonical_bytes(manifest) + b"\n")
+    manifest_path.chmod(0o400)
+
+    with pytest.raises(browser.BrowserReviewError, match="manifest digest drifted"):
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=expected_manifest_digest
+        )
+
+
+def test_runtime_attestation_refuses_escaping_closure_symlink(tmp_path):
+    runtime, manifest_path, _manifest = _runtime_install_fixture(tmp_path)
+    expected_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    package_root = runtime / "node_modules" / "playwright-core"
+    package_root.chmod(0o700)
+    (package_root / "escape").symlink_to(tmp_path / "node")
+    package_root.chmod(0o500)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=expected_manifest_digest
+        )
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+
+def test_runtime_attestation_refuses_missing_extra_and_unsafe_closure_entries(tmp_path):
+    runtime, manifest_path, _manifest = _runtime_install_fixture(tmp_path)
+    closure = _add_loaded_runtime_closure(runtime)
+    expected_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+    mcp_lib = closure["mcp_other"].parent
+    mcp_lib.chmod(0o700)
+    closure["mcp_other"].unlink()
+    mcp_lib.chmod(0o500)
+    extra = runtime / "node_modules" / "playwright-core" / "lib" / "injected.js"
+    extra.parent.chmod(0o700)
+    extra.write_bytes(b"unmanifested")
+    extra.chmod(0o400)
+    extra.parent.chmod(0o500)
+    closure["utils_bundle"].chmod(0o600)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=expected_manifest_digest
+        )
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_manifest",
+        "manifest_symlink",
+        "manifest_mode",
+        "manifest_extra_field",
+        "wrong_owner",
+        "launcher_hardlink",
+        "launcher_symlink",
+        "launcher_mode",
+        "launcher_tamper",
+        "node_tamper",
+        "node_library_tamper",
+        "mcp_tamper",
+        "package_lock_tamper",
+        "browser_tamper",
+        "coordinated_node_and_manifest_tamper",
+    ],
+)
+def test_runtime_install_attestation_refuses_every_identity_drift(
+    tmp_path, monkeypatch, mutation
+):
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+    expected_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+    if mutation == "missing_manifest":
+        runtime.chmod(0o700)
+        manifest_path.unlink()
+    elif mutation == "manifest_symlink":
+        payload = manifest_path.read_bytes()
+        runtime.chmod(0o700)
+        manifest_path.unlink()
+        alternate = tmp_path / "alternate-manifest.json"
+        alternate.write_bytes(payload)
+        alternate.chmod(0o400)
+        manifest_path.symlink_to(alternate)
+    elif mutation == "manifest_mode":
+        manifest_path.chmod(0o600)
+    elif mutation == "manifest_extra_field":
+        manifest["unexpected"] = True
+        manifest_path.chmod(0o600)
+        manifest_path.write_bytes(browser._canonical_bytes(manifest) + b"\n")
+        manifest_path.chmod(0o400)
+    elif mutation == "wrong_owner":
+        actual_uid = os.geteuid()
+        monkeypatch.setattr(browser.os, "geteuid", lambda: actual_uid + 1)
+    else:
+        targets = {
+            "launcher_symlink": Path(manifest["launcher"]["path"]),
+            "launcher_hardlink": Path(manifest["launcher"]["path"]),
+            "launcher_mode": Path(manifest["launcher"]["path"]),
+            "launcher_tamper": Path(manifest["launcher"]["path"]),
+            "node_tamper": Path(manifest["node"]["executable"]["path"]),
+            "node_library_tamper": Path(
+                manifest["node"]["dynamic_library"]["path"]
+            ),
+            "mcp_tamper": Path(manifest["mcp"]["executable"]["path"]),
+            "package_lock_tamper": Path(manifest["mcp"]["package_lock"]["path"]),
+            "browser_tamper": Path(manifest["browser"]["executable"]["path"]),
+            "coordinated_node_and_manifest_tamper": Path(
+                manifest["node"]["executable"]["path"]
+            ),
+        }
+        target = targets[mutation]
+        if mutation == "launcher_hardlink":
+            os.link(target, tmp_path / "launcher-hardlink")
+        elif mutation == "launcher_symlink":
+            payload = target.read_bytes()
+            (runtime / "bin").chmod(0o700)
+            target.unlink()
+            alternate = tmp_path / "alternate-launcher"
+            alternate.write_bytes(payload)
+            alternate.chmod(0o500)
+            target.symlink_to(alternate)
+        elif mutation == "launcher_mode":
+            target.chmod(0o700)
+        else:
+            prior_mode = stat.S_IMODE(target.stat().st_mode)
+            target.chmod(0o700)
+            target.write_bytes(target.read_bytes() + b" tampered")
+            target.chmod(prior_mode)
+            if mutation == "coordinated_node_and_manifest_tamper":
+                manifest["node"]["executable"]["sha256"] = hashlib.sha256(
+                    target.read_bytes()
+                ).hexdigest()
+                manifest_path.chmod(0o600)
+                manifest_path.write_bytes(browser._canonical_bytes(manifest) + b"\n")
+                manifest_path.chmod(0o400)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=expected_manifest_digest
+        )
+
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+
+def test_runtime_attestation_refuses_unratified_parent_symlink_and_path_swap(
+    tmp_path, monkeypatch
+):
+    runtime, manifest_path, manifest = _runtime_install_fixture(tmp_path)
+
+    with pytest.raises(browser.BrowserReviewError, match="not ratified"):
+        browser.load_runtime_install_attestation(
+            runtime,
+            expected_manifest_digest=browser.UNRATIFIED_RUNTIME_MANIFEST_DIGEST,
+        )
+
+    actual_parent = tmp_path / "external-node-parent"
+    actual_parent.mkdir()
+    node = actual_parent / "node"
+    node.write_bytes(b"fixture node through symlinked parent")
+    node.chmod(0o500)
+    linked_parent = tmp_path / "linked-node-parent"
+    linked_parent.symlink_to(actual_parent, target_is_directory=True)
+    linked_node = linked_parent / "node"
+    info = node.stat()
+    manifest["node"]["executable"] = {
+        "gid": info.st_gid,
+        "mode": stat.S_IMODE(info.st_mode),
+        "path": os.fspath(linked_node),
+        "sha256": hashlib.sha256(node.read_bytes()).hexdigest(),
+        "uid": info.st_uid,
+    }
+    manifest_path.chmod(0o600)
+    manifest_path.write_bytes(browser._canonical_bytes(manifest) + b"\n")
+    manifest_path.chmod(0o400)
+    symlinked_parent_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    with pytest.raises(browser.BrowserReviewError) as parent_error:
+        browser.load_runtime_install_attestation(
+            runtime, expected_manifest_digest=symlinked_parent_digest
+        )
+    assert parent_error.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+    # Restore a direct path and replace that pathname after its descriptor is
+    # opened.  Hashing the original descriptor cannot bless the swapped leaf.
+    direct_node = tmp_path / "descriptor-swap-node"
+    direct_node.write_bytes(b"descriptor-stable node fixture")
+    direct_node.chmod(0o500)
+    target_inode = direct_node.stat().st_ino
+    original_read = browser.os.read
+    swapped = False
+
+    def read_then_swap(descriptor, size):
+        nonlocal swapped
+        chunk = original_read(descriptor, size)
+        if not swapped and os.fstat(descriptor).st_ino == target_inode:
+            swapped = True
+            old = direct_node.with_name("node-open-descriptor")
+            direct_node.rename(old)
+            direct_node.write_bytes(old.read_bytes())
+            direct_node.chmod(0o500)
+        return chunk
+
+    monkeypatch.setattr(browser.os, "read", read_then_swap)
+    with pytest.raises(browser.BrowserReviewError) as swap_error:
+        browser._stable_runtime_file(direct_node)
+    assert swapped is True
+    assert swap_error.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+
+
+def test_external_launcher_scrubs_parent_before_worktree_import_and_rechecks_pin(
+    tmp_path,
+):
+    runtime, manifest_path, _manifest = _runtime_install_fixture(tmp_path)
+    launcher = runtime / "bin" / browser.RUNTIME_LAUNCHER_NAME
+    manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    workspace = tmp_path / "workspace"
+    package = workspace / "control_plane"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "worker_browser_b1.py").write_text(
+        textwrap.dedent(
+            """
+            import json
+            import os
+            from pathlib import Path
+
+            output = Path(os.environ["MASTERMIND_BROWSER_ARTIFACT_DIR"]) / "import-env.json"
+            output.write_text(json.dumps(dict(os.environ), sort_keys=True), encoding="utf-8")
+            """
+        ),
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    reviewed_env = {
+        "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(artifact),
+        "MASTERMIND_BROWSER_FIXTURE_A_URL": "http://127.0.0.1:48101/a",
+        "MASTERMIND_BROWSER_FIXTURE_B_URL": "http://127.0.0.1:48101/b",
+        "MASTERMIND_BROWSER_FIXTURE_NONCE": "c" * 32,
+        "MASTERMIND_BROWSER_ORIGIN": "http://127.0.0.1:48101",
+        "MASTERMIND_BROWSER_PROXY_URL": "http://127.0.0.1:48102",
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH": os.fspath(manifest_path),
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": manifest_digest,
+        "MASTERMIND_BROWSER_RUNTIME_ROOT": os.fspath(runtime),
+        "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(workspace),
+        "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+    }
+    hostile_parent = {
+        **reviewed_env,
+        "AWS_ACCESS_KEY_ID": "must-not-cross",
+        "AWS_SECRET_ACCESS_KEY": "must-not-cross",
+        "CODEX_HOME": "/must/not/cross",
+        "GH_TOKEN": "must-not-cross",
+        "GITHUB_TOKEN": "must-not-cross",
+        "NODE_OPTIONS": "--require=/malicious.js",
+        "NPM_CONFIG_USERCONFIG": "/malicious/npmrc",
+        "OPENAI_API_KEY": "must-not-cross",
+        "PYTHONHOME": "/malicious/python-home",
+        "PYTHONPATH": "/malicious/sitecustomize",
+        "SLACK_BOT_TOKEN": "must-not-cross",
+        "SSH_AUTH_SOCK": "/malicious/agent.sock",
+    }
+
+    accepted = subprocess.run(
+        [
+            capabilities.WORKER_BROWSER_MCP_COMMAND,
+            *capabilities.WORKER_BROWSER_MCP_ARGS,
+        ],
+        cwd=workspace,
+        env=hostile_parent,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert accepted.returncode == 0, accepted.stderr
+    observed = json.loads((artifact / "import-env.json").read_text(encoding="utf-8"))
+    for forbidden in hostile_parent.keys() - reviewed_env.keys():
+        assert forbidden not in observed
+    assert observed["MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256"] == manifest_digest
+    assert "PYTHONPATH" not in observed
+    assert "PYTHONHOME" not in observed
+
+    (artifact / "import-env.json").unlink()
+    wrong_pin = dict(reviewed_env)
+    wrong_pin["MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256"] = "f" * 64
+    refused_pin = subprocess.run(
+        [
+            capabilities.WORKER_BROWSER_MCP_COMMAND,
+            *capabilities.WORKER_BROWSER_MCP_ARGS,
+        ],
+        cwd=workspace,
+        env=wrong_pin,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert refused_pin.returncode != 0
+    assert not (artifact / "import-env.json").exists()
+
+    container_fd = os.open(
+        runtime.parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    direct_env = {
+        **reviewed_env,
+        "MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD": str(container_fd),
+    }
+    try:
+        refused_argument = subprocess.run(
+            [os.fspath(launcher), "unexpected"],
+            cwd=runtime.parent,
+            env=direct_env,
+            capture_output=True,
+            text=True,
+            pass_fds=(container_fd,),
+            timeout=10,
+        )
+    finally:
+        os.close(container_fd)
+    assert refused_argument.returncode != 0
+    assert not (artifact / "import-env.json").exists()
+
+    launcher.chmod(0o700)
+    launcher.write_bytes(launcher.read_bytes() + b"\n# tampered\n")
+    launcher.chmod(0o500)
+    refused_launcher = subprocess.run(
+        [
+            capabilities.WORKER_BROWSER_MCP_COMMAND,
+            *capabilities.WORKER_BROWSER_MCP_ARGS,
+        ],
+        cwd=workspace,
+        env=reviewed_env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert refused_launcher.returncode != 0
+    assert not (artifact / "import-env.json").exists()
+
+
+class _OriginHandler(BaseHTTPRequestHandler):
+    hits: list[tuple[str, str]] = []
+
+    def do_GET(self):  # noqa: N802 - stdlib callback
+        type(self).hits.append((self.command, self.path))
+        if self.path == "/redirect-external":
+            self.send_response(302)
+            self.send_header("Location", "https://example.com/escape")
+            self.end_headers()
+            return
+        body = b"loopback-ok"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format, *_args):
+        return
+
+
+def _raw_proxy_request(proxy_url: str, request: bytes) -> bytes:
+    host, port_text = proxy_url.removeprefix("http://").split(":", 1)
+    with socket.create_connection((host, int(port_text)), timeout=5) as client:
+        client.sendall(request)
+        client.shutdown(socket.SHUT_WR)
+        chunks: list[bytes] = []
+        while True:
+            chunk = client.recv(65536)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+
+
+def test_attempt_local_proxy_allows_only_exact_origin_and_refuses_every_escape_class():
+    """Removing any proxy refusal branch must make a hostile request observable."""
+
+    _OriginHandler.hits = []
+    origin_server = ThreadingHTTPServer(("127.0.0.1", 0), _OriginHandler)
+    origin_thread = threading.Thread(target=origin_server.serve_forever, daemon=True)
+    origin_thread.start()
+    origin = f"http://127.0.0.1:{origin_server.server_port}"
+    proxy = browser.LoopbackEnforcingProxy(origin)
+    proxy.start()
+    try:
+        allowed = _raw_proxy_request(
+            proxy.proxy_url,
+            (
+                f"GET {origin}/ok HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{origin_server.server_port}\r\nConnection: close\r\n\r\n"
+            ).encode(),
+        )
+        redirect = _raw_proxy_request(
+            proxy.proxy_url,
+            (
+                f"GET {origin}/redirect-external HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{origin_server.server_port}\r\nConnection: close\r\n\r\n"
+            ).encode(),
+        )
+        hostile_requests = {
+            "http": b"GET http://external-http.invalid/b1 HTTP/1.1\r\nHost: external-http.invalid\r\nConnection: close\r\n\r\n",
+            "https": b"CONNECT external-https.invalid:443 HTTP/1.1\r\nHost: external-https.invalid:443\r\nConnection: close\r\n\r\n",
+            "redirect": b"GET http://redirect.invalid/escape HTTP/1.1\r\nHost: redirect.invalid\r\nConnection: close\r\n\r\n",
+            "subresource": b"GET http://subresource.invalid/app.js HTTP/1.1\r\nHost: subresource.invalid\r\nSec-Fetch-Dest: script\r\nConnection: close\r\n\r\n",
+            "fetch": b"GET http://fetch.invalid/api HTTP/1.1\r\nHost: fetch.invalid\r\nSec-Fetch-Mode: cors\r\nConnection: close\r\n\r\n",
+            "websocket": (
+                "GET http://websocket.invalid/socket HTTP/1.1\r\n"
+                "Host: websocket.invalid\r\n"
+                "Connection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+            ).encode(),
+            "file": b"GET file:///etc/passwd HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            "write": (
+                f"POST {origin}/write HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{origin_server.server_port}\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n"
+            ).encode(),
+        }
+        refused = {
+            name: _raw_proxy_request(proxy.proxy_url, request)
+            for name, request in hostile_requests.items()
+        }
+    finally:
+        proxy.stop()
+        origin_server.shutdown()
+        origin_server.server_close()
+        origin_thread.join(5)
+
+    assert allowed.startswith(b"HTTP/1.1 200")
+    assert allowed.endswith(b"loopback-ok")
+    assert redirect.startswith(b"HTTP/1.1 302")
+    assert b"Location: https://example.com/escape" in redirect
+    assert set(refused) == {
+        "http", "https", "redirect", "subresource", "fetch", "websocket", "file", "write"
+    }
+    assert all(response.startswith(b"HTTP/1.1 403") for response in refused.values())
+    assert _OriginHandler.hits == [("GET", "/ok"), ("GET", "/redirect-external")]
+    assert proxy.receipt() == {
+        "allowed_requests": 2,
+        "external_egress_observed": False,
+        "refused": {
+            "external_fetch": 1,
+            "external_http": 1,
+            "external_https": 1,
+            "external_redirect": 1,
+            "external_subresource": 1,
+            "external_websocket": 1,
+            "file_url": 1,
+            "proxy_override": 0,
+            "write_method": 1,
+        },
+    }
+
+
+def test_mcp_launch_forces_locked_chromium_through_proxy_with_no_loopback_bypass(tmp_path):
+    config = _config(tmp_path, command_override=None)
+
+    argv = browser.build_mcp_argv(
+        config,
+        tmp_path / "output",
+        proxy_url="http://127.0.0.1:48177",
+    )
+
+    assert argv[argv.index("--browser") + 1] == "chromium"
+    assert argv[argv.index("--proxy-server") + 1] == "http://127.0.0.1:48177"
+    assert argv[argv.index("--proxy-bypass") + 1] == "<-loopback>"
+    assert argv[argv.index("--allowed-origins") + 1] == "http://127.0.0.1:8787"
+    assert "--allow-unrestricted-file-access" not in argv
+
+
+def test_mcp_tool_guard_confines_all_writes_and_rejects_unsafe_arguments(tmp_path):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+
+    guard.rewrite_call(
+        "browser_navigate",
+        {"url": "http://127.0.0.1:48101/"},
+    )
+    guard.rewrite_call("browser_resize", {"width": 1440, "height": 900})
+    screenshot = guard.rewrite_call(
+        "browser_take_screenshot",
+        {
+            "filename": "desktop.png",
+            "fullPage": False,
+            "scale": "css",
+            "type": "png",
+        },
+    )
+    assert "filename" not in screenshot
+
+    hostile_calls = (
+        ("browser_take_screenshot", {"filename": "../../tracked.py", "fullPage": False, "scale": "css", "type": "png"}),
+        ("browser_console_messages", {"level": "warning", "all": True, "filename": "tracked.py"}),
+        ("browser_network_requests", {"static": True, "filename": "tracked.py"}),
+        ("browser_tabs", {"action": "new", "url": "https://example.com"}),
+        ("browser_click", {"target": "arbitrary-production-ref"}),
+        ("browser_fill_form", {"fields": []}),
+        ("browser_run_code_unsafe", {"code": "require('fs').writeFileSync('pwned','x')"}),
+    )
+    for name, arguments in hostile_calls:
+        with pytest.raises(browser.BrowserReviewError) as raised:
+            guard.rewrite_call(name, arguments)
+        assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+
+
+def test_mcp_tool_guard_allows_fixture_only_interaction_and_records_file_refusal(tmp_path):
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    fixture_a = _fixture_urls(origin)["A"]
+    guard.rewrite_call("browser_navigate", {"url": fixture_a})
+    assert guard.rewrite_call(
+        "browser_hover", {"element": "visual fixture card", "target": "fixture-card"}
+    )["target"] == "fixture-card"
+    assert guard.rewrite_call(
+        "browser_fill_form",
+        {
+            "fields": [
+                {
+                    "name": "fixture input",
+                    "target": "fixture-input",
+                    "type": "textbox",
+                    "value": "local-only",
+                }
+            ]
+        },
+    )["fields"][0]["value"] == "local-only"
+    with pytest.raises(browser.BrowserReviewError):
+        guard.rewrite_call("browser_navigate", {"url": "file:///etc/passwd"})
+    assert guard.evidence()["egress_falsifiers"]["file_url"] == "REFUSED"
+    assert guard.evidence()["egress_falsifiers"]["proxy_override"] == "REFUSED"
+
+
+def test_attempt_env_wrapper_runs_argument_guard_with_credential_free_child_env(
+    tmp_path, monkeypatch
+):
+    runtime, runtime_manifest, manifest = _runtime_install_fixture(tmp_path)
+    manifest_digest = hashlib.sha256(runtime_manifest.read_bytes()).hexdigest()
+    node = Path(manifest["node"]["executable"]["path"])
+    binary = Path(manifest["mcp"]["executable"]["path"])
+    browsers = runtime / "browsers"
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    monkeypatch.chdir(tmp_path)
+    observed: dict[str, object] = {}
+
+    def capture(**kwargs):
+        observed.update(
+            argv=list(kwargs["argv"]),
+            environment=dict(kwargs["environment"]),
+            guard=kwargs["guard"],
+            pass_fds=tuple(kwargs["pass_fds"]),
+        )
+        return 0
+
+    container_fd = os.open(
+        runtime.parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    os.set_inheritable(container_fd, True)
+    try:
+        assert browser.launch_mcp_from_attempt_env(
+            {
+                "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(artifact),
+                "MASTERMIND_BROWSER_FIXTURE_A_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "MASTERMIND_BROWSER_FIXTURE_B_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "MASTERMIND_BROWSER_FIXTURE_NONCE": "c" * 32,
+                "MASTERMIND_BROWSER_ORIGIN": "http://127.0.0.1:48101",
+                "MASTERMIND_BROWSER_PROXY_URL": "http://127.0.0.1:48102",
+                "MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD": str(container_fd),
+                "MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH": os.fspath(runtime_manifest),
+                "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": manifest_digest,
+                "MASTERMIND_BROWSER_RUNTIME_ROOT": os.fspath(runtime),
+                "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(tmp_path),
+                "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+                "OPENAI_API_KEY": "must-not-cross-wrapper",
+            },
+            bridge_runner=capture,
+        ) == 0
+    finally:
+        os.close(container_fd)
+
+    argv = observed["argv"]
+    assert argv[:5] == [
+        "/usr/bin/python3",
+        "-I",
+        "-S",
+        "-c",
+        browser._ANCHORED_NODE_BOOTSTRAP,
+    ]
+    assert os.fspath(node) not in argv
+    assert os.fspath(binary) not in argv
+    assert argv[argv.index("--browser") + 1] == "chromium"
+    assert argv[argv.index("--proxy-bypass") + 1] == "<-loopback>"
+    assert observed["environment"] == {
+        "HOME": os.fspath(artifact / "home"),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD": str(container_fd),
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": manifest_digest,
+        "NO_COLOR": "1",
+        "PATH": "/usr/bin:/bin",
+        "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+        "TMPDIR": os.fspath(artifact),
+    }
+    assert observed["pass_fds"] == (container_fd,)
+    assert isinstance(observed["guard"], browser.BrowserMcpToolGuard)
+
+
+def test_attempt_env_wrapper_executes_inner_anchor_not_outer_bootstrap(
+    tmp_path, monkeypatch
+):
+    runtime, runtime_manifest, _manifest = _runtime_install_fixture(
+        tmp_path,
+        node_payload=(
+            b"#!/bin/sh\n"
+            b"printf 'INNER:%s:%s\\n' \"$1\" \"$PLAYWRIGHT_BROWSERS_PATH\"\n"
+        ),
+    )
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    monkeypatch.chdir(tmp_path)
+    container_fd = os.open(
+        runtime.parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    os.set_inheritable(container_fd, True)
+    observed: dict[str, object] = {}
+
+    def execute_selected_envelope(**kwargs):
+        completed = subprocess.run(
+            kwargs["argv"],
+            cwd=kwargs["guard"].artifact_dir,
+            env=kwargs["environment"],
+            pass_fds=kwargs["pass_fds"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        observed.update(
+            argv=list(kwargs["argv"]),
+            stderr=completed.stderr,
+            stdout=completed.stdout,
+        )
+        return completed.returncode
+
+    try:
+        return_code = browser.launch_mcp_from_attempt_env(
+            {
+                "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(artifact),
+                "MASTERMIND_BROWSER_FIXTURE_A_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "MASTERMIND_BROWSER_FIXTURE_B_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "MASTERMIND_BROWSER_FIXTURE_NONCE": "c" * 32,
+                "MASTERMIND_BROWSER_ORIGIN": "http://127.0.0.1:48101",
+                "MASTERMIND_BROWSER_PROXY_URL": "http://127.0.0.1:48102",
+                "MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD": str(container_fd),
+                "MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH": os.fspath(runtime_manifest),
+                "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": hashlib.sha256(
+                    runtime_manifest.read_bytes()
+                ).hexdigest(),
+                "MASTERMIND_BROWSER_RUNTIME_ROOT": os.fspath(runtime),
+                "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(tmp_path),
+                "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+            },
+            bridge_runner=execute_selected_envelope,
+        )
+    finally:
+        os.close(container_fd)
+
+    assert return_code == 0, observed.get("stderr")
+    assert observed["argv"][:5] == [
+        "/usr/bin/python3",
+        "-I",
+        "-S",
+        "-c",
+        browser._ANCHORED_NODE_BOOTSTRAP,
+    ]
+    assert observed["stdout"] == (
+        "INNER:runtime/node_modules/@playwright/mcp/cli.js:runtime/browsers\n"
+    )
+
+
+@pytest.mark.parametrize("tampered_identity", ["node", "mcp"])
+def test_inner_runtime_stub_refuses_post_manifest_direct_executable_tamper(
+    tmp_path,
+    monkeypatch,
+    tampered_identity,
+):
+    """The last trusted Python boundary must reject stable Node/MCP drift."""
+
+    runtime, runtime_manifest, manifest = _runtime_install_fixture(
+        tmp_path,
+        node_payload=(
+            b"#!/bin/sh\n"
+            b"printf 'ORIGINAL-NODE:%s\\n' \"$1\"\n"
+        ),
+    )
+    target = Path(
+        manifest["node"]["executable"]["path"]
+        if tampered_identity == "node"
+        else manifest["mcp"]["executable"]["path"]
+    )
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    monkeypatch.chdir(tmp_path)
+    container_fd = os.open(
+        runtime.parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    os.set_inheritable(container_fd, True)
+    observed: dict[str, object] = {}
+
+    def tamper_then_execute(**kwargs):
+        target.chmod(0o700)
+        target.write_bytes(
+            b"#!/bin/sh\nprintf 'TAMPERED-NODE\\n'\n"
+            if tampered_identity == "node"
+            else b"post-manifest direct MCP replacement\n"
+        )
+        target.chmod(0o500)
+        completed = subprocess.run(
+            kwargs["argv"],
+            cwd=kwargs["guard"].artifact_dir,
+            env=kwargs["environment"],
+            pass_fds=kwargs["pass_fds"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        observed.update(stderr=completed.stderr, stdout=completed.stdout)
+        return completed.returncode
+
+    try:
+        return_code = browser.launch_mcp_from_attempt_env(
+            _attempt_launch_environment(
+                workspace=tmp_path,
+                artifact=artifact,
+                runtime=runtime,
+                runtime_manifest=runtime_manifest,
+                container_fd=container_fd,
+            ),
+            bridge_runner=tamper_then_execute,
+        )
+    finally:
+        os.close(container_fd)
+
+    assert return_code != 0
+    assert "anchored runtime launch refused" in observed["stderr"]
+    assert "TAMPERED-NODE" not in observed["stdout"]
+    assert "ORIGINAL-NODE" not in observed["stdout"]
+
+
+def test_attempt_env_wrapper_refuses_post_manifest_browser_closure_tamper(
+    tmp_path,
+    monkeypatch,
+):
+    """The bridge may not start after one manifest-bound browser byte drifts."""
+
+    runtime, runtime_manifest, _manifest = _runtime_install_fixture(tmp_path)
+    target = (
+        runtime
+        / "browsers"
+        / "chromium-1237"
+        / "Chromium.app"
+        / "Contents"
+        / "Frameworks"
+        / "Chromium Helper.app"
+        / "Contents"
+        / "MacOS"
+        / "Chromium Helper"
+    )
+    target.chmod(0o700)
+    target.write_bytes(target.read_bytes() + b"post-manifest browser closure tamper")
+    target.chmod(0o500)
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    monkeypatch.chdir(tmp_path)
+    container_fd = os.open(
+        runtime.parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    os.set_inheritable(container_fd, True)
+    bridge_called = False
+
+    def must_not_start_bridge(**_kwargs):
+        nonlocal bridge_called
+        bridge_called = True
+        return 0
+
+    try:
+        with pytest.raises(browser.BrowserReviewError) as raised:
+            browser.launch_mcp_from_attempt_env(
+                _attempt_launch_environment(
+                    workspace=tmp_path,
+                    artifact=artifact,
+                    runtime=runtime,
+                    runtime_manifest=runtime_manifest,
+                    container_fd=container_fd,
+                ),
+                bridge_runner=must_not_start_bridge,
+            )
+    finally:
+        os.close(container_fd)
+
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+    assert bridge_called is False
+
+
+def test_attempt_env_wrapper_refuses_post_manifest_first_rpath_shadow(
+    tmp_path,
+    monkeypatch,
+):
+    """A late @loader_path shadow may not outrank the attested runtime library."""
+
+    runtime, runtime_manifest, _manifest = _runtime_install_fixture(tmp_path)
+    binary_root = runtime / "bin"
+    binary_root.chmod(0o700)
+    shadow = binary_root / browser.RUNTIME_NODE_LIBRARY_NAME
+    shadow.write_bytes(b"post-manifest first-rpath shadow")
+    shadow.chmod(0o400)
+    binary_root.chmod(0o500)
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    monkeypatch.chdir(tmp_path)
+    container_fd = os.open(
+        runtime.parent,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    os.set_inheritable(container_fd, True)
+    bridge_called = False
+
+    def must_not_start_bridge(**_kwargs):
+        nonlocal bridge_called
+        bridge_called = True
+        return 0
+
+    try:
+        with pytest.raises(browser.BrowserReviewError) as raised:
+            browser.launch_mcp_from_attempt_env(
+                _attempt_launch_environment(
+                    workspace=tmp_path,
+                    artifact=artifact,
+                    runtime=runtime,
+                    runtime_manifest=runtime_manifest,
+                    container_fd=container_fd,
+                ),
+                bridge_runner=must_not_start_bridge,
+            )
+    finally:
+        os.close(container_fd)
+
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
+    assert bridge_called is False
+
+
+@pytest.mark.parametrize("descriptor_case", ["missing", "closed", "not-inheritable", "wrong"])
+def test_attempt_env_wrapper_refuses_unbound_runtime_container_descriptor(
+    tmp_path, monkeypatch, descriptor_case
+):
+    runtime, runtime_manifest, _manifest = _runtime_install_fixture(tmp_path)
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    monkeypatch.chdir(tmp_path)
+    environment = {
+        "MASTERMIND_BROWSER_ARTIFACT_DIR": os.fspath(artifact),
+        "MASTERMIND_BROWSER_FIXTURE_A_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "MASTERMIND_BROWSER_FIXTURE_B_URL": "http://127.0.0.1:48101/__mastermind_browser_visual_fixture__/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "MASTERMIND_BROWSER_FIXTURE_NONCE": "c" * 32,
+        "MASTERMIND_BROWSER_ORIGIN": "http://127.0.0.1:48101",
+        "MASTERMIND_BROWSER_PROXY_URL": "http://127.0.0.1:48102",
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH": os.fspath(runtime_manifest),
+        "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": hashlib.sha256(
+            runtime_manifest.read_bytes()
+        ).hexdigest(),
+        "MASTERMIND_BROWSER_RUNTIME_ROOT": os.fspath(runtime),
+        "MASTERMIND_BROWSER_WORKSPACE_PATH": os.fspath(tmp_path),
+        "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+    }
+    descriptor: int | None = None
+    if descriptor_case != "missing":
+        descriptor = os.open(
+            tmp_path if descriptor_case == "wrong" else runtime.parent,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        )
+        environment["MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD"] = str(descriptor)
+        if descriptor_case == "closed":
+            os.close(descriptor)
+            descriptor = None
+        elif descriptor_case != "not-inheritable":
+            os.set_inheritable(descriptor, True)
+    try:
+        with pytest.raises(browser.BrowserReviewError) as error:
+            browser.launch_mcp_from_attempt_env(environment)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+    assert error.value.state in {
+        "BROWSER_MCP_START_FAILED",
+        "BROWSER_RUNTIME_ATTESTATION_INVALID",
+    }
+
+
+def test_inner_runtime_stub_executes_from_held_container_after_whole_name_swap(
+    tmp_path,
+):
+    stub = getattr(browser, "_ANCHORED_NODE_BOOTSTRAP", "")
+    assert stub
+    canonical = tmp_path / "worker-browser-b1"
+    node = canonical / "runtime" / "bin" / "node"
+    mcp = canonical / "runtime" / "node_modules" / "@playwright" / "mcp" / "cli.js"
+    mcp.parent.mkdir(parents=True)
+    node.parent.mkdir(parents=True)
+    node.write_text(
+        "#!/bin/sh\nprintf 'ORIGINAL:%s\\n' \"$1\"\n",
+        encoding="utf-8",
+    )
+    node.chmod(0o500)
+    mcp.write_text("fixture", encoding="utf-8")
+    mcp.chmod(0o500)
+    manifest = canonical / "runtime" / browser.RUNTIME_INSTALL_MANIFEST_NAME
+    container_info = canonical.stat()
+    node_info = node.stat()
+    mcp_info = mcp.stat()
+    manifest.write_bytes(
+        browser._canonical_bytes(
+            {
+                "mcp": {
+                    "executable": {
+                        "gid": mcp_info.st_gid,
+                        "mode": stat.S_IMODE(mcp_info.st_mode),
+                        "path": os.fspath(mcp),
+                        "sha256": hashlib.sha256(mcp.read_bytes()).hexdigest(),
+                        "uid": mcp_info.st_uid,
+                    }
+                },
+                "node": {
+                    "executable": {
+                        "gid": node_info.st_gid,
+                        "mode": stat.S_IMODE(node_info.st_mode),
+                        "path": os.fspath(node),
+                        "sha256": hashlib.sha256(node.read_bytes()).hexdigest(),
+                        "uid": node_info.st_uid,
+                    }
+                },
+                "runtime_root": os.fspath(canonical / "runtime"),
+                "runtime_container": {
+                    "device": container_info.st_dev,
+                    "gid": container_info.st_gid,
+                    "inode": container_info.st_ino,
+                    "mode": 0o500,
+                    "uid": container_info.st_uid,
+                }
+            }
+        )
+        + b"\n"
+    )
+    manifest.chmod(0o400)
+    for directory in (
+        mcp.parent,
+        mcp.parent.parent,
+        mcp.parent.parent.parent,
+        node.parent,
+        canonical / "runtime",
+    ):
+        directory.chmod(0o500)
+    canonical.chmod(0o500)
+    manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    container_fd = os.open(
+        canonical,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    try:
+        captured = tmp_path / "worker-browser-b1.attested"
+        canonical.rename(captured)
+        replacement_node = canonical / "runtime" / "bin" / "node"
+        replacement_node.parent.mkdir(parents=True)
+        replacement_node.write_text(
+            "#!/bin/sh\nprintf 'REPLACEMENT\\n'\n",
+            encoding="utf-8",
+        )
+        replacement_node.chmod(0o500)
+        result = subprocess.run(
+            ["/usr/bin/python3", "-I", "-S", "-c", stub, "--isolated"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                "HOME": os.fspath(tmp_path),
+                "LANG": "C",
+                "LC_ALL": "C",
+                "MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD": str(container_fd),
+                "MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256": manifest_digest,
+                "NO_COLOR": "1",
+                "PATH": "/usr/bin:/bin",
+                "PLAYWRIGHT_BROWSERS_PATH": "runtime/browsers",
+                "TMPDIR": os.fspath(tmp_path),
+            },
+            pass_fds=(container_fd,),
+            timeout=10,
+        )
+    finally:
+        os.close(container_fd)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "ORIGINAL:runtime/node_modules/@playwright/mcp/cli.js\n"
+    )
+    assert "REPLACEMENT" not in result.stdout
+
+
+def test_guard_binds_image_content_hash_to_confined_screenshot_bytes(tmp_path):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    guard.rewrite_call(
+        "browser_navigate", {"url": "http://127.0.0.1:48101/"}
+    )
+    guard.rewrite_call("browser_resize", {"width": 1440, "height": 900})
+    original = {
+        "filename": "desktop.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+    pixels = _png(1440, 900)
+    guard.record_result(
+        "browser_take_screenshot",
+        original,
+        {
+            "result": {
+                "content": [
+                    {
+                        "type": "image",
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(pixels).decode("ascii"),
+                    }
+                ]
+            }
+        },
+    )
+
+    assert guard.evidence()["image_content_sha256"]["desktop.png"] == hashlib.sha256(
+        pixels
+    ).hexdigest()
+    assert (artifact / "desktop.png").read_bytes() == pixels
+
+
+def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_evidence(
+    tmp_path,
+):
+    fake = tmp_path / "fake_mcp.py"
+    fake.write_text(
+        textwrap.dedent(
+            """
+            import base64
+            import json
+            import struct
+            import sys
+            import zlib
+
+            def chunk(kind, payload):
+                return struct.pack('>I', len(payload)) + kind + payload + struct.pack('>I', zlib.crc32(kind + payload) & 0xffffffff)
+
+            scanline = b'\\x00' + (b'\\x00\\x00\\x00\\xff' * 1440)
+            pixels = b'\\x89PNG\\r\\n\\x1a\\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1440, 900, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(scanline * 900)) + chunk(b'IEND', b'')
+            for raw in sys.stdin.buffer:
+                request = json.loads(raw)
+                if request.get('method') == 'tools/call':
+                    params = request['params']
+                    if params['name'] == 'browser_take_screenshot':
+                        assert 'filename' not in params['arguments']
+                        content = [{'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(pixels).decode('ascii')}]
+                    else:
+                        content = [{'type': 'text', 'text': 'ok'}]
+                    result = {'content': content}
+                else:
+                    result = {}
+                sys.stdout.write(json.dumps({'jsonrpc': '2.0', 'id': request.get('id'), 'result': result}, separators=(',', ':')) + '\\n')
+                sys.stdout.flush()
+            """
+        ),
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "browser_navigate", "arguments": {"url": f"{origin}/"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "browser_resize", "arguments": {"width": 1440, "height": 900}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "browser_take_screenshot", "arguments": {"filename": "desktop.png", "fullPage": False, "scale": "css", "type": "png"}}},
+    ]
+    client_input = io.BytesIO(
+        b"".join(browser._canonical_bytes(row) + b"\n" for row in requests)
+    )
+    client_output = io.BytesIO()
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+
+    assert browser.run_guarded_mcp_bridge(
+        argv=(sys.executable, os.fspath(fake)),
+        environment={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        guard=guard,
+        stdin=client_input,
+        stdout=client_output,
+        stderr=subprocess.DEVNULL,
+    ) == 0
+
+    evidence = json.loads(
+        (artifact / browser._MCP_GUARD_EVIDENCE_FILE).read_text(encoding="utf-8")
+    )
+    assert evidence["cleanup_proven"] is True
+    assert evidence["image_content_sha256"]["desktop.png"] == hashlib.sha256(
+        (artifact / "desktop.png").read_bytes()
+    ).hexdigest()
+    assert b'"id":3' in client_output.getvalue()
+
+
+def test_closed_attempt_receipt_binds_generation_workspace_security_and_cleanup(tmp_path):
+    artifact_dir = tmp_path / "artifacts" / "attempt-1"
+    artifact_dir.mkdir(parents=True)
+    png = artifact_dir / "desktop.png"
+    png.write_bytes(_png(1440, 900))
+    mobile_png = artifact_dir / "mobile.png"
+    mobile_png.write_bytes(_png(390, 844, color=b"\x01\x02\x03\xff"))
+    context = browser.BrowserAttemptContext(
+        attempt_id="attempt-1",
+        session_epoch_id="epoch-1",
+        process_generation_id="generation-1",
+        workspace=WorkspaceIdentity(
+            workspace_path=os.fspath(tmp_path / "workspace"),
+            base_sha="1" * 40,
+            device=11,
+            inode=22,
+            uid=os.getuid(),
+            gid=os.getgid(),
+        ),
+        artifact_dir=artifact_dir,
+        devserver_manifest_digest="a" * 64,
+        capability_manifest_digest="b" * 64,
+        browser_profile_id="operator.browser.local-review.v1",
+        browser_profile_digest="c" * 64,
+        playwright_mcp_identity="@playwright/mcp",
+        playwright_mcp_version="0.0.79",
+        playwright_tool_schema_digest="d" * 64,
+        runtime_manifest_digest="6" * 64,
+        browser_revision="1237",
+        browser_executable=os.fspath(tmp_path / "runtime" / "chromium"),
+        browser_executable_sha256="e" * 64,
+    )
+
+    receipt = browser.seal_browser_review_receipt(
+        context,
+        local_origin="http://127.0.0.1:8787",
+        screenshots=[
+            browser.screenshot_artifact(
+                artifact_dir,
+                "desktop.png",
+                viewport={"width": 1440, "height": 900},
+            ),
+            browser.screenshot_artifact(
+                artifact_dir,
+                "mobile.png",
+                viewport={"width": 390, "height": 844},
+            ),
+        ],
+        console_rows=[{"type": "warning", "text": "fixture warning"}],
+        network_rows=[{"method": "GET", "url": "http://127.0.0.1:8787/", "status": 200}],
+        egress_falsifiers={
+            "external_http": "REFUSED",
+            "external_https": "REFUSED",
+            "external_redirect": "REFUSED",
+            "external_subresource": "REFUSED",
+            "external_fetch": "REFUSED",
+            "external_websocket": "REFUSED",
+            "file_url": "REFUSED",
+            "proxy_override": "REFUSED",
+        },
+        visual_judgment={
+            "source": "model_image_content",
+            "fixture_nonce": "opaque-4f5c",
+            "defective_variant": "B",
+            "reason": "critical card is clipped on its right edge",
+            "image_sha256": ["f" * 64, "0" * 64],
+        },
+        cleanup={
+            "browser_absent": True,
+            "mcp_absent": True,
+            "proxy_absent": True,
+            "devserver_absent": True,
+            "uid_sweep_passed": True,
+            "uid_sweep_digest": "9" * 64,
+        },
+        tracked_workspace_changes_after_review=False,
+    )
+
+    assert isinstance(receipt, browser.BrowserReviewReceipt)
+    wire = receipt.to_wire()
+    assert "receipt_digest" not in wire
+    assert browser.browser_review_receipt(wire) == receipt
+    assert receipt.digest == browser.canonical_browser_review_receipt_digest(receipt)
+    assert wire["schema_version"] == "mastermind.browser_review_receipt/v1"
+    assert wire["attempt_id"] == "attempt-1"
+    assert wire["session_epoch_id"] == "epoch-1"
+    assert wire["process_generation_id"] == "generation-1"
+    assert wire["workspace"] == {
+        "workspace_path": os.fspath(tmp_path / "workspace"),
+        "base_sha": "1" * 40,
+        "device": 11,
+        "inode": 22,
+        "uid": os.getuid(),
+        "gid": os.getgid(),
+    }
+    assert wire["devserver"] == {
+        "manifest_digest": "a" * 64,
+        "local_origin": "http://127.0.0.1:8787",
+    }
+    assert wire["capability"] == {
+        "manifest_digest": "b" * 64,
+        "profile_id": "operator.browser.local-review.v1",
+        "profile_digest": "c" * 64,
+    }
+    assert wire["playwright_mcp"] == {
+        "identity": "@playwright/mcp",
+        "version": "0.0.79",
+        "tool_schema_digest": "d" * 64,
+    }
+    assert wire["browser"] == {
+        "executable": os.fspath(tmp_path / "runtime" / "chromium"),
+        "executable_sha256": "e" * 64,
+        "revision": "1237",
+        "runtime_manifest_digest": "6" * 64,
+    }
+    assert wire["external_egress_observed"] is False
+    assert wire["tracked_workspace_changes_after_review"] is False
+    assert wire["cleanup"]["uid_sweep_passed"] is True
+    assert wire["artifacts"]["screenshots"][0]["relative_path"] == "desktop.png"
+    assert wire["artifacts"]["console"]["observed"] is True
+    assert wire["artifacts"]["network"]["observed"] is True
+
+    hostile = dict(wire)
+    hostile["receipt_digest"] = "0" * 64
+    with pytest.raises(browser.BrowserReviewError, match="fields are not closed"):
+        browser.browser_review_receipt(hostile)
+
+
+def test_receipt_refuses_oversize_console_instead_of_truncating(tmp_path):
+    context = browser.BrowserAttemptContext(
+        attempt_id="attempt-oversize",
+        session_epoch_id="epoch-oversize",
+        process_generation_id="generation-oversize",
+        workspace=WorkspaceIdentity(
+            workspace_path=os.fspath(tmp_path / "workspace"),
+            base_sha="1" * 40,
+            device=1,
+            inode=2,
+            uid=os.getuid(),
+            gid=os.getgid(),
+        ),
+        artifact_dir=tmp_path,
+        devserver_manifest_digest="a" * 64,
+        capability_manifest_digest="b" * 64,
+        browser_profile_id="operator.browser.local-review.v1",
+        browser_profile_digest="c" * 64,
+        playwright_mcp_identity="@playwright/mcp",
+        playwright_mcp_version="0.0.79",
+        playwright_tool_schema_digest="d" * 64,
+        runtime_manifest_digest="6" * 64,
+        browser_revision="1237",
+        browser_executable=os.fspath(tmp_path / "chromium"),
+        browser_executable_sha256="e" * 64,
+    )
+    rows = [{"type": "warning", "text": "x" * (browser.MAX_TEXT_EVIDENCE_BYTES + 1)}]
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.seal_browser_review_receipt(
+            context,
+            local_origin="http://127.0.0.1:8787",
+            screenshots=[],
+            console_rows=rows,
+            network_rows=[],
+            egress_falsifiers={
+                "external_http": "REFUSED",
+                "external_https": "REFUSED",
+                "external_redirect": "REFUSED",
+                "external_subresource": "REFUSED",
+                "external_fetch": "REFUSED",
+                "external_websocket": "REFUSED",
+                "file_url": "REFUSED",
+                "proxy_override": "REFUSED",
+            },
+            visual_judgment={
+                "source": "model_image_content",
+                "fixture_nonce": "opaque-oversize",
+                "defective_variant": "A",
+                "reason": "critical card is clipped",
+                "image_sha256": ["f" * 64, "0" * 64],
+            },
+            cleanup={
+                "browser_absent": True,
+                "mcp_absent": True,
+                "proxy_absent": True,
+                "devserver_absent": True,
+                "uid_sweep_passed": True,
+                "uid_sweep_digest": "9" * 64,
+            },
+            tracked_workspace_changes_after_review=False,
+        )
+
+    assert raised.value.state == "BROWSER_ARTIFACT_OVERSIZE"
+
+
+def test_reviewed_control_room_manifest_is_closed_and_workspace_bound(tmp_path):
+    workspace = tmp_path / "workspace"
+    (workspace / "scripts").mkdir(parents=True)
+    (workspace / "scripts" / "chairman_control_room.py").write_text("# fixture\n")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "mastermind.devserver_resource/v1",
+                "resource_id": "chairman-control-room-local",
+                "cwd": ".",
+                "argv": [
+                    "/usr/bin/python3",
+                    "scripts/chairman_control_room.py",
+                    "--port",
+                    "{port}",
+                    "--repo-root",
+                    ".",
+                    "--compose-timeout",
+                    "240",
+                ],
+                "host": "127.0.0.1",
+                "readiness_path": "/",
+                "readiness_timeout_seconds": 300,
+                "shutdown_grace_seconds": 5,
+                "allowed_generated_paths": [],
+            }
+        )
+    )
+
+    manifest = browser.load_devserver_manifest(manifest_path, workspace)
+
+    assert manifest.cwd == workspace.resolve()
+    assert manifest.argv_for_port(48123) == (
+        "/usr/bin/python3",
+        "scripts/chairman_control_room.py",
+        "--port",
+        "48123",
+        "--repo-root",
+        ".",
+        "--compose-timeout",
+        "240",
+    )
+    assert len(manifest.digest) == 64
+    hostile = json.loads(manifest_path.read_text())
+    hostile["command"] = "sh -c whoami"
+    manifest_path.write_text(json.dumps(hostile))
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.load_devserver_manifest(manifest_path, workspace)
+    assert raised.value.state == "DEVSERVER_MANIFEST_INVALID"
+
+
+def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_receipt(
+    tmp_path,
+):
+    workspace = tmp_path / "workspace"
+    (workspace / "scripts").mkdir(parents=True)
+    (workspace / "config").mkdir()
+    (workspace / "scripts" / "chairman_control_room.py").write_text(
+        textwrap.dedent(
+            """
+            import argparse
+            from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--port', type=int, required=True)
+            parser.add_argument('--repo-root')
+            parser.add_argument('--compose-timeout')
+            args = parser.parse_args()
+            class Handler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    body = b'<title>Chairman Control Room</title>'
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                def log_message(self, *_args):
+                    pass
+            ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()
+            """
+        ),
+        encoding="utf-8",
+    )
+    manifest_raw = {
+        "schema_version": "mastermind.devserver_resource/v1",
+        "resource_id": "chairman-control-room-local",
+        "cwd": ".",
+        "argv": [
+            "/usr/bin/python3",
+            "scripts/chairman_control_room.py",
+            "--port",
+            "{port}",
+            "--repo-root",
+            ".",
+            "--compose-timeout",
+            "240",
+        ],
+        "host": "127.0.0.1",
+        "readiness_path": "/",
+        "readiness_timeout_seconds": 300,
+        "shutdown_grace_seconds": 5,
+        "allowed_generated_paths": [],
+    }
+    manifest_path = workspace / "config" / "worker_browser_b1_control_room_devserver.json"
+    manifest_path.write_text(json.dumps(manifest_raw), encoding="utf-8")
+    subprocess.run(["git", "init", "-q", "-b", "fixture"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.name", "Fixture"], cwd=workspace, check=True)
+    subprocess.run(["git", "add", "scripts", "config"], cwd=workspace, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=workspace, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=workspace, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    info = workspace.stat()
+    identity = WorkspaceIdentity(
+        os.fspath(workspace.resolve()), head, info.st_dev, info.st_ino, info.st_uid, info.st_gid
+    )
+    runtime, runtime_manifest, runtime_identity = _runtime_install_fixture(tmp_path)
+    chromium = Path(runtime_identity["browser"]["executable"]["path"])
+    artifact_root = tmp_path / "artifacts"
+    resource_grant = SimpleNamespace(
+        resource_id="worker-browser-b1-local",
+        manifest_path="config/worker_browser_b1_control_room_devserver.json",
+        manifest_digest=browser._canonical_digest(manifest_raw),
+        runtime_root=os.fspath(runtime),
+        runtime_manifest_path=os.fspath(runtime_manifest),
+        runtime_manifest_digest=hashlib.sha256(runtime_manifest.read_bytes()).hexdigest(),
+        artifact_root=os.fspath(artifact_root),
+        browser="chromium",
+        browser_revision="1237",
+        grant_digest="a" * 64,
+    )
+    mcp_grant = SimpleNamespace(
+        capability_id="playwright-worker-browser-b1",
+        server_identity="playwright",
+        server_version="1.63.0-alpha-2026-08-05",
+        tool_schema_digest="b" * 64,
+        command=capabilities.WORKER_BROWSER_MCP_COMMAND,
+        args=capabilities.WORKER_BROWSER_MCP_ARGS,
+    )
+    profile = SimpleNamespace(
+        profile_id="operator.browser.local-review.v1",
+        profile_digest="c" * 64,
+        resource_grants=(resource_grant,),
+        mcp_server_grants=(mcp_grant,),
+    )
+    requested = SimpleNamespace(workspace=identity, capabilities=CapabilityManifest())
+    epoch = SessionEpochRef("epoch-resource", "attempt-resource", "worker-a", 1)
+    generation = ProcessGenerationRef("generation-resource", "epoch-resource", 1, "worker-a")
+    resource = browser.BrowserGenerationResource(
+        workspace=workspace,
+        requested=requested,
+        epoch=epoch,
+        generation=generation,
+        profile=profile,
+    )
+
+    resource.start()
+    environment = resource.environment
+    assert set(environment) == browser._BROWSER_ENV_KEYS
+    proxy = browser.LoopbackEnforcingProxy  # explicit positive ownership control
+    assert proxy is not None
+    artifact_dir = Path(environment["MASTERMIND_BROWSER_ARTIFACT_DIR"])
+    pngs = {
+        "desktop.png": _png(1440, 900),
+        "mobile.png": _png(390, 844, color=b"\x01\x02\x03\xff"),
+        "visual-a.png": _png(900, 600, color=b"\x04\x05\x06\xff"),
+        "visual-b.png": _png(900, 600, color=b"\x07\x08\x09\xff"),
+    }
+    for name, payload in pngs.items():
+        (artifact_dir / name).write_bytes(payload)
+
+    # A model-authored convenience file is deliberately present and false.  It
+    # cannot satisfy the resource; only guard-observed transport evidence can.
+    (artifact_dir / browser._ATTEMPT_EVIDENCE_FILE).write_text(
+        json.dumps({"visual_judgment": {"defective_variant": "WRONG"}}),
+        encoding="utf-8",
+    )
+    guard_evidence = {
+        "bridge_exit_code": 0,
+        "calls": {
+            "browser_console_messages": 1,
+            "browser_network_requests": 1,
+            "browser_take_screenshot": 4,
+        },
+        "cleanup_proven": True,
+        "console_rows": [{"bytes": 2, "content_sha256": "a" * 64, "tool": "browser_console_messages"}],
+        "egress_falsifiers": {"file_url": "REFUSED", "proxy_override": "REFUSED"},
+        "image_content_sha256": {
+            name: hashlib.sha256(payload).hexdigest() for name, payload in pngs.items()
+        },
+        "network_rows": [{"bytes": 2, "content_sha256": "b" * 64, "tool": "browser_network_requests"}],
+        "schema_version": "mastermind.browser_mcp_guard_evidence/v1",
+        "screenshots": sorted(pngs),
+    }
+    guard_path = artifact_dir / browser._MCP_GUARD_EVIDENCE_FILE
+    guard_path.write_bytes(browser._canonical_bytes(guard_evidence))
+    guard_path.chmod(0o600)
+
+    hostile = {
+        "external_http": b"GET http://external-http.invalid/b1 HTTP/1.1\r\nHost: external-http.invalid\r\nConnection: close\r\n\r\n",
+        "external_https": b"CONNECT external-https.invalid:443 HTTP/1.1\r\nHost: external-https.invalid:443\r\nConnection: close\r\n\r\n",
+        "external_redirect": b"GET http://redirect.invalid/b1 HTTP/1.1\r\nHost: redirect.invalid\r\nConnection: close\r\n\r\n",
+        "external_subresource": b"GET http://subresource.invalid/b1 HTTP/1.1\r\nHost: subresource.invalid\r\nConnection: close\r\n\r\n",
+        "external_fetch": b"GET http://fetch.invalid/b1 HTTP/1.1\r\nHost: fetch.invalid\r\nConnection: close\r\n\r\n",
+        "external_websocket": b"GET http://websocket.invalid/b1 HTTP/1.1\r\nHost: websocket.invalid\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+    }
+    for request in hostile.values():
+        assert _raw_proxy_request(
+            environment["MASTERMIND_BROWSER_PROXY_URL"], request
+        ).startswith(b"HTTP/1.1 403")
+
+    visual = {
+        "defective_variant": resource._visual_fixture.defective_variant,
+        "fixture_nonce": environment["MASTERMIND_BROWSER_FIXTURE_NONCE"],
+        "reason": "the critical portfolio card is visibly clipped off canvas",
+        "schema_version": "mastermind.browser_visual_judgment/v1",
+        "source": "model_image_content",
+    }
+    resource.observe_canonical_result(
+        browser._canonical_bytes(
+            {"current_state": browser._canonical_bytes(visual).decode("utf-8")}
+        ).decode("utf-8")
+    )
+    resource.stop()
+    sweep = UIDSweepReceipt(
+        schema_version=UID_SWEEP_SCHEMA_VERSION,
+        observed_at="2026-08-29T00:00:00+00:00",
+        reason="operator_terminal",
+        worker_uid=os.geteuid(),
+        broker_pid=os.getpid(),
+        residual_pids_before=(),
+        residual_pids_after=(),
+        signal_name="SIGKILL",
+        signal_sent=False,
+        quiescent_observations=2,
+    )
+
+    receipt = resource.seal_after_uid_sweep(sweep)
+
+    assert receipt.attempt_id == "attempt-resource"
+    assert receipt.process_generation_id == "generation-resource"
+    assert receipt.cleanup["uid_sweep_passed"] is True
+    assert receipt.visual_judgment["defective_variant"] == visual["defective_variant"]
+    assert len(receipt.artifacts["screenshots"]) == 4
+    assert receipt.browser["runtime_manifest_digest"] == (
+        resource_grant.runtime_manifest_digest
+    )
+    assert receipt.browser["revision"] == "1237"
+    persisted = browser.load_persisted_browser_review_receipt(
+        generation, artifact_root=artifact_root
+    )
+    assert persisted == receipt
+    assert persisted.digest == receipt.digest
+
+    # Seal performs a fresh use-time attestation.  Even a coordinated rewrite
+    # of a runtime file plus its self-signed manifest remains outside the
+    # independently reviewed ResourceGrant digest and must fail closed.
+    node = Path(runtime_identity["node"]["executable"]["path"])
+    node.chmod(0o700)
+    node.write_bytes(node.read_bytes() + b" coordinated tamper")
+    node.chmod(0o500)
+    runtime_identity["node"]["executable"]["sha256"] = hashlib.sha256(
+        node.read_bytes()
+    ).hexdigest()
+    runtime_manifest.chmod(0o600)
+    runtime_manifest.write_bytes(browser._canonical_bytes(runtime_identity) + b"\n")
+    runtime_manifest.chmod(0o400)
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        resource.seal_after_uid_sweep(sweep)
+    assert raised.value.state == "BROWSER_RUNTIME_ATTESTATION_INVALID"
