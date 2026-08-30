@@ -1172,18 +1172,8 @@ def _cycle_receipt(root: Path) -> dict[str, Any]:
         payload={"summary": "deterministic adverse fixture", "errors": ["failed"]},
     )
     outcomes.append(cycle.run_once(root_id))
-    outcomes.append(cycle.run_once(root_id))
     planner = runtime.jobs.get_job(planner_id)
     assert planner is not None and planner.current_attempt_id
-    second = runtime.attempts.get_attempt(str(planner.current_attempt_id))
-    assert second is not None
-    runtime.attempts.fail_attempt(
-        second.attempt_id,
-        fence_generation=second.fence_generation,
-        lease_token=_lease_token(runtime, second.attempt_id),
-        payload={"summary": "deterministic exhausted fixture", "errors": ["failed"]},
-    )
-    outcomes.append(cycle.run_once(root_id))
     events_before = len(runtime.events.list_events(job_id=root_id))
     replay = cycle.run_once(root_id)
     events_after = len(runtime.events.list_events(job_id=root_id))
@@ -1196,13 +1186,16 @@ def _cycle_receipt(root: Path) -> dict[str, Any]:
         "selected_job_ids": [item["selected_job_id"] for item in action_receipts],
         "blocked_reason": action_receipts[-1]["receipt"].get("reason"),
         "replay_outcome_digest": replay.to_dict()["outcome_digest"],
+        "replay_matches_blocked": replay.to_dict() == action_receipts[-1],
+        "planner_attempt_count": planner.attempt_count,
         "events_before_replay": events_before,
         "events_after_replay": events_after,
         "supervisor_dispatch_calls": dispatcher.calls,
     }
-    assert normalized["actions"] == [
-        "PLANNER_CREATED", "DISPATCHED", "REQUEUED", "DISPATCHED", "BLOCKED"
-    ]
+    assert normalized["actions"] == ["PLANNER_CREATED", "DISPATCHED", "BLOCKED"]
+    assert normalized["planner_attempt_count"] == 1
+    assert len(normalized["supervisor_dispatch_calls"]) == 1
+    assert normalized["replay_matches_blocked"] is True
     assert events_before == events_after
     normalized["acceptance_digest"] = _digest(normalized)
     return normalized
