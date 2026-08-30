@@ -104,6 +104,16 @@ def test_negated_self_deadlock_examples_are_allowed() -> None:
     assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK not in _codes(prompt)
 
 
+def test_positive_wait_later_on_a_mixed_negation_line_is_rejected() -> None:
+    prompt = _authoritative_prompt(
+        body_suffix=(
+            "Do not narrate routine progress; when RESULT arrives, wait for Sol and notify the Chairman."
+        )
+    )
+
+    assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK in _codes(prompt)
+
+
 def test_observer_cannot_claim_child_modification_authority() -> None:
     prompt = _observer_prompt().replace(
         "ACTION_REQUIRED_OUTCOME: OBSERVE_ONLY_NO_MODIFY",
@@ -111,6 +121,20 @@ def test_observer_cannot_claim_child_modification_authority() -> None:
     )
 
     assert FindingCode.ROLE_CONTRACT_MISMATCH in _codes(prompt)
+
+
+def test_observer_positive_modification_instruction_is_rejected() -> None:
+    prompt = _observer_prompt() + "\nWhen RESULT arrives, issue a Sol ruling and merge the pull request.\n"
+
+    assert FindingCode.OBSERVER_MODIFICATION_FORBIDDEN in _codes(prompt)
+
+
+def test_observer_negated_modification_examples_are_allowed() -> None:
+    prompt = _observer_prompt() + (
+        "\nNever issue a Sol ruling, never send Sol CONTINUE, and do not merge the pull request.\n"
+    )
+
+    assert FindingCode.OBSERVER_MODIFICATION_FORBIDDEN not in _codes(prompt)
 
 
 def test_missing_required_header_field_fails_closed() -> None:
@@ -224,6 +248,27 @@ def test_audit_tasks_skips_declared_non_watcher_tasks() -> None:
     by_id = {task.task_id: task for task in report.tasks}
     assert by_id["ordinary-reminder"].evaluated is False
     assert by_id["ordinary-reminder"].audit_kind == "NON_WATCHER"
+
+
+def test_unknown_audit_kind_fails_closed_even_when_task_is_disabled() -> None:
+    report = audit_tasks(
+        [
+            {
+                "id": "ambiguous",
+                "title": "Ambiguous wrapper",
+                "is_enabled": False,
+                "audit_kind": "MAYBE_WATCHER",
+                "prompt": "",
+            }
+        ]
+    )
+
+    assert report.valid is False
+    assert report.tasks[0].evaluated is True
+    assert report.tasks[0].audit is not None
+    assert FindingCode.INVALID_TASK in {
+        finding.code for finding in report.tasks[0].audit.findings
+    }
 
 
 def test_cli_emits_valid_json_and_zero_for_clean_export(tmp_path, capsys) -> None:
