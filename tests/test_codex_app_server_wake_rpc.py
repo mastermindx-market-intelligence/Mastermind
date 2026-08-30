@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import queue
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -10,6 +9,7 @@ import pytest
 from control_plane.wake_dispatcher import WakePreSubmitError
 from integrations.executive_wake.codex_app_server import CODEX_WAKE_INSTRUCTION
 from integrations.executive_wake.codex_app_server_rpc import CodexAppServerRpcWakeClient
+from scripts.ohf.laboratory import JsonRpcError
 
 
 NATIVE_HANDLE = "019cafe0-1111-7222-8333-abcdefabcdef"
@@ -56,9 +56,9 @@ class FakeAppServerClient:
     def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, Any]:
         self.calls.append((f"wait:{method}", timeout))
         if self.fail_method == f"wait:{method}":
-            raise queue.Empty()
+            raise JsonRpcError(f"timeout waiting for notification {method}")
         if self.fail_method == "wait:turn/completed-transport":
-            raise RuntimeError(f"app-server exited before {method}")
+            raise JsonRpcError(f"app-server exited before {method}")
         if self.completion is not None:
             return dict(self.completion)
         return {
