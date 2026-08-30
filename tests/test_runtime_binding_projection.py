@@ -248,6 +248,52 @@ def test_public_projection_uses_one_supplied_snapshot_connection(tmp_path, monke
     assert actual == expected
 
 
+def test_public_projection_refuses_snapshot_connection_owned_by_another_runtime(tmp_path):
+    runtime_a, _dispatch_a, _sealed_a, _epoch_a, _generation_a, _process_a, _profile_a = (
+        _admitted_runtime(tmp_path / "runtime-a")
+    )
+    runtime_b, _dispatch_b, sealed_b, _epoch_b, _generation_b, _process_b, _profile_b = (
+        _admitted_runtime(tmp_path / "runtime-b")
+    )
+
+    with runtime_b.store.read() as connection:
+        with pytest.raises(StateConflict, match="connection"):
+            project_runtime_binding(
+                runtime_a,
+                sealed_b.attempt_id,
+                _target(),
+                connection=connection,
+            )
+
+
+@pytest.mark.parametrize("mutation", ["moved", "replaced"])
+def test_public_projection_refuses_snapshot_after_owned_database_identity_changes(
+    tmp_path, mutation
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path / "runtime")
+    )
+    replacement = None
+    if mutation == "replaced":
+        replacement = _admitted_runtime(tmp_path / "replacement")[0]
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM schema_migrations LIMIT 1"
+        ).fetchone() is not None
+        moved_path = runtime.store.path.with_name("executive-runtime-moved.sqlite3")
+        os.replace(runtime.store.path, moved_path)
+        if replacement is not None:
+            os.link(replacement.store.path, runtime.store.path)
+
+        with pytest.raises(StateConflict, match="connection"):
+            project_runtime_binding(
+                runtime,
+                sealed.attempt_id,
+                _target(),
+                connection=connection,
+            )
+
+
 def test_public_projection_keeps_one_snapshot_when_generation_changes_after_read(tmp_path):
     runtime, _dispatch, sealed, _epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path)
     with runtime.store.read() as connection:
@@ -705,6 +751,79 @@ def test_projection_refuses_effective_grant_identity_drift(
         project_runtime_binding(runtime, sealed.attempt_id, _target())
 
 
+@pytest.mark.parametrize(
+    ("field", "corrupt_value"),
+    [
+        ("authorities", ["READ", "WRITE"]),
+        ("write_paths", [7]),
+        ("validation_argv", ["pytest"]),
+    ],
+    ids=["authority-widening", "non-string-write-path", "flat-validation-argv"],
+)
+def test_projection_refuses_rehashed_effective_grant_outside_frozen_job_authority(
+    tmp_path, field, corrupt_value
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        row = connection.execute(
+            "SELECT effective_grant_json FROM attempts WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert row is not None
+        grant = json.loads(str(row["effective_grant_json"]))
+        grant[field] = corrupt_value
+        grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+        grant_digest = hashlib.sha256(grant_json.encode("utf-8")).hexdigest()
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (grant_json, grant_digest, sealed.attempt_id),
+        )
+        event = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert event is not None
+        payload = json.loads(str(event["payload_json"]))
+        payload["effective_grant_digest"] = grant_digest
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                event["event_id"],
+            ),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    ("column", "corrupt_json"),
+    [
+        ("requested_authorities_json", '["READ","READ"]'),
+        ("allowed_write_paths_json", "[7]"),
+        ("validation_commands_json", '["pytest"]'),
+    ],
+    ids=["duplicate-job-authority", "non-string-job-path", "flat-job-validation"],
+)
+def test_projection_refuses_noncanonical_frozen_job_authority_arrays(
+    tmp_path, column, corrupt_json
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            f"UPDATE jobs SET {column}=? WHERE current_attempt_id=?",
+            (corrupt_json, sealed.attempt_id),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
 def test_projection_refuses_corrupt_tx3_applied_payload(tmp_path):
     runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
     with runtime.store.transaction() as connection:
@@ -745,6 +864,99 @@ def test_projection_refuses_corrupt_tx3_operation_lineage(tmp_path, corruption):
                 "WHERE event_type='OPERATOR_OPERATION_INTENT' AND attempt_id=?",
                 (sealed.attempt_id,),
             )
+
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_tx3_applied_after_launch_decision_and_admission(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        applied = connection.execute(
+            "SELECT event_id FROM events "
+            "WHERE event_type='OPERATOR_OPERATION_APPLIED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        admission = connection.execute(
+            "SELECT event_id FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert applied is not None and admission is not None
+        late_event_id = int(
+            connection.execute("SELECT MAX(event_id)+1 FROM events").fetchone()[0]
+        )
+        assert late_event_id > int(admission["event_id"])
+        connection.execute(
+            "UPDATE events SET event_id=? WHERE event_id=?",
+            (late_event_id, applied["event_id"]),
+        )
+
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_second_complete_matching_start_operation_pair(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        original_intent = connection.execute(
+            "SELECT * FROM events "
+            "WHERE event_type='OPERATOR_OPERATION_INTENT' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        original_applied = connection.execute(
+            "SELECT * FROM events "
+            "WHERE event_type='OPERATOR_OPERATION_APPLIED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        admission = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert original_intent is not None and original_applied is not None
+        assert admission is not None
+        duplicate_operation_id = "ohf-op:projection-second-start"
+        duplicate_applied_command_id = f"{duplicate_operation_id}:applied"
+        runtime.store.append_event(
+            connection,
+            aggregate_type="operator_operation",
+            aggregate_id=duplicate_operation_id,
+            event_type="OPERATOR_OPERATION_INTENT",
+            command_id=duplicate_operation_id,
+            actor=str(original_intent["actor"]),
+            job_id=str(original_intent["job_id"]),
+            attempt_id=str(original_intent["attempt_id"]),
+            worker_id=str(original_intent["worker_id"]),
+            quota_class=str(original_intent["quota_class"]),
+            payload=json.loads(str(original_intent["payload_json"])),
+        )
+        runtime.store.append_event(
+            connection,
+            aggregate_type="operator_operation",
+            aggregate_id=duplicate_operation_id,
+            event_type="OPERATOR_OPERATION_APPLIED",
+            command_id=duplicate_applied_command_id,
+            actor=str(original_applied["actor"]),
+            job_id=str(original_applied["job_id"]),
+            attempt_id=str(original_applied["attempt_id"]),
+            worker_id=str(original_applied["worker_id"]),
+            quota_class=str(original_applied["quota_class"]),
+            payload=json.loads(str(original_applied["payload_json"])),
+        )
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        admission_payload = json.loads(str(admission["payload_json"]))
+        admission_payload["tx3_applied_command_id"] = duplicate_applied_command_id
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    admission_payload, sort_keys=True, separators=(",", ":")
+                ),
+                admission["event_id"],
+            ),
+        )
 
     with pytest.raises(StateConflict, match="TX-3"):
         project_runtime_binding(runtime, sealed.attempt_id, _target())

@@ -1771,6 +1771,15 @@ class RuntimeStore:
             )
         self._database_was_absent = not os.path.lexists(self.path)
         self._fresh_file_identity: tuple[int, int] | None = None
+        self._database_file_identity: tuple[int, int] | None = None
+        if not self._database_was_absent:
+            try:
+                metadata = os.stat(self.path)
+            except OSError as exc:
+                raise PersistenceError(
+                    f"executive runtime database at {self.path} is unavailable: {exc}"
+                ) from exc
+            self._database_file_identity = (metadata.st_dev, metadata.st_ino)
         if (self.create or self.existing_writable) and not self._database_was_absent:
             if not self.path.is_file():
                 raise PersistenceError(
@@ -1833,7 +1842,28 @@ class RuntimeStore:
                 f"executive runtime database at {self.path} is missing"
             )
         connection = self._open()
-        connection.close()
+        try:
+            metadata = os.stat(self.path)
+            current_file_identity = (metadata.st_dev, metadata.st_ino)
+            expected_file_identity = (
+                self._fresh_file_identity
+                if self._database_was_absent
+                else self._database_file_identity
+            )
+            if (
+                expected_file_identity is not None
+                and current_file_identity != expected_file_identity
+            ):
+                raise PersistenceError(
+                    "executive runtime database file identity changed during initialization"
+                )
+            self._database_file_identity = current_file_identity
+        except OSError as exc:
+            raise PersistenceError(
+                f"executive runtime database at {self.path} is unavailable: {exc}"
+            ) from exc
+        finally:
+            connection.close()
 
     def _upgrade_barrier_present(self) -> bool:
         """Use lstat semantics so a dangling barrier symlink still quarantines."""
@@ -1938,6 +1968,43 @@ class RuntimeStore:
                 value = value.replace(tzinfo=timezone.utc)
             return int(value.timestamp() * 1000)
         return int(value)
+
+    def _assert_owned_snapshot_connection(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        """Prove a supplied snapshot's ``main`` is this store's stable file."""
+
+        try:
+            database_rows = connection.execute("PRAGMA database_list").fetchall()
+            main_rows = [row for row in database_rows if str(row[1]) == "main"]
+            if len(main_rows) != 1 or not str(main_rows[0][2] or ""):
+                raise StateConflict(
+                    "supplied connection has no exact file-backed SQLite main"
+                )
+            connection_path = Path(str(main_rows[0][2])).resolve(strict=True)
+            owned_path = self.path.resolve(strict=True)
+            connection_metadata = os.stat(connection_path)
+            owned_metadata = os.stat(owned_path)
+        except StateConflict:
+            raise
+        except (OSError, RuntimeError, sqlite3.Error) as exc:
+            raise StateConflict(
+                f"supplied connection database identity is unavailable: {exc}"
+            ) from exc
+        connection_identity = (
+            connection_metadata.st_dev,
+            connection_metadata.st_ino,
+        )
+        owned_identity = (owned_metadata.st_dev, owned_metadata.st_ino)
+        if (
+            self._database_file_identity is None
+            or connection_path != owned_path
+            or connection_identity != owned_identity
+            or owned_identity != self._database_file_identity
+        ):
+            raise StateConflict(
+                "supplied connection is not the stable database owned by this RuntimeStore"
+            )
 
     def _open_readonly(self) -> sqlite3.Connection:
         """Open an EXISTING database read-only: no create, no chmod, no migration.
@@ -13926,6 +13993,29 @@ class ResourceBroker:
         return WorkerRegistry(self.store).get_worker(lease.attempt.worker_id)
 
 
+def _runtime_binding_ordered_unique_strings(
+    value: Any, *, require_nonempty: bool
+) -> bool:
+    return (
+        isinstance(value, list)
+        and (bool(value) or not require_nonempty)
+        and all(
+            isinstance(item, str) and bool(item) and item == item.strip()
+            for item in value
+        )
+        and value == sorted(set(value))
+    )
+
+
+def _runtime_binding_validation_argv(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(argv, list)
+        and bool(argv)
+        and all(isinstance(item, str) and bool(item) for item in argv)
+        for argv in value
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class ActiveOperatorBindingFacts:
     """One read-snapshot of the accepted current OHF binding source."""
@@ -14004,11 +14094,16 @@ class Runtime:
                 return self.current_harness_binding_source(
                     token, connection=owned_connection
                 )
+        self.store._assert_owned_snapshot_connection(connection)
 
         rows = connection.execute(
             """
             SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
                    j.status AS job_status,j.owner_seat,j.orchestration_role,
+                   j.requested_authorities_json AS job_requested_authorities_json,
+                   j.allowed_write_paths_json AS job_allowed_write_paths_json,
+                   j.validation_commands_json AS job_validation_commands_json,
+                   j.authority_policy_hash AS job_authority_policy_hash,
                    w.provider AS worker_provider,w.account_label AS worker_account_label,
                    q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
                    q.provider AS quota_provider,q.status AS quota_status,
@@ -14118,6 +14213,23 @@ class Runtime:
             raise StateConflict(
                 f"runtime binding effective grant evidence is invalid: {exc}"
             ) from exc
+        try:
+            job_authorities = _strict_canonical_json_loads(
+                str(row["job_requested_authorities_json"]),
+                name="runtime binding Job requested authorities",
+            )
+            job_write_paths = _strict_canonical_json_loads(
+                str(row["job_allowed_write_paths_json"]),
+                name="runtime binding Job allowed write paths",
+            )
+            job_validation_argv = _strict_canonical_json_loads(
+                str(row["job_validation_commands_json"]),
+                name="runtime binding Job validation commands",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(
+                f"runtime binding effective grant Job evidence is invalid: {exc}"
+            ) from exc
         grant_keys = {
             "schema_version",
             "authorities",
@@ -14135,11 +14247,41 @@ class Runtime:
             or grant.get("job_id") != row["job_id"]
             or grant.get("role") != row["orchestration_role"]
             or grant.get("policy_sha") != row["authority_policy_hash"]
-            or not isinstance(grant.get("authorities"), list)
-            or not isinstance(grant.get("write_paths"), list)
-            or not isinstance(grant.get("validation_argv"), list)
+            or row["job_authority_policy_hash"] != row["authority_policy_hash"]
+            or not _runtime_binding_ordered_unique_strings(
+                job_authorities, require_nonempty=True
+            )
+            or not _runtime_binding_ordered_unique_strings(
+                job_write_paths, require_nonempty=False
+            )
+            or not _runtime_binding_validation_argv(job_validation_argv)
+            or not _runtime_binding_ordered_unique_strings(
+                grant.get("authorities"), require_nonempty=True
+            )
+            or not _runtime_binding_ordered_unique_strings(
+                grant.get("write_paths"), require_nonempty=False
+            )
+            or not _runtime_binding_validation_argv(grant.get("validation_argv"))
+            or any(item not in job_authorities for item in grant["authorities"])
+            or any(item not in job_write_paths for item in grant["write_paths"])
+            or any(item not in job_validation_argv for item in grant["validation_argv"])
         ):
             raise StateConflict("runtime binding effective grant evidence drifted")
+        if row["orchestration_role"] in {"plan", "aggregation"} and (
+            grant["authorities"] != ["READ"]
+            or grant["write_paths"]
+            or grant["validation_argv"]
+        ):
+            raise StateConflict("runtime binding effective grant role semantics drifted")
+        if row["orchestration_role"] == "review" and (
+            grant["authorities"] != job_authorities
+            or any(item not in {"READ", "RUN_TESTS"} for item in job_authorities)
+            or "READ" not in job_authorities
+            or job_write_paths
+            or grant["write_paths"]
+            or grant["validation_argv"] != job_validation_argv
+        ):
+            raise StateConflict("runtime binding effective grant role semantics drifted")
 
         admissions = connection.execute(
             """SELECT * FROM events
@@ -14185,11 +14327,8 @@ class Runtime:
             "effective_grant_digest",
             "policy_sha",
         )
-        tx3_rows = connection.execute(
-            "SELECT * FROM events WHERE command_id=? ORDER BY event_id",
-            (admission.get("tx3_applied_command_id"),),
-        ).fetchall()
-        tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
+        decision_event = decisions[0]
+        tx3: sqlite3.Row | None = None
         tx3_payload: Any = None
         tx3_intent: sqlite3.Row | None = None
         tx3_intent_payload: Any = None
@@ -14227,7 +14366,38 @@ class Runtime:
                     "worker_id": row["worker_id"],
                     "provider_session_id": row["epoch_provider_session"],
                 }
-            if tx3 is not None:
+            if expected_tx3_applied is not None and expected_tx3_intent is not None:
+                tx3_rows = connection.execute(
+                    """SELECT * FROM events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                    (
+                        OperationReceiptKind.APPLIED.value,
+                        token,
+                        expected_tx3_applied["operation_kind"],
+                        row["process_generation_id"],
+                    ),
+                ).fetchall()
+                tx3_intent_rows = connection.execute(
+                    """SELECT * FROM events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                    (
+                        OperationReceiptKind.INTENT.value,
+                        token,
+                        expected_tx3_intent["operation_kind"],
+                        row["process_generation_id"],
+                    ),
+                ).fetchall()
+                tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
+                tx3_intent = (
+                    tx3_intent_rows[0] if len(tx3_intent_rows) == 1 else None
+                )
+            if tx3 is not None and tx3_intent is not None:
                 tx3_payload = _strict_canonical_json_loads(
                     str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
                 )
@@ -14235,16 +14405,10 @@ class Runtime:
                 expected_tx3_command_id = operation_receipt_command_id(
                     operation_id, OperationReceiptKind.APPLIED
                 )
-                tx3_intent_rows = connection.execute(
-                    "SELECT * FROM events WHERE command_id=? ORDER BY event_id",
-                    (operation_id.command_id,),
-                ).fetchall()
-                if len(tx3_intent_rows) == 1:
-                    tx3_intent = tx3_intent_rows[0]
-                    tx3_intent_payload = _strict_canonical_json_loads(
-                        str(tx3_intent["payload_json"]),
-                        name="runtime binding TX-3 INTENT",
-                    )
+                tx3_intent_payload = _strict_canonical_json_loads(
+                    str(tx3_intent["payload_json"]),
+                    name="runtime binding TX-3 INTENT",
+                )
         except (StateConflict, TypeError, ValueError) as exc:
             raise StateConflict(
                 f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
@@ -14274,6 +14438,8 @@ class Runtime:
             or tx3_intent["worker_id"] != row["worker_id"]
             or tx3_intent["quota_class"] != row["quota_class"]
             or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
+            or int(tx3["event_id"]) >= int(decision_event["event_id"])
+            or int(decision_event["event_id"]) >= int(admission_event["event_id"])
             or tx3_intent_payload != expected_tx3_intent
         ):
             raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
@@ -14282,6 +14448,9 @@ class Runtime:
             set(admission) != admission_keys
             or admission_event["command_id"]
             != f"ohf-work-admit:{row['process_generation_id']}"
+            or admission_event["actor"] != "supervisor"
+            or admission_event["aggregate_type"] != "process_generation"
+            or admission_event["aggregate_id"] != row["process_generation_id"]
             or admission_event["job_id"] != row["job_id"]
             or admission_event["attempt_id"] != token
             or admission_event["worker_id"] != row["worker_id"]
@@ -14306,6 +14475,13 @@ class Runtime:
                 for field in immutable_digests
             )
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
+            or decision_event["actor"] != "supervisor"
+            or decision_event["aggregate_type"] != "process_generation"
+            or decision_event["aggregate_id"] != row["process_generation_id"]
+            or decision_event["job_id"] != row["job_id"]
+            or decision_event["attempt_id"] != token
+            or decision_event["worker_id"] != row["worker_id"]
+            or decision_event["quota_class"] != row["quota_class"]
             or decision
             != {
                 "decision": LaunchDecision.ALLOW.value,
