@@ -7,9 +7,9 @@
 **Current protected release base:** `Mastermind@28d365cceaef6efb0a26e0ac9af51ead44695d60`  
 **Current Macro observation:** `macro@ede7e065a90b294e9835e98e5326a84e1c14d038`
 
-This record reconciles F0 with protected Mastermind movement and one machine-experience omission found during exact-head release review. It creates no implementation, MCP server, semantic backend, Zoekt index, capability profile, worker, Attempt, RuntimeBinding, SessionTarget, Sol action target, host process, credential, service, Slack/Linear projection, Control Room component or production capability.
+This record reconciles F0 with protected Mastermind movement and architecture omissions found during exact-head release review. It creates no implementation, MCP server, semantic backend, Zoekt index, capability profile, worker, Attempt, RuntimeBinding, SessionTarget, Sol action target, host process, credential, service, Slack/Linear projection, Control Room component, telemetry store or production capability.
 
-For current release-base identity, the intervening exact Sol action-authority boundary and the optional Control Room projection, this record is more recent and specific than the historical pin headers in the F0 architecture, benchmark charter, supply-chain amendment and C0/Z0 plans. It does not replace their product architecture, tool contracts, benchmark law, rights law or wave boundaries.
+For current release-base identity, the intervening exact Sol action-authority boundary, the optional Control Room projection, the value model and the learning contract, this record is more recent and specific than the historical pin headers in the F0 architecture, benchmark charter, supply-chain amendment and C0/Z0 plans. It does not replace their product architecture, tool contracts, benchmark law, rights law or wave boundaries.
 
 ## 1. Current Skillpack compatibility
 
@@ -85,17 +85,76 @@ The projection must preserve these boundaries:
 
 A Control Room wave requires its own future bounded commission, real-data reference composition, empty/loading/stale/degraded/unauthorized/failure states, browser proof at relevant breakpoints and a named user capability. F0 creates no such wave and makes no UI live.
 
-## 5. Macro movement reconciliation
+## 5. Product, economic, distribution and moat value
+
+The Fabric is an internal autonomy product first. It has six separate value legs; no single leg may be used as a substitute for the others.
+
+### User value
+
+Sols, builders and reviewers reach the correct current implementation, owner, consumers, tests and recent evidence with less whole-repository rereading and fewer wrong-path edits. The visible benefit is a higher-quality architecture, change or review—not a search-result count.
+
+### Machine/intelligence value
+
+The workforce gains bounded retrieval that preserves exact source state, lets a model reason over its actual candidate worktree and reduces context burn. A lower-tier worker should be able to complete more bounded missions without asking a frontier model to reconstruct the estate from scratch.
+
+### Research and signal-system value
+
+CodeIntel has zero market, research-ranking, forecast or trade authority. Its value to intelligence systems is indirect but material: fewer duplicate pipelines, better recovery of canonical data/contract owners, better impact analysis and more reliable fixes to the systems that produce research. No search hit, sentiment, model summary or code-graph score becomes a signal.
+
+### Distribution value
+
+Initial distribution is through reviewed worker capability profiles and existing Sol/reviewer workflows. The optional Control Room evidence projection is a later internal distribution surface. There is no external code-intelligence SaaS, browser extension, public API or customer-facing SKU in V1.
+
+### Commercial/economic value
+
+The economic thesis is reduced frontier-token/context consumption, less engineering rework, shorter recovery and review cycles, fewer duplicate-system incidents and safe migration of bounded work to cheaper workers. CI5 must measure those savings against index/semantic CPU, RAM, disk, startup, maintenance and upgrade costs. A technically strong system that costs more cognition or operations than it saves does not promote.
+
+### Data-moat value
+
+Mastermind's moat is not copied third-party code or an opaque vector store. It is the rights-safe, point-in-time relationship between the company's own evolving repositories, exact refs, canonical owners, tests, consumers, historical benchmark answer keys, correction history and measured worker outcomes. Indexes and caches remain disposable projections; Git/GitHub and accepted source law remain truth.
+
+## 6. Learning and instrumentation contract
+
+CI5 and CI6 must show whether the Fabric improves research, discovery, retention of implementation context and engineering decisions. Required measurements include:
+
+```text
+query and tool type
+exact capability/profile/build identity
+repository/ref coverage and freshness state
+time/tool calls to first authoritative file
+whole-file reads and context/tokens consumed
+critical owner/file/symbol/consumer recall
+wrong-owner and stale-current conclusions
+canonical-verification completion
+review impacts caught or safely ruled out
+worker completion quality and model tier
+latency, startup, CPU, RAM, disk and refresh cost
+degradation, truncation, crash, restart and cleanup outcomes
+```
+
+Instrumentation rules:
+
+- use existing Job/Attempt/Worker/profile identities when runtime attribution is needed; create no CodeIntel worker or session identity;
+- preserve aggregate operational and benchmark evidence without copying arbitrary source files, secrets, prompts or full model transcripts into a new telemetry store;
+- raw snippets and candidate paths inherit repository confidentiality and follow the reviewed retention policy;
+- model-generated usefulness labels are non-authoritative until independently scored against frozen answer keys or real review outcomes;
+- a metric may describe use or quality; it cannot rank work, select a worker, grant authority, originate a retry or declare completion;
+- missing telemetry is explicit degradation, not evidence of zero cost or perfect behavior;
+- corrections create new point-in-time observations and never rewrite the historical benchmark result that motivated a decision.
+
+CI6 promotion therefore requires all four completion legs: truthful inputs, useful semantic/search intelligence, a coherent real workflow, and evidence that the workflow improves outcomes at acceptable cost.
+
+## 7. Macro movement reconciliation
 
 Macro advanced from the F0 source window `ca31568272d06f2472f65946d2435517611f31dc` to current observation `ede7e065a90b294e9835e98e5326a84e1c14d038` through two commits whose changed paths are confined to rendered `site/**` output.
 
 The Agent OS workstreams, decisions, discoveries and handoffs read for F0 are unchanged. The original exact Macro source window remains the reproducible archaeology pin; current Macro main is recorded separately rather than pretending rendered publication movement changed organizational truth.
 
-## 6. Collision and release consequence
+## 8. Collision and release consequence
 
 The protected source movement is adjacent but path-disjoint from PR #276. It adds no conflicting CodeIntel implementation or program carrier. Current Linear and Slack duplicate sweeps remain empty for Code Intelligence / Serena / Zoekt, and the open-PR collision review shows no other carrier changing the F0 records paths.
 
-PR #276 incorporated protected `28d365cceaef6efb0a26e0ac9af51ead44695d60` into the same branch carrier before this amendment so hosted CI evaluates the actual combined tree. No force update, replacement PR or cross-carrier retry is permitted.
+PR #276 incorporated protected `28d365cceaef6efb0a26e0ac9af51ead44695d60` into the same branch carrier before these amendments so hosted CI evaluates the actual combined tree. No force update, replacement PR or cross-carrier retry is permitted.
 
 After this amendment, release requires:
 
@@ -106,7 +165,7 @@ After this amendment, release requires:
 5. post-merge protected SHA verification;
 6. durable Macro Agent OS workstream/decision/discovery/handoff referencing the exact accepted Mastermind merge SHA.
 
-## 7. Capability truth after this reconciliation
+## 9. Capability truth after this reconciliation
 
 ```text
 F0 architecture and reconciliation records       SPEC_ONLY / RECORDS_ONLY
@@ -117,8 +176,10 @@ current Sol action-target resolver                BUILT_NOT_PROVEN / PRODUCTION_
 CodeIntel Sol/session/workspace election          REJECTED_BY_DESIGN
 Control Room CodeIntel projection                 NOT_BUILT / OPTIONAL AFTER PROOF
 Control Room as code-browser clone                REJECTED_BY_DESIGN
+CodeIntel market/signal authority                 REJECTED_BY_DESIGN
+CodeIntel learning instrumentation                SPEC_ONLY
 ```
 
-## 8. Exact next action
+## 10. Exact next action
 
 Run and review exact-head CI and the six-file current-base census on the amended existing PR #276 carrier. Only a clean PASS permits expected-head merge of the records-only F0 carrier. After accepted merge, create the durable Agent OS records, then place C0 and Z0 through current capacity procedure without turning missing placement into Chairman labor.
