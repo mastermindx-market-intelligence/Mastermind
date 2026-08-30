@@ -25,8 +25,7 @@
 
 ### Task 1: Freeze the incident as RED prompt-contract tests
 
-**Files:**
-- Create: `tests/test_sol_watcher_contract.py`
+**Files:** `tests/test_sol_watcher_contract.py`
 
 - [x] Write tests for a valid action-authoritative contract, FF/FIF notification-only self-deadlock, observer modification, missing fields, malformed carrier, cross-account policy, and audit summary.
 - [x] Verify collection fails because `control_plane.sol_watcher_contract` does not exist.
@@ -34,9 +33,7 @@
 
 ### Task 2: Implement the pure watcher contract validator
 
-**Files:**
-- Create: `control_plane/sol_watcher_contract.py`
-- Test: `tests/test_sol_watcher_contract.py`
+**Files:** `control_plane/sol_watcher_contract.py`, `tests/test_sol_watcher_contract.py`
 
 - [x] Implement strict header parsing and closed role/event/outcome/policy combinations.
 - [x] Implement body-law checks and action-authoritative notification-only anti-pattern detection.
@@ -46,9 +43,7 @@
 
 ### Task 3: Add the account-local read-only audit CLI
 
-**Files:**
-- Create: `scripts/audit_sol_watchers.py`
-- Modify: `tests/test_sol_watcher_contract.py`
+**Files:** `scripts/audit_sol_watchers.py`, `tests/test_sol_watcher_contract.py`
 
 - [x] Add RED CLI tests for valid, invalid, malformed-input, and disabled-task handling.
 - [x] Verify the new tests fail because the CLI is absent.
@@ -58,9 +53,7 @@
 
 ### Task 4: Tighten the Skillpack and source-law tests
 
-**Files:**
-- Modify: `docs/sol_skills/WATCHER_ACTION_LOOP.md`
-- Modify: `tests/test_sol_watcher_action_loop_skill.py`
+**Files:** `docs/sol_skills/WATCHER_ACTION_LOOP.md`, `tests/test_sol_watcher_action_loop_skill.py`
 
 - [x] Add RED assertions for the discriminator, role vocabulary, self-deadlock failure, audit command, aggregate scope, and non-watcher classification.
 - [x] Verify the assertions fail before procedure changes.
@@ -69,9 +62,7 @@
 
 ### Task 5: Add the three-account deployment runbook
 
-**Files:**
-- Create: `docs/runbooks/SOL_WATCHER_ACCOUNT_HARDENING.md`
-- Create/modify: `tests/test_sol_watcher_account_hardening_runbook.py`
+**Files:** `docs/runbooks/SOL_WATCHER_ACCOUNT_HARDENING.md`, `tests/test_sol_watcher_account_hardening_runbook.py`
 
 - [x] Add RED assertions for account-local-only mutation, receipt fields, no recency election, aggregate scope and `audit_kind` classification.
 - [x] Verify RED.
@@ -96,14 +87,30 @@
 - [x] Add `invalid_classification_tasks` to the stable audit summary.
 - [x] Record that one rotating Codex OAuth slot does not identify or authorize the three web-account task stores.
 - [x] Correct all three preflight carriers and the Grok placement carrier in place; no replacement carrier or Codex-session multiplication.
-- [x] Local exact validator/CLI proof: 19 focused tests passed; `py_compile` passed; four additional polarity/authority mutation probes passed.
+- [x] Prior local validator/CLI proof: 19 focused tests passed; `py_compile` passed; four additional polarity/authority mutation probes passed.
+
+### Task 5C: All-role authority and native-export identity hardening
+
+**Why:** A second adversarial pass found that parent/triage prompts could hide child modification authority in body prose, self-deferral synonyms could bypass the original vocabulary, and malformed native exports could coerce strings to enabled state or synthesize/duplicate task identity.
+
+- [x] Add RED for `await/defer/escalate/pause` self-deferral synonyms.
+- [x] Add RED proving observer, parent and triage body prose cannot issue child semantic edges, release, retry/failover or start successors.
+- [x] Add RED proving explicit non-authoritative prohibitions remain valid.
+- [x] Add RED for missing/duplicate/conflicting native task IDs.
+- [x] Add RED requiring real JSON booleans for enabled state and refusing conflicting aliases.
+- [x] Implement all-role body fences and strict export identity/typing.
+- [x] Add `invalid_export_tasks` and `duplicate_task_ids` to the stable report.
+- [x] Repair the valid `No blind retry` polarity case and widen clause boundaries so unrelated negation cannot suppress later positive authority.
+- [x] Synchronize Skillpack, runbook and design.
+- [ ] Run final exact-head focused tests and compile checks after the documentation freeze.
 
 ### Task 6: Exact-head verification and release packet
 
 **Files:** all nine carrier paths.
 
-- [x] Run local focused validator/CLI proof on exact authored bytes: 19 passed.
-- [x] Run validator/CLI `py_compile`.
+- [x] Run prior focused validator/CLI proof on exact authored bytes: 19 passed.
+- [x] Run prior validator/CLI `py_compile`.
+- [ ] Run the final enlarged focused suite and compile checks on the immutable release head.
 - [ ] Require current protected-base ancestry and exact nine-file census on the final head.
 - [x] Open one DRAFT/HOLD pull request on the same branch: Mastermind #268.
 - [x] Request independent review from `mastermindx-2` and `MastermindX1`.
@@ -120,6 +127,7 @@
 - ChatGPT2: `C0BSBM78V1N/1788074146.955509`, child `sol-watcher-account-hardening-chatgpt2-20260830-sol-001`.
 - ChatGPT3: `C0BSBM78V1N/1788074158.598619`, child `sol-watcher-account-hardening-chatgpt3-20260830-sol-001`.
 - Placement/attention bridge only: `C0BSBM78V1N/1788074188.046229`, `sol-watcher-three-account-placement-20260830-gs-001`.
+- Independent-review capacity census: `C0BSBM78V1N/1788075138.441739`, `sol-watcher-pr268-review-capacity-20260830-gs-001`.
 - Existing permanent owners: W3A #250, W3C under accepted Wake runtime plan, MAS-229 ACK/source resolution, AD-SOL1 exact action-target enforcement.
 
 - [x] Create exact account-local read-only preflight carriers for all three web accounts.
