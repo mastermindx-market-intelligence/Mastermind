@@ -22,7 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime(2026, 8, 30, 8, 0, 0, tzinfo=timezone.utc)
 
 
-def request(*, issued: datetime | None = None, expires: datetime | None = None):
+def request(
+    *,
+    issued: datetime | None = None,
+    expires: datetime | None = None,
+):
     issued = NOW if issued is None else issued
     expires = NOW + timedelta(seconds=30) if expires is None else expires
     return {
@@ -49,15 +53,33 @@ def test_action_window_accepts_fresh_bounded_request_and_detaches_it():
 @pytest.mark.parametrize(
     ("issued", "expires", "now", "reason"),
     [
-        (NOW - timedelta(seconds=31), NOW - timedelta(seconds=1), NOW, "expired"),
+        (
+            NOW - timedelta(seconds=31),
+            NOW - timedelta(seconds=1),
+            NOW,
+            "expired",
+        ),
         (NOW - timedelta(seconds=30), NOW, NOW, "expired"),
-        (NOW + timedelta(seconds=6), NOW + timedelta(seconds=30), NOW, "future"),
+        (
+            NOW + timedelta(seconds=6),
+            NOW + timedelta(seconds=30),
+            NOW,
+            "future",
+        ),
         (NOW, NOW + timedelta(seconds=61), NOW, "ttl"),
     ],
 )
-def test_action_window_refuses_expiry_future_and_excessive_ttl(issued, expires, now, reason):
+def test_action_window_refuses_expiry_future_and_excessive_ttl(
+    issued,
+    expires,
+    now,
+    reason,
+):
     with pytest.raises(wsp.WebSolProtocolError, match=reason):
-        wsp.validate_action_window(request(issued=issued, expires=expires), now=now)
+        wsp.validate_action_window(
+            request(issued=issued, expires=expires),
+            now=now,
+        )
 
 
 def test_action_window_rejects_a_naive_clock_instead_of_guessing_timezone():
@@ -139,7 +161,8 @@ const chrome = {
   alarms: {onAlarm: event(), create() {}, async clear() {}},
 };
 const context = vm.createContext({chrome, Date, Map, Set, Number, Array, Object, String,
-  Promise, URL, TextEncoder, crypto: webcrypto, console, setTimeout, clearTimeout});
+  Promise, URL, TextEncoder, crypto: webcrypto, console, setTimeout, clearTimeout,
+  importScripts() {}});
 vm.runInContext(source, context, {filename: "background.js"});
 const request = {
   schema: "mastermind.web_sol_surface_action.v1",
@@ -179,11 +202,19 @@ const request = {
 '''
 
 
-@pytest.mark.parametrize("scenario", ["false-focus", "moved-window", "route-change", "expired-action"])
+@pytest.mark.parametrize(
+    "scenario",
+    ["false-focus", "moved-window", "route-change", "expired-action"],
+)
 def test_actual_extension_reliability_behaviors(scenario):
     node = shutil.which("node")
-    assert node is not None, "Node is required for real extension behavior tests; do not skip this gate"
-    background = ROOT / "integrations/chairman_surfaces/web_sol_extension/background.js"
+    assert (
+        node is not None
+    ), "Node is required for real extension behavior tests; do not skip this gate"
+    background = (
+        ROOT
+        / "integrations/chairman_surfaces/web_sol_extension/background.js"
+    )
     completed = subprocess.run(
         [node, "-e", NODE_HARNESS, scenario, str(background)],
         capture_output=True,
