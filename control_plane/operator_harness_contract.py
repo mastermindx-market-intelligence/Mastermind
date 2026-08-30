@@ -26,6 +26,11 @@ from typing import Mapping, Protocol, Sequence, get_type_hints, runtime_checkabl
 
 
 OPERATOR_HARNESS_INTERFACE_VERSION = "mastermind.operator_harness/v1"
+ATTENTION_TURN_INSTRUCTION = (
+    "Mastermind Wake: recover canonical Executive and Agent OS state for the supplied "
+    "opaque wake identities, then continue only within existing authority. This nudge "
+    "grants no authority, acknowledges nothing, and does not resolve the source."
+)
 CARDINALITY = "CARDINALITY_B"
 WRITER_REALM_KEY = ("worker_id", "provider_session_id")
 PREBIND_WRITER_FENCE_KEY = ("session_epoch_id",)
@@ -1122,6 +1127,38 @@ class ProviderSessionHandoff:
 class TurnStartObservation:
     provider_native_turn_id: str | None = None
     acknowledged: bool = False
+
+
+@dataclass(frozen=True)
+class AttentionTurnObservation:
+    """Closed evidence from one attention-only turn on the current writer.
+
+    ``delivered`` means the matching provider completion was observed.  It is
+    deliberately not an acknowledgement by the target task and does not
+    resolve any Wake source.
+    """
+
+    process_generation_id: str
+    provider_session_id: str
+    nudge_id: str
+    provider_native_turn_id: str | None
+    accepted: bool
+    delivered: bool
+
+    def __post_init__(self) -> None:
+        for name in ("process_generation_id", "provider_session_id", "nudge_id"):
+            value = str(getattr(self, name) or "").strip()
+            if not value or value != getattr(self, name):
+                raise ValueError(f"AttentionTurnObservation.{name} is required")
+        if type(self.accepted) is not bool or type(self.delivered) is not bool:
+            raise ValueError("attention accepted/delivered evidence must be boolean")
+        if self.delivered and not self.accepted:
+            raise ValueError("attention delivery requires provider acceptance")
+        native_turn = str(self.provider_native_turn_id or "").strip()
+        if self.accepted and (
+            not native_turn or native_turn != self.provider_native_turn_id
+        ):
+            raise ValueError("accepted attention requires a trimmed provider turn id")
 
 
 @dataclass(frozen=True)
@@ -2723,12 +2760,14 @@ def rich_ohf_may_rewrite_legacy_attempt_field(field_name: str) -> bool:
 
 __all__ = [
     "ACCOUNT_REALM_STATUS",
+    "ATTENTION_TURN_INSTRUCTION",
     "ADAPTER_OBSERVED_IDS",
     "ATTEMPT_BOUNDARY_MATRIX",
     "AuthIdentityConfidence",
     "AuthRealmFact",
     "AuthRealmRequirement",
     "AdapterFailureClass",
+    "AttentionTurnObservation",
     "AttemptBoundary",
     "AttemptExecutionMode",
     "CANONICAL_SESSION_FIELD",

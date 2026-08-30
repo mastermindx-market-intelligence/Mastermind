@@ -22,6 +22,7 @@ from control_plane.executive_worker_broker import (
 )
 from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
+    AttentionTurnObservation,
     CandidateResult,
     EventCursor,
     HarnessAdapterCapabilities,
@@ -42,6 +43,7 @@ from control_plane.operator_harness_contract import (
 )
 from control_plane.operator_harness_wire import (
     OperatorHarnessWireError,
+    attention_turn_observation,
     candidate_result,
     event_cursor,
     normalized_event,
@@ -238,6 +240,37 @@ class RemoteCodexOperatorAdapter:
             return turn_start_observation(result.get("observation"))
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError("remote OHF turn-start receipt is invalid") from exc
+
+    def deliver_attention(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        attempt_id: str,
+        provider_session_id: str,
+        nudge_id: str,
+        opaque_ids: tuple[str, ...],
+        instruction: str,
+        completion_timeout_seconds: float,
+    ) -> AttentionTurnObservation:
+        result = self.client.request_sync(
+            "ohf-deliver-attention",
+            {
+                "generation": to_wire(generation),
+                "attempt_id": attempt_id,
+                "provider_session_id": provider_session_id,
+                "nudge_id": nudge_id,
+                "opaque_ids": list(opaque_ids),
+                "instruction": instruction,
+                "completion_timeout_seconds": float(completion_timeout_seconds),
+            },
+            timeout_seconds=float(completion_timeout_seconds) + 30.0,
+        )
+        try:
+            return attention_turn_observation(result.get("observation"))
+        except OperatorHarnessWireError as exc:
+            raise BrokerProtocolError(
+                "remote OHF attention receipt is invalid"
+            ) from exc
 
     def read_events(
         self, cursor: EventCursor, *, timeout_seconds: float = 30.0

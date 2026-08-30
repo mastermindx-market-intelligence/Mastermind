@@ -11,14 +11,20 @@ import pytest
 
 from control_plane import codex_operator_adapter as codex_adapter
 from control_plane import executive_worker_broker as broker_module
-from control_plane.executive_worker_broker import RemoteBrokerError
+from control_plane.executive_worker_broker import (
+    BrokerEffectUnknownError,
+    BrokerPreSubmitError,
+    RemoteBrokerError,
+)
 from control_plane.operator_harness_contract import (
+    ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
     ProcessGenerationRef,
     ProcessIdentityObservation,
     ProviderWriterState,
+    SessionEpochRef,
 )
-from control_plane.operator_harness_wire import to_wire
+from control_plane.operator_harness_wire import attention_turn_observation, to_wire
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
 from control_plane.wake_dispatcher import WakePreSubmitError
 from integrations.executive_wake.codex_app_server import CODEX_WAKE_INSTRUCTION
@@ -30,6 +36,13 @@ from scripts.ohf.laboratory import JsonRpcError
 NATIVE_HANDLE = "019cafe0-1111-7222-8333-abcdefabcdef"
 NUDGE_ID = "nudge-123"
 OPAQUE_IDS = ("WAKE-123", "WAKE-123:ATTEMPT:1")
+ATTEMPT_ID = "attempt-123"
+EPOCH = SessionEpochRef(
+    session_epoch_id="epoch-123",
+    attempt_id=ATTEMPT_ID,
+    worker_id="worker-123",
+    epoch_number=3,
+)
 GENERATION = ProcessGenerationRef(
     process_generation_id="generation-123",
     session_epoch_id="epoch-123",
@@ -90,6 +103,7 @@ def _owned_adapter(
     *,
     provider_session_id: str = NATIVE_HANDLE,
     observed_process: ProcessIdentityObservation = PROCESS,
+    writer_state: ProviderWriterState = ProviderWriterState.HELD,
 ):
     adapter = object.__new__(codex_adapter.CodexOperatorAdapter)
     adapter.worker_id = GENERATION.worker_id
@@ -97,18 +111,22 @@ def _owned_adapter(
     adapter.process_identity_observer = lambda _pid: observed_process
     adapter._generations = {
         GENERATION.process_generation_id: SimpleNamespace(
+            epoch=EPOCH,
             generation=GENERATION,
             provider_session_id=provider_session_id,
-            writer_state=ProviderWriterState.HELD,
+            writer_state=writer_state,
             client=client,
             process=PROCESS,
             requested=SimpleNamespace(approval_policy="never"),
+            events=[],
+            turns={},
         )
     }
     return adapter
 
 
 def test_attention_observation_is_closed_and_delivery_requires_acceptance() -> None:
+    assert ATTENTION_TURN_INSTRUCTION == CODEX_WAKE_INSTRUCTION
     observation = AttentionTurnObservation(
         process_generation_id=GENERATION.process_generation_id,
         provider_session_id=NATIVE_HANDLE,
@@ -136,6 +154,7 @@ def test_worker_local_attention_reuses_exact_owned_generation_without_start_or_r
 
     observation = adapter.deliver_attention(
         generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
         provider_session_id=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         opaque_ids=OPAQUE_IDS,
@@ -174,6 +193,7 @@ def test_provider_session_drift_refuses_before_provider_io() -> None:
     with pytest.raises(codex_adapter.CodexAdapterError) as error:
         adapter.deliver_attention(
             generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -183,6 +203,69 @@ def test_provider_session_drift_refuses_before_provider_io() -> None:
 
     assert error.value.effect_unknown is False
     assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert client.calls == []
+
+
+def test_attempt_drift_refuses_before_provider_io() -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(client)
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id="attempt-foreign",
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert error.value.effect_unknown is False
+    assert client.calls == []
+
+
+def test_released_writer_refuses_before_provider_io() -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(client, writer_state=ProviderWriterState.RELEASED)
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert error.value.effect_unknown is False
+    assert client.calls == []
+
+
+def test_active_normal_turn_refuses_attention_before_provider_io() -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(client)
+    state = adapter._generations[GENERATION.process_generation_id]
+    state.turns = {"executive-turn-1": "provider-turn-1"}
+    state.events = []
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert error.value.effect_unknown is False
     assert client.calls == []
 
 
@@ -201,6 +284,7 @@ def test_process_identity_drift_refuses_before_provider_io() -> None:
     with pytest.raises(codex_adapter.CodexAdapterError) as error:
         adapter.deliver_attention(
             generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -219,6 +303,7 @@ def test_turn_start_transport_loss_is_effect_unknown() -> None:
     with pytest.raises(codex_adapter.CodexAdapterError) as error:
         adapter.deliver_attention(
             generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -236,6 +321,7 @@ def test_completion_timeout_is_accepted_not_delivered_on_same_owned_writer() -> 
 
     observation = adapter.deliver_attention(
         generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
         provider_session_id=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         opaque_ids=OPAQUE_IDS,
@@ -278,6 +364,7 @@ def test_remote_adapter_uses_one_closed_worker_broker_attention_operation() -> N
 
     observation = remote.deliver_attention(
         generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
         provider_session_id=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         opaque_ids=OPAQUE_IDS,
@@ -290,6 +377,7 @@ def test_remote_adapter_uses_one_closed_worker_broker_attention_operation() -> N
     operation, payload, timeout = broker.calls[0]
     assert operation == "ohf-deliver-attention"
     assert payload["generation"] == to_wire(GENERATION)
+    assert payload["attempt_id"] == ATTEMPT_ID
     assert payload["provider_session_id"] == NATIVE_HANDLE
     assert payload["nudge_id"] == NUDGE_ID
     assert payload["opaque_ids"] == list(OPAQUE_IDS)
@@ -298,12 +386,77 @@ def test_remote_adapter_uses_one_closed_worker_broker_attention_operation() -> N
     assert timeout is not None
 
 
-def test_broker_surface_has_dedicated_attention_operation_and_typed_effect_boundary() -> None:
-    source = inspect.getsource(broker_module)
-    assert '"ohf-deliver-attention"' in source
-    assert "def _ohf_deliver_attention" in source
-    assert "BrokerPreSubmitError" in source
-    assert "BrokerEffectUnknownError" in source
+def _real_broker_with_owned_adapter(
+    adapter: Any, *, busy: bool = False
+) -> broker_module.ExecutiveWorkerBroker:
+    broker = object.__new__(broker_module.ExecutiveWorkerBroker)
+    broker.operator_harness_armed = False
+    broker._state_lock = asyncio.Lock()
+    broker._operator_run = broker_module._BrokerOperatorRun(
+        adapter=adapter,
+        requested=SimpleNamespace(approval_policy="never"),
+        epoch=EPOCH,
+        generation=GENERATION,
+        provider_session_id=NATIVE_HANDLE,
+        busy=busy,
+    )
+    return broker
+
+
+def _attention_payload() -> dict[str, Any]:
+    return {
+        "generation": to_wire(GENERATION),
+        "attempt_id": ATTEMPT_ID,
+        "provider_session_id": NATIVE_HANDLE,
+        "nudge_id": NUDGE_ID,
+        "opaque_ids": list(OPAQUE_IDS),
+        "instruction": CODEX_WAKE_INSTRUCTION,
+        "completion_timeout_seconds": 3.0,
+    }
+
+
+def test_real_broker_consumer_reaches_real_owned_adapter_once() -> None:
+    client = FakeOwnedAppServerClient()
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client))
+
+    result = asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+
+    observation = attention_turn_observation(result["observation"])
+    assert observation.accepted is True
+    assert observation.delivered is True
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_real_broker_busy_refuses_before_provider_io() -> None:
+    client = FakeOwnedAppServerClient()
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client), busy=True)
+
+    with pytest.raises(BrokerPreSubmitError):
+        asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+
+    assert client.calls == []
+
+
+def test_real_broker_attempt_drift_refuses_before_provider_io() -> None:
+    client = FakeOwnedAppServerClient()
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client))
+    payload = _attention_payload()
+    payload["attempt_id"] = "attempt-foreign"
+
+    with pytest.raises(BrokerPreSubmitError):
+        asyncio.run(broker._ohf_deliver_attention(payload))
+
+    assert client.calls == []
+
+
+def test_real_broker_preserves_effect_unknown_after_one_provider_write() -> None:
+    client = FakeOwnedAppServerClient(fail_request=True)
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client))
+
+    with pytest.raises(BrokerEffectUnknownError):
+        asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
 @dataclass
@@ -324,6 +477,7 @@ def _deliver_via_wake_client(fake: FakeRemoteAttentionAdapter):
     client = CodexCurrentWriterWakeClient(
         operator_adapter=fake,
         generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
         completion_timeout_seconds=3.0,
     )
     return asyncio.run(
@@ -356,6 +510,7 @@ def test_wake_client_delegates_to_bound_generation_and_returns_provider_observat
     assert observation.delivered is True
     assert len(fake.calls) == 1
     assert fake.calls[0]["generation"] == GENERATION
+    assert fake.calls[0]["attempt_id"] == ATTEMPT_ID
     assert fake.calls[0]["provider_session_id"] == NATIVE_HANDLE
 
 
