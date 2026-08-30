@@ -67,6 +67,9 @@ def test_temporary_sol_watchers_use_structured_role_contract() -> None:
         "python3 scripts/audit_sol_watchers.py",
         "canonical action-target transfer",
         "never elect by recency",
+        "aggregate:<stable-scope-id>",
+        "ACTION_AUTHORITATIVE always requires an exact Slack carrier",
+        "audit_kind: NON_WATCHER",
     )
     for phrase in required_contract_phrases:
         assert phrase in normalized, f"missing structured watcher contract law: {phrase}"
