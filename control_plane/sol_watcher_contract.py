@@ -5,6 +5,7 @@ action target, transport, retry, cursor, provider session, or persistence.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 import re
@@ -57,8 +58,11 @@ class FindingCode(str, Enum):
     MISSING_LIFECYCLE_BOUNDARY = "MISSING_LIFECYCLE_BOUNDARY"
     MISSING_TERMINAL_STOP_ORDER = "MISSING_TERMINAL_STOP_ORDER"
     NOTIFICATION_ONLY_SELF_DEADLOCK = "NOTIFICATION_ONLY_SELF_DEADLOCK"
-    OBSERVER_MODIFICATION_FORBIDDEN = "OBSERVER_MODIFICATION_FORBIDDEN"
+    NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN = "NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN"
     INVALID_TASK = "INVALID_TASK"
+    INVALID_TASK_ID = "INVALID_TASK_ID"
+    INVALID_ENABLED_FLAG = "INVALID_ENABLED_FLAG"
+    DUPLICATE_TASK_ID = "DUPLICATE_TASK_ID"
 
 
 @dataclass(frozen=True)
@@ -125,6 +129,8 @@ class AuditReport:
     valid_enabled_tasks: int
     invalid_enabled_tasks: int
     invalid_classification_tasks: int
+    invalid_export_tasks: int
+    duplicate_task_ids: tuple[str, ...]
     tasks: tuple[TaskAudit, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -137,6 +143,8 @@ class AuditReport:
                 "valid_enabled_tasks": self.valid_enabled_tasks,
                 "invalid_enabled_tasks": self.invalid_enabled_tasks,
                 "invalid_classification_tasks": self.invalid_classification_tasks,
+                "invalid_export_tasks": self.invalid_export_tasks,
+                "duplicate_task_ids": list(self.duplicate_task_ids),
             },
             "tasks": [task.to_dict() for task in self.tasks],
         }
@@ -169,12 +177,21 @@ _NOTIFICATION_ONLY_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bsol action required\b", re.IGNORECASE),
     re.compile(r"\bwait(?:ing)? for sol\b", re.IGNORECASE),
     re.compile(r"\bstand by for sol(?:'s)? ruling\b", re.IGNORECASE),
+    re.compile(r"\bawait(?:ing)? sol\b", re.IGNORECASE),
+    re.compile(r"\bdefer(?:red|ring)? to sol\b", re.IGNORECASE),
+    re.compile(r"\bescalate(?:d|s|ing)? to sol\b", re.IGNORECASE),
+    re.compile(r"\bpause(?:d|s|ing)? for sol\b", re.IGNORECASE),
 )
-_OBSERVER_MODIFICATION_PATTERNS: tuple[Pattern[str], ...] = (
-    re.compile(re.escape("post the actual same-carrier sol edge"), re.IGNORECASE),
-    re.compile(re.escape("issue a sol ruling"), re.IGNORECASE),
-    re.compile(re.escape("send sol continue"), re.IGNORECASE),
-    re.compile(re.escape("merge the pull request"), re.IGNORECASE),
+_NON_AUTHORITATIVE_MODIFICATION_PATTERNS: tuple[Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:post|send|issue|write|emit|reply with|respond with)\s+"
+        r"(?:an?\s+)?(?:sol\s+)?(?:continue|ruling|request[_ -]?repair|stop)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:merge|release)\s+(?:the\s+)?(?:pull request|pr|carrier|branch)\b", re.IGNORECASE),
+    re.compile(r"\b(?:enable|arm)\s+auto-merge\b", re.IGNORECASE),
+    re.compile(r"\b(?:retry|resubmit|requeue|fail\s*over)\b", re.IGNORECASE),
+    re.compile(r"\b(?:commission|start)\s+(?:a\s+)?successor\b", re.IGNORECASE),
 )
 _REJECTION_MARKERS = (
     "do not",
@@ -193,6 +210,14 @@ _REJECTION_MARKERS = (
     "fails",
 )
 _CLAUSE_BOUNDARY_RE = re.compile(r"[;.!?]|\b(?:but|however|instead|whereas)\b", re.IGNORECASE)
+_EXPORT_FINDING_CODES = frozenset(
+    {
+        FindingCode.INVALID_TASK,
+        FindingCode.INVALID_TASK_ID,
+        FindingCode.INVALID_ENABLED_FLAG,
+        FindingCode.DUPLICATE_TASK_ID,
+    }
+)
 
 
 def _finding(
@@ -203,6 +228,18 @@ def _finding(
     severity: Severity = Severity.ERROR,
 ) -> ContractFinding:
     return ContractFinding(code=code, message=message, field=field, severity=severity)
+
+
+def _audit_from_findings(findings: Iterable[ContractFinding]) -> PromptAudit:
+    frozen = tuple(findings)
+    return PromptAudit(
+        valid=not any(finding.severity is Severity.ERROR for finding in frozen),
+        role=None,
+        operation_key=None,
+        carrier=None,
+        latest_handled_edge=None,
+        findings=frozen,
+    )
 
 
 def _parse_prompt(prompt: str) -> tuple[dict[str, str], str, list[ContractFinding]]:
@@ -251,8 +288,6 @@ def _normalized_events(raw: str) -> frozenset[str]:
 
 
 def _clause_containing(text: str, start: int, end: int) -> str:
-    """Return the local semantic clause around one phrase occurrence."""
-
     previous_end = 0
     next_start = len(text)
     for boundary in _CLAUSE_BOUNDARY_RE.finditer(text):
@@ -266,8 +301,6 @@ def _clause_containing(text: str, start: int, end: int) -> str:
 
 
 def _contains_positive_phrase(text: str, patterns: tuple[Pattern[str], ...]) -> bool:
-    """Find a positive instruction while tolerating explicit bans/failure examples."""
-
     for raw_line in text.splitlines():
         normalized = " ".join(raw_line.casefold().split())
         if not normalized:
@@ -428,13 +461,15 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
                 )
             )
 
-    if role is WatcherRole.OBSERVER_ONLY and _contains_positive_phrase(
-        body, _OBSERVER_MODIFICATION_PATTERNS
-    ):
+    if role in {
+        WatcherRole.OBSERVER_ONLY,
+        WatcherRole.PARENT_ORCHESTRATOR,
+        WatcherRole.TRIAGE_ONLY,
+    } and _contains_positive_phrase(body, _NON_AUTHORITATIVE_MODIFICATION_PATTERNS):
         findings.append(
             _finding(
-                FindingCode.OBSERVER_MODIFICATION_FORBIDDEN,
-                "observer-only watcher cannot claim child modification authority",
+                FindingCode.NON_AUTHORITATIVE_MODIFICATION_FORBIDDEN,
+                "non-authoritative watcher cannot claim child modification, retry, release, or successor authority",
             )
         )
 
@@ -449,29 +484,126 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
     )
 
 
-def _invalid_task_audit(message: str) -> PromptAudit:
-    finding = _finding(FindingCode.INVALID_TASK, message, field="audit_kind")
-    return PromptAudit(
-        valid=False,
-        role=None,
-        operation_key=None,
-        carrier=None,
-        latest_handled_edge=None,
-        findings=(finding,),
-    )
+def _extract_task_id(raw: Mapping[str, Any], index: int) -> tuple[str, list[ContractFinding]]:
+    findings: list[ContractFinding] = []
+    has_id = "id" in raw
+    has_task_id = "task_id" in raw
+    if not has_id and not has_task_id:
+        return f"invalid-task-{index}", [
+            _finding(FindingCode.INVALID_TASK_ID, "task export must contain id or task_id", field="id")
+        ]
+    primary = raw.get("id") if has_id else raw.get("task_id")
+    secondary = raw.get("task_id") if has_id and has_task_id else primary
+    if not isinstance(primary, str) or not primary.strip():
+        findings.append(
+            _finding(FindingCode.INVALID_TASK_ID, "native task id must be a non-empty string", field="id")
+        )
+        task_id = f"invalid-task-{index}"
+    else:
+        task_id = primary.strip()
+    if has_id and has_task_id and primary != secondary:
+        findings.append(
+            _finding(FindingCode.INVALID_TASK_ID, "id and task_id disagree", field="id")
+        )
+    return task_id, findings
+
+
+def _extract_enabled(raw: Mapping[str, Any]) -> tuple[bool, list[ContractFinding]]:
+    findings: list[ContractFinding] = []
+    has_is_enabled = "is_enabled" in raw
+    has_enabled = "enabled" in raw
+    if not has_is_enabled and not has_enabled:
+        return False, [
+            _finding(
+                FindingCode.INVALID_ENABLED_FLAG,
+                "task export must contain a JSON boolean is_enabled or enabled field",
+                field="is_enabled",
+            )
+        ]
+    primary = raw.get("is_enabled") if has_is_enabled else raw.get("enabled")
+    secondary = raw.get("enabled") if has_is_enabled and has_enabled else primary
+    if not isinstance(primary, bool):
+        findings.append(
+            _finding(
+                FindingCode.INVALID_ENABLED_FLAG,
+                "enabled state must be a JSON boolean, not a string or number",
+                field="is_enabled",
+            )
+        )
+        enabled = False
+    else:
+        enabled = primary
+    if has_is_enabled and has_enabled and primary != secondary:
+        findings.append(
+            _finding(
+                FindingCode.INVALID_ENABLED_FLAG,
+                "is_enabled and enabled disagree",
+                field="is_enabled",
+            )
+        )
+    return enabled, findings
 
 
 def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
     """Audit an account-local task export without contacting or mutating a task store."""
 
-    results: list[TaskAudit] = []
-    for index, raw in enumerate(tasks):
-        task_id = str(raw.get("id") or raw.get("task_id") or f"task-{index}")
-        title = str(raw.get("title") or "")
-        enabled = bool(raw.get("is_enabled", raw.get("enabled", False)))
-        audit_kind = str(raw.get("audit_kind") or "SOL_WATCHER").strip().upper()
+    materialized = list(tasks)
+    candidate_ids: list[str] = []
+    for index, raw in enumerate(materialized):
+        if not isinstance(raw, Mapping):
+            continue
+        task_id, id_findings = _extract_task_id(raw, index)
+        if not id_findings:
+            candidate_ids.append(task_id)
+    duplicate_task_ids = tuple(
+        sorted(task_id for task_id, count in Counter(candidate_ids).items() if count > 1)
+    )
+    duplicate_set = set(duplicate_task_ids)
 
+    results: list[TaskAudit] = []
+    for index, raw in enumerate(materialized):
+        if not isinstance(raw, Mapping):
+            audit = _audit_from_findings(
+                [_finding(FindingCode.INVALID_TASK, "every task must be a JSON object", field="task")]
+            )
+            results.append(
+                TaskAudit(
+                    task_id=f"invalid-task-{index}",
+                    title="",
+                    enabled=False,
+                    evaluated=True,
+                    audit_kind="INVALID",
+                    audit=audit,
+                )
+            )
+            continue
+
+        task_id, wrapper_findings = _extract_task_id(raw, index)
+        enabled, enabled_findings = _extract_enabled(raw)
+        wrapper_findings.extend(enabled_findings)
+        title = str(raw.get("title") or "")
+        raw_audit_kind = raw.get("audit_kind", "SOL_WATCHER")
+        if not isinstance(raw_audit_kind, str):
+            audit_kind = "INVALID"
+            wrapper_findings.append(
+                _finding(FindingCode.INVALID_TASK, "audit_kind must be a string", field="audit_kind")
+            )
+        else:
+            audit_kind = raw_audit_kind.strip().upper()
         if audit_kind not in _AUDIT_KINDS:
+            wrapper_findings.append(
+                _finding(FindingCode.INVALID_TASK, f"unknown audit_kind {audit_kind!r}", field="audit_kind")
+            )
+        if task_id in duplicate_set:
+            wrapper_findings.append(
+                _finding(
+                    FindingCode.DUPLICATE_TASK_ID,
+                    f"duplicate native task id {task_id!r}",
+                    field="id",
+                )
+            )
+
+        if wrapper_findings:
             results.append(
                 TaskAudit(
                     task_id=task_id,
@@ -479,7 +611,7 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
                     enabled=enabled,
                     evaluated=True,
                     audit_kind=audit_kind,
-                    audit=_invalid_task_audit(f"unknown audit_kind {audit_kind!r}"),
+                    audit=_audit_from_findings(wrapper_findings),
                 )
             )
             continue
@@ -517,14 +649,34 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
     valid_count = sum(bool(result.audit and result.audit.valid) for result in enabled_results)
     invalid_count = len(enabled_results) - valid_count
     invalid_classification_count = sum(
-        result.audit_kind not in _AUDIT_KINDS for result in results
+        bool(
+            result.audit
+            and any(
+                finding.code is FindingCode.INVALID_TASK and finding.field == "audit_kind"
+                for finding in result.audit.findings
+            )
+        )
+        for result in results
+    )
+    invalid_export_count = sum(
+        bool(
+            result.audit
+            and any(finding.code in _EXPORT_FINDING_CODES for finding in result.audit.findings)
+        )
+        for result in results
     )
     return AuditReport(
-        valid=invalid_count == 0 and invalid_classification_count == 0,
+        valid=(
+            invalid_count == 0
+            and invalid_classification_count == 0
+            and invalid_export_count == 0
+        ),
         total_tasks=len(results),
         enabled_tasks=len(enabled_results),
         valid_enabled_tasks=valid_count,
         invalid_enabled_tasks=invalid_count,
         invalid_classification_tasks=invalid_classification_count,
+        invalid_export_tasks=invalid_export_count,
+        duplicate_task_ids=duplicate_task_ids,
         tasks=tuple(results),
     )
