@@ -829,17 +829,10 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
             UPDATE attempts
             SET execution_mode='OPERATOR_HARNESS',
                 requested_execution_profile_json='{}',
-                requested_execution_profile_digest=?,
-                result_json='{"attempt_evidence":"keep"}'
+                requested_execution_profile_digest=?
             WHERE attempt_id=?
             """,
             ("f" * 64, attempt.attempt_id),
-        )
-        connection.execute(
-            """
-            UPDATE jobs SET result_json='{"job_evidence":"keep"}' WHERE job_id=?
-            """,
-            (planner.job_id,),
         )
         connection.execute(
             """
@@ -885,11 +878,16 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
     requeue_command = (
         f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:{attempt.attempt_id}"
     )
-    outcome = runtime.jobs.requeue_job(
-        planner.job_id, command_id=requeue_command
+    projection = runtime.jobs.project_retry_safety(
+        planner.job_id, expected_attempt_id=attempt.attempt_id
     )
-    assert isinstance(outcome, JobRequeueOutcome)
-    assert outcome.requeue_kind == "TX9_DETACHED"
+    committed = runtime.jobs.commit_coo_retry_decision(
+        root.job_id,
+        selected_job_id=planner.job_id,
+        expectation=projection,
+    )
+    assert committed.action == "REQUEUED"
+    assert committed.receipt["requeue_kind"] == "TX9_DETACHED"
 
     with runtime.store.read() as connection:
         after_job = dict(
@@ -925,7 +923,7 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
     }
     assert after_attempt == before_attempt
     assert after_quota == before_quota
-    assert after_job["result_json"] == '{"job_evidence":"keep"}'
+    assert after_job["result_json"] is None
 
     second = runtime.attempts.dispatch_cycle_job(
         planner.job_id,
@@ -938,7 +936,7 @@ def test_tx9_detached_requeue_is_evidence_bound_and_event_first(tmp_path):
     quota_before_replay = runtime.workers.get_quota_class("worker-b", "default")
     replay = runtime.jobs.requeue_job(planner.job_id, command_id=requeue_command)
     assert isinstance(replay, JobRequeueOutcome)
-    assert replay.event_id == outcome.event_id
+    assert replay.event_id == committed.receipt["event_id"]
     assert runtime.jobs.get_job(planner.job_id) == current_before_replay
     assert runtime.workers.get_quota_class("worker-b", "default") == quota_before_replay
     with pytest.raises(StateConflict, match="another target"):
@@ -991,8 +989,15 @@ def test_tx9_exact_worker_and_quota_cutoff_and_snapshot_drift_refuse(tmp_path):
         f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:"
         f"{dispatch.attempt.attempt_id}"
     )
-    outcome = runtime.jobs.requeue_job(planner.job_id, command_id=command)
-    assert isinstance(outcome, JobRequeueOutcome)
+    projection = runtime.jobs.project_retry_safety(
+        planner.job_id, expected_attempt_id=dispatch.attempt.attempt_id
+    )
+    outcome = runtime.jobs.commit_coo_retry_decision(
+        root.job_id,
+        selected_job_id=planner.job_id,
+        expectation=projection,
+    )
+    assert outcome.action == "REQUEUED"
     with runtime.store.transaction() as connection:
         connection.execute(
             """
@@ -1023,6 +1028,9 @@ def test_tx9_exact_worker_quota_later_event_blocks_without_mutation(tmp_path):
             ("f" * 64, dispatch.attempt.attempt_id),
         )
     runtime.operator_harness.invalidate_after_restore()
+    projection = runtime.jobs.project_retry_safety(
+        planner.job_id, expected_attempt_id=dispatch.attempt.attempt_id
+    )
     with runtime.store.transaction() as connection:
         runtime.store.append_event(
             connection,
@@ -1037,8 +1045,13 @@ def test_tx9_exact_worker_quota_later_event_blocks_without_mutation(tmp_path):
         f"coo-cycle:{root.job_id}:requeue:{planner.job_id}:"
         f"{dispatch.attempt.attempt_id}"
     )
-    with pytest.raises(StateConflict, match="later Event"):
-        runtime.jobs.requeue_job(planner.job_id, command_id=command)
+    outcome = runtime.jobs.commit_coo_retry_decision(
+        root.job_id,
+        selected_job_id=planner.job_id,
+        expectation=projection,
+    )
+    assert outcome.action == "RECONCILIATION_REQUIRED"
+    assert outcome.receipt["effect_state"] == "NONE"
     assert runtime.jobs.get_job(planner.job_id) == before
 
 
