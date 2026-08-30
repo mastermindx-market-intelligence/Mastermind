@@ -153,6 +153,22 @@ def _exact_text(value: Any, *, maximum: int = 1024) -> str:
     return value
 
 
+def _exact_subject(value: Any, *, maximum: int = 1024) -> str:
+    """Validate one opaque JWT subject without normalizing exact UTF-8 bytes."""
+
+    if not isinstance(value, str):
+        _refuse()
+    if not value or len(value) > maximum or value != value.strip():
+        _refuse()
+    if _CONTROL_RE.search(value):
+        _refuse()
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        _refuse()
+    return value
+
+
 def _policy_id(value: Any) -> str:
     token = _exact_text(value, maximum=96)
     if _POLICY_ID_RE.fullmatch(token) is None:
@@ -162,6 +178,8 @@ def _policy_id(value: Any) -> str:
 
 def _split_https_url(value: Any) -> tuple[str, SplitResult]:
     token = _exact_text(value, maximum=2048)
+    if "\\" in token or any(character.isspace() for character in token):
+        _refuse()
     try:
         parsed = urlsplit(token)
         port = parsed.port
@@ -176,7 +194,7 @@ def _split_https_url(value: Any) -> tuple[str, SplitResult]:
         or parsed.query
         or parsed.fragment
         or port not in (None, 443)
-        or not parsed.path.startswith("/")
+        or (parsed.path and not parsed.path.startswith("/"))
     ):
         _refuse()
     return token, parsed
@@ -208,10 +226,10 @@ def _bounded_integer(value: Any, *, minimum: int, maximum: int) -> int:
 
 
 def subject_digest(*, issuer: str, subject: str) -> str:
-    """Digest exact issuer and subject bytes without normalization or stripping."""
+    """Digest exact canonical issuer and opaque subject UTF-8 bytes."""
 
-    issuer_value = _exact_text(issuer, maximum=1024)
-    subject_value = _exact_text(subject, maximum=1024)
+    issuer_value, _issuer_parts = _split_https_url(issuer)
+    subject_value = _exact_subject(subject, maximum=1024)
     return hashlib.sha256(
         f"{issuer_value}\n{subject_value}".encode("utf-8")
     ).hexdigest()
