@@ -17,6 +17,10 @@ def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _collapsed(paths: tuple[Path, ...]) -> str:
+    return " ".join("\n".join(_text(path) for path in paths).split())
+
+
 def test_gh0_records_exist() -> None:
     for path in (ESTATE, REUSE, SEMANTICS, GH1_PLAN):
         assert path.is_file(), path
@@ -101,13 +105,15 @@ def test_semantic_contract_is_closed_storeless_and_effect_safe() -> None:
 
 def test_prepared_token_binds_normalized_effect_and_digest_without_a_store() -> None:
     text = _text(SEMANTICS)
-    token_section = text.split("### 7.3 Token bindings", 1)[1].split(
-        "### 7.4 Commit law", 1
+    token_section = text.split("### 7.3 Self-contained token bindings", 1)[1].split(
+        "### 7.4 Commit law and current-source revalidation", 1
     )[0]
     normalized = "\n".join(line.strip() for line in token_section.splitlines())
     assert "\nnormalized_requested_effect\nnormalized_requested_effect_digest\n" in normalized
-    assert "no durable prepared-action store" in text
+    assert "The digest proves equality; it does not replace the effect" in token_section
+    assert "There is **no durable prepared-action store**" in token_section
     assert "commit_github_prepared_action(prepared_token)" in text
+    assert "There is **no universal action router**" in text
 
 
 def test_gh1_plan_freezes_pure_release_collision_engine_before_live_composition() -> None:
@@ -134,9 +140,7 @@ def test_gh1_plan_freezes_pure_release_collision_engine_before_live_composition(
 
 
 def test_gh0_does_not_claim_live_git_control() -> None:
-    combined = " ".join(
-        "\n".join(_text(path) for path in (ESTATE, REUSE, SEMANTICS, GH1_PLAN)).split()
-    )
+    combined = _collapsed((ESTATE, REUSE, SEMANTICS, GH1_PLAN))
     assert "GH0 installs no app, connector, credential, runner, workflow, service or actuator" in combined
     assert "GitHub status composer = NOT_BUILT" in combined
     assert "GitHub prepared action executor = NOT_BUILT" in combined
