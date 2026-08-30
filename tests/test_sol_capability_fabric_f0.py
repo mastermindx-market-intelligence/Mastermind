@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "docs/superpowers/specs/2026-08-30-sol-capability-fabric-design.md"
 CATALOG = ROOT / "docs/superpowers/plans/2026-08-30-sol-capability-fabric-tool-catalog.md"
 PROGRAM = ROOT / "docs/superpowers/plans/2026-08-30-sol-capability-fabric-program.md"
+PREPARED_TOKEN_CORRECTION = ROOT / "docs/superpowers/specs/2026-08-30-sol-capability-fabric-prepared-action-token-correction.md"
 
 
 def _text(path: Path) -> str:
@@ -17,6 +18,7 @@ def test_sol_capability_fabric_records_exist() -> None:
     assert SPEC.is_file()
     assert CATALOG.is_file()
     assert PROGRAM.is_file()
+    assert PREPARED_TOKEN_CORRECTION.is_file()
 
 
 def test_architecture_preserves_canonical_owners_and_chat_native_cognition() -> None:
@@ -142,15 +144,20 @@ def test_program_is_vertical_and_has_real_promotion_proof() -> None:
 
 
 def test_prepared_action_commit_uses_authenticated_storeless_token() -> None:
-    combined = "\n".join(_text(path) for path in (SPEC, CATALOG, PROGRAM))
-    assert "commit_prepared_action(prepared_token)" in combined
-    assert "commit_prepared_action(prepared_digest)" not in combined
-    assert "authenticated self-contained expiring token" in combined
-    assert "server validates its integrity and expiry before use" in combined
+    text = _text(PREPARED_TOKEN_CORRECTION)
+    assert "Narrow precedence" in text
+    assert "commit_prepared_action(prepared_token)" in text
+    assert "commit_prepared_action(prepared_digest)" in text
+    assert "superseded" in text
+    assert "authenticated self-contained expiring token" in text
+    assert "server validates its integrity and expiry before use" in text
+    assert "no durable prepared-action store" in text
 
 
 def test_records_state_is_honest() -> None:
-    combined = "\n".join(_text(path) for path in (SPEC, CATALOG, PROGRAM))
+    combined = "\n".join(
+        _text(path) for path in (SPEC, CATALOG, PROGRAM, PREPARED_TOKEN_CORRECTION)
+    )
     assert "SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT" in combined
     assert "This records wave creates no live MCP app" in combined
     assert "PROVEN_LIVE" in combined
