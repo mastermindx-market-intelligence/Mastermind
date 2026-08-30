@@ -48,7 +48,7 @@ def test_estate_ledger_uses_company_capability_vocabulary_and_source_limits() ->
         "expected_head_sha",
         "Repository.fullDatabaseId",
         "first page",
-        "technical permission is not organizational authority",
+        "Technical permission is not organizational authority",
         "runner inventory",
         "organization audit log",
         "app installation",
