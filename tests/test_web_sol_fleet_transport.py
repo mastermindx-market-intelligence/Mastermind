@@ -29,7 +29,11 @@ def managed_binding(
     seat_ref: str = "chatgpt1",
     binding_id: str = "33333333-3333-4333-8333-333333333333",
 ) -> dict:
-    locator = {"env_manager": manager, "profile_id": profile_id, "url": url}
+    locator = {
+        "env_manager": manager,
+        "profile_id": profile_id,
+        "url": url,
+    }
     if manager == "multilogin":
         locator["folder_id"] = folder_id
     return sb.new_binding(
@@ -53,13 +57,19 @@ def test_instance_identity_uses_only_the_canonical_managed_environment_coordinat
         binding_id="44444444-4444-4444-8444-444444444444",
     )
 
-    assert instance.adapter_instance_id(first) == instance.adapter_instance_id(second)
+    assert instance.adapter_instance_id(first) == instance.adapter_instance_id(
+        second
+    )
 
 
 def test_distinct_multilogin_profiles_and_folders_have_distinct_instances_and_sockets():
     original = managed_binding()
-    changed_profile = managed_binding(profile_id="55555555-5555-4555-8555-555555555555")
-    changed_folder = managed_binding(folder_id="66666666-6666-4666-8666-666666666666")
+    changed_profile = managed_binding(
+        profile_id="55555555-5555-4555-8555-555555555555"
+    )
+    changed_folder = managed_binding(
+        folder_id="66666666-6666-4666-8666-666666666666"
+    )
 
     identities = {
         instance.adapter_instance_id(original),
@@ -67,11 +77,19 @@ def test_distinct_multilogin_profiles_and_folders_have_distinct_instances_and_so
         instance.adapter_instance_id(changed_folder),
     }
     assert len(identities) == 3
-    assert len({instance.socket_path(value, root=SHORT_TEST_ROOT) for value in identities}) == 3
+    assert len(
+        {
+            instance.socket_path(value, root=SHORT_TEST_ROOT)
+            for value in identities
+        }
+    ) == 3
 
 
 def test_gologin_instance_uses_profile_without_inventing_a_folder_coordinate():
-    first = managed_binding(manager="gologin", profile_id=GOLOGIN_PROFILE)
+    first = managed_binding(
+        manager="gologin",
+        profile_id=GOLOGIN_PROFILE,
+    )
     second = managed_binding(
         manager="gologin",
         profile_id=GOLOGIN_PROFILE,
@@ -79,7 +97,9 @@ def test_gologin_instance_uses_profile_without_inventing_a_folder_coordinate():
         work_ref="WS:OTHER",
     )
 
-    assert instance.adapter_instance_id(first) == instance.adapter_instance_id(second)
+    assert instance.adapter_instance_id(first) == instance.adapter_instance_id(
+        second
+    )
 
 
 def test_instance_derivatives_are_opaque_and_bounded():
@@ -89,7 +109,12 @@ def test_instance_derivatives_are_opaque_and_bounded():
     host_name = instance.native_host_name(value)
     destination = instance.socket_path(value, root=SHORT_TEST_ROOT)
     serialized = json.dumps(
-        {"instance": value, "leaf": leaf, "host": host_name, "path": str(destination)},
+        {
+            "instance": value,
+            "leaf": leaf,
+            "host": host_name,
+            "path": str(destination),
+        },
         sort_keys=True,
     )
 
@@ -98,28 +123,45 @@ def test_instance_derivatives_are_opaque_and_bounded():
     assert row["locator"]["folder_id"] not in serialized
     assert row["locator"]["profile_id"] not in serialized
     assert leaf == f"wsx-{value[:instance.SOCKET_LEAF_HEX]}.sock"
-    assert host_name == f"com.mastermind.web_sol_surface.{value[:instance.NATIVE_HOST_LEAF_HEX]}"
+    assert host_name == (
+        f"com.mastermind.web_sol_surface."
+        f"{value[:instance.NATIVE_HOST_LEAF_HEX]}"
+    )
 
 
-def test_invalid_binding_instance_and_overlong_explicit_socket_path_fail_closed(tmp_path):
+def test_invalid_binding_instance_and_overlong_explicit_socket_path_fail_closed(
+    tmp_path,
+):
     with pytest.raises(instance.WebSolInstanceError, match="invalid_binding"):
         instance.adapter_instance_id({"provider": "codex"})
-    with pytest.raises(instance.WebSolInstanceError, match="invalid_instance_id"):
+    with pytest.raises(
+        instance.WebSolInstanceError,
+        match="invalid_instance_id",
+    ):
         instance.socket_path("not-a-digest", root=SHORT_TEST_ROOT)
-    with pytest.raises(instance.WebSolInstanceError, match="socket_path_too_long"):
+    with pytest.raises(
+        instance.WebSolInstanceError,
+        match="socket_path_too_long",
+    ):
         instance.socket_path("a" * 64, root=tmp_path / ("x" * 120))
 
 
-def test_default_socket_path_prefers_application_support_when_it_fits(monkeypatch):
+def test_default_socket_path_prefers_application_support_when_it_fits(
+    monkeypatch,
+):
     home = Path("/Users/wsx")
     monkeypatch.setenv("HOME", str(home))
     destination = instance.socket_path("a" * 64)
 
-    assert destination.parent == home / "Library" / "Application Support" / "Mastermind" / "wsx"
+    assert destination.parent == (
+        home / "Library" / "Application Support" / "Mastermind" / "wsx"
+    )
     assert len(os.fsencode(destination)) < instance.DARWIN_SUN_PATH_BYTES
 
 
-def test_default_socket_path_uses_deterministic_uid_scoped_short_root_when_home_is_too_long(monkeypatch):
+def test_default_socket_path_uses_deterministic_uid_scoped_short_root_when_home_is_too_long(
+    monkeypatch,
+):
     monkeypatch.setenv("HOME", f"/tmp/{'h' * 80}")
     monkeypatch.setattr(instance.os, "getuid", lambda: 501)
 
@@ -131,7 +173,10 @@ def test_default_socket_path_uses_deterministic_uid_scoped_short_root_when_home_
 
 
 def test_public_web_sol_actions_do_not_accept_socket_or_instance_overrides():
-    for function in (client.inspect_via_extension, client.foreground_via_extension):
+    for function in (
+        client.inspect_via_extension,
+        client.foreground_via_extension,
+    ):
         parameters = inspect.signature(function).parameters
         for forbidden in (
             "socket_path",
@@ -144,12 +189,22 @@ def test_public_web_sol_actions_do_not_accept_socket_or_instance_overrides():
             assert forbidden not in parameters
 
 
-def test_client_routes_one_action_to_the_socket_derived_from_its_binding(monkeypatch):
-    row = managed_binding(manager="gologin", profile_id=GOLOGIN_PROFILE)
-    seen: list[tuple[dict, Path]] = []
+def test_client_routes_one_action_to_the_socket_derived_from_its_binding(
+    monkeypatch,
+):
+    row = managed_binding(
+        manager="gologin",
+        profile_id=GOLOGIN_PROFILE,
+    )
+    seen: list[tuple[dict, Path, str]] = []
 
-    def exchange(request: dict, *, path: Path):
-        seen.append((request, path))
+    def exchange(
+        request: dict,
+        *,
+        path: Path,
+        expected_instance_id: str,
+    ):
+        seen.append((request, path, expected_instance_id))
         raise client.WebSolExtensionError("fixture_stop")
 
     monkeypatch.setattr(client, "_exchange_web_sol_socket", exchange)
@@ -165,6 +220,7 @@ def test_client_routes_one_action_to_the_socket_derived_from_its_binding(monkeyp
     expected_instance = instance.adapter_instance_id(row)
     assert len(seen) == 1
     assert seen[0][1] == instance.socket_path(expected_instance)
+    assert seen[0][2] == expected_instance
 
 
 def test_native_host_requires_a_wrapper_fixed_instance_and_has_no_global_production_socket():
