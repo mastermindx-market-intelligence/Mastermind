@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PURE_MODULES = (
     "integrations/business_mcp_auth/__init__.py",
     "integrations/business_mcp_auth/contracts.py",
+    "integrations/business_mcp_auth/metadata.py",
+    "integrations/business_mcp_auth/claims.py",
 )
 
 
@@ -105,3 +107,24 @@ def test_business_auth_pure_package_contains_no_io_or_persistence_imports() -> N
     for relative in PURE_MODULES:
         imports = _imports(ROOT / relative)
         assert imports.isdisjoint(forbidden), (relative, imports & forbidden)
+
+
+def test_metadata_and_claims_sources_contain_no_runtime_or_storage_actions() -> None:
+    forbidden_tokens = (
+        "open(",
+        "write_text",
+        "write_bytes",
+        "sqlite",
+        "requests.",
+        "httpx.",
+        "urlopen(",
+        "subprocess.",
+        "socket.",
+        "create_task(",
+    )
+    for relative in (
+        "integrations/business_mcp_auth/metadata.py",
+        "integrations/business_mcp_auth/claims.py",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert not any(token in text for token in forbidden_tokens), relative
