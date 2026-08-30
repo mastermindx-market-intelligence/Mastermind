@@ -7,6 +7,7 @@ import pytest
 from scripts.github_estate_governance import (
     AdministrationFamily,
     AdministrationSpec,
+    GitHubRead,
     GitHubResponse,
     GovernanceRefusal,
     assess_github_admin_prerequisites,
@@ -25,26 +26,84 @@ class FakeTransport:
         *,
         after: dict | None = None,
         response: GitHubResponse | None = None,
+        before_etag: str = '"before-v1"',
+        after_etag: str = '"after-v1"',
     ) -> None:
         self.before = deepcopy(before)
         self.after = deepcopy(after if after is not None else before)
         self.response = response or GitHubResponse(status=200, body={"ok": True})
+        self.before_etag = before_etag
+        self.after_etag = after_etag
         self.read_count = 0
-        self.mutations: list[tuple[str, str, dict]] = []
+        self.mutations: list[tuple[str, str, dict, str]] = []
 
-    def read(self, endpoint: str) -> dict:
+    def read(self, endpoint: str) -> GitHubRead:
         self.read_count += 1
-        return deepcopy(self.before if self.read_count == 1 else self.after)
+        return GitHubRead(
+            body=deepcopy(self.before if self.read_count == 1 else self.after),
+            etag=(self.before_etag if self.read_count == 1 else self.after_etag),
+        )
 
-    def mutate(self, method: str, endpoint: str, payload: dict) -> GitHubResponse:
-        self.mutations.append((method, endpoint, deepcopy(payload)))
+    def mutate(
+        self,
+        method: str,
+        endpoint: str,
+        payload: dict,
+        *,
+        if_match: str,
+    ) -> GitHubResponse:
+        self.mutations.append((method, endpoint, deepcopy(payload), if_match))
         return self.response
 
 
 class RaisingMutationTransport(FakeTransport):
-    def mutate(self, method: str, endpoint: str, payload: dict) -> GitHubResponse:
-        self.mutations.append((method, endpoint, deepcopy(payload)))
+    def mutate(
+        self,
+        method: str,
+        endpoint: str,
+        payload: dict,
+        *,
+        if_match: str,
+    ) -> GitHubResponse:
+        self.mutations.append((method, endpoint, deepcopy(payload), if_match))
         raise TimeoutError("response boundary was not observed")
+
+
+class RaisingReadbackTransport(FakeTransport):
+    def read(self, endpoint: str) -> GitHubRead:
+        if self.read_count == 1:
+            raise TimeoutError("read-back boundary was not observed")
+        return super().read(endpoint)
+
+
+class MalformedResponseTransport(FakeTransport):
+    def mutate(self, method, endpoint, payload, *, if_match):
+        self.mutations.append((method, endpoint, deepcopy(payload), if_match))
+        return {"status": 200}
+
+
+class NonMappingReadbackTransport(FakeTransport):
+    def read(self, endpoint: str) -> GitHubRead:
+        if self.read_count == 1:
+            self.read_count += 1
+            return GitHubRead(body=[], etag=self.after_etag)  # type: ignore[arg-type]
+        return super().read(endpoint)
+
+
+class ConcurrentWriteTransport(FakeTransport):
+    """Model a server that atomically rejects the stale If-Match version."""
+
+    def mutate(
+        self,
+        method: str,
+        endpoint: str,
+        payload: dict,
+        *,
+        if_match: str,
+    ) -> GitHubResponse:
+        self.mutations.append((method, endpoint, deepcopy(payload), if_match))
+        assert if_match == self.before_etag
+        return GitHubResponse(status=412, body={"message": "stale precondition"})
 
 
 def _repo_merge_spec(before: dict) -> AdministrationSpec:
@@ -103,6 +162,38 @@ def test_exact_existing_configuration_is_idempotent_without_mutation():
     assert receipt["verdict"] == "ALREADY_CONFIGURED"
     assert receipt["effect"] == "NONE"
     assert transport.read_count == 1
+    assert transport.mutations == []
+
+
+@pytest.mark.parametrize(
+    "expected_after",
+    [
+        {},
+        {"allow_squash_merge": True},
+        {"unrelated": True},
+        {
+            "allow_merge_commit": True,
+            "allow_rebase_merge": False,
+            "allow_squash_merge": True,
+            "delete_branch_on_merge": True,
+        },
+    ],
+)
+def test_expected_after_must_exactly_equal_the_family_payload(expected_after):
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    original = _repo_merge_spec(before)
+    spec = AdministrationSpec(**{**original.__dict__, "expected_after": expected_after})
+    transport = FakeTransport(before)
+
+    with pytest.raises(GovernanceRefusal, match="expected after"):
+        apply_administration_family(transport, spec)
+
+    assert transport.read_count == 0
     assert transport.mutations == []
 
 
@@ -188,6 +279,120 @@ def test_mutation_transport_exception_reconciles_once_and_never_retries():
     assert len(transport.mutations) == 1
 
 
+@pytest.mark.parametrize("status", [200, 503])
+def test_readback_failure_after_write_preserves_effect_unknown(status: int):
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = RaisingReadbackTransport(
+        before,
+        response=GitHubResponse(status=status, body=None),
+    )
+
+    receipt = apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert receipt["verdict"] == "EFFECT_UNKNOWN"
+    assert receipt["effect"] == "UNKNOWN"
+    assert receipt["reconciled"] is True
+    assert receipt["mutation_attempts"] == 1
+    assert transport.read_count == 1
+    assert len(transport.mutations) == 1
+
+
+def test_malformed_response_after_write_preserves_effect_unknown():
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = MalformedResponseTransport(before)
+
+    receipt = apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert receipt["verdict"] == "EFFECT_UNKNOWN"
+    assert receipt["effect"] == "UNKNOWN"
+    assert receipt["mutation_attempts"] == 1
+    assert len(transport.mutations) == 1
+
+
+def test_malformed_status_after_write_preserves_effect_unknown():
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = FakeTransport(
+        before,
+        response=GitHubResponse(status="200", body={}),  # type: ignore[arg-type]
+    )
+
+    receipt = apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert receipt["verdict"] == "EFFECT_UNKNOWN"
+    assert receipt["effect"] == "UNKNOWN"
+    assert len(transport.mutations) == 1
+
+
+def test_nonmapping_readback_after_write_preserves_effect_unknown():
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = NonMappingReadbackTransport(before)
+
+    receipt = apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert receipt["verdict"] == "EFFECT_UNKNOWN"
+    assert receipt["effect"] == "UNKNOWN"
+    assert len(transport.mutations) == 1
+
+
+def test_atomic_if_match_precondition_rejects_concurrent_change_without_readback():
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = ConcurrentWriteTransport(before, before_etag='"baseline-v1"')
+
+    receipt = apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert receipt["verdict"] == "REJECTED"
+    assert receipt["effect"] == "NONE"
+    assert transport.read_count == 1
+    assert transport.mutations == [
+        (
+            "PATCH",
+            "repos/mastermindx-market-intelligence/Mastermind",
+            dict(_repo_merge_spec(before).payload),
+            '"baseline-v1"',
+        )
+    ]
+
+
+def test_missing_server_version_refuses_before_mutation():
+    before = {
+        "allow_merge_commit": True,
+        "allow_rebase_merge": True,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": False,
+    }
+    transport = FakeTransport(before, before_etag="")
+
+    with pytest.raises(GovernanceRefusal, match="server version"):
+        apply_administration_family(transport, _repo_merge_spec(before))
+
+    assert transport.mutations == []
+
+
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
 def test_definitive_rejection_has_no_readback_or_retry(status: int):
     before = {
@@ -249,6 +454,26 @@ def _installed_apps() -> list[dict]:
     ]
 
 
+def _publisher_installation() -> dict:
+    return {
+        "installation_id": 152000001,
+        "app_id": 48151623,
+        "app_slug": "macro-production-publisher",
+        "account_login": "mastermindx-market-intelligence",
+        "target_type": "Organization",
+        "suspended_at": None,
+        "repository_selection": "selected",
+        "repositories": ["mastermindx-market-intelligence/macro"],
+        "permissions": {"metadata": "read", "contents": "write"},
+        "events": [],
+        "observed_at": "2026-08-30T04:00:00Z",
+        "source_endpoints": [
+            "GET /orgs/mastermindx-market-intelligence/installations",
+            "GET /user/installations/152000001/repositories",
+        ],
+    }
+
+
 def test_admin_prerequisite_census_does_not_promote_oauth_scopes_to_app_authority():
     result = assess_github_admin_prerequisites(
         principal={
@@ -267,6 +492,8 @@ def test_admin_prerequisite_census_does_not_promote_oauth_scopes_to_app_authorit
         },
         installations=_installed_apps(),
         expected_repository="mastermindx-market-intelligence/macro",
+        expected_publisher_app_id=None,
+        expected_publisher_installation_id=None,
     )
 
     assert result["suitable_publisher_app_exists"] is False
@@ -280,15 +507,8 @@ def test_admin_prerequisite_census_does_not_promote_oauth_scopes_to_app_authorit
     ]
 
 
-def test_admin_prerequisite_census_qualifies_one_exact_publisher_app():
-    publisher = {
-        "app_id": 48151623,
-        "app_slug": "macro-production-publisher",
-        "repository_selection": "selected",
-        "repositories": ["mastermindx-market-intelligence/macro"],
-        "permissions": {"metadata": "read", "contents": "write"},
-        "events": [],
-    }
+def test_admin_prerequisite_census_reports_only_a_static_configuration_match():
+    publisher = _publisher_installation()
     result = assess_github_admin_prerequisites(
         principal={
             "login": "admin",
@@ -306,10 +526,42 @@ def test_admin_prerequisite_census_qualifies_one_exact_publisher_app():
         },
         installations=[publisher],
         expected_repository="mastermindx-market-intelligence/macro",
+        expected_publisher_app_id=48151623,
+        expected_publisher_installation_id=152000001,
     )
 
-    assert result["suitable_publisher_app_exists"] is True
-    assert result["qualified_app_integration_id"] == 48151623
+    assert result["publisher_configuration_matches_policy"] is True
+    assert result["configuration_matching_app_integration_id"] == 48151623
+    assert result["suitable_publisher_app_exists"] is False
+    assert result["qualified_app_integration_id"] is None
+    assert result["dynamic_candidate_denial_required"] is True
+
+
+def test_admin_prerequisite_census_cannot_qualify_an_app_while_gates_are_held():
+    result = assess_github_admin_prerequisites(
+        principal={
+            "login": "admin",
+            "principal_type": "oauth_user",
+            "organization_role": "admin",
+            "oauth_scopes": ["admin:org"],
+        },
+        capability_probes={
+            "organization_audit_log": "HELD",
+            "installed_app_inventory": "HELD",
+            "app_management": "HELD",
+            "app_creation": "HELD",
+            "app_installation": "HELD",
+            "private_key_custody": "HELD",
+        },
+        installations=[_publisher_installation()],
+        expected_repository="mastermindx-market-intelligence/macro",
+        expected_publisher_app_id=48151623,
+        expected_publisher_installation_id=152000001,
+    )
+
+    assert result["publisher_configuration_matches_policy"] is False
+    assert result["suitable_publisher_app_exists"] is False
+    assert result["qualified_app_integration_id"] is None
 
 
 def test_admin_prerequisite_census_refuses_missing_or_claimed_probe_results():
@@ -332,6 +584,8 @@ def test_admin_prerequisite_census_refuses_missing_or_claimed_probe_results():
             capability_probes=probes,
             installations=[],
             expected_repository="mastermindx-market-intelligence/macro",
+            expected_publisher_app_id=None,
+            expected_publisher_installation_id=None,
         )
 
 
@@ -348,8 +602,9 @@ def test_candidate_credential_denial_requires_external_custody_and_zero_projecti
         }
     )
 
-    assert receipt["verdict"] == "PASS"
-    assert receipt["candidate_credential_reachability"] == "DENIED"
+    assert receipt["verdict"] == "CLAIM_SHAPE_VALIDATED"
+    assert receipt["candidate_credential_reachability"] == "UNPROVEN"
+    assert receipt["dynamic_candidate_canary_required"] is True
 
 
 @pytest.mark.parametrize(
@@ -380,20 +635,29 @@ def test_candidate_credential_denial_refuses_any_candidate_projection(mutation):
 
 def test_publisher_app_must_be_repo_selected_and_exactly_least_privileged():
     receipt = validate_publisher_app_installation(
-        {
-            "app_id": 48151623,
-            "app_slug": "macro-production-publisher",
-            "repository_selection": "selected",
-            "repositories": ["mastermindx-market-intelligence/macro"],
-            "permissions": {"metadata": "read", "contents": "write"},
-            "events": [],
-        },
+        _publisher_installation(),
         expected_repository="mastermindx-market-intelligence/macro",
+        expected_app_id=48151623,
+        expected_installation_id=152000001,
     )
 
-    assert receipt["verdict"] == "PASS"
+    assert receipt["verdict"] == "CONFIGURATION_MATCH"
     assert receipt["app_integration_id"] == 48151623
-    assert receipt["credential_material_observed"] is False
+    assert receipt["installation_id"] == 152000001
+    assert receipt["dynamic_candidate_denial_required"] is True
+
+
+def test_publisher_app_refuses_an_unbound_arbitrary_positive_app_id():
+    app = _publisher_installation()
+    app["app_id"] = 99999999
+
+    with pytest.raises(GovernanceRefusal, match="Integration ID"):
+        validate_publisher_app_installation(
+            app,
+            expected_repository="mastermindx-market-intelligence/macro",
+            expected_app_id=48151623,
+            expected_installation_id=152000001,
+        )
 
 
 @pytest.mark.parametrize(
@@ -407,20 +671,15 @@ def test_publisher_app_must_be_repo_selected_and_exactly_least_privileged():
     ],
 )
 def test_publisher_app_refuses_broad_or_incomplete_authority(mutation):
-    app = {
-        "app_id": 48151623,
-        "app_slug": "macro-production-publisher",
-        "repository_selection": "selected",
-        "repositories": ["mastermindx-market-intelligence/macro"],
-        "permissions": {"metadata": "read", "contents": "write"},
-        "events": [],
-    }
+    app = _publisher_installation()
     mutation(app)
 
     with pytest.raises(GovernanceRefusal):
         validate_publisher_app_installation(
             app,
             expected_repository="mastermindx-market-intelligence/macro",
+            expected_app_id=48151623,
+            expected_installation_id=152000001,
         )
 
 

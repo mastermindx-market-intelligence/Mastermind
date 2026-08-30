@@ -34,6 +34,14 @@ class GitHubResponse:
 
 
 @dataclass(frozen=True)
+class GitHubRead:
+    """One authenticated server document plus its mutation precondition version."""
+
+    body: Mapping[str, Any]
+    etag: str
+
+
+@dataclass(frozen=True)
 class AdministrationSpec:
     family: AdministrationFamily
     endpoint: str
@@ -44,10 +52,15 @@ class AdministrationSpec:
 
 
 class GitHubTransport(Protocol):
-    def read(self, endpoint: str) -> Mapping[str, Any]: ...
+    def read(self, endpoint: str) -> GitHubRead: ...
 
     def mutate(
-        self, method: str, endpoint: str, payload: Mapping[str, Any]
+        self,
+        method: str,
+        endpoint: str,
+        payload: Mapping[str, Any],
+        *,
+        if_match: str,
     ) -> GitHubResponse: ...
 
 
@@ -56,6 +69,10 @@ _ACTIONS_ENDPOINT = re.compile(
     r"repos/[^/]+/[^/]+/actions/permissions/workflow\Z"
 )
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_SERVER_VERSION = re.compile(r"[^\r\n]{1,512}\Z")
+_RFC3339_UTC = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z"
+)
 _SECRET_KEY = re.compile(
     r"(^|_)(token|secret|password|private_key|credential|authorization)($|_)",
     re.IGNORECASE,
@@ -127,9 +144,15 @@ def _assert_family_contract(spec: AdministrationSpec) -> None:
     if spec.method.upper() != method:
         raise GovernanceRefusal("administration method is outside the family contract")
     payload = _plain_mapping(spec.payload)
+    expected_after = _plain_mapping(spec.expected_after)
     _assert_secret_free(payload)
+    _assert_secret_free(expected_after, path="expected_after")
     if set(payload) != allowed_keys:
         raise GovernanceRefusal("administration payload keys drifted from the family contract")
+    if expected_after != payload:
+        raise GovernanceRefusal(
+            "expected after must exactly equal the administration family payload"
+        )
     if _SHA256.fullmatch(spec.expected_before_sha256) is None:
         raise GovernanceRefusal("expected before digest is malformed")
 
@@ -165,13 +188,28 @@ def _matches_expected(current: Mapping[str, Any], expected: Mapping[str, Any]) -
     return True
 
 
+def _observed_document(value: Any) -> tuple[dict[str, Any], str]:
+    if not isinstance(value, GitHubRead):
+        raise GovernanceRefusal("GitHub read did not return an observed document")
+    body = _plain_mapping(value.body)
+    if not isinstance(value.etag, str) or _SERVER_VERSION.fullmatch(value.etag) is None:
+        raise GovernanceRefusal("GitHub read lacks an atomic server version")
+    return body, value.etag
+
+
+def _version_digest(version: str) -> str:
+    return hashlib.sha256(version.encode("utf-8")).hexdigest()
+
+
 def _receipt(
     *,
     spec: AdministrationSpec,
     verdict: str,
     effect: str,
     before: Mapping[str, Any],
+    before_version: str,
     after: Mapping[str, Any] | None = None,
+    after_version: str | None = None,
     reconciled: bool = False,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
@@ -181,11 +219,15 @@ def _receipt(
         "verdict": verdict,
         "effect": effect,
         "before_sha256": canonical_digest(before),
+        "before_version_sha256": _version_digest(before_version),
+        "mutation_precondition": "If-Match",
         "reconciled": reconciled,
         "mutation_attempts": 0 if verdict == "ALREADY_CONFIGURED" else 1,
     }
     if after is not None:
         result["after_sha256"] = canonical_digest(after)
+    if after_version is not None:
+        result["after_version_sha256"] = _version_digest(after_version)
     return result
 
 
@@ -201,7 +243,7 @@ def apply_administration_family(
     """
 
     _assert_family_contract(spec)
-    before = _plain_mapping(transport.read(spec.endpoint))
+    before, before_version = _observed_document(transport.read(spec.endpoint))
     if canonical_digest(before) != spec.expected_before_sha256:
         raise GovernanceRefusal("before digest drifted; refusing stale administration")
     if _matches_expected(before, spec.expected_after):
@@ -210,59 +252,94 @@ def apply_administration_family(
             verdict="ALREADY_CONFIGURED",
             effect="NONE",
             before=before,
+            before_version=before_version,
         )
 
     try:
-        response = transport.mutate(spec.method.upper(), spec.endpoint, spec.payload)
+        response = transport.mutate(
+            spec.method.upper(),
+            spec.endpoint,
+            spec.payload,
+            if_match=before_version,
+        )
     except Exception:  # noqa: BLE001 - the request may have crossed the effect boundary
         try:
-            after = _plain_mapping(transport.read(spec.endpoint))
+            after, after_version = _observed_document(transport.read(spec.endpoint))
         except Exception:  # noqa: BLE001 - preserve effect-unknown without a retry
             return _receipt(
                 spec=spec,
                 verdict="EFFECT_UNKNOWN",
                 effect="UNKNOWN",
                 before=before,
+                before_version=before_version,
+                reconciled=True,
+            )
+        matches = _matches_expected(after, spec.expected_after)
+        return _receipt(
+            spec=spec,
+            verdict="APPLIED_AFTER_RECONCILIATION" if matches else "EFFECT_UNKNOWN",
+            effect="CONFIRMED" if matches else "UNKNOWN",
+            before=before,
+            before_version=before_version,
+            after=after,
+            after_version=after_version,
+            reconciled=True,
+        )
+
+    if not isinstance(response, GitHubResponse) or type(response.status) is not int:
+        try:
+            after, after_version = _observed_document(transport.read(spec.endpoint))
+        except Exception:  # noqa: BLE001 - preserve effect-unknown without a retry
+            return _receipt(
+                spec=spec,
+                verdict="EFFECT_UNKNOWN",
+                effect="UNKNOWN",
+                before=before,
+                before_version=before_version,
                 reconciled=True,
             )
         return _receipt(
             spec=spec,
-            verdict=(
-                "APPLIED_AFTER_RECONCILIATION"
-                if _matches_expected(after, spec.expected_after)
-                else "EFFECT_UNKNOWN"
-            ),
-            effect=(
-                "CONFIRMED"
-                if _matches_expected(after, spec.expected_after)
-                else "UNKNOWN"
-            ),
+            verdict="EFFECT_UNKNOWN",
+            effect="UNKNOWN",
             before=before,
+            before_version=before_version,
             after=after,
+            after_version=after_version,
             reconciled=True,
         )
-    if not isinstance(response, GitHubResponse):
-        raise GovernanceRefusal("mutation response contract is malformed")
+
     if 400 <= response.status < 500:
         return _receipt(
             spec=spec,
             verdict="AUTH_REJECTED" if response.status in {401, 403} else "REJECTED",
             effect="NONE",
             before=before,
+            before_version=before_version,
         )
 
-    after = _plain_mapping(transport.read(spec.endpoint))
+    try:
+        after, after_version = _observed_document(transport.read(spec.endpoint))
+    except Exception:  # noqa: BLE001 - the write crossed the effect boundary
+        return _receipt(
+            spec=spec,
+            verdict="EFFECT_UNKNOWN",
+            effect="UNKNOWN",
+            before=before,
+            before_version=before_version,
+            reconciled=True,
+        )
     matches = _matches_expected(after, spec.expected_after)
     ambiguous = not (200 <= response.status < 300)
     if matches:
         return _receipt(
             spec=spec,
-            verdict=(
-                "APPLIED_AFTER_RECONCILIATION" if ambiguous else "APPLIED"
-            ),
+            verdict="APPLIED_AFTER_RECONCILIATION" if ambiguous else "APPLIED",
             effect="CONFIRMED",
             before=before,
+            before_version=before_version,
             after=after,
+            after_version=after_version,
             reconciled=ambiguous,
         )
     return _receipt(
@@ -270,7 +347,9 @@ def apply_administration_family(
         verdict="EFFECT_UNKNOWN" if ambiguous else "READBACK_MISMATCH",
         effect="UNKNOWN",
         before=before,
+        before_version=before_version,
         after=after,
+        after_version=after_version,
         reconciled=ambiguous,
     )
 
@@ -291,6 +370,8 @@ def assess_github_admin_prerequisites(
     capability_probes: Mapping[str, Any],
     installations: list[Mapping[str, Any]],
     expected_repository: str,
+    expected_publisher_app_id: int | None,
+    expected_publisher_installation_id: int | None,
 ) -> dict[str, Any]:
     """Assess explicit admin probes without promoting OAuth scopes to authority."""
 
@@ -309,7 +390,7 @@ def assess_github_admin_prerequisites(
     _assert_secret_free(identity, path="principal")
 
     safe_rows: list[dict[str, Any]] = []
-    qualified: list[dict[str, Any]] = []
+    publisher_rows: list[dict[str, Any]] = []
     for raw in installations:
         app = _plain_mapping(raw)
         _assert_secret_free(app, path="installation")
@@ -320,20 +401,33 @@ def assess_github_admin_prerequisites(
         safe_rows.append(
             {
                 "app_id": app_id,
+                "installation_id": app.get("installation_id", app.get("id")),
                 "app_slug": app_slug,
                 "repository_selection": app.get("repository_selection"),
                 "permissions": app.get("permissions"),
             }
         )
         if app_slug == "macro-production-publisher":
-            qualified.append(
-                validate_publisher_app_installation(
-                    app,
-                    expected_repository=expected_repository,
-                )
-            )
-    if len(qualified) > 1:
+            publisher_rows.append(app)
+    if len(publisher_rows) > 1:
         raise GovernanceRefusal("publisher App installation is ambiguous")
+
+    all_gates_satisfied = all(value == "SATISFIED" for value in probes.values())
+    configuration_matches: list[dict[str, Any]] = []
+    if (
+        len(publisher_rows) == 1
+        and all_gates_satisfied
+        and type(expected_publisher_app_id) is int
+        and type(expected_publisher_installation_id) is int
+    ):
+        configuration_matches.append(
+            validate_publisher_app_installation(
+                publisher_rows[0],
+                expected_repository=expected_repository,
+                expected_app_id=expected_publisher_app_id,
+                expected_installation_id=expected_publisher_installation_id,
+            )
+        )
     return {
         "schema": "mastermind.github_admin_prerequisite_census.v1",
         "principal": {
@@ -345,16 +439,23 @@ def assess_github_admin_prerequisites(
         "scope_inferred_from_oauth": False,
         "gates": dict(sorted(probes.items())),
         "installed_apps": safe_rows,
-        "suitable_publisher_app_exists": len(qualified) == 1,
-        "qualified_app_integration_id": (
-            qualified[0]["app_integration_id"] if qualified else None
+        "publisher_configuration_matches_policy": len(configuration_matches) == 1,
+        "configuration_matching_app_integration_id": (
+            configuration_matches[0]["app_integration_id"]
+            if configuration_matches
+            else None
         ),
-        "credential_material_observed": False,
+        # Static/API configuration matching is deliberately not dynamic proof that
+        # candidate execution cannot reach the credential.
+        "suitable_publisher_app_exists": False,
+        "qualified_app_integration_id": None,
+        "dynamic_candidate_denial_required": True,
+        "credential_material_observation": "NOT_PERFORMED",
     }
 
 
 def validate_candidate_credential_denial(evidence: Mapping[str, Any]) -> dict[str, Any]:
-    """Accept secret-free proof that candidate execution has no App credential seam."""
+    """Validate a static claim shape without promoting it to dynamic denial proof."""
 
     observed = _plain_mapping(evidence)
     expected_keys = {
@@ -376,11 +477,13 @@ def validate_candidate_credential_denial(evidence: Mapping[str, Any]) -> dict[st
     if any(observed[key] is not False for key in expected_keys - {"custody_kind"}):
         raise GovernanceRefusal("candidate credential projection was observed")
     return {
-        "schema": "mastermind.github_candidate_credential_denial.v1",
-        "verdict": "PASS",
+        "schema": "mastermind.github_candidate_credential_claim_shape.v1",
+        "verdict": "CLAIM_SHAPE_VALIDATED",
         "custody_kind": observed["custody_kind"],
-        "candidate_credential_reachability": "DENIED",
-        "credential_material_observed": False,
+        "candidate_credential_reachability": "UNPROVEN",
+        "evidence_scope": "STATIC_ADMIN_SURFACES_ONLY",
+        "dynamic_candidate_canary_required": True,
+        "credential_material_observation_claim": False,
     }
 
 
@@ -388,14 +491,29 @@ def validate_publisher_app_installation(
     installation: Mapping[str, Any],
     *,
     expected_repository: str,
+    expected_app_id: int,
+    expected_installation_id: int,
 ) -> dict[str, Any]:
-    """Accept only the dedicated repository-selected publisher authority."""
+    """Match a caller-bound, secret-free installation read-back configuration."""
 
     app = _plain_mapping(installation)
-    if type(app.get("app_id")) is not int or app["app_id"] <= 0:
+    if type(expected_app_id) is not int or expected_app_id <= 0:
+        raise GovernanceRefusal("expected publisher App Integration ID is not exact")
+    if app.get("app_id") != expected_app_id:
         raise GovernanceRefusal("publisher App Integration ID is not exact")
+    if type(expected_installation_id) is not int or expected_installation_id <= 0:
+        raise GovernanceRefusal("expected publisher App installation ID is not exact")
+    if app.get("installation_id", app.get("id")) != expected_installation_id:
+        raise GovernanceRefusal("publisher App installation ID is not exact")
     if app.get("app_slug") != "macro-production-publisher":
         raise GovernanceRefusal("publisher App identity is not exact")
+    expected_account = expected_repository.split("/", maxsplit=1)[0]
+    if app.get("account_login") != expected_account:
+        raise GovernanceRefusal("publisher App installation account is not exact")
+    if app.get("target_type") != "Organization":
+        raise GovernanceRefusal("publisher App target type is not exact")
+    if app.get("suspended_at") is not None:
+        raise GovernanceRefusal("publisher App installation is suspended")
     if app.get("repository_selection") != "selected":
         raise GovernanceRefusal("publisher App is not repository-selected")
     if app.get("repositories") != [expected_repository]:
@@ -404,16 +522,29 @@ def validate_publisher_app_installation(
         raise GovernanceRefusal("publisher App permissions are not least-privileged")
     if app.get("events") != []:
         raise GovernanceRefusal("publisher App subscribes to events")
+    observed_at = app.get("observed_at")
+    if not isinstance(observed_at, str) or _RFC3339_UTC.fullmatch(observed_at) is None:
+        raise GovernanceRefusal("publisher App observation time is not exact")
+    expected_sources = [
+        f"GET /orgs/{expected_account}/installations",
+        f"GET /user/installations/{expected_installation_id}/repositories",
+    ]
+    if app.get("source_endpoints") != expected_sources:
+        raise GovernanceRefusal("publisher App source binding is not exact")
     _assert_secret_free(app)
     return {
-        "schema": "mastermind.github_publisher_app_validation.v1",
-        "verdict": "PASS",
+        "schema": "mastermind.github_publisher_app_configuration_match.v1",
+        "verdict": "CONFIGURATION_MATCH",
         "app_integration_id": app["app_id"],
+        "installation_id": expected_installation_id,
         "app_slug": app["app_slug"],
         "repository": expected_repository,
         "permissions": app["permissions"],
         "events": [],
-        "credential_material_observed": False,
+        "observed_at": observed_at,
+        "source_endpoints": expected_sources,
+        "dynamic_candidate_denial_required": True,
+        "credential_material_observation": "NOT_PERFORMED",
     }
 
 
