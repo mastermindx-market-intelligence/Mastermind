@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import subprocess
@@ -396,3 +397,69 @@ def test_cli_valid_and_opaque_invalid_journeys(tmp_path):
     assert "INVALID_SOURCE_BUNDLE" in proc.stderr
     assert "do-not-leak" not in proc.stderr
     assert proc.stdout == ""
+
+
+def test_derived_source_observation_uses_latest_load_bearing_input():
+    bundle = _bundle()
+    bundle["as_of"] = "2026-08-30T16:00:02Z"
+    bundle["mastermind_revision_attestation"]["observed_at"] = (
+        "2026-08-30T16:00:02Z"
+    )
+    bundle["agentos_revision_attestation"]["observed_at"] = (
+        "2026-08-30T16:00:01Z"
+    )
+    composed = compose_input(bundle)
+    assert _receipt(composed, STRATEGIC_SOURCE_REF)["observed_at"] == (
+        "2026-08-30T16:00:02Z"
+    )
+    assert _receipt(composed, AGENT_OS_SOURCE_REF)["observed_at"] == (
+        "2026-08-30T16:00:01Z"
+    )
+
+
+def test_future_dated_revision_attestation_is_rejected_by_a1():
+    bundle = _bundle()
+    bundle["mastermind_revision_attestation"]["observed_at"] = (
+        "2026-08-30T16:00:01Z"
+    )
+    with pytest.raises(ChairmanCognitionError, match="postdate"):
+        compose_input(bundle)
+
+
+def test_composer_imports_no_io_runtime_or_connector_owner():
+    source = (
+        _ROOT / "control_plane" / "chairman_cognition_sources.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            imported.add(module)
+            imported.update(f"{module}.{alias.name}" for alias in node.names)
+    forbidden = (
+        "pathlib",
+        "sqlite",
+        "subprocess",
+        "socket",
+        "urllib",
+        "httpx",
+        "requests",
+        "worker_runtime",
+        "executive_runtime",
+        "capacity",
+        "runtime_binding",
+        "slack",
+        "linear",
+        "github",
+        "agentos",
+        "mcp",
+    )
+    offenders = sorted(
+        name
+        for name in imported
+        if any(fragment in name.lower() for fragment in forbidden)
+    )
+    assert not offenders, offenders
