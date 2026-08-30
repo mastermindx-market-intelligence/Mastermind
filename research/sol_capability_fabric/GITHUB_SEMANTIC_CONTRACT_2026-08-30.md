@@ -1,46 +1,48 @@
 # Sol Capability Fabric GH0 — GitHub Semantic Contract
 
 **Operation:** `mastermind-sol-capability-fabric-gh0-20260830-sol-001`  
-**Protected source:** `mastermindx-market-intelligence/Mastermind@98bc7a71dcd70947c7a18eb5af7493a2f62a2571`  
+**Protected source at repair:** `mastermindx-market-intelligence/Mastermind@e19ef1c54cc6f2b7bfc652a78bf94a209fcb42b9`  
 **Cognition route:** `COGNITION_ROUTE: CHAT_PRO_DEFAULT`  
 **State:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`
 
-This document freezes closed, owner-preserving GitHub semantics for GH1/GH2/RUN1. It contains no
-runtime implementation or GitHub mutation. GH0 installs no app, connector, credential, runner,
+This document freezes closed, owner-preserving GitHub semantics for GH1, GH2 and RUN1. It contains
+no runtime implementation or GitHub mutation. GH0 installs no app, connector, credential, runner,
 workflow, service or actuator.
 
-The contracts are projections over GitHub and existing Mastermind owners. They are not a GitHub
-mirror, release lifecycle, operation registry, prepared-action database or universal action router.
+The contracts below are projections over GitHub and existing Mastermind owners. They are not a GitHub
+mirror, release lifecycle, operation registry, prepared-action database, credential plane or universal
+action router.
 
 ---
 
-## 1. Contract family and authority
+## 1. Contract family and canonical ownership
 
-| Contract | Owner | Role |
+| Contract | Canonical owner | Role |
 |---|---|---|
 | `mastermind.github_status.v1` | GitHub facts + GH2 composition | Current source-attributed status for one exact GitHub target. |
-| `mastermind.github_release_assessment.v1` | GH1 pure engine | Deterministic `ELIGIBLE | HELD | REFUSED | UNKNOWN` release/collision/completion assessment. |
+| `mastermind.github_release_assessment.v1` | GH1 pure engine | Deterministic `ELIGIBLE | HELD | REFUSED | UNKNOWN` release, collision and completion assessment. |
 | `mastermind.github_prepared_action.v1` | exact privilege-separated GitHub owner app | Human-readable preview plus authenticated self-contained expiring `prepared_token`. |
-| `mastermind.github_action_receipt.v1` | GitHub owner app + canonical GitHub read-back | `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN` for one exact action. |
+| `mastermind.github_action_receipt.v1` | exact GitHub owner app + canonical GitHub read-back | `NOT_APPLIED | APPLIED | EFFECT_UNKNOWN` for one exact action. |
 | `mastermind.github_runner_status.v1` | RUN1 over GitHub runner and accepted host owners | Read-only runner eligibility, health and queue explanation. |
 
 Authority remains federated:
 
-- GitHub owns repository, ref, commit, PR, review, check, workflow and artifact truth.
-- Executive OS owns Job/Attempt/Worker/Event and CEO admission.
-- Agent OS owns durable responsibility/decision/discovery/handoff.
-- RuntimeBinding/SessionTargetRegistry own current exact operating surface.
-- Code Intelligence Fabric owns governed discovery/semantics, never protected implementation truth.
-- SCF GH1 assesses immutable facts; it owns no source and performs no effect.
+- GitHub owns repository, ref, commit, pull-request, review, check, workflow and artifact truth.
+- Executive OS owns Job, Attempt, Worker, Event and CEO admission.
+- Agent OS owns durable responsibility, decision, discovery and handoff.
+- RuntimeBinding and SessionTargetRegistry own the current exact operating surface.
+- production owners own deployment and real-path proof.
+- Code Intelligence Fabric owns governed discovery and semantics, never protected implementation truth.
+- GH1 classifies supplied immutable facts; it owns no source and performs no effect.
 
-Retrieved PR text, issue text, review prose or commit messages are evidence to validate. They cannot
-self-assign authority or create a carrier merely by containing an operation key.
+Retrieved PR text, issue text, review prose, commit messages and Slack text are evidence to validate.
+They cannot self-assign authority or create a carrier merely by containing an operation key.
 
 ---
 
 ## 2. Common source reference
 
-Every source-bearing record uses a closed reference equivalent to:
+Every load-bearing source record uses a closed reference equivalent to:
 
 ```text
 source_kind
@@ -57,19 +59,19 @@ truncated = true | false
 continuation|null
 ```
 
-`revision` is owner-native: commit SHA, PR head SHA, run attempt identity, immutable Agent OS commit,
+`revision` is owner-native: commit SHA, PR head SHA, run-attempt identity, immutable Agent OS commit,
 production release identity or another accepted exact version. Time never substitutes for revision.
 
-A source is unusable for a load-bearing positive conclusion when:
+A source cannot support a positive load-bearing conclusion when:
 
-- revision is missing or mutable;
-- owner cannot be established;
+- revision or owner is missing;
 - freshness exceeds the accepted owner-relative budget;
-- pagination/coverage is partial and the absent page could change the verdict;
-- a fetch failed or returned an unvalidated shape;
-- two current sources materially disagree.
+- pagination or coverage is partial and unseen data could change the verdict;
+- the fetch failed or returned an unvalidated shape;
+- current sources materially disagree;
+- the source belongs to a different candidate head or attempt.
 
-The output then remains `UNKNOWN`, `HELD` or `DEGRADED`; it does not manufacture a default.
+The output remains `UNKNOWN`, `HELD` or `DEGRADED`; it never manufactures an empty default.
 
 ---
 
@@ -79,12 +81,12 @@ The output then remains `UNKNOWN`, `HELD` or `DEGRADED`; it does not manufacture
 
 One deterministic current packet answers:
 
-- what exact GitHub object is being inspected;
-- which protected/current/candidate revisions exist;
-- what changed;
-- which reviews/checks/runs/artifacts apply;
-- where evidence is incomplete;
-- whether a modifying action is even serviceable.
+- which exact GitHub object is being inspected;
+- which protected, base and candidate revisions exist;
+- what changed and which semantic owners are affected;
+- which reviews, checks, runs, attempts and artifacts apply;
+- where evidence is partial or stale;
+- whether an action family is technically serviceable.
 
 It does not decide organizational authority and does not perform a write.
 
@@ -180,17 +182,16 @@ continuation|null
 
 ### 3.3 Packet laws
 
-1. `head_sha` is mandatory for exact PR/release reasoning.
+1. `head_sha` is mandatory for exact PR or release reasoning.
 2. A branch name without immutable SHA makes exact-head conclusions `UNKNOWN`.
-3. `mergeable=true` is insufficient without paths, checks, reviews, source compatibility and required
-   production proof.
+3. `mergeable=true` is insufficient without paths, semantic owners, checks, reviews, current source
+   compatibility and required production proof.
 4. A skipped check is successful only when the accepted required-check policy says the skip is
    applicable; otherwise it remains visible.
-5. A cancelled check is not green. A run superseded by a new head is not applicable.
-6. `changed_paths_sha256` is a canonical digest over sorted exact paths; it is not a substitute for
-   the path list.
-7. Production evidence references remain owner-native; GitHub does not become production truth.
-8. Packet generation performs no persistence. Re-read GitHub for every current packet.
+5. Cancelled is not green. A run superseded by a new head is not applicable.
+6. `changed_paths_sha256` is a canonical digest over sorted exact paths; it never replaces the path list.
+7. Production evidence remains owner-native; GitHub does not become production truth.
+8. Packet generation performs no persistence. Every current packet is rebuilt from current owners.
 
 ---
 
@@ -198,13 +199,13 @@ continuation|null
 
 ### 4.1 Candidate acquisition
 
-GH2 may acquire candidates through bounded native searches over:
+GH2 may acquire candidate pointers through bounded native searches over:
 
-- exact operation key in open/recent PRs and issues;
-- branch/ref naming convention;
-- exact commit/PR linkage;
+- exact operation key in open or recent PRs and issues;
+- branch or ref naming convention;
+- exact commit and PR linkage;
 - explicit current Agent OS handoff references;
-- current Slack transport only as a candidate pointer, never canonical implementation truth.
+- Slack only as transport evidence, never canonical implementation truth.
 
 Candidate discovery is followed by exact GitHub reads. Text matching alone is not carrier proof.
 
@@ -223,7 +224,7 @@ CONFLICT
   one operation key has changed normalized payload, or current writer evidence conflicts
 
 UNKNOWN
-  search/coverage/freshness is incomplete or required owner evidence is unavailable
+  search, coverage, freshness or required owner evidence is incomplete
 ```
 
 `CONFLICT` emits `OPERATION_CARRIER_CONFLICT`. It never elects the newest branch, loudest comment or
@@ -237,7 +238,7 @@ One logical modifying operation binds to **one carrier** until canonical reconci
 
 ### 5.1 Pure input
 
-GH1 consumes only immutable/plain data supplied by its caller:
+GH1 consumes only immutable plain data supplied by its caller:
 
 ```text
 operation_key
@@ -246,17 +247,18 @@ protected_ref / protected_sha
 candidate_branch / candidate_sha
 base_ref / base_sha
 merge_base_sha / ahead_by / behind_by
+expected_head_sha
 expected_paths / actual_paths
 expected_semantic_owners / current semantic-owner facts
-carrier_state / writer evidence
-required checks / observed checks and attempts
-reviews / review decision / unresolved threads
+carrier state / current writer evidence
+required checks / observed check and attempt facts
+reviews / review decision / unresolved thread facts
 current source-law revisions and compatibility facts
 required production proof / observed production proof
 claimed capability state
 allowed merge method
-expected_head_sha
-source_refs / source completeness
+source refs / source completeness
+prior effect state
 ```
 
 No input is fetched by GH1. No model prose is parsed into privileged fields.
@@ -294,12 +296,12 @@ canonical_digest
 `ELIGIBLE` means every required predicate is affirmatively established for the requested effect. It
 never means `PROVEN_LIVE`; a records-only PR can be eligible while remaining `SPEC_ONLY`.
 
-`HELD` means the carrier is valid but a potentially satisfiable gate is incomplete, such as pending
-checks, pending required review, missing expected production proof or deliberate dependency order.
+`HELD` means the exact carrier is valid and no hard contradiction exists, but a satisfiable gate is
+incomplete: pending checks, required review, dependency order or required production proof.
 
-`REFUSED` means a hard contradiction exists: moved/unexpected head, forbidden path/semantic-owner
-collision, operation conflict, stale material source law, failed required check, blocking review,
-invalid completion claim or forbidden effect.
+`REFUSED` means a hard contradiction exists: moved or unexpected head, forbidden path or semantic
+collision, operation or writer conflict, incompatible current source, failed required check, blocking
+review, invalid completion claim, forbidden effect or prior effect uncertainty.
 
 `UNKNOWN` means required source coverage, freshness, identity or effect truth cannot be established.
 Unknown is fail-closed.
@@ -309,6 +311,7 @@ Unknown is fail-closed.
 ```text
 SOURCE_INCOMPLETE
 SOURCE_STALE
+SOURCE_CONFLICT
 PROTECTED_REF_MOVED
 CANDIDATE_HEAD_MOVED
 BASE_OR_MERGE_CONTEXT_UNKNOWN
@@ -326,6 +329,7 @@ CHECK_COVERAGE_PARTIAL
 REVIEW_REQUIRED
 CHANGES_REQUESTED
 UNRESOLVED_REVIEW_THREAD
+SOURCE_LAW_INCOMPATIBLE
 PRODUCTION_PROOF_MISSING
 PRODUCTION_PROOF_UNKNOWN
 COMPLETION_CLAIM_OVERSTATED
@@ -333,24 +337,24 @@ MERGE_METHOD_REFUSED
 EFFECT_UNKNOWN
 ```
 
-The issue list is sorted deterministically. Output digest is permutation-stable.
+Issues are sorted deterministically. Output digest is permutation-stable.
 
 ---
 
 ## 6. Completion and capability-state law
 
-GitHub facts support, but do not replace, product/production acceptance.
+GitHub facts support, but do not replace, product and production acceptance.
 
 | Evidence | Maximum truthful conclusion by itself |
 |---|---|
-| records/spec files + green CI | `SPEC_ONLY` |
-| implementation + exact-head tests | `BUILT_NOT_PROVEN` |
+| records or spec files plus green CI | `SPEC_ONLY` |
+| implementation plus exact-head tests | `BUILT_NOT_PROVEN` |
 | implementation connected to a non-production consumer | `PARTIAL` or `BUILT_NOT_PROVEN` |
-| merge to protected branch | merged implementation/spec only; not automatically live |
+| merge to protected branch | merged implementation or spec only; not automatically live |
 | deploy receipt without real-path proof | `BUILT_NOT_PROVEN` or `PARTIAL` |
-| real production path + required negative/browser/machine proof | may establish `PROVEN_LIVE` for the exact capability |
+| real production path plus required negative, browser or machine proof | may establish `PROVEN_LIVE` for the exact capability |
 
-A broad program row is not closed from one narrow canary. The assessment validates the precise
+A broad program row is not closed from one narrow canary. The assessment validates only the precise
 capability claim supplied by the owning acceptance contract.
 
 ---
@@ -359,9 +363,9 @@ capability claim supplied by the owning acceptance contract.
 
 ### 7.1 Purpose and scope
 
-This is an owner-specific preview/commit contract for one exact GitHub action family. It follows the
-protected prepared-token correction. It is not a bearer grant, credential, generic request body or
-cross-owner dispatcher.
+This is an owner-specific preview and commit contract for one exact GitHub action family. It follows
+the protected prepared-action token correction. It is not a bearer grant, credential, generic request
+body or cross-owner dispatcher.
 
 ### 7.2 Preview shape
 
@@ -382,6 +386,7 @@ workflow_run_id|null
 job_id|null
 expected_head_sha|null
 expected_source_digest
+normalized_requested_effect
 normalized_requested_effect_digest
 privilege_class = W1_ROUTINE | W2_CONSEQUENTIAL
 confirmation_required
@@ -395,33 +400,49 @@ prepared_token|null
 ```
 
 The preview is secret-free. `prepared_token` is present only when state is `READY` and is an
-authenticated self-contained expiring token. No normalized review body, credential, private key,
-installation token or hidden account selection is reflected to the model.
+authenticated self-contained expiring token. The human-readable preview may show a bounded redacted
+rendering of the effect; it never shows a credential, raw signing material, hidden account selection or
+secret-bearing payload.
 
-### 7.3 Token bindings
+### 7.3 Self-contained token bindings
 
 The exact owner app binds at least:
 
 ```text
-token schema
-app identity/generation/schema/policy
-authenticated principal digest
-operation key
-action family
-target reference
-normalized requested effect digest
-expected source/precondition digest
+token_schema
+app_id
+app_generation
+schema_digest
+policy_id
+authenticated_principal_digest
+operation_key
+action_family
+target_ref
+normalized_requested_effect
+normalized_requested_effect_digest
+expected_source_and_precondition_digest
 expected_head_sha where relevant
-release assessment digest where relevant
-privilege class
-confirmation requirement
-issued_at / expires_at
+release_assessment_digest where relevant
+privilege_class
+confirmation_requirement
+issued_at
+expires_at
 ```
 
-There is **no durable prepared-action store**. There is no digest lookup table, token registry, queue,
-lock, scheduler or shared signing service.
+`normalized_requested_effect` is the bounded secret-free canonical effect required because commit
+accepts only the token. The digest proves equality; it does not replace the effect. The normalized
+effect may not contain credentials, private keys, access tokens, arbitrary shell, SQL, HTTP,
+filesystem or browser instructions, hidden provider or account selection, or any field prohibited from
+model-visible input.
 
-### 7.4 Commit law
+The token is scoped to one owner app generation and action family. Cross-app verification and a shared
+company-wide signing key are forbidden in V1. App-local reviewed key custody and verification remain
+owner-native.
+
+There is **no durable prepared-action store**. There is no digest lookup table, token registry, queue,
+lock, scheduler, lifecycle or shared signing service.
+
+### 7.4 Commit law and current-source revalidation
 
 Commit accepts only:
 
@@ -429,18 +450,21 @@ Commit accepts only:
 commit_github_prepared_action(prepared_token)
 ```
 
-The owner app reauthenticates and performs **current-source revalidation**:
+The exact owner app authenticates and establishes at action time:
 
-- same current principal/resource/scopes;
-- same app/schema/policy generation;
-- same organizational authority and exact Sol action target when required;
-- same operation, action family, target and normalized effect;
-- same current head/base/source/check/review state;
-- no unresolved prior effect;
-- current production arming and confirmation.
+1. current OAuth resource, subject and required scopes;
+2. the same authenticated principal digest bound in the token;
+3. current Chairman intent and canonical organizational authority required by the action;
+4. exact current Sol action target where required;
+5. unchanged app, schema and policy generation;
+6. the same owner, operation, action family, target and normalized effect;
+7. unchanged load-bearing source and precondition state;
+8. no unresolved prior effect for the same operation, action and target;
+9. current host confirmation where required;
+10. current production arming for that exact action family.
 
-Only then may it issue one native GitHub request. A valid token with stale source refuses. Current
-OAuth with an invalid token refuses.
+Only then may it issue at most one owner-native request. The token never routes across owners and never
+selects a credential, account, host, branch writer or RuntimeBinding.
 
 This protocol is owner-local. There is **no universal action router**.
 
@@ -466,7 +490,7 @@ observed_at
 
 ### 8.1 Effect law
 
-- `NOT_APPLIED`: GitHub/current owner proves zero intended effect.
+- `NOT_APPLIED`: GitHub and current owners prove zero intended effect.
 - `APPLIED`: canonical GitHub read-back proves the exact intended effect.
 - `EFFECT_UNKNOWN`: the request may have crossed the effect boundary and read-back cannot prove the
   exact result.
@@ -482,15 +506,14 @@ Reconciliation performs no mutation.
 
 ### 8.2 Native action ceilings
 
-- `REQUEST_REVIEW`: current requested-reviewer read-back.
-- `SUBMIT_REVIEW`: exact review ID and exact reviewed head/commit read-back.
-- `RERUN_FAILED_JOB`: exact run/job attempt change; never assume from HTTP success alone.
-- `MERGE_EXPECTED_HEAD`: exact merged PR state and resulting commit; must bind
-  `expected_head_sha`.
+- `REQUEST_REVIEW`: read back current requested reviewers.
+- `SUBMIT_REVIEW`: read back exact review ID and exact reviewed head or commit.
+- `RERUN_FAILED_JOB`: read back the exact run or job attempt change; HTTP success is insufficient.
+- `MERGE_EXPECTED_HEAD`: bind `expected_head_sha`, then read exact merged PR state and resulting commit.
 
 ---
 
-## 9. Runner status boundary
+## 9. Runner-status boundary
 
 `mastermind.github_runner_status.v1` is read-only and belongs to SCF-RUN1, not GH1.
 
@@ -508,8 +531,8 @@ labels
 group
 version
 observation time
-current job/host refs
-source refs/freshness
+current job and host refs
+source refs and freshness
 eligibility decision
 health state
 queue explanation
@@ -517,7 +540,7 @@ issues
 ```
 
 It never carries runner registration tokens, credentials, private addresses, raw environment or raw
-argv. Runner registration/deletion/relabeling/regrouping remains A3 administration.
+argv. Runner registration, deletion, relabeling and regrouping remain isolated A3 administration.
 
 ---
 
@@ -528,16 +551,16 @@ The GitHub contracts refuse:
 - arbitrary repository URL, API URL, HTTP method or body;
 - arbitrary shell, Git command, filesystem root or executable;
 - model-selected repository, installation, credential, principal or branch writer;
-- force push/reset/rebase as a generic recovery action;
-- hidden fallback from native connector to browser/CLI;
-- auto-merge or base-chase loops;
-- a second PR/check/run/artifact/runner database;
+- force push, reset or rebase as a generic recovery action;
+- hidden fallback from native connector to browser or CLI;
+- automatic base chase or auto-merge bypass;
+- a second PR, check, run, artifact or runner database;
 - a cross-owner prepared-action token service;
-- lifecycle inference from PR/issue text;
+- lifecycle inference from PR, issue or Slack text;
 - secret-bearing logs or action payloads reflected to the model.
 
-One logical operation uses one carrier. A changed normalized effect requires a new explicit operation;
-it is not a retry under the old key.
+One logical operation uses **one carrier**. A changed normalized effect requires a new explicit
+operation; it is not a retry under the old key.
 
 ---
 
@@ -547,11 +570,11 @@ it is not a retry under the old key.
 GH0 protected records
 -> GH1 pure assessment = BUILT_NOT_PROVEN / PRODUCTION_INERT
 -> GH2 real read composition
--> one disposable W1 review/rerun canary
+-> one disposable W1 review or rerun canary
 -> one separately authorized expected-head merge canary
 -> effect reconciliation proof
 -> production capability assessment
 ```
 
 GH1 does not implement live GitHub reads or actions. GH2 does not absorb RUN1 or A3. Every promotion
-requires exact current-source evidence and a separate accepted carrier.
+requires exact current-source evidence and a separate accepted carrier. No successor inherits START.
