@@ -7,7 +7,11 @@ import json
 import sys
 from pathlib import Path
 
-from control_plane.chairman_cognition import (
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from control_plane.chairman_cognition import (  # noqa: E402
     ERROR_SCHEMA,
     ChairmanCognitionError,
     evaluate_document,
