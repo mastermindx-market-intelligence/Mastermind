@@ -49,6 +49,8 @@ def test_architecture_freezes_privilege_and_effect_semantics() -> None:
         "APPLIED",
         "EFFECT_UNKNOWN",
         "PARTIAL_CLOSEOUT",
+        "No universal action router",
+        "no durable prepared-action store",
     ):
         assert required in text
 
