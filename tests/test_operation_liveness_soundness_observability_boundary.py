@@ -13,7 +13,7 @@ AMENDMENT = (
 
 def _text() -> str:
     assert AMENDMENT.is_file()
-    return AMENDMENT.read_text(encoding="utf-8")
+    return " ".join(AMENDMENT.read_text(encoding="utf-8").split())
 
 
 def test_ols_reconciles_current_protected_source_without_rewriting_history() -> None:
@@ -51,7 +51,7 @@ def test_ols_cannot_create_a_second_diagnostic_evidence_plane() -> None:
 
 def test_source_compiler_must_use_corrected_canonical_read_seams() -> None:
     text = _text()
-    assert "corrected and protected Executive\nSteward/OCR-6 read seam" in text
+    assert "corrected and protected Executive Steward/OCR-6 read seam" in text
     assert "must not side-read raw Grafana/Loki/Prometheus/Jaeger stores" in text
     assert "separately accepted bounded Runtime Observability read contract" in text
     assert "UNAVAILABLE" in text
@@ -70,7 +70,7 @@ def test_runtime_diagnostics_never_originate_lifecycle_or_assurance_truth() -> N
     ):
         assert forbidden_inference in text
 
-    assert "a log/metric/trace cannot originate the\ncanonical divergence fact by itself" in text
+    assert "a log/metric/trace cannot originate the canonical divergence fact by itself" in text
 
 
 def test_ols_a2_and_a6_gates_are_explicit() -> None:

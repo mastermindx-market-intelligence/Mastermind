@@ -26,7 +26,7 @@ PLAN = (
 
 def _read(path: Path) -> str:
     assert path.is_file(), f"missing protected source artifact: {path.relative_to(ROOT)}"
-    return path.read_text(encoding="utf-8")
+    return " ".join(path.read_text(encoding="utf-8").split())
 
 
 def test_ols_f0_artifacts_exist_and_bind_one_operation() -> None:
