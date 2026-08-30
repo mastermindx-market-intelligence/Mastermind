@@ -28,6 +28,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<10",
+    # The historical mcp>= floor is intentionally retired; the maintained v1
+    # release below is exact so unrelated SDK movement cannot red hosted CI.
     # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.
     # It is deliberately not a base dependency: control_plane must remain
     # importable in the sealed Executive runtime without the SDK installed.
