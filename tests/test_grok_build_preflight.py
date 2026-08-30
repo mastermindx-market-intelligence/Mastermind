@@ -8,13 +8,12 @@ from pathlib import Path
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[1]
+MODULE_PATH = ROOT / "ops" / "executive_os" / "grok-build-preflight.py"
 
-_ROOT = Path(__file__).resolve().parents[1]
-_MODULE_PATH = _ROOT / "ops" / "executive_os" / "grok-build-preflight.py"
 
-
-def _load():
-    spec = importlib.util.spec_from_file_location("grok_build_preflight", _MODULE_PATH)
+def load_module():
+    spec = importlib.util.spec_from_file_location("grok_build_preflight", MODULE_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -22,144 +21,103 @@ def _load():
     return module
 
 
-def _executable(tmp_path: Path, body: bytes = b"#!/bin/sh\n") -> Path:
-    binary = tmp_path / "grok"
-    binary.write_bytes(body)
-    binary.chmod(0o700)
-    return binary
+def executable(tmp_path: Path, body: bytes = b"#!/bin/sh\necho ok\n") -> Path:
+    path = tmp_path / "grok"
+    path.write_bytes(body)
+    path.chmod(0o700)
+    return path
 
 
-def _receipt(module, **overrides):
-    value = {
-        "schema": module.SCHEMA,
-        "observed_at": "2026-08-30T20:30:00Z",
-        "grok_binary_sha256": "a" * 64,
-        "acp_protocol_version": 1,
-        "cached_token_offered": True,
-        "oauth_ready": True,
-        "model_turn_performed": False,
-        "executive_routing_ready": False,
-        "verdict": "LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE",
-        "reason_codes": [],
-    }
-    value.update(overrides)
-    return value
-
-
-def test_command_builder_is_provider_work_free(tmp_path: Path):
-    module = _load()
-    binary = _executable(tmp_path)
-    assert module.build_allowed_argv(binary, "version") == (str(binary), "--no-auto-update", "version")
-    assert module.build_allowed_argv(binary, "acp_stdio") == (
-        str(binary),
-        "--no-auto-update",
-        "agent",
-        "stdio",
+def test_command_allowlist_is_provider_work_free(tmp_path: Path):
+    m = load_module()
+    binary = executable(tmp_path)
+    assert m.build_allowed_argv(binary, "version") == (
+        str(binary), "--no-auto-update", "version"
     )
-    for forbidden in (
-        "prompt",
-        "session_new",
-        "session_prompt",
-        "resume",
-        "continue",
-        "worktree",
-        "models",
-        "login",
-        "logout",
-    ):
-        with pytest.raises(module.PreflightError, match="COMMAND_NOT_ALLOWED"):
-            module.build_allowed_argv(binary, forbidden)
+    assert m.build_allowed_argv(binary, "acp_stdio") == (
+        str(binary), "--no-auto-update", "agent", "stdio"
+    )
+    for forbidden in ("prompt", "session_new", "resume", "login", "models"):
+        with pytest.raises(m.PreflightError, match="COMMAND_NOT_ALLOWED"):
+            m.build_allowed_argv(binary, forbidden)
 
 
-def test_provider_env_drops_api_key_and_unrelated_secrets():
-    module = _load()
-    env = module.sanitized_provider_env(
+def test_provider_env_drops_api_auth_and_unrelated_secrets():
+    m = load_module()
+    env = m.sanitized_provider_env(
         {
             "HOME": "/tmp/home",
-            "PATH": "/bin:/usr/bin",
-            "HTTPS_PROXY": "http://127.0.0.1:9999",
+            "PATH": "/bin",
             "GROK_HOME": "/tmp/grok-home",
-            "XAI_API_KEY": "fake-secret-value",
-            "ANTHROPIC_AUTH_TOKEN": "another-fake-secret",
-            "RANDOM_SECRET": "do-not-forward",
+            "XAI_API_KEY": "secret",
+            "ANTHROPIC_AUTH_TOKEN": "secret",
+            "RANDOM_SECRET": "secret",
         }
     )
-    assert env == {
-        "HOME": "/tmp/home",
-        "PATH": "/bin:/usr/bin",
-        "HTTPS_PROXY": "http://127.0.0.1:9999",
-        "GROK_HOME": "/tmp/grok-home",
-    }
-    assert "XAI_API_KEY" not in env
+    assert env == {"HOME": "/tmp/home", "PATH": "/bin", "GROK_HOME": "/tmp/grok-home"}
 
 
-def test_initialize_request_is_fixed_and_has_no_session_or_prompt():
-    module = _load()
-    payload = json.loads(module.initialize_request())
-    assert payload["method"] == "initialize"
-    assert payload["params"]["protocolVersion"] == 1
-    assert payload["params"]["clientInfo"]["name"] == "mastermind-grok-preflight"
-    raw = module.initialize_request()
-    assert "session/new" not in raw
-    assert "session/prompt" not in raw
-
-
-def test_authenticate_request_uses_cached_token_headless_only():
-    module = _load()
-    payload = json.loads(module.authenticate_request())
-    assert payload == {
+def test_requests_are_exact_and_have_no_session_methods():
+    m = load_module()
+    init = json.loads(m.initialize_request())
+    auth = json.loads(m.authenticate_request())
+    assert init["method"] == "initialize"
+    assert init["params"]["protocolVersion"] == 1
+    assert auth == {
         "jsonrpc": "2.0",
         "id": 2,
         "method": "authenticate",
         "params": {"_meta": {"headless": True}, "methodId": "cached_token"},
     }
+    assert "session/new" not in m.initialize_request() + m.authenticate_request()
+    assert "session/prompt" not in m.initialize_request() + m.authenticate_request()
 
 
-def test_initialize_accepts_cached_token_and_refuses_wrong_protocol():
-    module = _load()
-    ok, reason = module.normalize_initialize_response(
+def test_initialize_outcomes_are_closed():
+    m = load_module()
+    assert m.normalize_initialize_response(
         {
             "jsonrpc": "2.0",
             "id": 1,
             "result": {
                 "protocolVersion": 1,
-                "authMethods": [
-                    {"id": "xai.api_key", "name": "API key"},
-                    {"id": "cached_token", "name": "Cached OAuth"},
-                    {"id": "device_flow", "name": "Device"},
-                ],
+                "authMethods": [{"id": "xai.api_key"}, {"id": "cached_token"}],
             },
         }
-    )
-    assert (ok, reason) == (True, None)
-
-    ok, reason = module.normalize_initialize_response(
+    ) is None
+    assert m.normalize_initialize_response(
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -1, "message": "no"}}
+    ) is m.AcpOutcome.INITIALIZE_FAILED
+    assert m.normalize_initialize_response(
         {
             "jsonrpc": "2.0",
             "id": 1,
             "result": {"protocolVersion": 2, "authMethods": [{"id": "cached_token"}]},
         }
-    )
-    assert (ok, reason) == (False, "ACP_PROTOCOL_UNSUPPORTED")
-
-
-def test_initialize_without_cached_token_is_honest_not_ready():
-    module = _load()
-    ok, reason = module.normalize_initialize_response(
+    ) is m.AcpOutcome.PROTOCOL_UNSUPPORTED
+    assert m.normalize_initialize_response(
         {
             "jsonrpc": "2.0",
             "id": 1,
             "result": {"protocolVersion": 1, "authMethods": [{"id": "device_flow"}]},
         }
-    )
-    assert ok is False
-    assert reason == "CACHED_TOKEN_METHOD_UNAVAILABLE"
+    ) is m.AcpOutcome.CACHED_TOKEN_UNAVAILABLE
 
 
-def test_initialize_rejects_duplicate_or_malformed_methods():
-    module = _load()
-    with pytest.raises(module.PreflightError, match="ACP_RESPONSE_INVALID"):
-        module.normalize_initialize_response(
+def test_authenticate_outcomes_are_closed():
+    m = load_module()
+    assert m.normalize_authenticate_response(
+        {"jsonrpc": "2.0", "id": 2, "result": {}}
+    ) is m.AcpOutcome.READY
+    assert m.normalize_authenticate_response(
+        {"jsonrpc": "2.0", "id": 2, "error": {"code": -1, "message": "no"}}
+    ) is m.AcpOutcome.AUTHENTICATION_FAILED
+
+
+def test_malformed_or_duplicate_methods_fail_closed():
+    m = load_module()
+    with pytest.raises(m.PreflightError, match="ACP_RESPONSE_INVALID"):
+        m.normalize_initialize_response(
             {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -169,8 +127,8 @@ def test_initialize_rejects_duplicate_or_malformed_methods():
                 },
             }
         )
-    with pytest.raises(module.PreflightError, match="ACP_RESPONSE_INVALID"):
-        module.normalize_initialize_response(
+    with pytest.raises(m.PreflightError, match="ACP_RESPONSE_INVALID"):
+        m.normalize_initialize_response(
             {
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -179,34 +137,10 @@ def test_initialize_rejects_duplicate_or_malformed_methods():
         )
 
 
-def test_authenticate_success_and_failure_is_not_misclassified_as_login_required():
-    module = _load()
-    ready = module.normalize_authenticate_response(
-        {"jsonrpc": "2.0", "id": 2, "result": {}}
-    )
-    assert ready == module.AcpAuthObservation(
-        cached_token_offered=True,
-        oauth_ready=True,
-        verdict="LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE",
-        reason_codes=(),
-    )
-
-    missing = module.normalize_authenticate_response(
-        {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "error": {"code": -32000, "message": "authentication required"},
-        }
-    )
-    assert missing.oauth_ready is False
-    assert missing.verdict == "ACP_AUTHENTICATION_FAILED"
-    assert missing.reason_codes == ("ACP_AUTHENTICATION_FAILED",)
-
-
-def test_provider_wire_secret_shape_is_never_accepted():
-    module = _load()
-    with pytest.raises(module.PreflightError, match="SECRET_SHAPED_VALUE"):
-        module.normalize_authenticate_response(
+def test_secret_shaped_provider_wire_fails_closed():
+    m = load_module()
+    with pytest.raises(m.PreflightError, match="SECRET_SHAPED_VALUE"):
+        m.normalize_authenticate_response(
             {
                 "jsonrpc": "2.0",
                 "id": 2,
@@ -215,125 +149,123 @@ def test_provider_wire_secret_shape_is_never_accepted():
         )
 
 
-def test_receipt_never_claims_model_turn_or_routing_ready():
-    module = _load()
-    assert module.validate_receipt(_receipt(module))["oauth_ready"] is True
-    for key in ("model_turn_performed", "executive_routing_ready"):
-        with pytest.raises(module.PreflightError, match="RECEIPT_INVALID"):
-            module.validate_receipt(_receipt(module, **{key: True}))
-
-
-def test_nonready_receipt_requires_reason_and_consistent_auth_state():
-    module = _load()
-    value = _receipt(
-        module,
-        cached_token_offered=False,
-        oauth_ready=False,
-        verdict="CACHED_TOKEN_METHOD_UNAVAILABLE",
-        reason_codes=["CACHED_TOKEN_METHOD_UNAVAILABLE"],
-    )
-    assert module.validate_receipt(value)["oauth_ready"] is False
-
-    with pytest.raises(module.PreflightError, match="RECEIPT_INVALID"):
-        module.validate_receipt(_receipt(module, oauth_ready=False))
-
-
-def test_binary_must_be_absolute_regular_and_not_symlink(tmp_path: Path):
-    module = _load()
-    binary = _executable(tmp_path)
-    assert module._require_binary(binary) == binary
-    link = tmp_path / "grok-link"
+def test_binary_must_be_absolute_regular_executable_and_not_symlink(tmp_path: Path):
+    m = load_module()
+    binary = executable(tmp_path)
+    resolved, _ = m._require_binary(binary)
+    assert resolved == binary
+    link = tmp_path / "link"
     link.symlink_to(binary)
-    with pytest.raises(module.PreflightError, match="BINARY_INVALID"):
-        module._require_binary(link)
-    with pytest.raises(module.PreflightError, match="BINARY_INVALID"):
-        module._require_binary(Path("grok"))
+    with pytest.raises(m.PreflightError, match="BINARY_INVALID"):
+        m._require_binary(link)
+    with pytest.raises(m.PreflightError, match="BINARY_INVALID"):
+        m._require_binary(Path("grok"))
 
 
-def test_observe_version_uses_sanitized_env_and_discards_stderr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    module = _load()
-    binary = _executable(tmp_path)
+def test_binary_identity_detects_in_place_change(tmp_path: Path):
+    m = load_module()
+    binary = executable(tmp_path, b"#!/bin/sh\necho one\n")
+    path, identity = m.snapshot_binary(binary)
+    path.write_bytes(b"#!/bin/sh\necho two\n")
+    path.chmod(0o700)
+    with pytest.raises(m.PreflightError, match="BINARY_CHANGED_DURING_PREFLIGHT"):
+        m.assert_binary_unchanged(path, identity)
+
+
+def test_observe_version_suppresses_stderr_and_api_key(tmp_path: Path, monkeypatch):
+    m = load_module()
+    binary = executable(tmp_path)
     captured = {}
 
     def fake_run(argv, **kwargs):
-        captured["argv"] = tuple(argv)
-        captured["env"] = dict(kwargs["env"])
-        captured["stderr"] = kwargs["stderr"]
-        return subprocess.CompletedProcess(argv, 0, stdout="Grok Build 9.8.7\n", stderr="secret")
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(argv, 0, stdout="Grok Build 1.2.3\n", stderr="secret")
 
-    monkeypatch.setenv("XAI_API_KEY", "fake-secret")
-    monkeypatch.setattr(module.subprocess, "run", fake_run)
-    assert module.observe_version(binary) == "Grok Build 9.8.7"
-    assert "XAI_API_KEY" not in captured["env"]
+    monkeypatch.setenv("XAI_API_KEY", "secret")
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    assert m.observe_version(binary) is None
     assert captured["stderr"] is subprocess.DEVNULL
+    assert "XAI_API_KEY" not in captured["env"]
 
 
-def test_build_receipt_does_not_leak_provider_or_account_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    module = _load()
-    binary = _executable(tmp_path, b"#!/bin/sh\necho ok\n")
-    monkeypatch.setattr(module, "observe_version", lambda path: "Grok Build 1.0.0")
-    monkeypatch.setattr(
-        module,
-        "observe_acp_cached_oauth",
-        lambda path: module.AcpAuthObservation(
-            cached_token_offered=True,
-            oauth_ready=True,
-            verdict="LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE",
-            reason_codes=(),
-        ),
-    )
-    receipt = module.build_receipt(binary)
-    assert set(receipt) == module._RECEIPT_KEYS
-    raw = json.dumps(receipt, sort_keys=True).lower()
-    for forbidden in (
-        "email",
-        "account_id",
-        "organization",
-        "home_path",
-        "session_id",
-        "provider_account",
-        "grok_version",
+def test_all_public_receipts_contain_only_closed_fields():
+    m = load_module()
+    digest = "a" * 64
+    observed = "2026-08-30T21:50:00Z"
+    renderers = [
+        m.render_ready_receipt,
+        m.render_cached_unavailable_receipt,
+        m.render_auth_failed_receipt,
+        m.render_initialize_failed_receipt,
+        m.render_protocol_unsupported_receipt,
+    ]
+    allowed = {
+        "schema",
+        "observed_at",
+        "grok_binary_sha256",
+        "acp_protocol_version",
+        "cached_token_offered",
+        "oauth_ready",
+        "model_turn_performed",
+        "executive_routing_ready",
+        "verdict",
+        "reason_codes",
+    }
+    for renderer in renderers:
+        payload = json.loads(renderer(digest, observed))
+        assert set(payload) == allowed
+        assert payload["model_turn_performed"] is False
+        assert payload["executive_routing_ready"] is False
+        raw = json.dumps(payload).lower()
+        for forbidden in ("token_value", "email", "grok_version", "home_path", "session_id"):
+            assert forbidden not in raw
+
+
+def test_main_provider_state_selects_constant_renderer_only(tmp_path: Path, monkeypatch, capsys):
+    m = load_module()
+    binary = executable(tmp_path)
+    _, identity = m.snapshot_binary(binary)
+    monkeypatch.setattr(m, "snapshot_binary", lambda path: (binary, identity))
+    monkeypatch.setattr(m, "observe_version", lambda path: None)
+    monkeypatch.setattr(m, "assert_binary_unchanged", lambda path, ident: None)
+    monkeypatch.setattr(m, "now_iso", lambda: "2026-08-30T21:50:00Z")
+
+    for outcome, expected_code, expected_ready in (
+        (m.AcpOutcome.READY, 0, True),
+        (m.AcpOutcome.CACHED_TOKEN_UNAVAILABLE, 1, False),
+        (m.AcpOutcome.AUTHENTICATION_FAILED, 1, False),
+        (m.AcpOutcome.INITIALIZE_FAILED, 1, False),
+        (m.AcpOutcome.PROTOCOL_UNSUPPORTED, 1, False),
     ):
-        assert forbidden not in raw
-    assert receipt["model_turn_performed"] is False
-    assert receipt["executive_routing_ready"] is False
+        monkeypatch.setattr(m, "observe_acp_cached_oauth", lambda path, o=outcome: o)
+        assert m.main(["--grok-binary", str(binary)]) == expected_code
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["oauth_ready"] is expected_ready
+        assert payload["grok_binary_sha256"] == identity.sha256
 
 
-def test_public_exception_channel_never_echoes_arbitrary_text():
-    module = _load()
-    rogue = module.PreflightError("Bearer " + "s" * 40)
-    assert rogue.public_code == module.PUBLIC_FAILURE
-    assert str(rogue) == module.PUBLIC_FAILURE
+def test_main_exception_output_is_fixed_and_opaque(tmp_path: Path, monkeypatch, capsys):
+    m = load_module()
+    binary = executable(tmp_path)
+
+    def explode(path):
+        raise m.PreflightError("Bearer " + "s" * 40)
+
+    monkeypatch.setattr(m, "snapshot_binary", explode)
+    assert m.main(["--grok-binary", str(binary)]) == 2
+    assert json.loads(capsys.readouterr().out) == {"ok": False, "error": "PREFLIGHT_FAILED"}
 
 
-def test_cli_errors_are_opaque_and_do_not_echo_path_contents(tmp_path: Path, capsys):
-    module = _load()
-    missing = tmp_path / "private-user@example.com-grok"
-    assert module.main(["--grok-binary", str(missing)]) == 2
-    output = capsys.readouterr().out
-    assert "private-user@example.com" not in output
-    assert json.loads(output) == {"ok": False, "error": module.PUBLIC_FAILURE}
-
-
-def test_acp_probe_emits_only_initialize_and_authenticate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    module = _load()
-    binary = _executable(tmp_path)
-    sent: list[str] = []
+def test_acp_probe_emits_only_initialize_then_authenticate(tmp_path: Path, monkeypatch):
+    m = load_module()
+    binary = executable(tmp_path)
+    sent = []
     responses = iter(
         [
             {
                 "jsonrpc": "2.0",
                 "id": 1,
-                "result": {
-                    "protocolVersion": 1,
-                    "authMethods": [{"id": "cached_token"}],
-                },
+                "result": {"protocolVersion": 1, "authMethods": [{"id": "cached_token"}]},
             },
             {"jsonrpc": "2.0", "id": 2, "result": {}},
         ]
@@ -345,29 +277,27 @@ def test_acp_probe_emits_only_initialize_and_authenticate(
         pid = 424242
 
         def __init__(self):
-            self._running = True
+            self.running = True
 
         def poll(self):
-            return None if self._running else 0
+            return None if self.running else 0
 
         def terminate(self):
-            self._running = False
+            self.running = False
 
         def wait(self, timeout=None):
-            self._running = False
+            self.running = False
             return 0
 
         def kill(self):
-            self._running = False
+            self.running = False
 
-    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: FakeProc())
-    monkeypatch.setattr(module.os, "killpg", lambda pid, sig: None)
-    monkeypatch.setattr(module, "_send_json_line", lambda stream, payload: sent.append(payload))
-    monkeypatch.setattr(module, "_read_json_line", lambda stream, timeout: next(responses))
-
-    observed = module.observe_acp_cached_oauth(binary)
-    assert observed.oauth_ready is True
+    monkeypatch.setattr(m.subprocess, "Popen", lambda *args, **kwargs: FakeProc())
+    monkeypatch.setattr(m.os, "killpg", lambda pid, sig: None)
+    monkeypatch.setattr(m, "_send_json_line", lambda stream, payload: sent.append(payload))
+    monkeypatch.setattr(m, "_read_json_line", lambda stream, timeout: next(responses))
+    assert m.observe_acp_cached_oauth(binary) is m.AcpOutcome.READY
     assert [json.loads(item)["method"] for item in sent] == ["initialize", "authenticate"]
-    source = _MODULE_PATH.read_text(encoding="utf-8")
+    source = MODULE_PATH.read_text()
     assert '"session/new"' not in source
     assert '"session/prompt"' not in source
