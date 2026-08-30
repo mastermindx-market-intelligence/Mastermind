@@ -1,64 +1,79 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Mapping, Sequence
 
 import pytest
 
+from control_plane import codex_operator_adapter as codex_adapter
+from control_plane import executive_worker_broker as broker_module
+from control_plane.executive_worker_broker import RemoteBrokerError
+from control_plane.operator_harness_contract import (
+    AttentionTurnObservation,
+    ProcessGenerationRef,
+    ProcessIdentityObservation,
+    ProviderWriterState,
+)
+from control_plane.operator_harness_wire import to_wire
+from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
 from control_plane.wake_dispatcher import WakePreSubmitError
 from integrations.executive_wake.codex_app_server import CODEX_WAKE_INSTRUCTION
-from integrations.executive_wake.codex_app_server_rpc import CodexAppServerRpcWakeClient
+from integrations.executive_wake import codex_app_server_rpc as wake_rpc
+from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
 from scripts.ohf.laboratory import JsonRpcError
 
 
 NATIVE_HANDLE = "019cafe0-1111-7222-8333-abcdefabcdef"
 NUDGE_ID = "nudge-123"
 OPAQUE_IDS = ("WAKE-123", "WAKE-123:ATTEMPT:1")
+GENERATION = ProcessGenerationRef(
+    process_generation_id="generation-123",
+    session_epoch_id="epoch-123",
+    generation_number=7,
+    worker_id="worker-123",
+)
+PROCESS = ProcessIdentityObservation(
+    pid=4242,
+    pgid=4242,
+    process_start_identity="Mon Aug 30 01:00:00 2026",
+    boot_id="boot-123",
+)
 
 
 @dataclass
-class FakeAppServerClient:
-    resume_id: str = NATIVE_HANDLE
-    turn_id: str = "turn-456"
-    fail_method: str | None = None
+class FakeOwnedAppServerClient:
+    turn_id: str = "turn-wake-456"
+    fail_request: bool = False
+    completion_timeout: bool = False
     completion: Mapping[str, Any] | None = None
     calls: list[tuple[str, object]] = field(default_factory=list)
 
-    def start(self) -> None:
-        self.calls.append(("start", None))
-        if self.fail_method == "start":
-            raise RuntimeError("start failed")
+    def alive(self) -> bool:
+        self.calls.append(("alive", None))
+        return True
 
     def request(
         self,
         method: str,
         params: Mapping[str, Any] | None = None,
         *,
-        timeout: float = 15.0,
+        timeout: float = 60.0,
     ) -> dict[str, Any]:
         self.calls.append((method, dict(params or {})))
-        if self.fail_method == method:
-            raise RuntimeError(f"{method} failed")
-        if method == "initialize":
-            return {}
-        if method == "thread/resume":
-            return {"thread": {"id": self.resume_id}}
-        if method == "turn/start":
-            return {"turn": {"id": self.turn_id}}
-        raise AssertionError(f"unexpected request method {method}")
-
-    def notify(self, method: str, params: Mapping[str, Any] | None = None) -> None:
-        self.calls.append((method, dict(params or {})))
-        if self.fail_method == method:
-            raise RuntimeError(f"{method} failed")
+        if method != "turn/start":
+            raise AssertionError(f"second-writer/cold-resume method attempted: {method}")
+        if self.fail_request:
+            raise RuntimeError("turn/start transport lost")
+        return {"turn": {"id": self.turn_id}}
 
     def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, Any]:
         self.calls.append((f"wait:{method}", timeout))
-        if self.fail_method == f"wait:{method}":
+        if self.completion_timeout:
             raise JsonRpcError(f"timeout waiting for notification {method}")
-        if self.fail_method == "wait:turn/completed-transport":
-            raise JsonRpcError(f"app-server exited before {method}")
         if self.completion is not None:
             return dict(self.completion)
         return {
@@ -69,14 +84,246 @@ class FakeAppServerClient:
             },
         }
 
-    def close(self) -> None:
-        self.calls.append(("close", None))
+
+def _owned_adapter(
+    client: FakeOwnedAppServerClient,
+    *,
+    provider_session_id: str = NATIVE_HANDLE,
+    observed_process: ProcessIdentityObservation = PROCESS,
+):
+    adapter = object.__new__(codex_adapter.CodexOperatorAdapter)
+    adapter.worker_id = GENERATION.worker_id
+    adapter.workspace_root = Path("/tmp/mastermind-w3a-owned-workspace")
+    adapter.process_identity_observer = lambda _pid: observed_process
+    adapter._generations = {
+        GENERATION.process_generation_id: SimpleNamespace(
+            generation=GENERATION,
+            provider_session_id=provider_session_id,
+            writer_state=ProviderWriterState.HELD,
+            client=client,
+            process=PROCESS,
+            requested=SimpleNamespace(approval_policy="never"),
+        )
+    }
+    return adapter
 
 
-def _deliver(fake: FakeAppServerClient):
-    client = CodexAppServerRpcWakeClient(
-        client_factory=lambda: fake,
-        request_timeout_seconds=2.0,
+def test_attention_observation_is_closed_and_delivery_requires_acceptance() -> None:
+    observation = AttentionTurnObservation(
+        process_generation_id=GENERATION.process_generation_id,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        provider_native_turn_id="turn-wake-456",
+        accepted=True,
+        delivered=True,
+    )
+    assert observation.delivered is True
+
+    with pytest.raises(ValueError):
+        AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id=None,
+            accepted=False,
+            delivered=True,
+        )
+
+
+def test_worker_local_attention_reuses_exact_owned_generation_without_start_or_resume() -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(client)
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation == AttentionTurnObservation(
+        process_generation_id=GENERATION.process_generation_id,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        provider_native_turn_id="turn-wake-456",
+        accepted=True,
+        delivered=True,
+    )
+    methods = [name for name, _payload in client.calls]
+    assert "start" not in methods
+    assert "initialize" not in methods
+    assert "thread/resume" not in methods
+    assert "thread/start" not in methods
+    assert methods.count("turn/start") == 1
+    payload = next(payload for name, payload in client.calls if name == "turn/start")
+    assert payload["threadId"] == NATIVE_HANDLE
+    assert payload["clientUserMessageId"] == NUDGE_ID
+    assert payload["input"][0]["type"] == "text"
+    assert payload["input"][0]["text_elements"] == []
+    assert CODEX_WAKE_INSTRUCTION in payload["input"][0]["text"]
+    for opaque_id in OPAQUE_IDS:
+        assert opaque_id in payload["input"][0]["text"]
+
+
+def test_provider_session_drift_refuses_before_provider_io() -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(client, provider_session_id="foreign-session")
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.effect_unknown is False
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert client.calls == []
+
+
+def test_process_identity_drift_refuses_before_provider_io() -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(
+        client,
+        observed_process=ProcessIdentityObservation(
+            pid=9999,
+            pgid=9999,
+            process_start_identity="different",
+            boot_id="boot-foreign",
+        ),
+    )
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.effect_unknown is False
+    assert client.calls == []
+
+
+def test_turn_start_transport_loss_is_effect_unknown() -> None:
+    client = FakeOwnedAppServerClient(fail_request=True)
+    adapter = _owned_adapter(client)
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.effect_unknown is True
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_completion_timeout_is_accepted_not_delivered_on_same_owned_writer() -> None:
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    adapter = _owned_adapter(client)
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.accepted is True
+    assert observation.delivered is False
+    assert observation.provider_native_turn_id == "turn-wake-456"
+
+
+@dataclass
+class FakeBrokerClient:
+    response: AttentionTurnObservation
+    calls: list[tuple[str, object, float | None]] = field(default_factory=list)
+
+    def request_sync(
+        self,
+        operation: str,
+        payload: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append((operation, dict(payload), timeout_seconds))
+        return {"observation": to_wire(self.response)}
+
+
+def test_remote_adapter_uses_one_closed_worker_broker_attention_operation() -> None:
+    expected = AttentionTurnObservation(
+        process_generation_id=GENERATION.process_generation_id,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        provider_native_turn_id="turn-wake-456",
+        accepted=True,
+        delivered=True,
+    )
+    broker = FakeBrokerClient(expected)
+    remote = RemoteCodexOperatorAdapter(broker, turn_input_loader=lambda _turn: "unused")
+
+    observation = remote.deliver_attention(
+        generation=GENERATION,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation == expected
+    assert len(broker.calls) == 1
+    operation, payload, timeout = broker.calls[0]
+    assert operation == "ohf-deliver-attention"
+    assert payload["generation"] == to_wire(GENERATION)
+    assert payload["provider_session_id"] == NATIVE_HANDLE
+    assert payload["nudge_id"] == NUDGE_ID
+    assert payload["opaque_ids"] == list(OPAQUE_IDS)
+    assert payload["instruction"] == CODEX_WAKE_INSTRUCTION
+    assert payload["completion_timeout_seconds"] == 3.0
+    assert timeout is not None
+
+
+def test_broker_surface_has_dedicated_attention_operation_and_typed_effect_boundary() -> None:
+    source = inspect.getsource(broker_module)
+    assert '"ohf-deliver-attention"' in source
+    assert "def _ohf_deliver_attention" in source
+    assert "BrokerPreSubmitError" in source
+    assert "BrokerEffectUnknownError" in source
+
+
+@dataclass
+class FakeRemoteAttentionAdapter:
+    response: AttentionTurnObservation | None = None
+    error: Exception | None = None
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def deliver_attention(self, **kwargs: Any) -> AttentionTurnObservation:
+        self.calls.append(dict(kwargs))
+        if self.error is not None:
+            raise self.error
+        assert self.response is not None
+        return self.response
+
+
+def _deliver_via_wake_client(fake: FakeRemoteAttentionAdapter):
+    client = CodexCurrentWriterWakeClient(
+        operator_adapter=fake,
+        generation=GENERATION,
         completion_timeout_seconds=3.0,
     )
     return asyncio.run(
@@ -89,122 +336,53 @@ def _deliver(fake: FakeAppServerClient):
     )
 
 
-def _method_names(fake: FakeAppServerClient) -> list[str]:
-    return [name for name, _payload in fake.calls]
+def test_wake_client_delegates_to_bound_generation_and_returns_provider_observation() -> None:
+    fake = FakeRemoteAttentionAdapter(
+        response=AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id="turn-wake-456",
+            accepted=True,
+            delivered=True,
+        )
+    )
 
-
-def test_exact_running_thread_is_resumed_then_started_once() -> None:
-    fake = FakeAppServerClient()
-
-    observation = _deliver(fake)
+    observation = _deliver_via_wake_client(fake)
 
     assert observation.native_handle == NATIVE_HANDLE
     assert observation.nudge_id == NUDGE_ID
     assert observation.accepted is True
     assert observation.delivered is True
-    assert _method_names(fake) == [
-        "start",
-        "initialize",
-        "initialized",
-        "thread/resume",
-        "turn/start",
-        "wait:turn/completed",
-        "close",
-    ]
-    requests = {name: payload for name, payload in fake.calls if isinstance(payload, dict)}
-    assert requests["thread/resume"] == {"threadId": NATIVE_HANDLE}
-    assert requests["turn/start"]["threadId"] == NATIVE_HANDLE
-    assert requests["turn/start"]["clientUserMessageId"] == NUDGE_ID
-    assert requests["turn/start"]["input"][0]["type"] == "text"
-    assert requests["turn/start"]["input"][0]["text_elements"] == []
-    text = requests["turn/start"]["input"][0]["text"]
-    assert CODEX_WAKE_INSTRUCTION in text
-    for opaque_id in OPAQUE_IDS:
-        assert opaque_id in text
-    assert "thread/start" not in _method_names(fake)
-    assert "thread/fork" not in _method_names(fake)
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["generation"] == GENERATION
+    assert fake.calls[0]["provider_session_id"] == NATIVE_HANDLE
 
 
-@pytest.mark.parametrize("failure", ["start", "initialize", "initialized", "thread/resume"])
-def test_failure_before_turn_start_is_definite_pre_submit_refusal(failure: str) -> None:
-    fake = FakeAppServerClient(fail_method=failure)
+def test_broker_pre_submit_refusal_maps_to_wake_target_unavailable() -> None:
+    fake = FakeRemoteAttentionAdapter(
+        error=RemoteBrokerError("BrokerPreSubmitError", "pre-submit refusal")
+    )
 
     with pytest.raises(WakePreSubmitError) as error:
-        _deliver(fake)
+        _deliver_via_wake_client(fake)
 
-    assert error.value.outcome.value == "TARGET_UNAVAILABLE"
     assert error.value.reason_code == "target_unavailable"
-    assert "turn/start" not in _method_names(fake)
-    assert _method_names(fake)[-1] == "close"
 
 
-def test_resume_identity_mismatch_refuses_before_turn_start() -> None:
-    fake = FakeAppServerClient(resume_id="019cafe0-9999-7222-8333-abcdefabcdef")
+def test_broker_effect_unknown_never_maps_to_safe_refusal() -> None:
+    remote_error = RemoteBrokerError("BrokerEffectUnknownError", "provider write uncertain")
+    fake = FakeRemoteAttentionAdapter(error=remote_error)
 
-    with pytest.raises(WakePreSubmitError):
-        _deliver(fake)
+    with pytest.raises(RemoteBrokerError) as error:
+        _deliver_via_wake_client(fake)
 
-    assert "turn/start" not in _method_names(fake)
-    assert _method_names(fake)[-1] == "close"
-
-
-def test_turn_start_failure_is_post_submit_uncertainty_not_safe_refusal() -> None:
-    fake = FakeAppServerClient(fail_method="turn/start")
-
-    with pytest.raises(RuntimeError, match="turn/start failed") as error:
-        _deliver(fake)
-
-    assert not isinstance(error.value, WakePreSubmitError)
-    assert _method_names(fake)[-1] == "close"
+    assert error.value.code == "BrokerEffectUnknownError"
 
 
-def test_completion_timeout_is_accepted_but_not_delivered() -> None:
-    fake = FakeAppServerClient(fail_method="wait:turn/completed")
-
-    observation = _deliver(fake)
-
-    assert observation.accepted is True
-    assert observation.delivered is False
-    assert _method_names(fake).count("turn/start") == 1
-    assert _method_names(fake)[-1] == "close"
-
-
-def test_post_submit_transport_loss_is_effect_unknown_not_accepted() -> None:
-    fake = FakeAppServerClient(fail_method="wait:turn/completed-transport")
-
-    with pytest.raises(RuntimeError, match="app-server exited") as error:
-        _deliver(fake)
-
-    assert not isinstance(error.value, WakePreSubmitError)
-    assert _method_names(fake).count("turn/start") == 1
-    assert _method_names(fake)[-1] == "close"
-
-
-@pytest.mark.parametrize(
-    "completion",
-    [
-        {
-            "method": "turn/completed",
-            "params": {
-                "threadId": "019cafe0-9999-7222-8333-abcdefabcdef",
-                "turn": {"id": "turn-456", "status": "completed"},
-            },
-        },
-        {
-            "method": "turn/completed",
-            "params": {
-                "threadId": NATIVE_HANDLE,
-                "turn": {"id": "turn-foreign", "status": "completed"},
-            },
-        },
-    ],
-)
-def test_foreign_completion_identity_is_effect_unknown(completion: Mapping[str, Any]) -> None:
-    fake = FakeAppServerClient(completion=completion)
-
-    with pytest.raises(RuntimeError, match="completion identity") as error:
-        _deliver(fake)
-
-    assert not isinstance(error.value, WakePreSubmitError)
-    assert _method_names(fake).count("turn/start") == 1
-    assert _method_names(fake)[-1] == "close"
+def test_w3a_module_contains_no_second_app_server_or_cold_resume_path() -> None:
+    source = inspect.getsource(wake_rpc)
+    assert "AppServerClient" not in source
+    assert "client.start" not in source
+    assert '"thread/resume"' not in source
+    assert '"thread/start"' not in source
