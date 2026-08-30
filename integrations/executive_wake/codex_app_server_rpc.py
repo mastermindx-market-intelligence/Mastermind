@@ -117,6 +117,7 @@ class CodexAppServerRpcWakeClient:
                     {
                         "type": "text",
                         "text": _wake_text(instruction, opaque_ids),
+                        "text_elements": [],
                     }
                 ],
             }
