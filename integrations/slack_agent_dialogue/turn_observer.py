@@ -17,7 +17,7 @@ from control_plane.session_targets import (
     WakeRoute,
     route_obligation,
 )
-from control_plane.wake_dispatcher import WakeEffectUnknownError
+from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
 from control_plane.wake_events import WakeObligation, utc_now_iso
 from integrations.slack_agent_dialogue.contract import DialogueContractError
 from integrations.slack_agent_dialogue.contract_v2 import (
@@ -392,6 +392,14 @@ class DialogueTurnObserver:
             )
         try:
             await self.wake_carrier.submit(obligation, route)
+        except WakePreSubmitError:
+            return self._receipt(
+                ObservationOutcome.RECONCILIATION_INCOMPLETE,
+                "WAKE_TARGET_UNAVAILABLE",
+                decision=decision,
+                obligation=obligation,
+                route=route,
+            )
         except WakeEffectUnknownError:
             self._effect_unknown_source_refs.add(source_ref)
             return self._receipt(
