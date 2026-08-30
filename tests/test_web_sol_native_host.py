@@ -22,7 +22,9 @@ HEX_B = "b" * 64
 
 
 def host():
-    return importlib.import_module("integrations.chairman_surfaces.web_sol_native_host")
+    return importlib.import_module(
+        "integrations.chairman_surfaces.web_sol_native_host"
+    )
 
 
 def valid_request(action: str = "INSPECT") -> dict:
@@ -57,7 +59,11 @@ def observation(*, exact: bool = True) -> dict:
 
 def valid_receipt(request: dict, *, status: str | None = None) -> dict:
     if status is None:
-        status = "FOREGROUNDED_VERIFIED" if request["action"] == "FOREGROUND" else "INSPECTED"
+        status = (
+            "FOREGROUNDED_VERIFIED"
+            if request["action"] == "FOREGROUND"
+            else "INSPECTED"
+        )
     return {
         "schema": wsp.RECEIPT_SCHEMA,
         "binding_id": request["binding_id"],
@@ -74,7 +80,12 @@ def valid_receipt(request: dict, *, status: str | None = None) -> dict:
 
 
 def test_module_is_initially_missing_red():
-    assert importlib.util.find_spec("integrations.chairman_surfaces.web_sol_native_host") is not None
+    assert (
+        importlib.util.find_spec(
+            "integrations.chairman_surfaces.web_sol_native_host"
+        )
+        is not None
+    )
 
 
 def test_native_host_constants_are_exact_and_small():
@@ -83,26 +94,31 @@ def test_native_host_constants_are_exact_and_small():
     assert module.ALLOWED_EXTENSION_ORIGIN == EXTENSION_ORIGIN
     assert module.MAX_MESSAGE_BYTES == 64 * 1024
     assert not hasattr(module, "SOCKET_PATH")
-    assert wsi.DEFAULT_SOCKET_ROOT == "~/Library/Application Support/Mastermind/wsx"
+    assert (
+        wsi.DEFAULT_SOCKET_ROOT
+        == "~/Library/Application Support/Mastermind/wsx"
+    )
 
 
-def test_checked_in_native_host_manifest_is_exact_and_non_wildcard():
-    manifest_path = Path(__file__).resolve().parents[1] / "config" / "web_sol_native_host_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest == {
-        "name": NATIVE_HOST_NAME,
-        "description": "Mastermind Web Sol exact-surface bridge",
-        "path": "/usr/local/libexec/mastermind-web-sol-native-host",
-        "type": "stdio",
-        "allowed_origins": [EXTENSION_ORIGIN],
-    }
+def test_checked_in_global_native_host_manifest_is_absent():
+    manifest_path = (
+        Path(__file__).resolve().parents[1]
+        / "config"
+        / "web_sol_native_host_manifest.json"
+    )
+    assert not manifest_path.exists()
 
 
 def test_frame_encoding_is_native_endian_deterministic_and_round_trips():
     module = host()
     document = {"z": 2, "a": "é"}
     framed = module.encode_frame(document)
-    payload = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    payload = json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
     assert framed[:4] == struct.pack("@I", len(payload))
     assert framed[4:] == payload
     assert module.read_frame(io.BytesIO(framed)) == document
@@ -119,7 +135,10 @@ def test_frame_encoding_is_native_endian_deterministic_and_round_trips():
         (struct.pack("@I", 2) + b"\xff\xff", "frame_invalid_utf8"),
         (struct.pack("@I", 1) + b"[", "frame_invalid_json"),
         (struct.pack("@I", 7) + b"[1,2,3]", "frame_not_object"),
-        (struct.pack("@I", 13) + b'{"a":1,"a":2}', "frame_duplicate_key"),
+        (
+            struct.pack("@I", 13) + b'{"a":1,"a":2}',
+            "frame_duplicate_key",
+        ),
     ],
 )
 def test_frame_reader_fails_closed_without_echoing_payload(framed, code):
@@ -149,7 +168,10 @@ def test_exact_chrome_origin_only():
         "",
         None,
     ):
-        with pytest.raises(module.NativeHostError, match="caller_origin_refused"):
+        with pytest.raises(
+            module.NativeHostError,
+            match="caller_origin_refused",
+        ):
             module.validate_caller_origin(value)
 
 
@@ -197,7 +219,10 @@ def test_forward_ignores_bounded_probe_event_and_accepts_one_exact_receipt():
 @pytest.mark.parametrize(
     ("field", "replacement"),
     [
-        ("binding_id", "22222222-2222-4222-8222-222222222222"),
+        (
+            "binding_id",
+            "22222222-2222-4222-8222-222222222222",
+        ),
         ("conversation_fingerprint", "c" * 64),
         ("binding_fingerprint", "d" * 64),
         ("binding_revision", 8),
@@ -206,14 +231,20 @@ def test_forward_ignores_bounded_probe_event_and_accepts_one_exact_receipt():
         ("nonce", "different-nonce-00000001"),
     ],
 )
-def test_mismatched_receipt_is_refused_and_never_retried(field, replacement):
+def test_mismatched_receipt_is_refused_and_never_retried(
+    field,
+    replacement,
+):
     module = host()
     request = valid_request()
     receipt = valid_receipt(request)
     receipt[field] = replacement
     writes: list[dict] = []
 
-    with pytest.raises(module.NativeHostError, match="receipt_identity_mismatch"):
+    with pytest.raises(
+        module.NativeHostError,
+        match="receipt_identity_mismatch",
+    ):
         module.forward_request(
             request,
             write_chrome=writes.append,
@@ -270,12 +301,17 @@ def test_private_unix_socket_created_with_owner_only_mode(tmp_path):
         assert info.st_mode & 0o077 == 0
         assert server.family == socket.AF_UNIX
     finally:
-        module.close_private_server(server, path, owner_uid=os.getuid())
+        module.close_private_server(
+            server,
+            path,
+            owner_uid=os.getuid(),
+        )
     assert not path.exists()
 
 
 def stat_is_socket(mode: int) -> bool:
     import stat
+
     return stat.S_ISSOCK(mode)
 
 
@@ -293,7 +329,10 @@ def test_private_socket_refuses_colliding_non_socket_paths(tmp_path, kind):
         target.write_text("do not unlink", encoding="utf-8")
         path.symlink_to(target)
 
-    with pytest.raises(module.NativeHostError, match="socket_path_unsafe"):
+    with pytest.raises(
+        module.NativeHostError,
+        match="socket_path_unsafe",
+    ):
         module.open_private_server(path, owner_uid=os.getuid())
     assert path.exists() or path.is_symlink()
 
@@ -303,8 +342,14 @@ def test_private_socket_refuses_world_or_group_accessible_parent(tmp_path):
     parent = tmp_path / "wide"
     parent.mkdir(mode=0o755)
     os.chmod(parent, 0o755)
-    with pytest.raises(module.NativeHostError, match="socket_parent_unsafe"):
-        module.open_private_server(parent / "web_sol_surface.sock", owner_uid=os.getuid())
+    with pytest.raises(
+        module.NativeHostError,
+        match="socket_parent_unsafe",
+    ):
+        module.open_private_server(
+            parent / "web_sol_surface.sock",
+            owner_uid=os.getuid(),
+        )
 
 
 def test_source_has_no_tcp_http_subprocess_database_or_persistence_plane():
