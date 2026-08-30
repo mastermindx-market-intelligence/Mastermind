@@ -6,17 +6,25 @@ import pytest
 
 from control_plane.executive_runtime import Runtime
 from control_plane.session_targets import RuntimeBinding
-from control_plane.wake_dispatcher import WakeEffectUnknownError
+from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
 from control_plane.wake_ledger import LedgerPhase, requested_record
 from control_plane.wake_persist import WakeLedgerRepository
 from integrations.executive_wake.registry import WakeDispatcherRegistry
 from integrations.slack_agent_dialogue.persisted_wake_carrier import PersistedWakeCarrier
-from integrations.slack_agent_dialogue.turn_observer import WakeCarrierState
+from integrations.slack_agent_dialogue.turn_observer import DialogueTurnObserver, ObservationOutcome, WakeCarrierState
 from tests.test_executive_wake_persisted_dispatch import (
     _Dispatcher,
     _POLICY,
     _binding,
     _pair,
+)
+from tests.test_slack_agent_dialogue_turn_observer import (
+    _client_with_result as _dialogue_client_with_result,
+    _context as _dialogue_context,
+    _parent as _dialogue_parent,
+    _policy as _dialogue_policy,
+    _registry as _dialogue_registry,
+    _routing as _dialogue_routing,
 )
 
 
@@ -104,7 +112,7 @@ def test_current_binding_is_revalidated_before_provider_submission(tmp_path) -> 
         retry_policy=_POLICY,
     )
 
-    with pytest.raises(ValueError, match="current RuntimeBinding"):
+    with pytest.raises(WakePreSubmitError, match="current RuntimeBinding"):
         _run(carrier.submit(obligation, route))
 
     assert dispatcher.nudge_calls == 0
@@ -131,3 +139,57 @@ def test_requested_only_survives_restart_and_dispatches_once(tmp_path) -> None:
         LedgerPhase.DELIVERY_ATTEMPT,
         LedgerPhase.DELIVERED,
     ]
+
+
+def test_observer_binding_movement_is_reconciliation_incomplete_not_crash(tmp_path) -> None:
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    parent = _dialogue_parent()
+    current = RuntimeBinding(
+        session_alias="EXECUTIVE-CEO-A",
+        binding_id="bind-observer01",
+        binding_generation=1,
+        native_handle="thread-observer-current",
+        reasoning_surface="chatgpt-sol",
+    )
+    rotated = RuntimeBinding(
+        session_alias="EXECUTIVE-CEO-A",
+        binding_id="bind-observer02",
+        binding_generation=2,
+        native_handle="thread-observer-rotated",
+        reasoning_surface="chatgpt-sol",
+    )
+    carrier = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry(),
+        current_binding_for=lambda _route: rotated,
+        retry_policy=_POLICY,
+    )
+    observer = DialogueTurnObserver(
+        policy=_dialogue_policy(),
+        client=_dialogue_client_with_result(parent),
+        registry=_dialogue_registry(),
+        wake_carrier=carrier,
+        binding_for=lambda seat: current if seat == "ceo" else None,
+        emitted_at=lambda: "2026-08-29T02:00:00Z",
+    )
+
+    first = _run(
+        observer.reconcile_once(
+            context=_dialogue_context(parent),
+            routing=_dialogue_routing(parent),
+        )
+    )
+    second = _run(
+        observer.reconcile_once(
+            context=_dialogue_context(parent),
+            routing=_dialogue_routing(parent),
+        )
+    )
+
+    assert first.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+    assert first.reason == "WAKE_TARGET_UNAVAILABLE"
+    assert second.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+    assert second.reason == "WAKE_TARGET_UNAVAILABLE"
+    assert first.obligation is not None
+    assert _phases(repo, first.obligation.obligation_id) == [LedgerPhase.WAKE_REQUESTED]
