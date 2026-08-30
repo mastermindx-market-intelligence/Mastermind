@@ -107,7 +107,7 @@ def test_v2_modules_do_not_import_wake_persistence_or_second_transport() -> None
         )
 
 
-def test_injected_slack_seam_is_exactly_three_methods() -> None:
+def test_injected_slack_seam_is_exactly_four_methods() -> None:
     tree = ast.parse((PACKAGE / "engine.py").read_text(encoding="utf-8"))
     protocol = next(
         node
@@ -119,14 +119,20 @@ def test_injected_slack_seam_is_exactly_three_methods() -> None:
         for node in protocol.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
-    assert methods == {"fetch_channel_history", "fetch_thread", "post_reply"}
+    assert methods == {
+        "fetch_channel_history",
+        "fetch_thread",
+        "post_parent",
+        "post_reply",
+    }
 
 
-def test_local_service_exposes_only_five_operations() -> None:
+def test_local_service_exposes_only_six_operations() -> None:
     text = (PACKAGE / "service.py").read_text(encoding="utf-8")
     operations = {
         "status",
         "bind_or_verify_thread",
+        "ensure_thread",
         "send_message",
         "read_thread",
         "wait_for_reply",

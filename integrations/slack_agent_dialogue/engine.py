@@ -25,6 +25,7 @@ from integrations.slack_agent_dialogue.contract import (
 ERROR_CODES = frozenset(
     {
         "MESSAGE_KEY_CONFLICT",
+        "PARENT_SEND_EFFECT_UNKNOWN",
         "PARENT_MESSAGE_INVALID",
         "REPLY_AMBIGUOUS",
         "REPLY_NOT_FOUND",
@@ -122,6 +123,10 @@ class SlackDialogueClient(Protocol):
         self, *, channel_id: str, thread_ts: str, limit: int
     ) -> HistoryPage: ...
 
+    async def post_parent(
+        self, *, channel_id: str, text: str
+    ) -> SlackMessage: ...
+
     async def post_reply(
         self, *, channel_id: str, thread_ts: str, text: str
     ) -> SlackMessage: ...
@@ -212,6 +217,15 @@ class BoundThread:
     thread_ts: str
     parent_author_user_id: str
     parent_fingerprint: str
+
+
+@dataclass(frozen=True)
+class ParentEnsureReceipt(BoundThread):
+    action: str
+
+    def __post_init__(self) -> None:
+        if self.action not in {"POSTED", "RECOVERED", "REUSED"}:
+            raise ValueError("invalid parent ensure action")
 
 
 @dataclass(frozen=True)
@@ -672,6 +686,7 @@ __all__ = [
     "ERROR_CODES",
     "HistoryPage",
     "MessageReceipt",
+    "ParentEnsureReceipt",
     "ReadMessage",
     "SlackDialogueClient",
     "SlackEffectUnknown",
