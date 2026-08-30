@@ -44,6 +44,9 @@ MAX_SOURCE_RECEIPTS = 128
 MAX_SOURCE_REFS_PER_OPTION = 16
 MAX_SCOPE_REPOSITORIES = 8
 MAX_SCOPE_PATHS = 64
+MAX_SCOPE_REFS = 32
+MAX_SCOPE_PREFIXES = 32
+MAX_CARRIER_PREFIXES = 32
 MAX_BUDGET_UNITS = 1_000_000
 MAX_ACTIVE_CHILDREN = 128
 
@@ -87,6 +90,7 @@ READ_ONLY_ACTIONS = frozenset(
         "READ_ONLY_AUDIT",
         "ARCHITECTURE_PROPOSAL",
         "STRATEGIC_ANALYSIS",
+        "PORTFOLIO_HOLD",
     }
 )
 MODIFYING_ACTIONS = frozenset(
@@ -96,6 +100,14 @@ MODIFYING_ACTIONS = frozenset(
         "SOURCE_MERGE",
         "EXECUTIVE_CHILD_COMMISSION",
         "REVERSIBLE_RUNTIME_CANARY",
+        "PROGRAM_START",
+        "PROGRAM_PAUSE",
+        "PROGRAM_RESUME",
+        "PROGRAM_RETIRE",
+        "PROGRAM_COMBINE",
+        "PROGRAM_SPLIT",
+        "RESOURCE_REALLOCATION",
+        "ORGANIZATIONAL_RESTRUCTURE",
         "PRODUCTION_DEPLOY",
         "LIVE_CAPITAL_EXECUTION",
         "CONSTITUTION_CHANGE",
@@ -105,6 +117,7 @@ MODIFYING_ACTIONS = frozenset(
     }
 )
 ALL_ACTIONS = READ_ONLY_ACTIONS | MODIFYING_ACTIONS
+NEW_CHILD_ACTIONS = frozenset({"EXECUTIVE_CHILD_COMMISSION", "PROGRAM_START"})
 
 ALWAYS_CHAIRMAN_ACTIONS = frozenset(
     {
@@ -211,6 +224,8 @@ class DelegationEnvelope:
     allowed_reversibility: frozenset[Reversibility]
     allowed_repositories: frozenset[str]
     allowed_path_prefixes: Mapping[str, tuple[str, ...]]
+    allowed_scope_prefixes: tuple[str, ...]
+    allowed_carrier_prefixes: tuple[str, ...]
     max_budget_units: int
     max_active_children: int
     require_exact_carrier: bool
@@ -224,6 +239,7 @@ class StrategicOption:
     action: str
     reversibility: Reversibility
     source_refs: tuple[str, ...]
+    scope_refs: tuple[str, ...]
     effect_state: EffectState
     operation_key: str | None
     carrier_state: CarrierState
@@ -447,6 +463,8 @@ def _parse_envelope(
             "allowed_reversibility",
             "allowed_repositories",
             "allowed_path_prefixes",
+            "allowed_scope_prefixes",
+            "allowed_carrier_prefixes",
             "max_budget_units",
             "max_active_children",
             "require_exact_carrier",
@@ -506,6 +524,20 @@ def _parse_envelope(
             if _PATH_PREFIX_RE.fullmatch(prefix) is None:
                 raise ChairmanCognitionError("invalid path prefix")
         prefixes[repo] = parsed
+    allowed_scope_prefixes = _str_tuple(
+        item["allowed_scope_prefixes"],
+        "allowed_scope_prefixes",
+        1,
+        MAX_SCOPE_PREFIXES,
+        256,
+    )
+    allowed_carrier_prefixes = _str_tuple(
+        item["allowed_carrier_prefixes"],
+        "allowed_carrier_prefixes",
+        1,
+        MAX_CARRIER_PREFIXES,
+        256,
+    )
     max_budget_units = _bounded_int(
         item["max_budget_units"], "max_budget_units", 0, MAX_BUDGET_UNITS
     )
@@ -528,6 +560,8 @@ def _parse_envelope(
         allowed_reversibility=allowed_reversibility,
         allowed_repositories=allowed_repositories,
         allowed_path_prefixes=prefixes,
+        allowed_scope_prefixes=allowed_scope_prefixes,
+        allowed_carrier_prefixes=allowed_carrier_prefixes,
         max_budget_units=max_budget_units,
         max_active_children=max_active_children,
         require_exact_carrier=item["require_exact_carrier"],
@@ -557,6 +591,7 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                 "action",
                 "reversibility",
                 "source_refs",
+                "scope_refs",
                 "effect_state",
                 "operation_key",
                 "carrier_state",
@@ -598,6 +633,13 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
         if action in READ_ONLY_ACTIONS and effect_state is not EffectState.NONE:
             raise ChairmanCognitionError(
                 "read-only action must use NONE effect_state"
+            )
+        scope_refs = _str_tuple(
+            item["scope_refs"], "scope_refs", 0, MAX_SCOPE_REFS, 256
+        )
+        if action in MODIFYING_ACTIONS and not scope_refs:
+            raise ChairmanCognitionError(
+                "modifying action requires at least one scope_ref"
             )
         operation_key = _nullable_str(item["operation_key"], "operation_key", 192)
         if operation_key is not None and _OPERATION_KEY_RE.fullmatch(operation_key) is None:
@@ -656,6 +698,7 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                     MAX_SOURCE_REFS_PER_OPTION,
                     256,
                 ),
+                scope_refs=scope_refs,
                 effect_state=effect_state,
                 operation_key=operation_key,
                 carrier_state=carrier_state,
@@ -803,6 +846,13 @@ def _adjudicate(
             ReasonCode.REVERSIBILITY_NOT_DELEGATED,
             source_state,
         )
+    if not _refs_allowed(option.scope_refs, envelope.allowed_scope_prefixes):
+        return _decision(
+            option,
+            Disposition.CHAIRMAN_REQUIRED,
+            ReasonCode.SCOPE_OUTSIDE_ENVELOPE,
+            source_state,
+        )
     if option.budget_units > envelope.max_budget_units:
         return _decision(
             option,
@@ -839,7 +889,7 @@ def _adjudicate(
             source_state,
         )
     if (
-        option.action == "EXECUTIVE_CHILD_COMMISSION"
+        option.action in NEW_CHILD_ACTIONS
         and option.carrier_state is not CarrierState.NEW_CHILD
     ):
         return _decision(
@@ -849,13 +899,25 @@ def _adjudicate(
             source_state,
         )
     if (
-        option.action != "EXECUTIVE_CHILD_COMMISSION"
+        option.action not in NEW_CHILD_ACTIONS
         and option.carrier_state is not CarrierState.EXACT_EXISTING
     ):
         return _decision(
             option,
             Disposition.REFUSED,
             ReasonCode.EXACT_CARRIER_REQUIRED,
+            source_state,
+        )
+    if (
+        option.carrier_ref is not None
+        and not _refs_allowed(
+            (option.carrier_ref,), envelope.allowed_carrier_prefixes
+        )
+    ):
+        return _decision(
+            option,
+            Disposition.CHAIRMAN_REQUIRED,
+            ReasonCode.SCOPE_OUTSIDE_ENVELOPE,
             source_state,
         )
     if option.carrier_state is CarrierState.AMBIGUOUS:
@@ -899,6 +961,10 @@ def _decision(
         source_state=source_state,
         execution_authority_granted=False,
     )
+
+
+def _refs_allowed(refs: Sequence[str], prefixes: Sequence[str]) -> bool:
+    return all(any(ref.startswith(prefix) for prefix in prefixes) for ref in refs)
 
 
 def _scope_allowed(option: StrategicOption, envelope: DelegationEnvelope) -> bool:
