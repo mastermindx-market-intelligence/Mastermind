@@ -119,6 +119,7 @@ A strategic option is not an implementation prompt. It states:
 option identity and observable outcome
 action/effect class
 source references and freshness
+canonical affected-scope references
 reversibility and effect state
 operation and carrier identity
 repository/path scope where applicable
@@ -129,7 +130,17 @@ capability unlocked and proof required
 ```
 
 A model may create option content. It may not create the current authority source that makes a
-modifying option eligible.
+modifying option eligible. The closed V1 action vocabulary explicitly includes:
+
+```text
+PORTFOLIO_HOLD
+PROGRAM_START / PROGRAM_PAUSE / PROGRAM_RESUME / PROGRAM_RETIRE
+PROGRAM_COMBINE / PROGRAM_SPLIT
+RESOURCE_REALLOCATION / ORGANIZATIONAL_RESTRUCTURE
+```
+
+`PORTFOLIO_HOLD` has no effect and is eligible as read-only cognition. Organizational modifications
+require canonical affected-scope references and the existing owner of those responsibilities.
 
 ## 6. Frontier construction
 
@@ -143,8 +154,7 @@ incomparable. This favors truthful over-inclusion over false suppression.
 The deterministic engine emits:
 
 - `strategic_frontier`: current/effect-safe non-dominated options;
-- `actionable_frontier`: non-dominated options among those eligible by delegation/serviceability
-  preflight;
+- `actionable_frontier`: frontier options eligible by delegation/serviceability preflight;
 - a mechanical recommendation only for a unique actionable frontier;
 - otherwise an explicit multi-option fork or no-action state.
 
@@ -180,9 +190,12 @@ not allowed:
   duplicate lifecycle/queue/session/authority/memory plane
 scope:
   named repositories and path prefixes only
+  named canonical affected-scope prefixes
+  named allowed exact-carrier prefixes
   max three active children for the first cycle
   small explicit budget ceiling
   exact carrier for every non-child-creation modification
+  explicit NEW_CHILD for a new Program or Executive child
 ```
 
 ### 7.3 Action-time enforcement
@@ -295,10 +308,14 @@ The model generates options; A1 validates grammar, computes the frontier and pro
 - unknown field/action/source owner -> invalid input;
 - stale/conflicting/unknown load-bearing source -> option refused;
 - ambiguous effect -> reconcile first;
+- known-applied effect -> terminal/non-actionable, never replayed or recommended;
 - duplicate control plane -> refused;
 - current strategic prohibition -> refused;
 - missing/expired/non-current envelope -> Chairman required or refused;
 - missing exact carrier/operation/expected head -> refused;
+- Executive child commission without explicit `NEW_CHILD` carrier state -> refused;
+- source action without one repository and explicit paths -> invalid input;
+- non-Chairman-owned delegation source or envelope disabling exact-carrier law -> invalid input;
 - canary without stop/rollback/falsifier -> refused;
 - invalid CLI input -> fixed opaque `INVALID_INPUT`, exit 2, no payload leakage.
 
