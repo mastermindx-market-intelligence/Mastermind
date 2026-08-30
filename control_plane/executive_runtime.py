@@ -14108,6 +14108,39 @@ class Runtime:
         ):
             raise StateConflict("runtime binding placement evidence drifted")
 
+        try:
+            grant = _load_canonical_digest_pair(
+                row["effective_grant_json"],
+                row["effective_grant_digest"],
+                name="runtime binding effective grant",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(
+                f"runtime binding effective grant evidence is invalid: {exc}"
+            ) from exc
+        grant_keys = {
+            "schema_version",
+            "authorities",
+            "write_paths",
+            "validation_argv",
+            "policy_sha",
+            "job_id",
+            "role",
+        }
+        if (
+            not isinstance(grant, dict)
+            or set(grant) != grant_keys
+            or grant.get("schema_version")
+            != "mastermind.executive_effective_grant/v1"
+            or grant.get("job_id") != row["job_id"]
+            or grant.get("role") != row["orchestration_role"]
+            or grant.get("policy_sha") != row["authority_policy_hash"]
+            or not isinstance(grant.get("authorities"), list)
+            or not isinstance(grant.get("write_paths"), list)
+            or not isinstance(grant.get("validation_argv"), list)
+        ):
+            raise StateConflict("runtime binding effective grant evidence drifted")
+
         admissions = connection.execute(
             """SELECT * FROM events
                WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
@@ -14156,6 +14189,94 @@ class Runtime:
             "SELECT * FROM events WHERE command_id=? ORDER BY event_id",
             (admission.get("tx3_applied_command_id"),),
         ).fetchall()
+        tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
+        tx3_payload: Any = None
+        tx3_intent: sqlite3.Row | None = None
+        tx3_intent_payload: Any = None
+        expected_tx3_command_id: str | None = None
+        expected_tx3_applied: dict[str, Any] | None = None
+        expected_tx3_intent: dict[str, Any] | None = None
+        try:
+            generation_number = int(row["generation_number"])
+            if generation_number == 1:
+                expected_tx3_applied = {
+                    "operation_kind": OperationKind.START_SESSION.value,
+                    "provider_session_id": row["epoch_provider_session"],
+                    "process_generation_id": row["process_generation_id"],
+                }
+                expected_tx3_intent = {
+                    "schema_version": "mastermind.operator_harness_intent/v1",
+                    "operation_kind": OperationKind.START_SESSION.value,
+                    "attempt_id": token,
+                    "session_epoch_id": row["session_epoch_id"],
+                    "process_generation_id": row["process_generation_id"],
+                    "worker_id": row["worker_id"],
+                    "provider_session_id": None,
+                }
+            elif generation_number == 2:
+                expected_tx3_applied = {
+                    "operation_kind": OperationKind.RESUME_SESSION.value,
+                    "provider_session_id": row["epoch_provider_session"],
+                    "process_generation_id": row["process_generation_id"],
+                }
+                expected_tx3_intent = {
+                    "operation_kind": OperationKind.RESUME_SESSION.value,
+                    "attempt_id": token,
+                    "session_epoch_id": row["session_epoch_id"],
+                    "process_generation_id": row["process_generation_id"],
+                    "worker_id": row["worker_id"],
+                    "provider_session_id": row["epoch_provider_session"],
+                }
+            if tx3 is not None:
+                tx3_payload = _strict_canonical_json_loads(
+                    str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
+                )
+                operation_id = OperationId(str(tx3["aggregate_id"]))
+                expected_tx3_command_id = operation_receipt_command_id(
+                    operation_id, OperationReceiptKind.APPLIED
+                )
+                tx3_intent_rows = connection.execute(
+                    "SELECT * FROM events WHERE command_id=? ORDER BY event_id",
+                    (operation_id.command_id,),
+                ).fetchall()
+                if len(tx3_intent_rows) == 1:
+                    tx3_intent = tx3_intent_rows[0]
+                    tx3_intent_payload = _strict_canonical_json_loads(
+                        str(tx3_intent["payload_json"]),
+                        name="runtime binding TX-3 INTENT",
+                    )
+        except (StateConflict, TypeError, ValueError) as exc:
+            raise StateConflict(
+                f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
+            ) from exc
+        if (
+            tx3 is None
+            or expected_tx3_applied is None
+            or expected_tx3_intent is None
+            or tx3["event_type"] != OperationReceiptKind.APPLIED.value
+            or tx3["command_id"] != expected_tx3_command_id
+            or tx3["command_id"] != admission.get("tx3_applied_command_id")
+            or tx3["actor"] != "supervisor"
+            or tx3["aggregate_type"] != "operator_operation"
+            or tx3["job_id"] != row["job_id"]
+            or tx3["attempt_id"] != token
+            or tx3["worker_id"] != row["worker_id"]
+            or tx3["quota_class"] != row["quota_class"]
+            or tx3_payload != expected_tx3_applied
+            or tx3_intent is None
+            or tx3_intent["event_type"] != OperationReceiptKind.INTENT.value
+            or tx3_intent["command_id"] != tx3["aggregate_id"]
+            or tx3_intent["actor"] != "supervisor"
+            or tx3_intent["aggregate_type"] != "operator_operation"
+            or tx3_intent["aggregate_id"] != tx3["aggregate_id"]
+            or tx3_intent["job_id"] != row["job_id"]
+            or tx3_intent["attempt_id"] != token
+            or tx3_intent["worker_id"] != row["worker_id"]
+            or tx3_intent["quota_class"] != row["quota_class"]
+            or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
+            or tx3_intent_payload != expected_tx3_intent
+        ):
+            raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
         observation = _validated_admission_principal(row, admission)
         if (
             set(admission) != admission_keys
@@ -14184,12 +14305,6 @@ class Runtime:
                 or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
                 for field in immutable_digests
             )
-            or len(tx3_rows) != 1
-            or tx3_rows[0]["event_type"] != OperationReceiptKind.APPLIED.value
-            or tx3_rows[0]["aggregate_type"] != "operator_operation"
-            or tx3_rows[0]["attempt_id"] != token
-            or tx3_rows[0]["worker_id"] != row["worker_id"]
-            or tx3_rows[0]["quota_class"] != row["quota_class"]
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {
