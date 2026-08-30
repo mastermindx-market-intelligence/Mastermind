@@ -1,0 +1,15 @@
+{
+  "schema": "mastermind.chairman_cognition_a4_effect_canary.v1",
+  "operation": "mastermind-chairman-cognition-effect-canary-20260830-sol-001",
+  "decision": "OPT-A4-CANARY-WRITE",
+  "status": "COMPILED_OWNER_REVALIDATION_REQUIRED",
+  "execution_authority_granted": false,
+  "effect_owner_revalidation_required": true,
+  "expected_effect": {
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "base_branch": "sol/chairman-cognition-effect-compiler-a4-20260830",
+    "target_branch": "sol/chairman-cognition-effect-canary-a4-20260830",
+    "path": "research/CHAIRMAN_COGNITION_A4_EFFECT_CANARY_2026-08-30.json"
+  },
+  "completion_boundary": "The GitHub owner must independently reread current base, target and path state before effect; this record grants no authority."
+}
