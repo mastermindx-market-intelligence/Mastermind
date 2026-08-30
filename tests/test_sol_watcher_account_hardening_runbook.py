@@ -26,6 +26,10 @@ def test_three_account_runbook_is_account_local_and_receipted() -> None:
         '"audit_kind": "NON_WATCHER"',
         "aggregate:<stable-scope-id>",
         "ACTION_AUTHORITATIVE requires one exact Slack carrier",
+        "one rotating Codex OAuth slot",
+        "does not identify or authorize all three ChatGPT web accounts",
+        "audit each exact web account's native Tasks/Automations store",
+        "Codex availability is not a watcher-store prerequisite",
     )
     for phrase in required_phrases:
         assert phrase in text, f"missing account hardening law: {phrase}"
