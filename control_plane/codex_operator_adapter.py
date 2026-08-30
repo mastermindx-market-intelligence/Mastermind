@@ -63,6 +63,7 @@ from control_plane.operator_harness_contract import (
     TurnRef,
     TurnStartObservation,
     WorkspaceIdentity,
+    runtime_binding_id_for,
 )
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
@@ -277,6 +278,8 @@ class _GenerationState:
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
     turns: dict[str, str] = field(default_factory=dict)
+    attention_inflight: bool = False
+    attention_native_turn_id: str | None = None
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
@@ -1379,6 +1382,8 @@ class CodexOperatorAdapter:
         *,
         generation: ProcessGenerationRef,
         attempt_id: str,
+        binding_id: str,
+        binding_generation: int,
         provider_session_id: str,
         nudge_id: str,
         opaque_ids: Sequence[str],
@@ -1393,6 +1398,10 @@ class CodexOperatorAdapter:
         if (
             not isinstance(attempt_id, str)
             or COMMAND_ID_RE.fullmatch(attempt_id) is None
+            or not isinstance(binding_id, str)
+            or COMMAND_ID_RE.fullmatch(binding_id) is None
+            or type(binding_generation) is not int
+            or binding_generation < 1
             or not isinstance(provider_session_id, str)
             or COMMAND_ID_RE.fullmatch(provider_session_id) is None
             or not isinstance(nudge_id, str)
@@ -1413,6 +1422,10 @@ class CodexOperatorAdapter:
             )
         if (
             state.epoch.attempt_id != attempt_id
+            or binding_id
+            != runtime_binding_id_for(attempt_id, state.epoch.session_epoch_id)
+            or binding_generation != state.generation.generation_number
+            or binding_generation != generation.generation_number
             or state.provider_session_id != provider_session_id
             or state.writer_state is not ProviderWriterState.HELD
         ):
@@ -1425,7 +1438,9 @@ class CodexOperatorAdapter:
             for event in state.events
             if event.kind == "turn/completed" and event.turn_id is not None
         }
-        if any(turn_id not in completed_turns for turn_id in state.turns):
+        if state.attention_inflight or any(
+            turn_id not in completed_turns for turn_id in state.turns
+        ):
             raise CodexAdapterError(
                 AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
                 "attention refused while the current writer has an active turn",
@@ -1470,6 +1485,8 @@ class CodexOperatorAdapter:
 
         # Final I/O boundary: every exception from this request onward is
         # effect-unknown and may never be translated into a retryable refusal.
+        state.attention_inflight = True
+        state.attention_native_turn_id = None
         try:
             started = state.client.request("turn/start", params, timeout=30.0)
         except Exception as exc:
@@ -1488,6 +1505,7 @@ class CodexOperatorAdapter:
                 "attention provider response omitted the turn id",
                 effect_unknown=True,
             )
+        state.attention_native_turn_id = native_turn_id
         try:
             completion = state.client.wait_notification(
                 _ATTENTION_COMPLETION_METHOD,
@@ -1534,6 +1552,8 @@ class CodexOperatorAdapter:
                 "attention completion identity is ambiguous",
                 effect_unknown=True,
             )
+        state.attention_inflight = False
+        state.attention_native_turn_id = None
         return AttentionTurnObservation(
             process_generation_id=generation.process_generation_id,
             provider_session_id=provider_session_id,

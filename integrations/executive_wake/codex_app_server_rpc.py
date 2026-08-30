@@ -15,7 +15,9 @@ from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
     ProcessGenerationRef,
+    runtime_binding_id_for,
 )
+from control_plane.session_targets import RuntimeBinding
 from control_plane.wake_dispatcher import TransportOutcome, WakePreSubmitError
 from integrations.executive_wake.codex_app_server import CodexWakeDeliveryObservation
 
@@ -29,6 +31,7 @@ class CodexCurrentWriterWakeClient:
         operator_adapter: Any,
         generation: ProcessGenerationRef,
         attempt_id: str,
+        runtime_binding: RuntimeBinding,
         completion_timeout_seconds: float = 15.0,
     ) -> None:
         if not callable(getattr(operator_adapter, "deliver_attention", None)):
@@ -37,6 +40,20 @@ class CodexCurrentWriterWakeClient:
             raise TypeError("generation must be a ProcessGenerationRef")
         if not str(attempt_id or "").strip():
             raise ValueError("attempt_id is required")
+        if not isinstance(runtime_binding, RuntimeBinding):
+            raise TypeError("runtime_binding must be a RuntimeBinding")
+        expected_binding_id = runtime_binding_id_for(
+            str(attempt_id), generation.session_epoch_id
+        )
+        if runtime_binding.binding_id != expected_binding_id:
+            raise ValueError("runtime binding id does not match the OHF Attempt/epoch")
+        if runtime_binding.binding_generation != generation.generation_number:
+            raise ValueError("runtime binding generation does not match OHF generation")
+        if (
+            not str(runtime_binding.native_handle or "").strip()
+            or runtime_binding.reasoning_surface != "codex"
+        ):
+            raise ValueError("runtime binding is not an addressable Codex binding")
         timeout = completion_timeout_seconds
         if (
             isinstance(timeout, bool)
@@ -47,6 +64,7 @@ class CodexCurrentWriterWakeClient:
         self._operator_adapter = operator_adapter
         self._generation = generation
         self._attempt_id = str(attempt_id)
+        self._runtime_binding = runtime_binding
         self._completion_timeout_seconds = float(timeout)
 
     async def deliver_wake(
@@ -63,6 +81,8 @@ class CodexCurrentWriterWakeClient:
             )
         if isinstance(opaque_ids, (str, bytes)):
             raise _pre_submit("Codex opaque Wake identities must be a sequence")
+        if native_handle != self._runtime_binding.native_handle:
+            raise _pre_submit("Codex native handle moved from the bound RuntimeBinding")
         return await asyncio.to_thread(
             self._deliver_sync,
             native_handle=str(native_handle),
@@ -83,6 +103,8 @@ class CodexCurrentWriterWakeClient:
             observation = self._operator_adapter.deliver_attention(
                 generation=self._generation,
                 attempt_id=self._attempt_id,
+                binding_id=self._runtime_binding.binding_id,
+                binding_generation=self._runtime_binding.binding_generation,
                 provider_session_id=native_handle,
                 nudge_id=nudge_id,
                 opaque_ids=opaque_ids,

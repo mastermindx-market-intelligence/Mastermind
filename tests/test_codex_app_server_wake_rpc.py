@@ -23,7 +23,9 @@ from control_plane.operator_harness_contract import (
     ProcessIdentityObservation,
     ProviderWriterState,
     SessionEpochRef,
+    runtime_binding_id_for,
 )
+from control_plane.session_targets import RuntimeBinding
 from control_plane.operator_harness_wire import attention_turn_observation, to_wire
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
 from control_plane.wake_dispatcher import WakePreSubmitError
@@ -48,6 +50,13 @@ GENERATION = ProcessGenerationRef(
     session_epoch_id="epoch-123",
     generation_number=7,
     worker_id="worker-123",
+)
+BINDING = RuntimeBinding(
+    session_alias="EXECUTIVE-CTO-FORGE",
+    binding_id="bind-685d52104959fdbdd2e81ce6790478f610ba202b",
+    binding_generation=GENERATION.generation_number,
+    native_handle=NATIVE_HANDLE,
+    reasoning_surface="codex",
 )
 PROCESS = ProcessIdentityObservation(
     pid=4242,
@@ -120,6 +129,8 @@ def _owned_adapter(
             requested=SimpleNamespace(approval_policy="never"),
             events=[],
             turns={},
+            attention_inflight=False,
+            attention_native_turn_id=None,
         )
     }
     return adapter
@@ -127,6 +138,7 @@ def _owned_adapter(
 
 def test_attention_observation_is_closed_and_delivery_requires_acceptance() -> None:
     assert ATTENTION_TURN_INSTRUCTION == CODEX_WAKE_INSTRUCTION
+    assert runtime_binding_id_for(ATTEMPT_ID, EPOCH.session_epoch_id) == BINDING.binding_id
     observation = AttentionTurnObservation(
         process_generation_id=GENERATION.process_generation_id,
         provider_session_id=NATIVE_HANDLE,
@@ -155,6 +167,8 @@ def test_worker_local_attention_reuses_exact_owned_generation_without_start_or_r
     observation = adapter.deliver_attention(
         generation=GENERATION,
         attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
         provider_session_id=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         opaque_ids=OPAQUE_IDS,
@@ -194,6 +208,8 @@ def test_provider_session_drift_refuses_before_provider_io() -> None:
         adapter.deliver_attention(
             generation=GENERATION,
             attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -214,6 +230,40 @@ def test_attempt_drift_refuses_before_provider_io() -> None:
         adapter.deliver_attention(
             generation=GENERATION,
             attempt_id="attempt-foreign",
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert error.value.effect_unknown is False
+    assert client.calls == []
+
+
+@pytest.mark.parametrize(
+    ("binding_id", "binding_generation"),
+    (
+        ("bind-ffffffffffffffffffffffffffffffffffffffff", BINDING.binding_generation),
+        (BINDING.binding_id, BINDING.binding_generation + 1),
+    ),
+)
+def test_runtime_binding_drift_refuses_at_worker_local_edge_before_provider_io(
+    binding_id: str,
+    binding_generation: int,
+) -> None:
+    client = FakeOwnedAppServerClient()
+    adapter = _owned_adapter(client)
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=binding_id,
+            binding_generation=binding_generation,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -234,6 +284,8 @@ def test_released_writer_refuses_before_provider_io() -> None:
         adapter.deliver_attention(
             generation=GENERATION,
             attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -257,6 +309,8 @@ def test_active_normal_turn_refuses_attention_before_provider_io() -> None:
         adapter.deliver_attention(
             generation=GENERATION,
             attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -285,6 +339,8 @@ def test_process_identity_drift_refuses_before_provider_io() -> None:
         adapter.deliver_attention(
             generation=GENERATION,
             attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -304,6 +360,8 @@ def test_turn_start_transport_loss_is_effect_unknown() -> None:
         adapter.deliver_attention(
             generation=GENERATION,
             attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
             provider_session_id=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
             opaque_ids=OPAQUE_IDS,
@@ -314,6 +372,23 @@ def test_turn_start_transport_loss_is_effect_unknown() -> None:
     assert error.value.effect_unknown is True
     assert [name for name, _payload in client.calls].count("turn/start") == 1
 
+    with pytest.raises(codex_adapter.CodexAdapterError) as second:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id="nudge-456",
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert second.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert second.value.effect_unknown is False
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
 
 def test_completion_timeout_is_accepted_not_delivered_on_same_owned_writer() -> None:
     client = FakeOwnedAppServerClient(completion_timeout=True)
@@ -322,6 +397,8 @@ def test_completion_timeout_is_accepted_not_delivered_on_same_owned_writer() -> 
     observation = adapter.deliver_attention(
         generation=GENERATION,
         attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
         provider_session_id=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         opaque_ids=OPAQUE_IDS,
@@ -332,6 +409,42 @@ def test_completion_timeout_is_accepted_not_delivered_on_same_owned_writer() -> 
     assert observation.accepted is True
     assert observation.delivered is False
     assert observation.provider_native_turn_id == "turn-wake-456"
+
+
+def test_completion_timeout_blocks_a_second_attention_provider_write() -> None:
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    adapter = _owned_adapter(client)
+
+    first = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert first.accepted is True
+    assert first.delivered is False
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id="nudge-456",
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert error.value.effect_unknown is False
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
 @dataclass
@@ -365,6 +478,8 @@ def test_remote_adapter_uses_one_closed_worker_broker_attention_operation() -> N
     observation = remote.deliver_attention(
         generation=GENERATION,
         attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
         provider_session_id=NATIVE_HANDLE,
         nudge_id=NUDGE_ID,
         opaque_ids=OPAQUE_IDS,
@@ -378,6 +493,8 @@ def test_remote_adapter_uses_one_closed_worker_broker_attention_operation() -> N
     assert operation == "ohf-deliver-attention"
     assert payload["generation"] == to_wire(GENERATION)
     assert payload["attempt_id"] == ATTEMPT_ID
+    assert payload["binding_id"] == BINDING.binding_id
+    assert payload["binding_generation"] == BINDING.binding_generation
     assert payload["provider_session_id"] == NATIVE_HANDLE
     assert payload["nudge_id"] == NUDGE_ID
     assert payload["opaque_ids"] == list(OPAQUE_IDS)
@@ -407,6 +524,8 @@ def _attention_payload() -> dict[str, Any]:
     return {
         "generation": to_wire(GENERATION),
         "attempt_id": ATTEMPT_ID,
+        "binding_id": BINDING.binding_id,
+        "binding_generation": BINDING.binding_generation,
         "provider_session_id": NATIVE_HANDLE,
         "nudge_id": NUDGE_ID,
         "opaque_ids": list(OPAQUE_IDS),
@@ -478,6 +597,7 @@ def _deliver_via_wake_client(fake: FakeRemoteAttentionAdapter):
         operator_adapter=fake,
         generation=GENERATION,
         attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
         completion_timeout_seconds=3.0,
     )
     return asyncio.run(
@@ -512,6 +632,26 @@ def test_wake_client_delegates_to_bound_generation_and_returns_provider_observat
     assert fake.calls[0]["generation"] == GENERATION
     assert fake.calls[0]["attempt_id"] == ATTEMPT_ID
     assert fake.calls[0]["provider_session_id"] == NATIVE_HANDLE
+    assert fake.calls[0]["binding_id"] == BINDING.binding_id
+    assert fake.calls[0]["binding_generation"] == BINDING.binding_generation
+
+
+def test_wake_client_refuses_runtime_binding_generation_mispairing() -> None:
+    stale = RuntimeBinding(
+        session_alias=BINDING.session_alias,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation + 1,
+        native_handle=BINDING.native_handle,
+        reasoning_surface=BINDING.reasoning_surface,
+    )
+
+    with pytest.raises(ValueError, match="binding generation"):
+        CodexCurrentWriterWakeClient(
+            operator_adapter=FakeRemoteAttentionAdapter(),
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            runtime_binding=stale,
+        )
 
 
 def test_broker_pre_submit_refusal_maps_to_wake_target_unavailable() -> None:

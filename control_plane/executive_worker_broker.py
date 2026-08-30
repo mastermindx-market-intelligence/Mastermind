@@ -1768,6 +1768,8 @@ class ExecutiveWorkerBroker:
         expected = {
             "generation",
             "attempt_id",
+            "binding_id",
+            "binding_generation",
             "provider_session_id",
             "nudge_id",
             "opaque_ids",
@@ -1787,6 +1789,8 @@ class ExecutiveWorkerBroker:
             ) from exc
 
         attempt_id = payload["attempt_id"]
+        binding_id = payload["binding_id"]
+        binding_generation = payload["binding_generation"]
         provider_session_id = payload["provider_session_id"]
         nudge_id = payload["nudge_id"]
         opaque_ids = payload["opaque_ids"]
@@ -1795,6 +1799,10 @@ class ExecutiveWorkerBroker:
         if (
             not isinstance(attempt_id, str)
             or _ID_RE.fullmatch(attempt_id) is None
+            or not isinstance(binding_id, str)
+            or _ID_RE.fullmatch(binding_id) is None
+            or type(binding_generation) is not int
+            or binding_generation < 1
             or not isinstance(provider_session_id, str)
             or _ID_RE.fullmatch(provider_session_id) is None
             or not isinstance(nudge_id, str)
@@ -1831,6 +1839,8 @@ class ExecutiveWorkerBroker:
                     state.adapter.deliver_attention,
                     generation=generation,
                     attempt_id=attempt_id,
+                    binding_id=binding_id,
+                    binding_generation=binding_generation,
                     provider_session_id=provider_session_id,
                     nudge_id=nudge_id,
                     opaque_ids=tuple(opaque_ids),

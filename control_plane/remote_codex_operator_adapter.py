@@ -246,6 +246,8 @@ class RemoteCodexOperatorAdapter:
         *,
         generation: ProcessGenerationRef,
         attempt_id: str,
+        binding_id: str,
+        binding_generation: int,
         provider_session_id: str,
         nudge_id: str,
         opaque_ids: tuple[str, ...],
@@ -257,6 +259,8 @@ class RemoteCodexOperatorAdapter:
             {
                 "generation": to_wire(generation),
                 "attempt_id": attempt_id,
+                "binding_id": binding_id,
+                "binding_generation": binding_generation,
                 "provider_session_id": provider_session_id,
                 "nudge_id": nudge_id,
                 "opaque_ids": list(opaque_ids),

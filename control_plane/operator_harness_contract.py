@@ -18,6 +18,7 @@ Interface version: ``mastermind.operator_harness/v1``.
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
 import re
 from dataclasses import dataclass, field, fields
@@ -64,6 +65,19 @@ LONGEST_OPERATION_RECEIPT_SUFFIX_LEN = max(
 # Longest derived receipt is `:effect-unknown` (15).  Every accepted OperationId
 # must leave room for that suffix under COMMAND_ID_MAX_LEN.
 MAX_OPERATION_ID_LEN = COMMAND_ID_MAX_LEN - LONGEST_OPERATION_RECEIPT_SUFFIX_LEN
+
+
+def runtime_binding_id_for(attempt_id: str, session_epoch_id: str) -> str:
+    """Derive the accepted ABA-safe binding id for one Attempt/epoch pair."""
+
+    attempt = str(attempt_id or "").strip()
+    epoch = str(session_epoch_id or "").strip()
+    if (
+        COMMAND_ID_RE.fullmatch(attempt) is None
+        or COMMAND_ID_RE.fullmatch(epoch) is None
+    ):
+        raise ValueError("runtime binding source identities are malformed")
+    return "bind-" + hashlib.sha256(f"{attempt}:{epoch}".encode("utf-8")).hexdigest()[:40]
 
 
 def operation_id_permits_all_derived_receipts(command_id: str) -> bool:
@@ -2898,6 +2912,7 @@ __all__ = [
     "resolve_operation_after_crash",
     "restore_invalidation",
     "rich_ohf_may_rewrite_legacy_attempt_field",
+    "runtime_binding_id_for",
     "same_epoch_recovery_replay_disposition",
     "tx10_resume_intent_target",
     "workspace_identities_equal",
