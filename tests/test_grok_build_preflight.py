@@ -51,7 +51,11 @@ def _receipt(module, **overrides):
 def test_command_builder_is_provider_work_free(tmp_path: Path):
     module = _load()
     binary = _executable(tmp_path)
-    assert module.build_allowed_argv(binary, "version") == (str(binary), "version")
+    assert module.build_allowed_argv(binary, "version") == (
+        str(binary),
+        "--no-auto-update",
+        "version",
+    )
     assert module.build_allowed_argv(binary, "acp_stdio") == (
         str(binary),
         "--no-auto-update",
@@ -80,6 +84,7 @@ def test_provider_env_drops_api_key_and_unrelated_secrets():
             "HOME": "/tmp/home",
             "PATH": "/bin:/usr/bin",
             "HTTPS_PROXY": "http://127.0.0.1:9999",
+            "GROK_HOME": "/tmp/grok-home",
             "XAI_API_KEY": "fake-secret-value",
             "ANTHROPIC_AUTH_TOKEN": "another-fake-secret",
             "RANDOM_SECRET": "do-not-forward",
@@ -89,6 +94,7 @@ def test_provider_env_drops_api_key_and_unrelated_secrets():
         "HOME": "/tmp/home",
         "PATH": "/bin:/usr/bin",
         "HTTPS_PROXY": "http://127.0.0.1:9999",
+        "GROK_HOME": "/tmp/grok-home",
     }
     assert "XAI_API_KEY" not in env
 
@@ -124,6 +130,7 @@ def test_initialize_accepts_cached_token_and_refuses_wrong_protocol():
             "result": {
                 "protocolVersion": 1,
                 "authMethods": [
+                    {"id": "xai.api_key", "name": "API key"},
                     {"id": "cached_token", "name": "Cached OAuth"},
                     {"id": "device_flow", "name": "Device"},
                 ],
@@ -178,7 +185,7 @@ def test_initialize_rejects_duplicate_or_malformed_methods():
         )
 
 
-def test_authenticate_success_and_login_required():
+def test_authenticate_success_and_failure_is_not_misclassified_as_login_required():
     module = _load()
     ready = module.normalize_authenticate_response(
         {"jsonrpc": "2.0", "id": 2, "result": {}}
@@ -198,7 +205,8 @@ def test_authenticate_success_and_login_required():
         }
     )
     assert missing.oauth_ready is False
-    assert missing.verdict == "LOGIN_REQUIRED"
+    assert missing.verdict == "ACP_AUTHENTICATION_FAILED"
+    assert missing.reason_codes == ("ACP_AUTHENTICATION_FAILED",)
 
 
 def test_provider_wire_secret_shape_is_never_accepted():
@@ -259,7 +267,12 @@ def test_observe_version_uses_sanitized_env_and_discards_stderr(
         captured["argv"] = tuple(argv)
         captured["env"] = dict(kwargs["env"])
         captured["stderr"] = kwargs["stderr"]
-        return subprocess.CompletedProcess(argv, 0, stdout="Grok Build 9.8.7\n", stderr="secret")
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout="Grok Build 9.8.7\n",
+            stderr="secret",
+        )
 
     monkeypatch.setenv("XAI_API_KEY", "fake-secret")
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -287,7 +300,14 @@ def test_build_receipt_does_not_leak_provider_or_account_identity(
     receipt = module.build_receipt(binary)
     assert set(receipt) == module._RECEIPT_KEYS
     raw = json.dumps(receipt, sort_keys=True).lower()
-    for forbidden in ("email", "account_id", "organization", "home_path", "session_id", "provider_account"):
+    for forbidden in (
+        "email",
+        "account_id",
+        "organization",
+        "home_path",
+        "session_id",
+        "provider_account",
+    ):
         assert forbidden not in raw
     assert receipt["model_turn_performed"] is False
     assert receipt["executive_routing_ready"] is False
