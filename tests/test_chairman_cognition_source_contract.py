@@ -40,7 +40,12 @@ def test_source_law_freezes_one_office_two_modes_and_no_duplicate_owner():
         "does **not** create a second `META_CHAIRMAN`",
         "execution_authority_granted=false",
         "SUPERVISED_LIVE_CANARY",
+        "PORTFOLIO_HOLD",
+        "PROGRAM_START",
+        "PROGRAM_RETIRE",
         "EFFECT_UNKNOWN_RECONCILE_FIRST",
+        "EFFECT_ALREADY_APPLIED",
+        "NEW_CHILD_CARRIER_REQUIRED",
         "DUPLICATE_CONTROL_PLANE_REFUSED",
     ):
         assert marker in law
@@ -62,6 +67,10 @@ def test_architecture_preserves_canonical_owners_and_accelerated_live_canary():
         "Operation Assurance",
         "no mandatory multi-week shadow",
         "one supervised live reversible canary",
+        "canonical affected-scope references",
+        "allowed exact-carrier prefixes",
+        "known-applied effect",
+        "explicit `NEW_CHILD` carrier state",
         "No `chairman_brain.db`",
     ):
         assert marker in spec
@@ -73,6 +82,7 @@ def test_program_has_real_vertical_and_completion_not_docs():
         "control_plane/chairman_cognition.py",
         "scripts/chairman_cognition.py",
         "tests/test_chairman_cognition.py",
+        "tests/test_chairman_cognition_hardening.py",
         "CCL-A2",
         "CCL-A3",
         "CCL-A4",
