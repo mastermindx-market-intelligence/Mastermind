@@ -212,6 +212,48 @@ def test_missing_freshness_or_repin_law_is_rejected() -> None:
     assert FindingCode.MISSING_CARRIER_FRESHNESS in codes
 
 
+@pytest.mark.parametrize(
+    ("original", "contradiction", "expected"),
+    (
+        (
+            "On every run, re-pin the CURRENT protected Mastermind Skillpack before modifying action.",
+            "On every run, do not re-pin the CURRENT protected Mastermind Skillpack before modifying action.",
+            FindingCode.MISSING_CURRENT_REPIN,
+        ),
+        (
+            "Fresh-read the exact carrier after the latest local evidence-producing action.",
+            "Do not fresh-read the exact carrier after the latest local evidence-producing action.",
+            FindingCode.MISSING_CARRIER_FRESHNESS,
+        ),
+        (
+            "For BLOCKED, DECISION_REQUEST, or RESULT, post the actual same-carrier Sol edge before reporting.",
+            "For BLOCKED, DECISION_REQUEST, or RESULT, do not post the actual same-carrier Sol edge before reporting.",
+            FindingCode.MISSING_SAME_CARRIER_ACTION,
+        ),
+        (
+            "If action cannot lawfully occur, return a typed blocker naming the real boundary.",
+            "If action cannot lawfully occur, do not return a typed blocker naming the real boundary.",
+            FindingCode.MISSING_TYPED_BLOCKER,
+        ),
+        (
+            "Send terminal STOP before disarming the child watcher source.",
+            "Do not send terminal STOP before disarming the child watcher source.",
+            FindingCode.MISSING_TERMINAL_STOP_ORDER,
+        ),
+        (
+            "Never infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.",
+            "Infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.",
+            FindingCode.MISSING_LIFECYCLE_BOUNDARY,
+        ),
+    ),
+)
+def test_negated_required_laws_do_not_satisfy_contract(
+    original: str, contradiction: str, expected: FindingCode
+) -> None:
+    prompt = _authoritative_prompt().replace(original, contradiction)
+    assert expected in _codes(prompt)
+
+
 def test_audit_tasks_reports_invalid_enabled_and_ignores_disabled() -> None:
     tasks = [
         {"id": "good", "title": "Good action loop", "is_enabled": True, "prompt": _authoritative_prompt()},
