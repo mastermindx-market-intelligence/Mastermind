@@ -276,6 +276,11 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         raise ChairmanCognitionError("unsupported input schema")
     as_of = _iso_utc(doc["as_of"], "document.as_of")
     source_receipts = _parse_source_receipts(doc["source_receipts"])
+    if any(
+        _parse_time(receipt.observed_at) > _parse_time(as_of)
+        for receipt in source_receipts.values()
+    ):
+        raise ChairmanCognitionError("source receipt cannot postdate document.as_of")
     strategic_constraints = _parse_constraints(doc["strategic_constraints"])
     envelope, envelope_state = _parse_envelope(
         doc["delegation_envelope"], source_receipts, as_of
@@ -462,6 +467,10 @@ def _parse_envelope(
         if source_receipts[ref].owner != "CHAIRMAN_DIRECTIVE":
             raise ChairmanCognitionError(
                 "delegation authority must come from Chairman directive"
+            )
+        if not source_receipts[ref].load_bearing:
+            raise ChairmanCognitionError(
+                "delegation authority source must be load-bearing"
             )
     mode = _enum(EnvelopeMode, item["mode"], "envelope mode")
     allowed_actions = frozenset(
