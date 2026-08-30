@@ -169,7 +169,7 @@ Current archaeology may refine exact names, but the default bounded surface is:
 ```text
 professional_practices/schema/practice-pack-v1.schema.json
 professional_practices/README.md
-control_plane/professional_practice_contract.py
+professional_practices/contract.py
 scripts/validate_professional_practices.py
 tests/professional_practices/test_practice_pack_contract.py
 docs/superpowers/plans/2026-08-30-professional-practice-fabric-c0.md
@@ -181,13 +181,17 @@ docs/superpowers/plans/2026-08-30-professional-practice-fabric-c0.md
 schema_version
 practice_id
 practice_version
+source_identity
 status
 mission_classes
 exclusions
 mandate
 authority_ceiling
+success_definition
 information_required
+information_optional
 information_forbidden
+source_precedence
 methods
 artifacts
 evaluation

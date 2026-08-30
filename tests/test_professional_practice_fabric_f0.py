@@ -123,6 +123,19 @@ def test_product_design_pilot_falsifies_specialization_against_control() -> None
         assert required.lower() in text.lower()
 
 
+def test_program_contract_matches_architecture_and_stays_out_of_runtime_owner() -> None:
+    text = _text(PROGRAM)
+    for required in (
+        "source_identity",
+        "success_definition",
+        "information_optional",
+        "source_precedence",
+        "professional_practices/contract.py",
+    ):
+        assert required in text
+    assert "control_plane/professional_practice_contract.py" not in text
+
+
 def test_program_is_bounded_vertical_and_carries_no_start() -> None:
     text = _text(PROGRAM)
     for wave in (

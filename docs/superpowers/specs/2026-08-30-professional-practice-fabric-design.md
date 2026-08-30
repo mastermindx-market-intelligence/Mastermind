@@ -331,7 +331,9 @@ unknowns
 reasons
 ```
 
-It never assigns a worker, creates a Job/session or grants capability.
+It never assigns a worker, creates a Job/session or grants capability. Its initial state is an
+advisory projection; the action-authoritative parent Sol owns professional-coverage admission until a
+separately reviewed policy proves any deterministic gate.
 
 ### 7.2 Questions
 
