@@ -10,6 +10,7 @@ from control_plane.session_targets import load_session_targets, route_obligation
 from control_plane.wake_dispatcher import WakeEffectUnknownError
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
+    PARENT_DISCRIMINATOR_V2,
     TURN_WATCH_MODE_V1,
     build_message_v2,
     build_parent_v2,
@@ -114,12 +115,14 @@ def _policy() -> DialoguePolicy:
     )
 
 
-def _client(parent: dict[str, object]) -> InMemorySlackClient:
+def _client(
+    parent: dict[str, object], *, parent_author: str = PARENT_USER
+) -> InMemorySlackClient:
     client = InMemorySlackClient(relay_bot_user_id=RELAY_USER)
     client.add_parent(
         SlackMessage(
             ts=PARENT_TS,
-            author_user_id=PARENT_USER,
+            author_user_id=parent_author,
             text=render_parent_v2(parent),
         )
     )
@@ -314,6 +317,124 @@ def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> 
         assert result.route.target_seat == "coo"
         assert len(carrier.reconcile_calls) == 1
         assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
+def test_configured_relay_authored_parent_reaches_existing_classifier_and_wake() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = RecordingWakeCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent, parent_author=RELAY_USER),
+            registry=_registry(),
+            wake_carrier=carrier,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert result.obligation is not None
+        assert len(carrier.reconcile_calls) == 1
+        assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
+def test_legacy_and_relay_duplicate_full_parent_identity_is_ambiguous_without_wake() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_parent(
+            SlackMessage(
+                ts="1787961600.000003",
+                author_user_id=RELAY_USER,
+                text=render_parent_v2(parent),
+            )
+        )
+        carrier = RecordingWakeCarrier()
+        observer = DialogueTurnObserver(
+            policy=_policy(), client=client, registry=_registry(), wake_carrier=carrier
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.REFUSED
+        assert result.reason == "THREAD_BINDING_AMBIGUOUS"
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_arbitrary_bot_and_malformed_relay_parent_refuse_without_wake() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        for author, text, reason in (
+            ("U0ARBITRARYBOT", render_parent_v2(parent), "THREAD_BINDING_AMBIGUOUS"),
+            (RELAY_USER, f"{PARENT_DISCRIMINATOR_V2}{{malformed", "PARENT_MESSAGE_INVALID"),
+        ):
+            client = InMemorySlackClient(relay_bot_user_id=RELAY_USER)
+            client.add_parent(
+                SlackMessage(ts=PARENT_TS, author_user_id=author, text=text)
+            )
+            carrier = RecordingWakeCarrier()
+            observer = DialogueTurnObserver(
+                policy=_policy(),
+                client=client,
+                registry=_registry(),
+                wake_carrier=carrier,
+            )
+
+            result = await observer.reconcile_once(
+                context=_context(parent), routing=_routing(parent)
+            )
+
+            assert result.outcome is ObservationOutcome.REFUSED
+            assert result.reason == reason
+            assert carrier.reconcile_calls == []
+            assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_relay_parent_without_creation_mutation_evidence_refuses_without_wake() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        for edited, deleted in ((True, False), (False, True)):
+            client = InMemorySlackClient(relay_bot_user_id=RELAY_USER)
+            client.add_parent(
+                SlackMessage(
+                    ts=PARENT_TS,
+                    author_user_id=RELAY_USER,
+                    text=render_parent_v2(parent),
+                    edited=edited,
+                    deleted=deleted,
+                    created_text=None,
+                )
+            )
+            carrier = RecordingWakeCarrier()
+            observer = DialogueTurnObserver(
+                policy=_policy(),
+                client=client,
+                registry=_registry(),
+                wake_carrier=carrier,
+            )
+
+            result = await observer.reconcile_once(
+                context=_context(parent), routing=_routing(parent)
+            )
+
+            assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+            assert result.reason == "MUTATION_RECONCILIATION_INCOMPLETE"
+            assert carrier.reconcile_calls == []
+            assert carrier.submit_calls == []
 
     asyncio.run(scenario())
 
