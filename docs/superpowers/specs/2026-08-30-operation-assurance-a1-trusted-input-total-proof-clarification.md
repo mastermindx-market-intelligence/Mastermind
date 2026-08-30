@@ -144,13 +144,22 @@ The exploration receipt and property result must make the incomplete product vis
 may add separate reviewed product limits, but A1 cannot invent hidden unlimited work or silently stop
 searching.
 
-The verdict law is fail-closed:
+The verdict law distinguishes incomplete no-witness analysis from an already complete unsafe
+witness:
 
-> any analysis exhaustion or checker exception yields BOUNDED_NO_COUNTEREXAMPLE or INCONCLUSIVE_MODEL_GAP, never proof.
+> without a fully materialized definite witness, analysis exhaustion yields BOUNDED_NO_COUNTEREXAMPLE or INCONCLUSIVE_MODEL_GAP, never proof.
 
-A concrete counterexample already established before an unrelated later exhaustion remains visible
-subject to the existing fidelity and relevant-gap law. Exhaustion cannot erase a definite witness,
-but it prevents broader all-pass proof.
+> resource-bound exhaustion does not erase a fully materialized definite counterexample.
+
+A fully materialized witness means the complete prefix or lasso, failed property, state deltas,
+source references, realizability classification, and relevant-gap check were all deterministically
+constructed before the bound was reached. Such a witness remains `UNSAFE_COUNTEREXAMPLE` within its
+existing fidelity and applicability scope even when unrelated later exploration is incomplete.
+
+A checker internal exception is different from an ordinary declared resource bound: a checker internal exception never upgrades a result and may require bounded report refusal. If the exception occurs after a
+fully materialized witness and the immutable report can still be validated and finalized through the
+normal error boundary, the witness may remain visible; otherwise the CLI refuses the report rather
+than emitting partially trusted output. An exception never becomes proof or a healthy default.
 
 ### 3.1 Required falsifiers
 
@@ -161,7 +170,10 @@ Tests must fail if implementation:
 3. omits a built-in property from the proof-coverage receipt;
 4. catches an internal exception and returns proof or a healthy default;
 5. hides which product or property exhausted its bound;
-6. lets wall-clock timeout or memory pressure become a pass.
+6. lets wall-clock timeout or memory pressure become a pass;
+7. discards a complete definite counterexample merely because a later unrelated search reaches a
+   declared resource bound;
+8. emits a partially constructed witness after an internal exception.
 
 ## 4. Terminal gate boundaries must be machine represented
 
@@ -214,7 +226,7 @@ Tests must fail if implementation:
 
 - Track product-search completeness separately from base-graph completeness.
 - Apply the declared state bound to augmented products and expose the exact limit reason.
-- Preserve already-found witnesses while refusing incomplete global proof.
+- Preserve fully materialized definite witnesses while refusing incomplete global proof.
 
 ### Immutable report
 
@@ -222,12 +234,15 @@ Tests must fail if implementation:
 - Never serialize caller claims as stronger trusted evidence.
 - Keep generation-time applicability, model verdict, progress disposition, and recommendation
   orthogonal.
+- Refuse partial output when an internal error prevents full immutable-report validation.
 
 ### CLI
 
 - Accept only authored model input; no trusted-source or trusted-replay flags exist.
 - Invalid input returns the bounded refusal exit.
 - Valid unsafe, bounded, or inconclusive reports still return normal report completion and JSON.
+- Internal checker failure returns the bounded checker-refusal exit unless a fully validated report
+  was already finalized.
 
 ## 6. Capability and no-rebuild boundary
 
