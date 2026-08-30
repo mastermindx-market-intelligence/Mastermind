@@ -175,3 +175,17 @@ def test_read_only_action_cannot_claim_an_applied_effect() -> None:
     )
     with pytest.raises(ChairmanCognitionError, match="NONE effect_state"):
         evaluate_document(_document(option, envelope=None))
+
+
+def test_delegation_authority_source_must_be_load_bearing() -> None:
+    document = _document()
+    document["source_receipts"][0]["load_bearing"] = False
+    with pytest.raises(ChairmanCognitionError, match="load-bearing"):
+        evaluate_document(document)
+
+
+def test_source_receipt_cannot_postdate_decision_snapshot() -> None:
+    document = _document()
+    document["source_receipts"][1]["observed_at"] = "2026-08-30T16:00:01Z"
+    with pytest.raises(ChairmanCognitionError, match="postdate"):
+        evaluate_document(document)
