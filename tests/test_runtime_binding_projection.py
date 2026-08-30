@@ -314,6 +314,28 @@ def test_public_projection_refuses_temp_job_shadow_of_authoritative_main(tmp_pat
             )
 
 
+def test_public_projection_refuses_owner_seat_drift_from_job_created(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    with runtime.store.transaction() as connection:
+        created = connection.execute(
+            "SELECT payload_json FROM main.events "
+            "WHERE event_type='JOB_CREATED' AND job_id=("
+            "SELECT job_id FROM main.attempts WHERE attempt_id=?)",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert created is not None
+        assert json.loads(str(created["payload_json"]))["owner_seat"] == "coo"
+        connection.execute(
+            "UPDATE main.jobs SET owner_seat='ceo' WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        )
+
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target(seat="ceo"))
+
+
 @pytest.mark.parametrize("mutation", ["moved", "replaced"])
 def test_public_projection_refuses_snapshot_after_owned_database_identity_changes(
     tmp_path, mutation

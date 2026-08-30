@@ -14104,6 +14104,9 @@ class Runtime:
             """
             SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
                    j.status AS job_status,j.owner_seat,j.orchestration_role,
+                   j.parent_job_id,j.root_job_id,j.orchestration_provenance_json,
+                   j.orchestration_provenance_digest,j.plan_attempt_id,j.plan_digest,
+                   j.plan_step_id,j.repair_round,j.supersedes_job_id,
                    j.requested_authorities_json AS job_requested_authorities_json,
                    j.allowed_write_paths_json AS job_allowed_write_paths_json,
                    j.validation_commands_json AS job_validation_commands_json,
@@ -14288,6 +14291,50 @@ class Runtime:
             != ("RUN_TESTS" in grant["authorities"])
         ):
             raise StateConflict("runtime binding effective grant role semantics drifted")
+
+        creation_events = connection.execute(
+            """SELECT * FROM main.events
+               WHERE event_type='JOB_CREATED' AND job_id=?
+               ORDER BY event_id""",
+            (row["job_id"],),
+        ).fetchall()
+        if len(creation_events) != 1:
+            raise StateConflict("runtime binding Job creation cardinality is not exact")
+        creation_event = creation_events[0]
+        try:
+            job_role, job_provenance, job_provenance_digest = (
+                _decode_orchestration_job_fields(row)
+            )
+            creation_payload = _strict_canonical_json_loads(
+                str(creation_event["payload_json"]),
+                name="runtime binding JOB_CREATED payload",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(
+                f"runtime binding Job creation evidence is invalid: {exc}"
+            ) from exc
+        expected_creation_actor = (
+            "operator" if job_role in {"aggregation", "plan"} else "coo"
+        )
+        if (
+            not isinstance(job_provenance, dict)
+            or not isinstance(creation_payload, dict)
+            or creation_event["sequence"] != 1
+            or creation_event["actor"] != expected_creation_actor
+            or creation_event["aggregate_type"] != "job"
+            or creation_event["aggregate_id"] != row["job_id"]
+            or creation_event["job_id"] != row["job_id"]
+            or creation_event["attempt_id"] is not None
+            or creation_event["worker_id"] is not None
+            or creation_event["quota_class"] is not None
+            or creation_event["command_id"] != job_provenance.get("command_id")
+            or not isinstance(creation_payload.get("owner_seat"), str)
+            or creation_payload.get("owner_seat") != row["owner_seat"]
+            or creation_payload.get("orchestration_role") != job_role
+            or creation_payload.get("orchestration_provenance_digest")
+            != job_provenance_digest
+        ):
+            raise StateConflict("runtime binding Job creation evidence drifted")
 
         admissions = connection.execute(
             """SELECT * FROM main.events
