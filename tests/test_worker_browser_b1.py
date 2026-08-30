@@ -13,6 +13,7 @@ import sys
 import textwrap
 import threading
 import zlib
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -71,6 +72,34 @@ def _fixture_urls(origin: str) -> dict[str, str]:
         "A": f"{origin}/__mastermind_browser_visual_fixture__/{'a' * 32}",
         "B": f"{origin}/__mastermind_browser_visual_fixture__/{'b' * 32}",
     }
+
+
+def _record_guard_text_success(
+    guard: browser.BrowserMcpToolGuard,
+    name: str,
+    arguments: dict,
+    *,
+    text: str = "ok",
+) -> None:
+    guard.record_result(
+        name,
+        arguments,
+        {"result": {"content": [{"type": "text", "text": text}]}},
+    )
+
+
+def _guard_navigate(guard: browser.BrowserMcpToolGuard, url: str) -> None:
+    arguments = {"url": url}
+    guard.rewrite_call("browser_navigate", arguments)
+    _record_guard_text_success(guard, "browser_navigate", arguments)
+
+
+def _guard_resize(
+    guard: browser.BrowserMcpToolGuard, *, width: int, height: int
+) -> None:
+    arguments = {"width": width, "height": height}
+    guard.rewrite_call("browser_resize", arguments)
+    _record_guard_text_success(guard, "browser_resize", arguments)
 
 
 def _runtime_install_fixture(
@@ -1665,11 +1694,8 @@ def test_mcp_tool_guard_confines_all_writes_and_rejects_unsafe_arguments(tmp_pat
         origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
     )
 
-    guard.rewrite_call(
-        "browser_navigate",
-        {"url": "http://127.0.0.1:48101/"},
-    )
-    guard.rewrite_call("browser_resize", {"width": 1440, "height": 900})
+    _guard_navigate(guard, "http://127.0.0.1:48101/")
+    _guard_resize(guard, width=1440, height=900)
     screenshot = guard.rewrite_call(
         "browser_take_screenshot",
         {
@@ -1696,7 +1722,7 @@ def test_mcp_tool_guard_confines_all_writes_and_rejects_unsafe_arguments(tmp_pat
         assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
 
 
-def test_mcp_tool_guard_allows_fixture_only_interaction_and_records_file_refusal(tmp_path):
+def test_mcp_tool_guard_requires_product_hover_and_records_file_refusal(tmp_path):
     artifact = tmp_path / "attempt"
     artifact.mkdir(mode=0o700)
     origin = "http://127.0.0.1:48101"
@@ -1705,26 +1731,69 @@ def test_mcp_tool_guard_allows_fixture_only_interaction_and_records_file_refusal
     )
     fixture_a = _fixture_urls(origin)["A"]
     guard.rewrite_call("browser_navigate", {"url": fixture_a})
-    assert guard.rewrite_call(
-        "browser_hover", {"element": "visual fixture card", "target": "fixture-card"}
-    )["target"] == "fixture-card"
-    assert guard.rewrite_call(
-        "browser_fill_form",
+    guard.record_result(
+        "browser_navigate",
+        {"url": fixture_a},
+        {"result": {"content": [{"type": "text", "text": "navigated"}]}},
+    )
+    guard.rewrite_call("browser_snapshot", {})
+    guard.record_result(
+        "browser_snapshot",
+        {},
         {
-            "fields": [
-                {
-                    "name": "fixture input",
-                    "target": "fixture-input",
-                    "type": "textbox",
-                    "value": "local-only",
-                }
-            ]
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "- region 'Visual review fixture'\n  - section 'Critical portfolio card'",
+                    }
+                ]
+            }
         },
-    )["fields"][0]["value"] == "local-only"
+    )
+    with pytest.raises(browser.BrowserReviewError, match="product-page-only"):
+        guard.rewrite_call(
+            "browser_hover",
+            {"element": "visual fixture card", "target": "fixture-card"},
+        )
+
+    product = f"{origin}/"
+    guard.rewrite_call("browser_navigate", {"url": product})
+    _record_guard_text_success(
+        guard, "browser_navigate", {"url": product}, text="navigated"
+    )
+    guard.rewrite_call("browser_snapshot", {})
+    _record_guard_text_success(
+        guard,
+        "browser_snapshot",
+        {},
+        text="- banner 'Mastermind X Chairman Control Room'\n  - button 'Theme'",
+    )
+    hover = {"element": "Theme button", "target": "theme-ref"}
+    assert guard.rewrite_call("browser_hover", hover) == hover
+    _record_guard_text_success(guard, "browser_hover", hover, text="hovered")
+    with pytest.raises(browser.BrowserReviewError):
+        guard.rewrite_call(
+            "browser_fill_form",
+            {
+                "fields": [
+                    {
+                        "name": "fixture input",
+                        "target": "fixture-input",
+                        "type": "textbox",
+                        "value": "local-only",
+                    }
+                ]
+            },
+        )
     with pytest.raises(browser.BrowserReviewError):
         guard.rewrite_call("browser_navigate", {"url": "file:///etc/passwd"})
     assert guard.evidence()["egress_falsifiers"]["file_url"] == "REFUSED"
     assert guard.evidence()["egress_falsifiers"]["proxy_override"] == "REFUSED"
+    assert guard.evidence()["interaction"] == {
+        "page_class": "product",
+        "tool": "browser_hover",
+    }
 
 
 def test_attempt_env_wrapper_runs_argument_guard_with_credential_free_child_env(
@@ -2216,24 +2285,32 @@ def test_guard_binds_image_content_hash_to_confined_screenshot_bytes(tmp_path):
     guard = browser.BrowserMcpToolGuard(
         origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
     )
-    guard.rewrite_call(
-        "browser_navigate", {"url": "http://127.0.0.1:48101/"}
-    )
-    guard.rewrite_call("browser_resize", {"width": 1440, "height": 900})
+    _guard_navigate(guard, "http://127.0.0.1:48101/")
+    _guard_resize(guard, width=390, height=844)
     original = {
-        "filename": "desktop.png",
+        "filename": "mobile.png",
         "fullPage": False,
         "scale": "css",
         "type": "png",
     }
     guard.rewrite_call("browser_take_screenshot", original)
-    pixels = _png(1440, 900)
+    pixels = _png(390, 844)
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    upstream.write_bytes(pixels)
     guard.record_result(
         "browser_take_screenshot",
         original,
         {
             "result": {
                 "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "### Result\n"
+                            "- [Screenshot of viewport]"
+                            "(./page-2026-08-30T12-34-56-789Z.png)"
+                        ),
+                    },
                     {
                         "type": "image",
                         "mimeType": "image/png",
@@ -2244,10 +2321,474 @@ def test_guard_binds_image_content_hash_to_confined_screenshot_bytes(tmp_path):
         },
     )
 
-    assert guard.evidence()["image_content_sha256"]["desktop.png"] == hashlib.sha256(
+    assert guard.evidence()["image_content_sha256"]["mobile.png"] == hashlib.sha256(
         pixels
     ).hexdigest()
-    assert (artifact / "desktop.png").read_bytes() == pixels
+    assert guard.evidence()["model_image_content_sha256"]["mobile.png"] == hashlib.sha256(
+        pixels
+    ).hexdigest()
+    assert (artifact / "mobile.png").read_bytes() == pixels
+    assert not upstream.exists()
+
+
+def test_guard_binds_full_viewport_artifact_when_pinned_mcp_scales_model_image(
+    tmp_path,
+):
+    """The pinned MCP scales message pixels but leaves the exact viewport file."""
+
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    _guard_navigate(guard, "http://127.0.0.1:48101/")
+    _guard_resize(guard, width=1440, height=900)
+    original = {
+        "filename": "desktop.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    full_viewport = _png(1440, 900)
+    upstream.write_bytes(full_viewport)
+    model_visible = _png(1389, 868, color=b"\x01\x02\x03\xff")
+
+    guard.record_result(
+        "browser_take_screenshot",
+        original,
+        {
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "### Result\n"
+                            "- [Screenshot of viewport]"
+                            "(./page-2026-08-30T12-34-56-789Z.png)"
+                        ),
+                    },
+                    {
+                        "type": "image",
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(model_visible).decode("ascii"),
+                    },
+                ]
+            }
+        },
+    )
+
+    evidence = guard.evidence()
+    assert (artifact / "desktop.png").read_bytes() == full_viewport
+    assert evidence["image_content_sha256"]["desktop.png"] == hashlib.sha256(
+        full_viewport
+    ).hexdigest()
+    assert evidence["model_image_content_sha256"]["desktop.png"] == hashlib.sha256(
+        model_visible
+    ).hexdigest()
+    assert not upstream.exists()
+
+
+def test_guard_refuses_screenshot_artifact_link_outside_attempt_root(tmp_path):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    outside = tmp_path / "page-2026-08-30T12-34-56-789Z.png"
+    outside.write_bytes(_png(1440, 900))
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    _guard_navigate(guard, f"{origin}/")
+    _guard_resize(guard, width=1440, height=900)
+    original = {
+        "filename": "desktop.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_take_screenshot",
+            original,
+            {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "### Result\n"
+                                "- [Screenshot of viewport]"
+                                "(../page-2026-08-30T12-34-56-789Z.png)"
+                            ),
+                        },
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(
+                                _png(1389, 868)
+                            ).decode("ascii"),
+                        },
+                    ]
+                }
+            },
+        )
+
+    assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+    assert outside.exists()
+    assert not (artifact / "desktop.png").exists()
+
+
+@pytest.mark.parametrize(
+    "result_line",
+    (
+        "forged-prefix - [Screenshot of viewport]"
+        "(./page-2026-08-30T12-34-56-789Z.png)",
+        "- [Screenshot of viewport]"
+        "(./page-2026-08-30T12-34-56-789Z.png) forged-suffix",
+    ),
+)
+def test_guard_refuses_embedded_screenshot_artifact_link(tmp_path, result_line):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    upstream.write_bytes(_png(390, 844))
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    _guard_navigate(guard, f"{origin}/")
+    _guard_resize(guard, width=390, height=844)
+    original = {
+        "filename": "mobile.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_take_screenshot",
+            original,
+            {
+                "result": {
+                    "content": [
+                        {"type": "text", "text": f"### Result\n{result_line}"},
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(_png(390, 844)).decode(
+                                "ascii"
+                            ),
+                        },
+                    ]
+                }
+            },
+        )
+
+    assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+    assert upstream.exists()
+    assert not (artifact / "mobile.png").exists()
+
+
+def test_guard_refuses_symlinked_upstream_screenshot_artifact(tmp_path):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(_png(1440, 900))
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    upstream.symlink_to(outside)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    _guard_navigate(guard, f"{origin}/")
+    _guard_resize(guard, width=1440, height=900)
+    original = {
+        "filename": "desktop.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_take_screenshot",
+            original,
+            {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "### Result\n"
+                                "- [Screenshot of viewport]"
+                                "(./page-2026-08-30T12-34-56-789Z.png)"
+                            ),
+                        },
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(
+                                _png(1389, 868)
+                            ).decode("ascii"),
+                        },
+                    ]
+                }
+            },
+        )
+
+    assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+    assert upstream.is_symlink()
+    assert outside.exists()
+    assert not (artifact / "desktop.png").exists()
+
+
+def test_guard_refuses_wrong_size_full_viewport_artifact(tmp_path):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    upstream.write_bytes(_png(1440, 899))
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    _guard_navigate(guard, f"{origin}/")
+    _guard_resize(guard, width=1440, height=900)
+    original = {
+        "filename": "desktop.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_take_screenshot",
+            original,
+            {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "### Result\n"
+                                "- [Screenshot of viewport]"
+                                "(./page-2026-08-30T12-34-56-789Z.png)"
+                            ),
+                        },
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(
+                                _png(1389, 868)
+                            ).decode("ascii"),
+                        },
+                    ]
+                }
+            },
+        )
+
+    assert raised.value.state == "BROWSER_SCREENSHOT_FAILED"
+    assert upstream.exists()
+    assert not (artifact / "desktop.png").exists()
+
+
+def test_guard_refuses_unscaled_model_image_that_differs_from_full_artifact(tmp_path):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    upstream.write_bytes(_png(390, 844))
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    _guard_navigate(guard, f"{origin}/")
+    _guard_resize(guard, width=390, height=844)
+    original = {
+        "filename": "mobile.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_take_screenshot",
+            original,
+            {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "### Result\n"
+                                "- [Screenshot of viewport]"
+                                "(./page-2026-08-30T12-34-56-789Z.png)"
+                            ),
+                        },
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(
+                                _png(390, 844, color=b"\x01\x02\x03\xff")
+                            ).decode("ascii"),
+                        },
+                    ]
+                }
+            },
+        )
+
+    assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+    assert upstream.exists()
+    assert not (artifact / "mobile.png").exists()
+
+
+def test_guard_refuses_replaced_attempt_artifact_directory(tmp_path):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    original_artifact = tmp_path / "original-attempt"
+    artifact.rename(original_artifact)
+    artifact.mkdir(mode=0o700)
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    upstream.write_bytes(_png(390, 844))
+    _guard_navigate(guard, f"{origin}/")
+    _guard_resize(guard, width=390, height=844)
+    original = {
+        "filename": "mobile.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_take_screenshot",
+            original,
+            {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "### Result\n"
+                                "- [Screenshot of viewport]"
+                                "(./page-2026-08-30T12-34-56-789Z.png)"
+                            ),
+                        },
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(_png(390, 844)).decode(
+                                "ascii"
+                            ),
+                        },
+                    ]
+                }
+            },
+        )
+
+    assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+    assert upstream.exists()
+    assert not (artifact / "mobile.png").exists()
+    assert original_artifact.exists()
+
+
+def test_guard_refuses_artifact_root_swap_after_descriptor_write(
+    tmp_path, monkeypatch
+):
+    import base64
+
+    artifact = tmp_path / "attempt"
+    artifact.mkdir(mode=0o700)
+    upstream = artifact / "page-2026-08-30T12-34-56-789Z.png"
+    pixels = _png(390, 844)
+    upstream.write_bytes(pixels)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
+    )
+    _guard_navigate(guard, f"{origin}/")
+    _guard_resize(guard, width=390, height=844)
+    original = {
+        "filename": "mobile.png",
+        "fullPage": False,
+        "scale": "css",
+        "type": "png",
+    }
+    guard.rewrite_call("browser_take_screenshot", original)
+
+    original_fsync = browser.os.fsync
+    directory_fsyncs = 0
+    displaced = tmp_path / "displaced-attempt"
+
+    def swap_after_destination_write(descriptor):
+        nonlocal directory_fsyncs
+        original_fsync(descriptor)
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            directory_fsyncs += 1
+            if directory_fsyncs == 2:
+                artifact.rename(displaced)
+                artifact.mkdir(mode=0o700)
+                (artifact / "mobile.png").write_bytes(pixels)
+
+    monkeypatch.setattr(browser.os, "fsync", swap_after_destination_write)
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        guard.record_result(
+            "browser_take_screenshot",
+            original,
+            {
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "### Result\n"
+                                "- [Screenshot of viewport]"
+                                "(./page-2026-08-30T12-34-56-789Z.png)"
+                            ),
+                        },
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": base64.b64encode(pixels).decode("ascii"),
+                        },
+                    ]
+                }
+            },
+        )
+
+    assert raised.value.state == "BROWSER_MCP_TOOL_REFUSED"
+    assert (artifact / "mobile.png").read_bytes() == pixels
+    assert (displaced / "mobile.png").read_bytes() == pixels
 
 
 def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_evidence(
@@ -2262,19 +2803,28 @@ def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_
             import struct
             import sys
             import zlib
+            from pathlib import Path
 
             def chunk(kind, payload):
                 return struct.pack('>I', len(payload)) + kind + payload + struct.pack('>I', zlib.crc32(kind + payload) & 0xffffffff)
 
-            scanline = b'\\x00' + (b'\\x00\\x00\\x00\\xff' * 1440)
-            pixels = b'\\x89PNG\\r\\n\\x1a\\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1440, 900, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(scanline * 900)) + chunk(b'IEND', b'')
+            def png(width, height):
+                scanline = b'\\x00' + (b'\\x00\\x00\\x00\\xff' * width)
+                return b'\\x89PNG\\r\\n\\x1a\\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(scanline * height)) + chunk(b'IEND', b'')
+
+            pixels = png(1440, 900)
+            message_pixels = png(1389, 868)
             for raw in sys.stdin.buffer:
                 request = json.loads(raw)
                 if request.get('method') == 'tools/call':
                     params = request['params']
                     if params['name'] == 'browser_take_screenshot':
                         assert 'filename' not in params['arguments']
-                        content = [{'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(pixels).decode('ascii')}]
+                        Path('page-2026-08-30T12-34-56-789Z.png').write_bytes(pixels)
+                        content = [
+                            {'type': 'text', 'text': '### Result\\n- [Screenshot of viewport](./page-2026-08-30T12-34-56-789Z.png)'},
+                            {'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(message_pixels).decode('ascii')},
+                        ]
                     else:
                         content = [{'type': 'text', 'text': 'ok'}]
                     result = {'content': content}
@@ -2294,19 +2844,31 @@ def test_stdio_bridge_interposes_before_official_mcp_and_persists_control_plane_
         {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "browser_resize", "arguments": {"width": 1440, "height": 900}}},
         {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "browser_take_screenshot", "arguments": {"filename": "desktop.png", "fullPage": False, "scale": "css", "type": "png"}}},
     ]
-    client_input = io.BytesIO(
-        b"".join(browser._canonical_bytes(row) + b"\n" for row in requests)
-    )
     client_output = io.BytesIO()
     guard = browser.BrowserMcpToolGuard(
         origin=origin, artifact_dir=artifact, fixture_urls=_fixture_urls(origin)
     )
+    completed = {
+        request["params"]["name"]: threading.Event() for request in requests
+    }
+    original_record_result = guard.record_result
+
+    def record_result_and_release(name, original_arguments, response):
+        original_record_result(name, original_arguments, response)
+        completed[name].set()
+
+    guard.record_result = record_result_and_release
+
+    def sequential_client_input():
+        for request in requests:
+            yield browser._canonical_bytes(request) + b"\n"
+            assert completed[request["params"]["name"]].wait(2)
 
     assert browser.run_guarded_mcp_bridge(
         argv=(sys.executable, os.fspath(fake)),
         environment={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
         guard=guard,
-        stdin=client_input,
+        stdin=sequential_client_input(),
         stdout=client_output,
         stderr=subprocess.DEVNULL,
     ) == 0
@@ -2357,6 +2919,12 @@ def test_closed_attempt_receipt_binds_generation_workspace_security_and_cleanup(
     receipt = browser.seal_browser_review_receipt(
         context,
         local_origin="http://127.0.0.1:8787",
+        mcp_guard={
+            "relative_path": browser._MCP_GUARD_EVIDENCE_FILE,
+            "schema_version": browser._MCP_GUARD_EVIDENCE_SCHEMA,
+            "bytes": 4096,
+            "sha256": "7" * 64,
+        },
         screenshots=[
             browser.screenshot_artifact(
                 artifact_dir,
@@ -2442,6 +3010,99 @@ def test_closed_attempt_receipt_binds_generation_workspace_security_and_cleanup(
     assert wire["artifacts"]["screenshots"][0]["relative_path"] == "desktop.png"
     assert wire["artifacts"]["console"]["observed"] is True
     assert wire["artifacts"]["network"]["observed"] is True
+    assert wire["artifacts"]["mcp_guard"] == {
+        "relative_path": browser._MCP_GUARD_EVIDENCE_FILE,
+        "schema_version": browser._MCP_GUARD_EVIDENCE_SCHEMA,
+        "bytes": 4096,
+        "sha256": "7" * 64,
+    }
+    for field in ("console", "network"):
+        hostile_rows = receipt.to_wire()
+        hostile_rows["artifacts"][field] = {
+            "bytes": 2,
+            "observed": True,
+            "rows": 0,
+            "sha256": hashlib.sha256(b"[]").hexdigest(),
+        }
+        with pytest.raises(
+            browser.BrowserReviewError, match=f"{field} evidence"
+        ):
+            browser.browser_review_receipt(hostile_rows)
+        with pytest.raises(
+            browser.BrowserReviewError, match=f"{field} rows"
+        ):
+            browser._bounded_rows(
+                [],
+                maximum_rows=(
+                    browser.MAX_CONSOLE_ROWS
+                    if field == "console"
+                    else browser.MAX_NETWORK_ROWS
+                ),
+                field=field,
+            )
+
+    changed_guard = dict(wire)
+    changed_guard["artifacts"] = dict(wire["artifacts"])
+    changed_guard["artifacts"]["mcp_guard"] = dict(
+        wire["artifacts"]["mcp_guard"]
+    )
+    changed_guard["artifacts"]["mcp_guard"]["sha256"] = "8" * 64
+    changed_receipt = browser.browser_review_receipt(changed_guard)
+    assert changed_receipt.digest != receipt.digest
+
+    caller_owned_wire = receipt.to_wire()
+    detached_receipt = browser.browser_review_receipt(caller_owned_wire)
+    detached_digest = detached_receipt.digest
+    caller_owned_wire["artifacts"]["mcp_guard"]["sha256"] = "8" * 64
+    assert detached_receipt.artifacts["mcp_guard"]["sha256"] == "7" * 64
+    assert detached_receipt.digest == detached_digest
+
+    nested_wire = receipt.to_wire()
+    immutable_receipt = browser.browser_review_receipt(nested_wire)
+    immutable_digest = immutable_receipt.digest
+    nested_wire["visual_judgment"]["image_sha256"][0] = "8" * 64
+    nested_wire["viewports"][0]["width"] = 1
+    assert immutable_receipt.visual_judgment["image_sha256"][0] == "f" * 64
+    assert immutable_receipt.viewports[0]["width"] == 1440
+    assert immutable_receipt.digest == immutable_digest
+    with pytest.raises(TypeError):
+        immutable_receipt.visual_judgment["image_sha256"][0] = "8" * 64
+    with pytest.raises(TypeError):
+        immutable_receipt.artifacts["mcp_guard"]["sha256"] = "8" * 64
+    with pytest.raises(TypeError):
+        immutable_receipt.viewports[0]["width"] = 1
+
+    invalid_typed_receipt = replace(
+        receipt,
+        artifacts={
+            key: value
+            for key, value in receipt.artifacts.items()
+            if key != "mcp_guard"
+        },
+    )
+    with pytest.raises(browser.BrowserReviewError, match="artifacts receipt is not closed"):
+        browser.canonical_browser_review_receipt_digest(invalid_typed_receipt)
+
+    legacy_v1 = receipt.to_wire()
+    legacy_v1["artifacts"].pop("mcp_guard")
+    with pytest.raises(browser.BrowserReviewError, match="artifacts receipt is not closed"):
+        browser.browser_review_receipt(legacy_v1)
+
+    valid_guard = receipt.to_wire()["artifacts"]["mcp_guard"]
+    hostile_guard_summaries = (
+        {**valid_guard, "relative_path": "../browser-mcp-guard-evidence.json"},
+        {**valid_guard, "schema_version": "mastermind.browser_mcp_guard_evidence/v1"},
+        {**valid_guard, "bytes": True},
+        {**valid_guard, "bytes": 0},
+        {**valid_guard, "bytes": browser.MAX_TEXT_EVIDENCE_BYTES + 1},
+        {**valid_guard, "sha256": "not-a-digest"},
+        {**valid_guard, "unexpected": "field"},
+    )
+    for hostile_guard in hostile_guard_summaries:
+        hostile_wire = receipt.to_wire()
+        hostile_wire["artifacts"]["mcp_guard"] = hostile_guard
+        with pytest.raises(browser.BrowserReviewError):
+            browser.browser_review_receipt(hostile_wire)
 
     hostile = dict(wire)
     hostile["receipt_digest"] = "0" * 64
@@ -2481,6 +3142,12 @@ def test_receipt_refuses_oversize_console_instead_of_truncating(tmp_path):
         browser.seal_browser_review_receipt(
             context,
             local_origin="http://127.0.0.1:8787",
+            mcp_guard={
+                "relative_path": browser._MCP_GUARD_EVIDENCE_FILE,
+                "schema_version": browser._MCP_GUARD_EVIDENCE_SCHEMA,
+                "bytes": 4096,
+                "sha256": "7" * 64,
+            },
             screenshots=[],
             console_rows=rows,
             network_rows=[],
@@ -2513,6 +3180,421 @@ def test_receipt_refuses_oversize_console_instead_of_truncating(tmp_path):
         )
 
     assert raised.value.state == "BROWSER_ARTIFACT_OVERSIZE"
+
+
+def test_private_artifact_writer_refuses_replaced_parent_during_create(
+    tmp_path, monkeypatch
+):
+    artifact_root = tmp_path / "attempt"
+    artifact_root.mkdir(mode=0o700)
+    displaced = tmp_path / "displaced-attempt"
+    target = artifact_root / "evidence.json"
+    original_open = browser.os.open
+    swapped = False
+
+    def swap_parent_before_file_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if not swapped and flags & os.O_CREAT:
+            artifact_root.rename(displaced)
+            artifact_root.mkdir(mode=0o700)
+            swapped = True
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(browser.os, "open", swap_parent_before_file_open)
+
+    with pytest.raises(browser.BrowserReviewError, match="write did not complete"):
+        browser._write_private_bytes_once(target, b"sealed evidence")
+
+    assert swapped is True
+    assert (displaced / target.name).read_bytes() == b"sealed evidence"
+    assert not (artifact_root / target.name).exists()
+
+
+def test_generation_resource_holds_original_artifact_root_across_seal_reads(
+    tmp_path,
+):
+    artifact_root = tmp_path / "attempt"
+    artifact_root.mkdir(mode=0o700)
+    original_pixels = _png(390, 844)
+    screenshot = artifact_root / "mobile.png"
+    screenshot.write_bytes(original_pixels)
+    screenshot.chmod(0o600)
+
+    resource = object.__new__(browser.BrowserGenerationResource)
+    resource._artifact_dir = artifact_root
+    resource._artifact_dir_identity = browser.BrowserMcpToolGuard._directory_identity(
+        artifact_root.lstat()
+    )
+    root_fd = resource._open_artifact_root_descriptor()
+    displaced = tmp_path / "displaced-attempt"
+    try:
+        artifact_root.rename(displaced)
+        artifact_root.mkdir(mode=0o700)
+        replacement = artifact_root / "mobile.png"
+        replacement.write_bytes(_png(390, 844, color=b"\x01\x02\x03\xff"))
+        replacement.chmod(0o600)
+
+        row = browser._screenshot_artifact_at(
+            root_fd, "mobile.png", viewport={"width": 390, "height": 844}
+        )
+        assert row["sha256"] == hashlib.sha256(original_pixels).hexdigest()
+        with pytest.raises(
+            browser.BrowserReviewError, match="artifact root identity changed"
+        ):
+            resource._require_artifact_root_descriptor(root_fd)
+    finally:
+        os.close(root_fd)
+
+
+def test_guard_interaction_requires_a_successful_structured_snapshot(tmp_path):
+    artifact_root = tmp_path / "attempt"
+    artifact_root.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin,
+        artifact_dir=artifact_root,
+        fixture_urls=_fixture_urls(origin),
+    )
+    product = f"{origin}/"
+    guard.rewrite_call("browser_navigate", {"url": product})
+    guard.record_result(
+        "browser_navigate",
+        {"url": product},
+        {"result": {"content": [{"type": "text", "text": "navigated"}]}},
+    )
+
+    with pytest.raises(browser.BrowserReviewError, match="structured snapshot"):
+        guard.rewrite_call(
+            "browser_hover", {"target": "Critical portfolio card"}
+        )
+
+    guard.rewrite_call("browser_snapshot", {})
+    guard.record_result(
+        "browser_snapshot",
+        {},
+        {
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "- banner 'Mastermind X Chairman Control Room'\n  - button 'Theme'",
+                    }
+                ]
+            }
+        },
+    )
+    assert guard.rewrite_call(
+        "browser_hover", {"element": "Theme button", "target": "theme-ref"}
+    ) == {"element": "Theme button", "target": "theme-ref"}
+    guard.record_result(
+        "browser_hover",
+        {"element": "Theme button", "target": "theme-ref"},
+        {"result": {"content": [{"type": "text", "text": "hovered"}]}},
+    )
+    assert guard.evidence()["calls"] == {
+        "browser_hover": 1,
+        "browser_navigate": 1,
+        "browser_snapshot": 1,
+    }
+
+
+def test_guard_refuses_mcp_is_error_results_and_does_not_unlock_interaction(tmp_path):
+    artifact_root = tmp_path / "attempt"
+    artifact_root.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin,
+        artifact_dir=artifact_root,
+        fixture_urls=_fixture_urls(origin),
+    )
+    product = f"{origin}/"
+    fixture_a = _fixture_urls(origin)["A"]
+
+    guard.rewrite_call("browser_navigate", {"url": product})
+    guard.record_result(
+        "browser_navigate",
+        {"url": product},
+        {
+            "result": {
+                "content": [{"type": "text", "text": "product navigated"}],
+                "isError": False,
+            }
+        },
+    )
+    guard.rewrite_call("browser_navigate", {"url": fixture_a})
+    with pytest.raises(browser.BrowserReviewError, match="successful result"):
+        guard.record_result(
+            "browser_navigate",
+            {"url": fixture_a},
+            {
+                "result": {
+                    "content": [{"type": "text", "text": "navigation failed"}],
+                    "isError": True,
+                }
+            },
+        )
+
+    with pytest.raises(
+        browser.BrowserReviewError,
+        match="successfully established page",
+    ):
+        guard.rewrite_call("browser_snapshot", {})
+
+    guard.rewrite_call("browser_navigate", {"url": product})
+    guard.record_result(
+        "browser_navigate",
+        {"url": product},
+        {"result": {"content": [{"type": "text", "text": "navigated"}]}},
+    )
+    guard.rewrite_call("browser_snapshot", {})
+    guard.record_result(
+        "browser_snapshot",
+        {},
+        {
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "- region 'Product control room'",
+                    }
+                ],
+                "isError": False,
+            }
+        },
+    )
+
+    hover = {"element": "Theme button", "target": "theme-ref"}
+    assert guard.rewrite_call("browser_hover", hover) == hover
+    _record_guard_text_success(guard, "browser_hover", hover, text="hovered")
+    assert guard.evidence()["calls"] == {
+        "browser_hover": 1,
+        "browser_navigate": 2,
+        "browser_snapshot": 1,
+    }
+
+
+def test_guard_does_not_commit_failed_or_pending_browser_state_transitions(tmp_path):
+    artifact_root = tmp_path / "attempt"
+    artifact_root.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin,
+        artifact_dir=artifact_root,
+        fixture_urls=_fixture_urls(origin),
+    )
+    fixtures = _fixture_urls(origin)
+
+    product = f"{origin}/"
+    guard.rewrite_call("browser_navigate", {"url": product})
+    guard.record_result(
+        "browser_navigate",
+        {"url": product},
+        {"result": {"content": [{"type": "text", "text": "navigated"}]}},
+    )
+    guard.rewrite_call("browser_snapshot", {})
+    guard.record_result(
+        "browser_snapshot",
+        {},
+        {
+            "result": {
+                "content": [{"type": "text", "text": "- button 'Theme'"}]
+            }
+        },
+    )
+
+    # Merely forwarding a later navigation invalidates the snapshot binding;
+    # the official MCP has not yet proven which page it actually established.
+    guard.rewrite_call("browser_navigate", {"url": fixtures["B"]})
+    with pytest.raises(browser.BrowserReviewError, match="product-page-only"):
+        guard.rewrite_call(
+            "browser_hover", {"target": "Critical portfolio card"}
+        )
+    guard.record_result(
+        "browser_navigate",
+        {"url": fixtures["B"]},
+        {"result": {"content": [{"type": "text", "text": "navigated"}]}},
+    )
+
+    guard.rewrite_call("browser_resize", {"width": 1440, "height": 900})
+    with pytest.raises(browser.BrowserReviewError, match="successful result"):
+        guard.record_result(
+            "browser_resize",
+            {"width": 1440, "height": 900},
+            {
+                "result": {
+                    "content": [{"type": "text", "text": "resize failed"}],
+                    "isError": True,
+                }
+            },
+        )
+    with pytest.raises(browser.BrowserReviewError, match="exact page and viewport"):
+        guard.rewrite_call(
+            "browser_take_screenshot",
+            {
+                "filename": "desktop.png",
+                "fullPage": False,
+                "scale": "css",
+                "type": "png",
+            },
+        )
+
+
+def test_guard_binds_successful_snapshot_to_current_navigation_epoch(tmp_path):
+    artifact_root = tmp_path / "attempt"
+    artifact_root.mkdir(mode=0o700)
+    origin = "http://127.0.0.1:48101"
+    guard = browser.BrowserMcpToolGuard(
+        origin=origin,
+        artifact_dir=artifact_root,
+        fixture_urls=_fixture_urls(origin),
+    )
+    fixtures = _fixture_urls(origin)
+    product = f"{origin}/"
+
+    guard.rewrite_call("browser_navigate", {"url": product})
+    _record_guard_text_success(
+        guard, "browser_navigate", {"url": product}, text="navigated"
+    )
+    guard.rewrite_call("browser_snapshot", {})
+    _record_guard_text_success(
+        guard, "browser_snapshot", {}, text="- button 'Theme'"
+    )
+    guard.rewrite_call("browser_navigate", {"url": fixtures["B"]})
+    _record_guard_text_success(
+        guard,
+        "browser_navigate",
+        {"url": fixtures["B"]},
+        text="navigated",
+    )
+
+    with pytest.raises(browser.BrowserReviewError, match="product-page-only"):
+        guard.rewrite_call(
+            "browser_hover", {"target": "Critical portfolio card"}
+        )
+
+    guard.rewrite_call("browser_navigate", {"url": product})
+    _record_guard_text_success(
+        guard, "browser_navigate", {"url": product}, text="navigated"
+    )
+    guard.rewrite_call("browser_snapshot", {})
+    _record_guard_text_success(
+        guard, "browser_snapshot", {}, text="- button 'Theme'"
+    )
+    assert guard.rewrite_call(
+        "browser_hover", {"element": "Theme button", "target": "theme-ref"}
+    ) == {"element": "Theme button", "target": "theme-ref"}
+
+
+def test_mcp_guard_evidence_requires_positive_closed_review_observations(tmp_path):
+    artifact_root = tmp_path / "attempt"
+    artifact_root.mkdir(mode=0o700)
+    resource = object.__new__(browser.BrowserGenerationResource)
+    resource._artifact_dir = artifact_root
+    resource._artifact_dir_identity = browser.BrowserMcpToolGuard._directory_identity(
+        artifact_root.lstat()
+    )
+    required_calls = {
+        "browser_console_messages": 1,
+        "browser_hover": 1,
+        "browser_navigate": 3,
+        "browser_network_requests": 1,
+        "browser_resize": 3,
+        "browser_snapshot": 1,
+        "browser_take_screenshot": 4,
+    }
+    evidence = {
+        "bridge_exit_code": 0,
+        "calls": required_calls,
+        "cleanup_proven": True,
+        "console_rows": [
+            {
+                "bytes": 2,
+                "content_sha256": "a" * 64,
+                "tool": "browser_console_messages",
+            }
+        ],
+        "egress_falsifiers": {
+            "file_url": "REFUSED",
+            "proxy_override": "REFUSED",
+        },
+        "image_content_sha256": {
+            name: "b" * 64
+            for name in (
+                "desktop.png",
+                "mobile.png",
+                "visual-a.png",
+                "visual-b.png",
+            )
+        },
+        "interaction": {"page_class": "product", "tool": "browser_hover"},
+        "model_image_content_sha256": {
+            name: "c" * 64
+            for name in (
+                "desktop.png",
+                "mobile.png",
+                "visual-a.png",
+                "visual-b.png",
+            )
+        },
+        "network_rows": [
+            {
+                "bytes": 2,
+                "content_sha256": "d" * 64,
+                "tool": "browser_network_requests",
+            }
+        ],
+        "schema_version": browser._MCP_GUARD_EVIDENCE_SCHEMA,
+        "screenshots": [
+            "desktop.png",
+            "mobile.png",
+            "visual-a.png",
+            "visual-b.png",
+        ],
+    }
+    guard_path = artifact_root / browser._MCP_GUARD_EVIDENCE_FILE
+
+    def write_guard(value):
+        guard_path.write_bytes(browser._canonical_bytes(value))
+        guard_path.chmod(0o600)
+
+    root_fd = resource._open_artifact_root_descriptor()
+    try:
+        write_guard(evidence)
+        observed, _summary = resource._attempt_evidence(root_fd)
+        assert observed["calls"] == required_calls
+
+        hostile_values = []
+        for field in required_calls:
+            missing = json.loads(json.dumps(evidence))
+            missing["calls"].pop(field)
+            hostile_values.append(missing)
+        malformed = json.loads(json.dumps(evidence))
+        malformed["calls"]["browser_snapshot"] = True
+        hostile_values.append(malformed)
+        no_console = json.loads(json.dumps(evidence))
+        no_console["console_rows"] = []
+        hostile_values.append(no_console)
+        no_network = json.loads(json.dumps(evidence))
+        no_network["network_rows"] = []
+        hostile_values.append(no_network)
+        extra_interaction = json.loads(json.dumps(evidence))
+        extra_interaction["calls"]["browser_click"] = 1
+        hostile_values.append(extra_interaction)
+        fixture_interaction = json.loads(json.dumps(evidence))
+        fixture_interaction["interaction"]["page_class"] = "fixture-a"
+        hostile_values.append(fixture_interaction)
+        click_interaction = json.loads(json.dumps(evidence))
+        click_interaction["interaction"]["tool"] = "browser_click"
+        hostile_values.append(click_interaction)
+
+        for hostile in hostile_values:
+            write_guard(hostile)
+            with pytest.raises(
+                browser.BrowserReviewError, match="MCP guard evidence"
+            ):
+                resource._attempt_evidence(root_fd)
+    finally:
+        os.close(root_fd)
 
 
 def test_reviewed_control_room_manifest_is_closed_and_workspace_bound(tmp_path):
@@ -2568,7 +3650,7 @@ def test_reviewed_control_room_manifest_is_closed_and_workspace_bound(tmp_path):
 
 
 def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_receipt(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     workspace = tmp_path / "workspace"
     (workspace / "scripts").mkdir(parents=True)
@@ -2674,6 +3756,10 @@ def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_recei
 
     resource.start()
     environment = resource.environment
+    prompt_suffix = resource.turn_prompt_suffix()
+    assert "structured snapshot" in prompt_suffix
+    assert "exactly one harmless browser_hover" in prompt_suffix
+    assert "product Theme button" in prompt_suffix
     assert set(environment) == browser._BROWSER_ENV_KEYS
     proxy = browser.LoopbackEnforcingProxy  # explicit positive ownership control
     assert proxy is not None
@@ -2685,7 +3771,9 @@ def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_recei
         "visual-b.png": _png(900, 600, color=b"\x07\x08\x09\xff"),
     }
     for name, payload in pngs.items():
-        (artifact_dir / name).write_bytes(payload)
+        screenshot = artifact_dir / name
+        screenshot.write_bytes(payload)
+        screenshot.chmod(0o600)
 
     # A model-authored convenience file is deliberately present and false.  It
     # cannot satisfy the resource; only guard-observed transport evidence can.
@@ -2697,7 +3785,11 @@ def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_recei
         "bridge_exit_code": 0,
         "calls": {
             "browser_console_messages": 1,
+            "browser_hover": 1,
+            "browser_navigate": 3,
             "browser_network_requests": 1,
+            "browser_resize": 3,
+            "browser_snapshot": 1,
             "browser_take_screenshot": 4,
         },
         "cleanup_proven": True,
@@ -2706,12 +3798,17 @@ def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_recei
         "image_content_sha256": {
             name: hashlib.sha256(payload).hexdigest() for name, payload in pngs.items()
         },
+        "interaction": {"page_class": "product", "tool": "browser_hover"},
+        "model_image_content_sha256": {
+            name: hashlib.sha256(payload).hexdigest() for name, payload in pngs.items()
+        },
         "network_rows": [{"bytes": 2, "content_sha256": "b" * 64, "tool": "browser_network_requests"}],
-        "schema_version": "mastermind.browser_mcp_guard_evidence/v1",
+        "schema_version": browser._MCP_GUARD_EVIDENCE_SCHEMA,
         "screenshots": sorted(pngs),
     }
     guard_path = artifact_dir / browser._MCP_GUARD_EVIDENCE_FILE
-    guard_path.write_bytes(browser._canonical_bytes(guard_evidence))
+    guard_raw = b"\n " + browser._canonical_bytes(guard_evidence) + b" \n"
+    guard_path.write_bytes(guard_raw)
     guard_path.chmod(0o600)
 
     hostile = {
@@ -2760,6 +3857,24 @@ def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_recei
     assert receipt.cleanup["uid_sweep_passed"] is True
     assert receipt.visual_judgment["defective_variant"] == visual["defective_variant"]
     assert len(receipt.artifacts["screenshots"]) == 4
+    assert receipt.artifacts["mcp_guard"] == {
+        "relative_path": browser._MCP_GUARD_EVIDENCE_FILE,
+        "schema_version": browser._MCP_GUARD_EVIDENCE_SCHEMA,
+        "bytes": len(guard_path.read_bytes()),
+        "sha256": hashlib.sha256(guard_path.read_bytes()).hexdigest(),
+    }
+    changed_guard_evidence = json.loads(json.dumps(guard_evidence))
+    changed_guard_evidence["model_image_content_sha256"]["desktop.png"] = "8" * 64
+    changed_guard_bytes = browser._canonical_bytes(changed_guard_evidence)
+    assert hashlib.sha256(changed_guard_bytes).hexdigest() != (
+        receipt.artifacts["mcp_guard"]["sha256"]
+    )
+    changed_wire = receipt.to_wire()
+    changed_wire["artifacts"]["mcp_guard"]["bytes"] = len(changed_guard_bytes)
+    changed_wire["artifacts"]["mcp_guard"]["sha256"] = hashlib.sha256(
+        changed_guard_bytes
+    ).hexdigest()
+    assert browser.browser_review_receipt(changed_wire).digest != receipt.digest
     assert receipt.browser["runtime_manifest_digest"] == (
         resource_grant.runtime_manifest_digest
     )
@@ -2769,6 +3884,51 @@ def test_generation_resource_owns_devserver_proxy_artifacts_and_post_sweep_recei
     )
     assert persisted == receipt
     assert persisted.digest == receipt.digest
+
+    receipt_path = artifact_dir / browser._RECEIPT_FILE
+    replacement_path = artifact_dir / "replacement-browser-review-receipt.json"
+    replacement_wire = receipt.to_wire()
+    replacement_wire["browser"]["executable_sha256"] = "e" * 64
+    replacement_path.write_bytes(
+        browser._canonical_bytes(replacement_wire) + b"\n"
+    )
+    replacement_path.chmod(0o600)
+    original_lstat = Path.lstat
+    original_stat = browser.os.stat
+    swapped_receipt = False
+
+    def swap_receipt_once():
+        nonlocal swapped_receipt
+        if not swapped_receipt:
+            os.replace(replacement_path, receipt_path)
+            swapped_receipt = True
+
+    def lstat_then_swap(path, *args, **kwargs):
+        info = original_lstat(path, *args, **kwargs)
+        if Path(path) == receipt_path:
+            swap_receipt_once()
+        return info
+
+    def stat_then_swap(path, *args, **kwargs):
+        info = original_stat(path, *args, **kwargs)
+        if (
+            path == browser._RECEIPT_FILE
+            and kwargs.get("dir_fd") is not None
+            and kwargs.get("follow_symlinks") is False
+        ):
+            swap_receipt_once()
+        return info
+
+    monkeypatch.setattr(Path, "lstat", lstat_then_swap)
+    monkeypatch.setattr(browser.os, "stat", stat_then_swap)
+    with pytest.raises(
+        browser.BrowserReviewError,
+        match="persisted browser receipt is unsafe",
+    ):
+        browser.load_persisted_browser_review_receipt(
+            generation, artifact_root=artifact_root
+        )
+    assert swapped_receipt is True
 
     # Seal performs a fresh use-time attestation.  Even a coordinated rewrite
     # of a runtime file plus its self-signed manifest remains outside the

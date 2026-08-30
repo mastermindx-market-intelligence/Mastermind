@@ -13,6 +13,7 @@ import hashlib
 import http.client
 import http.server
 import json
+import math
 import os
 import re
 import secrets
@@ -27,6 +28,7 @@ import time
 import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
@@ -135,6 +137,16 @@ ALLOWED_TOOLS = frozenset(
         "browser_wait_for",
     }
 )
+_BOUNDED_INTERACTION_TOOLS = frozenset(
+    {"browser_click", "browser_fill_form", "browser_hover"}
+)
+_REQUIRED_MCP_SUCCESS_MINIMUMS = {
+    "browser_console_messages": 1,
+    "browser_navigate": 3,
+    "browser_network_requests": 1,
+    "browser_resize": 3,
+    "browser_snapshot": 1,
+}
 
 _DESKTOP = {"width": 1440, "height": 900}
 _MOBILE = {"width": 390, "height": 844}
@@ -250,6 +262,24 @@ class RuntimeInstallAttestation:
     browser_revision: str
 
 
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_json(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class BrowserReviewReceipt:
     """Closed immutable browser artifact carried by the normal Attempt result."""
@@ -271,6 +301,20 @@ class BrowserReviewReceipt:
     cleanup: Mapping[str, Any]
     tracked_workspace_changes_after_review: bool
 
+    def __post_init__(self) -> None:
+        for field in (
+            "devserver",
+            "capability",
+            "playwright_mcp",
+            "browser",
+            "viewports",
+            "artifacts",
+            "egress_falsifiers",
+            "visual_judgment",
+            "cleanup",
+        ):
+            object.__setattr__(self, field, _freeze_json(getattr(self, field)))
+
     def to_wire(self) -> dict[str, Any]:
         value = {
             "schema_version": self.schema_version,
@@ -278,16 +322,16 @@ class BrowserReviewReceipt:
             "session_epoch_id": self.session_epoch_id,
             "process_generation_id": self.process_generation_id,
             "workspace": asdict(self.workspace),
-            "devserver": dict(self.devserver),
-            "capability": dict(self.capability),
-            "playwright_mcp": dict(self.playwright_mcp),
-            "browser": dict(self.browser),
-            "viewports": [dict(row) for row in self.viewports],
-            "artifacts": dict(self.artifacts),
-            "egress_falsifiers": dict(self.egress_falsifiers),
+            "devserver": _thaw_json(self.devserver),
+            "capability": _thaw_json(self.capability),
+            "playwright_mcp": _thaw_json(self.playwright_mcp),
+            "browser": _thaw_json(self.browser),
+            "viewports": _thaw_json(self.viewports),
+            "artifacts": _thaw_json(self.artifacts),
+            "egress_falsifiers": _thaw_json(self.egress_falsifiers),
             "external_egress_observed": self.external_egress_observed,
-            "visual_judgment": dict(self.visual_judgment),
-            "cleanup": dict(self.cleanup),
+            "visual_judgment": _thaw_json(self.visual_judgment),
+            "cleanup": _thaw_json(self.cleanup),
             "tracked_workspace_changes_after_review": (
                 self.tracked_workspace_changes_after_review
             ),
@@ -297,7 +341,12 @@ class BrowserReviewReceipt:
 
     @property
     def digest(self) -> str:
-        return _canonical_digest(self.to_wire())
+        wire = self.to_wire()
+        # A frozen dataclass does not freeze or validate nested mappings.  The
+        # canonical digest boundary therefore re-parses the closed wire shape
+        # before treating a typed receipt as authoritative.
+        browser_review_receipt(wire)
+        return _canonical_digest(wire)
 
 
 _RECEIPT_TOP_LEVEL_KEYS = frozenset(
@@ -326,6 +375,29 @@ def canonical_browser_review_receipt_digest(receipt: BrowserReviewReceipt) -> st
     if not isinstance(receipt, BrowserReviewReceipt):
         raise BrowserReviewError("BROWSER_RECEIPT_INVALID", "browser receipt is not typed")
     return receipt.digest
+
+
+def _closed_mcp_guard_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "bytes",
+        "relative_path",
+        "schema_version",
+        "sha256",
+    }:
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID", "MCP guard artifact summary is not closed"
+        )
+    if (
+        value.get("relative_path") != _MCP_GUARD_EVIDENCE_FILE
+        or value.get("schema_version") != _MCP_GUARD_EVIDENCE_SCHEMA
+        or type(value.get("bytes")) is not int
+        or not 0 < value["bytes"] <= MAX_TEXT_EVIDENCE_BYTES
+    ):
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID", "MCP guard artifact summary is invalid"
+        )
+    _require_sha256(value.get("sha256"), field="artifacts.mcp_guard.sha256")
+    return dict(value)
 
 
 def browser_review_receipt(value: Any) -> BrowserReviewReceipt:
@@ -370,7 +442,7 @@ def browser_review_receipt(value: Any) -> BrowserReviewReceipt:
             "revision",
             "runtime_manifest_digest",
         },
-        "artifacts": {"console", "network", "screenshots"},
+        "artifacts": {"console", "mcp_guard", "network", "screenshots"},
     }
     for field, keys in expected_nested.items():
         row = value.get(field)
@@ -386,6 +458,9 @@ def browser_review_receipt(value: Any) -> BrowserReviewReceipt:
     ):
         root, key = field.split(".")
         _require_sha256(value[root][key], field=field)
+    guard_summary = _closed_mcp_guard_summary(
+        value["artifacts"].get("mcp_guard")
+    )
     try:
         _validate_origin(str(value["devserver"]["local_origin"]))
     except ValueError as exc:
@@ -453,9 +528,9 @@ def browser_review_receipt(value: Any) -> BrowserReviewReceipt:
         if (
             summary.get("observed") is not True
             or type(summary.get("rows")) is not int
-            or not 0 <= summary["rows"] <= maximum_rows
+            or not 1 <= summary["rows"] <= maximum_rows
             or type(summary.get("bytes")) is not int
-            or not 0 <= summary["bytes"] <= MAX_TEXT_EVIDENCE_BYTES
+            or not 0 < summary["bytes"] <= MAX_TEXT_EVIDENCE_BYTES
         ):
             raise BrowserReviewError(
                 "BROWSER_ARTIFACT_OVERSIZE", f"{field} evidence exceeds the reviewed bound"
@@ -516,6 +591,10 @@ def browser_review_receipt(value: Any) -> BrowserReviewReceipt:
     _require_sha256(cleanup.get("uid_sweep_digest"), field="cleanup.uid_sweep_digest")
     if value.get("tracked_workspace_changes_after_review") is not False:
         raise BrowserReviewError("BROWSER_WORKSPACE_MUTATION", "workspace mutation is not refused")
+    normalized_artifacts = json.loads(
+        _canonical_bytes(value["artifacts"]).decode("ascii")
+    )
+    normalized_artifacts["mcp_guard"] = guard_summary
     return BrowserReviewReceipt(
         schema_version=RECEIPT_SCHEMA,
         attempt_id=identities[0],
@@ -527,7 +606,7 @@ def browser_review_receipt(value: Any) -> BrowserReviewReceipt:
         playwright_mcp=dict(value["playwright_mcp"]),
         browser=dict(value["browser"]),
         viewports=tuple(normalized_viewports),
-        artifacts=dict(value["artifacts"]),
+        artifacts=normalized_artifacts,
         egress_falsifiers=dict(value["egress_falsifiers"]),
         external_egress_observed=False,
         visual_judgment=dict(visual),
@@ -1036,50 +1115,76 @@ def build_mcp_argv(
     return values
 
 
-def _write_private_bytes_once(path: Path, payload: bytes) -> None:
-    """Create one immutable attempt artifact without following or replacing paths."""
+def _write_private_bytes_once_at(
+    directory_fd: int,
+    name: str,
+    payload: bytes,
+) -> os.stat_result:
+    """Create one private artifact through one already-bound directory."""
 
-    candidate = Path(path)
     if not isinstance(payload, bytes) or not payload:
         raise BrowserReviewError(
             "BROWSER_ARTIFACT_OVERSIZE", "attempt artifact payload is empty"
         )
-    try:
-        parent = candidate.parent.resolve(strict=True)
-        parent_info = candidate.parent.lstat()
-    except OSError as exc:
-        raise BrowserReviewError(
-            "BROWSER_RECEIPT_INVALID", "attempt artifact parent is unavailable"
-        ) from exc
     if (
-        candidate.parent.is_symlink()
-        or not stat.S_ISDIR(parent_info.st_mode)
-        or parent_info.st_uid != os.geteuid()
-        or stat.S_IMODE(parent_info.st_mode) != 0o700
-        or candidate.parent != parent
-        or candidate.name != os.fspath(candidate.relative_to(candidate.parent))
+        not isinstance(name, str)
+        or not name
+        or Path(name).name != name
+        or PurePosixPath(name).parts != (name,)
     ):
         raise BrowserReviewError(
-            "BROWSER_RECEIPT_INVALID", "attempt artifact path is not direct and owned"
+            "BROWSER_RECEIPT_INVALID", "attempt artifact name is not direct"
+        )
+    directory = os.fstat(directory_fd)
+    if (
+        not stat.S_ISDIR(directory.st_mode)
+        or directory.st_uid != os.geteuid()
+        or stat.S_IMODE(directory.st_mode) != 0o700
+    ):
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID", "attempt artifact directory is not exact"
         )
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
     try:
-        descriptor = os.open(candidate, flags, 0o600)
-        try:
-            view = memoryview(payload)
-            while view:
-                written = os.write(descriptor, view)
-                if written <= 0:
-                    raise OSError("short artifact write")
-                view = view[written:]
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        directory = os.open(parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        descriptor = os.open(name, flags, 0o600, dir_fd=directory_fd)
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short artifact write")
+            view = view[written:]
+        os.fsync(descriptor)
+        created = os.fstat(descriptor)
+        named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(created.st_mode)
+            or created.st_uid != os.geteuid()
+            or created.st_nlink != 1
+            or stat.S_IMODE(created.st_mode) != 0o600
+            or created.st_size != len(payload)
+            or (
+                created.st_dev,
+                created.st_ino,
+                created.st_mode,
+                created.st_nlink,
+                created.st_uid,
+                created.st_gid,
+                created.st_size,
+            )
+            != (
+                named.st_dev,
+                named.st_ino,
+                named.st_mode,
+                named.st_nlink,
+                named.st_uid,
+                named.st_gid,
+                named.st_size,
+            )
+        ):
+            raise OSError("created artifact identity is not exact")
+        os.fsync(directory_fd)
+        return created
     except FileExistsError as exc:
         raise BrowserReviewError(
             "BROWSER_RECEIPT_INVALID", "attempt artifact is immutable and already exists"
@@ -1088,6 +1193,85 @@ def _write_private_bytes_once(path: Path, payload: bytes) -> None:
         raise BrowserReviewError(
             "BROWSER_RECEIPT_INVALID", "attempt artifact write did not complete"
         ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _write_private_bytes_once(path: Path, payload: bytes) -> None:
+    """Create one private attempt artifact through a bound parent descriptor."""
+
+    candidate = Path(path)
+    parent_fd = -1
+    try:
+        if (
+            not candidate.is_absolute()
+            or not candidate.name
+            or candidate.parent / candidate.name != candidate
+            or candidate.parent != candidate.parent.resolve(strict=True)
+        ):
+            raise OSError("artifact path is not absolute and direct")
+        directory_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        parent_fd = os.open(candidate.parent, directory_flags)
+        before = os.fstat(parent_fd)
+        named_before = candidate.parent.lstat()
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_uid,
+            before.st_gid,
+        )
+        if (
+            identity
+            != (
+                named_before.st_dev,
+                named_before.st_ino,
+                named_before.st_mode,
+                named_before.st_uid,
+                named_before.st_gid,
+            )
+            or not stat.S_ISDIR(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o700
+        ):
+            raise OSError("artifact parent identity is not exact")
+        _write_private_bytes_once_at(parent_fd, candidate.name, payload)
+        after = os.fstat(parent_fd)
+        named_after = candidate.parent.lstat()
+        if (
+            identity
+            != (
+                after.st_dev,
+                after.st_ino,
+                after.st_mode,
+                after.st_uid,
+                after.st_gid,
+            )
+            or identity
+            != (
+                named_after.st_dev,
+                named_after.st_ino,
+                named_after.st_mode,
+                named_after.st_uid,
+                named_after.st_gid,
+            )
+            or candidate.parent != candidate.parent.resolve(strict=True)
+        ):
+            raise OSError("artifact parent changed during write")
+    except BrowserReviewError:
+        raise
+    except OSError as exc:
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID", "attempt artifact write did not complete"
+        ) from exc
+    finally:
+        if parent_fd >= 0:
+            os.close(parent_fd)
 
 
 class BrowserMcpToolGuard:
@@ -1101,6 +1285,12 @@ class BrowserMcpToolGuard:
         "visual-a.png": ("fixture-a", _VISUAL_VIEWPORT),
         "visual-b.png": ("fixture-b", _VISUAL_VIEWPORT),
     }
+    _SCREENSHOT_LINK_RE = re.compile(
+        r"^- \[Screenshot of viewport\]"
+        r"\((\./page-[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+        r"[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z\.png)\)$",
+        re.MULTILINE,
+    )
     def __init__(
         self,
         *,
@@ -1152,15 +1342,33 @@ class BrowserMcpToolGuard:
             )
         self.origin = origin
         self.artifact_dir = resolved
+        self._artifact_dir_identity = (
+            observed.st_dev,
+            observed.st_ino,
+            observed.st_mode,
+            observed.st_uid,
+            observed.st_gid,
+        )
         self._fixture_urls = {key: fixture_urls[key] for key in ("A", "B")}
         self._page_classes = page_classes
         self._current_page: str | None = None
         self._viewport: dict[str, int] | None = None
         self._screenshots: set[str] = set()
         self._image_content_sha256: dict[str, str] = {}
+        self._model_image_content_sha256: dict[str, str] = {}
         self._console_rows: list[dict[str, Any]] = []
         self._network_rows: list[dict[str, Any]] = []
         self._calls: dict[str, int] = {}
+        self._successful_calls: dict[str, int] = {}
+        self._navigation_epoch = 0
+        self._snapshot_binding: tuple[str, int] | None = None
+        self._pending_snapshot_binding: tuple[str, int] | None = None
+        self._pending_state_call: tuple[
+            str, bytes, dict[str, Any]
+        ] | None = None
+        self._pending_interaction_binding: tuple[str, int, str] | None = None
+        self._interaction: dict[str, str] | None = None
+        self._bounded_interaction_forwarded = False
         # There is no tool or request field that can alter the locked launch
         # envelope; every tools/call still passes this guard.
         self._egress_falsifiers = {"proxy_override": "REFUSED"}
@@ -1196,6 +1404,293 @@ class BrowserMcpToolGuard:
             return "product"
         return self._page_classes.get(url)
 
+    @staticmethod
+    def _state_call_key(name: str, arguments: Mapping[str, Any]) -> tuple[str, bytes]:
+        return name, _canonical_bytes(dict(arguments))
+
+    def _reserve_state_call(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        transition: Mapping[str, Any],
+    ) -> None:
+        """Invalidate optimistic state until one exact MCP result succeeds."""
+
+        if (
+            self._pending_state_call is not None
+            or self._pending_snapshot_binding is not None
+            or self._pending_interaction_binding is not None
+        ):
+            self._refuse("browser state transition is already pending")
+        call_name, encoded = self._state_call_key(name, arguments)
+        self._pending_state_call = (call_name, encoded, dict(transition))
+        self._snapshot_binding = None
+        if name in {"browser_navigate", "browser_close", "browser_tabs"}:
+            self._current_page = None
+        if name in {"browser_resize", "browser_close"}:
+            self._viewport = None
+
+    def _pending_transition(
+        self, name: str, arguments: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        pending = self._pending_state_call
+        if pending is None:
+            return None
+        call_name, encoded, transition = pending
+        expected_name, expected_encoded = self._state_call_key(name, arguments)
+        if (call_name, encoded) != (expected_name, expected_encoded):
+            return None
+        return transition
+
+    @staticmethod
+    def _stat_fingerprint(info: os.stat_result) -> tuple[int, ...]:
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_nlink,
+            info.st_uid,
+            info.st_gid,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+        )
+
+    @staticmethod
+    def _file_identity(info: os.stat_result) -> tuple[int, ...]:
+        """Identity fields that remain stable when the same inode is renamed."""
+
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_nlink,
+            info.st_uid,
+            info.st_gid,
+            info.st_size,
+        )
+
+    @staticmethod
+    def _directory_identity(info: os.stat_result) -> tuple[int, ...]:
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_uid,
+            info.st_gid,
+        )
+
+    @staticmethod
+    def _model_message_viewport(viewport: Mapping[str, int]) -> dict[str, int]:
+        """Mirror the pinned MCP's reviewed scaleImageToFitMessage contract."""
+
+        width = viewport["width"]
+        height = viewport["height"]
+        shrink = min(
+            1568 / width,
+            1568 / height,
+            math.sqrt((1.15 * 1024 * 1024) / (width * height)),
+        )
+        if shrink > 1:
+            return {"width": width, "height": height}
+        return {"width": int(width * shrink), "height": int(height * shrink)}
+
+    def _consume_full_viewport_artifact(
+        self,
+        *,
+        link: str,
+        filename: str,
+        model_pixels: bytes,
+        model_viewport: Mapping[str, int],
+        viewport: Mapping[str, int],
+    ) -> bytes:
+        """Read, seal, and remove one exact upstream MCP screenshot by dirfd."""
+
+        if (
+            not isinstance(link, str)
+            or not link.startswith("./")
+            or PurePosixPath(link).parts != (link[2:],)
+        ):
+            self._refuse("screenshot result link is outside the direct artifact root")
+        leaf = link[2:]
+        if re.fullmatch(
+            r"page-[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+            r"[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z\.png",
+            leaf,
+        ) is None:
+            self._refuse("screenshot result link is not the pinned MCP filename")
+
+        root_fd = -1
+        source_fd = -1
+        try:
+            root_fd = os.open(
+                self.artifact_dir,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            root_before = os.fstat(root_fd)
+            root_named = self.artifact_dir.lstat()
+            named_before = os.stat(leaf, dir_fd=root_fd, follow_symlinks=False)
+            source_fd = os.open(
+                leaf,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=root_fd,
+            )
+            opened = os.fstat(source_fd)
+            if (
+                not stat.S_ISDIR(root_before.st_mode)
+                or root_before.st_uid != os.geteuid()
+                or stat.S_IMODE(root_before.st_mode) != 0o700
+                or self._directory_identity(root_before)
+                != self._artifact_dir_identity
+                or self._directory_identity(root_named)
+                != self._artifact_dir_identity
+                or not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.geteuid()
+                or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) not in {0o600, 0o644}
+                or not 0 < opened.st_size <= MAX_SCREENSHOT_BYTES
+                or self._stat_fingerprint(named_before)
+                != self._stat_fingerprint(opened)
+            ):
+                self._refuse("upstream screenshot artifact identity is not exact")
+
+            chunks: list[bytes] = []
+            observed_bytes = 0
+            while True:
+                chunk = os.read(source_fd, min(1024 * 1024, MAX_SCREENSHOT_BYTES + 1 - observed_bytes))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                observed_bytes += len(chunk)
+                if observed_bytes > MAX_SCREENSHOT_BYTES:
+                    self._refuse("upstream screenshot artifact exceeds the reviewed bound")
+            payload = b"".join(chunks)
+            opened_after = os.fstat(source_fd)
+            named_after = os.stat(leaf, dir_fd=root_fd, follow_symlinks=False)
+            root_after = os.fstat(root_fd)
+            if (
+                len(payload) != opened.st_size
+                or self._stat_fingerprint(opened)
+                != self._stat_fingerprint(opened_after)
+                or self._stat_fingerprint(opened)
+                != self._stat_fingerprint(named_after)
+                or self._stat_fingerprint(root_before)
+                != self._stat_fingerprint(root_after)
+            ):
+                self._refuse("upstream screenshot artifact changed during read")
+
+            _validate_png_dimensions(payload, viewport=viewport)
+            if dict(model_viewport) == dict(viewport) and model_pixels != payload:
+                self._refuse("unscaled model image differs from the full screenshot")
+            if self._stat_fingerprint(opened) != self._stat_fingerprint(
+                os.stat(leaf, dir_fd=root_fd, follow_symlinks=False)
+            ):
+                self._refuse("upstream screenshot name changed before cleanup")
+
+            tombstone = f".mcp-consume-{secrets.token_hex(16)}"
+            try:
+                os.stat(tombstone, dir_fd=root_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:  # pragma: no cover - collision-resistant fail-closed guard
+                self._refuse("upstream screenshot cleanup tombstone already exists")
+            os.rename(
+                leaf,
+                tombstone,
+                src_dir_fd=root_fd,
+                dst_dir_fd=root_fd,
+            )
+            moved = os.stat(tombstone, dir_fd=root_fd, follow_symlinks=False)
+            if self._file_identity(opened) != self._file_identity(moved):
+                self._refuse("upstream screenshot name was replaced before cleanup")
+            os.unlink(tombstone, dir_fd=root_fd)
+            if os.fstat(source_fd).st_nlink != 0:
+                self._refuse("upstream screenshot inode survived cleanup")
+            for consumed_name in (leaf, tombstone):
+                try:
+                    os.stat(consumed_name, dir_fd=root_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                self._refuse("upstream screenshot name survived cleanup")
+            os.fsync(root_fd)
+
+            destination_fd = -1
+            destination: os.stat_result | None = None
+            try:
+                destination_fd = os.open(
+                    filename,
+                    os.O_RDWR
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=root_fd,
+                )
+                view = memoryview(payload)
+                while view:
+                    written = os.write(destination_fd, view)
+                    if written <= 0:
+                        raise OSError("short screenshot artifact write")
+                    view = view[written:]
+                os.fsync(destination_fd)
+                destination = os.fstat(destination_fd)
+                os.lseek(destination_fd, 0, os.SEEK_SET)
+                readback: list[bytes] = []
+                while True:
+                    chunk = os.read(destination_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    readback.append(chunk)
+                destination_named = os.stat(
+                    filename, dir_fd=root_fd, follow_symlinks=False
+                )
+                if (
+                    not stat.S_ISREG(destination.st_mode)
+                    or destination.st_uid != os.geteuid()
+                    or destination.st_nlink != 1
+                    or stat.S_IMODE(destination.st_mode) != 0o600
+                    or destination.st_size != len(payload)
+                    or b"".join(readback) != payload
+                    or self._stat_fingerprint(destination)
+                    != self._stat_fingerprint(destination_named)
+                ):
+                    self._refuse("sealed screenshot artifact identity is not exact")
+            finally:
+                if destination_fd >= 0:
+                    os.close(destination_fd)
+            os.fsync(root_fd)
+            if destination is None:
+                self._refuse("sealed screenshot artifact identity is unavailable")
+            root_final = os.fstat(root_fd)
+            root_named_final = self.artifact_dir.lstat()
+            destination_final = os.stat(
+                filename, dir_fd=root_fd, follow_symlinks=False
+            )
+            if (
+                self._directory_identity(root_final)
+                != self._artifact_dir_identity
+                or self._directory_identity(root_named_final)
+                != self._artifact_dir_identity
+                or self._stat_fingerprint(destination)
+                != self._stat_fingerprint(destination_final)
+            ):
+                self._refuse("sealed screenshot artifact root changed before completion")
+            return payload
+        except BrowserReviewError:
+            raise
+        except OSError as exc:
+            raise BrowserReviewError(
+                "BROWSER_MCP_TOOL_REFUSED",
+                "upstream screenshot artifact could not be consumed safely",
+            ) from exc
+        finally:
+            if source_fd >= 0:
+                os.close(source_fd)
+            if root_fd >= 0:
+                os.close(root_fd)
+
     def rewrite_call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """Validate one model-authored call and rewrite only confined filenames."""
 
@@ -1218,7 +1713,9 @@ class BrowserMcpToolGuard:
             page_class = self._page_class(url)
             if page_class is None:
                 self._refuse("browser navigation is outside the exact review origin")
-            self._current_page = page_class
+            self._reserve_state_call(
+                name, values, {"current_page": page_class}
+            )
             return values
 
         if name == "browser_resize":
@@ -1229,7 +1726,16 @@ class BrowserMcpToolGuard:
                 self._VISUAL_VIEWPORT,
             ):
                 self._refuse("browser viewport is outside the reviewed proof set")
-            self._viewport = {"width": int(values["width"]), "height": int(values["height"])}
+            self._reserve_state_call(
+                name,
+                values,
+                {
+                    "viewport": {
+                        "width": int(values["width"]),
+                        "height": int(values["height"]),
+                    }
+                },
+            )
             return values
 
         if name == "browser_take_screenshot":
@@ -1280,6 +1786,21 @@ class BrowserMcpToolGuard:
             values = self._closed(arguments, allowed=set())
             if values:
                 self._refuse("parameterless browser tool received arguments")
+            if name == "browser_close":
+                self._reserve_state_call(name, values, {"closed": True})
+            else:
+                if (
+                    self._pending_state_call is not None
+                    or self._pending_snapshot_binding is not None
+                    or self._current_page is None
+                ):
+                    self._refuse(
+                        "structured snapshot requires one successfully established page"
+                    )
+                self._pending_snapshot_binding = (
+                    self._current_page,
+                    self._navigation_epoch,
+                )
             return values
 
         if name == "browser_wait_for":
@@ -1304,41 +1825,36 @@ class BrowserMcpToolGuard:
                 and type(values.get("index")) is int
                 and 0 <= values["index"] <= 3
             ):
+                self._reserve_state_call(name, values, {"selected_tab": True})
                 return values
             self._refuse("browser tab operation is outside list/select")
 
         if name in {"browser_click", "browser_hover", "browser_fill_form"}:
-            if self._current_page not in {"fixture-a", "fixture-b"}:
-                self._refuse("mutable browser interaction is fixture-only")
-            if name == "browser_hover":
-                values = self._closed(arguments, allowed={"element", "target"})
-                if set(values) not in ({"target"}, {"element", "target"}) or not self._bounded_token(values.get("target")):
-                    self._refuse("hover target is invalid")
-                return values
-            if name == "browser_click":
-                values = self._closed(arguments, allowed={"button", "element", "target"})
-                if (
-                    set(values) not in ({"target"}, {"element", "target"}, {"button", "element", "target"})
-                    or not self._bounded_token(values.get("target"))
-                    or values.get("button", "left") != "left"
-                ):
-                    self._refuse("click target is invalid")
-                return values
-            values = self._closed(arguments, allowed={"fields"})
-            fields = values.get("fields")
-            if not isinstance(fields, list) or len(fields) != 1:
-                self._refuse("form interaction must contain one fixture field")
-            field = fields[0]
-            if (
-                not isinstance(field, Mapping)
-                or set(field) != {"name", "target", "type", "value"}
-                or field.get("type") != "textbox"
-                or any(
-                    not self._bounded_token(field.get(key), maximum=128)
-                    for key in ("name", "target", "value")
+            if name != "browser_hover" or self._current_page != "product":
+                self._refuse(
+                    "bounded browser interaction is product-page-only harmless hover"
                 )
+            if (
+                self._pending_state_call is not None
+                or self._pending_snapshot_binding is not None
+                or self._pending_interaction_binding is not None
+                or self._snapshot_binding
+                != (self._current_page, self._navigation_epoch)
             ):
-                self._refuse("form field is outside the fixture-only shape")
+                self._refuse(
+                    "structured snapshot must succeed before the bounded interaction"
+                )
+            if self._bounded_interaction_forwarded:
+                self._refuse("bounded browser interaction is already exhausted")
+            values = self._closed(arguments, allowed={"element", "target"})
+            if set(values) not in ({"target"}, {"element", "target"}) or not self._bounded_token(values.get("target")):
+                self._refuse("hover target is invalid")
+            self._bounded_interaction_forwarded = True
+            self._pending_interaction_binding = (
+                self._current_page,
+                self._navigation_epoch,
+                name,
+            )
             return values
 
         self._refuse("MCP tool lacks an enforcing argument policy")
@@ -1353,8 +1869,43 @@ class BrowserMcpToolGuard:
 
         if name not in ALLOWED_TOOLS or not isinstance(response, Mapping):
             self._refuse("MCP tool response lacks an authorized call")
+        transition = self._pending_transition(name, original_arguments)
+        stateful_response = name in {
+            "browser_close",
+            "browser_navigate",
+            "browser_resize",
+        } or (
+            name == "browser_tabs"
+            and original_arguments.get("action") == "select"
+        )
+        if stateful_response and transition is None:
+            self._refuse(
+                "MCP state response lacks its exact pending transition"
+            )
+        snapshot_binding = (
+            self._pending_snapshot_binding if name == "browser_snapshot" else None
+        )
+        interaction_binding = (
+            self._pending_interaction_binding
+            if name in _BOUNDED_INTERACTION_TOOLS
+            else None
+        )
+        if name in _BOUNDED_INTERACTION_TOOLS and interaction_binding is None:
+            self._refuse(
+                "MCP interaction response lacks its exact pending product binding"
+            )
         result = response.get("result")
-        if not isinstance(result, Mapping) or response.get("error") is not None:
+        if (
+            not isinstance(result, Mapping)
+            or response.get("error") is not None
+            or result.get("isError", False) is not False
+        ):
+            if transition is not None:
+                self._pending_state_call = None
+            if name == "browser_snapshot":
+                self._pending_snapshot_binding = None
+            if name in _BOUNDED_INTERACTION_TOOLS:
+                self._pending_interaction_binding = None
             self._refuse("MCP tool response is not a successful result")
         content = result.get("content")
         if not isinstance(content, list):
@@ -1363,18 +1914,89 @@ class BrowserMcpToolGuard:
         if len(encoded) > MAX_TEXT_EVIDENCE_BYTES + (2 * MAX_SCREENSHOT_BYTES):
             self._refuse("MCP tool response exceeds the reviewed bound")
 
+        if name == "browser_snapshot":
+            if (
+                not content
+                or not any(
+                    isinstance(block, Mapping)
+                    and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                    and bool(block["text"].strip())
+                    for block in content
+                )
+            ):
+                self._pending_snapshot_binding = None
+                self._refuse("structured snapshot result is empty")
+            if (
+                snapshot_binding is None
+                or self._pending_state_call is not None
+                or snapshot_binding
+                != (self._current_page, self._navigation_epoch)
+            ):
+                self._pending_snapshot_binding = None
+                self._refuse(
+                    "structured snapshot result is not bound to the current page"
+                )
+            self._pending_snapshot_binding = None
+            self._snapshot_binding = snapshot_binding
+
+        if name in _BOUNDED_INTERACTION_TOOLS:
+            if (
+                interaction_binding
+                != (self._current_page, self._navigation_epoch, "browser_hover")
+                or self._snapshot_binding
+                != (self._current_page, self._navigation_epoch)
+            ):
+                self._pending_interaction_binding = None
+                self._refuse(
+                    "successful interaction is not bound to the product snapshot"
+                )
+            self._pending_interaction_binding = None
+            self._interaction = {
+                "page_class": "product",
+                "tool": "browser_hover",
+            }
+
+        if transition is not None:
+            self._pending_state_call = None
+            if name == "browser_navigate":
+                self._current_page = str(transition["current_page"])
+                self._navigation_epoch += 1
+            elif name == "browser_resize":
+                self._viewport = dict(transition["viewport"])
+            elif name in {"browser_close", "browser_tabs"}:
+                self._current_page = None
+                self._snapshot_binding = None
+
         if name == "browser_take_screenshot":
             filename = str(original_arguments.get("filename") or "")
+            texts = [
+                block
+                for block in content
+                if isinstance(block, Mapping) and block.get("type") == "text"
+            ]
             images = [
                 block
                 for block in content
                 if isinstance(block, Mapping) and block.get("type") == "image"
             ]
-            if len(images) != 1 or filename not in self._screenshots:
-                self._refuse("screenshot response lacks one bound image content block")
+            if (
+                len(content) != 2
+                or len(texts) != 1
+                or len(images) != 1
+                or filename not in self._screenshots
+                or set(texts[0]) != {"text", "type"}
+                or not isinstance(texts[0].get("text"), str)
+            ):
+                self._refuse("screenshot response lacks one bound file and image result")
+            links = self._SCREENSHOT_LINK_RE.findall(texts[0]["text"])
+            if len(links) != 1 or texts[0]["text"].count("](") != 1:
+                self._refuse("screenshot response lacks one exact upstream artifact link")
             image = images[0]
-            if image.get("mimeType") != "image/png" or not isinstance(
-                image.get("data"), str
+            if (
+                set(image) != {"data", "mimeType", "type"}
+                or image.get("mimeType") != "image/png"
+                or not isinstance(image.get("data"), str)
             ):
                 self._refuse("screenshot response image content is not PNG")
             try:
@@ -1388,19 +2010,25 @@ class BrowserMcpToolGuard:
                 or not 0 < len(pixels) <= MAX_SCREENSHOT_BYTES
             ):
                 self._refuse("screenshot image content is outside the reviewed bound")
+            viewport = self._SCREENSHOT_BINDINGS[filename][1]
+            model_viewport = self._model_message_viewport(viewport)
             _validate_png_dimensions(
-                pixels, viewport=self._SCREENSHOT_BINDINGS[filename][1]
+                pixels, viewport=model_viewport
             )
-            _write_private_bytes_once(self.artifact_dir / filename, pixels)
-            artifact = screenshot_artifact(
-                self.artifact_dir,
-                filename,
-                viewport=self._SCREENSHOT_BINDINGS[filename][1],
+            full_viewport = self._consume_full_viewport_artifact(
+                link=links[0],
+                filename=filename,
+                model_pixels=pixels,
+                model_viewport=model_viewport,
+                viewport=viewport,
             )
-            digest = hashlib.sha256(pixels).hexdigest()
-            if artifact["sha256"] != digest or artifact["bytes"] != len(pixels):
-                self._refuse("image content differs from the confined screenshot artifact")
-            self._image_content_sha256[filename] = digest
+            self._image_content_sha256[filename] = hashlib.sha256(
+                full_viewport
+            ).hexdigest()
+            self._model_image_content_sha256[filename] = hashlib.sha256(
+                pixels
+            ).hexdigest()
+            self._successful_calls[name] = self._successful_calls.get(name, 0) + 1
             return
 
         if name in {"browser_console_messages", "browser_network_requests"}:
@@ -1418,13 +2046,20 @@ class BrowserMcpToolGuard:
             if len(target) >= maximum:
                 self._refuse("MCP evidence row count exceeds the reviewed bound")
             target.append(row)
+        self._successful_calls[name] = self._successful_calls.get(name, 0) + 1
 
     def evidence(self) -> dict[str, Any]:
         return {
-            "calls": dict(sorted(self._calls.items())),
+            "calls": dict(sorted(self._successful_calls.items())),
             "console_rows": list(self._console_rows),
             "egress_falsifiers": dict(sorted(self._egress_falsifiers.items())),
             "image_content_sha256": dict(sorted(self._image_content_sha256.items())),
+            "interaction": (
+                dict(self._interaction) if self._interaction is not None else None
+            ),
+            "model_image_content_sha256": dict(
+                sorted(self._model_image_content_sha256.items())
+            ),
             "network_rows": list(self._network_rows),
             "screenshots": sorted(self._screenshots),
         }
@@ -1477,6 +2112,7 @@ class _GuardedMcpBridge:
         self._pending_lock = threading.Lock()
         self._output_lock = threading.Lock()
         self._client_error: Exception | None = None
+        self._tool_call_in_flight = False
 
     def _write_client(self, payload: Mapping[str, Any]) -> None:
         encoded = _canonical_bytes(dict(payload)) + b"\n"
@@ -1548,9 +2184,20 @@ class _GuardedMcpBridge:
                         continue
                     name = str(params["name"])
                     original = dict(params["arguments"])
+                    with self._pending_lock:
+                        if self._tool_call_in_flight:
+                            busy = True
+                        else:
+                            self._tool_call_in_flight = True
+                            busy = False
+                    if busy:
+                        self._refusal(request_id)
+                        continue
                     try:
                         rewritten = self.guard.rewrite_call(name, original)
                     except BrowserReviewError:
+                        with self._pending_lock:
+                            self._tool_call_in_flight = False
                         self._refusal(request_id)
                         continue
                     forwarded = dict(request)
@@ -1692,7 +2339,11 @@ class _GuardedMcpBridge:
                         self.guard.record_result(tool_name, original, response)
                     except BrowserReviewError:
                         self._refusal(request_id)
+                        with self._pending_lock:
+                            self._tool_call_in_flight = False
                         continue
+                    with self._pending_lock:
+                        self._tool_call_in_flight = False
                 self._write_client(response)
         except Exception as exc:  # noqa: BLE001 - converted to fail-closed exit
             server_error = exc
@@ -1714,6 +2365,86 @@ class _GuardedMcpBridge:
 
 
 _MCP_GUARD_EVIDENCE_FILE = "browser-mcp-guard-evidence.json"
+_MCP_GUARD_EVIDENCE_SCHEMA = "mastermind.browser_mcp_guard_evidence/v2"
+
+
+def _closed_mcp_guard_observations(
+    calls: Any,
+    *,
+    console_rows: Any,
+    interaction: Any,
+    network_rows: Any,
+) -> dict[str, int]:
+    """Validate positive successful calls behind one guard-v2 receipt."""
+
+    if not isinstance(calls, Mapping) or not calls:
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID", "MCP guard evidence calls are incomplete"
+        )
+    normalized: dict[str, int] = {}
+    for name, count in calls.items():
+        if (
+            not isinstance(name, str)
+            or name not in ALLOWED_TOOLS
+            or type(count) is not int
+            or not 1 <= count <= 16
+        ):
+            raise BrowserReviewError(
+                "BROWSER_RECEIPT_INVALID",
+                "MCP guard evidence successful call count is invalid",
+            )
+        normalized[name] = count
+    if any(
+        normalized.get(name, 0) < minimum
+        for name, minimum in _REQUIRED_MCP_SUCCESS_MINIMUMS.items()
+    ) or normalized.get("browser_take_screenshot") != 4:
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID",
+            "MCP guard evidence required successful calls are incomplete",
+        )
+    if sum(normalized.get(name, 0) for name in _BOUNDED_INTERACTION_TOOLS) != 1:
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID",
+            "MCP guard evidence bounded interaction is not exact",
+        )
+    if (
+        not isinstance(interaction, Mapping)
+        or dict(interaction)
+        != {"page_class": "product", "tool": "browser_hover"}
+    ):
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID",
+            "MCP guard evidence product interaction provenance is invalid",
+        )
+
+    for rows, tool, maximum in (
+        (console_rows, "browser_console_messages", MAX_CONSOLE_ROWS),
+        (network_rows, "browser_network_requests", MAX_NETWORK_ROWS),
+    ):
+        if (
+            not isinstance(rows, list)
+            or not 1 <= len(rows) <= maximum
+            or normalized.get(tool) != len(rows)
+        ):
+            raise BrowserReviewError(
+                "BROWSER_RECEIPT_INVALID",
+                "MCP guard evidence result rows are incomplete",
+            )
+        for row in rows:
+            if (
+                not isinstance(row, Mapping)
+                or set(row) != {"bytes", "content_sha256", "tool"}
+                or row.get("tool") != tool
+                or type(row.get("bytes")) is not int
+                or not 0 < row["bytes"] <= MAX_TEXT_EVIDENCE_BYTES
+                or _SHA256_RE.fullmatch(str(row.get("content_sha256") or ""))
+                is None
+            ):
+                raise BrowserReviewError(
+                    "BROWSER_RECEIPT_INVALID",
+                    "MCP guard evidence result row is invalid",
+                )
+    return dict(sorted(normalized.items()))
 
 
 def run_guarded_mcp_bridge(
@@ -1766,7 +2497,7 @@ def run_guarded_mcp_bridge(
             {
                 "bridge_exit_code": return_code,
                 "cleanup_proven": cleanup_proven,
-                "schema_version": "mastermind.browser_mcp_guard_evidence/v1",
+                "schema_version": _MCP_GUARD_EVIDENCE_SCHEMA,
             }
         )
         payload = _canonical_bytes(evidence)
@@ -1954,14 +2685,111 @@ def screenshot_artifact(
     }
 
 
+def _screenshot_artifact_at(
+    directory_fd: int,
+    relative_path: str,
+    *,
+    viewport: Mapping[str, int],
+) -> dict[str, Any]:
+    """Hash one screenshot through the already-bound Attempt directory."""
+
+    if set(viewport) != {"height", "width"} or any(
+        type(value) is not int or value <= 0 for value in viewport.values()
+    ):
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID", "viewport is not closed positive pixels"
+        )
+    if (
+        not isinstance(relative_path, str)
+        or not relative_path
+        or Path(relative_path).name != relative_path
+        or PurePosixPath(relative_path).parts != (relative_path,)
+    ):
+        raise BrowserReviewError(
+            "BROWSER_SCREENSHOT_FAILED", "screenshot path must be a direct artifact"
+        )
+    descriptor = -1
+    try:
+        named_before = os.stat(
+            relative_path, dir_fd=directory_fd, follow_symlinks=False
+        )
+        descriptor = os.open(
+            relative_path,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or not 0 < before.st_size <= MAX_SCREENSHOT_BYTES
+            or BrowserMcpToolGuard._stat_fingerprint(named_before)
+            != BrowserMcpToolGuard._stat_fingerprint(before)
+        ):
+            raise OSError("screenshot identity is not exact")
+        chunks: list[bytes] = []
+        observed_bytes = 0
+        while True:
+            chunk = os.read(
+                descriptor,
+                min(1024 * 1024, MAX_SCREENSHOT_BYTES + 1 - observed_bytes),
+            )
+            if not chunk:
+                break
+            chunks.append(chunk)
+            observed_bytes += len(chunk)
+            if observed_bytes > MAX_SCREENSHOT_BYTES:
+                raise OSError("screenshot exceeds reviewed bound")
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+        named_after = os.stat(
+            relative_path, dir_fd=directory_fd, follow_symlinks=False
+        )
+        if (
+            len(raw) != before.st_size
+            or BrowserMcpToolGuard._stat_fingerprint(before)
+            != BrowserMcpToolGuard._stat_fingerprint(after)
+            or BrowserMcpToolGuard._stat_fingerprint(before)
+            != BrowserMcpToolGuard._stat_fingerprint(named_after)
+        ):
+            raise OSError("screenshot changed during read")
+        _validate_png_dimensions(raw, viewport=viewport)
+        return {
+            "relative_path": relative_path,
+            "viewport": {
+                "width": int(viewport["width"]),
+                "height": int(viewport["height"]),
+            },
+            "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    except BrowserReviewError:
+        raise
+    except OSError as exc:
+        raise BrowserReviewError(
+            "BROWSER_SCREENSHOT_FAILED", "screenshot artifact is unavailable"
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def _bounded_rows(
     rows: Sequence[Mapping[str, Any]],
     *,
     maximum_rows: int,
     field: str,
 ) -> dict[str, Any]:
-    if isinstance(rows, (str, bytes)) or len(rows) > maximum_rows:
-        raise BrowserReviewError("BROWSER_ARTIFACT_OVERSIZE", f"{field} rows exceed the reviewed bound")
+    if (
+        isinstance(rows, (str, bytes))
+        or not 1 <= len(rows) <= maximum_rows
+    ):
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID",
+            f"{field} rows do not prove an explicit observation",
+        )
     normalized: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, Mapping):
@@ -1982,6 +2810,7 @@ def seal_browser_review_receipt(
     context: BrowserAttemptContext,
     *,
     local_origin: str,
+    mcp_guard: Mapping[str, Any],
     screenshots: Sequence[Mapping[str, Any]],
     console_rows: Sequence[Mapping[str, Any]],
     network_rows: Sequence[Mapping[str, Any]],
@@ -1999,6 +2828,7 @@ def seal_browser_review_receipt(
     network = _bounded_rows(
         network_rows, maximum_rows=MAX_NETWORK_ROWS, field="network"
     )
+    guard_summary = _closed_mcp_guard_summary(mcp_guard)
     if not 2 <= len(screenshots) <= MAX_SCREENSHOTS:
         raise BrowserReviewError("BROWSER_VISUAL_CAPABILITY_UNPROVEN", "desktop and mobile screenshot evidence is required")
     screenshot_rows: list[dict[str, Any]] = []
@@ -2073,6 +2903,7 @@ def seal_browser_review_receipt(
         "artifacts": {
             "screenshots": screenshot_rows,
             "console": console,
+            "mcp_guard": guard_summary,
             "network": network,
         },
         "egress_falsifiers": dict(sorted(egress_falsifiers.items())),
@@ -4081,6 +4912,7 @@ class BrowserGenerationResource:
         self._artifact_dir = _generation_artifact_dir(
             Path(self.resource_grant.artifact_root), self.process_generation_id
         )
+        self._artifact_dir_identity: tuple[int, ...] | None = None
         self._manifest: DevserverManifest | None = None
         self._process: subprocess.Popen[bytes] | None = None
         self._process_group: int | None = None
@@ -4103,6 +4935,45 @@ class BrowserGenerationResource:
                 "BROWSER_MCP_START_FAILED", "browser resource is not ready"
             )
         return dict(self._environment)
+
+    def _require_artifact_root_descriptor(self, descriptor: int) -> os.stat_result:
+        try:
+            held = os.fstat(descriptor)
+            named = self._artifact_dir.lstat()
+        except OSError as exc:
+            raise BrowserReviewError(
+                "BROWSER_RECEIPT_INVALID", "Attempt artifact root is unavailable"
+            ) from exc
+        if (
+            self._artifact_dir_identity is None
+            or not stat.S_ISDIR(held.st_mode)
+            or held.st_uid != os.geteuid()
+            or stat.S_IMODE(held.st_mode) != 0o700
+            or BrowserMcpToolGuard._directory_identity(held)
+            != self._artifact_dir_identity
+            or BrowserMcpToolGuard._directory_identity(named)
+            != self._artifact_dir_identity
+        ):
+            raise BrowserReviewError(
+                "BROWSER_RECEIPT_INVALID", "Attempt artifact root identity changed"
+            )
+        return held
+
+    def _open_artifact_root_descriptor(self) -> int:
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                self._artifact_dir,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            self._require_artifact_root_descriptor(descriptor)
+            return descriptor
+        except (OSError, BrowserReviewError):
+            if descriptor >= 0:
+                os.close(descriptor)
+            raise
 
     def _candidate_ports(self) -> tuple[int, ...]:
         span = 65535 - 49152 - 16
@@ -4234,6 +5105,9 @@ class BrowserGenerationResource:
                 "generation artifact directory already exists",
             ) from exc
         _secure_directory(self._artifact_dir)
+        self._artifact_dir_identity = BrowserMcpToolGuard._directory_identity(
+            self._artifact_dir.lstat()
+        )
         private_home = self._artifact_dir / "home"
         _secure_directory(private_home)
         self._workspace_before = _tracked_workspace_snapshot(root)
@@ -4364,8 +5238,11 @@ class BrowserGenerationResource:
         return (
             "\n\nBROWSER REVIEW RECEIPT CONTRACT (Executive-owned): use only the "
             "playwright-worker-browser-b1 MCP. Inspect the local product at "
-            f"{self._environment['MASTERMIND_BROWSER_ORIGIN']}/ at 1440x900 and "
-            "390x844, capturing desktop.png and mobile.png. Then inspect both "
+            f"{self._environment['MASTERMIND_BROWSER_ORIGIN']}/. First take a "
+            "structured snapshot and perform exactly one harmless browser_hover "
+            "on the product Theme button using its exact snapshot target and "
+            "reference. Then inspect the product at 1440x900 and 390x844, "
+            "capturing desktop.png and mobile.png. Then inspect both "
             "opaque pixel fixtures at 900x600 and capture visual-a.png from "
             f"{self._environment['MASTERMIND_BROWSER_FIXTURE_A_URL']} and "
             "visual-b.png from "
@@ -4425,24 +5302,79 @@ class BrowserGenerationResource:
             )
         self._visual_judgment = dict(judgment)
 
-    def _attempt_evidence(self) -> dict[str, Any]:
-        path = self._artifact_dir / _MCP_GUARD_EVIDENCE_FILE
+    def _attempt_evidence(
+        self, root_fd: int
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        evidence_fd = -1
         try:
-            info = path.lstat()
+            root_before = self._require_artifact_root_descriptor(root_fd)
+            named_before = os.stat(
+                _MCP_GUARD_EVIDENCE_FILE,
+                dir_fd=root_fd,
+                follow_symlinks=False,
+            )
+            evidence_fd = os.open(
+                _MCP_GUARD_EVIDENCE_FILE,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=root_fd,
+            )
+            info = os.fstat(evidence_fd)
             if (
-                path.is_symlink()
-                or not stat.S_ISREG(info.st_mode)
+                not stat.S_ISREG(info.st_mode)
                 or info.st_uid != os.geteuid()
+                or info.st_nlink != 1
                 or stat.S_IMODE(info.st_mode) != 0o600
                 or info.st_size <= 0
                 or info.st_size > MAX_TEXT_EVIDENCE_BYTES
+                or BrowserMcpToolGuard._stat_fingerprint(named_before)
+                != BrowserMcpToolGuard._stat_fingerprint(info)
             ):
                 raise OSError("unsafe evidence")
-            value = json.loads(path.read_text(encoding="utf-8"))
+            chunks: list[bytes] = []
+            observed_bytes = 0
+            while True:
+                chunk = os.read(
+                    evidence_fd,
+                    min(
+                        1024 * 1024,
+                        MAX_TEXT_EVIDENCE_BYTES + 1 - observed_bytes,
+                    ),
+                )
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                observed_bytes += len(chunk)
+                if observed_bytes > MAX_TEXT_EVIDENCE_BYTES:
+                    raise OSError("evidence exceeds reviewed bound")
+            raw = b"".join(chunks)
+            info_after = os.fstat(evidence_fd)
+            named_after = os.stat(
+                _MCP_GUARD_EVIDENCE_FILE,
+                dir_fd=root_fd,
+                follow_symlinks=False,
+            )
+            root_after = os.fstat(root_fd)
+            self._require_artifact_root_descriptor(root_fd)
+            if (
+                len(raw) != info.st_size
+                or BrowserMcpToolGuard._stat_fingerprint(info)
+                != BrowserMcpToolGuard._stat_fingerprint(info_after)
+                or BrowserMcpToolGuard._stat_fingerprint(info)
+                != BrowserMcpToolGuard._stat_fingerprint(named_after)
+                or BrowserMcpToolGuard._stat_fingerprint(root_before)
+                != BrowserMcpToolGuard._stat_fingerprint(root_after)
+                or BrowserMcpToolGuard._directory_identity(root_after)
+                != self._artifact_dir_identity
+            ):
+                raise OSError("evidence changed during read")
+            value = json.loads(raw.decode("utf-8"))
         except (OSError, UnicodeError, ValueError) as exc:
             raise BrowserReviewError(
                 "BROWSER_VISUAL_CAPABILITY_UNPROVEN", "closed MCP guard evidence is unavailable"
             ) from exc
+        finally:
+            if evidence_fd >= 0:
+                os.close(evidence_fd)
         expected = {
             "bridge_exit_code",
             "calls",
@@ -4450,6 +5382,8 @@ class BrowserGenerationResource:
             "console_rows",
             "egress_falsifiers",
             "image_content_sha256",
+            "interaction",
+            "model_image_content_sha256",
             "network_rows",
             "schema_version",
             "screenshots",
@@ -4457,8 +5391,7 @@ class BrowserGenerationResource:
         if (
             not isinstance(value, dict)
             or set(value) != expected
-            or value.get("schema_version")
-            != "mastermind.browser_mcp_guard_evidence/v1"
+            or value.get("schema_version") != _MCP_GUARD_EVIDENCE_SCHEMA
             or value.get("bridge_exit_code") != 0
             or value.get("cleanup_proven") is not True
             or not isinstance(value.get("calls"), Mapping)
@@ -4469,16 +5402,43 @@ class BrowserGenerationResource:
             or not isinstance(value.get("image_content_sha256"), Mapping)
             or set(value["image_content_sha256"])
             != {"desktop.png", "mobile.png", "visual-a.png", "visual-b.png"}
+            or not isinstance(value.get("model_image_content_sha256"), Mapping)
+            or set(value["model_image_content_sha256"])
+            != {"desktop.png", "mobile.png", "visual-a.png", "visual-b.png"}
             or not isinstance(value.get("egress_falsifiers"), Mapping)
+            or not isinstance(value.get("interaction"), Mapping)
         ):
             raise BrowserReviewError(
                 "BROWSER_RECEIPT_INVALID", "MCP guard evidence fields are not closed"
             )
         for digest in value["image_content_sha256"].values():
             _require_sha256(digest, field="MCP guard image content")
-        return value
+        for digest in value["model_image_content_sha256"].values():
+            _require_sha256(digest, field="MCP guard model image content")
+        value["calls"] = _closed_mcp_guard_observations(
+            value["calls"],
+            console_rows=value["console_rows"],
+            interaction=value["interaction"],
+            network_rows=value["network_rows"],
+        )
+        summary = {
+            "relative_path": _MCP_GUARD_EVIDENCE_FILE,
+            "schema_version": _MCP_GUARD_EVIDENCE_SCHEMA,
+            "bytes": len(raw),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+        return value, summary
 
     def seal_after_uid_sweep(self, sweep: Any) -> BrowserReviewReceipt:
+        root_fd = self._open_artifact_root_descriptor()
+        try:
+            return self._seal_after_uid_sweep_bound(sweep, root_fd)
+        finally:
+            os.close(root_fd)
+
+    def _seal_after_uid_sweep_bound(
+        self, sweep: Any, root_fd: int
+    ) -> BrowserReviewReceipt:
         from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
 
         if (
@@ -4500,7 +5460,7 @@ class BrowserGenerationResource:
             raise BrowserReviewError(
                 "BROWSER_ORPHAN_PROCESS_UNCERTAIN", "post-generation cleanup is not exact"
             )
-        evidence = self._attempt_evidence()
+        evidence, mcp_guard = self._attempt_evidence(root_fd)
         seal_attestation = load_runtime_install_attestation(
             Path(self.resource_grant.runtime_root),
             manifest_path=Path(self.resource_grant.runtime_manifest_path),
@@ -4512,24 +5472,25 @@ class BrowserGenerationResource:
                 "runtime identity changed before receipt seal",
             )
         screenshots = [
-            screenshot_artifact(
-                self._artifact_dir, "desktop.png", viewport=_DESKTOP
+            _screenshot_artifact_at(
+                root_fd, "desktop.png", viewport=_DESKTOP
             ),
-            screenshot_artifact(
-                self._artifact_dir, "mobile.png", viewport=_MOBILE
+            _screenshot_artifact_at(
+                root_fd, "mobile.png", viewport=_MOBILE
             ),
-            screenshot_artifact(
-                self._artifact_dir,
+            _screenshot_artifact_at(
+                root_fd,
                 "visual-a.png",
                 viewport=BrowserMcpToolGuard._VISUAL_VIEWPORT,
             ),
-            screenshot_artifact(
-                self._artifact_dir,
+            _screenshot_artifact_at(
+                root_fd,
                 "visual-b.png",
                 viewport=BrowserMcpToolGuard._VISUAL_VIEWPORT,
             ),
         ]
         observed_images = evidence["image_content_sha256"]
+        model_images = evidence["model_image_content_sha256"]
         if any(
             observed_images[row["relative_path"]] != row["sha256"]
             for row in screenshots
@@ -4564,8 +5525,8 @@ class BrowserGenerationResource:
             "defective_variant": expected_defective,
             "fixture_nonce": self._visual_fixture.nonce,
             "image_sha256": [
-                observed_images["visual-a.png"],
-                observed_images["visual-b.png"],
+                model_images["visual-a.png"],
+                model_images["visual-b.png"],
             ],
             "reason": self._visual_judgment["reason"],
             "source": "model_image_content",
@@ -4592,6 +5553,7 @@ class BrowserGenerationResource:
         receipt = seal_browser_review_receipt(
             context,
             local_origin=self._environment["MASTERMIND_BROWSER_ORIGIN"],
+            mcp_guard=mcp_guard,
             screenshots=screenshots,
             console_rows=evidence["console_rows"],
             network_rows=evidence["network_rows"],
@@ -4607,12 +5569,19 @@ class BrowserGenerationResource:
             },
             tracked_workspace_changes_after_review=False,
         )
-        _write_private_receipt(self._artifact_dir / _RECEIPT_FILE, receipt)
+        _write_private_receipt_at(root_fd, receipt)
+        self._require_artifact_root_descriptor(root_fd)
         return receipt
 
 
-def _write_private_receipt(path: Path, receipt: BrowserReviewReceipt) -> None:
-    _write_private_bytes_once(path, _canonical_bytes(receipt.to_wire()) + b"\n")
+def _write_private_receipt_at(
+    directory_fd: int, receipt: BrowserReviewReceipt
+) -> None:
+    _write_private_bytes_once_at(
+        directory_fd,
+        _RECEIPT_FILE,
+        _canonical_bytes(receipt.to_wire()) + b"\n",
+    )
 
 
 def load_persisted_browser_review_receipt(
@@ -4620,25 +5589,134 @@ def load_persisted_browser_review_receipt(
     *,
     artifact_root: Path = DEFAULT_ARTIFACT_ROOT,
 ) -> BrowserReviewReceipt | None:
-    path = _generation_artifact_dir(artifact_root, generation.process_generation_id) / _RECEIPT_FILE
+    root_path = Path(artifact_root)
+    generation_name = _generation_artifact_dir(
+        Path(), generation.process_generation_id
+    ).name
+    root_fd = -1
+    generation_fd = -1
+    receipt_fd = -1
     try:
-        info = path.lstat()
+        root_fd = os.open(
+            root_path,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        root_before = os.fstat(root_fd)
+        root_named_before = root_path.lstat()
         if (
-            path.is_symlink()
-            or not stat.S_ISREG(info.st_mode)
+            not stat.S_ISDIR(root_before.st_mode)
+            or root_before.st_uid != os.geteuid()
+            or stat.S_IMODE(root_before.st_mode) != 0o700
+            or BrowserMcpToolGuard._directory_identity(root_before)
+            != BrowserMcpToolGuard._directory_identity(root_named_before)
+        ):
+            raise OSError("unsafe artifact root")
+
+        generation_named_before = os.stat(
+            generation_name, dir_fd=root_fd, follow_symlinks=False
+        )
+        generation_fd = os.open(
+            generation_name,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=root_fd,
+        )
+        generation_before = os.fstat(generation_fd)
+        if (
+            not stat.S_ISDIR(generation_before.st_mode)
+            or generation_before.st_uid != os.geteuid()
+            or stat.S_IMODE(generation_before.st_mode) != 0o700
+            or BrowserMcpToolGuard._stat_fingerprint(generation_before)
+            != BrowserMcpToolGuard._stat_fingerprint(generation_named_before)
+        ):
+            raise OSError("unsafe generation artifact directory")
+
+        named_before = os.stat(
+            _RECEIPT_FILE, dir_fd=generation_fd, follow_symlinks=False
+        )
+        receipt_fd = os.open(
+            _RECEIPT_FILE,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=generation_fd,
+        )
+        info = os.fstat(receipt_fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
             or info.st_uid != os.geteuid()
+            or info.st_nlink != 1
             or stat.S_IMODE(info.st_mode) != 0o600
             or info.st_size <= 0
             or info.st_size > MAX_TEXT_EVIDENCE_BYTES
+            or BrowserMcpToolGuard._stat_fingerprint(info)
+            != BrowserMcpToolGuard._stat_fingerprint(named_before)
         ):
             raise OSError("unsafe receipt")
-        value = json.loads(path.read_text(encoding="utf-8"))
+
+        chunks: list[bytes] = []
+        observed_bytes = 0
+        while True:
+            chunk = os.read(
+                receipt_fd,
+                min(
+                    1024 * 1024,
+                    MAX_TEXT_EVIDENCE_BYTES + 1 - observed_bytes,
+                ),
+            )
+            if not chunk:
+                break
+            chunks.append(chunk)
+            observed_bytes += len(chunk)
+            if observed_bytes > MAX_TEXT_EVIDENCE_BYTES:
+                raise OSError("persisted receipt exceeds reviewed bound")
+        raw = b"".join(chunks)
+
+        info_after = os.fstat(receipt_fd)
+        named_after = os.stat(
+            _RECEIPT_FILE, dir_fd=generation_fd, follow_symlinks=False
+        )
+        generation_after = os.fstat(generation_fd)
+        generation_named_after = os.stat(
+            generation_name, dir_fd=root_fd, follow_symlinks=False
+        )
+        root_after = os.fstat(root_fd)
+        root_named_after = root_path.lstat()
+        if (
+            len(raw) != info.st_size
+            or BrowserMcpToolGuard._stat_fingerprint(info)
+            != BrowserMcpToolGuard._stat_fingerprint(info_after)
+            or BrowserMcpToolGuard._stat_fingerprint(info)
+            != BrowserMcpToolGuard._stat_fingerprint(named_after)
+            or BrowserMcpToolGuard._stat_fingerprint(generation_before)
+            != BrowserMcpToolGuard._stat_fingerprint(generation_after)
+            or BrowserMcpToolGuard._stat_fingerprint(generation_before)
+            != BrowserMcpToolGuard._stat_fingerprint(generation_named_after)
+            or BrowserMcpToolGuard._stat_fingerprint(root_before)
+            != BrowserMcpToolGuard._stat_fingerprint(root_after)
+            or BrowserMcpToolGuard._directory_identity(root_before)
+            != BrowserMcpToolGuard._directory_identity(root_named_after)
+        ):
+            raise OSError("persisted receipt changed during read")
+        value = json.loads(raw.decode("utf-8"))
     except FileNotFoundError:
-        return None
+        if receipt_fd < 0:
+            return None
+        raise BrowserReviewError(
+            "BROWSER_RECEIPT_INVALID", "persisted browser receipt is unsafe"
+        )
     except (OSError, UnicodeError, ValueError) as exc:
         raise BrowserReviewError(
             "BROWSER_RECEIPT_INVALID", "persisted browser receipt is unsafe"
         ) from exc
+    finally:
+        if receipt_fd >= 0:
+            os.close(receipt_fd)
+        if generation_fd >= 0:
+            os.close(generation_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
     receipt = browser_review_receipt(value)
     if receipt.process_generation_id != generation.process_generation_id:
         raise BrowserReviewError(

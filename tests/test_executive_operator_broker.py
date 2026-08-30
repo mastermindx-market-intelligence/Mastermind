@@ -455,8 +455,14 @@ def test_browser_resource_is_generation_bound_and_sealed_only_after_uid_sweep(
                         {"bytes": 10, "relative_path": "desktop.png", "sha256": "0" * 64, "viewport": {"width": 1440, "height": 900}},
                         {"bytes": 10, "relative_path": "mobile.png", "sha256": "1" * 64, "viewport": {"width": 390, "height": 844}},
                     ],
-                    "console": {"bytes": 2, "observed": True, "rows": 0, "sha256": "2" * 64},
-                    "network": {"bytes": 2, "observed": True, "rows": 0, "sha256": "3" * 64},
+                    "console": {"bytes": 64, "observed": True, "rows": 1, "sha256": "2" * 64},
+                    "mcp_guard": {
+                        "bytes": 4096,
+                        "relative_path": "browser-mcp-guard-evidence.json",
+                        "schema_version": "mastermind.browser_mcp_guard_evidence/v2",
+                        "sha256": "8" * 64,
+                    },
+                    "network": {"bytes": 64, "observed": True, "rows": 1, "sha256": "3" * 64},
                 },
                 egress_falsifiers={
                     "external_fetch": "REFUSED",
