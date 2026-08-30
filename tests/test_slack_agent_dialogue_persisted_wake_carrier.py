@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 
 import pytest
 
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.session_targets import RuntimeBinding
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
+from control_plane.wake_events import mint_obligation
 from control_plane.wake_ledger import LedgerPhase, requested_record
 from control_plane.wake_persist import WakeLedgerRepository
 from integrations.executive_wake.registry import WakeDispatcherRegistry
@@ -43,6 +45,24 @@ def _carrier(repo, dispatcher, binding: RuntimeBinding):
 
 def _phases(repo, obligation_id):
     return [item.record.phase for item in repo.list_records(obligation_id)]
+
+
+def _remint(obligation, **overrides):
+    fields = {
+        "wake_kind": obligation.wake_kind,
+        "source_kind": obligation.source_kind,
+        "source_ref": obligation.source_ref,
+        "declared_target_seat": obligation.declared_target_seat,
+        "job_id": obligation.job_id,
+        "attempt_id": obligation.attempt_id,
+        "root_job_id": obligation.root_job_id,
+        "workstream": obligation.workstream,
+        "source_workstream": obligation.source_workstream,
+        "source_created_at": obligation.source_created_at,
+        "emitted_at": obligation.emitted_at,
+    }
+    fields.update(overrides)
+    return mint_obligation(**fields)
 
 
 def test_reconcile_no_records_and_requested_only_are_submit_eligible(tmp_path) -> None:
@@ -193,3 +213,118 @@ def test_observer_binding_movement_is_reconciliation_incomplete_not_crash(tmp_pa
     assert second.reason == "WAKE_TARGET_UNAVAILABLE"
     assert first.obligation is not None
     assert _phases(repo, first.obligation.obligation_id) == [LedgerPhase.WAKE_REQUESTED]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"declared_target_seat": "coo"},
+        {"job_id": "JOB-777", "root_job_id": "JOB-777"},
+        {"attempt_id": "ATT-" + ("cd" * 16)},
+        {"workstream": "changed_stream"},
+        {"source_workstream": "changed-source-stream"},
+    ],
+)
+def test_requested_only_reconcile_refuses_same_id_frozen_envelope_drift(
+    tmp_path, mutation
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    repo.append_record(requested_record(obligation), obligation=obligation)
+    mutated = _remint(obligation, **mutation)
+    assert mutated.obligation_id == obligation.obligation_id
+    before = repo.get_by_command_id(obligation.obligation_id)
+    dispatcher = _Dispatcher()
+    carrier = _carrier(repo, dispatcher, binding)
+
+    with pytest.raises(StateConflict, match="payload disagrees|correlation disagrees"):
+        _run(carrier.reconcile(mutated, route))
+
+    after = repo.get_by_command_id(obligation.obligation_id)
+    assert before is not None and after is not None
+    assert before.event.payload == after.event.payload
+    assert dispatcher.nudge_calls == 0
+    assert _phases(repo, obligation.obligation_id) == [LedgerPhase.WAKE_REQUESTED]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"declared_target_seat": "coo"},
+        {"job_id": "JOB-777", "root_job_id": "JOB-777"},
+        {"attempt_id": "ATT-" + ("ef" * 16)},
+        {"workstream": "changed_stream"},
+    ],
+)
+def test_requested_only_submit_refuses_same_id_frozen_envelope_drift_before_dispatch(
+    tmp_path, mutation
+) -> None:
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    repo.append_record(requested_record(obligation), obligation=obligation)
+    mutated = _remint(obligation, **mutation)
+    assert mutated.obligation_id == obligation.obligation_id
+    before = repo.get_by_command_id(obligation.obligation_id)
+    dispatcher = _Dispatcher()
+    carrier = _carrier(repo, dispatcher, binding)
+
+    with pytest.raises(StateConflict, match="payload disagrees|correlation disagrees"):
+        _run(carrier.submit(mutated, route))
+
+    after = repo.get_by_command_id(obligation.obligation_id)
+    assert before is not None and after is not None
+    assert before.event.payload == after.event.payload
+    assert dispatcher.nudge_calls == 0
+    assert _phases(repo, obligation.obligation_id) == [LedgerPhase.WAKE_REQUESTED]
+
+
+def test_terminal_reconcile_refuses_same_id_frozen_envelope_drift(tmp_path) -> None:
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    dispatcher = _Dispatcher(repo=repo)
+    carrier = _carrier(repo, dispatcher, binding)
+    _run(carrier.submit(obligation, route))
+    assert dispatcher.nudge_calls == 1
+    mutated = _remint(obligation, declared_target_seat="coo")
+    assert mutated.obligation_id == obligation.obligation_id
+
+    with pytest.raises(StateConflict, match="payload disagrees|correlation disagrees"):
+        _run(carrier.reconcile(mutated, route))
+
+    assert dispatcher.nudge_calls == 1
+    assert _phases(repo, obligation.obligation_id) == [
+        LedgerPhase.WAKE_REQUESTED,
+        LedgerPhase.DELIVERY_ATTEMPT,
+        LedgerPhase.DELIVERED,
+    ]
+
+
+def test_timestamp_only_semantic_replay_remains_submit_eligible(tmp_path) -> None:
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    repo.append_record(requested_record(obligation), obligation=obligation)
+    replay = _remint(
+        obligation,
+        source_created_at="2026-08-30T04:00:00Z",
+        emitted_at="2026-08-30T04:01:00Z",
+    )
+    assert replay.obligation_id == obligation.obligation_id
+    dispatcher = _Dispatcher(repo=repo)
+    carrier = _carrier(repo, dispatcher, binding)
+
+    assert _run(carrier.reconcile(replay, route)) is WakeCarrierState.MISSING
+    _run(carrier.submit(replay, route))
+
+    assert dispatcher.nudge_calls == 1
+    persisted = repo.get_by_command_id(obligation.obligation_id)
+    assert persisted is not None
+    assert persisted.obligation == obligation
+    assert _phases(repo, obligation.obligation_id) == [
+        LedgerPhase.WAKE_REQUESTED,
+        LedgerPhase.DELIVERY_ATTEMPT,
+        LedgerPhase.DELIVERED,
+    ]
