@@ -123,7 +123,9 @@ def test_gh1_plan_freezes_pure_release_collision_engine_before_live_composition(
 
 
 def test_gh0_does_not_claim_live_git_control() -> None:
-    combined = "\n".join(_text(path) for path in (ESTATE, REUSE, SEMANTICS, GH1_PLAN))
+    combined = " ".join(
+        "\n".join(_text(path) for path in (ESTATE, REUSE, SEMANTICS, GH1_PLAN)).split()
+    )
     assert "GH0 installs no app, connector, credential, runner, workflow, service or actuator" in combined
     assert "GitHub status composer = NOT_BUILT" in combined
     assert "GitHub prepared action executor = NOT_BUILT" in combined
