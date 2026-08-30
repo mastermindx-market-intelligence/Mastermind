@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import secrets
 import select
 import socket
 import stat
@@ -28,15 +29,31 @@ ALLOWED_EXTENSION_ORIGIN = f"chrome-extension://{EXTENSION_ID}/"
 MAX_MESSAGE_BYTES = 64 * 1024
 _HEADER = struct.Struct("@I")
 _MATCH_FIELDS = (
-    "binding_id", "conversation_fingerprint", "binding_fingerprint",
-    "binding_revision", "action", "operation_key", "nonce",
+    "binding_id",
+    "conversation_fingerprint",
+    "binding_fingerprint",
+    "binding_revision",
+    "action",
+    "operation_key",
+    "nonce",
 )
-_PROBE_EVENT_KEYS = frozenset({"kind", "conversation_fingerprint", "observation"})
-_PROBE_KEYS = frozenset({
-    "schema", "target_present", "exact_conversation_loaded", "page_responsive",
-    "document_ready_state", "visibility", "composer_available", "generation_state",
-    "auth_required", "provider_error_present",
-})
+_PROBE_EVENT_KEYS = frozenset(
+    {"kind", "conversation_fingerprint", "observation"}
+)
+_PROBE_KEYS = frozenset(
+    {
+        "schema",
+        "target_present",
+        "exact_conversation_loaded",
+        "page_responsive",
+        "document_ready_state",
+        "visibility",
+        "composer_available",
+        "generation_state",
+        "auth_required",
+        "provider_error_present",
+    }
+)
 
 
 class NativeHostError(RuntimeError):
@@ -149,7 +166,11 @@ def write_frame(stream, document: dict[str, Any]) -> None:
     try:
         while offset < len(payload):
             written = stream.write(payload[offset:])
-            if type(written) is not int or written <= 0 or written > len(payload) - offset:
+            if (
+                type(written) is not int
+                or written <= 0
+                or written > len(payload) - offset
+            ):
                 raise NativeHostError("frame_write_failed")
             offset += written
         if hasattr(stream, "flush"):
@@ -164,6 +185,98 @@ def validate_caller_origin(value: Any) -> str:
     if value != ALLOWED_EXTENSION_ORIGIN:
         raise NativeHostError("caller_origin_refused")
     return ALLOWED_EXTENSION_ORIGIN
+
+
+def _valid_transport_nonce(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and 16 <= len(value) <= 128
+        and not any(character.isspace() for character in value)
+    )
+
+
+def _transport_nonce(factory: Callable[[], str], *, code: str) -> str:
+    if not callable(factory):
+        raise NativeHostError(code)
+    try:
+        value = factory()
+    except Exception as exc:
+        raise NativeHostError(code) from exc
+    if not _valid_transport_nonce(value):
+        raise NativeHostError(code)
+    return value
+
+
+def _accepted_peer_hello(
+    value: Any,
+    *,
+    expected_role: str,
+    expected_instance_id: str,
+    expected_boot_nonce: str | None,
+) -> dict[str, Any]:
+    try:
+        accepted = wsp.validate_transport_hello(value)
+    except wsp.WebSolProtocolError as exc:
+        raise NativeHostError("transport_hello_invalid") from exc
+    if accepted["role"] != expected_role:
+        raise NativeHostError("transport_role_mismatch")
+    if accepted["adapter_instance_id"] != expected_instance_id:
+        raise NativeHostError("transport_instance_mismatch")
+    versions = (
+        accepted["client_package_version"],
+        accepted["native_package_version"],
+        accepted["extension_package_version"],
+    )
+    if versions != (wsp.WEB_SOL_PACKAGE_VERSION,) * 3:
+        raise NativeHostError("transport_version_mismatch")
+    if accepted["capability_digest"] != wsp.transport_capability_digest():
+        raise NativeHostError("transport_capability_mismatch")
+    if accepted["boot_nonce"] != expected_boot_nonce:
+        raise NativeHostError("transport_boot_mismatch")
+    return accepted
+
+
+def complete_server_handshake(
+    reader,
+    writer,
+    *,
+    expected_role: str,
+    expected_instance_id: str,
+    boot_nonce: str,
+) -> dict[str, Any]:
+    """Complete the two-message challenge exchange for one bound peer."""
+
+    try:
+        instance_id = wsi.validate_instance_id(expected_instance_id)
+    except wsi.WebSolInstanceError as exc:
+        raise NativeHostError("transport_instance_mismatch") from exc
+    if expected_role not in {"client", "extension"}:
+        raise NativeHostError("transport_role_mismatch")
+    if not _valid_transport_nonce(boot_nonce):
+        raise NativeHostError("transport_boot_invalid")
+
+    first = _accepted_peer_hello(
+        read_frame(reader),
+        expected_role=expected_role,
+        expected_instance_id=instance_id,
+        expected_boot_nonce=None,
+    )
+    write_frame(
+        writer,
+        wsp.build_transport_hello_ack(first, boot_nonce=boot_nonce),
+    )
+
+    second = _accepted_peer_hello(
+        read_frame(reader),
+        expected_role=expected_role,
+        expected_instance_id=instance_id,
+        expected_boot_nonce=boot_nonce,
+    )
+    if second["challenge_nonce"] == first["challenge_nonce"]:
+        raise NativeHostError("transport_challenge_reused")
+    final_ack = wsp.build_transport_hello_ack(second, boot_nonce=boot_nonce)
+    write_frame(writer, final_ack)
+    return final_ack
 
 
 def _is_strict_bool(value: Any) -> bool:
@@ -183,7 +296,10 @@ def _is_probe_event(message: Any) -> bool:
     if fingerprint is not None and (
         not isinstance(fingerprint, str)
         or len(fingerprint) != 64
-        or any(character not in "0123456789abcdef" for character in fingerprint)
+        or any(
+            character not in "0123456789abcdef"
+            for character in fingerprint
+        )
     ):
         return False
     observation = message.get("observation")
@@ -193,7 +309,11 @@ def _is_probe_event(message: Any) -> bool:
         return False
     if not all(
         _is_strict_bool(observation.get(field))
-        for field in ("target_present", "exact_conversation_loaded", "page_responsive")
+        for field in (
+            "target_present",
+            "exact_conversation_loaded",
+            "page_responsive",
+        )
     ):
         return False
     for field, allowed in (
@@ -201,19 +321,33 @@ def _is_probe_event(message: Any) -> bool:
         ("visibility", {"visible", "hidden"}),
         ("generation_state", {"active", "idle", "unknown"}),
     ):
-        if not isinstance(observation.get(field), str) or observation[field] not in allowed:
+        if (
+            not isinstance(observation.get(field), str)
+            or observation[field] not in allowed
+        ):
             return False
     return all(
         _valid_nullable_bool(observation.get(field))
-        for field in ("composer_available", "auth_required", "provider_error_present")
+        for field in (
+            "composer_available",
+            "auth_required",
+            "provider_error_present",
+        )
     )
 
 
 def _timeout_code(request: dict[str, Any]) -> str:
-    return "foreground_effect_unknown" if request["action"] == "FOREGROUND" else "inspect_timeout"
+    return (
+        "foreground_effect_unknown"
+        if request["action"] == "FOREGROUND"
+        else "inspect_timeout"
+    )
 
 
-def _receipt_matches(request: dict[str, Any], receipt: dict[str, Any]) -> bool:
+def _receipt_matches(
+    request: dict[str, Any],
+    receipt: dict[str, Any],
+) -> bool:
     return all(receipt[field] == request[field] for field in _MATCH_FIELDS)
 
 
@@ -265,7 +399,11 @@ def _private_parent(path: Path, owner_uid: int) -> None:
         raise NativeHostError("socket_parent_unsafe")
 
 
-def open_private_server(path: str | Path, *, owner_uid: int) -> socket.socket:
+def open_private_server(
+    path: str | Path,
+    *,
+    owner_uid: int,
+) -> socket.socket:
     """Bind one derived user-private AF_UNIX transport endpoint."""
 
     destination = Path(path)
@@ -303,7 +441,12 @@ def open_private_server(path: str | Path, *, owner_uid: int) -> socket.socket:
         raise
 
 
-def close_private_server(server: socket.socket, path: str | Path, *, owner_uid: int) -> None:
+def close_private_server(
+    server: socket.socket,
+    path: str | Path,
+    *,
+    owner_uid: int,
+) -> None:
     destination = Path(path)
     try:
         server.close()
@@ -323,7 +466,10 @@ def close_private_server(server: socket.socket, path: str | Path, *, owner_uid: 
                 pass
 
 
-def _read_chrome_with_timeout(stream, timeout_seconds: float) -> dict[str, Any] | None:
+def _read_chrome_with_timeout(
+    stream,
+    timeout_seconds: float,
+) -> dict[str, Any] | None:
     try:
         descriptor = stream.fileno()
     except (AttributeError, OSError) as exc:
@@ -352,16 +498,31 @@ def _serve_client(
     chrome_out,
     *,
     timeout_seconds: float,
+    expected_instance_id: str,
+    boot_nonce: str,
 ) -> None:
     with client:
         reader = client.makefile("rb", buffering=0)
         writer = client.makefile("wb", buffering=0)
         try:
+            complete_server_handshake(
+                reader,
+                writer,
+                expected_role="client",
+                expected_instance_id=expected_instance_id,
+                boot_nonce=boot_nonce,
+            )
             request = read_frame(reader)
             receipt = forward_request(
                 request,
-                write_chrome=lambda document: _write_chrome(chrome_out, document),
-                read_chrome=lambda remaining: _read_chrome_with_timeout(chrome_in, remaining),
+                write_chrome=lambda document: _write_chrome(
+                    chrome_out,
+                    document,
+                ),
+                read_chrome=lambda remaining: _read_chrome_with_timeout(
+                    chrome_in,
+                    remaining,
+                ),
                 timeout_seconds=timeout_seconds,
             )
             write_frame(writer, receipt)
@@ -379,6 +540,7 @@ def run_native_host(
     socket_root: str | os.PathLike[str] | None = None,
     owner_uid: int | None = None,
     action_timeout_seconds: float = 5.0,
+    boot_nonce_factory: Callable[[], str] | None = None,
 ) -> None:
     """Run one wrapper-fixed profile bridge until Chrome disconnects."""
 
@@ -389,6 +551,18 @@ def run_native_host(
     except wsi.WebSolInstanceError as exc:
         raise NativeHostError(exc.code) from exc
     uid = os.getuid() if owner_uid is None else owner_uid
+    nonce_factory = boot_nonce_factory or (lambda: secrets.token_urlsafe(24))
+    boot_nonce = _transport_nonce(
+        nonce_factory,
+        code="transport_boot_invalid",
+    )
+    complete_server_handshake(
+        chrome_in,
+        chrome_out,
+        expected_role="extension",
+        expected_instance_id=instance_id,
+        boot_nonce=boot_nonce,
+    )
     server = open_private_server(destination, owner_uid=uid)
     selector = select.poll() if hasattr(select, "poll") else None
     try:
@@ -400,10 +574,15 @@ def run_native_host(
                     chrome_in,
                     chrome_out,
                     timeout_seconds=action_timeout_seconds,
+                    expected_instance_id=instance_id,
+                    boot_nonce=boot_nonce,
                 )
         else:
             selector.register(server.fileno(), select.POLLIN)
-            selector.register(chrome_in.fileno(), select.POLLIN | select.POLLHUP | select.POLLERR)
+            selector.register(
+                chrome_in.fileno(),
+                select.POLLIN | select.POLLHUP | select.POLLERR,
+            )
             while True:
                 events = selector.poll(1000)
                 for descriptor, event in events:
@@ -425,6 +604,8 @@ def run_native_host(
                             chrome_in,
                             chrome_out,
                             timeout_seconds=action_timeout_seconds,
+                            expected_instance_id=instance_id,
+                            boot_nonce=boot_nonce,
                         )
     finally:
         close_private_server(server, destination, owner_uid=uid)
@@ -442,7 +623,9 @@ def _parse_main_arguments(arguments: list[str]) -> tuple[str, str]:
         raise NativeHostError(exc.code) from exc
     origin = validate_caller_origin(arguments[3])
     extras = arguments[4:]
-    if len(extras) > 1 or any(not value.startswith("--parent-window=") for value in extras):
+    if len(extras) > 1 or any(
+        not value.startswith("--parent-window=") for value in extras
+    ):
         raise NativeHostError("startup_arguments_invalid")
     return instance_id, origin
 
