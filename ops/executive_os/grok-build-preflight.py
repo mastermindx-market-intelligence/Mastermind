@@ -115,8 +115,17 @@ _HASH_CHUNK_BYTES = 1024 * 1024
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 
 
+PUBLIC_FAILURE = "PREFLIGHT_FAILED"
+
+
 class PreflightError(RuntimeError):
-    """Bounded fail-closed preflight refusal."""
+    """Bounded fail-closed preflight refusal with a closed public code."""
+
+    def __init__(self, code: str) -> None:
+        # Never expose arbitrary exception text. Only a compile-time closed code
+        # may cross the CLI boundary, even if a future caller passes tainted text.
+        self.public_code = code if code in REASON_CODES else PUBLIC_FAILURE
+        super().__init__(self.public_code)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -532,7 +541,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         receipt = build_receipt(args.grok_binary)
     except PreflightError as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
+        # `public_code` is closed at exception construction; never log exception
+        # text, provider output, paths, credentials, or raw user-controlled data.
+        print(json.dumps({"ok": False, "error": exc.public_code}, sort_keys=True))
         return 2
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
     return 0 if receipt["oauth_ready"] else 1
