@@ -94,6 +94,162 @@ def _guard_navigate(guard: browser.BrowserMcpToolGuard, url: str) -> None:
     _record_guard_text_success(guard, "browser_navigate", arguments)
 
 
+def test_listener_owner_uses_closed_usr_bin_lsof_fallback(tmp_path, monkeypatch):
+    missing = tmp_path / "usr-sbin-lsof"
+    fallback = tmp_path / "usr-bin-lsof"
+    fallback.write_text("trusted fixture", encoding="utf-8")
+    fallback.chmod(0o755)
+    real_lstat = Path.lstat
+
+    def fake_lstat(path: Path):
+        if path == missing:
+            raise FileNotFoundError(path)
+        if path == fallback:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o755, st_uid=0)
+        return real_lstat(path)
+
+    observed: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        observed.append(list(argv))
+        return SimpleNamespace(stdout=f"{os.getpid()}\n")
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    monkeypatch.setattr(
+        browser.BrowserGenerationResource,
+        "_LSOF_CANDIDATES",
+        (missing, fallback),
+        raising=False,
+    )
+    monkeypatch.setattr(browser.subprocess, "run", fake_run)
+
+    assert browser.BrowserGenerationResource._listener_owned_by_group(
+        48101, os.getpgid(os.getpid())
+    )
+    assert observed == [
+        [os.fspath(fallback), "-nP", "-iTCP:48101", "-sTCP:LISTEN", "-t"]
+    ]
+
+
+def test_listener_owner_refuses_without_closed_trusted_lsof(tmp_path, monkeypatch):
+    symlink = tmp_path / "lsof-link"
+    target = tmp_path / "lsof-target"
+    target.write_text("fixture", encoding="utf-8")
+    symlink.symlink_to(target)
+    writable = tmp_path / "lsof-writable"
+    writable.write_text("fixture", encoding="utf-8")
+    non_executable = tmp_path / "lsof-non-executable"
+    non_executable.write_text("fixture", encoding="utf-8")
+    inaccessible = tmp_path / "lsof-inaccessible"
+    inaccessible.write_text("fixture", encoding="utf-8")
+    real_lstat = Path.lstat
+
+    def fake_lstat(path: Path):
+        if path == symlink:
+            return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=0)
+        if path == writable:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o777, st_uid=0)
+        if path == non_executable:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_uid=0)
+        if path == inaccessible:
+            # The attested metadata claims execute bits, but the current worker
+            # cannot execute this path. Both predicates are required.
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o755, st_uid=0)
+        return real_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+    monkeypatch.setattr(
+        browser.BrowserGenerationResource,
+        "_LSOF_CANDIDATES",
+        (symlink, writable, non_executable, inaccessible),
+        raising=False,
+    )
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        browser.BrowserGenerationResource._trusted_lsof_path()
+
+    assert raised.value.state == "BROWSER_MCP_START_FAILED"
+
+
+def test_generation_start_refuses_untrusted_lsof_before_artifact_or_process(
+    tmp_path, monkeypatch
+):
+    artifact_root = tmp_path / "artifacts"
+    resource_grant = SimpleNamespace(
+        resource_id="worker-browser-b1-local",
+        manifest_path="config/worker_browser_b1_control_room_devserver.json",
+        manifest_digest="a" * 64,
+        runtime_root=os.fspath(tmp_path / "runtime"),
+        runtime_manifest_path=os.fspath(tmp_path / "runtime-manifest.json"),
+        runtime_manifest_digest="b" * 64,
+        artifact_root=os.fspath(artifact_root),
+        browser="chromium",
+        browser_revision="1237",
+        grant_digest="c" * 64,
+    )
+    mcp_grant = SimpleNamespace(
+        capability_id="playwright-worker-browser-b1",
+        command=capabilities.WORKER_BROWSER_MCP_COMMAND,
+        args=capabilities.WORKER_BROWSER_MCP_ARGS,
+    )
+    profile = SimpleNamespace(
+        resource_grants=(resource_grant,),
+        mcp_server_grants=(mcp_grant,),
+    )
+    requested = SimpleNamespace(workspace=SimpleNamespace())
+    resource = browser.BrowserGenerationResource(
+        workspace=tmp_path,
+        requested=requested,
+        epoch=SessionEpochRef("epoch-lsof", "attempt-lsof", "worker-a", 1),
+        generation=ProcessGenerationRef(
+            "generation-lsof", "epoch-lsof", 1, "worker-a"
+        ),
+        profile=profile,
+    )
+    monkeypatch.setattr(
+        browser,
+        "_validate_workspace_identity",
+        lambda *_args, **_kwargs: tmp_path,
+    )
+    monkeypatch.setattr(
+        browser,
+        "load_devserver_manifest",
+        lambda *_args, **_kwargs: SimpleNamespace(digest=resource_grant.manifest_digest),
+    )
+    monkeypatch.setattr(
+        browser,
+        "load_runtime_install_attestation",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            browser_revision="1237",
+            browser_executable=tmp_path / "chromium",
+            browser_executable_sha256="d" * 64,
+        ),
+    )
+
+    def refuse_lsof(_self):
+        raise browser.BrowserReviewError(
+            "BROWSER_MCP_START_FAILED", "trusted lsof executable is unavailable"
+        )
+
+    monkeypatch.setattr(browser.BrowserGenerationResource, "_trusted_lsof_path", refuse_lsof)
+    monkeypatch.setattr(
+        browser,
+        "_secure_directory",
+        lambda *_args, **_kwargs: pytest.fail("artifact directory mutation occurred"),
+    )
+    monkeypatch.setattr(
+        browser.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("devserver process launch occurred"),
+    )
+
+    with pytest.raises(browser.BrowserReviewError) as raised:
+        resource.start()
+
+    assert raised.value.state == "BROWSER_MCP_START_FAILED"
+    assert not artifact_root.exists()
+
+
 def _guard_resize(
     guard: browser.BrowserMcpToolGuard, *, width: int, height: int
 ) -> None:

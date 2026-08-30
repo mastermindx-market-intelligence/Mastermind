@@ -4864,6 +4864,8 @@ def resolve_pinned_chromium_executable(
 class BrowserGenerationResource:
     """One devserver/proxy resource subordinate to an existing OHF generation."""
 
+    _LSOF_CANDIDATES = (Path("/usr/sbin/lsof"), Path("/usr/bin/lsof"))
+
     def __init__(
         self,
         *,
@@ -4996,14 +4998,43 @@ class BrowserGenerationResource:
                 return False
             return True
 
-    @staticmethod
-    def _listener_owned_by_group(port: int, process_group: int) -> bool:
+    @classmethod
+    def _trusted_lsof_path(cls) -> Path:
+        """Resolve lsof from the closed root-owned host locations we support."""
+
+        for candidate in cls._LSOF_CANDIDATES:
+            try:
+                observed = candidate.lstat()
+            except OSError:
+                continue
+            if (
+                stat.S_ISREG(observed.st_mode)
+                and observed.st_uid == 0
+                and stat.S_IMODE(observed.st_mode) & 0o022 == 0
+                and stat.S_IMODE(observed.st_mode) & 0o111 != 0
+                and os.access(candidate, os.X_OK)
+            ):
+                return candidate
+        raise BrowserReviewError(
+            "BROWSER_MCP_START_FAILED",
+            "trusted lsof executable is unavailable",
+        )
+
+    @classmethod
+    def _listener_owned_by_group(
+        cls,
+        port: int,
+        process_group: int,
+        *,
+        lsof_path: Path | None = None,
+    ) -> bool:
         """Bind the accepted listener to the launched private process group."""
 
+        executable = lsof_path or cls._trusted_lsof_path()
         try:
             completed = subprocess.run(
                 [
-                    "/usr/sbin/lsof",
+                    os.fspath(executable),
                     "-nP",
                     f"-iTCP:{port}",
                     "-sTCP:LISTEN",
@@ -5041,6 +5072,7 @@ class BrowserGenerationResource:
         timeout_seconds: int,
         process: subprocess.Popen[bytes],
         process_group: int,
+        lsof_path: Path,
     ) -> bool:
         parsed = urlsplit(origin)
         assert parsed.port is not None
@@ -5057,7 +5089,11 @@ class BrowserGenerationResource:
                     response.status == 200
                     and len(body) <= MAX_TEXT_EVIDENCE_BYTES
                     and b"<title>Chairman Control Room</title>" in body
-                    and cls._listener_owned_by_group(parsed.port, process_group)
+                    and cls._listener_owned_by_group(
+                        parsed.port,
+                        process_group,
+                        lsof_path=lsof_path,
+                    )
                 ):
                     return True
             except (OSError, http.client.HTTPException):
@@ -5095,6 +5131,7 @@ class BrowserGenerationResource:
                 "BROWSER_RUNTIME_ATTESTATION_INVALID",
                 "runtime receipt does not match the reviewed capability grant",
             )
+        lsof_path = self._trusted_lsof_path()
         executable = attestation.browser_executable
         _secure_directory(Path(self.resource_grant.artifact_root))
         try:
@@ -5161,6 +5198,7 @@ class BrowserGenerationResource:
                 timeout_seconds=manifest.readiness_timeout_seconds,
                 process=process,
                 process_group=pgid,
+                lsof_path=lsof_path,
             ):
                 self._process = process
                 self._process_group = pgid
