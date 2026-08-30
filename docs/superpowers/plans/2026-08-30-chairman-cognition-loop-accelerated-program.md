@@ -43,6 +43,7 @@ docs/superpowers/plans/2026-08-30-chairman-cognition-loop-accelerated-program.md
 control_plane/chairman_cognition.py
 scripts/chairman_cognition.py
 tests/test_chairman_cognition.py
+tests/test_chairman_cognition_hardening.py
 tests/test_chairman_cognition_source_contract.py
 ```
 
@@ -52,12 +53,14 @@ tests/test_chairman_cognition_source_contract.py
    review trigger and preserve all standing constraints/resource weights;
 2. freeze one-office/two-mode, owner composition, accelerated-canary and delegation law;
 3. implement closed schemas and deterministic canonical digests;
-4. implement source-state/effect/duplicate-owner/strategic-constraint refusal;
-5. implement envelope, scope, budget, child, operation, carrier and expected-head checks;
+4. implement source-state/effect/duplicate-owner/strategic-constraint refusal, including
+   terminal already-applied effects;
+5. implement Chairman-owned envelope, scope, budget, child, operation, carrier and expected-head
+   checks, including explicit `NEW_CHILD` commission state;
 6. implement supervised-live-canary controls;
 7. implement truthful Pareto frontier and unique-only mechanical recommendation;
 8. expose a no-side-effect JSON CLI with opaque invalid-input failure;
-9. prove focused, source-contract, AST/static and existing strategic-state tests;
+9. prove focused, hostile-boundary, source-contract, AST/static and existing strategic-state tests;
 10. publish one current-base branch/PR, obtain hosted/security proof and independent review.
 
 ### Acceptance tests
@@ -66,10 +69,14 @@ tests/test_chairman_cognition_source_contract.py
 - every output says `execution_authority_granted=false`;
 - no envelope blocks modifying actions but not read-only cognition;
 - stale/conflicting source and `EFFECT_UNKNOWN` block action;
+- already-applied effects remain terminal and never re-enter a frontier;
 - production deploy/live capital stay refused under current constraints;
 - constitutional/terminal/budget/admin changes stay Chairman-only;
+- delegation authority must resolve to a current Chairman-owned source;
 - duplicate control plane is refused even inside an envelope;
 - scope, budget, child, operation, carrier and expected-head boundaries fail closed;
+- new Executive children require explicit `NEW_CHILD` carrier state;
+- exact-carrier law cannot be disabled by an envelope;
 - canary requires stop, rollback and falsifier;
 - incomparable options remain visible and unselected;
 - dominated options are removed only with complete known dimensions;
@@ -79,7 +86,7 @@ tests/test_chairman_cognition_source_contract.py
 
 ### Stop condition
 
-One immutable current-base PR head with exact eight-path scope, focused/source/static proof and hosted
+One immutable current-base PR head with exact nine-path scope, focused/source/static proof and hosted
 repository/security proof. No production integration, merge-on-green, runtime canary, Executive Job,
 Slack/Linear/Agent OS mutation or automatic envelope expansion in A1.
 
