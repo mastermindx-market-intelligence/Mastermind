@@ -1,10 +1,8 @@
 """Private transport bridge for the Web-Sol exact-surface extension.
 
-Chrome owns this process's stdin/stdout through Native Messaging.  While that
-port is alive, the host exposes one fixed user-local AF_UNIX socket so the
-explicit Mastermind Web-Sol seam can exchange one closed action/receipt at a
-time.  The host owns no target selection, persistence, lifecycle, retry, Wake,
-or provider/account authority.
+Chrome owns this process's stdin/stdout through Native Messaging. While that
+port is alive, the explicit Mastermind seam exchanges closed action receipts.
+The host owns no target selection, persistence, lifecycle, retry or Wake state.
 """
 from __future__ import annotations
 
@@ -26,37 +24,21 @@ EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
 ALLOWED_EXTENSION_ORIGIN = f"chrome-extension://{EXTENSION_ID}/"
 SOCKET_PATH = "~/Library/Application Support/Mastermind/control-room/web_sol_surface.sock"
 MAX_MESSAGE_BYTES = 64 * 1024
-
 _HEADER = struct.Struct("@I")
 _MATCH_FIELDS = (
-    "binding_id",
-    "conversation_fingerprint",
-    "binding_fingerprint",
-    "binding_revision",
-    "action",
-    "operation_key",
-    "nonce",
+    "binding_id", "conversation_fingerprint", "binding_fingerprint",
+    "binding_revision", "action", "operation_key", "nonce",
 )
 _PROBE_EVENT_KEYS = frozenset({"kind", "conversation_fingerprint", "observation"})
-_PROBE_KEYS = frozenset(
-    {
-        "schema",
-        "target_present",
-        "exact_conversation_loaded",
-        "page_responsive",
-        "document_ready_state",
-        "visibility",
-        "composer_available",
-        "generation_state",
-        "auth_required",
-        "provider_error_present",
-    }
-)
+_PROBE_KEYS = frozenset({
+    "schema", "target_present", "exact_conversation_loaded", "page_responsive",
+    "document_ready_state", "visibility", "composer_available", "generation_state",
+    "auth_required", "provider_error_present",
+})
 
 
 class NativeHostError(RuntimeError):
     """Stable, payload-free native bridge failure."""
-
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
@@ -79,13 +61,8 @@ def _canonical_json(document: dict[str, Any]) -> bytes:
     if not isinstance(document, dict):
         raise NativeHostError("frame_not_object")
     try:
-        payload = json.dumps(
-            document,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        payload = json.dumps(document, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False, allow_nan=False).encode("utf-8")
     except (TypeError, ValueError, UnicodeError) as exc:
         raise NativeHostError("frame_invalid_document") from exc
     if not payload:
@@ -97,7 +74,6 @@ def _canonical_json(document: dict[str, Any]) -> bytes:
 
 def encode_frame(document: dict[str, Any]) -> bytes:
     """Encode one deterministic Chrome Native Messaging frame."""
-
     payload = _canonical_json(document)
     return _HEADER.pack(len(payload)) + payload
 
@@ -119,7 +95,6 @@ def _read_exact(stream, size: int) -> bytes:
 
 def read_frame(stream) -> dict[str, Any]:
     """Read and strictly decode one bounded Native Messaging frame."""
-
     header = _read_exact(stream, _HEADER.size)
     if not header:
         raise NativeHostError("frame_header_missing")
@@ -138,11 +113,8 @@ def read_frame(stream) -> dict[str, Any]:
     except UnicodeDecodeError as exc:
         raise NativeHostError("frame_invalid_utf8") from exc
     try:
-        document = json.loads(
-            text,
-            object_pairs_hook=_reject_duplicate_pairs,
-            parse_constant=_reject_constant,
-        )
+        document = json.loads(text, object_pairs_hook=_reject_duplicate_pairs,
+                              parse_constant=_reject_constant)
     except NativeHostError:
         raise
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -153,12 +125,22 @@ def read_frame(stream) -> dict[str, Any]:
 
 
 def write_frame(stream, document: dict[str, Any]) -> None:
+    """Write every byte or fail; BinaryIO.write may legitimately be short.
+
+    Zero progress, None, booleans and impossible byte counts are refusals, not
+    successful delivery. Effect certainty is decided by the transport caller.
+    """
     payload = encode_frame(document)
+    offset = 0
     try:
-        stream.write(payload)
+        while offset < len(payload):
+            written = stream.write(payload[offset:])
+            if type(written) is not int or written <= 0 or written > len(payload) - offset:
+                raise NativeHostError("frame_write_failed")
+            offset += written
         if hasattr(stream, "flush"):
             stream.flush()
-    except OSError as exc:
+    except (OSError, TypeError, ValueError) as exc:
         raise NativeHostError("frame_write_failed") from exc
 
 
@@ -182,34 +164,26 @@ def _is_probe_event(message: Any) -> bool:
     if message.get("kind") != "MMX_WEB_SOL_PROBE":
         return False
     fingerprint = message.get("conversation_fingerprint")
-    if fingerprint is not None and (
-        not isinstance(fingerprint, str)
-        or len(fingerprint) != 64
-        or any(character not in "0123456789abcdef" for character in fingerprint)
-    ):
+    if fingerprint is not None and (not isinstance(fingerprint, str) or len(fingerprint) != 64
+            or any(character not in "0123456789abcdef" for character in fingerprint)):
         return False
     observation = message.get("observation")
     if not isinstance(observation, dict) or set(observation) != _PROBE_KEYS:
         return False
     if observation.get("schema") != wsp.PROBE_SCHEMA:
         return False
-    if not all(
-        _is_strict_bool(observation.get(field))
-        for field in ("target_present", "exact_conversation_loaded", "page_responsive")
+    if not all(_is_strict_bool(observation.get(field))
+               for field in ("target_present", "exact_conversation_loaded", "page_responsive")):
+        return False
+    for field, allowed in (
+        ("document_ready_state", {"loading", "interactive", "complete"}),
+        ("visibility", {"visible", "hidden"}),
+        ("generation_state", {"active", "idle", "unknown"}),
     ):
-        return False
-    if observation.get("document_ready_state") not in {"loading", "interactive", "complete"}:
-        return False
-    if observation.get("visibility") not in {"visible", "hidden"}:
-        return False
-    if observation.get("generation_state") not in {"active", "idle", "unknown"}:
-        return False
-    if not all(
-        _valid_nullable_bool(observation.get(field))
-        for field in ("composer_available", "auth_required", "provider_error_present")
-    ):
-        return False
-    return True
+        if not isinstance(observation.get(field), str) or observation[field] not in allowed:
+            return False
+    return all(_valid_nullable_bool(observation.get(field))
+               for field in ("composer_available", "auth_required", "provider_error_present"))
 
 
 def _timeout_code(request: dict[str, Any]) -> str:
@@ -220,16 +194,12 @@ def _receipt_matches(request: dict[str, Any], receipt: dict[str, Any]) -> bool:
     return all(receipt[field] == request[field] for field in _MATCH_FIELDS)
 
 
-def forward_request(
-    request: dict[str, Any],
-    *,
-    write_chrome: Callable[[dict[str, Any]], None],
-    read_chrome: Callable[[float], dict[str, Any] | None],
-    timeout_seconds: float,
-) -> dict[str, Any]:
+def forward_request(request: dict[str, Any], *, write_chrome: Callable[[dict[str, Any]], None],
+                    read_chrome: Callable[[float], dict[str, Any] | None],
+                    timeout_seconds: float) -> dict[str, Any]:
     """Forward one exact action once and wait for its matching receipt."""
-
-    if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+    if (not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool)
+            or timeout_seconds <= 0):
         raise NativeHostError("timeout_invalid")
     accepted = wsp.validate_request(request)
     write_chrome(accepted)
@@ -266,7 +236,6 @@ def _private_parent(path: Path, owner_uid: int) -> None:
 
 def open_private_server(path: str | Path, *, owner_uid: int) -> socket.socket:
     """Bind the fixed-style user-private AF_UNIX transport endpoint."""
-
     destination = Path(path)
     _private_parent(destination.parent, owner_uid)
     if os.path.lexists(destination):
@@ -307,11 +276,7 @@ def close_private_server(server: socket.socket, path: str | Path, *, owner_uid: 
             info = destination.lstat()
         except OSError:
             return
-        if (
-            stat.S_ISSOCK(info.st_mode)
-            and info.st_uid == owner_uid
-            and not (stat.S_IMODE(info.st_mode) & 0o077)
-        ):
+        if stat.S_ISSOCK(info.st_mode) and info.st_uid == owner_uid and not (stat.S_IMODE(info.st_mode) & 0o077):
             try:
                 destination.unlink()
             except OSError:
@@ -347,29 +312,20 @@ def _serve_client(client: socket.socket, chrome_in, chrome_out, *, timeout_secon
         writer = client.makefile("wb", buffering=0)
         try:
             request = read_frame(reader)
-            receipt = forward_request(
-                request,
+            receipt = forward_request(request,
                 write_chrome=lambda document: _write_chrome(chrome_out, document),
                 read_chrome=lambda remaining: _read_chrome_with_timeout(chrome_in, remaining),
-                timeout_seconds=timeout_seconds,
-            )
+                timeout_seconds=timeout_seconds)
             write_frame(writer, receipt)
         finally:
             reader.close()
             writer.close()
 
 
-def run_native_host(
-    chrome_in,
-    chrome_out,
-    *,
-    caller_origin: str,
-    socket_path: str | Path | None = None,
-    owner_uid: int | None = None,
-    action_timeout_seconds: float = 5.0,
-) -> None:
+def run_native_host(chrome_in, chrome_out, *, caller_origin: str,
+                    socket_path: str | Path | None = None, owner_uid: int | None = None,
+                    action_timeout_seconds: float = 5.0) -> None:
     """Run the single-process private bridge until Chrome disconnects."""
-
     validate_caller_origin(caller_origin)
     uid = os.getuid() if owner_uid is None else owner_uid
     destination = Path(socket_path or SOCKET_PATH).expanduser()
@@ -409,11 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(arguments) < 2:
         return 64
     try:
-        run_native_host(
-            sys.stdin.buffer,
-            sys.stdout.buffer,
-            caller_origin=arguments[1],
-        )
+        run_native_host(sys.stdin.buffer, sys.stdout.buffer, caller_origin=arguments[1])
     except (NativeHostError, wsp.WebSolProtocolError):
         return 65
     return 0
