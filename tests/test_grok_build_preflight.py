@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -35,7 +34,6 @@ def _receipt(module, **overrides):
         "schema": module.SCHEMA,
         "observed_at": "2026-08-30T20:30:00Z",
         "grok_binary_sha256": "a" * 64,
-        "grok_version": "Grok Build 1.2.3",
         "acp_protocol_version": 1,
         "cached_token_offered": True,
         "oauth_ready": True,
@@ -291,13 +289,21 @@ def test_build_receipt_does_not_leak_provider_or_account_identity(
     receipt = module.build_receipt(binary)
     assert set(receipt) == module._RECEIPT_KEYS
     raw = json.dumps(receipt, sort_keys=True).lower()
-    for forbidden in ("email", "account_id", "organization", "home_path", "session_id", "provider_account"):
+    for forbidden in (
+        "email",
+        "account_id",
+        "organization",
+        "home_path",
+        "session_id",
+        "provider_account",
+        "grok_version",
+    ):
         assert forbidden not in raw
     assert receipt["model_turn_performed"] is False
     assert receipt["executive_routing_ready"] is False
 
 
-def test_public_exception_channel_never_echoes_arbitrary_text(capsys):
+def test_public_exception_channel_never_echoes_arbitrary_text():
     module = _load()
     rogue = module.PreflightError("Bearer " + "s" * 40)
     assert rogue.public_code == module.PUBLIC_FAILURE
