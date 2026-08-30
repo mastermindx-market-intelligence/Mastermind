@@ -13,7 +13,7 @@ AMENDMENT = (
 
 def _text() -> str:
     assert AMENDMENT.is_file()
-    return AMENDMENT.read_text(encoding="utf-8")
+    return " ".join(AMENDMENT.read_text(encoding="utf-8").split())
 
 
 def test_abstraction_fidelity_is_a_required_truth_axis() -> None:
@@ -45,7 +45,7 @@ def test_counterexamples_cannot_hide_spuriousness_or_replay_scope() -> None:
         assert marker in text
 
     assert "Runtime Observability logs, metrics or traces may enrich replay evidence" in text
-    assert "cannot alone create\n  `RUNTIME_REPLAY_CONFIRMED`" in text
+    assert "cannot alone create `RUNTIME_REPLAY_CONFIRMED`" in text
 
 
 def test_model_analysis_and_current_source_applicability_remain_separate() -> None:
@@ -73,7 +73,7 @@ def test_gap_relevance_controls_counterexample_certainty() -> None:
         "affects_variable_ids",
         "trace/property-specific relevance",
         "An unrelated non-load-bearing gap does not hide",
-        "A gap that\ncan invalidate the trace or checked property does",
+        "A gap that can invalidate the trace or checked property does",
     ):
         assert marker in text
 
@@ -119,4 +119,4 @@ def test_exact_corrected_wire_examples_are_present() -> None:
 def test_fidelity_amendment_is_an_ols_f0_release_blocker() -> None:
     text = _text()
     assert "This amendment is a release blocker for OLS-F0" in text
-    assert "OLS-A1 must implement it from its first parser/report\ncommit" in text
+    assert "OLS-A1 must implement it from its first parser/report commit" in text

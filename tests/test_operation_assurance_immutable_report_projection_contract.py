@@ -13,7 +13,7 @@ CLARIFICATION = (
 
 def _text() -> str:
     assert CLARIFICATION.is_file()
-    return CLARIFICATION.read_text(encoding="utf-8")
+    return " ".join(CLARIFICATION.read_text(encoding="utf-8").split())
 
 
 def test_immutable_report_uses_generation_time_truth_only() -> None:
@@ -22,7 +22,7 @@ def test_immutable_report_uses_generation_time_truth_only() -> None:
     assert "model_analysis_verdict" in text
     assert "source_applicability_at_generation" in text
     assert "The report is content-addressed and immutable" in text
-    assert "never mutates\nthese fields" in text
+    assert "never mutates these fields" in text
 
 
 def test_current_projection_fields_are_withdrawn_from_report_wire() -> None:
@@ -42,7 +42,7 @@ def test_current_status_is_an_existing_owner_read_composition() -> None:
     assert "mastermind.operation_assurance_status.v1" in text
     assert "corrected Executive Steward / Control Room" in text
     assert "read composition, not a new truth store or lifecycle" in text
-    assert "owns no retry,\nrecheck schedule, admission, report mutation, or source correction" in text
+    assert "owns no retry, recheck schedule, admission, report mutation, or source correction" in text
 
 
 def test_ols_a1_cannot_emit_current_operational_status() -> None:
