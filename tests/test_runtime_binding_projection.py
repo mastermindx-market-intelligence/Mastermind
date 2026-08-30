@@ -799,6 +799,56 @@ def test_projection_refuses_effective_grant_identity_drift(
         project_runtime_binding(runtime, sealed.attempt_id, _target())
 
 
+def test_projection_refuses_consistently_bound_unknown_orchestration_role(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    unknown_role = "observer"
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER jobs_orchestration_fields_immutable")
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE main.jobs SET orchestration_role=? WHERE current_attempt_id=?",
+            (unknown_role, sealed.attempt_id),
+        )
+        attempt = connection.execute(
+            "SELECT effective_grant_json FROM main.attempts WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert attempt is not None
+        grant = json.loads(str(attempt["effective_grant_json"]))
+        grant["role"] = unknown_role
+        grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+        grant_digest = hashlib.sha256(grant_json.encode("utf-8")).hexdigest()
+        connection.execute(
+            "UPDATE main.attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (grant_json, grant_digest, sealed.attempt_id),
+        )
+        admission = connection.execute(
+            "SELECT event_id,payload_json FROM main.events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert admission is not None
+        admission_payload = json.loads(str(admission["payload_json"]))
+        admission_payload["orchestration_role"] = unknown_role
+        admission_payload["effective_grant_digest"] = grant_digest
+        connection.execute(
+            "UPDATE main.events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    admission_payload, sort_keys=True, separators=(",", ":")
+                ),
+                admission["event_id"],
+            ),
+        )
+
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
 @pytest.mark.parametrize(
     ("field", "corrupt_value"),
     [

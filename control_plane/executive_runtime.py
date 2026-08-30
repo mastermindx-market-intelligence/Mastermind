@@ -14168,7 +14168,7 @@ class Runtime:
             or row["lease_token"] is None
             or int(row["lease_expires_at_ms"]) <= self.store.now_ms()
             or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
-            or row["orchestration_role"] is None
+            or row["orchestration_role"] not in _ORCHESTRATION_ROLES
             or row["quota_worker_id"] != row["worker_id"]
             or row["quota_quota_class"] != row["quota_class"]
             or row["quota_provider"] != row["worker_provider"]
