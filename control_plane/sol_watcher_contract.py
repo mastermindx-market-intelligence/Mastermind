@@ -21,9 +21,11 @@ _REQUIRED_FIELDS = (
     "ACTION_REQUIRED_OUTCOME",
     "SISTER_SOL_POLICY",
 )
-_CARRIER_RE = re.compile(r"^slack:[CGD][A-Z0-9]+/\d{10}\.\d{6}$")
+_SLACK_CARRIER_RE = re.compile(r"^slack:[CGD][A-Z0-9]+/\d{10}\.\d{6}$")
+_AGGREGATE_CARRIER_RE = re.compile(r"^aggregate:[a-z0-9][a-z0-9._/-]{2,127}$")
 _OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$")
 _EDGE_RE = re.compile(r"^(?:NONE|\d{10}\.\d{6}|[A-Za-z0-9][A-Za-z0-9._:/-]{1,255})$")
+_AUDIT_KINDS = frozenset({"SOL_WATCHER", "NON_WATCHER"})
 
 
 class WatcherRole(str, Enum):
@@ -101,6 +103,7 @@ class TaskAudit:
     title: str
     enabled: bool
     evaluated: bool
+    audit_kind: str
     audit: PromptAudit | None
 
     def to_dict(self) -> dict[str, object]:
@@ -109,6 +112,7 @@ class TaskAudit:
             "title": self.title,
             "enabled": self.enabled,
             "evaluated": self.evaluated,
+            "audit_kind": self.audit_kind,
             "audit": self.audit.to_dict() if self.audit else None,
         }
 
@@ -163,6 +167,22 @@ _NOTIFICATION_ONLY_PATTERNS = (
     re.compile(r"\bsol action required\b", re.IGNORECASE),
     re.compile(r"\bwait(?:ing)? for sol\b", re.IGNORECASE),
     re.compile(r"\bstand by for sol(?:'s)? ruling\b", re.IGNORECASE),
+)
+_NEGATION_OR_REJECTION_MARKERS = (
+    "do not",
+    "don't",
+    "never",
+    "must not",
+    "cannot",
+    "can't",
+    "forbidden",
+    "reject",
+    "rejected",
+    "invalid",
+    "anti-pattern",
+    "antipattern",
+    "failure",
+    "fails",
 )
 
 
@@ -221,6 +241,33 @@ def _normalized_events(raw: str) -> frozenset[str]:
     return frozenset(values)
 
 
+def _contains_notification_only_self_deadlock(body: str) -> bool:
+    """Detect positive notification-only instructions without rejecting bans/examples."""
+
+    for raw_line in body.splitlines():
+        normalized = " ".join(raw_line.casefold().split())
+        if not normalized:
+            continue
+        if not any(pattern.search(normalized) for pattern in _NOTIFICATION_ONLY_PATTERNS):
+            continue
+        if any(marker in normalized for marker in _NEGATION_OR_REJECTION_MARKERS):
+            continue
+        return True
+    return False
+
+
+def _carrier_is_valid_for_role(carrier: str, role: WatcherRole | None) -> bool:
+    if _SLACK_CARRIER_RE.fullmatch(carrier):
+        return True
+    if not _AGGREGATE_CARRIER_RE.fullmatch(carrier):
+        return False
+    return role in {
+        WatcherRole.OBSERVER_ONLY,
+        WatcherRole.PARENT_ORCHESTRATOR,
+        WatcherRole.TRIAGE_ONLY,
+    }
+
+
 def validate_watcher_prompt(prompt: str) -> PromptAudit:
     """Validate one prompt without executing or mutating anything."""
 
@@ -253,11 +300,14 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
         )
 
     carrier = headers.get("CARRIER")
-    if carrier and not _CARRIER_RE.fullmatch(carrier):
+    if carrier and not _carrier_is_valid_for_role(carrier, role):
         findings.append(
             _finding(
                 FindingCode.INVALID_CARRIER,
-                "carrier must be slack:<channel-id>/<10-digit-ts.6-digit-fraction>",
+                (
+                    "ACTION_AUTHORITATIVE requires slack:<channel-id>/<parent-ts>; "
+                    "observer, parent and triage roles may instead use aggregate:<stable-scope-id>"
+                ),
                 field="CARRIER",
             )
         )
@@ -345,7 +395,7 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
                     "terminal STOP must precede child watcher disarm",
                 )
             )
-        if any(pattern.search(body) for pattern in _NOTIFICATION_ONLY_PATTERNS):
+        if _contains_notification_only_self_deadlock(body):
             findings.append(
                 _finding(
                     FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK,
@@ -381,6 +431,18 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
     )
 
 
+def _invalid_task_audit(message: str) -> PromptAudit:
+    finding = _finding(FindingCode.INVALID_TASK, message, field="audit_kind")
+    return PromptAudit(
+        valid=False,
+        role=None,
+        operation_key=None,
+        carrier=None,
+        latest_handled_edge=None,
+        findings=(finding,),
+    )
+
+
 def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
     """Audit an account-local task export without contacting or mutating a task store."""
 
@@ -389,17 +451,34 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
         task_id = str(raw.get("id") or raw.get("task_id") or f"task-{index}")
         title = str(raw.get("title") or "")
         enabled = bool(raw.get("is_enabled", raw.get("enabled", False)))
-        if not enabled:
+        audit_kind = str(raw.get("audit_kind") or "SOL_WATCHER").strip().upper()
+
+        if audit_kind not in _AUDIT_KINDS:
             results.append(
                 TaskAudit(
                     task_id=task_id,
                     title=title,
-                    enabled=False,
+                    enabled=enabled,
+                    evaluated=True,
+                    audit_kind=audit_kind,
+                    audit=_invalid_task_audit(f"unknown audit_kind {audit_kind!r}"),
+                )
+            )
+            continue
+
+        if not enabled or audit_kind == "NON_WATCHER":
+            results.append(
+                TaskAudit(
+                    task_id=task_id,
+                    title=title,
+                    enabled=enabled,
                     evaluated=False,
+                    audit_kind=audit_kind,
                     audit=None,
                 )
             )
             continue
+
         audit = validate_watcher_prompt(raw.get("prompt", ""))
         results.append(
             TaskAudit(
@@ -407,11 +486,16 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
                 title=title,
                 enabled=True,
                 evaluated=True,
+                audit_kind=audit_kind,
                 audit=audit,
             )
         )
 
-    enabled_results = [result for result in results if result.enabled]
+    enabled_results = [
+        result
+        for result in results
+        if result.enabled and result.audit_kind != "NON_WATCHER"
+    ]
     valid_count = sum(bool(result.audit and result.audit.valid) for result in enabled_results)
     invalid_count = len(enabled_results) - valid_count
     return AuditReport(
