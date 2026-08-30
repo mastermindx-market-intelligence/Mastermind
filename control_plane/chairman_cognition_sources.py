@@ -20,6 +20,8 @@ ERROR_SCHEMA = "mastermind.chairman_cognition_source_error.v1"
 BOOT_PACKET_SCHEMA = "mastermind.ceo_boot_packet.v1"
 STRATEGIC_STATE_SCHEMA = "mastermind.strategic_state.v1"
 AGENT_OS_BRIEF_SCHEMA = "ceo_brief.v1"
+MASTERMIND_REVISION_SOURCE_REF = "GITHUB:Mastermind:protected-master"
+AGENT_OS_REVISION_SOURCE_REF = "AGENT_OS:canonical-revision"
 STRATEGIC_SOURCE_REF = "STRATEGIC_STATE:config/strategic_state.yml"
 AGENT_OS_SOURCE_REF = "AGENT_OS:ceo_brief"
 
@@ -32,6 +34,7 @@ _REQUIRED_CONSTRAINTS = frozenset(
         "duplicate_control_planes",
     }
 )
+_MAX_ADDITIONAL_RECEIPTS = 123
 
 
 class ChairmanCognitionSourceError(ValueError):
@@ -46,6 +49,8 @@ def compose_input(bundle: Mapping[str, Any]) -> dict[str, Any]:
             "schema",
             "as_of",
             "chairman_directive",
+            "mastermind_revision_attestation",
+            "agentos_revision_attestation",
             "boot_packet",
             "additional_source_receipts",
             "delegation_envelope",
@@ -61,11 +66,32 @@ def compose_input(bundle: Mapping[str, Any]) -> dict[str, Any]:
     generated_at = _text(boot["generated_at"], "boot_packet.generated_at", 40)
 
     chairman = _chairman_receipt(doc["chairman_directive"])
-    strategic_receipt, constraints = _strategic_receipt(boot, generated_at)
-    agentos_receipt = _agentos_receipt(boot, generated_at)
+    mastermind_revision = _revision_attestation(
+        doc["mastermind_revision_attestation"],
+        source_ref=MASTERMIND_REVISION_SOURCE_REF,
+        owner="GITHUB",
+        where="mastermind_revision_attestation",
+    )
+    agentos_revision = _revision_attestation(
+        doc["agentos_revision_attestation"],
+        source_ref=AGENT_OS_REVISION_SOURCE_REF,
+        owner="AGENT_OS",
+        where="agentos_revision_attestation",
+    )
+    strategic_receipt, constraints = _strategic_receipt(
+        boot, generated_at, mastermind_revision
+    )
+    agentos_receipt = _agentos_receipt(boot, generated_at, agentos_revision)
     additions = _additional_receipts(doc["additional_source_receipts"])
 
-    receipts = [chairman, strategic_receipt, agentos_receipt, *additions]
+    receipts = [
+        chairman,
+        mastermind_revision,
+        strategic_receipt,
+        agentos_revision,
+        agentos_receipt,
+        *additions,
+    ]
     refs = [item["source_ref"] for item in receipts]
     if len(refs) != len(set(refs)):
         raise ChairmanCognitionSourceError("duplicate source_ref across composed sources")
@@ -129,15 +155,21 @@ def _boot_packet(value: Any) -> Mapping[str, Any]:
         "degraded",
     ):
         if key not in value:
-            raise ChairmanCognitionSourceError("CEO boot packet is missing required fields")
+            raise ChairmanCognitionSourceError(
+                "CEO boot packet is missing required fields"
+            )
     if not isinstance(value["mastermind"], Mapping):
-        raise ChairmanCognitionSourceError("boot_packet.mastermind must be a mapping")
+        raise ChairmanCognitionSourceError(
+            "boot_packet.mastermind must be a mapping"
+        )
     if not isinstance(value["macro"], Mapping):
         raise ChairmanCognitionSourceError("boot_packet.macro must be a mapping")
     if not isinstance(value["degraded"], list) or not all(
         isinstance(item, str) for item in value["degraded"]
     ):
-        raise ChairmanCognitionSourceError("boot_packet.degraded must be a string list")
+        raise ChairmanCognitionSourceError(
+            "boot_packet.degraded must be a string list"
+        )
     return value
 
 
@@ -161,8 +193,41 @@ def _chairman_receipt(value: Any) -> dict[str, Any]:
     }
 
 
+def _revision_attestation(
+    value: Any,
+    *,
+    source_ref: str,
+    owner: str,
+    where: str,
+) -> dict[str, Any]:
+    item = _closed_mapping(
+        value,
+        required={"revision", "state", "load_bearing", "observed_at"},
+        where=where,
+    )
+    revision = _text(item["revision"], f"{where}.revision", 40)
+    if _SHA_RE.fullmatch(revision) is None:
+        raise ChairmanCognitionSourceError(
+            f"{where}.revision must be a full commit SHA"
+        )
+    if item["load_bearing"] is not True:
+        raise ChairmanCognitionSourceError(
+            f"{where} must be explicitly load-bearing"
+        )
+    return {
+        "source_ref": source_ref,
+        "owner": owner,
+        "revision": revision,
+        "state": _source_state(item["state"]),
+        "load_bearing": True,
+        "observed_at": _text(item["observed_at"], f"{where}.observed_at", 40),
+    }
+
+
 def _strategic_receipt(
-    boot: Mapping[str, Any], observed_at: str
+    boot: Mapping[str, Any],
+    observed_at: str,
+    canonical_revision: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, str]]:
     strategic = boot.get("strategic_state")
     if not isinstance(strategic, Mapping):
@@ -181,23 +246,35 @@ def _strategic_receipt(
             raise ChairmanCognitionSourceError("unknown strategic constraint level")
         normalized[name] = level
     if not _REQUIRED_CONSTRAINTS <= set(normalized):
-        raise ChairmanCognitionSourceError("load-bearing strategic constraint missing")
+        raise ChairmanCognitionSourceError(
+            "load-bearing strategic constraint missing"
+        )
 
-    sha = boot["mastermind"].get("sha")
+    checkout_sha = boot["mastermind"].get("sha")
     branch = boot["mastermind"].get("branch")
-    sha_known = isinstance(sha, str) and _SHA_RE.fullmatch(sha) is not None
+    checkout_known = (
+        isinstance(checkout_sha, str)
+        and _SHA_RE.fullmatch(checkout_sha) is not None
+    )
+    canonical_sha = canonical_revision["revision"]
+    if not checkout_known or branch != "master":
+        state = "UNKNOWN"
+    elif checkout_sha != canonical_sha:
+        state = "CONFLICT"
+    else:
+        state = canonical_revision["state"]
+
     content_digest = hashlib.sha256(canonical_json_bytes(strategic)).hexdigest()
-    current = sha_known and branch == "master"
+    checkout_label = checkout_sha if checkout_known else "UNRESOLVED"
     return (
         {
             "source_ref": STRATEGIC_SOURCE_REF,
             "owner": "STRATEGIC_STATE",
             "revision": (
-                f"sha256:{content_digest};mastermind:{sha}"
-                if sha_known
-                else f"sha256:{content_digest};mastermind:UNRESOLVED"
+                f"sha256:{content_digest};mastermind:{checkout_label};"
+                f"canonical:{canonical_sha}"
             ),
-            "state": "CURRENT" if current else "UNKNOWN",
+            "state": state,
             "load_bearing": True,
             "observed_at": observed_at,
         },
@@ -205,13 +282,22 @@ def _strategic_receipt(
     )
 
 
-def _agentos_receipt(boot: Mapping[str, Any], fallback_observed_at: str) -> dict[str, Any]:
+def _agentos_receipt(
+    boot: Mapping[str, Any],
+    fallback_observed_at: str,
+    canonical_revision: Mapping[str, Any],
+) -> dict[str, Any]:
     brief = boot.get("brief")
-    macro_sha = boot["macro"].get("sha")
-    sha_current = isinstance(macro_sha, str) and _SHA_RE.fullmatch(macro_sha) is not None
+    checkout_sha = boot["macro"].get("sha")
+    checkout_known = (
+        isinstance(checkout_sha, str)
+        and _SHA_RE.fullmatch(checkout_sha) is not None
+    )
+    canonical_sha = canonical_revision["revision"]
 
     state = "UNKNOWN"
     observed_at = fallback_observed_at
+    valid_brief = False
     if isinstance(brief, Mapping):
         raw_observed = brief.get("generated_at")
         if isinstance(raw_observed, str) and raw_observed.strip():
@@ -219,29 +305,33 @@ def _agentos_receipt(boot: Mapping[str, Any], fallback_observed_at: str) -> dict
         inputs = brief.get("inputs")
         degraded = inputs.get("degraded") if isinstance(inputs, Mapping) else None
         warnings = brief.get("warnings")
-        if (
+        valid_brief = (
             brief.get("schema") == AGENT_OS_BRIEF_SCHEMA
-            and sha_current
             and isinstance(degraded, list)
             and not degraded
             and isinstance(warnings, list)
             and not warnings
-        ):
-            state = "CURRENT"
+        )
+
+    if valid_brief and checkout_known:
+        if checkout_sha != canonical_sha:
+            state = "CONFLICT"
+        else:
+            state = canonical_revision["state"]
 
     brief_digest = (
         hashlib.sha256(canonical_json_bytes(brief)).hexdigest()
         if isinstance(brief, Mapping)
         else None
     )
+    checkout_label = checkout_sha if checkout_known else "UNRESOLVED"
     revision = (
-        f"sha256:{brief_digest};macro:{macro_sha}"
-        if brief_digest is not None and sha_current
-        else (
-            f"sha256:{brief_digest};macro:UNRESOLVED"
-            if brief_digest is not None
-            else "UNRESOLVED"
+        (
+            f"sha256:{brief_digest};macro:{checkout_label};"
+            f"canonical:{canonical_sha}"
         )
+        if brief_digest is not None
+        else f"UNRESOLVED;macro:{checkout_label};canonical:{canonical_sha}"
     )
     return {
         "source_ref": AGENT_OS_SOURCE_REF,
@@ -254,14 +344,16 @@ def _agentos_receipt(boot: Mapping[str, Any], fallback_observed_at: str) -> dict
 
 
 def _additional_receipts(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or len(value) > 125:
+    if not isinstance(value, list) or len(value) > _MAX_ADDITIONAL_RECEIPTS:
         raise ChairmanCognitionSourceError(
             "additional_source_receipts must be a bounded list"
         )
     out: list[dict[str, Any]] = []
     for raw in value:
         if not isinstance(raw, Mapping):
-            raise ChairmanCognitionSourceError("additional receipt must be a mapping")
+            raise ChairmanCognitionSourceError(
+                "additional receipt must be a mapping"
+            )
         if raw.get("owner") in _RESERVED_OWNERS:
             raise ChairmanCognitionSourceError(
                 "reserved canonical source must use its dedicated composer path"
@@ -300,9 +392,11 @@ def _source_state(value: Any) -> str:
 
 
 __all__ = [
+    "AGENT_OS_REVISION_SOURCE_REF",
     "AGENT_OS_SOURCE_REF",
     "COMPOSITION_SCHEMA",
     "ERROR_SCHEMA",
+    "MASTERMIND_REVISION_SOURCE_REF",
     "SOURCE_BUNDLE_SCHEMA",
     "STRATEGIC_SOURCE_REF",
     "ChairmanCognitionSourceError",
