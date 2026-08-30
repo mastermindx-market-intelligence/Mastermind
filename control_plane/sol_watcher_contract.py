@@ -184,16 +184,18 @@ _NOTIFICATION_ONLY_PATTERNS: tuple[Pattern[str], ...] = (
 )
 _NON_AUTHORITATIVE_MODIFICATION_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(
-        r"\b(?:post|send|issue|write|emit|reply with|respond with)\s+"
+        r"\b(?:post(?:s|ed|ing)?|send(?:s|ing)?|sent|issue(?:s|d|ing)?|"
+        r"write(?:s|written|ing)?|emit(?:s|ted|ting)?|reply with|respond with)\s+"
         r"(?:an?\s+)?(?:sol\s+)?(?:continue|ruling|request[_ -]?repair|stop)\b",
         re.IGNORECASE,
     ),
-    re.compile(r"\b(?:merge|release)\s+(?:the\s+)?(?:pull request|pr|carrier|branch)\b", re.IGNORECASE),
-    re.compile(r"\b(?:enable|arm)\s+auto-merge\b", re.IGNORECASE),
-    re.compile(r"\b(?:retry|resubmit|requeue|fail\s*over)\b", re.IGNORECASE),
-    re.compile(r"\b(?:commission|start)\s+(?:a\s+)?successor\b", re.IGNORECASE),
+    re.compile(r"\b(?:merge|release)(?:s|d|ing)?\s+(?:the\s+)?(?:pull request|pr|carrier|branch)\b", re.IGNORECASE),
+    re.compile(r"\b(?:enable|arm)(?:s|ed|ing)?\s+auto-merge\b", re.IGNORECASE),
+    re.compile(r"\b(?:retry|resubmit|requeue|fail\s*over)(?:s|ed|ing)?\b", re.IGNORECASE),
+    re.compile(r"\b(?:commission|start)(?:s|ed|ing)?\s+(?:a\s+)?successor\b", re.IGNORECASE),
 )
 _REJECTION_MARKERS = (
+    "no ",
     "do not",
     "don't",
     "never",
@@ -209,7 +211,7 @@ _REJECTION_MARKERS = (
     "failure",
     "fails",
 )
-_CLAUSE_BOUNDARY_RE = re.compile(r"[;.!?]|\b(?:but|however|instead|whereas)\b", re.IGNORECASE)
+_CLAUSE_BOUNDARY_RE = re.compile(r"[,;.!?]|\b(?:but|however|instead|whereas)\b", re.IGNORECASE)
 _EXPORT_FINDING_CODES = frozenset(
     {
         FindingCode.INVALID_TASK,
