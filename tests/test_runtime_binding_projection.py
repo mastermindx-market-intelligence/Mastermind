@@ -1,0 +1,1170 @@
+"""Contract tests for the storeless MAS-237 RuntimeBinding projection."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+
+import pytest
+
+from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
+from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
+import control_plane.executive_runtime as executive_runtime
+from control_plane.executive_runtime import Runtime, StateConflict
+from control_plane.operator_harness_contract import (
+    AuthRealmFact,
+    AuthRealmRequirement,
+    CapabilityManifest,
+    NativeHelperPolicy,
+    ObservedHarnessAttestation,
+    ObservedTriState,
+    OperationId,
+    ProcessIdentityObservation,
+    ProcessLiveness,
+    ProviderWriterState,
+    ReconcileObservation,
+    RequestedExecutionProfile,
+    TurnStartObservation,
+    WorkspaceIdentity,
+)
+from control_plane.runtime_binding_projection import project_runtime_binding
+from control_plane.session_targets import SessionTarget
+
+
+def _target(*, seat: str = "coo", surface: str = "codex") -> SessionTarget:
+    return SessionTarget(
+        session_alias="COO-CODEX",
+        target_seat=seat,
+        reasoning_surface=surface,
+        wake_transport="grok-computer",
+        allowed_transports=("grok-computer",),
+        workstream=None,
+        target_enabled=False,
+    )
+
+
+def _intent() -> dict[str, object]:
+    return {
+        "schema": INTENT_SCHEMA_V2,
+        "intent_id": "CEO-PROJECTION-001",
+        "actor": "ceo-sol",
+        "objective": "Exercise the inert RuntimeBinding projection.",
+        "department": "executive-infrastructure",
+        "priority": 9,
+        "grounding": {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40},
+        "execution_contract": {"requested_authorities": ["READ"], "attempt_limit": 2},
+        "intent_kind": "executive_coo_cycle",
+        "business_impact": "material",
+    }
+
+
+def _profile(dispatch) -> RequestedExecutionProfile:
+    attempt = dispatch.attempt
+    return RequestedExecutionProfile(
+        worker_id=str(attempt.worker_id),
+        provider="openai-codex",
+        requested_model="fixture-model",
+        harness_kind="fixture",
+        harness_binary_digest="a" * 64,
+        harness_version="1",
+        workspace=WorkspaceIdentity(
+            "/tmp/runtime-binding-projection", "b" * 40, 1, 2, os.getuid(), os.getgid()
+        ),
+        sandbox_policy="read-only",
+        approval_policy="never",
+        network_policy="disabled",
+        capabilities=CapabilityManifest(),
+        native_helper_policy=NativeHelperPolicy.DISABLED,
+        authority_policy_hash=str(attempt.authority_policy_hash),
+        auth_realm_requirement=AuthRealmRequirement.SLOT_BOUND_V1,
+    )
+
+
+def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestation:
+    return ObservedHarnessAttestation(
+        served_model=profile.requested_model,
+        harness_version=profile.harness_version,
+        harness_binary_digest=profile.harness_binary_digest,
+        capabilities=(),
+        effective_skills=(),
+        effective_mcp=(),
+        effective_plugins_or_apps=(),
+        sandbox_state=profile.sandbox_policy,
+        approval_state=profile.approval_policy,
+        network_state=profile.network_policy,
+        effective_config_digest=None,
+        auth=AuthRealmFact(worker_id=profile.worker_id, provider=profile.provider),
+        workspace=profile.workspace,
+        supports_subagent_capability_ceiling=ObservedTriState.UNKNOWN,
+    )
+
+
+def _admitted_runtime(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a",
+        provider="openai-codex",
+        account_label="account-a",
+        worker_type="fixture",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "openai-codex",
+                "capabilities": ["read"],
+                "cost_class": "small",
+            }
+        },
+    )
+    receipt = submit_intent(runtime, _intent())
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert dispatch is not None and dispatch.lease_token is not None
+    profile = _profile(dispatch)
+    harness = runtime.operator_harness
+    sealed = harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+    )
+    operation = OperationId("ohf-op:projection-start")
+    epoch, generation = harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=operation,
+    )
+    process = ProcessIdentityObservation(3001, 3001, "start-3001", "boot-fixture")
+    harness.bind_start_result(
+        epoch=epoch,
+        generation=generation,
+        operation_id=operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="PROVIDER-SESSION-1",
+        process=process,
+    )
+    principal = OperatorPrincipalObservation(
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        process_generation_id=generation.process_generation_id,
+        provider_session_id="PROVIDER-SESSION-1",
+        process_identity={
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        },
+        os_principal_name="fixture-principal",
+        os_principal_uid=os.getuid(),
+        provider_home_identity={
+            "path": "/tmp/runtime-binding-projection-home",
+            "device": 1,
+            "inode": 2,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "mode": 0o700,
+        },
+        observed_at_ms=runtime.store.now_ms(),
+    )
+    harness.seal_attestation(
+        generation=generation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=_attestation(profile),
+        principal_observation=principal,
+    )
+    return runtime, dispatch, sealed, epoch, generation, process, profile
+
+
+def _expected_binding_id(attempt_id: str, epoch_id: str) -> str:
+    return "bind-" + hashlib.sha256(f"{attempt_id}:{epoch_id}".encode("utf-8")).hexdigest()[:40]
+
+
+def _sqlite_snapshot(runtime: Runtime):
+    with runtime.store.read() as connection:
+        tables = tuple(
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            )
+        )
+        schema = tuple(
+            tuple(row)
+            for row in connection.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"
+            )
+        )
+        contents = tuple(
+            (
+                table,
+                tuple(tuple(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")),
+            )
+            for table in tables
+        )
+    return schema, contents
+
+
+def test_projects_exact_current_admitted_ohf_binding_without_a_write(tmp_path):
+    runtime, dispatch, sealed, epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    before = _sqlite_snapshot(runtime)
+
+    binding = project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+    assert binding.session_alias == "COO-CODEX"
+    assert binding.binding_id == _expected_binding_id(sealed.attempt_id, epoch.session_epoch_id)
+    assert binding.binding_generation == generation.generation_number
+    assert binding.native_handle == "PROVIDER-SESSION-1"
+    assert binding.account_label == "account-a"
+    assert binding.reasoning_surface == "codex"
+    assert _sqlite_snapshot(runtime) == before
+    assert dispatch.attempt.attempt_id == sealed.attempt_id
+
+
+def test_public_projection_uses_one_supplied_snapshot_connection(tmp_path, monkeypatch):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.read() as connection:
+        expected = project_runtime_binding(
+            runtime, sealed.attempt_id, _target(), connection=connection
+        )
+        monkeypatch.setattr(
+            runtime.store,
+            "read",
+            lambda: pytest.fail("provided connection must not open a second read"),
+        )
+        actual = project_runtime_binding(
+            runtime, sealed.attempt_id, _target(), connection=connection
+        )
+    assert actual == expected
+
+
+def test_public_projection_refuses_snapshot_connection_owned_by_another_runtime(tmp_path):
+    runtime_a, _dispatch_a, _sealed_a, _epoch_a, _generation_a, _process_a, _profile_a = (
+        _admitted_runtime(tmp_path / "runtime-a")
+    )
+    runtime_b, _dispatch_b, sealed_b, _epoch_b, _generation_b, _process_b, _profile_b = (
+        _admitted_runtime(tmp_path / "runtime-b")
+    )
+
+    with runtime_b.store.read() as connection:
+        with pytest.raises(StateConflict, match="connection"):
+            project_runtime_binding(
+                runtime_a,
+                sealed_b.attempt_id,
+                _target(),
+                connection=connection,
+            )
+
+
+def test_public_projection_refuses_owned_connection_without_an_active_snapshot(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    connection = runtime.store._open()
+    try:
+        assert connection.in_transaction is False
+        with pytest.raises(StateConflict, match="transaction"):
+            project_runtime_binding(
+                runtime,
+                sealed.attempt_id,
+                _target(),
+                connection=connection,
+            )
+    finally:
+        connection.close()
+
+
+def test_public_projection_refuses_temp_job_shadow_of_authoritative_main(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    with runtime.store.read() as connection:
+        main_job = connection.execute(
+            "SELECT owner_seat FROM main.jobs WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert main_job is not None and main_job["owner_seat"] == "coo"
+        connection.execute("CREATE TEMP TABLE jobs AS SELECT * FROM main.jobs")
+        connection.execute(
+            "UPDATE temp.jobs SET owner_seat='ceo' WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        )
+        temp_job = connection.execute(
+            "SELECT owner_seat FROM temp.jobs WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert temp_job is not None and temp_job["owner_seat"] == "ceo"
+
+        with pytest.raises(StateConflict):
+            project_runtime_binding(
+                runtime,
+                sealed.attempt_id,
+                _target(seat="ceo"),
+                connection=connection,
+            )
+
+
+def test_public_projection_refuses_owner_seat_drift_from_job_created(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    with runtime.store.transaction() as connection:
+        created = connection.execute(
+            "SELECT payload_json FROM main.events "
+            "WHERE event_type='JOB_CREATED' AND job_id=("
+            "SELECT job_id FROM main.attempts WHERE attempt_id=?)",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert created is not None
+        assert json.loads(str(created["payload_json"]))["owner_seat"] == "coo"
+        connection.execute(
+            "UPDATE main.jobs SET owner_seat='ceo' WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        )
+
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target(seat="ceo"))
+
+
+@pytest.mark.parametrize("mutation", ["moved", "replaced"])
+def test_public_projection_refuses_snapshot_after_owned_database_identity_changes(
+    tmp_path, mutation
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path / "runtime")
+    )
+    replacement = None
+    if mutation == "replaced":
+        replacement = _admitted_runtime(tmp_path / "replacement")[0]
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM schema_migrations LIMIT 1"
+        ).fetchone() is not None
+        moved_path = runtime.store.path.with_name("executive-runtime-moved.sqlite3")
+        os.replace(runtime.store.path, moved_path)
+        if replacement is not None:
+            os.link(replacement.store.path, runtime.store.path)
+
+        with pytest.raises(StateConflict, match="connection"):
+            project_runtime_binding(
+                runtime,
+                sealed.attempt_id,
+                _target(),
+                connection=connection,
+            )
+
+
+def test_public_projection_keeps_one_snapshot_when_generation_changes_after_read(tmp_path):
+    runtime, _dispatch, sealed, _epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.read() as connection:
+        before = project_runtime_binding(runtime, sealed.attempt_id, _target(), connection=connection)
+        with runtime.store.transaction() as writer:
+            # Test-only corruption: a normal runtime transition cannot alter a
+            # generation number in place, but the projection seam must still
+            # retain the supplied reader's snapshot when another connection
+            # commits a newer state.
+            writer.execute("DROP TRIGGER process_generation_projection_update")
+            writer.execute(
+                "UPDATE process_generations SET generation_number=2 WHERE process_generation_id=?",
+                (generation.process_generation_id,),
+            )
+        still_before = project_runtime_binding(
+            runtime, sealed.attempt_id, _target(), connection=connection
+        )
+    assert before.binding_generation == still_before.binding_generation == 1
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def _resume_admitted_runtime(admitted):
+    runtime, dispatch, sealed, epoch, g1, process, profile = admitted
+    harness = runtime.operator_harness
+    turn_operation = OperationId("ohf-op:projection-g1-turn")
+    turn = harness.reserve_turn(
+        epoch=epoch,
+        generation=g1,
+        operation_id=turn_operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    harness.acknowledge_turn(
+        turn=turn,
+        operation_id=turn_operation,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        observation=TurnStartObservation("NATIVE-PROJECTION-G1", True),
+    )
+    harness.record_reconcile_observation(
+        generation=g1,
+        observation=ReconcileObservation(
+            ProcessLiveness.PROVEN_DEAD,
+            process,
+            True,
+            ProviderWriterState.RELEASED,
+            "PROVIDER-SESSION-1",
+        ),
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    resume = OperationId("ohf-op:projection-resume")
+    g2 = harness.reserve_same_epoch_resume(
+        epoch=epoch,
+        old_generation=g1,
+        operation_id=resume,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    process2 = ProcessIdentityObservation(3002, 3002, "start-3002", "boot-fixture")
+    harness.bind_resume_result(
+        epoch=epoch,
+        generation=g2,
+        operation_id=resume,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="PROVIDER-SESSION-1",
+        process=process2,
+    )
+    principal = runtime.operator_harness.admitted_principal_observation(g1)
+    assert principal is not None
+    harness.seal_attestation(
+        generation=g2,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=_attestation(profile),
+        principal_observation=OperatorPrincipalObservation.from_dict(
+            {
+                **principal.to_dict(),
+                "process_generation_id": g2.process_generation_id,
+                "process_identity": {
+                    "pid": process2.pid,
+                    "pgid": process2.pgid,
+                    "process_start_identity": process2.process_start_identity,
+                    "boot_id": process2.boot_id,
+                },
+            }
+        ),
+    )
+    return runtime, dispatch, sealed, epoch, g1, g2, process2, profile
+
+
+def test_same_epoch_generation_replacement_keeps_id_and_advances_generation(tmp_path):
+    admitted = _admitted_runtime(tmp_path)
+    before = project_runtime_binding(admitted[0], admitted[2].attempt_id, _target())
+    runtime, _dispatch, sealed, _epoch, _g1, g2, _process2, _profile = (
+        _resume_admitted_runtime(admitted)
+    )
+    after = project_runtime_binding(runtime, sealed.attempt_id, _target())
+    assert after.binding_id == before.binding_id
+    assert after.binding_generation == g2.generation_number == 2
+
+
+def test_new_attempt_and_epoch_identity_change_binding_id(tmp_path):
+    first = _admitted_runtime(tmp_path / "first")
+    second = _admitted_runtime(tmp_path / "second")
+    first_binding = project_runtime_binding(first[0], first[2].attempt_id, _target())
+    second_binding = project_runtime_binding(second[0], second[2].attempt_id, _target())
+    assert first_binding.binding_id != second_binding.binding_id
+
+
+def test_orchestration_attempt_refuses_a_second_epoch_after_abandonment(tmp_path):
+    runtime, dispatch, sealed, first_epoch, first_generation, first_process, _profile_value = _admitted_runtime(tmp_path)
+    harness = runtime.operator_harness
+    harness.record_hard_process_death(
+        generation=first_generation,
+        observation=ReconcileObservation(
+            ProcessLiveness.PROVEN_DEAD,
+            first_process,
+            True,
+            ProviderWriterState.UNKNOWN,
+            "PROVIDER-SESSION-1",
+        ),
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    harness.abandon_epoch(
+        epoch=first_epoch,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    # The existing OHF law permits only one epoch for an orchestration Attempt,
+    # so no production-valid same-Attempt new epoch fixture can be constructed.
+    # This refusal is the boundary that prevents a fabricated identity case.
+    with pytest.raises(StateConflict, match="only one session epoch per Attempt"):
+        harness.reserve_start(
+            sealed.attempt_id,
+            fence_generation=sealed.fence_generation,
+            lease_token=dispatch.lease_token,
+            operation_id=OperationId("ohf-op:projection-new-epoch"),
+        )
+
+
+@pytest.mark.parametrize(
+    "target",
+    [_target(seat="ceo"), _target(surface="chatgpt-sol")],
+    ids=["owner-seat-mismatch", "logical-surface-mismatch"],
+)
+def test_projection_refuses_target_that_does_not_match_current_binding(tmp_path, target):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, target)
+
+
+def test_projection_refuses_missing_writer_session_or_current_epoch(tmp_path):
+    runtime, _dispatch, sealed, epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE process_generations SET executive_writer_held=0 WHERE process_generation_id=?",
+            (generation.process_generation_id,),
+        )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+    runtime, _dispatch, sealed, epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path / "stale")
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE harness_session_epochs SET state='TERMINAL' WHERE session_epoch_id=?",
+            (epoch.session_epoch_id,),
+        )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_provider_session_drift_and_unknown_provider(tmp_path):
+    runtime, _dispatch, sealed, _epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER process_generation_projection_update")
+        connection.execute(
+            "UPDATE process_generations SET provider_session_id='DRIFTED-SESSION' WHERE process_generation_id=?",
+            (generation.process_generation_id,),
+        )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path / "unknown")
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER workers_identity_immutable")
+        connection.execute("UPDATE workers SET provider='openai' WHERE worker_id='worker-a'")
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_non_ohf_attempt_and_wrong_source_admission(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    runtime.workers.register_worker(
+        "worker-a", provider="openai-codex", account_label="account-a", worker_type="fixture"
+    )
+    job = runtime.jobs.create_job("legacy attempt")
+    lease = runtime.attempts.claim_job(job.job_id)
+    assert lease is not None
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, lease.attempt.attempt_id, _target())
+
+    runtime, _dispatch, sealed, _epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path / "wrong-source")
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE process_generations SET observed_attestation_digest=NULL WHERE process_generation_id=?",
+            (generation.process_generation_id,),
+        )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["expired", "null-token", "claimed", "job-state", "released", "wrong-holder", "fence"],
+)
+def test_projection_refuses_incoherent_current_lease_and_quota(tmp_path, kind):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    if kind == "wrong-holder":
+        connection = runtime.store._open()
+        try:
+            connection.execute("PRAGMA foreign_keys=OFF")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "UPDATE worker_quota_classes SET held_attempt_id='ATT-WRONG' "
+                "WHERE worker_id='worker-a' AND quota_class='default'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        with pytest.raises(StateConflict):
+            project_runtime_binding(runtime, sealed.attempt_id, _target())
+        return
+    with runtime.store.transaction() as connection:
+        if kind == "expired":
+            connection.execute(
+                "UPDATE attempts SET lease_expires_at_ms=0 WHERE attempt_id=?",
+                (sealed.attempt_id,),
+            )
+        elif kind == "null-token":
+            connection.execute("PRAGMA ignore_check_constraints=ON")
+            connection.execute(
+                "UPDATE attempts SET lease_token=NULL WHERE attempt_id=?",
+                (sealed.attempt_id,),
+            )
+        elif kind == "claimed":
+            connection.execute(
+                "UPDATE attempts SET status='CLAIMED' WHERE attempt_id=?",
+                (sealed.attempt_id,),
+            )
+        elif kind == "job-state":
+            connection.execute(
+                "UPDATE jobs SET status='CHECKPOINTED' WHERE current_attempt_id=?",
+                (sealed.attempt_id,),
+            )
+        elif kind == "released":
+            connection.execute(
+                "UPDATE worker_quota_classes SET status='DRAINING',held_attempt_id=NULL "
+                "WHERE worker_id='worker-a' AND quota_class='default'"
+            )
+        elif kind == "fence":
+            connection.execute(
+                "UPDATE worker_quota_classes SET fence_counter=fence_counter+1 "
+                "WHERE worker_id='worker-a' AND quota_class='default'"
+            )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_current_job_pointer_drift(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    connection = runtime.store._open()
+    try:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "UPDATE jobs SET current_attempt_id='ATT-WRONG' WHERE current_attempt_id=?",
+            (sealed.attempt_id,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize("event_type", ["ORCHESTRATION_WORK_ADMITTED", "OHF_LAUNCH_DECISION"])
+def test_projection_refuses_duplicate_current_admission_or_decision(tmp_path, event_type):
+    runtime, _dispatch, sealed, _epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        if event_type == "ORCHESTRATION_WORK_ADMITTED":
+            connection.execute("DROP INDEX events_one_work_admission_per_generation")
+        row = connection.execute(
+            "SELECT * FROM events WHERE aggregate_type='process_generation' "
+            "AND aggregate_id=? AND event_type=?",
+            (generation.process_generation_id, event_type),
+        ).fetchone()
+        assert row is not None
+        runtime.store.append_event(
+            connection,
+            aggregate_type=str(row["aggregate_type"]),
+            aggregate_id=str(row["aggregate_id"]),
+            event_type=event_type,
+            command_id=f"projection-duplicate:{event_type}:{generation.process_generation_id}",
+            actor=str(row["actor"]),
+            job_id=str(row["job_id"]),
+            attempt_id=str(row["attempt_id"]),
+            worker_id=str(row["worker_id"]),
+            quota_class=str(row["quota_class"]),
+            payload=json.loads(str(row["payload_json"])),
+            timestamp_ms=int(row["created_at_ms"]),
+        )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_stale_writer_with_newer_writerless_generation(tmp_path):
+    runtime, _dispatch, sealed, epoch, generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """INSERT INTO process_generations(
+                 process_generation_id,session_epoch_id,worker_id,provider_session_id,
+                 generation_number,started_at_ms,executive_writer_held,
+                 provider_writer_state,created_at_ms
+               ) VALUES(?,?,?,?,2,1,0,'UNKNOWN',1)""",
+            (
+                "projection-writerless-g2",
+                epoch.session_epoch_id,
+                "worker-a",
+                "PROVIDER-SESSION-1",
+            ),
+        )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_does_not_read_live_policy_and_refuses_corrupt_persisted_digest(tmp_path, monkeypatch):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    monkeypatch.setattr(
+        executive_runtime.CooCyclePolicy,
+        "load",
+        lambda: pytest.fail("projection must not load mutable CooCyclePolicy"),
+    )
+    assert project_runtime_binding(runtime, sealed.attempt_id, _target()).reasoning_surface == "codex"
+
+    monkeypatch.undo()
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        event = connection.execute(
+            "SELECT event_id,payload_json FROM events WHERE event_type='ORCHESTRATION_WORK_ADMITTED' "
+            "AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert event is not None
+        payload = json.loads(str(event["payload_json"]))
+        payload["policy_sha"] = "not-a-digest"
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")), event["event_id"]),
+        )
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_corrupt_effective_grant_canonical_pair(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute(
+            "UPDATE attempts SET effective_grant_json='{}' WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_structurally_invalid_effective_grant(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    invalid_grant_json = "{}"
+    invalid_grant_digest = hashlib.sha256(invalid_grant_json.encode("utf-8")).hexdigest()
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (invalid_grant_json, invalid_grant_digest, sealed.attempt_id),
+        )
+        event = connection.execute(
+            "SELECT event_id,payload_json FROM events WHERE event_type='ORCHESTRATION_WORK_ADMITTED' "
+            "AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert event is not None
+        payload = json.loads(str(event["payload_json"]))
+        payload["effective_grant_digest"] = invalid_grant_digest
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")), event["event_id"]),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    ("field", "corrupt_value"),
+    [
+        ("job_id", "JOB-WRONG"),
+        ("role", "review"),
+        ("policy_sha", "f" * 64),
+    ],
+    ids=["job", "role", "authority-policy"],
+)
+def test_projection_refuses_effective_grant_identity_drift(
+    tmp_path, field, corrupt_value
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        row = connection.execute(
+            "SELECT effective_grant_json FROM attempts WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert row is not None
+        grant = json.loads(str(row["effective_grant_json"]))
+        grant[field] = corrupt_value
+        grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+        grant_digest = hashlib.sha256(grant_json.encode("utf-8")).hexdigest()
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (grant_json, grant_digest, sealed.attempt_id),
+        )
+        event = connection.execute(
+            "SELECT event_id,payload_json FROM events WHERE event_type='ORCHESTRATION_WORK_ADMITTED' "
+            "AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert event is not None
+        payload = json.loads(str(event["payload_json"]))
+        payload["effective_grant_digest"] = grant_digest
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")), event["event_id"]),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_consistently_bound_unknown_orchestration_role(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    unknown_role = "observer"
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER jobs_orchestration_fields_immutable")
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE main.jobs SET orchestration_role=? WHERE current_attempt_id=?",
+            (unknown_role, sealed.attempt_id),
+        )
+        attempt = connection.execute(
+            "SELECT effective_grant_json FROM main.attempts WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert attempt is not None
+        grant = json.loads(str(attempt["effective_grant_json"]))
+        grant["role"] = unknown_role
+        grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+        grant_digest = hashlib.sha256(grant_json.encode("utf-8")).hexdigest()
+        connection.execute(
+            "UPDATE main.attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (grant_json, grant_digest, sealed.attempt_id),
+        )
+        admission = connection.execute(
+            "SELECT event_id,payload_json FROM main.events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert admission is not None
+        admission_payload = json.loads(str(admission["payload_json"]))
+        admission_payload["orchestration_role"] = unknown_role
+        admission_payload["effective_grant_digest"] = grant_digest
+        connection.execute(
+            "UPDATE main.events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    admission_payload, sort_keys=True, separators=(",", ":")
+                ),
+                admission["event_id"],
+            ),
+        )
+
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    ("field", "corrupt_value"),
+    [
+        ("authorities", ["READ", "WRITE"]),
+        ("write_paths", [7]),
+        ("validation_argv", ["pytest"]),
+    ],
+    ids=["authority-widening", "non-string-write-path", "flat-validation-argv"],
+)
+def test_projection_refuses_rehashed_effective_grant_outside_frozen_job_authority(
+    tmp_path, field, corrupt_value
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        row = connection.execute(
+            "SELECT effective_grant_json FROM attempts WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert row is not None
+        grant = json.loads(str(row["effective_grant_json"]))
+        grant[field] = corrupt_value
+        grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+        grant_digest = hashlib.sha256(grant_json.encode("utf-8")).hexdigest()
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (grant_json, grant_digest, sealed.attempt_id),
+        )
+        event = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert event is not None
+        payload = json.loads(str(event["payload_json"]))
+        payload["effective_grant_digest"] = grant_digest
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                event["event_id"],
+            ),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    ("column", "corrupt_json"),
+    [
+        ("requested_authorities_json", '["READ","READ"]'),
+        ("allowed_write_paths_json", "[7]"),
+        ("validation_commands_json", '["pytest"]'),
+    ],
+    ids=["duplicate-job-authority", "non-string-job-path", "flat-job-validation"],
+)
+def test_projection_refuses_noncanonical_frozen_job_authority_arrays(
+    tmp_path, column, corrupt_json
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            f"UPDATE jobs SET {column}=? WHERE current_attempt_id=?",
+            (corrupt_json, sealed.attempt_id),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    ("authorities", "validation_argv"),
+    [
+        (["READ"], [["pytest"]]),
+        (["READ", "RUN_TESTS"], []),
+    ],
+    ids=["validation-without-run-tests", "run-tests-without-validation"],
+)
+def test_projection_refuses_review_grant_validation_run_tests_mismatch(
+    tmp_path, authorities, validation_argv
+):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path)
+    )
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER jobs_orchestration_fields_immutable")
+        connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            """UPDATE jobs
+               SET orchestration_role='review',requested_authorities_json=?,
+                   allowed_write_paths_json='[]',validation_commands_json=?
+               WHERE current_attempt_id=?""",
+            (
+                json.dumps(authorities, separators=(",", ":")),
+                json.dumps(validation_argv, separators=(",", ":")),
+                sealed.attempt_id,
+            ),
+        )
+        attempt = connection.execute(
+            "SELECT effective_grant_json FROM attempts WHERE attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert attempt is not None
+        grant = json.loads(str(attempt["effective_grant_json"]))
+        grant.update(
+            {
+                "role": "review",
+                "authorities": authorities,
+                "write_paths": [],
+                "validation_argv": validation_argv,
+            }
+        )
+        grant_json = json.dumps(grant, sort_keys=True, separators=(",", ":"))
+        grant_digest = hashlib.sha256(grant_json.encode("utf-8")).hexdigest()
+        connection.execute(
+            "UPDATE attempts SET effective_grant_json=?,effective_grant_digest=? "
+            "WHERE attempt_id=?",
+            (grant_json, grant_digest, sealed.attempt_id),
+        )
+        admission = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert admission is not None
+        admission_payload = json.loads(str(admission["payload_json"]))
+        admission_payload["orchestration_role"] = "review"
+        admission_payload["effective_grant_digest"] = grant_digest
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    admission_payload, sort_keys=True, separators=(",", ":")
+                ),
+                admission["event_id"],
+            ),
+        )
+
+    with pytest.raises(StateConflict, match="effective grant"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_corrupt_tx3_applied_payload(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json='{}' "
+            "WHERE event_type='OPERATOR_OPERATION_APPLIED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        )
+
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ["applied-aggregate", "intent-payload", "intent-actor"],
+)
+def test_projection_refuses_corrupt_tx3_operation_lineage(tmp_path, corruption):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        if corruption == "applied-aggregate":
+            connection.execute(
+                "UPDATE events SET aggregate_id='ohf-op:projection-wrong' "
+                "WHERE event_type='OPERATOR_OPERATION_APPLIED' AND attempt_id=?",
+                (sealed.attempt_id,),
+            )
+        elif corruption == "intent-payload":
+            connection.execute(
+                "UPDATE events SET payload_json='{}' "
+                "WHERE event_type='OPERATOR_OPERATION_INTENT' AND attempt_id=?",
+                (sealed.attempt_id,),
+            )
+        else:
+            connection.execute(
+                "UPDATE events SET actor='worker' "
+                "WHERE event_type='OPERATOR_OPERATION_INTENT' AND attempt_id=?",
+                (sealed.attempt_id,),
+            )
+
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_tx3_applied_after_launch_decision_and_admission(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        applied = connection.execute(
+            "SELECT event_id FROM events "
+            "WHERE event_type='OPERATOR_OPERATION_APPLIED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        admission = connection.execute(
+            "SELECT event_id FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert applied is not None and admission is not None
+        late_event_id = int(
+            connection.execute("SELECT MAX(event_id)+1 FROM events").fetchone()[0]
+        )
+        assert late_event_id > int(admission["event_id"])
+        connection.execute(
+            "UPDATE events SET event_id=? WHERE event_id=?",
+            (late_event_id, applied["event_id"]),
+        )
+
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_second_complete_matching_start_operation_pair(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        original_intent = connection.execute(
+            "SELECT * FROM events "
+            "WHERE event_type='OPERATOR_OPERATION_INTENT' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        original_applied = connection.execute(
+            "SELECT * FROM events "
+            "WHERE event_type='OPERATOR_OPERATION_APPLIED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        admission = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' AND attempt_id=?",
+            (sealed.attempt_id,),
+        ).fetchone()
+        assert original_intent is not None and original_applied is not None
+        assert admission is not None
+        duplicate_operation_id = "ohf-op:projection-second-start"
+        duplicate_applied_command_id = f"{duplicate_operation_id}:applied"
+        runtime.store.append_event(
+            connection,
+            aggregate_type="operator_operation",
+            aggregate_id=duplicate_operation_id,
+            event_type="OPERATOR_OPERATION_INTENT",
+            command_id=duplicate_operation_id,
+            actor=str(original_intent["actor"]),
+            job_id=str(original_intent["job_id"]),
+            attempt_id=str(original_intent["attempt_id"]),
+            worker_id=str(original_intent["worker_id"]),
+            quota_class=str(original_intent["quota_class"]),
+            payload=json.loads(str(original_intent["payload_json"])),
+        )
+        runtime.store.append_event(
+            connection,
+            aggregate_type="operator_operation",
+            aggregate_id=duplicate_operation_id,
+            event_type="OPERATOR_OPERATION_APPLIED",
+            command_id=duplicate_applied_command_id,
+            actor=str(original_applied["actor"]),
+            job_id=str(original_applied["job_id"]),
+            attempt_id=str(original_applied["attempt_id"]),
+            worker_id=str(original_applied["worker_id"]),
+            quota_class=str(original_applied["quota_class"]),
+            payload=json.loads(str(original_applied["payload_json"])),
+        )
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        admission_payload = json.loads(str(admission["payload_json"]))
+        admission_payload["tx3_applied_command_id"] = duplicate_applied_command_id
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(
+                    admission_payload, sort_keys=True, separators=(",", ":")
+                ),
+                admission["event_id"],
+            ),
+        )
+
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_projection_refuses_corrupt_resume_applied_payload(tmp_path):
+    runtime, _dispatch, sealed, _epoch, _g1, _g2, _process2, _profile = (
+        _resume_admitted_runtime(_admitted_runtime(tmp_path))
+    )
+    with runtime.store.transaction() as connection:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json='{}' "
+            "WHERE command_id='ohf-op:projection-resume:applied'",
+        )
+
+    with pytest.raises(StateConflict, match="TX-3"):
+        project_runtime_binding(runtime, sealed.attempt_id, _target())

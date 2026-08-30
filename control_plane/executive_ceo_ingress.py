@@ -2,9 +2,10 @@
 
 This module preserves the closed submit/status validator, trusted-grounding/
 replay/admission law, and dedicated response/error law for the future Slack
-transport's local ingress, while adding only R0's no-input diagnostic state
-read (adjudication §3, §7-§14; R1 security correction; R2 lifecycle
-correction).  It is deliberately narrow:
+transport's local ingress, while adding R0's no-input diagnostic state read
+and AD-ID1's separately versioned transport-neutral automated request frames
+(adjudication §3, §7-§14; R1 security correction; R2 lifecycle correction).
+It is deliberately narrow:
 
 * **No generic dispatcher.**  There is no ``command/version/args`` shape here
   (unlike the broad Operator control protocol).  PR-A's submit/status schemas
@@ -69,7 +70,9 @@ __all__ = [
     "STATE_SCHEMA",
     "STATUS_ID_RE",
     "STATUS_SCHEMA",
+    "STATUS_SCHEMA_V2",
     "SUBMIT_SCHEMA",
+    "SUBMIT_SCHEMA_V2",
     "handle_frame",
 ]
 
@@ -82,6 +85,9 @@ __all__ = [
 SUBMIT_SCHEMA = "mastermind.executive_ceo_ingress_submit.v1"
 #: §7.2.
 STATUS_SCHEMA = "mastermind.executive_ceo_ingress_status.v1"
+#: AD-ID1 separately versioned, transport-neutral automated admission.
+SUBMIT_SCHEMA_V2 = "mastermind.executive_ceo_ingress_submit.v2"
+STATUS_SCHEMA_V2 = "mastermind.executive_ceo_ingress_status.v2"
 #: R0 §3 — the only post-PR-A additive diagnostic frame.
 STATE_SCHEMA = hot_state.STATE_REQUEST_SCHEMA
 
@@ -103,6 +109,10 @@ BOOT_PACKET_SCHEMA = "mastermind.ceo_boot_packet.v1"
 
 _SUBMIT_TOP_KEYS = frozenset({"schema", "observed_grounding", "request"})
 _STATUS_TOP_KEYS = frozenset({"schema", "intent_id"})
+_SUBMIT_V2_TOP_KEYS = frozenset(
+    {"schema", "request_ref", "observed_grounding", "request"}
+)
+_STATUS_V2_TOP_KEYS = frozenset({"schema", "request_ref"})
 _STATE_TOP_KEYS = frozenset({"schema"})
 _GROUNDING_KEYS = frozenset({"mastermind_sha", "macro_sha", "boot_packet_schema"})
 
@@ -409,6 +419,57 @@ async def _handle_submit(
     except ceo_request.CeoRequestError as exc:
         raise _dependency_failure("internal_error") from exc
 
+    return await _handle_normalized_submit(
+        normalized,
+        observed=observed,
+        intent_id=intent_id,
+        runtime=runtime,
+        grounding_provider=grounding_provider,
+        workspace_root=workspace_root,
+    )
+
+
+async def _handle_submit_v2(
+    parsed: Mapping[str, Any],
+    *,
+    runtime: Any,
+    grounding_provider: GroundingProvider,
+    workspace_root: "Path | str",
+) -> dict[str, Any]:
+    """AD-ID1 automated submit with the same load-bearing v1 order."""
+
+    # 1. validate the caller frame and semantic request before deriving the
+    #    canonical request-instance identity.
+    observed = _validate_observed_grounding(parsed["observed_grounding"])
+    try:
+        normalized = ceo_request.normalize_automated_request(parsed["request"])
+        intent_id = ceo_request.automated_intent_id(parsed["request_ref"])
+    except ceo_request.CeoRequestInvalid as exc:
+        raise CeoIngressError("invalid_input", exc.message) from exc
+    except ceo_request.CeoRequestInternalError as exc:
+        raise _dependency_failure("internal_error") from exc
+
+    return await _handle_normalized_submit(
+        normalized,
+        observed=observed,
+        intent_id=intent_id,
+        runtime=runtime,
+        grounding_provider=grounding_provider,
+        workspace_root=workspace_root,
+    )
+
+
+async def _handle_normalized_submit(
+    normalized: Mapping[str, Any],
+    *,
+    observed: Mapping[str, str],
+    intent_id: str,
+    runtime: Any,
+    grounding_provider: GroundingProvider,
+    workspace_root: "Path | str",
+) -> dict[str, Any]:
+    """Shared replay/grounding/sink law after version-specific validation."""
+
     # 3. construct the candidate envelope/fingerprint using the CALLER's
     #    observed_grounding claim ONLY for comparison (never for submission).
     candidate_envelope = _build_envelope(
@@ -469,6 +530,24 @@ async def _handle_status(parsed: Mapping[str, Any], *, runtime: Any) -> dict[str
         raise CeoIngressError(
             "invalid_intent_id", f"intent_id must match {STATUS_ID_RE.pattern!r}"
         )
+    return await _resolve_status_intent(runtime, intent_id)
+
+
+async def _handle_status_v2(parsed: Mapping[str, Any], *, runtime: Any) -> dict[str, Any]:
+    """Resolve status from trusted request identity, never a caller intent id."""
+
+    try:
+        intent_id = ceo_request.automated_intent_id(parsed["request_ref"])
+    except ceo_request.CeoRequestInvalid as exc:
+        raise CeoIngressError("invalid_input", exc.message) from exc
+    except ceo_request.CeoRequestInternalError as exc:
+        raise _dependency_failure("internal_error") from exc
+    return await _resolve_status_intent(runtime, intent_id)
+
+
+async def _resolve_status_intent(runtime: Any, intent_id: str) -> dict[str, Any]:
+    """Shared exact command-id lookup and canonical durable resolution."""
+
     # 1-2. derive command_id; use existing RuntimeStore API for that one id.
     command_id = ceo_intent.command_id_for(intent_id)
     event = await _backend_call(runtime.store.find_event_by_command_id, command_id)
@@ -497,6 +576,22 @@ def _exact_top_keys(value: Any, name: str, expected: frozenset[str]) -> Mapping[
     return value
 
 
+def _require_v2_admission(*, service_state: Any, ceo_ingress_armed: bool) -> None:
+    """Reassert the existing host-owned gate for additive v2 schemas.
+
+    The composition service's historical schema discriminator is byte-frozen
+    outside AD-ID1's authorized files, so v2 fails closed here using the same
+    host-supplied arming/state values.  Invocation already occurs only after
+    the service startup-ready latch has opened.
+    """
+
+    if not ceo_ingress_armed or service_state not in {"READY", "AWAITING_CANARY"}:
+        raise CeoIngressError(
+            "ingress_unavailable",
+            "Executive CEO ingress is not currently admitting requests",
+        )
+
+
 async def handle_frame(
     parsed: Any,
     *,
@@ -508,10 +603,11 @@ async def handle_frame(
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
-    There is no generic dispatcher: exactly three closed ``schema`` values are
-    legal.  The caller applies PR-A's full admission predicate to submit/status
-    before invoking this function; the R0 state branch is read-only and uses
-    only current in-process values supplied by that same service instance.
+    There is no generic dispatcher: exactly five closed ``schema`` values are
+    legal.  The caller applies PR-A's full admission predicate to v1 submit/
+    status before invoking this function; AD-ID1 reasserts that same predicate
+    for v2 inside this authorized module, while the R0 state branch is read-only
+    and uses only current in-process values supplied by the same service.
     Everything else — including a recognized schema whose object shape is
     wrong — refuses via :class:`CeoIngressError` with a code from
     :data:`ERROR_CODES`.  The caller (``executive_service``'s dedicated ingress
@@ -534,6 +630,23 @@ async def handle_frame(
     if schema == STATUS_SCHEMA:
         _exact_top_keys(parsed, "status frame", _STATUS_TOP_KEYS)
         return await _handle_status(parsed, runtime=runtime)
+    if schema == SUBMIT_SCHEMA_V2:
+        _require_v2_admission(
+            service_state=service_state, ceo_ingress_armed=ceo_ingress_armed
+        )
+        _exact_top_keys(parsed, "submit v2 frame", _SUBMIT_V2_TOP_KEYS)
+        return await _handle_submit_v2(
+            parsed,
+            runtime=runtime,
+            grounding_provider=grounding_provider,
+            workspace_root=workspace_root,
+        )
+    if schema == STATUS_SCHEMA_V2:
+        _require_v2_admission(
+            service_state=service_state, ceo_ingress_armed=ceo_ingress_armed
+        )
+        _exact_top_keys(parsed, "status v2 frame", _STATUS_V2_TOP_KEYS)
+        return await _handle_status_v2(parsed, runtime=runtime)
     if schema == STATE_SCHEMA:
         _exact_top_keys(parsed, "state frame", _STATE_TOP_KEYS)
         try:
@@ -549,5 +662,6 @@ async def handle_frame(
             ) from exc
     raise CeoIngressError(
         "unsupported_ingress_schema",
-        f"schema must be one of {sorted([STATE_SCHEMA, STATUS_SCHEMA, SUBMIT_SCHEMA])}",
+        "schema must be one of "
+        f"{sorted([STATE_SCHEMA, STATUS_SCHEMA, STATUS_SCHEMA_V2, SUBMIT_SCHEMA, SUBMIT_SCHEMA_V2])}",
     )
