@@ -50,6 +50,7 @@ def _option(option_id="OPT-A", **changes):
         "action": "SOURCE_BRANCH_WRITE",
         "reversibility": "REVERSIBLE",
         "source_refs": ["SRC-CHAIRMAN", "SRC-GITHUB"],
+        "scope_refs": ["WS:CHAIRMAN-CONTROL-ROOM"],
         "effect_state": "NONE",
         "operation_key": "chairman-cognition-test-001",
         "carrier_state": "EXACT_EXISTING",
@@ -93,6 +94,8 @@ def _envelope(**changes):
                 "tests",
             ]
         },
+        "allowed_scope_prefixes": ["WS:CHAIRMAN-CONTROL-ROOM"],
+        "allowed_carrier_prefixes": ["github:Mastermind:", "agentos:", "executive:"],
         "max_budget_units": 20,
         "max_active_children": 3,
         "require_exact_carrier": True,
@@ -135,9 +138,7 @@ def _document(*options, envelope=None):
 
 
 def _adjudication(packet, option_id="OPT-A"):
-    return next(
-        item for item in packet["adjudications"] if item["option_id"] == option_id
-    )
+    return next(item for item in packet["adjudications"] if item["option_id"] == option_id)
 
 
 def test_packet_is_deterministic_and_never_grants_execution_authority():
@@ -167,6 +168,7 @@ def test_read_only_action_is_eligible_without_envelope():
     option = _option(
         action="READ_ONLY_RESEARCH",
         reversibility="READ_ONLY",
+        scope_refs=[],
         operation_key=None,
         carrier_state="NOT_APPLICABLE",
         carrier_ref=None,
@@ -220,7 +222,9 @@ def test_effect_unknown_refuses_before_any_route_or_failover():
 
 def test_duplicate_control_plane_is_always_refused():
     packet = evaluate_document(
-        _document(_option(creates_duplicate_control_plane=True), envelope=_envelope())
+        _document(
+            _option(creates_duplicate_control_plane=True), envelope=_envelope()
+        )
     )
     item = _adjudication(packet)
     assert item["disposition"] == "REFUSED"
@@ -236,7 +240,9 @@ def test_duplicate_control_plane_is_always_refused():
 )
 def test_standing_prohibitions_override_envelope(action, constraint):
     envelope = _envelope(allowed_actions=_envelope()["allowed_actions"] + [action])
-    packet = evaluate_document(_document(_option(action=action), envelope=envelope))
+    packet = evaluate_document(
+        _document(_option(action=action), envelope=envelope)
+    )
     item = _adjudication(packet)
     assert item["disposition"] == "REFUSED"
     assert item["reason"] == "STRATEGIC_CONSTRAINT_PROHIBITS"
@@ -253,7 +259,9 @@ def test_standing_prohibitions_override_envelope(action, constraint):
 )
 def test_constitutional_boundaries_stay_with_chairman(action):
     envelope = _envelope(allowed_actions=_envelope()["allowed_actions"] + [action])
-    packet = evaluate_document(_document(_option(action=action), envelope=envelope))
+    packet = evaluate_document(
+        _document(_option(action=action), envelope=envelope)
+    )
     item = _adjudication(packet)
     assert item["disposition"] == "CHAIRMAN_REQUIRED"
     assert item["reason"] == "CONSTITUTIONAL_CHAIRMAN_BOUNDARY"
@@ -262,14 +270,18 @@ def test_constitutional_boundaries_stay_with_chairman(action):
 def test_irreversible_or_unknown_reversibility_requires_chairman():
     for reversibility in ("IRREVERSIBLE", "UNKNOWN"):
         packet = evaluate_document(
-            _document(_option(reversibility=reversibility), envelope=_envelope())
+            _document(
+                _option(reversibility=reversibility), envelope=_envelope()
+            )
         )
         assert _adjudication(packet)["reason"] == "IRREVERSIBLE_REQUIRES_CHAIRMAN"
 
 
 def test_scope_budget_and_child_limits_fail_closed():
     outside = evaluate_document(
-        _document(_option(paths=["secrets/keys.json"]), envelope=_envelope())
+        _document(
+            _option(paths=["secrets/keys.json"]), envelope=_envelope()
+        )
     )
     assert _adjudication(outside)["reason"] == "SCOPE_OUTSIDE_ENVELOPE"
 
@@ -429,7 +441,10 @@ def test_option_action_reversibility_and_carrier_grammar_is_consistent():
     with pytest.raises(ChairmanCognitionError, match="read-only action"):
         evaluate_document(
             _document(
-                _option(action="READ_ONLY_RESEARCH", reversibility="REVERSIBLE"),
+                _option(
+                    action="READ_ONLY_RESEARCH",
+                    reversibility="REVERSIBLE",
+                ),
                 envelope=None,
             )
         )
@@ -438,13 +453,13 @@ def test_option_action_reversibility_and_carrier_grammar_is_consistent():
             _document(_option(reversibility="READ_ONLY"), envelope=_envelope())
         )
     with pytest.raises(ChairmanCognitionError, match="requires carrier_ref"):
-        evaluate_document(_document(_option(carrier_ref=None), envelope=_envelope()))
+        evaluate_document(
+            _document(_option(carrier_ref=None), envelope=_envelope())
+        )
 
 
 def test_noncurrent_envelope_source_is_distinct_from_current_option_sources():
-    document = _document(
-        _option(), envelope=_envelope(authority_source_refs=["SRC-ENVELOPE"])
-    )
+    document = _document(_option(), envelope=_envelope(authority_source_refs=["SRC-ENVELOPE"]))
     document["source_receipts"].append(
         {
             "source_ref": "SRC-ENVELOPE",
@@ -484,3 +499,101 @@ def test_cli_emits_valid_packet_for_valid_input(tmp_path):
     assert packet["schema"] == PACKET_SCHEMA
     assert packet["recommended_option_id"] == "OPT-A"
     assert proc.stderr == ""
+
+
+def test_known_applied_effect_is_terminal_and_never_recommended():
+    packet = evaluate_document(
+        _document(_option(effect_state="KNOWN_APPLIED"), envelope=_envelope())
+    )
+    item = _adjudication(packet)
+    assert item["disposition"] == "REFUSED"
+    assert item["reason"] == "EFFECT_ALREADY_APPLIED"
+    assert packet["strategic_frontier"] == []
+    assert packet["actionable_frontier"] == []
+    assert packet["recommended_option_id"] is None
+
+
+def test_executive_child_commission_requires_explicit_new_child_carrier():
+    invalid = evaluate_document(
+        _document(
+            _option(action="EXECUTIVE_CHILD_COMMISSION"),
+            envelope=_envelope(),
+        )
+    )
+    assert _adjudication(invalid)["reason"] == "NEW_CHILD_CARRIER_REQUIRED"
+
+    valid = evaluate_document(
+        _document(
+            _option(
+                action="EXECUTIVE_CHILD_COMMISSION",
+                carrier_state="NEW_CHILD",
+                carrier_ref=None,
+            ),
+            envelope=_envelope(),
+        )
+    )
+    assert _adjudication(valid)["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+
+def test_delegation_envelope_cannot_disable_exact_carrier_law():
+    with pytest.raises(ChairmanCognitionError, match="must require exact carrier"):
+        evaluate_document(
+            _document(
+                _option(),
+                envelope=_envelope(require_exact_carrier=False),
+            )
+        )
+
+
+def test_delegation_authority_must_be_chairman_owned_source():
+    with pytest.raises(ChairmanCognitionError, match="Chairman directive"):
+        evaluate_document(
+            _document(
+                _option(),
+                envelope=_envelope(authority_source_refs=["SRC-GITHUB"]),
+            )
+        )
+
+
+def test_source_actions_require_one_repository_and_explicit_paths():
+    with pytest.raises(ChairmanCognitionError, match="explicit paths"):
+        evaluate_document(
+            _document(
+                _option(paths=[]),
+                envelope=_envelope(),
+            )
+        )
+    with pytest.raises(ChairmanCognitionError, match="explicit paths"):
+        evaluate_document(
+            _document(
+                _option(
+                    repositories=[
+                        "mastermindx-market-intelligence/Mastermind",
+                        "mastermindx-market-intelligence/macro",
+                    ]
+                ),
+                envelope=_envelope(),
+            )
+        )
+
+
+def test_read_only_options_cannot_carry_effect_state():
+    with pytest.raises(ChairmanCognitionError, match="NONE effect_state"):
+        evaluate_document(
+            _document(
+                _option(
+                    action="READ_ONLY_RESEARCH",
+                    reversibility="READ_ONLY",
+                    scope_refs=[],
+                    effect_state="KNOWN_APPLIED",
+                    operation_key=None,
+                    carrier_state="NOT_APPLICABLE",
+                    carrier_ref=None,
+                    repositories=[],
+                    paths=[],
+                    budget_units=0,
+                    active_children_after=0,
+                ),
+                envelope=None,
+            )
+        )
