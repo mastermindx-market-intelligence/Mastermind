@@ -10,6 +10,7 @@ import struct
 
 import pytest
 
+from integrations.chairman_surfaces import web_sol_instance as wsi
 from integrations.chairman_surfaces import web_sol_protocol as wsp
 
 
@@ -81,7 +82,8 @@ def test_native_host_constants_are_exact_and_small():
     assert module.NATIVE_HOST_NAME == NATIVE_HOST_NAME
     assert module.ALLOWED_EXTENSION_ORIGIN == EXTENSION_ORIGIN
     assert module.MAX_MESSAGE_BYTES == 64 * 1024
-    assert module.SOCKET_PATH == "~/Library/Application Support/Mastermind/control-room/web_sol_surface.sock"
+    assert not hasattr(module, "SOCKET_PATH")
+    assert wsi.DEFAULT_SOCKET_ROOT == "~/Library/Application Support/Mastermind/wsx"
 
 
 def test_checked_in_native_host_manifest_is_exact_and_non_wildcard():
