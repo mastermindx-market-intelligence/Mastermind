@@ -51,7 +51,7 @@ ACTION_REQUIRED_OUTCOME: SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER
 SISTER_SOL_POLICY: OBSERVE_ONLY_UNLESS_EXACT_ACTION_TARGET
 ```
 
-On an action-required event, a positive terminal instruction equivalent to `Sol action required`, `waiting for Sol`, or `stand by for Sol's ruling` is a contract failure. A prohibition or regression sentence such as `do not wait for Sol` is not itself a finding. Valid completion of that watcher turn requires one of:
+On an action-required event, a positive terminal instruction equivalent to `Sol action required`, `waiting for Sol`, or `stand by for Sol's ruling` is a contract failure. A prohibition or regression sentence such as `do not wait for Sol` is not itself a finding. Positive and negated phrases are adjudicated within their local semantic clause so a preceding unrelated `do not` cannot hide a later instruction to wait. Valid completion of that watcher turn requires one of:
 
 1. a lawful same-carrier `CONTINUE`, `RULING`, `REQUEST_REPAIR`, `PARK/HOLD`, or terminal `STOP`; or
 2. a typed blocker naming the actual boundary, such as `CHAIRMAN_ONLY`, `ATTENTION_OWNER_CONFLICT`, `EFFECT_UNKNOWN`, `CARRIER_UNREADABLE`, `WRITE_UNAVAILABLE`, or `SOURCE_LAW_CONFLICT`.
@@ -65,6 +65,8 @@ ACTION_REQUIRED_EVENTS: NONE
 ACTION_REQUIRED_OUTCOME: OBSERVE_ONLY_NO_MODIFY
 SISTER_SOL_POLICY: NEVER_ACT_WITHOUT_CANONICAL_TRANSFER
 ```
+
+Positive observer modification instructions are rejected, while explicit prohibitions such as `never issue a Sol ruling` remain valid.
 
 ### `PARENT_ORCHESTRATOR`
 
@@ -100,10 +102,10 @@ A triage task may use an aggregate scope. The exact child action surface must ac
 - current-procedure re-pin instruction;
 - exact-carrier fresh-read instruction;
 - same-carrier/no-blind-retry/no-lifecycle-inference/terminal-STOP laws;
-- positive notification-only anti-patterns without false-rejecting explicit prohibitions;
+- clause-local positive notification-only anti-patterns without false-rejecting explicit prohibitions;
 - observer/parent/triage authority widening.
 
-`scripts/audit_sol_watchers.py` accepts an account-local JSON export and emits a machine-readable report. Every wrapper entry declares `audit_kind: SOL_WATCHER | NON_WATCHER`; omission defaults to `SOL_WATCHER` for backward compatibility. Enabled `NON_WATCHER` tasks remain visible but are excluded from watcher-conformance counts. Unknown audit kinds fail closed. The CLI never connects to ChatGPT, Slack, GitHub, Executive OS, or a provider and never mutates a task.
+`scripts/audit_sol_watchers.py` accepts an account-local JSON export and emits a machine-readable report. Every wrapper entry declares `audit_kind: SOL_WATCHER | NON_WATCHER`; omission defaults to `SOL_WATCHER` for backward compatibility. Enabled `NON_WATCHER` tasks remain visible but are excluded from watcher-conformance counts. Unknown audit kinds fail closed even when the wrapped native task is disabled, because the export classification itself is ambiguous. The CLI never connects to ChatGPT, Slack, GitHub, Executive OS, or a provider and never mutates a task.
 
 ## Three-account deployment
 
@@ -118,9 +120,11 @@ Each ChatGPT account audits only its own native task store. The accounts return 
 - exact watcher IDs changed or disabled;
 - unresolved action-authority conflicts.
 
+The three account-local stores belong to the three signed-in ChatGPT web/app account profiles. The company exposes only one concurrently active Codex OAuth/CTO slot, and that slot may rotate between ChatGPT1, ChatGPT2, and ChatGPT3 depending on the active OAuth. The rotating Codex slot is not the identity or access path for all three native Tasks/Automations stores, and Codex availability is not a prerequisite for an account-local audit. Each preflight uses an ordinary exact Sol reasoning chat in the corresponding web account and leaves any current Codex task untouched unless a separate Codex operation owns it.
+
 A sister account receipt does not grant that account authority over another account's children. Cross-account canaries require one canonical action target and observer-only behavior from the other two surfaces.
 
-The rollout uses two phases: read-only account preflight while the source carrier is DRAFT, then in-place native task mutation only after exact-head source release and a fresh same-carrier Sol continuation. Slack delivery alone is not native task consumption; exact account-session placement or a typed unavailable result is required.
+The rollout uses two phases: read-only account preflight while the source carrier is DRAFT, then in-place native task mutation only after exact-head source release and a fresh same-carrier Sol continuation. Slack delivery alone is not native task consumption; exact web-account session placement or a typed unavailable result is required.
 
 ## Runtime continuation program
 
@@ -142,13 +146,14 @@ Existing W3A/W3C/MAS-229/AD-SOL1 carriers must be continued rather than duplicat
 
 1. The FF/FIF notification-only prompt is rejected with `NOTIFICATION_ONLY_SELF_DEADLOCK`.
 2. A valid action-authoritative watcher passes, including explicit `do not wait for Sol` law.
-3. A sister-Sol observer that can modify the child is rejected.
-4. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
-5. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
-6. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts.
-7. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
-8. Focused tests and repository CI are green on the exact final head.
-9. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
+3. An unrelated negation earlier in the same line cannot conceal a later positive `wait for Sol` instruction.
+4. A sister-Sol observer that can modify the child is rejected, while explicit observer prohibitions pass.
+5. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
+6. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
+7. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts; unknown classifications fail the report even when disabled.
+8. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
+9. Focused tests and repository CI are green on the exact final head.
+10. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
 
 ## Non-goals
 
