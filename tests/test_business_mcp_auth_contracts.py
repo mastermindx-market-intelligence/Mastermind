@@ -219,3 +219,87 @@ def test_load_resource_policy_does_not_mutate_input() -> None:
     policy = load_resource_policy(value)
     assert repr(value) == before
     assert isinstance(policy, ResourcePolicy)
+
+
+@pytest.mark.parametrize(
+    "issuer",
+    (
+        "https://identity.example.test",
+        "https://identity.example.test/",
+    ),
+)
+def test_policy_accepts_exact_root_issuer_spelling(issuer: str) -> None:
+    value = _policy()
+    value["issuer"] = issuer
+    value["authorization_servers"] = [issuer]
+    value["allowed_subject_digests"] = [
+        subject_digest(issuer=issuer, subject="chairman-opaque")
+    ]
+
+    policy = load_resource_policy(value)
+
+    assert policy.issuer == issuer
+    assert policy.authorization_servers == (issuer,)
+
+
+def test_subject_digest_accepts_unicode_without_normalization() -> None:
+    issuer = "https://identity.example.test/"
+    composed = "主席-é-opaque"
+    decomposed = "主席-e\u0301-opaque"
+
+    expected_composed = hashlib.sha256(
+        f"{issuer}\n{composed}".encode("utf-8")
+    ).hexdigest()
+    expected_decomposed = hashlib.sha256(
+        f"{issuer}\n{decomposed}".encode("utf-8")
+    ).hexdigest()
+
+    assert subject_digest(issuer=issuer, subject=composed) == expected_composed
+    assert subject_digest(issuer=issuer, subject=decomposed) == expected_decomposed
+    assert expected_composed != expected_decomposed
+
+
+@pytest.mark.parametrize(
+    "issuer",
+    (
+        "identity.example.test",
+        "http://identity.example.test/",
+        "https://identity.example.test/?tenant=x",
+        "https://identity.example.test/#fragment",
+    ),
+)
+def test_subject_digest_requires_canonical_https_issuer(issuer: str) -> None:
+    with pytest.raises(AuthError) as caught:
+        subject_digest(issuer=issuer, subject="chairman-opaque")
+    assert caught.value.code is AuthErrorCode.INVALID_POLICY
+    assert caught.value.public_message == "authentication policy refused"
+    assert issuer not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "resource",
+    (
+        "https://mcp .example.test/mcp/steward/v1",
+        "https://mcp.example.test/mcp\\steward/v1",
+        "https://mcp.example.test/mcp/steward v1",
+    ),
+)
+def test_policy_refuses_parser_differential_https_urls(resource: str) -> None:
+    value = _policy()
+    value["resource"] = resource
+
+    with pytest.raises(AuthError) as caught:
+        load_resource_policy(value)
+    assert caught.value.code is AuthErrorCode.INVALID_POLICY
+    assert caught.value.public_message == "authentication policy refused"
+    assert resource not in str(caught.value)
+
+
+def test_subject_digest_refuses_non_utf8_surrogate_data() -> None:
+    with pytest.raises(AuthError) as caught:
+        subject_digest(
+            issuer="https://identity.example.test/",
+            subject="bad-\ud800-subject",
+        )
+    assert caught.value.code is AuthErrorCode.INVALID_POLICY
+    assert caught.value.public_message == "authentication policy refused"
