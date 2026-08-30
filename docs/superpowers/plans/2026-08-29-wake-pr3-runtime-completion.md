@@ -20,7 +20,7 @@
 - `config/wake_session_targets.json` stays `production_armed=false`; no target is enabled by W3A/W3B/W3C hermetic implementation.
 - Delivery success is not target consumption. MAS-229 remains the owner of `TARGET_ACKNOWLEDGED -> SOURCE_RESOLVED`.
 - An ambiguous write after `turn/start` begins is effect-unknown and must never be downgraded to retryable failure.
-- A started/effect-unknown pre-crash FORGE child is not a reusable implementation receiver. Do not reuse/rebind it for these waves until its own effect is reconciled.
+- Any started child whose modifying effect is unresolved is not a reusable implementation receiver. Do not reuse/rebind/replay it until its exact same-carrier/same-runtime effect is reconciled. Once current canonical recovery evidence proves that effect known and the original writer current, do not re-park it from an earlier outage projection.
 
 ---
 
@@ -259,7 +259,7 @@ Protected source: `b8f7414e9906d6b5853640a18de68c3b91ffb44b`, Skillpack v1.0.1.
 - #174 merged: Wake transport safety + abstract Codex dispatcher; concrete RPC client absent.
 - #216 merged: one-pass observer + Wake adapter; production activation deferred.
 - #238/#221 stack: long-running Agent Relay source/enrollment exists, production host activation remains separately governed.
-- MAS-237: started pre-crash under original FORGE; current effect remains `EFFECT_UNKNOWN / RUNTIME_BINDING_RECONCILIATION_REQUIRED`; do not replay/rebind.
+- **Historical outage note — superseded:** MAS-237 and the same original FORGE/#6660 repair were initially parked `EFFECT_UNKNOWN / RUNTIME_BINDING_RECONCILIATION_REQUIRED` after the host crash. Later same-runtime recovery reconciled the original FORGE task/effects, so this plan is not a live status snapshot. Before any W3C/provider mutation, re-read current canonical RuntimeBinding/current-writer/effect evidence on the existing carriers. If that action-time evidence is absent or ambiguous, fail closed with the current typed reconciliation blocker; do not replay, rebind, start a replacement writer, or fail over.
 - MAS-229: blocked by exact binding and real delivery proof.
 - #248: watcher procedure/bootstrap hardening release carrier; path-disjoint from W3A/W3B.
 - #228: Steward read-core release carrier; path-disjoint.
