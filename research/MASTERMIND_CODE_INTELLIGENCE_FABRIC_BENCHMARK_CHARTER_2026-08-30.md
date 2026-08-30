@@ -159,10 +159,10 @@ Seed: Mastermind PR #198.
 Question: Find the caller/consumer mismatch between installer, systemd unit and low-level verifier, then prove the minimal repair did not relax symlink checks.  
 Critical distinction: resolve the alias once to immutable release identity; do not bless a mutable alias as authority.
 
-**R3 — Zoekt plausible-empty failure falsifier**  
-Seed: upstream Zoekt malformed-shard and duplicate-repository-name incidents, exercised against the Z0 index facade.  
-Question: Detect when a search response cannot support `not_found` despite HTTP success or an empty result.  
-Critical distinction: service health and coverage are part of the answer, not optional telemetry.
+**R3 — Direct entrypoint import failure masked by the development environment**  
+Seed: Mastermind PR #152.  
+Question: Why did the documented `python3 scripts/verify_slack_agent_dialogue_metadata.py ...` command fail from a clean checkout while ordinary tests could pass, which wrapper/import boundary was wrong, and what hermetic subprocess test proved the repair?  
+Critical distinction: editable installs or `PYTHONPATH` can mask the real operator journey; the wrapper may bootstrap the repository root without changing the credential-safe verifier contract.
 
 ### Adversarial impact review — A1–A3
 
