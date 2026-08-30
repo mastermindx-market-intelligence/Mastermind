@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Stateless, fail-closed interlocks for bounded GitHub administration.
+"""Stateless, fail-closed assessment for bounded GitHub administration policy.
 
 This module is deliberately not a scheduler, credential store, desired-state
-database, or authority plane.  The caller supplies a freshly observed baseline
-and performs one named administration family at a time.  The interlock binds the
-write to that baseline, sends no secret material, never retries a write, and
-accepts the effect only after a fresh read-back.
+database, authority plane, or write coordinator. The caller supplies a freshly
+observed baseline and evaluates one named administration family at a time.
+Current allowlisted families remain useful for deterministic compliance
+assessment, but no unsafe GitHub administration write is attempted unless a
+future endpoint contract explicitly documents an atomic conditional write.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ class GitHubResponse:
 
 @dataclass(frozen=True)
 class GitHubRead:
-    """One authenticated server document plus its mutation precondition version."""
+    """One authenticated server document plus its observed entity tag."""
 
     body: Mapping[str, Any]
     etag: str
@@ -77,6 +78,9 @@ _SECRET_KEY = re.compile(
     r"(^|_)(token|secret|password|private_key|credential|authorization)($|_)",
     re.IGNORECASE,
 )
+_GITHUB_APP_PERMISSION_NAME = re.compile(r"[a-z][a-z0-9_]{0,99}\Z")
+_GITHUB_APP_PERMISSION_LEVELS = frozenset({"read", "write"})
+_PUBLIC_SECRET_LIKE_APP_PERMISSIONS = frozenset({"secret_scanning_alerts"})
 
 _FAMILY_CONTRACTS: dict[AdministrationFamily, tuple[re.Pattern[str], str, set[str]]] = {
     AdministrationFamily.REPOSITORY_MERGE_POLICY: (
@@ -147,6 +151,61 @@ def _assert_secret_free(
                 path=f"{path}[{index}]",
                 allowed_secret_like_paths=allowed_secret_like_paths,
             )
+
+
+def _validated_app_permissions(
+    value: Any,
+    *,
+    path: str = "installation.permissions",
+) -> dict[str, str]:
+    """Return normalized public GitHub App permission metadata.
+
+    Permission names are public capability labels, not credentials. The
+    validator is deliberately local to the permission map so the generic
+    secret-bearing-field refusal remains unchanged everywhere else.
+    """
+
+    if not isinstance(value, Mapping):
+        raise GovernanceRefusal("installed App permission metadata is not a mapping")
+
+    normalized: dict[str, str] = {}
+    for raw_name, raw_level in value.items():
+        if (
+            not isinstance(raw_name, str)
+            or _GITHUB_APP_PERMISSION_NAME.fullmatch(raw_name) is None
+        ):
+            raise GovernanceRefusal(
+                f"installed App permission name is malformed at {path}"
+            )
+        if (
+            _SECRET_KEY.search(raw_name)
+            and raw_name not in _PUBLIC_SECRET_LIKE_APP_PERMISSIONS
+        ):
+            raise GovernanceRefusal(
+                f"secret-bearing permission field refused at {path}.{raw_name}"
+            )
+        if (
+            not isinstance(raw_level, str)
+            or raw_level not in _GITHUB_APP_PERMISSION_LEVELS
+        ):
+            raise GovernanceRefusal(
+                f"installed App permission access level is invalid at "
+                f"{path}.{raw_name}"
+            )
+        normalized[raw_name] = raw_level
+    return dict(sorted(normalized.items()))
+
+
+def _assert_secret_free_app_fields(
+    app: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    """Apply generic secret rejection to every App field except permissions."""
+
+    fields = dict(app)
+    fields.pop("permissions", None)
+    _assert_secret_free(fields, path=path)
 
 
 def _assert_family_contract(spec: AdministrationSpec) -> None:
@@ -227,7 +286,7 @@ def _observed_document(value: Any) -> tuple[dict[str, Any], str]:
         raise GovernanceRefusal("GitHub read did not return an observed document")
     body = _plain_mapping(value.body)
     if not isinstance(value.etag, str) or _ENTITY_TAG.fullmatch(value.etag) is None:
-        raise GovernanceRefusal("GitHub read lacks an atomic server version")
+        raise GovernanceRefusal("GitHub read lacks a valid server entity tag")
     return body, value.etag
 
 
@@ -242,11 +301,8 @@ def _receipt(
     effect: str,
     before: Mapping[str, Any],
     before_version: str,
-    after: Mapping[str, Any] | None = None,
-    after_version: str | None = None,
-    reconciled: bool = False,
 ) -> dict[str, Any]:
-    result: dict[str, Any] = {
+    return {
         "schema": "mastermind.github_estate_administration_receipt.v1",
         "family": spec.family.value,
         "endpoint": spec.endpoint,
@@ -254,27 +310,16 @@ def _receipt(
         "effect": effect,
         "before_sha256": canonical_digest(before),
         "before_version_sha256": _version_digest(before_version),
-        "mutation_precondition": "If-Match",
-        "reconciled": reconciled,
-        "mutation_attempts": 0 if verdict == "ALREADY_CONFIGURED" else 1,
+        "reconciled": False,
+        "mutation_attempts": 0,
     }
-    if after is not None:
-        result["after_sha256"] = canonical_digest(after)
-    if after_version is not None:
-        result["after_version_sha256"] = _version_digest(after_version)
-    return result
 
 
 def apply_administration_family(
     transport: GitHubTransport,
     spec: AdministrationSpec,
 ) -> dict[str, Any]:
-    """Apply one exact family once and accept it only from fresh read-back.
-
-    Explicit 4xx rejections are effect-none and are not reconciled.  A 5xx or
-    otherwise ambiguous response triggers exactly one read-only reconciliation;
-    the mutation is never retried.
-    """
+    """Assess one current administration family without attempting a write."""
 
     _assert_family_contract(spec)
     before, before_version = _observed_document(transport.read(spec.endpoint))
@@ -288,107 +333,11 @@ def apply_administration_family(
             before=before,
             before_version=before_version,
         )
-    if before_version.startswith("W/"):
-        raise GovernanceRefusal(
-            "GitHub read lacks a strong atomic server version for mutation"
-        )
 
-    try:
-        response = transport.mutate(
-            spec.method.upper(),
-            spec.endpoint,
-            spec.payload,
-            if_match=before_version,
-        )
-    except Exception:  # noqa: BLE001 - the request may have crossed the effect boundary
-        try:
-            after, after_version = _observed_document(transport.read(spec.endpoint))
-        except Exception:  # noqa: BLE001 - preserve effect-unknown without a retry
-            return _receipt(
-                spec=spec,
-                verdict="EFFECT_UNKNOWN",
-                effect="UNKNOWN",
-                before=before,
-                before_version=before_version,
-                reconciled=True,
-            )
-        matches = _matches_expected(after, spec.expected_after)
-        return _receipt(
-            spec=spec,
-            verdict="APPLIED_AFTER_RECONCILIATION" if matches else "EFFECT_UNKNOWN",
-            effect="CONFIRMED" if matches else "UNKNOWN",
-            before=before,
-            before_version=before_version,
-            after=after,
-            after_version=after_version,
-            reconciled=True,
-        )
-
-    if not isinstance(response, GitHubResponse) or type(response.status) is not int:
-        try:
-            after, after_version = _observed_document(transport.read(spec.endpoint))
-        except Exception:  # noqa: BLE001 - preserve effect-unknown without a retry
-            return _receipt(
-                spec=spec,
-                verdict="EFFECT_UNKNOWN",
-                effect="UNKNOWN",
-                before=before,
-                before_version=before_version,
-                reconciled=True,
-            )
-        return _receipt(
-            spec=spec,
-            verdict="EFFECT_UNKNOWN",
-            effect="UNKNOWN",
-            before=before,
-            before_version=before_version,
-            after=after,
-            after_version=after_version,
-            reconciled=True,
-        )
-
-    if 400 <= response.status < 500:
-        return _receipt(
-            spec=spec,
-            verdict="AUTH_REJECTED" if response.status in {401, 403} else "REJECTED",
-            effect="NONE",
-            before=before,
-            before_version=before_version,
-        )
-
-    try:
-        after, after_version = _observed_document(transport.read(spec.endpoint))
-    except Exception:  # noqa: BLE001 - the write crossed the effect boundary
-        return _receipt(
-            spec=spec,
-            verdict="EFFECT_UNKNOWN",
-            effect="UNKNOWN",
-            before=before,
-            before_version=before_version,
-            reconciled=True,
-        )
-    matches = _matches_expected(after, spec.expected_after)
-    ambiguous = not (200 <= response.status < 300)
-    if matches:
-        return _receipt(
-            spec=spec,
-            verdict="APPLIED_AFTER_RECONCILIATION" if ambiguous else "APPLIED",
-            effect="CONFIRMED",
-            before=before,
-            before_version=before_version,
-            after=after,
-            after_version=after_version,
-            reconciled=ambiguous,
-        )
-    return _receipt(
-        spec=spec,
-        verdict="EFFECT_UNKNOWN" if ambiguous else "READBACK_MISMATCH",
-        effect="UNKNOWN",
-        before=before,
-        before_version=before_version,
-        after=after,
-        after_version=after_version,
-        reconciled=ambiguous,
+    raise GovernanceRefusal(
+        "UNSAFE_CONDITIONAL_WRITE_UNSUPPORTED: "
+        f"{spec.method.upper()} {spec.endpoint} has no documented atomic "
+        "conditional-write contract"
     )
 
 
@@ -431,7 +380,8 @@ def assess_github_admin_prerequisites(
     publisher_rows: list[dict[str, Any]] = []
     for raw in installations:
         app = _plain_mapping(raw)
-        _assert_secret_free(app, path="installation")
+        permissions = _validated_app_permissions(app.get("permissions"))
+        _assert_secret_free_app_fields(app, path="installation")
         app_id = app.get("app_id")
         app_slug = app.get("app_slug")
         if type(app_id) is not int or app_id <= 0 or not isinstance(app_slug, str):
@@ -442,7 +392,7 @@ def assess_github_admin_prerequisites(
                 "installation_id": app.get("installation_id", app.get("id")),
                 "app_slug": app_slug,
                 "repository_selection": app.get("repository_selection"),
-                "permissions": app.get("permissions"),
+                "permissions": permissions,
             }
         )
         if app_slug == "macro-production-publisher":
@@ -535,6 +485,11 @@ def validate_publisher_app_installation(
     """Match a caller-bound, secret-free installation read-back configuration."""
 
     app = _plain_mapping(installation)
+    permissions = _validated_app_permissions(
+        app.get("permissions"),
+        path="publisher.permissions",
+    )
+    _assert_secret_free_app_fields(app, path="publisher")
     if type(expected_app_id) is not int or expected_app_id <= 0:
         raise GovernanceRefusal("expected publisher App Integration ID is not exact")
     if app.get("app_id") != expected_app_id:
@@ -556,7 +511,7 @@ def validate_publisher_app_installation(
         raise GovernanceRefusal("publisher App is not repository-selected")
     if app.get("repositories") != [expected_repository]:
         raise GovernanceRefusal("publisher App repository scope is not exact")
-    if app.get("permissions") != {"metadata": "read", "contents": "write"}:
+    if permissions != {"metadata": "read", "contents": "write"}:
         raise GovernanceRefusal("publisher App permissions are not least-privileged")
     if app.get("events") != []:
         raise GovernanceRefusal("publisher App subscribes to events")
@@ -569,7 +524,6 @@ def validate_publisher_app_installation(
     ]
     if app.get("source_endpoints") != expected_sources:
         raise GovernanceRefusal("publisher App source binding is not exact")
-    _assert_secret_free(app)
     return {
         "schema": "mastermind.github_publisher_app_configuration_match.v1",
         "verdict": "CONFIGURATION_MATCH",
@@ -577,7 +531,7 @@ def validate_publisher_app_installation(
         "installation_id": expected_installation_id,
         "app_slug": app["app_slug"],
         "repository": expected_repository,
-        "permissions": app["permissions"],
+        "permissions": permissions,
         "events": [],
         "observed_at": observed_at,
         "source_endpoints": expected_sources,
