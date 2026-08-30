@@ -70,6 +70,12 @@ def test_temporary_sol_watchers_use_structured_role_contract() -> None:
         "aggregate:<stable-scope-id>",
         "ACTION_AUTHORITATIVE always requires an exact Slack carrier",
         "audit_kind: NON_WATCHER",
+        "Every non-authoritative role",
+        "retry, resubmit, requeue, fail over",
+        "native task ID must be present and unique",
+        "enabled state must be a JSON boolean",
+        "duplicate native task IDs",
+        "invalid_export_tasks",
     )
     for phrase in required_contract_phrases:
         assert phrase in normalized, f"missing structured watcher contract law: {phrase}"
