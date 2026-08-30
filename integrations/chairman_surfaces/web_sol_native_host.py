@@ -2,7 +2,9 @@
 
 Chrome owns this process's stdin/stdout through Native Messaging. While that
 port is alive, the explicit Mastermind seam exchanges closed action receipts.
-The host owns no target selection, persistence, lifecycle, retry or Wake state.
+The host derives one private endpoint from a wrapper-fixed managed-profile
+instance. It owns no target selection, persistence, lifecycle, retry or Wake
+state.
 """
 from __future__ import annotations
 
@@ -17,12 +19,12 @@ import sys
 import time
 from typing import Any, Callable
 
+from . import web_sol_instance as wsi
 from . import web_sol_protocol as wsp
 
 NATIVE_HOST_NAME = "com.mastermind.web_sol_surface"
 EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
 ALLOWED_EXTENSION_ORIGIN = f"chrome-extension://{EXTENSION_ID}/"
-SOCKET_PATH = "~/Library/Application Support/Mastermind/control-room/web_sol_surface.sock"
 MAX_MESSAGE_BYTES = 64 * 1024
 _HEADER = struct.Struct("@I")
 _MATCH_FIELDS = (
@@ -39,6 +41,7 @@ _PROBE_KEYS = frozenset({
 
 class NativeHostError(RuntimeError):
     """Stable, payload-free native bridge failure."""
+
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
@@ -61,8 +64,13 @@ def _canonical_json(document: dict[str, Any]) -> bytes:
     if not isinstance(document, dict):
         raise NativeHostError("frame_not_object")
     try:
-        payload = json.dumps(document, sort_keys=True, separators=(",", ":"),
-                             ensure_ascii=False, allow_nan=False).encode("utf-8")
+        payload = json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
     except (TypeError, ValueError, UnicodeError) as exc:
         raise NativeHostError("frame_invalid_document") from exc
     if not payload:
@@ -74,6 +82,7 @@ def _canonical_json(document: dict[str, Any]) -> bytes:
 
 def encode_frame(document: dict[str, Any]) -> bytes:
     """Encode one deterministic Chrome Native Messaging frame."""
+
     payload = _canonical_json(document)
     return _HEADER.pack(len(payload)) + payload
 
@@ -95,6 +104,7 @@ def _read_exact(stream, size: int) -> bytes:
 
 def read_frame(stream) -> dict[str, Any]:
     """Read and strictly decode one bounded Native Messaging frame."""
+
     header = _read_exact(stream, _HEADER.size)
     if not header:
         raise NativeHostError("frame_header_missing")
@@ -113,8 +123,11 @@ def read_frame(stream) -> dict[str, Any]:
     except UnicodeDecodeError as exc:
         raise NativeHostError("frame_invalid_utf8") from exc
     try:
-        document = json.loads(text, object_pairs_hook=_reject_duplicate_pairs,
-                              parse_constant=_reject_constant)
+        document = json.loads(
+            text,
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_constant,
+        )
     except NativeHostError:
         raise
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -130,6 +143,7 @@ def write_frame(stream, document: dict[str, Any]) -> None:
     Zero progress, None, booleans and impossible byte counts are refusals, not
     successful delivery. Effect certainty is decided by the transport caller.
     """
+
     payload = encode_frame(document)
     offset = 0
     try:
@@ -140,6 +154,8 @@ def write_frame(stream, document: dict[str, Any]) -> None:
             offset += written
         if hasattr(stream, "flush"):
             stream.flush()
+    except NativeHostError:
+        raise
     except (OSError, TypeError, ValueError) as exc:
         raise NativeHostError("frame_write_failed") from exc
 
@@ -164,16 +180,21 @@ def _is_probe_event(message: Any) -> bool:
     if message.get("kind") != "MMX_WEB_SOL_PROBE":
         return False
     fingerprint = message.get("conversation_fingerprint")
-    if fingerprint is not None and (not isinstance(fingerprint, str) or len(fingerprint) != 64
-            or any(character not in "0123456789abcdef" for character in fingerprint)):
+    if fingerprint is not None and (
+        not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in fingerprint)
+    ):
         return False
     observation = message.get("observation")
     if not isinstance(observation, dict) or set(observation) != _PROBE_KEYS:
         return False
     if observation.get("schema") != wsp.PROBE_SCHEMA:
         return False
-    if not all(_is_strict_bool(observation.get(field))
-               for field in ("target_present", "exact_conversation_loaded", "page_responsive")):
+    if not all(
+        _is_strict_bool(observation.get(field))
+        for field in ("target_present", "exact_conversation_loaded", "page_responsive")
+    ):
         return False
     for field, allowed in (
         ("document_ready_state", {"loading", "interactive", "complete"}),
@@ -182,8 +203,10 @@ def _is_probe_event(message: Any) -> bool:
     ):
         if not isinstance(observation.get(field), str) or observation[field] not in allowed:
             return False
-    return all(_valid_nullable_bool(observation.get(field))
-               for field in ("composer_available", "auth_required", "provider_error_present"))
+    return all(
+        _valid_nullable_bool(observation.get(field))
+        for field in ("composer_available", "auth_required", "provider_error_present")
+    )
 
 
 def _timeout_code(request: dict[str, Any]) -> str:
@@ -194,12 +217,20 @@ def _receipt_matches(request: dict[str, Any], receipt: dict[str, Any]) -> bool:
     return all(receipt[field] == request[field] for field in _MATCH_FIELDS)
 
 
-def forward_request(request: dict[str, Any], *, write_chrome: Callable[[dict[str, Any]], None],
-                    read_chrome: Callable[[float], dict[str, Any] | None],
-                    timeout_seconds: float) -> dict[str, Any]:
+def forward_request(
+    request: dict[str, Any],
+    *,
+    write_chrome: Callable[[dict[str, Any]], None],
+    read_chrome: Callable[[float], dict[str, Any] | None],
+    timeout_seconds: float,
+) -> dict[str, Any]:
     """Forward one exact action once and wait for its matching receipt."""
-    if (not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool)
-            or timeout_seconds <= 0):
+
+    if (
+        not isinstance(timeout_seconds, (int, float))
+        or isinstance(timeout_seconds, bool)
+        or timeout_seconds <= 0
+    ):
         raise NativeHostError("timeout_invalid")
     accepted = wsp.validate_request(request)
     write_chrome(accepted)
@@ -235,7 +266,8 @@ def _private_parent(path: Path, owner_uid: int) -> None:
 
 
 def open_private_server(path: str | Path, *, owner_uid: int) -> socket.socket:
-    """Bind the fixed-style user-private AF_UNIX transport endpoint."""
+    """Bind one derived user-private AF_UNIX transport endpoint."""
+
     destination = Path(path)
     _private_parent(destination.parent, owner_uid)
     if os.path.lexists(destination):
@@ -247,7 +279,11 @@ def open_private_server(path: str | Path, *, owner_uid: int) -> socket.socket:
         created = True
         os.chmod(destination, 0o600)
         info = destination.lstat()
-        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != owner_uid or stat.S_IMODE(info.st_mode) & 0o077:
+        if (
+            not stat.S_ISSOCK(info.st_mode)
+            or info.st_uid != owner_uid
+            or stat.S_IMODE(info.st_mode) & 0o077
+        ):
             raise NativeHostError("socket_path_unsafe")
         server.listen(1)
         return server
@@ -276,7 +312,11 @@ def close_private_server(server: socket.socket, path: str | Path, *, owner_uid: 
             info = destination.lstat()
         except OSError:
             return
-        if stat.S_ISSOCK(info.st_mode) and info.st_uid == owner_uid and not (stat.S_IMODE(info.st_mode) & 0o077):
+        if (
+            stat.S_ISSOCK(info.st_mode)
+            and info.st_uid == owner_uid
+            and not (stat.S_IMODE(info.st_mode) & 0o077)
+        ):
             try:
                 destination.unlink()
             except OSError:
@@ -306,36 +346,61 @@ def _write_chrome(stream, document: dict[str, Any]) -> None:
     write_frame(stream, document)
 
 
-def _serve_client(client: socket.socket, chrome_in, chrome_out, *, timeout_seconds: float) -> None:
+def _serve_client(
+    client: socket.socket,
+    chrome_in,
+    chrome_out,
+    *,
+    timeout_seconds: float,
+) -> None:
     with client:
         reader = client.makefile("rb", buffering=0)
         writer = client.makefile("wb", buffering=0)
         try:
             request = read_frame(reader)
-            receipt = forward_request(request,
+            receipt = forward_request(
+                request,
                 write_chrome=lambda document: _write_chrome(chrome_out, document),
                 read_chrome=lambda remaining: _read_chrome_with_timeout(chrome_in, remaining),
-                timeout_seconds=timeout_seconds)
+                timeout_seconds=timeout_seconds,
+            )
             write_frame(writer, receipt)
         finally:
             reader.close()
             writer.close()
 
 
-def run_native_host(chrome_in, chrome_out, *, caller_origin: str,
-                    socket_path: str | Path | None = None, owner_uid: int | None = None,
-                    action_timeout_seconds: float = 5.0) -> None:
-    """Run the single-process private bridge until Chrome disconnects."""
+def run_native_host(
+    chrome_in,
+    chrome_out,
+    *,
+    caller_origin: str,
+    expected_instance_id: str,
+    socket_root: str | os.PathLike[str] | None = None,
+    owner_uid: int | None = None,
+    action_timeout_seconds: float = 5.0,
+) -> None:
+    """Run one wrapper-fixed profile bridge until Chrome disconnects."""
+
     validate_caller_origin(caller_origin)
+    try:
+        instance_id = wsi.validate_instance_id(expected_instance_id)
+        destination = wsi.socket_path(instance_id, root=socket_root)
+    except wsi.WebSolInstanceError as exc:
+        raise NativeHostError(exc.code) from exc
     uid = os.getuid() if owner_uid is None else owner_uid
-    destination = Path(socket_path or SOCKET_PATH).expanduser()
     server = open_private_server(destination, owner_uid=uid)
     selector = select.poll() if hasattr(select, "poll") else None
     try:
         if selector is None:
             while True:
                 client, _ = server.accept()
-                _serve_client(client, chrome_in, chrome_out, timeout_seconds=action_timeout_seconds)
+                _serve_client(
+                    client,
+                    chrome_in,
+                    chrome_out,
+                    timeout_seconds=action_timeout_seconds,
+                )
         else:
             selector.register(server.fileno(), select.POLLIN)
             selector.register(chrome_in.fileno(), select.POLLIN | select.POLLHUP | select.POLLERR)
@@ -355,17 +420,43 @@ def run_native_host(chrome_in, chrome_out, *, caller_origin: str,
                             raise NativeHostError("unexpected_chrome_message")
                     elif descriptor == server.fileno() and event & select.POLLIN:
                         client, _ = server.accept()
-                        _serve_client(client, chrome_in, chrome_out, timeout_seconds=action_timeout_seconds)
+                        _serve_client(
+                            client,
+                            chrome_in,
+                            chrome_out,
+                            timeout_seconds=action_timeout_seconds,
+                        )
     finally:
         close_private_server(server, destination, owner_uid=uid)
 
 
+def _parse_main_arguments(arguments: list[str]) -> tuple[str, str]:
+    # The generated per-profile executable wrapper fixes --instance-id before
+    # forwarding Chrome's exact extension origin and optional parent-window
+    # argument. The native host itself never discovers or elects a profile.
+    if len(arguments) < 4 or arguments[1] != "--instance-id":
+        raise NativeHostError("startup_arguments_invalid")
+    try:
+        instance_id = wsi.validate_instance_id(arguments[2])
+    except wsi.WebSolInstanceError as exc:
+        raise NativeHostError(exc.code) from exc
+    origin = validate_caller_origin(arguments[3])
+    extras = arguments[4:]
+    if len(extras) > 1 or any(not value.startswith("--parent-window=") for value in extras):
+        raise NativeHostError("startup_arguments_invalid")
+    return instance_id, origin
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv if argv is None else argv)
-    if len(arguments) < 2:
-        return 64
     try:
-        run_native_host(sys.stdin.buffer, sys.stdout.buffer, caller_origin=arguments[1])
+        instance_id, caller_origin = _parse_main_arguments(arguments)
+        run_native_host(
+            sys.stdin.buffer,
+            sys.stdout.buffer,
+            caller_origin=caller_origin,
+            expected_instance_id=instance_id,
+        )
     except (NativeHostError, wsp.WebSolProtocolError):
         return 65
     return 0
