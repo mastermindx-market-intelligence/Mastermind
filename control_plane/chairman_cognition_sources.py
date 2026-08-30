@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from control_plane.chairman_cognition import INPUT_SCHEMA, evaluate_document
@@ -276,7 +277,9 @@ def _strategic_receipt(
             ),
             "state": state,
             "load_bearing": True,
-            "observed_at": observed_at,
+            "observed_at": _latest_observed_at(
+                observed_at, canonical_revision["observed_at"]
+            ),
         },
         normalized,
     )
@@ -339,7 +342,9 @@ def _agentos_receipt(
         "revision": revision,
         "state": state,
         "load_bearing": True,
-        "observed_at": observed_at,
+        "observed_at": _latest_observed_at(
+            observed_at, canonical_revision["observed_at"]
+        ),
     }
 
 
@@ -361,6 +366,26 @@ def _additional_receipts(value: Any) -> list[dict[str, Any]]:
         out.append(dict(raw))
     out.sort(key=lambda item: str(item.get("source_ref", "")))
     return out
+
+
+def _latest_observed_at(*values: str) -> str:
+    parsed: list[tuple[str, datetime]] = []
+    for raw in values:
+        text = _text(raw, "observed_at", 40)
+        try:
+            instant = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ChairmanCognitionSourceError(
+                "observed_at must be UTC ISO-8601"
+            ) from exc
+        if instant.tzinfo is None or instant.utcoffset() != timezone.utc.utcoffset(
+            instant
+        ):
+            raise ChairmanCognitionSourceError(
+                "observed_at must be UTC ISO-8601"
+            )
+        parsed.append((text, instant))
+    return max(parsed, key=lambda item: item[1])[0]
 
 
 def _closed_mapping(
