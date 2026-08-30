@@ -70,6 +70,11 @@ The caller cannot rewrite their owner or source identity. A1 validates that thei
 do not postdate the decision snapshot. An attestation may be `CURRENT`, `STALE`, `CONFLICT` or
 `UNKNOWN`; the derived source preserves that state when its SHA matches the boot packet.
 
+A derived Strategic State or Agent OS receipt is not observed before its newest load-bearing input.
+Its `observed_at` is therefore the later of the boot/brief observation and the canonical revision
+attestation observation. This prevents a later attestation from being backdated into an earlier
+company-state snapshot.
+
 ### Strategic state
 
 A2 uses the strategic-state summary already embedded by the canonical CEO boot packet. Missing or
@@ -120,6 +125,7 @@ additional-receipt cap preserves A1's total 128-receipt bound after the five ded
 - unresolved Macro revision -> UNKNOWN Agent OS receipt;
 - local Macro/canonical SHA disagreement -> CONFLICT;
 - missing/degraded/wrong-schema Agent OS brief -> UNKNOWN receipt;
+- invalid or non-UTC observation time -> fail closed;
 - reserved owner injected through additional receipts -> refused;
 - duplicate source reference -> refused;
 - future-dated, malformed or unknown A1 receipt -> A1 refusal/error;
@@ -135,6 +141,9 @@ additional-receipt cap preserves A1's total 128-receipt bound after the five ded
 - unresolved/degraded sources remain UNKNOWN and block dependent options;
 - stale/unknown/conflicting attestations propagate truthfully;
 - attestations are closed, load-bearing and full-SHA only;
+- derived observation time is the latest load-bearing input and future evidence is rejected;
+- static import fence proves the pure composer imports no filesystem, subprocess, network,
+  connector, Executive runtime, Capacity or Agent OS implementation owner;
 - reserved-owner and duplicate-reference hostile cases fail closed;
 - direct CLI valid and invalid journeys;
 - full CCL-A1 behavior remains green on the stacked head;
