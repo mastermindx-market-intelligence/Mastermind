@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import importlib.util
-import socket
 from pathlib import Path
 
 import pytest
@@ -51,6 +50,7 @@ def test_producer_imports_only_standard_library_and_common() -> None:
     assert roots <= {
         "__future__",
         "collections",
+        "common",
         "dataclasses",
         "datetime",
         "json",
@@ -121,7 +121,14 @@ def test_producer_has_no_retry_sleep_thread_file_or_tcp_path() -> None:
 
 
 def test_cli_accepts_only_absolute_disposable_unix_socket_path() -> None:
-    args = parse_args(["--socket-path", "/tmp/mastermind-observability.sock", "--max-events", "3"])
+    args = parse_args(
+        [
+            "--socket-path",
+            "/tmp/mastermind-observability.sock",
+            "--max-events",
+            "3",
+        ]
+    )
     validated = validate_cli_configuration(args, effective_uid=501)
     assert validated.socket_path == Path("/tmp/mastermind-observability.sock")
     assert validated.max_events == 3
