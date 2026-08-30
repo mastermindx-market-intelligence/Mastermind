@@ -31,12 +31,14 @@ def test_terminal_outcomes_are_absorbing_and_unambiguous() -> None:
     assert "recurring outcomes are not terminal outcomes" in text
 
 
-def test_proof_requires_every_analysis_to_complete() -> None:
+def test_proof_requires_every_analysis_to_complete_without_erasing_definite_witnesses() -> None:
     text = _text()
     assert "a complete reachable graph is necessary but not sufficient for proof" in text
     assert "fairness-product, option-to-complete, proper-completion, dead-transition, safety, and starvation analyses must all be complete" in text
     assert "FAIRNESS_PRODUCT_STATE_LIMIT_REACHED" in text
-    assert "any analysis exhaustion or checker exception yields BOUNDED_NO_COUNTEREXAMPLE or INCONCLUSIVE_MODEL_GAP, never proof" in text
+    assert "without a fully materialized definite witness, analysis exhaustion yields BOUNDED_NO_COUNTEREXAMPLE or INCONCLUSIVE_MODEL_GAP, never proof" in text
+    assert "resource-bound exhaustion does not erase a fully materialized definite counterexample" in text
+    assert "a checker internal exception never upgrades a result and may require bounded report refusal" in text
 
 
 def test_terminal_gate_boundary_is_machine_represented() -> None:
