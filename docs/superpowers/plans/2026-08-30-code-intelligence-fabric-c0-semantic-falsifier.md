@@ -14,7 +14,7 @@
 
 - Base from then-current protected Mastermind and re-pin the current Skillpack before START.
 - Exact wave status is `DISPOSABLE FALSIFIER / PRODUCTION_INERT`; a successful spike is not a capability grant.
-- Change only `experiments/code_intelligence/**`, `tests/code_intelligence/**` and `tests/fixtures/code_intelligence/**` unless Sol explicitly reconciles a new path.
+- Change only `experiments/code_intelligence/**`, `tests/code_intelligence/**`, `tests/fixtures/code_intelligence/**`, `research/code_intelligence_fabric/C0_SEMANTIC_FALSIFIER_RESULT.md` and `research/code_intelligence_fabric/c0-result.schema.json` unless Sol explicitly reconciles a new path.
 - Do not modify `control_plane/**`, `config/**`, Operator Harness, App Server profiles, production MCP configuration, service files, host state, Slack, Linear or Agent OS.
 - No model-facing argument may select a root, path, project, Attempt, Worker, session, endpoint, executable, environment or language-server command.
 - External executable paths/digests are host-runner inputs and must never enter the facade tool schemas.
