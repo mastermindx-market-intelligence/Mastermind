@@ -21,6 +21,23 @@ python3 scripts/audit_sol_watchers.py tasks.json > watcher-audit.json
 A passing prompt audit does not prove runtime consumption, scheduled execution, Slack read/write,
 exact-session Wake, target acknowledgement or source resolution.
 
+## ChatGPT web-account identity versus the rotating Codex slot
+
+The company may expose **one rotating Codex OAuth slot** at a time. That slot can currently resolve
+to ChatGPT1 and later rotate to ChatGPT2 or ChatGPT3 according to whichever account OAuth is active.
+It **does not identify or authorize all three ChatGPT web accounts** and cannot stand in for their
+three separate native Tasks/Automations stores.
+
+For watcher hardening, audit each exact web account's native Tasks/Automations store through that
+account's signed-in ChatGPT web/app profile. Codex availability is not a watcher-store prerequisite.
+Do not create or demand three simultaneous Codex CTO sessions. Do not infer account identity from the
+currently active Codex OAuth, and do not reassign the rotating Codex slot merely to inspect a web
+account's native tasks.
+
+A ChatGPT web-account audit may use an ordinary exact Sol reasoning chat in that account. If the web
+account/profile or native Tasks surface cannot be proven, return the typed account/surface blocker
+with `effect=NONE`; do not substitute whichever Codex account is currently active.
+
 ## Preconditions
 
 Before changing any watcher on an account:
