@@ -219,6 +219,10 @@ effect, privilege class, confirmation requirement, expiry and reconciliation too
 prepared digest only, re-reads every load-bearing predicate, applies at most one request and never
 silently changes the target/payload/credential.
 
+**No universal action router** is created by this notation. Each privilege-separated app exposes only
+its own owner-specific closed action families. The prepared value is an opaque, self-contained,
+expiring server-authored envelope or equivalent owner-native receipt; there is no durable prepared-action store, queue, lock, lifecycle or cross-owner dispatch service.
+
 Effect truth is closed:
 
 ```text
