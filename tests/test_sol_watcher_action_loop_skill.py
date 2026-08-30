@@ -50,3 +50,23 @@ def test_watcher_lifetime_survives_nonterminal_events_until_stop() -> None:
     )
     for phrase in required_lifetime_phrases:
         assert phrase in normalized, f"missing watcher lifetime invariant: {phrase}"
+
+
+def test_temporary_sol_watchers_use_structured_role_contract() -> None:
+    skill = _read("docs/sol_skills/WATCHER_ACTION_LOOP.md")
+    normalized = " ".join(skill.split())
+
+    required_contract_phrases = (
+        "MMX_SOL_WATCHER_V1",
+        "ACTION_AUTHORITATIVE",
+        "OBSERVER_ONLY",
+        "PARENT_ORCHESTRATOR",
+        "TRIAGE_ONLY",
+        "SAME_CARRIER_SOL_EDGE_OR_TYPED_BLOCKER",
+        "NOTIFICATION_ONLY_SELF_DEADLOCK",
+        "python3 scripts/audit_sol_watchers.py",
+        "canonical action-target transfer",
+        "never elect by recency",
+    )
+    for phrase in required_contract_phrases:
+        assert phrase in normalized, f"missing structured watcher contract law: {phrase}"
