@@ -147,7 +147,7 @@ with this closed, machine-auditable header:
 MMX_SOL_WATCHER_V1
 WATCHER_ROLE: <ACTION_AUTHORITATIVE|OBSERVER_ONLY|PARENT_ORCHESTRATOR|TRIAGE_ONLY>
 OPERATION_KEY: <stable current operation key>
-CARRIER: slack:<channel-id>/<parent-message-ts>
+CARRIER: <slack:<channel-id>/<parent-message-ts>|aggregate:<stable-scope-id>>
 LATEST_HANDLED_EDGE: <Slack ts, semantic edge id, or NONE>
 ACTION_REQUIRED_EVENTS: <closed value required by role>
 ACTION_REQUIRED_OUTCOME: <closed value required by role>
@@ -156,6 +156,10 @@ SISTER_SOL_POLICY: <closed value required by role>
 
 The header owns no authority or task state. It makes the prompt's claimed role and safety contract
 auditable against the already-existing responsibility, action-target, carrier and runtime owners.
+`ACTION_AUTHORITATIVE` always requires an exact Slack carrier. `aggregate:<stable-scope-id>` is
+allowed only for `OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, or `TRIAGE_ONLY`; it identifies one bounded
+read/oversight scope and never grants authority over every child it contains. Any child-semantic
+modification still requires an exact current action target and exact lawful carrier.
 
 #### `ACTION_AUTHORITATIVE`
 
@@ -170,9 +174,10 @@ SISTER_SOL_POLICY: OBSERVE_ONLY_UNLESS_EXACT_ACTION_TARGET
 On an action-required event, this watcher turn must end with either the lawful same-carrier Sol edge
 or a typed blocker naming the real boundary, for example `CHAIRMAN_ONLY`,
 `ATTENTION_OWNER_CONFLICT`, `EFFECT_UNKNOWN`, `CARRIER_UNREADABLE`, `WRITE_UNAVAILABLE`, or
-`SOURCE_LAW_CONFLICT`. A terminal output such as “Sol action required,” “waiting for Sol,” or “stand
-by for Sol's ruling” is `NOTIFICATION_ONLY_SELF_DEADLOCK`: the watcher has identified its own role as
-the missing actor and then waited for itself.
+`SOURCE_LAW_CONFLICT`. A positive terminal instruction such as “Sol action required,” “waiting for
+Sol,” or “stand by for Sol's ruling” is `NOTIFICATION_ONLY_SELF_DEADLOCK`: the watcher has identified
+its own role as the missing actor and then waited for itself. A prohibition or regression example
+such as “do not wait for Sol” is not itself a self-deadlock finding.
 
 #### `OBSERVER_ONLY`
 
@@ -200,6 +205,10 @@ ACTION_REQUIRED_OUTCOME: PARENT_EDGE_ONLY_NO_CHILD_RACE
 SISTER_SOL_POLICY: NEVER_ACT_ON_DEDICATED_CHILD_RETURN
 ```
 
+A parent orchestrator may use an `aggregate:` carrier for its bounded program scope. It must still
+fresh-read each exact child carrier needed for a parent transition and cannot consume or answer a
+dedicated child return.
+
 #### `TRIAGE_ONLY`
 
 Use for an estate/continuity audit that detects unconsumed returns without creating duplicate child
@@ -211,8 +220,9 @@ ACTION_REQUIRED_OUTCOME: RECONCILE_OR_REPORT_NO_DUPLICATE
 SISTER_SOL_POLICY: NEVER_ELECT_BY_RECENCY
 ```
 
-Triage may post a child semantic edge only when current source law plus exact action-target evidence
-makes that triage surface authoritative for the turn. Otherwise it reports/reconciles the defect.
+Triage may use an `aggregate:` carrier for a bounded estate census. It reports or reconciles the
+attention defect; it never becomes child action-authoritative merely because it found the defect.
+The exact child action surface must act or receive canonical action-target transfer first.
 
 Validate an account-local JSON task export with:
 
@@ -223,7 +233,9 @@ python3 scripts/audit_sol_watchers.py <tasks.json>
 The validator is read-only and account-local. A passing prompt audit proves contract conformance,
 not that a scheduled turn fired, consumed Slack, wrote an edge or made the event-driven Wake path
 production-live. Each ChatGPT account may repair only its own native task store unless a separately
-accepted host capability explicitly proves broader authority.
+accepted host capability explicitly proves broader authority. When an account export includes
+ordinary reminders or unrelated scheduled tasks, mark each wrapper entry `audit_kind: NON_WATCHER`;
+enabled `NON_WATCHER` entries are listed but excluded from watcher-conformance counts.
 
 ## Common mistakes
 
@@ -234,6 +246,7 @@ accepted host capability explicitly proves broader authority.
 | Watcher detects `RESULT` and only tells Chairman what Sol should do | Re-pin, review, post the lawful Sol edge, then report material outcome |
 | Action-authoritative watcher says “waiting for Sol” | Classify `NOTIFICATION_ONLY_SELF_DEADLOCK`; act or return a typed blocker |
 | Observer sister Sol acts because the authoritative account looks idle | Fail closed until canonical action-target transfer; never elect by recency |
+| Aggregate triage task acts directly on a child it discovered | Route/reconcile attention; exact child action authority remains separate |
 | Worker is waiting and Sol says “the next step is mine” | Send explicit CONTINUE or STOP first |
 | Watcher sees terminal completion and starts the next wave | STOP/disarm; independent wave needs fresh commission law |
 | Wake is treated as permission to merge/retry/fail over | Reconcile authority/carrier first; watcher grants none |
