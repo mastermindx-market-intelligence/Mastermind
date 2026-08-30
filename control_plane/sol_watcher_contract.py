@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Pattern
 
 
 DISCRIMINATOR = "MMX_SOL_WATCHER_V1"
@@ -124,6 +124,7 @@ class AuditReport:
     enabled_tasks: int
     valid_enabled_tasks: int
     invalid_enabled_tasks: int
+    invalid_classification_tasks: int
     tasks: tuple[TaskAudit, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -135,6 +136,7 @@ class AuditReport:
                 "enabled_tasks": self.enabled_tasks,
                 "valid_enabled_tasks": self.valid_enabled_tasks,
                 "invalid_enabled_tasks": self.invalid_enabled_tasks,
+                "invalid_classification_tasks": self.invalid_classification_tasks,
             },
             "tasks": [task.to_dict() for task in self.tasks],
         }
@@ -163,12 +165,18 @@ _ROLE_CONTRACTS: dict[WatcherRole, tuple[frozenset[str], str, str]] = {
     ),
 }
 
-_NOTIFICATION_ONLY_PATTERNS = (
+_NOTIFICATION_ONLY_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bsol action required\b", re.IGNORECASE),
     re.compile(r"\bwait(?:ing)? for sol\b", re.IGNORECASE),
     re.compile(r"\bstand by for sol(?:'s)? ruling\b", re.IGNORECASE),
 )
-_NEGATION_OR_REJECTION_MARKERS = (
+_OBSERVER_MODIFICATION_PATTERNS: tuple[Pattern[str], ...] = (
+    re.compile(re.escape("post the actual same-carrier sol edge"), re.IGNORECASE),
+    re.compile(re.escape("issue a sol ruling"), re.IGNORECASE),
+    re.compile(re.escape("send sol continue"), re.IGNORECASE),
+    re.compile(re.escape("merge the pull request"), re.IGNORECASE),
+)
+_REJECTION_MARKERS = (
     "do not",
     "don't",
     "never",
@@ -184,6 +192,7 @@ _NEGATION_OR_REJECTION_MARKERS = (
     "failure",
     "fails",
 )
+_CLAUSE_BOUNDARY_RE = re.compile(r"[;.!?]|\b(?:but|however|instead|whereas)\b", re.IGNORECASE)
 
 
 def _finding(
@@ -241,18 +250,34 @@ def _normalized_events(raw: str) -> frozenset[str]:
     return frozenset(values)
 
 
-def _contains_notification_only_self_deadlock(body: str) -> bool:
-    """Detect positive notification-only instructions without rejecting bans/examples."""
+def _clause_containing(text: str, start: int, end: int) -> str:
+    """Return the local semantic clause around one phrase occurrence."""
 
-    for raw_line in body.splitlines():
+    previous_end = 0
+    next_start = len(text)
+    for boundary in _CLAUSE_BOUNDARY_RE.finditer(text):
+        if boundary.end() <= start:
+            previous_end = boundary.end()
+            continue
+        if boundary.start() >= end:
+            next_start = boundary.start()
+            break
+    return text[previous_end:next_start].strip()
+
+
+def _contains_positive_phrase(text: str, patterns: tuple[Pattern[str], ...]) -> bool:
+    """Find a positive instruction while tolerating explicit bans/failure examples."""
+
+    for raw_line in text.splitlines():
         normalized = " ".join(raw_line.casefold().split())
         if not normalized:
             continue
-        if not any(pattern.search(normalized) for pattern in _NOTIFICATION_ONLY_PATTERNS):
-            continue
-        if any(marker in normalized for marker in _NEGATION_OR_REJECTION_MARKERS):
-            continue
-        return True
+        for pattern in patterns:
+            for match in pattern.finditer(normalized):
+                clause = _clause_containing(normalized, match.start(), match.end())
+                if any(marker in clause for marker in _REJECTION_MARKERS):
+                    continue
+                return True
     return False
 
 
@@ -395,7 +420,7 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
                     "terminal STOP must precede child watcher disarm",
                 )
             )
-        if _contains_notification_only_self_deadlock(body):
+        if _contains_positive_phrase(body, _NOTIFICATION_ONLY_PATTERNS):
             findings.append(
                 _finding(
                     FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK,
@@ -403,22 +428,15 @@ def validate_watcher_prompt(prompt: str) -> PromptAudit:
                 )
             )
 
-    if role is WatcherRole.OBSERVER_ONLY:
-        positive_phrases = (
-            "post the actual same-carrier sol edge",
-            "issue a sol ruling",
-            "send sol continue",
-            "merge the pull request",
+    if role is WatcherRole.OBSERVER_ONLY and _contains_positive_phrase(
+        body, _OBSERVER_MODIFICATION_PATTERNS
+    ):
+        findings.append(
+            _finding(
+                FindingCode.OBSERVER_MODIFICATION_FORBIDDEN,
+                "observer-only watcher cannot claim child modification authority",
+            )
         )
-        for phrase in positive_phrases:
-            if phrase in folded and f"do not {phrase}" not in folded:
-                findings.append(
-                    _finding(
-                        FindingCode.OBSERVER_MODIFICATION_FORBIDDEN,
-                        "observer-only watcher cannot claim child modification authority",
-                    )
-                )
-                break
 
     findings_tuple = tuple(findings)
     return PromptAudit(
@@ -494,15 +512,19 @@ def audit_tasks(tasks: Iterable[Mapping[str, Any]]) -> AuditReport:
     enabled_results = [
         result
         for result in results
-        if result.enabled and result.audit_kind != "NON_WATCHER"
+        if result.enabled and result.audit_kind == "SOL_WATCHER"
     ]
     valid_count = sum(bool(result.audit and result.audit.valid) for result in enabled_results)
     invalid_count = len(enabled_results) - valid_count
+    invalid_classification_count = sum(
+        result.audit_kind not in _AUDIT_KINDS for result in results
+    )
     return AuditReport(
-        valid=invalid_count == 0,
+        valid=invalid_count == 0 and invalid_classification_count == 0,
         total_tasks=len(results),
         enabled_tasks=len(enabled_results),
         valid_enabled_tasks=valid_count,
         invalid_enabled_tasks=invalid_count,
+        invalid_classification_tasks=invalid_classification_count,
         tasks=tuple(results),
     )
