@@ -336,11 +336,16 @@ def _invoke(
         path = wsi.socket_path(instance_id)
     except wsi.WebSolInstanceError as exc:
         raise WebSolExtensionError(exc.code) from exc
-    receipt = _exchange_web_sol_socket(
-        request,
-        path=path,
-        expected_instance_id=instance_id,
-    )
+    try:
+        receipt = _exchange_web_sol_socket(
+            request,
+            path=path,
+            expected_instance_id=instance_id,
+        )
+    except WebSolExtensionError:
+        raise
+    except native.NativeHostError as exc:
+        raise WebSolExtensionError(exc.code) from exc
     try:
         accepted = wsp.validate_receipt(receipt)
     except wsp.WebSolProtocolError as exc:
