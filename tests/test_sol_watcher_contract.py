@@ -49,6 +49,25 @@ A terminal STOP is consumed as transport evidence only; this observer never disa
 """
 
 
+def _triage_prompt() -> str:
+    return """MMX_SOL_WATCHER_V1
+WATCHER_ROLE: TRIAGE_ONLY
+OPERATION_KEY: mastermind-session-triage-20260830-sol-001
+CARRIER: aggregate:mastermind-session-triage
+LATEST_HANDLED_EDGE: NONE
+ACTION_REQUIRED_EVENTS: UNCONSUMED_RETURN
+ACTION_REQUIRED_OUTCOME: RECONCILE_OR_REPORT_NO_DUPLICATE
+SISTER_SOL_POLICY: NEVER_ELECT_BY_RECENCY
+
+On every run, re-pin the CURRENT protected Mastermind Skillpack.
+Fresh-read each exact carrier selected by the bounded triage delta before reporting.
+Reconcile or report the unconsumed return without posting a child semantic edge or electing a Sol target.
+No blind retry or cross-carrier failover is permitted.
+Never infer Executive Job/Attempt/Worker/Event lifecycle from Slack delivery.
+Terminal STOP remains owned by the exact child action-authoritative Sol surface.
+"""
+
+
 def _codes(prompt: str) -> set[FindingCode]:
     return {finding.code for finding in validate_watcher_prompt(prompt).findings}
 
@@ -74,6 +93,17 @@ def test_ff_fif_notification_only_self_deadlock_is_rejected() -> None:
     assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK in _codes(prompt)
 
 
+def test_negated_self_deadlock_examples_are_allowed() -> None:
+    prompt = _authoritative_prompt(
+        body_suffix=(
+            "Do not return 'Sol action required'. Never wait for Sol or stand by for Sol's ruling; "
+            "this exact action-authoritative watcher is the Sol re-entry surface."
+        )
+    )
+
+    assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK not in _codes(prompt)
+
+
 def test_observer_cannot_claim_child_modification_authority() -> None:
     prompt = _observer_prompt().replace(
         "ACTION_REQUIRED_OUTCOME: OBSERVE_ONLY_NO_MODIFY",
@@ -93,6 +123,23 @@ def test_malformed_slack_carrier_fails_closed() -> None:
     prompt = _authoritative_prompt().replace(
         "CARRIER: slack:C0BSBM78V1N/1788053475.603929",
         "CARRIER: newest-visible-chat",
+    )
+
+    assert FindingCode.INVALID_CARRIER in _codes(prompt)
+
+
+def test_triage_may_use_closed_aggregate_scope() -> None:
+    audit = validate_watcher_prompt(_triage_prompt())
+
+    assert audit.valid is True
+    assert audit.role is WatcherRole.TRIAGE_ONLY
+    assert audit.carrier == "aggregate:mastermind-session-triage"
+
+
+def test_action_authoritative_watcher_requires_exact_slack_carrier() -> None:
+    prompt = _authoritative_prompt().replace(
+        "CARRIER: slack:C0BSBM78V1N/1788053475.603929",
+        "CARRIER: aggregate:ff-fif-program",
     )
 
     assert FindingCode.INVALID_CARRIER in _codes(prompt)
@@ -148,6 +195,35 @@ def test_audit_tasks_reports_invalid_enabled_and_ignores_disabled() -> None:
     assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK in {
         finding.code for finding in by_id["bad"].audit.findings
     }
+
+
+def test_audit_tasks_skips_declared_non_watcher_tasks() -> None:
+    report = audit_tasks(
+        [
+            {
+                "id": "ordinary-reminder",
+                "title": "Ordinary non-watcher automation",
+                "is_enabled": True,
+                "audit_kind": "NON_WATCHER",
+                "prompt": "remind the Chairman about a meeting",
+            },
+            {
+                "id": "watcher",
+                "title": "Triage watcher",
+                "is_enabled": True,
+                "audit_kind": "SOL_WATCHER",
+                "prompt": _triage_prompt(),
+            },
+        ]
+    )
+
+    assert report.total_tasks == 2
+    assert report.enabled_tasks == 1
+    assert report.valid_enabled_tasks == 1
+    assert report.invalid_enabled_tasks == 0
+    by_id = {task.task_id: task for task in report.tasks}
+    assert by_id["ordinary-reminder"].evaluated is False
+    assert by_id["ordinary-reminder"].audit_kind == "NON_WATCHER"
 
 
 def test_cli_emits_valid_json_and_zero_for_clean_export(tmp_path, capsys) -> None:
