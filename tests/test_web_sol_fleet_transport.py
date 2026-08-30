@@ -16,6 +16,7 @@ from integrations.chairman_surfaces import web_sol_native_host as native
 MULTILOGIN_FOLDER = "11111111-1111-4111-8111-111111111111"
 MULTILOGIN_PROFILE = "22222222-2222-4222-8222-222222222222"
 GOLOGIN_PROFILE = "aaaaaaaaaaaaaaaaaaaaaaaa"
+SHORT_TEST_ROOT = Path("/tmp/w")
 
 
 def managed_binding(
@@ -55,7 +56,7 @@ def test_instance_identity_uses_only_the_canonical_managed_environment_coordinat
     assert instance.adapter_instance_id(first) == instance.adapter_instance_id(second)
 
 
-def test_distinct_multilogin_profiles_and_folders_have_distinct_instances_and_sockets(tmp_path):
+def test_distinct_multilogin_profiles_and_folders_have_distinct_instances_and_sockets():
     original = managed_binding()
     changed_profile = managed_binding(profile_id="55555555-5555-4555-8555-555555555555")
     changed_folder = managed_binding(folder_id="66666666-6666-4666-8666-666666666666")
@@ -66,7 +67,7 @@ def test_distinct_multilogin_profiles_and_folders_have_distinct_instances_and_so
         instance.adapter_instance_id(changed_folder),
     }
     assert len(identities) == 3
-    assert len({instance.socket_path(value, root=tmp_path) for value in identities}) == 3
+    assert len({instance.socket_path(value, root=SHORT_TEST_ROOT) for value in identities}) == 3
 
 
 def test_gologin_instance_uses_profile_without_inventing_a_folder_coordinate():
@@ -81,12 +82,12 @@ def test_gologin_instance_uses_profile_without_inventing_a_folder_coordinate():
     assert instance.adapter_instance_id(first) == instance.adapter_instance_id(second)
 
 
-def test_instance_derivatives_are_opaque_and_bounded(tmp_path):
+def test_instance_derivatives_are_opaque_and_bounded():
     row = managed_binding()
     value = instance.adapter_instance_id(row)
     leaf = instance.socket_leaf(value)
     host_name = instance.native_host_name(value)
-    destination = instance.socket_path(value, root=tmp_path)
+    destination = instance.socket_path(value, root=SHORT_TEST_ROOT)
     serialized = json.dumps(
         {"instance": value, "leaf": leaf, "host": host_name, "path": str(destination)},
         sort_keys=True,
@@ -100,21 +101,32 @@ def test_instance_derivatives_are_opaque_and_bounded(tmp_path):
     assert host_name == f"com.mastermind.web_sol_surface.{value[:instance.NATIVE_HOST_LEAF_HEX]}"
 
 
-def test_invalid_binding_instance_and_overlong_socket_path_fail_closed(tmp_path):
+def test_invalid_binding_instance_and_overlong_explicit_socket_path_fail_closed(tmp_path):
     with pytest.raises(instance.WebSolInstanceError, match="invalid_binding"):
         instance.adapter_instance_id({"provider": "codex"})
     with pytest.raises(instance.WebSolInstanceError, match="invalid_instance_id"):
-        instance.socket_path("not-a-digest", root=tmp_path)
+        instance.socket_path("not-a-digest", root=SHORT_TEST_ROOT)
     with pytest.raises(instance.WebSolInstanceError, match="socket_path_too_long"):
         instance.socket_path("a" * 64, root=tmp_path / ("x" * 120))
 
 
-def test_default_socket_path_respects_darwin_af_unix_limit(monkeypatch, tmp_path):
-    home = tmp_path / "short-home"
+def test_default_socket_path_prefers_application_support_when_it_fits(monkeypatch):
+    home = Path("/Users/wsx")
     monkeypatch.setenv("HOME", str(home))
     destination = instance.socket_path("a" * 64)
 
     assert destination.parent == home / "Library" / "Application Support" / "Mastermind" / "wsx"
+    assert len(os.fsencode(destination)) < instance.DARWIN_SUN_PATH_BYTES
+
+
+def test_default_socket_path_uses_deterministic_uid_scoped_short_root_when_home_is_too_long(monkeypatch):
+    monkeypatch.setenv("HOME", f"/tmp/{'h' * 80}")
+    monkeypatch.setattr(instance.os, "getuid", lambda: 501)
+
+    destination = instance.socket_path("a" * 64)
+
+    assert destination.parent == Path("/tmp/mmx-wsx-501")
+    assert destination.name == instance.socket_leaf("a" * 64)
     assert len(os.fsencode(destination)) < instance.DARWIN_SUN_PATH_BYTES
 
 
