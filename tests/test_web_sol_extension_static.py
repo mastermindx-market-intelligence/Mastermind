@@ -24,7 +24,9 @@ def _extension_id(public_key_b64: str) -> str:
     der = base64.b64decode(public_key_b64, validate=True)
     digest = hashlib.sha256(der).digest()[:16]
     alphabet = "abcdefghijklmnop"
-    return "".join(alphabet[byte >> 4] + alphabet[byte & 15] for byte in digest)
+    return "".join(
+        alphabet[byte >> 4] + alphabet[byte & 15] for byte in digest
+    )
 
 
 def test_manifest_is_mv3_exact_host_and_least_privilege():
@@ -92,7 +94,11 @@ def test_extension_files_are_present_and_small():
 
 
 def test_extension_source_contains_no_content_extraction_or_powerful_browser_api():
-    source = (BACKGROUND.read_text(encoding="utf-8") + "\n" + CONTENT.read_text(encoding="utf-8")).lower()
+    source = (
+        BACKGROUND.read_text(encoding="utf-8")
+        + "\n"
+        + CONTENT.read_text(encoding="utf-8")
+    ).lower()
 
     forbidden_fragments = {
         "innertext",
@@ -134,7 +140,13 @@ def test_content_script_uses_only_bounded_probe_vocabulary():
     ):
         assert required in source
 
-    for forbidden in ("transcript", "output", "raw_dom", "message_text", "conversation_text"):
+    for forbidden in (
+        "transcript",
+        "output",
+        "raw_dom",
+        "message_text",
+        "conversation_text",
+    ):
         assert forbidden not in source.lower()
 
 
@@ -142,14 +154,17 @@ def test_content_script_does_not_emit_url_or_dom_content():
     source = CONTENT.read_text(encoding="utf-8")
     assert "location.href" not in source
     assert "document.documentElement" not in source
-    assert "querySelectorAll(\"*\")" not in source
+    assert 'querySelectorAll("*")' not in source
     assert "querySelectorAll('*')" not in source
 
 
-def test_background_uses_one_fixed_native_host_and_no_generic_action_vocabulary():
+def test_background_uses_generated_exact_native_host_and_no_generic_action_vocabulary():
     source = BACKGROUND.read_text(encoding="utf-8")
-    assert 'NATIVE_HOST = "com.mastermind.web_sol_surface"' in source
-    assert "chrome.runtime.connectNative(NATIVE_HOST)" in source
+    assert 'importScripts("instance_config.js")' in source
+    assert "MMX_WEB_SOL_INSTANCE" in source
+    assert "chrome.runtime.connectNative(INSTANCE_CONFIG.nativeHost)" in source
+    assert 'NATIVE_HOST = "com.mastermind.web_sol_surface"' not in source
+    assert 'connectNative("com.mastermind.web_sol_surface")' not in source
     for forbidden in (
         "CLICK",
         "TYPE",
