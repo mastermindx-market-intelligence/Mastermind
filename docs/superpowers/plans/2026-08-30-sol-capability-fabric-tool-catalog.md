@@ -80,6 +80,11 @@ confirmation, expiry, reconciliation tool and `READY | BLOCKED | UNKNOWN | REFUS
 the digest only, re-reads every load-bearing predicate, performs at most one request and never changes
 target/payload/credential.
 
+These are common wire semantics, not one cross-owner dispatcher. Every app exposes namespaced,
+owner-specific prepare/commit tools only. The prepared value is an opaque self-contained expiring
+envelope or owner-native receipt; there is no durable prepared-action database, queue, lock or
+lifecycle.
+
 ### 2.4 Effect truth
 
 ```text
