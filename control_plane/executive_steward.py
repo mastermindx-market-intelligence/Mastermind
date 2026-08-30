@@ -563,10 +563,13 @@ class ExecutiveStewardSnapshot:
         selected: list[ResponsibilityFact] = []
         by_ref: dict[str, list[ResponsibilityFact]] = {}
         for fact in self.responsibilities:
-            if target_seat is None or fact.accountable_seat is target_seat:
-                by_ref.setdefault(fact.responsibility_ref, []).append(fact)
+            by_ref.setdefault(fact.responsibility_ref, []).append(fact)
         for responsibility_ref in sorted(by_ref):
             facts = by_ref[responsibility_ref]
+            if target_seat is not None and not any(
+                fact.accountable_seat is target_seat for fact in facts
+            ):
+                continue
             if len(facts) != 1:
                 issues.append(
                     _issue(
@@ -577,6 +580,8 @@ class ExecutiveStewardSnapshot:
                 )
                 continue
             fact = facts[0]
+            if target_seat is not None and fact.accountable_seat is not target_seat:
+                continue
             selected.append(fact)
             if fact.source.freshness is not Freshness.CURRENT:
                 issues.append(
@@ -678,20 +683,40 @@ class ExecutiveStewardSnapshot:
                 ),
             )
 
-        candidates = tuple(
-            fact
-            for fact in self.attention
-            if (target_seat is None or fact.target_seat is target_seat)
-            and (
-                responsibility_ref is None
-                or fact.responsibility_ref == responsibility_ref
-            )
-        )
         issues = list(
             self._source_issues(
                 (SourceOwner.AGENT_OS, SourceOwner.EXECUTIVE_INBOX, SourceOwner.WAKE)
             )
         )
+        by_id: dict[str, list[AttentionFact]] = {}
+        for fact in self.attention:
+            by_id.setdefault(fact.attention_id, []).append(fact)
+
+        candidates: list[AttentionFact] = []
+        for attention_id in sorted(by_id):
+            facts = by_id[attention_id]
+            relevant = tuple(
+                fact
+                for fact in facts
+                if (target_seat is None or fact.target_seat is target_seat)
+                and (
+                    responsibility_ref is None
+                    or fact.responsibility_ref == responsibility_ref
+                )
+            )
+            if not relevant:
+                continue
+            if len(facts) != 1:
+                issues.append(
+                    _issue(
+                        "ambiguous_attention_identity",
+                        f"attention {attention_id} has {len(facts)} candidates",
+                        tuple(fact.source for fact in facts),
+                    )
+                )
+                continue
+            candidates.append(facts[0])
+
         joined: list[AttentionFact] = []
         for fact in candidates:
             responsibilities = self._responsibility_matches(fact.responsibility_ref)
@@ -725,9 +750,7 @@ class ExecutiveStewardSnapshot:
                 continue
             joined.append(fact)
 
-        seen: dict[str, list[AttentionFact]] = {}
         for fact in joined:
-            seen.setdefault(fact.attention_id, []).append(fact)
             if fact.source.freshness is not Freshness.CURRENT:
                 issues.append(
                     _issue(
@@ -736,18 +759,8 @@ class ExecutiveStewardSnapshot:
                         (fact.source,),
                     )
                 )
-        for attention_id, duplicates in seen.items():
-            if len(duplicates) > 1:
-                issues.append(
-                    _issue(
-                        "ambiguous_attention_identity",
-                        f"attention {attention_id} has {len(duplicates)} candidates",
-                        tuple(fact.source for fact in duplicates),
-                    )
-                )
-        facts = tuple(fact for fact in joined if len(seen[fact.attention_id]) == 1)
         status = QueryStatus.DEGRADED if issues else QueryStatus.OK
-        return _result(operation, status, facts, tuple(issues))
+        return _result(operation, status, tuple(joined), tuple(issues))
 
     def get_current_runtime(self, responsibility_ref: str, seat: Seat) -> StewardResult:
         operation = "get_current_runtime"
