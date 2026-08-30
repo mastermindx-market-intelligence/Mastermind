@@ -22,6 +22,10 @@ def test_three_account_runbook_is_account_local_and_receipted() -> None:
         "canonical action-target transfer",
         "never elect by recency",
         "passing prompt audit does not prove runtime consumption",
+        '"audit_kind": "SOL_WATCHER"',
+        '"audit_kind": "NON_WATCHER"',
+        "aggregate:<stable-scope-id>",
+        "ACTION_AUTHORITATIVE requires one exact Slack carrier",
     )
     for phrase in required_phrases:
         assert phrase in text, f"missing account hardening law: {phrase}"
