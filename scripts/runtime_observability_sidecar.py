@@ -34,6 +34,19 @@ class CliConfiguration:
 
 
 SocketIdentity = tuple[int, int, int, int]
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundSocketOwnership:
+    """In-process proof that an exact bound receiver still anchors a socket path."""
+
+    receiver: socket.socket = dataclasses.field(repr=False, compare=False)
+    socket_path: Path
+    path_identity: SocketIdentity
+    descriptor_identity: SocketIdentity
+    descriptor_fileno: int
+
+
 _DISPOSABLE_ROOTS = (Path("/tmp"), Path("/private/tmp"))
 
 
@@ -88,7 +101,7 @@ def _assert_no_symlink_below_root(path: Path, *, root: Path) -> None:
     """Reject existing symlink components below an approved disposable root.
 
     The root itself is deliberately excluded because macOS exposes ``/tmp`` as
-    the system-managed alias for ``/private/tmp``.  Every caller-controlled
+    the system-managed alias for ``/private/tmp``. Every caller-controlled
     component below that root must be a real path component.
     """
 
@@ -216,22 +229,73 @@ def _socket_identity(observed: os.stat_result) -> SocketIdentity:
     )
 
 
-def _observe_owned_socket(path: Path, *, effective_uid: int) -> tuple[os.stat_result, SocketIdentity]:
+def _bound_socket_path(receiver: socket.socket) -> str | None:
+    try:
+        if receiver.fileno() < 0 or receiver.family != socket.AF_UNIX:
+            return None
+        if receiver.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_DGRAM:
+            return None
+        address = receiver.getsockname()
+    except (OSError, ValueError):
+        return None
+    if not isinstance(address, (str, bytes)):
+        return None
+    return os.fsdecode(address)
+
+
+def _observe_owned_socket(
+    path: Path,
+    *,
+    receiver: socket.socket,
+    effective_uid: int,
+) -> tuple[os.stat_result, BoundSocketOwnership]:
     try:
         observed = path.lstat()
     except OSError as exc:
         raise CliConfigurationError("bound socket path is not observable") from exc
     if observed.st_uid != effective_uid or not stat.S_ISSOCK(observed.st_mode):
         raise CliConfigurationError("bound socket identity is not current-user owned")
-    return observed, _socket_identity(observed)
+
+    bound_path = _bound_socket_path(receiver)
+    if bound_path != str(path):
+        raise CliConfigurationError("receiver does not anchor the bound socket path")
+    try:
+        descriptor_fileno = receiver.fileno()
+        descriptor = os.fstat(descriptor_fileno)
+    except (OSError, ValueError) as exc:
+        raise CliConfigurationError("bound receiver descriptor is not observable") from exc
+    if descriptor.st_uid != effective_uid or not stat.S_ISSOCK(descriptor.st_mode):
+        raise CliConfigurationError("bound receiver descriptor is not current-user owned")
+
+    return observed, BoundSocketOwnership(
+        receiver=receiver,
+        socket_path=path,
+        path_identity=_socket_identity(observed),
+        descriptor_identity=_socket_identity(descriptor),
+        descriptor_fileno=descriptor_fileno,
+    )
 
 
 def _remove_owned_socket(
     path: Path,
     *,
+    receiver: socket.socket,
     effective_uid: int,
-    expected_identity: SocketIdentity,
+    expected_ownership: BoundSocketOwnership,
 ) -> bool:
+    if receiver is not expected_ownership.receiver or path != expected_ownership.socket_path:
+        return False
+    if receiver.fileno() != expected_ownership.descriptor_fileno:
+        return False
+    if _bound_socket_path(receiver) != str(path):
+        return False
+    try:
+        descriptor = os.fstat(receiver.fileno())
+    except (OSError, ValueError):
+        return False
+    if _socket_identity(descriptor) != expected_ownership.descriptor_identity:
+        return False
+
     try:
         current = path.lstat()
     except FileNotFoundError:
@@ -239,7 +303,7 @@ def _remove_owned_socket(
     if (
         current.st_uid != effective_uid
         or not stat.S_ISSOCK(current.st_mode)
-        or _socket_identity(current) != expected_identity
+        or _socket_identity(current) != expected_ownership.path_identity
     ):
         return False
     try:
@@ -268,20 +332,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     previous_umask = os.umask(0o077)
     receiver: socket.socket | None = None
-    bound_identity: SocketIdentity | None = None
+    bound_ownership: BoundSocketOwnership | None = None
     try:
         receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
         receiver.bind(str(config.socket_path))
-        _observed, bound_identity = _observe_owned_socket(
+        _observed, bound_ownership = _observe_owned_socket(
             config.socket_path,
+            receiver=receiver,
             effective_uid=effective_uid,
         )
         os.chmod(config.socket_path, 0o600)
-        observed_after_chmod, identity_after_chmod = _observe_owned_socket(
+        observed_after_chmod, ownership_after_chmod = _observe_owned_socket(
             config.socket_path,
+            receiver=receiver,
             effective_uid=effective_uid,
         )
-        if identity_after_chmod != bound_identity:
+        if ownership_after_chmod != bound_ownership:
             raise CliConfigurationError("bound socket identity changed during setup")
         if stat.S_IMODE(observed_after_chmod.st_mode) != 0o600:
             raise CliConfigurationError("bound socket mode is not 0600")
@@ -319,16 +385,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     finally:
         try:
-            if receiver is not None:
-                receiver.close()
+            if receiver is not None and bound_ownership is not None:
+                _remove_owned_socket(
+                    config.socket_path,
+                    receiver=receiver,
+                    effective_uid=effective_uid,
+                    expected_ownership=bound_ownership,
+                )
         finally:
             try:
-                if bound_identity is not None:
-                    _remove_owned_socket(
-                        config.socket_path,
-                        effective_uid=effective_uid,
-                        expected_identity=bound_identity,
-                    )
+                if receiver is not None:
+                    receiver.close()
             finally:
                 os.umask(previous_umask)
 
