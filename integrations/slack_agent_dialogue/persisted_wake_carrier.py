@@ -11,6 +11,7 @@ from control_plane.session_targets import RuntimeBinding, WakeRoute
 from control_plane.wake_dispatcher import (
     PersistedNudgeState,
     WakeEffectUnknownError,
+    WakePreSubmitError,
     dispatch_persisted_nudge,
 )
 from control_plane.wake_events import WakeObligation
@@ -125,14 +126,16 @@ def _assert_current_binding(
     route: WakeRoute,
 ) -> None:
     if binding is None:
-        raise ValueError("current RuntimeBinding is unavailable")
+        raise WakePreSubmitError("current RuntimeBinding is unavailable")
     if (
         binding.session_alias != route.session_alias
         or binding.binding_id != route.binding_id
         or binding.binding_generation != route.binding_generation
         or binding.reasoning_surface != route.reasoning_surface
     ):
-        raise ValueError("current RuntimeBinding no longer matches the Wake route")
+        raise WakePreSubmitError(
+            "current RuntimeBinding no longer matches the Wake route"
+        )
 
 
 __all__ = ["PersistedWakeCarrier"]
