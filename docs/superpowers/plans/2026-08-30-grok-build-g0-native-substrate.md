@@ -8,7 +8,7 @@
 
 ## Observable mission
 
-Prove, without a model turn or Executive lifecycle effect, that one exact installed Grok Build CLI can be attested, can speak ACP v1 over stdio, exposes the provider-owned `cached_token` OAuth method, and can authenticate it headlessly; then use that evidence to unlock a separately bounded manual Grok Build canary while canonical automatic Executive routing continues through CF2 -> RF1 -> HF1.
+Prove, without a model turn or Executive lifecycle effect, that one exact installed Grok Build executable can be attested by its binary digest, can speak ACP v1 over stdio, exposes the provider-owned `cached_token` OAuth method, and can authenticate it headlessly; then use that evidence to unlock a separately bounded manual Grok Build canary while canonical automatic Executive routing continues through CF2 -> RF1 -> HF1.
 
 ## Why this matters
 
@@ -79,6 +79,8 @@ Forbidden G0 actions include `session/new`, `session/prompt`, resume/continue, w
 - Grok/xAI remains the OAuth credential owner.
 - Mastermind never reads, copies, serializes, logs or transports cached token contents.
 - The child process environment is allowlisted and explicitly excludes `XAI_API_KEY`; `GROK_HOME` may pass through so an already-approved provider home can be honored without exposing that path in the receipt.
+- `grok version` output is validated internally and then discarded; raw provider-derived text is never published in the receipt. The exact executable is attested publicly by SHA-256 instead.
+- Exceptional preflight failures publish only the fixed `PREFLIGHT_FAILED` marker; no exception, provider output, path or credential-derived text crosses the public error channel.
 - A successful G0 receipt proves only that ACP cached OAuth was usable for this preflight.
 - It **does not prove** that every future model invocation is OAuth-only, because provider config/model credential precedence may differ from the G0 environment.
 - Before a real Grok Executive worker is admitted, the actual execution realm must separately prove a provider-supported OAuth-only precedence/policy or fail closed. A managed `requirements.toml` policy may be used when supported by the enrolled xAI plan/estate; do not assume that enterprise control exists on every subscription.
@@ -91,7 +93,6 @@ Forbidden G0 actions include `session/new`, `session/prompt`, resume/continue, w
 schema
 observed_at
 grok_binary_sha256
-grok_version
 acp_protocol_version
 cached_token_offered
 oauth_ready
@@ -101,7 +102,7 @@ verdict
 reason_codes
 ```
 
-It contains no email, account identifier, token, home path, provider session id, host-private address, auth-file coordinate or raw provider output.
+It contains no raw provider text, version text, email, account identifier, token, home path, provider session id, host-private address, auth-file coordinate or raw provider output.
 
 The positive verdict is intentionally:
 
@@ -115,6 +116,7 @@ It cannot be interpreted as Provider Capacity eligibility, Worker claim, Executi
 
 - binary identity is SHA-256 of the exact regular executable bytes under a bounded maximum size;
 - symlink, relative, missing, non-regular, non-executable or oversized binaries fail closed;
+- provider version output must pass the bounded internal validator, but is never persisted or printed;
 - `observed_at` is current UTC receipt time;
 - ACP protocol version is fixed to v1 for this contract;
 - missing `cached_token` is `CACHED_TOKEN_METHOD_UNAVAILABLE`, never inferred from other auth methods;
@@ -158,7 +160,7 @@ On the intended Grok Build worker host:
 2. run the exact accepted preflight once;
 3. if cached OAuth is unavailable or authentication fails, stop and diagnose the provider-owned login state. When the cause is an absent/expired local login, a human/admin performs provider-native `grok login` or `grok login --device-auth` without exposing OAuth/browser/device secrets to the worker/model;
 4. rerun the read-only preflight after the provider-native login/repair;
-5. accept only `LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE` with the exact binary/version digest and `model_turn_performed=false`.
+5. accept only `LOCAL_OAUTH_ACP_READY_NOT_ROUTABLE` bound to the exact binary SHA-256 with `model_turn_performed=false`.
 
 No model canary is performed inside G0-B.
 
@@ -207,14 +209,15 @@ Focused source proof must include:
 - absolute regular executable / symlink / missing / size checks;
 - API-key and unrelated-secret environment suppression;
 - exact `--no-auto-update version` and `--no-auto-update agent stdio` command allowlist;
+- internal version validation with zero provider-version publication;
 - exact ACP initialize request and protocol v1 check;
 - exact cached-token headless authenticate request;
 - cached-token missing / protocol mismatch / malformed / duplicate auth-method refusal;
 - authentication success plus typed initialize/protocol/authentication failure behavior;
 - secret-shaped provider-wire rejection;
 - receipt rejects any `model_turn_performed=true` or `executive_routing_ready=true` claim;
-- static/procedural proof that G0 emits only `initialize` then `authenticate`, never session/prompt methods;
-- opaque CLI failure output.
+- public exceptional failures remain fixed/opaque;
+- static/procedural proof that G0 emits only `initialize` then `authenticate`, never session/prompt methods.
 
 A host receipt is required before claiming local OAuth/ACP usable. A real bounded Grok coding result through GitHub/CI is required before claiming the Grok avenue operationally useful. Neither receipt proves automatic Executive routing.
 
@@ -231,5 +234,5 @@ Return to Sol with:
 - focused/hosted test + security receipts;
 - independent review verdict;
 - any official Grok CLI/ACP contract drift discovered;
-- explicit confirmation of zero model prompt, zero Executive lifecycle effect and zero credential-content handling;
+- explicit confirmation of zero model prompt, zero Executive lifecycle effect, zero credential-content handling and zero raw provider-text publication;
 - the exact host action required next: G0-B preflight, or provider-native human login/repair only after the read-only result establishes cached OAuth is unavailable or cannot authenticate.
