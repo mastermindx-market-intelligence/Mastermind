@@ -9,11 +9,12 @@ from scripts.github_estate_governance import (
     AdministrationSpec,
     GitHubResponse,
     GovernanceRefusal,
+    assess_github_admin_prerequisites,
     apply_administration_family,
     canonical_digest,
+    validate_candidate_credential_denial,
     validate_disposable_private_repository,
     validate_publisher_app_installation,
-    validate_ruleset_activation,
 )
 
 
@@ -231,160 +232,156 @@ def test_secret_bearing_payload_is_refused_before_any_network_effect(key: str):
     assert transport.mutations == []
 
 
-def _ruleset() -> dict:
-    return {
-        "id": 21813020,
-        "name": "c0b-native-main-interlock",
-        "target": "branch",
-        "enforcement": "evaluate",
-        "bypass_actors": [],
-        "conditions": {
-            "ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
+def _installed_apps() -> list[dict]:
+    return [
+        {
+            "app_id": 1,
+            "app_slug": "chatgpt-codex-connector",
+            "repository_selection": "all",
+            "permissions": {"contents": "write", "pull_requests": "write"},
         },
-        "rules": [
-            {"type": "deletion"},
-            {"type": "non_fast_forward"},
-            {
-                "type": "pull_request",
-                "parameters": {
-                    "allowed_merge_methods": ["squash"],
-                    "dismiss_stale_reviews_on_push": False,
-                    "dismissal_restriction": {
-                        "allowed_actors": [],
-                        "enabled": False,
-                    },
-                    "require_code_owner_review": False,
-                    "require_extra_approval_for_unattributed_changes": True,
-                    "require_last_push_approval": False,
-                    "required_approving_review_count": 0,
-                    "required_review_thread_resolution": False,
-                    "required_reviewers": [],
-                },
-            },
-            {
-                "type": "required_status_checks",
-                "parameters": {
-                    "required_status_checks": [
-                        {"context": "fence-pack", "integration_id": 15368},
-                        {"context": "ci-authority/main", "integration_id": 15368},
-                        {"context": "ci-gate", "integration_id": 15368},
-                    ],
-                    "strict_required_status_checks_policy": False,
-                    "do_not_enforce_on_create": True,
-                },
-            },
-        ],
-    }
+        {
+            "app_id": 2,
+            "app_slug": "linear-code",
+            "repository_selection": "all",
+            "permissions": {"issues": "write", "metadata": "read"},
+        },
+    ]
 
 
-def _activation_evidence() -> dict:
-    return {
-        "ruleset_id": 21813020,
-        "candidate_denial": "PASS",
-        "fork_denial": "PASS",
-        "natural_evaluate_observations": "PASS",
-        "natural_green_admission": "PASS",
-        "ordinary_red_rejection": "PASS",
-        "publisher_continuity": "PASS",
-        "rollback_canary": "PASS",
-        "disposable_private_repository": "PASS",
-    }
-
-
-def test_ruleset_activation_preserves_same_ruleset_and_requires_all_canaries():
-    before = _ruleset()
-    desired = {**deepcopy(before), "enforcement": "active"}
-
-    payload = validate_ruleset_activation(
-        before,
-        desired,
-        expected_ruleset_id=21813020,
-        evidence=_activation_evidence(),
+def test_admin_prerequisite_census_does_not_promote_oauth_scopes_to_app_authority():
+    result = assess_github_admin_prerequisites(
+        principal={
+            "login": "chriswong6031-creator",
+            "principal_type": "oauth_user",
+            "organization_role": "admin",
+            "oauth_scopes": ["admin:org", "repo", "workflow"],
+        },
+        capability_probes={
+            "organization_audit_log": "SATISFIED",
+            "installed_app_inventory": "SATISFIED",
+            "app_management": "HELD",
+            "app_creation": "HELD",
+            "app_installation": "HELD",
+            "private_key_custody": "HELD",
+        },
+        installations=_installed_apps(),
+        expected_repository="mastermindx-market-intelligence/macro",
     )
 
-    assert payload["enforcement"] == "active"
-    assert payload["bypass_actors"] == []
-    assert payload["rules"] == before["rules"]
-    assert payload["conditions"] == before["conditions"]
+    assert result["suitable_publisher_app_exists"] is False
+    assert result["qualified_app_integration_id"] is None
+    assert result["gates"]["organization_audit_log"] == "SATISFIED"
+    assert result["gates"]["app_creation"] == "HELD"
+    assert result["scope_inferred_from_oauth"] is False
+    assert [row["app_slug"] for row in result["installed_apps"]] == [
+        "chatgpt-codex-connector",
+        "linear-code",
+    ]
 
 
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        (lambda desired: desired.update(id=999), "ruleset id drifted"),
-        (
-            lambda desired: desired.update(
-                bypass_actors=[{"actor_id": 1, "actor_type": "OrganizationAdmin"}]
-            ),
-            "bypass actors drifted",
-        ),
-        (lambda desired: desired.update(rules=[]), "rules drifted"),
-        (lambda desired: desired.update(name="replacement"), "name drifted"),
-    ],
-)
-def test_ruleset_activation_refuses_replacement_or_policy_drift(mutation, message):
-    before = _ruleset()
-    desired = {**deepcopy(before), "enforcement": "active"}
-    mutation(desired)
+def test_admin_prerequisite_census_qualifies_one_exact_publisher_app():
+    publisher = {
+        "app_id": 48151623,
+        "app_slug": "macro-production-publisher",
+        "repository_selection": "selected",
+        "repositories": ["mastermindx-market-intelligence/macro"],
+        "permissions": {"metadata": "read", "contents": "write"},
+        "events": [],
+    }
+    result = assess_github_admin_prerequisites(
+        principal={
+            "login": "admin",
+            "principal_type": "oauth_user",
+            "organization_role": "admin",
+            "oauth_scopes": ["admin:org"],
+        },
+        capability_probes={
+            "organization_audit_log": "SATISFIED",
+            "installed_app_inventory": "SATISFIED",
+            "app_management": "SATISFIED",
+            "app_creation": "SATISFIED",
+            "app_installation": "SATISFIED",
+            "private_key_custody": "SATISFIED",
+        },
+        installations=[publisher],
+        expected_repository="mastermindx-market-intelligence/macro",
+    )
 
-    with pytest.raises(GovernanceRefusal, match=message):
-        validate_ruleset_activation(
-            before,
-            desired,
-            expected_ruleset_id=21813020,
-            evidence=_activation_evidence(),
+    assert result["suitable_publisher_app_exists"] is True
+    assert result["qualified_app_integration_id"] == 48151623
+
+
+def test_admin_prerequisite_census_refuses_missing_or_claimed_probe_results():
+    probes = {
+        "organization_audit_log": "SATISFIED",
+        "installed_app_inventory": "SATISFIED",
+        "app_management": "CLAIMED_FROM_SCOPE",
+        "app_creation": "HELD",
+        "app_installation": "HELD",
+        "private_key_custody": "HELD",
+    }
+    with pytest.raises(GovernanceRefusal, match="capability probe"):
+        assess_github_admin_prerequisites(
+            principal={
+                "login": "admin",
+                "principal_type": "oauth_user",
+                "organization_role": "admin",
+                "oauth_scopes": ["admin:org"],
+            },
+            capability_probes=probes,
+            installations=[],
+            expected_repository="mastermindx-market-intelligence/macro",
         )
 
 
-def test_ruleset_activation_refuses_any_missing_canary():
-    before = _ruleset()
-    desired = {**deepcopy(before), "enforcement": "active"}
-    evidence = _activation_evidence()
-    evidence["ordinary_red_rejection"] = "NOT_RUN"
+def test_candidate_credential_denial_requires_external_custody_and_zero_projection():
+    receipt = validate_candidate_credential_denial(
+        {
+            "custody_kind": "operator_keychain",
+            "repository_actions_secret_present": False,
+            "organization_actions_secret_present": False,
+            "environment_actions_secret_present": False,
+            "candidate_checkout_material_present": False,
+            "candidate_installation_token_minted": False,
+            "credential_material_observed": False,
+        }
+    )
 
-    with pytest.raises(GovernanceRefusal, match="activation evidence is incomplete"):
-        validate_ruleset_activation(
-            before,
-            desired,
-            expected_ruleset_id=21813020,
-            evidence=evidence,
-        )
+    assert receipt["verdict"] == "PASS"
+    assert receipt["candidate_credential_reachability"] == "DENIED"
 
 
 @pytest.mark.parametrize(
     "mutation",
     [
-        lambda ruleset: ruleset["conditions"]["ref_name"].update(
-            include=["refs/heads/main"]
-        ),
-        lambda ruleset: ruleset["rules"][-1]["parameters"][
-            "required_status_checks"
-        ].append({"context": "broad-bypass", "integration_id": 15368}),
-        lambda ruleset: ruleset["rules"][-1]["parameters"].update(
-            strict_required_status_checks_policy=True
-        ),
-        lambda ruleset: ruleset["rules"][2]["parameters"].update(
-            allowed_merge_methods=["merge", "squash"]
-        ),
+        lambda evidence: evidence.update(custody_kind="repository_actions_secret"),
+        lambda evidence: evidence.update(repository_actions_secret_present=True),
+        lambda evidence: evidence.update(candidate_checkout_material_present=True),
+        lambda evidence: evidence.update(candidate_installation_token_minted=True),
+        lambda evidence: evidence.update(credential_material_observed=True),
     ],
 )
-def test_ruleset_activation_refuses_a_preserved_but_wrong_policy(mutation):
-    before = _ruleset()
-    mutation(before)
-    desired = {**deepcopy(before), "enforcement": "active"}
+def test_candidate_credential_denial_refuses_any_candidate_projection(mutation):
+    evidence = {
+        "custody_kind": "operator_keychain",
+        "repository_actions_secret_present": False,
+        "organization_actions_secret_present": False,
+        "environment_actions_secret_present": False,
+        "candidate_checkout_material_present": False,
+        "candidate_installation_token_minted": False,
+        "credential_material_observed": False,
+    }
+    mutation(evidence)
 
-    with pytest.raises(GovernanceRefusal, match="ruleset policy is not exact"):
-        validate_ruleset_activation(
-            before,
-            desired,
-            expected_ruleset_id=21813020,
-            evidence=_activation_evidence(),
-        )
+    with pytest.raises(GovernanceRefusal):
+        validate_candidate_credential_denial(evidence)
 
 
 def test_publisher_app_must_be_repo_selected_and_exactly_least_privileged():
     receipt = validate_publisher_app_installation(
         {
+            "app_id": 48151623,
             "app_slug": "macro-production-publisher",
             "repository_selection": "selected",
             "repositories": ["mastermindx-market-intelligence/macro"],
@@ -395,6 +392,7 @@ def test_publisher_app_must_be_repo_selected_and_exactly_least_privileged():
     )
 
     assert receipt["verdict"] == "PASS"
+    assert receipt["app_integration_id"] == 48151623
     assert receipt["credential_material_observed"] is False
 
 
@@ -410,6 +408,7 @@ def test_publisher_app_must_be_repo_selected_and_exactly_least_privileged():
 )
 def test_publisher_app_refuses_broad_or_incomplete_authority(mutation):
     app = {
+        "app_id": 48151623,
         "app_slug": "macro-production-publisher",
         "repository_selection": "selected",
         "repositories": ["mastermindx-market-intelligence/macro"],

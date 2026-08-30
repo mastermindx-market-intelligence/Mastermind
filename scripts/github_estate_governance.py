@@ -25,7 +25,6 @@ class AdministrationFamily(str, Enum):
     REPOSITORY_MERGE_POLICY = "repository_merge_policy"
     ACTIONS_DEFAULT_PERMISSIONS = "actions_default_permissions"
     SECURITY_AND_ANALYSIS = "security_and_analysis"
-    RULESET_ACTIVATION = "ruleset_activation"
 
 
 @dataclass(frozen=True)
@@ -56,7 +55,6 @@ _REPOSITORY_ENDPOINT = re.compile(r"repos/[^/]+/[^/]+\Z")
 _ACTIONS_ENDPOINT = re.compile(
     r"repos/[^/]+/[^/]+/actions/permissions/workflow\Z"
 )
-_RULESET_ENDPOINT = re.compile(r"repos/[^/]+/[^/]+/rulesets/[1-9][0-9]*\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SECRET_KEY = re.compile(
     r"(^|_)(token|secret|password|private_key|credential|authorization)($|_)",
@@ -83,11 +81,6 @@ _FAMILY_CONTRACTS: dict[AdministrationFamily, tuple[re.Pattern[str], str, set[st
         _REPOSITORY_ENDPOINT,
         "PATCH",
         {"security_and_analysis"},
-    ),
-    AdministrationFamily.RULESET_ACTIVATION: (
-        _RULESET_ENDPOINT,
-        "PUT",
-        {"name", "target", "enforcement", "bypass_actors", "conditions", "rules"},
     ),
 }
 
@@ -282,98 +275,112 @@ def apply_administration_family(
     )
 
 
-_ACTIVATION_EVIDENCE = {
-    "candidate_denial",
-    "fork_denial",
-    "natural_evaluate_observations",
-    "natural_green_admission",
-    "ordinary_red_rejection",
-    "publisher_continuity",
-    "rollback_canary",
-    "disposable_private_repository",
+_ADMIN_CAPABILITY_PROBES = {
+    "organization_audit_log",
+    "installed_app_inventory",
+    "app_management",
+    "app_creation",
+    "app_installation",
+    "private_key_custody",
 }
 
-_EXPECTED_RULESET_CONDITIONS = {
-    "ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}
-}
-_EXPECTED_RULESET_RULES = [
-    {"type": "deletion"},
-    {"type": "non_fast_forward"},
-    {
-        "type": "pull_request",
-        "parameters": {
-            "allowed_merge_methods": ["squash"],
-            "dismiss_stale_reviews_on_push": False,
-            "dismissal_restriction": {"allowed_actors": [], "enabled": False},
-            "require_code_owner_review": False,
-            "require_extra_approval_for_unattributed_changes": True,
-            "require_last_push_approval": False,
-            "required_approving_review_count": 0,
-            "required_review_thread_resolution": False,
-            "required_reviewers": [],
-        },
-    },
-    {
-        "type": "required_status_checks",
-        "parameters": {
-            "do_not_enforce_on_create": True,
-            "required_status_checks": [
-                {"context": "fence-pack", "integration_id": 15368},
-                {"context": "ci-authority/main", "integration_id": 15368},
-                {"context": "ci-gate", "integration_id": 15368},
-            ],
-            "strict_required_status_checks_policy": False,
-        },
-    },
-]
 
-
-def validate_ruleset_activation(
-    before: Mapping[str, Any],
-    desired: Mapping[str, Any],
+def assess_github_admin_prerequisites(
     *,
-    expected_ruleset_id: int,
-    evidence: Mapping[str, Any],
+    principal: Mapping[str, Any],
+    capability_probes: Mapping[str, Any],
+    installations: list[Mapping[str, Any]],
+    expected_repository: str,
 ) -> dict[str, Any]:
-    """Build an in-place Evaluate-to-Active payload after every canary passes."""
+    """Assess explicit admin probes without promoting OAuth scopes to authority."""
 
-    old = _plain_mapping(before)
-    new = _plain_mapping(desired)
-    if old.get("id") != expected_ruleset_id or new.get("id") != expected_ruleset_id:
-        raise GovernanceRefusal("ruleset id drifted")
-    if old.get("name") != new.get("name"):
-        raise GovernanceRefusal("ruleset name drifted")
-    if old.get("target") != new.get("target"):
-        raise GovernanceRefusal("ruleset target drifted")
-    if old.get("bypass_actors") != new.get("bypass_actors"):
-        raise GovernanceRefusal("ruleset bypass actors drifted")
-    if old.get("bypass_actors") != []:
-        raise GovernanceRefusal("ruleset contains a bypass actor")
-    if (
-        old.get("conditions") != _EXPECTED_RULESET_CONDITIONS
-        or old.get("rules") != _EXPECTED_RULESET_RULES
+    identity = _plain_mapping(principal)
+    probes = _plain_mapping(capability_probes)
+    if not isinstance(identity.get("login"), str) or not identity["login"].strip():
+        raise GovernanceRefusal("GitHub principal identity is missing")
+    if identity.get("principal_type") != "oauth_user":
+        raise GovernanceRefusal("GitHub principal type is not explicit")
+    if set(probes) != _ADMIN_CAPABILITY_PROBES or any(
+        value not in {"SATISFIED", "HELD"} for value in probes.values()
     ):
-        raise GovernanceRefusal("ruleset policy is not exact")
-    if old.get("conditions") != new.get("conditions"):
-        raise GovernanceRefusal("ruleset conditions drifted")
-    if old.get("rules") != new.get("rules"):
-        raise GovernanceRefusal("ruleset rules drifted")
-    if old.get("enforcement") != "evaluate" or new.get("enforcement") != "active":
-        raise GovernanceRefusal("ruleset transition is not Evaluate to Active")
-    if evidence.get("ruleset_id") != expected_ruleset_id or any(
-        evidence.get(key) != "PASS" for key in _ACTIVATION_EVIDENCE
-    ):
-        raise GovernanceRefusal("activation evidence is incomplete")
-    return {
-        key: new[key]
-        for key in (
-            "name",
-            "target",
-            "enforcement",
-            "bypass_actors",
-            "conditions",
-            "rules",
+        raise GovernanceRefusal("GitHub capability probe results are not explicit")
+    if not isinstance(installations, list):
+        raise GovernanceRefusal("installed App census is not a list")
+    _assert_secret_free(identity, path="principal")
+
+    safe_rows: list[dict[str, Any]] = []
+    qualified: list[dict[str, Any]] = []
+    for raw in installations:
+        app = _plain_mapping(raw)
+        _assert_secret_free(app, path="installation")
+        app_id = app.get("app_id")
+        app_slug = app.get("app_slug")
+        if type(app_id) is not int or app_id <= 0 or not isinstance(app_slug, str):
+            raise GovernanceRefusal("installed App identity is malformed")
+        safe_rows.append(
+            {
+                "app_id": app_id,
+                "app_slug": app_slug,
+                "repository_selection": app.get("repository_selection"),
+                "permissions": app.get("permissions"),
+            }
         )
+        if app_slug == "macro-production-publisher":
+            qualified.append(
+                validate_publisher_app_installation(
+                    app,
+                    expected_repository=expected_repository,
+                )
+            )
+    if len(qualified) > 1:
+        raise GovernanceRefusal("publisher App installation is ambiguous")
+    return {
+        "schema": "mastermind.github_admin_prerequisite_census.v1",
+        "principal": {
+            "login": identity["login"],
+            "principal_type": identity["principal_type"],
+            "organization_role": identity.get("organization_role"),
+            "oauth_scopes": identity.get("oauth_scopes", []),
+        },
+        "scope_inferred_from_oauth": False,
+        "gates": dict(sorted(probes.items())),
+        "installed_apps": safe_rows,
+        "suitable_publisher_app_exists": len(qualified) == 1,
+        "qualified_app_integration_id": (
+            qualified[0]["app_integration_id"] if qualified else None
+        ),
+        "credential_material_observed": False,
+    }
+
+
+def validate_candidate_credential_denial(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept secret-free proof that candidate execution has no App credential seam."""
+
+    observed = _plain_mapping(evidence)
+    expected_keys = {
+        "custody_kind",
+        "repository_actions_secret_present",
+        "organization_actions_secret_present",
+        "environment_actions_secret_present",
+        "candidate_checkout_material_present",
+        "candidate_installation_token_minted",
+        "credential_material_observed",
+    }
+    if set(observed) != expected_keys:
+        raise GovernanceRefusal("candidate credential-denial evidence is incomplete")
+    if observed["custody_kind"] not in {
+        "operator_keychain",
+        "publisher_host_keychain",
+    }:
+        raise GovernanceRefusal("publisher credential custody is candidate-reachable")
+    if any(observed[key] is not False for key in expected_keys - {"custody_kind"}):
+        raise GovernanceRefusal("candidate credential projection was observed")
+    return {
+        "schema": "mastermind.github_candidate_credential_denial.v1",
+        "verdict": "PASS",
+        "custody_kind": observed["custody_kind"],
+        "candidate_credential_reachability": "DENIED",
+        "credential_material_observed": False,
     }
 
 
@@ -385,6 +392,8 @@ def validate_publisher_app_installation(
     """Accept only the dedicated repository-selected publisher authority."""
 
     app = _plain_mapping(installation)
+    if type(app.get("app_id")) is not int or app["app_id"] <= 0:
+        raise GovernanceRefusal("publisher App Integration ID is not exact")
     if app.get("app_slug") != "macro-production-publisher":
         raise GovernanceRefusal("publisher App identity is not exact")
     if app.get("repository_selection") != "selected":
@@ -399,6 +408,7 @@ def validate_publisher_app_installation(
     return {
         "schema": "mastermind.github_publisher_app_validation.v1",
         "verdict": "PASS",
+        "app_integration_id": app["app_id"],
         "app_slug": app["app_slug"],
         "repository": expected_repository,
         "permissions": app["permissions"],
