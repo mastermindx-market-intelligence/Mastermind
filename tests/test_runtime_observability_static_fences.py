@@ -14,6 +14,7 @@ import pytest
 from scripts import runtime_observability_sidecar as sidecar_cli
 from scripts.runtime_observability_sidecar import (
     CliConfigurationError,
+    _observe_owned_socket,
     _remove_owned_socket,
     parse_args,
     validate_cli_configuration,
@@ -180,28 +181,85 @@ def test_cleanup_does_not_unlink_replacement_socket() -> None:
     replacement = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     try:
         first.bind(str(path))
-        observed = path.lstat()
-        expected_identity = (
-            int(observed.st_dev),
-            int(observed.st_ino),
-            int(observed.st_uid),
-            int(stat.S_IFMT(observed.st_mode)),
+        _observed, ownership = _observe_owned_socket(
+            path,
+            receiver=first,
+            effective_uid=os.geteuid(),
         )
-        first.close()
         path.unlink()
         replacement.bind(str(path))
 
         removed = _remove_owned_socket(
             path,
+            receiver=first,
             effective_uid=os.geteuid(),
-            expected_identity=expected_identity,
+            expected_ownership=ownership,
+        )
+
+        assert removed is False
+        assert path.exists()
+        assert first.fileno() >= 0
+    finally:
+        first.close()
+        replacement.close()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def test_cleanup_refuses_after_bound_receiver_is_closed() -> None:
+    path = Path("/tmp") / f"mmx-observability-{uuid.uuid4().hex}.sock"
+    receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        receiver.bind(str(path))
+        _observed, ownership = _observe_owned_socket(
+            path,
+            receiver=receiver,
+            effective_uid=os.geteuid(),
+        )
+        receiver.close()
+
+        removed = _remove_owned_socket(
+            path,
+            receiver=receiver,
+            effective_uid=os.geteuid(),
+            expected_ownership=ownership,
         )
 
         assert removed is False
         assert path.exists()
     finally:
-        first.close()
-        replacement.close()
+        receiver.close()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def test_cleanup_unlinks_exact_socket_while_receiver_is_live() -> None:
+    path = Path("/tmp") / f"mmx-observability-{uuid.uuid4().hex}.sock"
+    receiver = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        receiver.bind(str(path))
+        _observed, ownership = _observe_owned_socket(
+            path,
+            receiver=receiver,
+            effective_uid=os.geteuid(),
+        )
+
+        removed = _remove_owned_socket(
+            path,
+            receiver=receiver,
+            effective_uid=os.geteuid(),
+            expected_ownership=ownership,
+        )
+
+        assert removed is True
+        assert not path.exists()
+        assert receiver.fileno() >= 0
+    finally:
+        receiver.close()
         try:
             path.unlink()
         except FileNotFoundError:
