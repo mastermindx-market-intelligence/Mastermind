@@ -32,7 +32,7 @@ def test_three_account_runbook_is_account_local_and_receipted() -> None:
         "Codex availability is not a watcher-store prerequisite",
         "native task ID must be present and unique",
         "enabled state must be a JSON boolean",
-        "duplicate native task IDs",
+        "Duplicate native task IDs",
         "invalid_export_tasks",
         "every non-authoritative role",
     )
