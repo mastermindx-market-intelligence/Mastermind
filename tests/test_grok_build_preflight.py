@@ -51,11 +51,7 @@ def _receipt(module, **overrides):
 def test_command_builder_is_provider_work_free(tmp_path: Path):
     module = _load()
     binary = _executable(tmp_path)
-    assert module.build_allowed_argv(binary, "version") == (
-        str(binary),
-        "--no-auto-update",
-        "version",
-    )
+    assert module.build_allowed_argv(binary, "version") == (str(binary), "--no-auto-update", "version")
     assert module.build_allowed_argv(binary, "acp_stdio") == (
         str(binary),
         "--no-auto-update",
@@ -267,12 +263,7 @@ def test_observe_version_uses_sanitized_env_and_discards_stderr(
         captured["argv"] = tuple(argv)
         captured["env"] = dict(kwargs["env"])
         captured["stderr"] = kwargs["stderr"]
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            stdout="Grok Build 9.8.7\n",
-            stderr="secret",
-        )
+        return subprocess.CompletedProcess(argv, 0, stdout="Grok Build 9.8.7\n", stderr="secret")
 
     monkeypatch.setenv("XAI_API_KEY", "fake-secret")
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -300,17 +291,17 @@ def test_build_receipt_does_not_leak_provider_or_account_identity(
     receipt = module.build_receipt(binary)
     assert set(receipt) == module._RECEIPT_KEYS
     raw = json.dumps(receipt, sort_keys=True).lower()
-    for forbidden in (
-        "email",
-        "account_id",
-        "organization",
-        "home_path",
-        "session_id",
-        "provider_account",
-    ):
+    for forbidden in ("email", "account_id", "organization", "home_path", "session_id", "provider_account"):
         assert forbidden not in raw
     assert receipt["model_turn_performed"] is False
     assert receipt["executive_routing_ready"] is False
+
+
+def test_public_exception_channel_never_echoes_arbitrary_text(capsys):
+    module = _load()
+    rogue = module.PreflightError("Bearer " + "s" * 40)
+    assert rogue.public_code == module.PUBLIC_FAILURE
+    assert str(rogue) == module.PUBLIC_FAILURE
 
 
 def test_cli_errors_are_opaque_and_do_not_echo_path_contents(tmp_path: Path, capsys):
