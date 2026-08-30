@@ -64,7 +64,8 @@ def test_background_foreground_is_activation_and_focus_only():
     assert "chrome.tabs.update(tabId, {active: true})" in text
     assert "chrome.windows.update(windowId, {focused: true})" in text
     assert "chrome.tabs.sendMessage(tabId" in text
-    assert 'kind: "MMX_WEB_SOL_REPROBE"' in text
+    assert 'REPROBE_KIND = "MMX_WEB_SOL_REPROBE"' in text
+    assert "kind: REPROBE_KIND" in text
 
     for forbidden in (
         "chrome.tabs.create",

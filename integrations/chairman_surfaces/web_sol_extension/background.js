@@ -62,8 +62,8 @@ function validInstanceConfig(value) {
   if (!exactKeys(value, INSTANCE_CONFIG_KEYS)) return false;
   if (value.schema !== INSTANCE_CONFIG_SCHEMA || value.protocolMajor !== TRANSPORT_PROTOCOL_MAJOR) return false;
   if (!isHex64(value.instanceId)) return false;
-  if (typeof value.nativeHost !== "string" ||
-      !/^com\.mastermind\.web_sol_surface\.[0-9a-f]{24}$/.test(value.nativeHost)) return false;
+  const expectedNativeHost = `com.mastermind.web_sol_surface.${value.instanceId.slice(0, 24)}`;
+  if (value.nativeHost !== expectedNativeHost) return false;
   for (const field of ["clientPackageVersion", "nativePackageVersion", "extensionPackageVersion"]) {
     if (value[field] !== PACKAGE_VERSION) return false;
   }
