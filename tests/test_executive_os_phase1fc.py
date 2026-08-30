@@ -2364,19 +2364,37 @@ def test_coo_cycle_cli_help_is_inert_and_requires_existing_runtime_root(tmp_path
 
 def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine():
     receipt = run_acceptance("90db9baf5bcc5f2221e3c9870c2aa09a95293c99")
-    assert receipt["cycle"]["actions"] == [
+    cycle = receipt["cycle"]
+    assert cycle["actions"] == [
         "PLANNER_CREATED",
         "DISPATCHED",
         "BLOCKED",
     ]
-    assert receipt["cycle"]["planner_attempt_count"] == 1
-    assert len(receipt["cycle"]["supervisor_dispatch_calls"]) == 1
-    assert receipt["cycle"]["replay_matches_blocked"] is True
-    assert receipt["cycle"]["events_before_replay"] == (
-        receipt["cycle"]["events_after_replay"]
+    assert cycle["blocked_selected_job_id"] == cycle["planner_job_id"]
+    assert cycle["blocked_reason"] == "state_conflict"
+    assert cycle["retry_safety_schema_version"] == (
+        "mastermind.executive_retry_safety_receipt/v1"
     )
+    assert cycle["retry_safety_cause"] == "GENERIC_FAILED"
+    assert cycle["retry_safety_decision"] == "NEEDS_RECONCILIATION"
+    assert cycle["planner_attempt_count_after_replay"] == 1
+    assert len(cycle["supervisor_dispatch_calls"]) == 1
+    assert cycle["replay_matches_blocked"] is True
+    assert cycle["event_stream_unchanged"] is True
+    assert cycle["events_before_replay"] == cycle["events_after_replay"]
+    assert cycle["event_stream_digest_before_replay"] == (
+        cycle["event_stream_digest_after_replay"]
+    )
+    exhaustion = receipt["bounded_exhaustion"]
+    assert exhaustion["actions"] == ["REQUEUED", "DISPATCHED", "BLOCKED"]
+    assert exhaustion["first_requeue_kind"] == "TX9_DETACHED"
+    assert exhaustion["attempt_limit"] == 2
+    assert exhaustion["planner_attempt_count"] == 2
+    assert exhaustion["second_terminal_status"] == "LOST"
+    assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
+    assert len(exhaustion["supervisor_dispatch_calls"]) == 2
     assert receipt["receipt_digest"] == (
-        "1becf689c3a66999fd057276cc9354a10e461a96d18e1026994aad484d8d268a"
+        "63b65e499e40e817d52bf803e70b5b3f0530591d62a0c1388a9bea3ddf84c6fc"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
@@ -2394,10 +2412,13 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
         "be6176fa45f80467923b9c283e9b696f303a4ed2fea5b9e655c8971afcc96b62"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
-        "8453e9c1fe127bef1d8b67d7f01bd441dc5e4bf6c210d52b9400603f5f1a914c"
+        "1572cc4b36d7ccc1fd007624920986b63f23c0f6c40bb9ae051c1b49f5b649a7"
     )
     assert receipt["tx9"]["acceptance_digest"] == (
         "9a43476a06fb3ecc4351b96d5646c7b0e521fd30092c3882bc5e8d4532825585"
+    )
+    assert receipt["bounded_exhaustion"]["acceptance_digest"] == (
+        "0245cfb4ce39c35af076ca3686501ae4e1c51e7acdd77be81b3b5b7cfc8f066c"
     )
     assert receipt["tx9"]["quota_byte_state_equal"] is True
     assert receipt["tx9"]["quarantined_worker_excluded"] is True
@@ -2410,7 +2431,7 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
         "runtime_roots_removed_on_exit": True,
         "provider_adapters_constructed": 0,
         "provider_calls": 0,
-        "executive_supervisor_fixture_instances": 6,
+        "executive_supervisor_fixture_instances": 7,
         "host_install_or_migration_calls": 0,
         "production_armed": False,
     }
