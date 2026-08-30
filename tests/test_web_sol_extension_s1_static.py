@@ -22,15 +22,18 @@ def test_background_has_closed_native_action_listener_and_exact_request_schema()
     assert "port.onMessage.addListener" in text
     assert "handleNativeRequest(request, port)" in text
     assert "validActionRequest" in text
-    assert 'request.action === "INSPECT"' in text
-    assert 'request.action === "FOREGROUND"' in text
+    # The dispatcher freezes the validated request before selecting one of the
+    # two closed actions. Assert the accepted dispatch vocabulary rather than
+    # the pre-validation variable name.
+    assert 'accepted.action === "INSPECT"' in text
+    assert 'accepted.action === "FOREGROUND"' in text
 
     for forbidden in (
-        'request.action === "CLICK"',
-        'request.action === "TYPE"',
-        'request.action === "SEND"',
-        'request.action === "NAVIGATE"',
-        'request.action === "RELOAD"',
+        'accepted.action === "CLICK"',
+        'accepted.action === "TYPE"',
+        'accepted.action === "SEND"',
+        'accepted.action === "NAVIGATE"',
+        'accepted.action === "RELOAD"',
     ):
         assert forbidden not in text
 
@@ -59,8 +62,8 @@ def test_background_uses_ephemeral_exact_fingerprint_to_tab_mapping_only():
 
 def test_background_foreground_is_activation_and_focus_only():
     text = source(BACKGROUND)
-    assert "chrome.tabs.update(tabId, { active: true })" in text
-    assert "chrome.windows.update(windowId, { focused: true })" in text
+    assert "chrome.tabs.update(tabId, {active: true})" in text
+    assert "chrome.windows.update(windowId, {focused: true})" in text
     assert "chrome.tabs.sendMessage(tabId" in text
     assert 'kind: "MMX_WEB_SOL_REPROBE"' in text
 
