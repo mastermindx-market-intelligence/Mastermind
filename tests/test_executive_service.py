@@ -12,8 +12,10 @@ import stat
 import subprocess
 import tempfile
 import ast
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,6 +47,13 @@ from control_plane.executive_service import (
     ServiceConfig,
     ServiceError,
     send_control_request,
+)
+from control_plane.executive_terminal_return import TerminalReturnCandidate
+from control_plane.executive_orchestration_result import canonical_digest
+from tests.test_executive_os_phase1fc import (
+    _complete_ohf_role,
+    _cycle_through_completed_work,
+    _review_body,
 )
 from control_plane.executive_workspace import (
     LAUNCH_CLEAN_STATUS_ARGS,
@@ -257,6 +266,245 @@ def _service(
         ),
     )
     return service, holder
+
+
+def _pending_review(tmp_path: Path, *, intent_id: str):
+    runtime, cycle, _dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path / "runtime", intent_id=intent_id, review_workers=["worker-b"]
+        )
+    )
+    review_created = cycle.run_once(root.job_id)
+    assert review_created.action == "REVIEW_CREATED"
+    review = runtime.jobs.get_job(str(review_created.selected_job_id))
+    work_job = runtime.jobs.get_job(work.attempt.job_id)
+    assert review is not None and work_job is not None
+    return runtime, review, _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(work_job.plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+    )
+
+
+def _first_dispatch_command(job) -> str:
+    return f"coo-cycle:{job.root_job_id}:dispatch:{job.job_id}:attempt:1"
+
+
+def test_finish_pickup_projects_a_sealed_terminal_child_once(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        config = _config(tmp_path)
+        runtime, child, body = _pending_review(
+            tmp_path, intent_id="CEO-SERVICE-TERMINAL-ONCE"
+        )
+        dispatch = runtime.attempts.dispatch_cycle_job(
+            child.job_id,
+            command_id=_first_dispatch_command(child),
+            worker_id="worker-b",
+        )
+        assert dispatch is not None and dispatch.lease_token is not None
+        received: list[TerminalReturnCandidate] = []
+
+        class SealingSupervisor(_FakeSupervisor):
+            async def finish_job(self, active: _Active):
+                if not self.started_jobs:
+                    self.started_jobs.append("finished")
+                    return _complete_ohf_role(
+                        self.runtime, dispatch, body, identity_seed=742
+                    )
+                return None
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: SealingSupervisor(opened),
+            terminal_return_projector=lambda candidate: received.append(candidate),
+        )
+        service.runtime = runtime
+        service.supervisor = SealingSupervisor(runtime)
+        try:
+            active = _Active(lease=AttemptLease(dispatch.attempt, dispatch.lease_token))
+            await service._finish_dispatched(child.job_id, active)
+            await service._finish_dispatched(child.job_id, active)
+            assert [candidate.attempt_id for candidate in received] == [
+                dispatch.attempt.attempt_id
+            ]
+            terminal = service.runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+            assert terminal is not None and terminal.status is AttemptStatus.COMPLETED
+            assert service.service_state == "READY"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_finish_pickup_provider_silence_and_failure_do_not_rewrite_lifecycle(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        for mode in ("silent", "raises"):
+            root = tmp_path / mode
+            config = _config(root)
+            runtime, child, body = _pending_review(
+                root, intent_id=f"CEO-SERVICE-TERMINAL-{mode.upper()}"
+            )
+            dispatch = runtime.attempts.dispatch_cycle_job(
+                child.job_id,
+                command_id=_first_dispatch_command(child),
+                worker_id="worker-b",
+            )
+            assert dispatch is not None and dispatch.lease_token is not None
+
+            class SealingSupervisor(_FakeSupervisor):
+                async def finish_job(self, active: _Active):
+                    return _complete_ohf_role(
+                        self.runtime, dispatch, body, identity_seed=743
+                    )
+
+            async def raises(_candidate: TerminalReturnCandidate) -> None:
+                raise RuntimeError("effect unknown")
+
+            service = ExecutiveControlService(
+                config,
+                supervisor_factory=lambda opened: SealingSupervisor(opened),
+                terminal_return_projector=None if mode == "silent" else raises,
+            )
+            service.runtime = runtime
+            service.supervisor = SealingSupervisor(runtime)
+            try:
+                active = _Active(lease=AttemptLease(dispatch.attempt, dispatch.lease_token))
+                await service._finish_dispatched(child.job_id, active)
+                terminal = service.runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+                job = service.runtime.jobs.get_job(child.job_id)
+                assert terminal is not None and terminal.status is AttemptStatus.COMPLETED
+                assert job is not None and job.status is JobStatus.COMPLETED
+                assert service.service_state == "READY"
+                assert service._terminal_return_last_diagnostic == (
+                    "terminal-return:PROJECTOR_UNBOUND"
+                    if mode == "silent"
+                    else "terminal-return:EFFECT_UNKNOWN:RuntimeError"
+                )
+            finally:
+                await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_cycle_immediate_terminal_outcome_uses_the_same_projection_pickup(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        config = _config(tmp_path)
+        runtime, receipt, body = _pending_review(
+            tmp_path, intent_id="CEO-SERVICE-IMMEDIATE-TERMINAL"
+        )
+        received: list[TerminalReturnCandidate] = []
+
+        class ImmediateTerminalSupervisor(_FakeSupervisor):
+            async def start_cycle_job(self, job_id: str, *, command_id: str):
+                dispatched = self.runtime.attempts.dispatch_cycle_job(
+                    job_id, command_id=command_id, worker_id="worker-b"
+                )
+                assert dispatched is not None and dispatched.lease_token is not None
+                _complete_ohf_role(
+                    self.runtime, dispatched, body, identity_seed=746
+                )
+                terminal = self.runtime.attempts.get_attempt(dispatched.attempt.attempt_id)
+                assert terminal is not None
+                return OrchestrationDispatchOutcome(
+                    command_id=command_id,
+                    job_id=job_id,
+                    attempt=terminal,
+                    outcome="TERMINAL",
+                )
+
+        service = ExecutiveControlService(
+            config,
+            supervisor_factory=lambda opened: ImmediateTerminalSupervisor(opened),
+            terminal_return_projector=lambda candidate: received.append(candidate),
+        )
+        service.runtime = runtime
+        service.supervisor = ImmediateTerminalSupervisor(runtime)
+        try:
+            # This test targets only the immediate-terminal post-dispatch seam;
+            # the host-profile guard has independent coverage in this module.
+            service._require_bound_coo_job = lambda job: job
+            service._require_coo_workspace = lambda job: {}
+            outcome = await service._dispatch_cycle_job_exact(
+                receipt.job_id, _first_dispatch_command(receipt)
+            )
+            assert outcome.outcome == "TERMINAL"
+            assert [candidate.attempt_id for candidate in received] == [
+                outcome.attempt.attempt_id
+            ]
+            assert service.service_state == "READY"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_service_pickup_accepts_a_fresh_sealed_worker_terminal_receipt_shape(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> None:
+        runtime, child, body = _pending_review(
+            tmp_path, intent_id="CEO-SERVICE-SEALED-WORKER"
+        )
+        dispatch = runtime.attempts.dispatch_cycle_job(
+            child.job_id,
+            command_id=_first_dispatch_command(child),
+            worker_id="worker-b",
+        )
+        assert dispatch is not None and dispatch.lease_token is not None
+        _complete_ohf_role(runtime, dispatch, body, identity_seed=747)
+        job = runtime.jobs.get_job(child.job_id)
+        attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+        worker = runtime.workers.get_worker("worker-b")
+        assert job is not None and attempt is not None and worker is not None
+        receipt = dict(attempt.result)
+        receipt["execution_mode"] = "SEALED_WORKER"
+        receipt["result_seal_command_id"] = f"sealed-worker-result:{attempt.attempt_id}"
+        receipt["result_evidence"] = {"schema_version": "fixture"}
+        unsigned = dict(receipt)
+        unsigned.pop("terminal_evidence_digest")
+        receipt["terminal_evidence_digest"] = canonical_digest(unsigned)
+        sealed_job = dataclasses.replace(job, result=receipt)
+        sealed_attempt = dataclasses.replace(
+            attempt, execution_mode="SEALED_WORKER", result=receipt
+        )
+        received: list[TerminalReturnCandidate] = []
+        service = ExecutiveControlService(
+            _config(tmp_path / "service"),
+            supervisor_factory=lambda opened: _FakeSupervisor(opened),
+            terminal_return_projector=lambda candidate: received.append(candidate),
+        )
+        service.runtime = SimpleNamespace(
+            jobs=SimpleNamespace(
+                get_job=lambda job_id: sealed_job if job_id == child.job_id else None
+            ),
+            attempts=SimpleNamespace(
+                get_attempt=lambda attempt_id: (
+                    sealed_attempt if attempt_id == attempt.attempt_id else None
+                )
+            ),
+            workers=SimpleNamespace(
+                get_worker=lambda worker_id: (
+                    worker if worker_id == worker.worker_id else None
+                )
+            ),
+        )
+        await service._project_terminal_return(
+            child.job_id, expected_attempt_id=attempt.attempt_id
+        )
+        assert [candidate.result_status for candidate in received] == ["RESULT"]
+        assert received[0].terminal_digest == receipt["terminal_evidence_digest"]
+        await service.close()
+
+    asyncio.run(exercise())
 
 
 def test_armed_service_requires_an_explicit_autonomy_guard(
