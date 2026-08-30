@@ -175,9 +175,11 @@ On an action-required event, this watcher turn must end with either the lawful s
 or a typed blocker naming the real boundary, for example `CHAIRMAN_ONLY`,
 `ATTENTION_OWNER_CONFLICT`, `EFFECT_UNKNOWN`, `CARRIER_UNREADABLE`, `WRITE_UNAVAILABLE`, or
 `SOURCE_LAW_CONFLICT`. A positive terminal instruction such as “Sol action required,” “waiting for
-Sol,” or “stand by for Sol's ruling” is `NOTIFICATION_ONLY_SELF_DEADLOCK`: the watcher has identified
-its own role as the missing actor and then waited for itself. A prohibition or regression example
-such as “do not wait for Sol” is not itself a self-deadlock finding.
+Sol,” “await Sol,” “defer to Sol,” “escalate to Sol,” “pause for Sol,” or “stand by for Sol's
+ruling” is `NOTIFICATION_ONLY_SELF_DEADLOCK`: the watcher has identified its own role as the missing
+actor and then waited for itself. A prohibition or regression example such as “do not wait for Sol”
+is not itself a self-deadlock finding. Positive and negated phrases must be evaluated in their local
+semantic clause so an unrelated earlier negation cannot conceal a later instruction to wait.
 
 #### `OBSERVER_ONLY`
 
@@ -224,18 +226,35 @@ Triage may use an `aggregate:` carrier for a bounded estate census. It reports o
 attention defect; it never becomes child action-authoritative merely because it found the defect.
 The exact child action surface must act or receive canonical action-target transfer first.
 
+#### Non-authoritative body fence
+
+Every non-authoritative role—`OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, and `TRIAGE_ONLY`—must be
+validated against positive child-modification instructions, not only against its header. It may not
+post/send/issue a child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, or `STOP`; merge/release or arm
+auto-merge; retry, resubmit, requeue, fail over; or commission/start a successor. Explicit
+prohibitions such as “never issue a Sol ruling” remain valid. A parent or triage prompt cannot smuggle
+child authority into prose while retaining a non-authoritative header.
+
+#### Account-local export envelope
+
 Validate an account-local JSON task export with:
 
 ```text
 python3 scripts/audit_sol_watchers.py <tasks.json>
 ```
 
+The native task ID must be present and unique. Duplicate native task IDs are an identity ambiguity
+even when disabled. The enabled state must be a JSON boolean; missing, string, numeric, or conflicting
+`is_enabled` / `enabled` values fail closed. Ordinary reminders may be marked
+`audit_kind: NON_WATCHER`; unknown classifications fail closed. The report must expose
+`invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and
+`duplicate_task_ids` separately rather than laundering wrapper defects into a green watcher count.
+
 The validator is read-only and account-local. A passing prompt audit proves contract conformance,
 not that a scheduled turn fired, consumed Slack, wrote an edge or made the event-driven Wake path
 production-live. Each ChatGPT account may repair only its own native task store unless a separately
-accepted host capability explicitly proves broader authority. When an account export includes
-ordinary reminders or unrelated scheduled tasks, mark each wrapper entry `audit_kind: NON_WATCHER`;
-enabled `NON_WATCHER` entries are listed but excluded from watcher-conformance counts.
+accepted host capability explicitly proves broader authority. Enabled `NON_WATCHER` entries are
+listed but excluded from watcher-conformance counts.
 
 ## Common mistakes
 
@@ -246,6 +265,7 @@ enabled `NON_WATCHER` entries are listed but excluded from watcher-conformance c
 | Watcher detects `RESULT` and only tells Chairman what Sol should do | Re-pin, review, post the lawful Sol edge, then report material outcome |
 | Action-authoritative watcher says “waiting for Sol” | Classify `NOTIFICATION_ONLY_SELF_DEADLOCK`; act or return a typed blocker |
 | Observer sister Sol acts because the authoritative account looks idle | Fail closed until canonical action-target transfer; never elect by recency |
+| Parent/triage prompt smuggles child retry or STOP authority into prose | Reject the non-authoritative prompt; route attention to the exact child owner |
 | Aggregate triage task acts directly on a child it discovered | Route/reconcile attention; exact child action authority remains separate |
 | Worker is waiting and Sol says “the next step is mine” | Send explicit CONTINUE or STOP first |
 | Watcher sees terminal completion and starts the next wave | STOP/disarm; independent wave needs fresh commission law |
