@@ -4,126 +4,112 @@
 **Owner:** Sol, AI CEO  
 **Parent plan:** `docs/superpowers/plans/2026-08-29-wake-pr3-runtime-completion.md`  
 **Operation:** `wake-pr3-wptw2-runtime-completion-plan-20260829-sol-001`  
-**Protected reconciliation basis:** `Mastermind@0604158caca9e3b8a43ec57dd36ca4dadf05198b`, Skillpack v1.0.1 / bootstrap-major 1  
+**Protected reconciliation basis:** current protected source includes MAS-237 RuntimeBinding projection #257 at `75b90cfeb4752d2a356a463b351382c1e0c25cb1`, Skillpack v1.0.1 / bootstrap-major 1  
 **Capability:** RECORDS_ONLY / no runtime authority
 
 ## 1. Narrow precedence
 
-This amendment has precedence over the parent plan only for what an exact Codex `threadId` proves and what W3C must bind before provider mutation. Every other parent-plan owner, no-rebuild boundary, W3A/W3B scope, effect-unknown rule and completion ruler remains controlling.
+This amendment records the current-writer identity problem that W3C must solve before provider mutation. The later sibling record `2026-08-29-wake-pr3-native-delivery-owner-correction.md` is the controlling implementation-owner ruling wherever this amendment's earlier W3A wording differs.
+
+Current controlling law is:
+
+- exact Codex thread identity is necessary but not sufficient current-writer proof;
+- the preferred canonical provider writer is the already-owned worker-local Operator Harness generation (`CodexOperatorAdapter` / WorkerBroker path), not a fresh standalone App Server;
+- W3A stays on the SAME logical #250 carrier but must be repaired toward that existing current-writer owner;
+- W3B remains transport/persistence defense-in-depth and is not the final provider-effect owner;
+- W3C remains held until exact current writer/generation/session evidence is proven at action time.
+
+All parent-plan no-rebuild, effect-unknown, target-acknowledgement and completion boundaries remain controlling.
 
 ## 2. Current first-party Codex finding
 
-Current first-party Codex App Server behavior distinguishes two materially different paths:
+Current first-party Codex behavior distinguishes two materially different facts:
 
-1. **running-thread reconnect inside the owning persistent App Server** — `thread/resume(threadId=...)` can rejoin the already-loaded/running thread and preserve its active runtime;
-2. **cold resume in another App Server process** — the same persisted thread identity can be loaded from durable thread history when it is not resident in that process.
+1. a persisted Codex thread/native handle can be loaded or resumed by an App Server process;
+2. the same persisted thread identity does not by itself prove which process/generation is the current authorized writer for the live governed task.
 
 Therefore:
 
 > **Exact Codex thread identity is necessary but is not sufficient proof of exact current writer identity.**
 
-A fresh standalone `codex app-server` process that cold-resumes the same persisted thread must not be treated as the current writer merely because the returned `thread.id` matches. Starting a new turn there while another process may still own the active task would violate Mastermind's one-writer/effect-unknown law.
+A fresh standalone App Server that can load/resume the same persisted thread must not be treated as the current writer merely because the returned thread id matches. Starting a turn there while another governed generation may still own the task violates Mastermind's one-writer/effect-unknown law.
 
-This finding strengthens, rather than replaces, the existing MAS-237 RuntimeBinding requirement.
+### 2.1 First-party local control transport is only an optional already-running-writer seam
 
-### 2.1 Supported local control transport exists, but ownership must be proven
+Current first-party `codex app-server` exposes supported local Unix-socket control transport. That may be useful only for a genuinely already-running App Server writer whose ownership is independently proven. The default socket path alone is never identity and absence of a socket never authorizes daemon bootstrap/restart or a replacement writer.
 
-Current first-party `codex app-server` also exposes a supported local Unix-socket transport:
+The accepted Mastermind path is stronger where the Operator Harness owns the current generation: protected source can read `active_operator_binding_facts(...)` from the existing Runtime/OHF owner and project the RuntimeBinding without persisting a second registry. W3C should consume those canonical source facts and route provider mutation back through the existing WorkerBroker / worker-local `CodexOperatorAdapter` generation.
 
-```text
---listen unix://
-$CODEX_HOME/app-server-control/app-server-control.sock
-```
+For any alternate already-running App Server seam, action-time proof would still need to bind endpoint/process generation and the loaded native thread to the accepted current writer before provider I/O. No GUI/title/recency fallback.
 
-The Codex documentation calls this transport intended for local app-server control-plane clients. The first-party `app-server-daemon` passively probes that socket, tracks a daemon PID/backend, and refuses to manage an app server found on the socket when it is not owned by that daemon. `codex app-server proxy` can proxy one raw websocket stream to the same socket.
+## 3. W3A interpretation — SAME #250 carrier, current implementation rejected
 
-This is a candidate **attach** seam for W3C because a control client can connect to an already-running App Server instead of starting a second process. It is not proof that the Chairman's current Codex Desktop tasks use that socket or daemon.
+W3A remains the same logical operation/carrier, but its current process-spawning implementation is **not** an acceptable merge-ready production primitive.
 
-W3C/MAS-237 therefore require a passive action-time host falsifier before adopting this seam:
+PR #250 currently starts its own `AppServerClient` and cold-resumes the supplied thread. That is useful historical RED/protocol evidence only; it does not satisfy current-writer ownership and must not land in that form.
 
-1. derive the expected Codex home without mutating it;
-2. prove whether the accepted current writer exposes a Unix control socket;
-3. identify the socket inode/path and owning process/process generation without starting, restarting or replacing any App Server;
-4. connect read-only and initialize one control connection;
-5. use current App Server read APIs such as `thread/loaded/list` / `thread/read` to prove the exact bound thread is **loaded in that process**, not merely persisted on disk;
-6. prove the process/endpoint remains the current RuntimeBinding writer immediately before any later provider mutation.
-
-Absence of this proof does not authorize `codex remote-control start`, daemon bootstrap, daemon restart, a new standalone App Server, or GUI fallback. Those actions would create or replace a writer and require a separate explicit effect operation after the old writer is known absent/reconciled.
-
-## 3. W3A interpretation
-
-W3A remains a valid production-disarmed transport primitive:
+Repair the SAME #250 carrier toward this capability:
 
 ```text
-exact supplied thread id
--> initialize accepted App Server client
--> thread/resume(exact id)
--> turn/start(exact id)
+trusted current RuntimeBinding + active OHF source facts
+-> exact existing ProcessGenerationRef / worker-local generation
+-> WorkerBroker / RemoteCodexOperatorAdapter attention operation
+-> worker-local CodexOperatorAdapter revalidates exact generation + provider_session_id/current writer immediately before provider I/O
+-> already-owned state.client performs one bounded attention turn/start
 -> accepted/delivered observation
 ```
 
-W3A proves protocol behavior and pre-submit versus post-submit uncertainty. It **does not** prove that the supplied client is the current owning App Server/writer for a live Desktop/Codex task.
-
-The current W3A implementation uses the existing process-owning OHF `AppServerClient`; that factory starts and later contains/closes its own child App Server. It is therefore a cold/isolated protocol primitive, not the final current-writer attachment client. W3C may reuse W3A's request/observation semantics behind a different accepted transport client connected to the proven owning endpoint, but it must not call a process-spawning factory merely because the thread ID is correct.
-
 W3A MUST NOT:
 
-- discover a thread by title, timestamp, OCR, window order or newest-session heuristic;
-- claim that spawning a fresh App Server is equivalent to waking an already-running Desktop writer;
-- select or rotate a RuntimeBinding;
-- bypass an effect-unknown existing writer;
+- call `AppServerClient.start()` to create another writer;
+- independently `thread/resume`, `thread/start` or `thread/fork` a persisted task;
+- discover a task by title, timestamp, OCR, window order or newest-session heuristic;
+- select/rotate RuntimeBinding or start/resume a generation;
+- bypass an unresolved/effect-unknown current writer;
+- make Agent Relay/Wake ledger the provider-effect owner;
 - become production-armed by merge alone.
 
-Its capability state after merge, absent a real owning-endpoint canary, is `BUILT_NOT_PROVEN`.
+The repaired W3A provider-local boundary must preserve current Operator Harness effect-unknown law: once provider write may have begun, ambiguity is non-retryable until same-carrier reconciliation.
 
 ## 4. W3C current-writer gate
 
-Before W3C may issue the first real provider `turn/start`, trusted composition must prove all of:
+Before W3C may issue the first real provider mutation, trusted composition must prove all of:
 
-1. the target `RuntimeBinding` is the current accepted generation for the logical session alias;
-2. the binding names the exact Codex thread/native handle;
-3. the binding also identifies or resolves the **current owning App Server/writer endpoint/process generation** through an accepted runtime-only seam;
-4. the endpoint/process generation is still current immediately before provider mutation;
-5. no unresolved prior writer/effect exists for the same logical operation that would make a second writer unsafe;
-6. the provider client used for mutation is connected to that exact owning endpoint, rather than merely cold-resuming the same persisted thread in a fresh standalone process.
+1. the target `RuntimeBinding` is the current accepted binding for the logical session alias;
+2. the binding's native handle/provider-session coordinate matches current canonical OHF source facts;
+3. the exact current Worker/Attempt/process generation is identified from the existing Runtime/OHF owner, not invented from Slack/model/browser state;
+4. the selected worker-local `CodexOperatorAdapter` generation/state is still current and matches those coordinates immediately before provider I/O;
+5. no unresolved prior writer/effect exists for the same governed operation that would make another submission unsafe;
+6. provider mutation uses the already-owned generation/client rather than a cold-resumed fresh process.
 
-If exact current writer/endpoint cannot be proven:
+If current writer/generation/session cannot be proven, use the current typed fail-closed reconciliation state (for example `SESSION_LOST / RUNTIME_BINDING_RECONCILIATION_REQUIRED` or the accepted equivalent). No provider call, fresh App Server, daemon bootstrap, GUI fallback, retry or failover is authorized.
 
-```text
-SESSION_LOST / RUNTIME_BINDING_RECONCILIATION_REQUIRED
-```
+## 5. MAS-237 / RuntimeBinding relationship
 
-or the current accepted typed equivalent applies. No provider call, GUI fallback, new App Server writer, retry or failover is authorized.
+Protected #257 now provides the canonical **storeless** RuntimeBinding projection over existing Runtime/OHF source facts:
 
-## 5. MAS-237 requirement strengthened
+- `active_operator_binding_facts(...)` reads the accepted current Operator Harness source in one caller-owned snapshot;
+- `project_runtime_binding(...)` derives the session alias/binding id/generation/native provider-session handle/account/surface without creating another persistence plane.
 
-MAS-237 must not stop at:
+The projected `RuntimeBinding` is intentionally not a new writer-endpoint registry. W3C/current-writer delivery must combine it with current authoritative OHF generation/source facts and then revalidate inside the worker-local `CodexOperatorAdapter` immediately before provider mutation.
 
-```text
-session_alias + binding_id + generation + native thread id
-```
-
-for the production Codex wake path if those fields cannot prove the current writer endpoint.
-
-The accepted production projection must carry or resolve enough runtime-only evidence to bind the exact current writer/process endpoint without checking that coordinate into Git or Slack. If an existing RuntimeBinding/Operator-Harness seam already owns that evidence, extend/project it; do not create a second provider-session registry.
-
-A Unix control socket is one acceptable endpoint coordinate only when passive proof ties its inode/path and owner process generation to the current RuntimeBinding and proves the bound thread is loaded there. The default path alone is not identity.
+Do **not** widen RuntimeBinding persistence merely to duplicate worker/process/generation data already owned by Runtime/OHF. If a different already-running App Server seam is ever adopted, its endpoint/process proof must be derived from existing runtime-only ownership and remain non-persisted unless a separately adjudicated owner change is required.
 
 ## 6. Canary falsifier
 
 A real W3C canary fails if any of the following is true:
 
-- the canary starts a fresh standalone App Server and only proves the same thread ID;
-- the canary bootstraps/restarts the first-party daemon merely because the expected control socket is absent;
-- the control socket path exists but its owner/process generation is not bound to the current RuntimeBinding;
-- the exact thread is only persisted/readable but not proven loaded in the current owning process;
-- two processes can concurrently issue turns to the same logical task under one supposedly current binding;
-- the old active writer is effect-unknown when the new writer begins;
-- endpoint/process generation changed after route derivation and before provider submission;
-- success is inferred from resumed history rather than a turn on the exact current owning endpoint.
+- it starts a fresh standalone App Server and merely proves the same thread id;
+- it performs an independent cold `thread/resume` before provider mutation;
+- it bootstraps/restarts a daemon because an expected socket is absent;
+- it cannot tie the chosen writer to the exact current RuntimeBinding + active OHF process generation;
+- two processes/generations can concurrently issue turns to the same governed task;
+- the old active writer is effect-unknown when another write begins;
+- generation/provider-session/native-handle/Attempt identity changes after route derivation and before provider I/O;
+- success is inferred from persisted/resumed history instead of one turn on the exact current owned generation.
 
-The canary passes this gate only when the exact current writer is proven before the single persisted provider submission.
+The canary passes this gate only when the provider write occurs through the exact already-owned current writer and duplicate observation/restart produces zero second submission.
 
 ## 7. Do not rebuild
 
-Do not create a new writer registry, thread database, GUI/session selector, daemon, provider lifecycle owner or retry system to satisfy this amendment. Reuse the canonical RuntimeBinding / Operator Harness / Codex App Server ownership seams and extend only the missing runtime projection needed to prove the current writer.
+Do not create a new writer registry, thread database, GUI/session selector, daemon, provider lifecycle owner or retry system to satisfy this amendment. Reuse canonical RuntimeBinding / Runtime/OHF source facts / WorkerBroker / `CodexOperatorAdapter` ownership and extend only the smallest attention operation needed on the SAME W3A carrier.
