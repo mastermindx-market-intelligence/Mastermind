@@ -141,6 +141,14 @@ def test_program_is_vertical_and_has_real_promotion_proof() -> None:
         assert required in text
 
 
+def test_prepared_action_commit_uses_authenticated_storeless_token() -> None:
+    combined = "\n".join(_text(path) for path in (SPEC, CATALOG, PROGRAM))
+    assert "commit_prepared_action(prepared_token)" in combined
+    assert "commit_prepared_action(prepared_digest)" not in combined
+    assert "authenticated self-contained expiring token" in combined
+    assert "server validates its integrity and expiry before use" in combined
+
+
 def test_records_state_is_honest() -> None:
     combined = "\n".join(_text(path) for path in (SPEC, CATALOG, PROGRAM))
     assert "SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT" in combined
