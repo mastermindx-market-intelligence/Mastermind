@@ -148,3 +148,50 @@ def test_audit_tasks_reports_invalid_enabled_and_ignores_disabled() -> None:
     assert FindingCode.NOTIFICATION_ONLY_SELF_DEADLOCK in {
         finding.code for finding in by_id["bad"].audit.findings
     }
+
+
+def test_cli_emits_valid_json_and_zero_for_clean_export(tmp_path, capsys) -> None:
+    from scripts.audit_sol_watchers import main
+
+    source = tmp_path / "tasks.json"
+    source.write_text(
+        __import__("json").dumps(
+            {"tasks": [{"id": "good", "title": "Good", "is_enabled": True, "prompt": _authoritative_prompt()}]}
+        ),
+        encoding="utf-8",
+    )
+
+    assert main([str(source)]) == 0
+    output = __import__("json").loads(capsys.readouterr().out)
+    assert output["schema"] == "mastermind.sol_watcher_audit.v1"
+    assert output["valid"] is True
+    assert output["summary"]["invalid_enabled_tasks"] == 0
+
+
+def test_cli_returns_one_for_invalid_enabled_watcher(tmp_path, capsys) -> None:
+    from scripts.audit_sol_watchers import main
+
+    source = tmp_path / "tasks.json"
+    source.write_text(
+        __import__("json").dumps(
+            [{"id": "bad", "title": "Bad", "is_enabled": True, "prompt": "wait for Sol"}]
+        ),
+        encoding="utf-8",
+    )
+
+    assert main([str(source)]) == 1
+    output = __import__("json").loads(capsys.readouterr().out)
+    assert output["valid"] is False
+    assert output["summary"]["invalid_enabled_tasks"] == 1
+
+
+def test_cli_returns_two_for_malformed_input(tmp_path, capsys) -> None:
+    from scripts.audit_sol_watchers import main
+
+    source = tmp_path / "tasks.json"
+    source.write_text("{not-json", encoding="utf-8")
+
+    assert main([str(source)]) == 2
+    error = __import__("json").loads(capsys.readouterr().err)
+    assert error["schema"] == "mastermind.sol_watcher_audit_error.v1"
+    assert error["error"] == "INVALID_INPUT"
