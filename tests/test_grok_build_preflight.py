@@ -310,7 +310,7 @@ def test_cli_errors_are_opaque_and_do_not_echo_path_contents(tmp_path: Path, cap
     assert module.main(["--grok-binary", str(missing)]) == 2
     output = capsys.readouterr().out
     assert "private-user@example.com" not in output
-    assert "BINARY_UNAVAILABLE" in output
+    assert json.loads(output) == {"ok": False, "error": module.PUBLIC_FAILURE}
 
 
 def test_acp_probe_emits_only_initialize_and_authenticate(
