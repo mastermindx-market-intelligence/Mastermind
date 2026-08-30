@@ -71,8 +71,10 @@ def test_subject_digest_refuses_ambiguous_or_unsafe_text(
         subject_digest(issuer=issuer, subject=subject)
     assert caught.value.code is AuthErrorCode.INVALID_POLICY
     assert caught.value.public_message == "authentication policy refused"
-    assert issuer not in str(caught.value)
-    assert subject not in str(caught.value)
+    if issuer:
+        assert issuer not in str(caught.value)
+    if subject:
+        assert subject not in str(caught.value)
 
 
 def test_exact_policy_wire_is_accepted_and_normalized() -> None:
@@ -120,9 +122,17 @@ def test_exact_policy_wire_is_accepted_and_normalized() -> None:
         lambda value: value.update(allowed_algorithms=["RS256", "HS256"]),
         lambda value: value.update(required_scopes=[]),
         lambda value: value.update(
-            required_scopes=["mastermind.steward.read", "mastermind.steward.read"]
+            required_scopes=[
+                "mastermind.steward.read",
+                "mastermind.steward.read",
+            ]
         ),
-        lambda value: value.update(required_scopes=["mastermind.steward.write", "mastermind.steward.read"]),
+        lambda value: value.update(
+            required_scopes=[
+                "mastermind.steward.write",
+                "mastermind.steward.read",
+            ]
+        ),
         lambda value: value.update(allowed_subject_digests=[]),
         lambda value: value.update(clock_skew_seconds=True),
         lambda value: value.update(clock_skew_seconds=121),
