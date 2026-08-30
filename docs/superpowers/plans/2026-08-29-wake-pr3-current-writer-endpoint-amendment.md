@@ -26,6 +26,30 @@ A fresh standalone `codex app-server` process that cold-resumes the same persist
 
 This finding strengthens, rather than replaces, the existing MAS-237 RuntimeBinding requirement.
 
+### 2.1 Supported local control transport exists, but ownership must be proven
+
+Current first-party `codex app-server` also exposes a supported local Unix-socket transport:
+
+```text
+--listen unix://
+$CODEX_HOME/app-server-control/app-server-control.sock
+```
+
+The Codex documentation calls this transport intended for local app-server control-plane clients. The first-party `app-server-daemon` passively probes that socket, tracks a daemon PID/backend, and refuses to manage an app server found on the socket when it is not owned by that daemon. `codex app-server proxy` can proxy one raw websocket stream to the same socket.
+
+This is a candidate **attach** seam for W3C because a control client can connect to an already-running App Server instead of starting a second process. It is not proof that the Chairman's current Codex Desktop tasks use that socket or daemon.
+
+W3C/MAS-237 therefore require a passive action-time host falsifier before adopting this seam:
+
+1. derive the expected Codex home without mutating it;
+2. prove whether the accepted current writer exposes a Unix control socket;
+3. identify the socket inode/path and owning process/process generation without starting, restarting or replacing any App Server;
+4. connect read-only and initialize one control connection;
+5. use current App Server read APIs such as `thread/loaded/list` / `thread/read` to prove the exact bound thread is **loaded in that process**, not merely persisted on disk;
+6. prove the process/endpoint remains the current RuntimeBinding writer immediately before any later provider mutation.
+
+Absence of this proof does not authorize `codex remote-control start`, daemon bootstrap, daemon restart, a new standalone App Server, or GUI fallback. Those actions would create or replace a writer and require a separate explicit effect operation after the old writer is known absent/reconciled.
+
 ## 3. W3A interpretation
 
 W3A remains a valid production-disarmed transport primitive:
@@ -39,6 +63,8 @@ exact supplied thread id
 ```
 
 W3A proves protocol behavior and pre-submit versus post-submit uncertainty. It **does not** prove that the supplied client is the current owning App Server/writer for a live Desktop/Codex task.
+
+The current W3A implementation uses the existing process-owning OHF `AppServerClient`; that factory starts and later contains/closes its own child App Server. It is therefore a cold/isolated protocol primitive, not the final current-writer attachment client. W3C may reuse W3A's request/observation semantics behind a different accepted transport client connected to the proven owning endpoint, but it must not call a process-spawning factory merely because the thread ID is correct.
 
 W3A MUST NOT:
 
@@ -59,7 +85,7 @@ Before W3C may issue the first real provider `turn/start`, trusted composition m
 3. the binding also identifies or resolves the **current owning App Server/writer endpoint/process generation** through an accepted runtime-only seam;
 4. the endpoint/process generation is still current immediately before provider mutation;
 5. no unresolved prior writer/effect exists for the same logical operation that would make a second writer unsafe;
-6. the provider client used by W3A is connected to that exact owning endpoint, rather than merely cold-resuming the same persisted thread in a fresh standalone process.
+6. the provider client used for mutation is connected to that exact owning endpoint, rather than merely cold-resuming the same persisted thread in a fresh standalone process.
 
 If exact current writer/endpoint cannot be proven:
 
@@ -81,11 +107,16 @@ for the production Codex wake path if those fields cannot prove the current writ
 
 The accepted production projection must carry or resolve enough runtime-only evidence to bind the exact current writer/process endpoint without checking that coordinate into Git or Slack. If an existing RuntimeBinding/Operator-Harness seam already owns that evidence, extend/project it; do not create a second provider-session registry.
 
+A Unix control socket is one acceptable endpoint coordinate only when passive proof ties its inode/path and owner process generation to the current RuntimeBinding and proves the bound thread is loaded there. The default path alone is not identity.
+
 ## 6. Canary falsifier
 
 A real W3C canary fails if any of the following is true:
 
 - the canary starts a fresh standalone App Server and only proves the same thread ID;
+- the canary bootstraps/restarts the first-party daemon merely because the expected control socket is absent;
+- the control socket path exists but its owner/process generation is not bound to the current RuntimeBinding;
+- the exact thread is only persisted/readable but not proven loaded in the current owning process;
 - two processes can concurrently issue turns to the same logical task under one supposedly current binding;
 - the old active writer is effect-unknown when the new writer begins;
 - endpoint/process generation changed after route derivation and before provider submission;
