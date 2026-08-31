@@ -70,6 +70,13 @@ The caller cannot rewrite their owner or source identity. A1 validates that thei
 do not postdate the decision snapshot. An attestation may be `CURRENT`, `STALE`, `CONFLICT` or
 `UNKNOWN`; the derived source preserves that state when its SHA matches the boot packet.
 
+This pure composer **does not authenticate** GitHub, Agent OS, Chairman identity or the acquisition
+path merely because a JSON value uses an owner label. A `CURRENT` attestation is operationally
+meaningful only when a separately accepted **trusted source adapter** supplies the owner payload and
+its attestation together through an approved path. A model-authored or arbitrary local JSON bundle
+is fixture/evidence input only. It never grants technical identity, organizational authority or a
+reusable effect token, and every output remains `execution_authority_granted=false`.
+
 A derived Strategic State or Agent OS receipt is not observed before its newest load-bearing input.
 Its `observed_at` is therefore the later of the boot/brief observation and the canonical revision
 attestation observation. This prevents a later attestation from being backdated into an earlier
@@ -99,14 +106,20 @@ Agent OS receipt. The exact brief payload is content-addressed.
 
 `AGENT_OS:ceo_brief` is CURRENT only when all are true:
 
-- the brief schema is exact;
-- structured `inputs.degraded` and `warnings` lists are present and empty;
+- the brief schema and complete current owner wire shape are present;
+- `generated_at`, `since`, `since_label`, counts, inputs, needs-CEO, blocked, finished, running,
+  readiness and warnings fields are structurally valid;
+- every readiness row contains the published identity, state, reason, dependency and source fields;
+- structured `inputs.degraded`, `readiness.degraded` and `warnings` lists are present and empty;
 - the boot packet reports a full Macro checkout SHA;
 - the checkout SHA matches the canonical Agent OS revision attestation;
 - the attestation itself is CURRENT.
 
-Missing, wrong-schema or degraded input becomes UNKNOWN. A valid brief whose local Macro revision
-disagrees with the canonical attestation becomes CONFLICT rather than healthy/current.
+The validation is wire-shape and degradation validation only. It does not re-rank work, infer an
+escalation, recompute readiness or become a second Agent OS implementation. Missing, partial,
+wrong-schema, malformed or degraded input becomes UNKNOWN. An invalid or missing brief observation
+time never inherits the boot-packet clock to manufacture CURRENT. A valid brief whose local Macro
+revision disagrees with the canonical attestation becomes CONFLICT rather than healthy/current.
 
 ### Other owners
 
@@ -124,10 +137,13 @@ additional-receipt cap preserves A1's total 128-receipt bound after the five ded
 - local Mastermind/canonical SHA disagreement -> CONFLICT;
 - unresolved Macro revision -> UNKNOWN Agent OS receipt;
 - local Macro/canonical SHA disagreement -> CONFLICT;
-- missing/degraded/wrong-schema Agent OS brief -> UNKNOWN receipt;
+- missing, partial, malformed, degraded or wrong-schema Agent OS brief -> UNKNOWN receipt;
+- missing/invalid Agent OS brief timestamp -> UNKNOWN; no fallback can produce CURRENT;
+- invalid readiness wire or non-empty readiness degradation -> UNKNOWN;
 - invalid or non-UTC observation time -> fail closed;
 - reserved owner injected through additional receipts -> refused;
 - duplicate source reference -> refused;
+- duplicate JSON object key at any nesting level -> opaque CLI refusal before composition;
 - future-dated, malformed or unknown A1 receipt -> A1 refusal/error;
 - CLI invalid input -> fixed opaque `INVALID_SOURCE_BUNDLE`, exit 2, no input leakage.
 
@@ -135,13 +151,17 @@ additional-receipt cap preserves A1's total 128-receipt bound after the five ded
 
 - deterministic repeated composition and digests;
 - owner documents are not mutated;
-- current strategic and Agent OS sources compose as CURRENT only from structured evidence plus
-  matching canonical revision attestations;
+- current strategic and Agent OS sources compose as CURRENT only from complete structured evidence
+  plus matching canonical revision attestations;
+- structurally partial or malformed Agent OS briefs remain UNKNOWN even when local and canonical SHAs
+  match;
 - stale local `master` and Macro checkouts produce CONFLICT rather than false CURRENT;
 - unresolved/degraded sources remain UNKNOWN and block dependent options;
 - stale/unknown/conflicting attestations propagate truthfully;
 - attestations are closed, load-bearing and full-SHA only;
 - derived observation time is the latest load-bearing input and future evidence is rejected;
+- strict recursive JSON decoding rejects top-level and nested duplicate-key overwrite attempts on
+  both file and stdin paths while leaking no duplicated content;
 - static import fence proves the pure composer imports no filesystem, subprocess, network,
   connector, Executive runtime, Capacity or Agent OS implementation owner;
 - reserved-owner and duplicate-reference hostile cases fail closed;
@@ -155,7 +175,7 @@ A2 does not call Agent OS, GitHub, Slack, Linear, Executive OS, Capacity, Runtim
 Steward or a model. It does not create a Job, select a worker, write durable memory, merge, deploy,
 trade, or grant execution authority. The existing CEO boot packet and future accepted Steward/owner
 adapters remain the gather paths. Supplying a revision attestation is an explicit current-source
-input, not a network lookup performed by this pure module.
+input, not a network lookup or authenticated provenance ceremony performed by this pure module.
 
 ## Stop condition
 
