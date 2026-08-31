@@ -369,6 +369,7 @@ def test_stale_orphan_identity_conflict_survives_filter_and_join_pruning():
     queries = (
         {"target_seat": steward.Seat.CEO},
         {"responsibility_ref": "WS:STALE-ORPHAN-PRIMARY"},
+        {"responsibility_ref": "WS:STALE-ORPHAN-MISSING"},
         {},
     )
     for query in queries:
