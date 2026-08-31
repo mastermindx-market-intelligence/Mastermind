@@ -28,6 +28,7 @@ def _fact(**overrides) -> CapabilityFact:
         "privilege_class": PrivilegeClass.R0_OBSERVE,
         "production_armed": False,
         "required_scopes": ("contents:read", "pull_requests:read"),
+        "required_write_scopes": (),
         "current_scopes": ("contents:read", "pull_requests:read"),
         "confirmation_required": False,
         "prepared_action_required": False,
@@ -88,6 +89,7 @@ def test_future_dated_live_proof_cannot_promote_or_arm_write() -> None:
             production_armed=True,
             write_capable=True,
             required_scopes=("contents:read", "pull_requests:write"),
+            required_write_scopes=("pull_requests:write",),
             current_scopes=("contents:read", "pull_requests:write"),
             live_proof_current=True,
             last_proven_at="2026-08-30T20:00:01Z",
@@ -121,6 +123,9 @@ def test_write_capability_with_broad_scope_but_production_disarmed_is_read_only(
         production_armed=False,
         confirmation_required=True,
         prepared_action_required=True,
+        required_scopes=("contents:read", "pull_requests:write"),
+        required_write_scopes=("pull_requests:write",),
+        current_scopes=("contents:read", "pull_requests:write"),
         live_proof_current=True,
         last_proven_at="2026-08-30T19:59:00Z",
         write_capable=True,
@@ -140,6 +145,7 @@ def test_missing_required_scope_keeps_write_unavailable_and_explicit() -> None:
         production_armed=True,
         write_capable=True,
         required_scopes=("contents:read", "pull_requests:write"),
+        required_write_scopes=("pull_requests:write",),
         current_scopes=("contents:read",),
         live_proof_current=True,
         last_proven_at="2026-08-30T19:59:00Z",
@@ -150,6 +156,61 @@ def test_missing_required_scope_keeps_write_unavailable_and_explicit() -> None:
     assert status.write_serviceable is False
     assert status.proof_state is CapabilityState.PARTIAL
     assert "REQUIRED_SCOPE_MISSING" in status.issues
+
+
+def test_scope_role_is_explicit_and_not_inferred_from_name() -> None:
+    status = _project(
+        _fact(
+            name="repo-write",
+            privilege_class=PrivilegeClass.W1_ROUTINE,
+            production_armed=True,
+            write_capable=True,
+            required_scopes=("pull_requests:read", "repo"),
+            required_write_scopes=("repo",),
+            current_scopes=("pull_requests:read",),
+            live_proof_current=True,
+            last_proven_at="2026-08-30T19:59:00Z",
+        )
+    ).capabilities[0]
+    assert status.required_read_scopes == ("pull_requests:read",)
+    assert status.required_write_scopes == ("repo",)
+    assert status.missing_scopes == ("repo",)
+    assert status.availability is Availability.READ_ONLY
+    assert status.read_serviceable is True
+    assert status.write_serviceable is False
+
+
+def test_write_like_scope_name_is_read_critical_without_explicit_role() -> None:
+    status = _project(
+        _fact(
+            name="opaque-scope-contract",
+            privilege_class=PrivilegeClass.W1_ROUTINE,
+            production_armed=True,
+            write_capable=True,
+            required_scopes=("contents:read", "pull_requests:write"),
+            required_write_scopes=(),
+            current_scopes=("contents:read",),
+            live_proof_current=True,
+            last_proven_at="2026-08-30T19:59:00Z",
+        )
+    ).capabilities[0]
+    assert status.availability is Availability.UNAVAILABLE
+    assert status.read_serviceable is False
+    assert status.write_serviceable is False
+    assert "READ_SCOPE_MISSING" in status.issues
+
+
+def test_required_write_scope_contract_fails_closed_on_invalid_shape() -> None:
+    with pytest.raises(CapabilityProjectionError, match="subset of required_scopes"):
+        _project(_fact(required_write_scopes=("repo",)))
+    with pytest.raises(CapabilityProjectionError, match="write_capable=true"):
+        _project(
+            _fact(
+                required_scopes=("contents:read", "repo"),
+                required_write_scopes=("repo",),
+                write_capable=False,
+            )
+        )
 
 
 def test_excess_ambient_scope_is_visible_without_granting_or_removing_serviceability() -> None:
@@ -324,6 +385,7 @@ def test_current_execution_registry_remains_source_owner_and_unarmed() -> None:
             privilege_class=PrivilegeClass.W2_CONSEQUENTIAL,
             production_armed=registry.production_armed,
             required_scopes=("workspace:read", "workspace:write"),
+            required_write_scopes=("workspace:write",),
             current_scopes=("workspace:read", "workspace:write"),
             write_capable=profile.write_capable,
             live_proof_current=False,
@@ -349,6 +411,8 @@ def test_output_is_secret_free_and_carries_required_contract_fields() -> None:
         "availability",
         "production_armed",
         "required_scopes",
+        "required_read_scopes",
+        "required_write_scopes",
         "current_scopes",
         "missing_scopes",
         "excess_scopes",
