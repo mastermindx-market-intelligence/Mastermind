@@ -1,10 +1,10 @@
 # SCF-CAP1 — Sol Capability Introspection Core
 
 **Operation:** `mastermind-sol-capability-fabric-cap1-20260830-sol-001`  
-**Hardening child:** `mastermind-sol-capability-fabric-cap1-r1-20260830-sol-001`  
+**Hardening children:** `mastermind-sol-capability-fabric-cap1-r1-20260830-sol-001`, `mastermind-sol-capability-fabric-cap1-r2-20260830-sol-001`  
 **Parent:** `mastermind-sol-capability-fabric-20260830-sol-001`  
 **Protected pickup:** `mastermindx-market-intelligence/Mastermind@98bc7a71dcd70947c7a18eb5af7493a2f62a2571`  
-**Current compatible procedure at hardening:** `mastermindx-market-intelligence/Mastermind@e19ef1c54cc6f2b7bfc652a78bf94a209fcb42b9`  
+**Current compatible procedure at R2:** `mastermindx-market-intelligence/Mastermind@eccf0a3fae8b8597c2ad0bc4f830e31b220415d2`  
 **Cognition:** `COGNITION_ROUTE: CHAT_PRO_DEFAULT`  
 **State at candidate source:** `BUILT_NOT_PROVEN / PRODUCTION_INERT`
 
@@ -139,6 +139,17 @@ The digest is SHA-256 over canonical sorted JSON excluding the digest field itse
   `prepared_action_required=true` is contradictory input and fails closed;
 - `write_serviceable=true` is impossible for `R0_OBSERVE` even if future code bypasses input
   normalization; only W1/W2/A3 can represent an effect-bearing capability;
+- `production_armed=true` requires `write_capable=true`; a read-only capability family cannot carry a
+  production write arm;
+- a production arm is contradictory when `source_state` is `NOT_BUILT`, `SPEC_ONLY`, or
+  `REJECTED_BY_DESIGN`;
+- every W2 or A3 write family requires `prepared_action_required=true`;
+- every A3 write family additionally requires `confirmation_required=true`; W1 has no universal
+  confirmation requirement and W2 confirmation remains owner/action-specific;
+- defense-in-depth write projection repeats the W2/A3 prepared-action and A3 confirmation guards, so
+  bypassing normalization cannot manufacture `write_serviceable=true`;
+- a future W2/A3 family remains representable while disarmed: `write_capable=true`, explicit write
+  scopes, required guard flags, `production_armed=false`, and an unavailable/spec-only state;
 - a capability whose own source state is `REJECTED_BY_DESIGN` is always `REFUSED`;
 - a **required** dependency in `REJECTED_BY_DESIGN` makes the top-level capability
   `REJECTED_BY_DESIGN / REFUSED`; it may not be laundered into generic `BROKEN` or availability;
@@ -202,6 +213,12 @@ or owner-native effect reconciliation.
 - write-looking scope names are read-critical unless explicitly classified;
 - invalid write-scope partition fails closed;
 - R0 write, arming, prepared-action or confirmation contradictions fail closed;
+- W2 and A3 writes without prepared-action guards fail closed;
+- A3 writes without explicit confirmation fail closed;
+- non-write families cannot carry a production arm;
+- `NOT_BUILT`, `SPEC_ONLY`, and `REJECTED_BY_DESIGN` sources cannot be armed;
+- future disarmed W2/A3 capability families remain representable but unavailable;
+- the private projection seam cannot emit a write-serviceable W2/A3 capability with missing guards;
 - every capability and nested collection ceiling rejects the first out-of-bounds item;
 - excess ambient scope is explicit, sorted, digest-bearing and authority-neutral;
 - missing required dependency becomes `DARK_OR_DISCONNECTED`;
