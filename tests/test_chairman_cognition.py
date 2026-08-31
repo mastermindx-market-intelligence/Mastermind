@@ -131,6 +131,7 @@ def _document(*options, envelope=None):
             "autonomous_production_deploy": "prohibited",
             "autonomous_live_capital_execution": "prohibited",
             "duplicate_control_planes": "prohibited",
+            "unbounded_autonomous_strategic_modification": "prohibited",
         },
         "delegation_envelope": envelope,
         "options": list(options or [_option()]),

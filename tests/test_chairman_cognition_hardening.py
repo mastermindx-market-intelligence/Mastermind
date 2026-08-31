@@ -110,6 +110,7 @@ def _document(option: dict | None = None, envelope: dict | None = None) -> dict:
             "autonomous_production_deploy": "prohibited",
             "autonomous_live_capital_execution": "prohibited",
             "duplicate_control_planes": "prohibited",
+            "unbounded_autonomous_strategic_modification": "prohibited",
         },
         "delegation_envelope": envelope or _envelope(),
         "options": [option or _option()],
@@ -118,6 +119,16 @@ def _document(option: dict | None = None, envelope: dict | None = None) -> dict:
 
 def _result(document: dict) -> dict:
     return evaluate_document(document)["adjudications"][0]
+
+
+def _organizational_option(**changes) -> dict:
+    return _option(
+        action="ORGANIZATIONAL_RESTRUCTURE",
+        carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+        repositories=[],
+        paths=[],
+        **changes,
+    )
 
 
 def test_known_applied_effect_is_terminal_and_never_recommended() -> None:
@@ -274,3 +285,115 @@ def test_chairman_organizational_actions_are_modeled_without_generic_task_aliase
         paths=[],
     )
     assert _result(_document(option, allowed))["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+
+def test_missing_unbounded_autonomous_constraint_rejects_closed_input() -> None:
+    document = _document()
+    del document["strategic_constraints"][
+        "unbounded_autonomous_strategic_modification"
+    ]
+    with pytest.raises(
+        ChairmanCognitionError, match="missing load-bearing strategic constraint"
+    ):
+        evaluate_document(document)
+
+
+@pytest.mark.parametrize(
+    "level,disposition,reason",
+    [
+        ("prohibited", "REFUSED", "STRATEGIC_CONSTRAINT_PROHIBITS"),
+        (
+            "constrained",
+            "CHAIRMAN_REQUIRED",
+            "STRATEGIC_CONSTRAINT_REQUIRES_CHAIRMAN",
+        ),
+        ("permitted", "ELIGIBLE_WITHIN_DELEGATION", "EXPLICIT_DELEGATION_ENVELOPE"),
+    ],
+)
+def test_bounded_autonomous_modification_consumes_strategic_constraint(
+    level: str, disposition: str, reason: str
+) -> None:
+    envelope = _envelope(
+        mode="BOUNDED_AUTONOMOUS",
+        allowed_actions=_envelope()["allowed_actions"]
+        + ["ORGANIZATIONAL_RESTRUCTURE"],
+    )
+    document = _document(_organizational_option(), envelope)
+    document["strategic_constraints"][
+        "unbounded_autonomous_strategic_modification"
+    ] = level
+    item = _result(document)
+    assert item["disposition"] == disposition
+    assert item["reason"] == reason
+
+
+def test_read_only_option_remains_eligible_in_bounded_autonomous_mode() -> None:
+    option = _option(
+        action="PORTFOLIO_HOLD",
+        reversibility="READ_ONLY",
+        scope_refs=[],
+        operation_key=None,
+        carrier_state="NOT_APPLICABLE",
+        carrier_ref=None,
+        repositories=[],
+        paths=[],
+        budget_units=0,
+        active_children_after=0,
+    )
+    item = _result(_document(option, _envelope(mode="BOUNDED_AUTONOMOUS")))
+    assert item["disposition"] == "READ_ONLY_ELIGIBLE"
+    assert item["reason"] == "READ_ONLY_INHERENT"
+
+
+@pytest.mark.parametrize("missing", ["stop_condition", "rollback_plan", "falsifier"])
+def test_every_supervised_modifying_option_requires_canary_controls(
+    missing: str,
+) -> None:
+    item = _result(_document(_option(**{missing: None}), _envelope()))
+    assert item["disposition"] == "REFUSED"
+    assert item["reason"] == "CANARY_CONTROLS_REQUIRED"
+
+
+def test_runtime_canary_requires_controls_in_bounded_autonomous_mode() -> None:
+    envelope = _envelope(
+        mode="BOUNDED_AUTONOMOUS",
+        allowed_actions=_envelope()["allowed_actions"]
+        + ["REVERSIBLE_RUNTIME_CANARY"],
+    )
+    document = _document(
+        _option(action="REVERSIBLE_RUNTIME_CANARY", stop_condition=None),
+        envelope,
+    )
+    document["strategic_constraints"][
+        "unbounded_autonomous_strategic_modification"
+    ] = "permitted"
+    item = _result(document)
+    assert item["disposition"] == "REFUSED"
+    assert item["reason"] == "CANARY_CONTROLS_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    "level,disposition,reason",
+    [
+        ("prohibited", "REFUSED", "DUPLICATE_CONTROL_PLANE_REFUSED"),
+        (
+            "constrained",
+            "CHAIRMAN_REQUIRED",
+            "CONSTITUTIONAL_CHAIRMAN_BOUNDARY",
+        ),
+        (
+            "permitted",
+            "CHAIRMAN_REQUIRED",
+            "CONSTITUTIONAL_CHAIRMAN_BOUNDARY",
+        ),
+    ],
+)
+def test_duplicate_plane_constraint_is_consumed_and_never_delegates(
+    level: str, disposition: str, reason: str
+) -> None:
+    document = _document(_option(creates_duplicate_control_plane=True))
+    document["strategic_constraints"]["duplicate_control_planes"] = level
+    item = _result(document)
+    assert item["disposition"] == disposition
+    assert item["reason"] == reason
+    assert item["execution_authority_granted"] is False

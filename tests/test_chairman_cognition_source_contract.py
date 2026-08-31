@@ -106,6 +106,10 @@ def test_strategic_state_records_current_chairman_cognition_objective():
     assert state["constraints"]["autonomous_production_deploy"] == "prohibited"
     assert state["constraints"]["autonomous_live_capital_execution"] == "prohibited"
     assert state["constraints"]["duplicate_control_planes"] == "prohibited"
+    assert (
+        state["constraints"]["unbounded_autonomous_strategic_modification"]
+        == "prohibited"
+    )
     assert sum(float(v) for v in state["resource_policy"].values()) == 1.0
 
 

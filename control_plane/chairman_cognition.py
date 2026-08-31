@@ -192,6 +192,9 @@ class ReasonCode(str, enum.Enum):
     EFFECT_ALREADY_APPLIED = "EFFECT_ALREADY_APPLIED"
     DUPLICATE_CONTROL_PLANE_REFUSED = "DUPLICATE_CONTROL_PLANE_REFUSED"
     STRATEGIC_CONSTRAINT_PROHIBITS = "STRATEGIC_CONSTRAINT_PROHIBITS"
+    STRATEGIC_CONSTRAINT_REQUIRES_CHAIRMAN = (
+        "STRATEGIC_CONSTRAINT_REQUIRES_CHAIRMAN"
+    )
     CONSTITUTIONAL_CHAIRMAN_BOUNDARY = "CONSTITUTIONAL_CHAIRMAN_BOUNDARY"
     IRREVERSIBLE_REQUIRES_CHAIRMAN = "IRREVERSIBLE_REQUIRES_CHAIRMAN"
     REVERSIBILITY_NOT_DELEGATED = "REVERSIBILITY_NOT_DELEGATED"
@@ -439,6 +442,7 @@ def _parse_constraints(value: Any) -> dict[str, str]:
         "autonomous_production_deploy",
         "autonomous_live_capital_execution",
         "duplicate_control_planes",
+        "unbounded_autonomous_strategic_modification",
     ):
         if required not in out:
             raise ChairmanCognitionError("missing load-bearing strategic constraint")
@@ -764,10 +768,17 @@ def _adjudicate(
             source_state,
         )
     if option.creates_duplicate_control_plane:
+        if strategic_constraints["duplicate_control_planes"] == "prohibited":
+            return _decision(
+                option,
+                Disposition.REFUSED,
+                ReasonCode.DUPLICATE_CONTROL_PLANE_REFUSED,
+                source_state,
+            )
         return _decision(
             option,
-            Disposition.REFUSED,
-            ReasonCode.DUPLICATE_CONTROL_PLANE_REFUSED,
+            Disposition.CHAIRMAN_REQUIRED,
+            ReasonCode.CONSTITUTIONAL_CHAIRMAN_BOUNDARY,
             source_state,
         )
     if option.action == "PRODUCTION_DEPLOY" and strategic_constraints.get(
@@ -832,6 +843,24 @@ def _adjudicate(
             ReasonCode.ENVELOPE_EXPIRED,
             source_state,
         )
+    if envelope.mode is EnvelopeMode.BOUNDED_AUTONOMOUS:
+        autonomous_level = strategic_constraints[
+            "unbounded_autonomous_strategic_modification"
+        ]
+        if autonomous_level == "prohibited":
+            return _decision(
+                option,
+                Disposition.REFUSED,
+                ReasonCode.STRATEGIC_CONSTRAINT_PROHIBITS,
+                source_state,
+            )
+        if autonomous_level == "constrained":
+            return _decision(
+                option,
+                Disposition.CHAIRMAN_REQUIRED,
+                ReasonCode.STRATEGIC_CONSTRAINT_REQUIRES_CHAIRMAN,
+                source_state,
+            )
     if option.action not in envelope.allowed_actions:
         return _decision(
             option,
@@ -927,7 +956,11 @@ def _adjudicate(
             ReasonCode.EXACT_CARRIER_REQUIRED,
             source_state,
         )
-    if option.action == "REVERSIBLE_RUNTIME_CANARY" and not all(
+    requires_canary_controls = (
+        option.action == "REVERSIBLE_RUNTIME_CANARY"
+        or envelope.mode is EnvelopeMode.SUPERVISED_LIVE_CANARY
+    )
+    if requires_canary_controls and not all(
         (option.stop_condition, option.rollback_plan, option.falsifier)
     ):
         return _decision(
