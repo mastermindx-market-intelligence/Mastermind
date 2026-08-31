@@ -23,19 +23,65 @@ from control_plane.chairman_cognition_sources import (
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
+_PLAN = (
+    _ROOT
+    / "docs"
+    / "superpowers"
+    / "plans"
+    / "2026-08-30-chairman-cognition-source-composer-a2.md"
+)
 _MASTERMIND_SHA = "a" * 40
 _MACRO_SHA = "b" * 40
 
 
-def _brief(*, degraded=None, warnings=None):
+def _brief(*, degraded=None, warnings=None, readiness_degraded=None):
     return {
         "schema": "ceo_brief.v1",
         "generated_at": "2026-08-30T16:00:00Z",
-        "inputs": {"degraded": list(degraded or [])},
-        "warnings": list(warnings or []),
+        "since": "2026-08-29T16:00:00Z",
+        "since_label": "the last 24h",
+        "counts": {
+            "total": 1,
+            "active": 1,
+            "awaiting_ci": 0,
+            "blocked": 0,
+            "done_in_window": 0,
+        },
+        "inputs": {
+            "active_builds_age_hours": 1.0,
+            "worktrees": 1,
+            "degraded": list(degraded or []),
+        },
         "needs_ceo": [],
         "blocked": [],
-        "running": {"active": 1},
+        "finished": [],
+        "running": {
+            "active": 1,
+            "awaiting_ci": 0,
+            "awaiting_review": 0,
+            "blocked": 0,
+            "proposed": 0,
+            "open_prs": 0,
+            "stale_claims": 0,
+            "claims_without_worktree": 0,
+        },
+        "readiness": {
+            "schema": "agentos.readiness.v1",
+            "records": [
+                {
+                    "workstream": "CHAIRMAN-CONTROL-ROOM",
+                    "wave": None,
+                    "state": "in_progress",
+                    "reason_code": "status_in_progress",
+                    "reason": "Authored workstream status is active.",
+                    "depends_on": [],
+                    "unmet_dependencies": [],
+                    "source": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md",
+                }
+            ],
+            "degraded": list(readiness_degraded or []),
+        },
+        "warnings": list(warnings or []),
     }
 
 
@@ -193,6 +239,29 @@ def _receipt(document, source_ref):
     )
 
 
+def _duplicate_payload(secret: str, *, nested: bool) -> str:
+    valid = json.dumps(_bundle(), separators=(",", ":"))
+    if nested:
+        target = '"option_id":"OPT-COMPOSE"'
+        replacement = f'"option_id":"{secret}","option_id":"OPT-COMPOSE"'
+        assert target in valid
+        return valid.replace(target, replacement, 1)
+    return f'{{"schema":"{secret}",' + valid[1:]
+
+
+def _assert_agentos_unknown(brief):
+    boot = _boot_packet(brief=brief)
+    option = _option(source_refs=[AGENT_OS_SOURCE_REF])
+    result = evaluate_bundle(_bundle(boot=boot, option=option, additions=[]))
+    summary = next(
+        item
+        for item in result["source_summary"]
+        if item["source_ref"] == AGENT_OS_SOURCE_REF
+    )
+    assert summary["state"] == "UNKNOWN"
+    assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+
+
 def test_composes_owner_attributed_input_and_evaluates_unique_option():
     composed = compose_input(_bundle())
     assert [item["source_ref"] for item in composed["source_receipts"]] == [
@@ -310,19 +379,52 @@ def test_missing_or_degraded_agentos_is_unknown_not_fabricated_current():
         None,
         _brief(degraded=["worktree census unavailable"]),
         _brief(warnings=["source mismatch"]),
+        _brief(readiness_degraded=["ambiguous workstream source"]),
         {**_brief(), "schema": "future.brief.v2"},
     ]
     for brief in cases:
-        boot = _boot_packet(brief=brief)
-        option = _option(source_refs=[AGENT_OS_SOURCE_REF])
-        result = evaluate_bundle(_bundle(boot=boot, option=option, additions=[]))
-        summary = next(
-            item
-            for item in result["source_summary"]
-            if item["source_ref"] == AGENT_OS_SOURCE_REF
-        )
-        assert summary["state"] == "UNKNOWN"
-        assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+        _assert_agentos_unknown(brief)
+
+
+def test_partial_or_malformed_ceo_brief_cannot_be_laundered_current():
+    partial = {
+        "schema": "ceo_brief.v1",
+        "inputs": {"degraded": []},
+        "warnings": [],
+    }
+    malformed_readiness = _brief()
+    malformed_readiness["readiness"]["records"] = [{"state": "ready"}]
+    missing_counts = _brief()
+    del missing_counts["counts"]
+    boolean_count = _brief()
+    boolean_count["counts"]["total"] = True
+
+    for brief in (
+        partial,
+        malformed_readiness,
+        missing_counts,
+        boolean_count,
+    ):
+        _assert_agentos_unknown(brief)
+
+
+def test_missing_or_invalid_brief_timestamps_remain_unknown_and_use_no_fake_current():
+    missing_generated = _brief()
+    del missing_generated["generated_at"]
+    invalid_generated = _brief()
+    invalid_generated["generated_at"] = "not-a-time"
+    missing_since = _brief()
+    del missing_since["since"]
+    invalid_since = _brief()
+    invalid_since["since"] = "2026-08-30"
+
+    for brief in (
+        missing_generated,
+        invalid_generated,
+        missing_since,
+        invalid_since,
+    ):
+        _assert_agentos_unknown(brief)
 
 
 def test_macro_revision_mismatch_is_conflict_not_current():
@@ -417,6 +519,48 @@ def test_cli_valid_and_opaque_invalid_journeys(tmp_path):
     assert proc.stdout == ""
 
 
+@pytest.mark.parametrize("use_stdin,nested", [(False, False), (True, True)])
+def test_cli_rejects_duplicate_keys_in_otherwise_valid_bundle(
+    tmp_path: Path,
+    use_stdin: bool,
+    nested: bool,
+) -> None:
+    secret = "duplicate-source-secret-must-not-leak"
+    payload = _duplicate_payload(secret, nested=nested)
+
+    permissive = json.loads(payload)
+    assert evaluate_bundle(permissive)["packet"]["recommended_option_id"] == "OPT-COMPOSE"
+
+    if use_stdin:
+        input_path = "-"
+        stdin_payload = payload
+    else:
+        path = tmp_path / "duplicate-valid.json"
+        path.write_text(payload, encoding="utf-8")
+        input_path = str(path)
+        stdin_payload = None
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(_ROOT / "scripts" / "chairman_cognition_compose.py"),
+            input_path,
+        ],
+        cwd=_ROOT,
+        text=True,
+        input=stdin_payload,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert json.loads(proc.stderr) == {
+        "error": "INVALID_SOURCE_BUNDLE",
+        "schema": "mastermind.chairman_cognition_source_error.v1",
+    }
+    assert secret not in proc.stderr
+
+
 def test_derived_source_observation_uses_latest_load_bearing_input():
     bundle = _bundle()
     bundle["as_of"] = "2026-08-30T16:00:02Z"
@@ -442,6 +586,17 @@ def test_future_dated_revision_attestation_is_rejected_by_a1():
     )
     with pytest.raises(ChairmanCognitionError, match="postdate"):
         compose_input(bundle)
+
+
+def test_plan_states_attestation_is_not_self_authenticating():
+    plan = _PLAN.read_text(encoding="utf-8")
+    for marker in (
+        "trusted source adapter",
+        "model-authored or arbitrary local JSON",
+        "does not authenticate",
+        "execution_authority_granted=false",
+    ):
+        assert marker in plan
 
 
 def test_composer_imports_no_io_runtime_or_connector_owner():
