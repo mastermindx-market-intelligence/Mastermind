@@ -66,6 +66,7 @@ class AssessmentIssue(str, Enum):
     SOURCE_CONFLICT = "SOURCE_CONFLICT"
     PROTECTED_REF_MOVED = "PROTECTED_REF_MOVED"
     CANDIDATE_HEAD_MOVED = "CANDIDATE_HEAD_MOVED"
+    BASE_REF_MISMATCH = "BASE_REF_MISMATCH"
     BASE_OR_MERGE_CONTEXT_UNKNOWN = "BASE_OR_MERGE_CONTEXT_UNKNOWN"
     CURRENT_BASE_REQUIRED = "CURRENT_BASE_REQUIRED"
     EXPECTED_PATH_MISMATCH = "EXPECTED_PATH_MISMATCH"
@@ -403,8 +404,14 @@ def _reject_secret(value: str, *, field: str) -> None:
         raise AssessmentInputError(f"{field} contains secret-shaped text")
 
 
-def _bounded_text(value: object, *, field: str, pattern: re.Pattern[str], message: str,
-                  lower: bool = False) -> str:
+def _bounded_text(
+    value: object,
+    *,
+    field: str,
+    pattern: re.Pattern[str],
+    message: str,
+    lower: bool = False,
+) -> str:
     if not isinstance(value, str):
         raise AssessmentInputError(f"{field} must be a string")
     token = value.strip()
@@ -416,38 +423,64 @@ def _bounded_text(value: object, *, field: str, pattern: re.Pattern[str], messag
 
 
 def _operation(value: object, *, field: str) -> str:
-    return _bounded_text(value, field=field, pattern=_OPERATION_RE,
-                         message="must be a bounded operation identifier")
+    return _bounded_text(
+        value,
+        field=field,
+        pattern=_OPERATION_RE,
+        message="must be a bounded operation identifier",
+    )
 
 
 def _identifier(value: object, *, field: str) -> str:
-    return _bounded_text(value, field=field, pattern=_IDENTIFIER_RE,
-                         message="must be a bounded lowercase identifier", lower=True)
+    return _bounded_text(
+        value,
+        field=field,
+        pattern=_IDENTIFIER_RE,
+        message="must be a bounded lowercase identifier",
+        lower=True,
+    )
 
 
 def _sha(value: object, *, field: str, optional: bool = False) -> str | None:
     if value is None and optional:
         return None
-    return _bounded_text(value, field=field, pattern=_SHA_RE,
-                         message="must be a lowercase 40-character Git SHA", lower=True)
+    return _bounded_text(
+        value,
+        field=field,
+        pattern=_SHA_RE,
+        message="must be a lowercase 40-character Git SHA",
+        lower=True,
+    )
 
 
 def _repository(value: object) -> str:
-    return _bounded_text(value, field="repository", pattern=_REPOSITORY_RE,
-                         message="must be owner/name")
+    return _bounded_text(
+        value,
+        field="repository",
+        pattern=_REPOSITORY_RE,
+        message="must be owner/name",
+    )
 
 
 def _ref(value: object, *, field: str) -> str:
-    token = _bounded_text(value, field=field, pattern=_REF_RE,
-                          message="must be a bounded Git ref")
+    token = _bounded_text(
+        value,
+        field=field,
+        pattern=_REF_RE,
+        message="must be a bounded Git ref",
+    )
     if token.startswith("/") or ".." in token.split("/"):
         raise AssessmentInputError(f"{field} must be a bounded Git ref")
     return token
 
 
 def _source_ref(value: object, *, field: str) -> str:
-    return _bounded_text(value, field=field, pattern=_SOURCE_REF_RE,
-                         message="must be a bounded source reference")
+    return _bounded_text(
+        value,
+        field=field,
+        pattern=_SOURCE_REF_RE,
+        message="must be a bounded source reference",
+    )
 
 
 def _path(value: object, *, field: str) -> str:
@@ -468,12 +501,19 @@ def _path(value: object, *, field: str) -> str:
     return token
 
 
-def _nonnegative_int(value: object, *, field: str, optional: bool = False,
-                     maximum: int = 1_000_000) -> int | None:
+def _nonnegative_int(
+    value: object,
+    *,
+    field: str,
+    optional: bool = False,
+    maximum: int = 1_000_000,
+) -> int | None:
     if value is None and optional:
         return None
     if type(value) is not int or value < 0 or value > maximum:
-        raise AssessmentInputError(f"{field} must be a bounded non-negative integer")
+        raise AssessmentInputError(
+            f"{field} must be a bounded non-negative integer"
+        )
     return value
 
 
@@ -483,7 +523,12 @@ def _boolean(value: object, *, field: str) -> bool:
     return value
 
 
-def _bounded_tuple(value: object, *, field: str, maximum: int) -> tuple[Any, ...]:
+def _bounded_tuple(
+    value: object,
+    *,
+    field: str,
+    maximum: int,
+) -> tuple[Any, ...]:
     if not isinstance(value, tuple):
         raise AssessmentInputError(f"{field} must be an immutable tuple")
     if len(value) > maximum:
@@ -499,7 +544,11 @@ def _unique_sorted(values: Iterable[str], *, field: str) -> tuple[str, ...]:
 
 
 def _path_overlap(left: str, right: str) -> bool:
-    return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+    return (
+        left == right
+        or left.startswith(right + "/")
+        or right.startswith(left + "/")
+    )
 
 
 def _primitive(value: object) -> object:
@@ -513,37 +562,69 @@ def _primitive(value: object) -> object:
     if isinstance(value, tuple):
         return [_primitive(item) for item in value]
     if isinstance(value, Mapping):
-        return {str(key): _primitive(item) for key, item in sorted(value.items(), key=lambda row: str(row[0]))}
+        return {
+            str(key): _primitive(item)
+            for key, item in sorted(value.items(), key=lambda row: str(row[0]))
+        }
     return value
 
 
 def _canonical_bytes(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=True, allow_nan=False).encode("utf-8")
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
 
 
 def _digest(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
-def _normalize_expectation(value: SemanticOwnerExpectation) -> SemanticOwnerExpectation:
+def _normalize_expectation(
+    value: SemanticOwnerExpectation,
+) -> SemanticOwnerExpectation:
     if not isinstance(value, SemanticOwnerExpectation):
-        raise AssessmentInputError("expected_semantic_owners must contain SemanticOwnerExpectation")
+        raise AssessmentInputError(
+            "expected_semantic_owners must contain SemanticOwnerExpectation"
+        )
     return SemanticOwnerExpectation(
-        path_prefix=_path(value.path_prefix, field="semantic expectation path_prefix"),
-        owner_id=_identifier(value.owner_id, field="semantic expectation owner_id"),
+        path_prefix=_path(
+            value.path_prefix,
+            field="semantic expectation path_prefix",
+        ),
+        owner_id=_identifier(
+            value.owner_id,
+            field="semantic expectation owner_id",
+        ),
     )
 
 
 def _normalize_owner(value: SemanticOwnerFact) -> SemanticOwnerFact:
     if not isinstance(value, SemanticOwnerFact):
-        raise AssessmentInputError("current_semantic_owners must contain SemanticOwnerFact")
+        raise AssessmentInputError(
+            "current_semantic_owners must contain SemanticOwnerFact"
+        )
     return SemanticOwnerFact(
-        path_prefix=_path(value.path_prefix, field="semantic owner path_prefix"),
-        owner_id=_identifier(value.owner_id, field="semantic owner owner_id"),
-        operation_key=_operation(value.operation_key, field="semantic owner operation_key"),
+        path_prefix=_path(
+            value.path_prefix,
+            field="semantic owner path_prefix",
+        ),
+        owner_id=_identifier(
+            value.owner_id,
+            field="semantic owner owner_id",
+        ),
+        operation_key=_operation(
+            value.operation_key,
+            field="semantic owner operation_key",
+        ),
         active=_boolean(value.active, field="semantic owner active"),
-        source_ref=_source_ref(value.source_ref, field="semantic owner source_ref"),
+        source_ref=_source_ref(
+            value.source_ref,
+            field="semantic owner source_ref",
+        ),
     )
 
 
@@ -552,9 +633,16 @@ def _normalize_carrier(value: CarrierFact) -> CarrierFact:
         raise AssessmentInputError("carriers must contain CarrierFact")
     return CarrierFact(
         carrier_ref=_source_ref(value.carrier_ref, field="carrier_ref"),
-        operation_key=_operation(value.operation_key, field="carrier operation_key"),
+        operation_key=_operation(
+            value.operation_key,
+            field="carrier operation_key",
+        ),
         branch=_ref(value.branch, field="carrier branch"),
-        candidate_sha=_sha(value.candidate_sha, field="carrier candidate_sha") or "",
+        candidate_sha=_sha(
+            value.candidate_sha,
+            field="carrier candidate_sha",
+        )
+        or "",
         active=_boolean(value.active, field="carrier active"),
         source_ref=_source_ref(value.source_ref, field="carrier source_ref"),
     )
@@ -563,11 +651,21 @@ def _normalize_carrier(value: CarrierFact) -> CarrierFact:
 def _normalize_writer(value: WriterFact) -> WriterFact:
     if not isinstance(value, WriterFact):
         raise AssessmentInputError("writers must contain WriterFact")
-    raw_paths = _bounded_tuple(value.paths, field="writer paths", maximum=MAX_FACT_PATHS)
-    paths = _unique_sorted((_path(path, field="writer path") for path in raw_paths), field="writer paths")
+    raw_paths = _bounded_tuple(
+        value.paths,
+        field="writer paths",
+        maximum=MAX_FACT_PATHS,
+    )
+    paths = _unique_sorted(
+        (_path(path, field="writer path") for path in raw_paths),
+        field="writer paths",
+    )
     return WriterFact(
         writer_id=_identifier(value.writer_id, field="writer_id"),
-        operation_key=_operation(value.operation_key, field="writer operation_key"),
+        operation_key=_operation(
+            value.operation_key,
+            field="writer operation_key",
+        ),
         paths=paths,
         active=_boolean(value.active, field="writer active"),
         source_ref=_source_ref(value.source_ref, field="writer source_ref"),
@@ -576,29 +674,51 @@ def _normalize_writer(value: WriterFact) -> WriterFact:
 
 def _normalize_collision(value: PathCollisionFact) -> PathCollisionFact:
     if not isinstance(value, PathCollisionFact):
-        raise AssessmentInputError("path_collisions must contain PathCollisionFact")
+        raise AssessmentInputError(
+            "path_collisions must contain PathCollisionFact"
+        )
     return PathCollisionFact(
         path=_path(value.path, field="collision path"),
-        other_operation_key=_operation(value.other_operation_key, field="collision operation_key"),
-        source_ref=_source_ref(value.source_ref, field="collision source_ref"),
+        other_operation_key=_operation(
+            value.other_operation_key,
+            field="collision operation_key",
+        ),
+        source_ref=_source_ref(
+            value.source_ref,
+            field="collision source_ref",
+        ),
     )
 
 
 def _normalize_check(value: CheckFact) -> CheckFact:
     if not isinstance(value, CheckFact):
         raise AssessmentInputError("checks must contain CheckFact")
-    name = _bounded_text(value.name, field="check name", pattern=_CHECK_NAME_RE,
-                         message="must be a bounded check name")
+    name = _bounded_text(
+        value.name,
+        field="check name",
+        pattern=_CHECK_NAME_RE,
+        message="must be a bounded check name",
+    )
     if not isinstance(value.status, CheckStatus):
         raise AssessmentInputError("check status is unsupported")
-    if value.conclusion is not None and not isinstance(value.conclusion, CheckConclusion):
+    if value.conclusion is not None and not isinstance(
+        value.conclusion,
+        CheckConclusion,
+    ):
         raise AssessmentInputError("check conclusion is unsupported")
     if value.status is not CheckStatus.COMPLETED and value.conclusion is not None:
-        raise AssessmentInputError("non-terminal check cannot have a conclusion")
+        raise AssessmentInputError(
+            "non-terminal check cannot have a conclusion"
+        )
     return CheckFact(
         name=name,
         head_sha=_sha(value.head_sha, field="check head_sha") or "",
-        attempt=_nonnegative_int(value.attempt, field="check attempt", maximum=10_000) or 0,
+        attempt=_nonnegative_int(
+            value.attempt,
+            field="check attempt",
+            maximum=10_000,
+        )
+        or 0,
         required=_boolean(value.required, field="check required"),
         status=value.status,
         conclusion=value.conclusion,
@@ -628,15 +748,22 @@ def _dedupe(rows: Iterable[Any], *, key, label: str) -> tuple[Any, ...]:
         existing = seen.get(identity)
         if existing is not None:
             if _primitive(existing) != _primitive(row):
-                raise AssessmentInputError(f"duplicate {label} identity conflicts")
+                raise AssessmentInputError(
+                    f"duplicate {label} identity conflicts"
+                )
             continue
         seen[identity] = row
-    return tuple(seen[identity] for identity in sorted(seen, key=lambda item: str(item)))
+    return tuple(
+        seen[identity]
+        for identity in sorted(seen, key=lambda item: str(item))
+    )
 
 
 def _normalize_input(value: AssessmentInput) -> AssessmentInput:
     if not isinstance(value, AssessmentInput):
-        raise AssessmentInputError("assessment input must be AssessmentInput")
+        raise AssessmentInputError(
+            "assessment input must be AssessmentInput"
+        )
     if value.schema != INPUT_SCHEMA:
         raise AssessmentInputError("schema is unsupported")
     if not isinstance(value.source_coverage, SourceCoverage):
@@ -652,93 +779,283 @@ def _normalize_input(value: AssessmentInput) -> AssessmentInput:
     if not isinstance(value.prior_effect_state, EffectState):
         raise AssessmentInputError("prior_effect_state is unsupported")
 
-    expected_paths_raw = _bounded_tuple(value.expected_paths, field="expected_paths", maximum=MAX_PATHS)
-    actual_paths_raw = _bounded_tuple(value.actual_paths, field="actual_paths", maximum=MAX_PATHS)
-    expected_paths = _unique_sorted((_path(path, field="expected path") for path in expected_paths_raw), field="expected_paths")
-    actual_paths = _unique_sorted((_path(path, field="actual path") for path in actual_paths_raw), field="actual_paths")
+    expected_paths_raw = _bounded_tuple(
+        value.expected_paths,
+        field="expected_paths",
+        maximum=MAX_PATHS,
+    )
+    actual_paths_raw = _bounded_tuple(
+        value.actual_paths,
+        field="actual_paths",
+        maximum=MAX_PATHS,
+    )
+    expected_paths = _unique_sorted(
+        (_path(path, field="expected path") for path in expected_paths_raw),
+        field="expected_paths",
+    )
+    actual_paths = _unique_sorted(
+        (_path(path, field="actual path") for path in actual_paths_raw),
+        field="actual_paths",
+    )
 
-    expectation_rows = _bounded_tuple(value.expected_semantic_owners, field="expected_semantic_owners", maximum=MAX_SEMANTIC_OWNERS)
-    owner_rows = _bounded_tuple(value.current_semantic_owners, field="current_semantic_owners", maximum=MAX_SEMANTIC_OWNERS)
-    expectations = _dedupe((_normalize_expectation(row) for row in expectation_rows), key=lambda row: (row.path_prefix, row.owner_id), label="semantic expectation")
-    owners = _dedupe((_normalize_owner(row) for row in owner_rows), key=lambda row: (row.path_prefix, row.owner_id, row.operation_key, row.source_ref), label="semantic owner")
+    expectation_rows = _bounded_tuple(
+        value.expected_semantic_owners,
+        field="expected_semantic_owners",
+        maximum=MAX_SEMANTIC_OWNERS,
+    )
+    owner_rows = _bounded_tuple(
+        value.current_semantic_owners,
+        field="current_semantic_owners",
+        maximum=MAX_SEMANTIC_OWNERS,
+    )
+    expectations = _dedupe(
+        (_normalize_expectation(row) for row in expectation_rows),
+        key=lambda row: (row.path_prefix, row.owner_id),
+        label="semantic expectation",
+    )
+    owners = _dedupe(
+        (_normalize_owner(row) for row in owner_rows),
+        key=lambda row: (
+            row.path_prefix,
+            row.owner_id,
+            row.operation_key,
+            row.source_ref,
+        ),
+        label="semantic owner",
+    )
 
-    carrier_rows = _bounded_tuple(value.carriers, field="carriers", maximum=MAX_CARRIERS)
-    carriers = _dedupe((_normalize_carrier(row) for row in carrier_rows), key=lambda row: row.carrier_ref, label="carrier")
-    writer_rows = _bounded_tuple(value.writers, field="writers", maximum=MAX_WRITERS)
-    writers = _dedupe((_normalize_writer(row) for row in writer_rows), key=lambda row: (row.writer_id, row.operation_key, row.source_ref), label="writer")
-    collision_rows = _bounded_tuple(value.path_collisions, field="path_collisions", maximum=MAX_COLLISIONS)
-    collisions = _dedupe((_normalize_collision(row) for row in collision_rows), key=lambda row: (row.path, row.other_operation_key, row.source_ref), label="path collision")
+    carrier_rows = _bounded_tuple(
+        value.carriers,
+        field="carriers",
+        maximum=MAX_CARRIERS,
+    )
+    carriers = _dedupe(
+        (_normalize_carrier(row) for row in carrier_rows),
+        key=lambda row: row.carrier_ref,
+        label="carrier",
+    )
+    writer_rows = _bounded_tuple(
+        value.writers,
+        field="writers",
+        maximum=MAX_WRITERS,
+    )
+    writers = _dedupe(
+        (_normalize_writer(row) for row in writer_rows),
+        key=lambda row: (
+            row.writer_id,
+            row.operation_key,
+            row.source_ref,
+        ),
+        label="writer",
+    )
+    collision_rows = _bounded_tuple(
+        value.path_collisions,
+        field="path_collisions",
+        maximum=MAX_COLLISIONS,
+    )
+    collisions = _dedupe(
+        (_normalize_collision(row) for row in collision_rows),
+        key=lambda row: (
+            row.path,
+            row.other_operation_key,
+            row.source_ref,
+        ),
+        label="path collision",
+    )
 
-    required_checks_raw = _bounded_tuple(value.required_checks, field="required_checks", maximum=MAX_CHECK_NAMES)
-    required_checks = _unique_sorted((_bounded_text(name, field="required check", pattern=_CHECK_NAME_RE, message="must be a bounded check name") for name in required_checks_raw), field="required_checks")
-    check_rows = _bounded_tuple(value.checks, field="checks", maximum=MAX_CHECK_FACTS)
-    checks = _dedupe((_normalize_check(row) for row in check_rows), key=lambda row: (row.name, row.head_sha, row.attempt), label="check")
-    review_rows = _bounded_tuple(value.reviews, field="reviews", maximum=MAX_REVIEWS)
-    reviews = _dedupe((_normalize_review(row) for row in review_rows), key=lambda row: (row.reviewer, row.head_sha), label="review")
+    required_checks_raw = _bounded_tuple(
+        value.required_checks,
+        field="required_checks",
+        maximum=MAX_CHECK_NAMES,
+    )
+    required_checks = _unique_sorted(
+        (
+            _bounded_text(
+                name,
+                field="required check",
+                pattern=_CHECK_NAME_RE,
+                message="must be a bounded check name",
+            )
+            for name in required_checks_raw
+        ),
+        field="required_checks",
+    )
+    check_rows = _bounded_tuple(
+        value.checks,
+        field="checks",
+        maximum=MAX_CHECK_FACTS,
+    )
+    checks = _dedupe(
+        (_normalize_check(row) for row in check_rows),
+        key=lambda row: (row.name, row.head_sha, row.attempt),
+        label="check",
+    )
+    review_rows = _bounded_tuple(
+        value.reviews,
+        field="reviews",
+        maximum=MAX_REVIEWS,
+    )
+    reviews = _dedupe(
+        (_normalize_review(row) for row in review_rows),
+        key=lambda row: (row.reviewer, row.head_sha),
+        label="review",
+    )
 
-    methods_raw = _bounded_tuple(value.allowed_merge_methods, field="allowed_merge_methods", maximum=3)
+    methods_raw = _bounded_tuple(
+        value.allowed_merge_methods,
+        field="allowed_merge_methods",
+        maximum=3,
+    )
     methods: list[MergeMethod] = []
     for method in methods_raw:
         if not isinstance(method, MergeMethod):
-            raise AssessmentInputError("allowed_merge_methods contains unsupported method")
+            raise AssessmentInputError(
+                "allowed_merge_methods contains unsupported method"
+            )
         if method in methods:
-            raise AssessmentInputError("allowed_merge_methods contains duplicate values")
+            raise AssessmentInputError(
+                "allowed_merge_methods contains duplicate values"
+            )
         methods.append(method)
     if not methods:
-        raise AssessmentInputError("allowed_merge_methods must be non-empty")
+        raise AssessmentInputError(
+            "allowed_merge_methods must be non-empty"
+        )
 
-    source_rows = _bounded_tuple(value.source_refs, field="source_refs", maximum=MAX_SOURCE_REFS)
-    source_refs = _unique_sorted((_source_ref(row, field="source_ref") for row in source_rows), field="source_refs")
+    source_rows = _bounded_tuple(
+        value.source_refs,
+        field="source_refs",
+        maximum=MAX_SOURCE_REFS,
+    )
+    source_refs = _unique_sorted(
+        (_source_ref(row, field="source_ref") for row in source_rows),
+        field="source_refs",
+    )
     if not source_refs:
         raise AssessmentInputError("source_refs must be non-empty")
 
-    required_approvals = _nonnegative_int(value.required_approvals, field="required_approvals", maximum=64)
-    unresolved_threads = _nonnegative_int(value.unresolved_required_threads, field="unresolved_required_threads", maximum=10_000)
-    assert required_approvals is not None and unresolved_threads is not None
-    production_required = _boolean(value.production_proof_required, field="production_proof_required")
-    if production_required and value.production_proof_state is ProductionProofState.NOT_REQUIRED:
-        raise AssessmentInputError("required production proof cannot be NOT_REQUIRED")
+    required_approvals = _nonnegative_int(
+        value.required_approvals,
+        field="required_approvals",
+        maximum=64,
+    )
+    unresolved_threads = _nonnegative_int(
+        value.unresolved_required_threads,
+        field="unresolved_required_threads",
+        maximum=10_000,
+    )
+    assert required_approvals is not None
+    assert unresolved_threads is not None
+    production_required = _boolean(
+        value.production_proof_required,
+        field="production_proof_required",
+    )
+    if (
+        production_required
+        and value.production_proof_state
+        is ProductionProofState.NOT_REQUIRED
+    ):
+        raise AssessmentInputError(
+            "required production proof cannot be NOT_REQUIRED"
+        )
 
     return AssessmentInput(
         schema=INPUT_SCHEMA,
-        operation_key=_operation(value.operation_key, field="operation_key"),
+        operation_key=_operation(
+            value.operation_key,
+            field="operation_key",
+        ),
         repository=_repository(value.repository),
-        protected_ref=_ref(value.protected_ref, field="protected_ref"),
-        protected_sha=_sha(value.protected_sha, field="protected_sha") or "",
-        expected_protected_sha=_sha(value.expected_protected_sha, field="expected_protected_sha") or "",
-        candidate_branch=_ref(value.candidate_branch, field="candidate_branch"),
-        candidate_sha=_sha(value.candidate_sha, field="candidate_sha") or "",
+        protected_ref=_ref(
+            value.protected_ref,
+            field="protected_ref",
+        ),
+        protected_sha=_sha(
+            value.protected_sha,
+            field="protected_sha",
+        )
+        or "",
+        expected_protected_sha=_sha(
+            value.expected_protected_sha,
+            field="expected_protected_sha",
+        )
+        or "",
+        candidate_branch=_ref(
+            value.candidate_branch,
+            field="candidate_branch",
+        ),
+        candidate_sha=_sha(
+            value.candidate_sha,
+            field="candidate_sha",
+        )
+        or "",
         base_ref=_ref(value.base_ref, field="base_ref"),
         base_sha=_sha(value.base_sha, field="base_sha", optional=True),
-        merge_base_sha=_sha(value.merge_base_sha, field="merge_base_sha", optional=True),
-        ahead_by=_nonnegative_int(value.ahead_by, field="ahead_by", optional=True),
-        behind_by=_nonnegative_int(value.behind_by, field="behind_by", optional=True),
-        expected_head_sha=_sha(value.expected_head_sha, field="expected_head_sha") or "",
+        merge_base_sha=_sha(
+            value.merge_base_sha,
+            field="merge_base_sha",
+            optional=True,
+        ),
+        ahead_by=_nonnegative_int(
+            value.ahead_by,
+            field="ahead_by",
+            optional=True,
+        ),
+        behind_by=_nonnegative_int(
+            value.behind_by,
+            field="behind_by",
+            optional=True,
+        ),
+        expected_head_sha=_sha(
+            value.expected_head_sha,
+            field="expected_head_sha",
+        )
+        or "",
         expected_paths=expected_paths,
         actual_paths=actual_paths,
         expected_semantic_owners=expectations,
         current_semantic_owners=owners,
-        semantic_owners_complete=_boolean(value.semantic_owners_complete, field="semantic_owners_complete"),
+        semantic_owners_complete=_boolean(
+            value.semantic_owners_complete,
+            field="semantic_owners_complete",
+        ),
         carriers=carriers,
-        carriers_complete=_boolean(value.carriers_complete, field="carriers_complete"),
+        carriers_complete=_boolean(
+            value.carriers_complete,
+            field="carriers_complete",
+        ),
         writers=writers,
-        writers_complete=_boolean(value.writers_complete, field="writers_complete"),
+        writers_complete=_boolean(
+            value.writers_complete,
+            field="writers_complete",
+        ),
         path_collisions=collisions,
         required_checks=required_checks,
         checks=checks,
-        checks_complete=_boolean(value.checks_complete, field="checks_complete"),
+        checks_complete=_boolean(
+            value.checks_complete,
+            field="checks_complete",
+        ),
         required_approvals=required_approvals,
         reviews=reviews,
         unresolved_required_threads=unresolved_threads,
-        reviews_complete=_boolean(value.reviews_complete, field="reviews_complete"),
+        reviews_complete=_boolean(
+            value.reviews_complete,
+            field="reviews_complete",
+        ),
         source_coverage=value.source_coverage,
         source_law_state=value.source_law_state,
-        current_base_required=_boolean(value.current_base_required, field="current_base_required"),
+        current_base_required=_boolean(
+            value.current_base_required,
+            field="current_base_required",
+        ),
         production_proof_required=production_required,
         production_proof_state=value.production_proof_state,
         claimed_capability_state=value.claimed_capability_state,
         requested_merge_method=value.requested_merge_method,
-        allowed_merge_methods=tuple(sorted(methods, key=lambda item: item.value)),
+        allowed_merge_methods=tuple(
+            sorted(methods, key=lambda item: item.value)
+        ),
         prior_effect_state=value.prior_effect_state,
         source_refs=source_refs,
     )
@@ -755,7 +1072,9 @@ def _all_source_refs(value: AssessmentInput) -> tuple[str, ...]:
     return tuple(sorted(refs))
 
 
-def assess_github_release(input_packet: AssessmentInput) -> GithubReleaseAssessment:
+def assess_github_release(
+    input_packet: AssessmentInput,
+) -> GithubReleaseAssessment:
     """Assess one immutable release packet without acquiring or mutating state."""
 
     value = _normalize_input(input_packet)
@@ -764,7 +1083,10 @@ def assess_github_release(input_packet: AssessmentInput) -> GithubReleaseAssessm
     unknown: set[AssessmentIssue] = set()
     held: set[AssessmentIssue] = set()
 
-    def add(issue: AssessmentIssue, disposition: AssessmentVerdict | None) -> None:
+    def add(
+        issue: AssessmentIssue,
+        disposition: AssessmentVerdict | None,
+    ) -> None:
         issues.add(issue)
         if disposition is AssessmentVerdict.REFUSED:
             refused.add(issue)
@@ -781,85 +1103,200 @@ def assess_github_release(input_packet: AssessmentInput) -> GithubReleaseAssessm
         add(AssessmentIssue.SOURCE_CONFLICT, AssessmentVerdict.UNKNOWN)
 
     if value.source_law_state is SourceLawState.INCOMPATIBLE:
-        add(AssessmentIssue.SOURCE_LAW_INCOMPATIBLE, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.SOURCE_LAW_INCOMPATIBLE,
+            AssessmentVerdict.REFUSED,
+        )
     elif value.source_law_state is SourceLawState.UNKNOWN:
         add(AssessmentIssue.SOURCE_INCOMPLETE, AssessmentVerdict.UNKNOWN)
 
     protected_moved = value.protected_sha != value.expected_protected_sha
     if protected_moved:
         if value.source_law_state is SourceLawState.INCOMPATIBLE:
-            add(AssessmentIssue.PROTECTED_REF_MOVED, AssessmentVerdict.REFUSED)
+            add(
+                AssessmentIssue.PROTECTED_REF_MOVED,
+                AssessmentVerdict.REFUSED,
+            )
         elif value.source_law_state is SourceLawState.UNKNOWN:
-            add(AssessmentIssue.PROTECTED_REF_MOVED, AssessmentVerdict.UNKNOWN)
+            add(
+                AssessmentIssue.PROTECTED_REF_MOVED,
+                AssessmentVerdict.UNKNOWN,
+            )
         else:
             add(AssessmentIssue.PROTECTED_REF_MOVED, None)
 
     if value.candidate_sha != value.expected_head_sha:
-        add(AssessmentIssue.CANDIDATE_HEAD_MOVED, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.CANDIDATE_HEAD_MOVED,
+            AssessmentVerdict.REFUSED,
+        )
 
-    merge_context_unknown = any(item is None for item in (value.base_sha, value.merge_base_sha, value.ahead_by, value.behind_by))
+    if value.base_ref != value.protected_ref:
+        add(
+            AssessmentIssue.BASE_REF_MISMATCH,
+            AssessmentVerdict.REFUSED,
+        )
+
+    merge_context_unknown = any(
+        item is None
+        for item in (
+            value.base_sha,
+            value.merge_base_sha,
+            value.ahead_by,
+            value.behind_by,
+        )
+    )
     if merge_context_unknown:
         merge_context_state = MergeContextState.UNKNOWN
-        add(AssessmentIssue.BASE_OR_MERGE_CONTEXT_UNKNOWN, AssessmentVerdict.UNKNOWN)
+        add(
+            AssessmentIssue.BASE_OR_MERGE_CONTEXT_UNKNOWN,
+            AssessmentVerdict.UNKNOWN,
+        )
     else:
         assert value.base_sha is not None
         assert value.merge_base_sha is not None
         assert value.behind_by is not None
-        current_base_missing = value.base_sha != value.protected_sha or value.merge_base_sha != value.protected_sha or value.behind_by > 0
+        current_base_missing = (
+            value.base_sha != value.protected_sha
+            or value.merge_base_sha != value.protected_sha
+            or value.behind_by > 0
+        )
         if current_base_missing:
             merge_context_state = MergeContextState.BEHIND_COMPATIBLE
             if value.current_base_required:
                 if value.source_law_state is SourceLawState.COMPATIBLE:
-                    add(AssessmentIssue.CURRENT_BASE_REQUIRED, AssessmentVerdict.HELD)
+                    add(
+                        AssessmentIssue.CURRENT_BASE_REQUIRED,
+                        AssessmentVerdict.HELD,
+                    )
                 elif value.source_law_state is SourceLawState.UNKNOWN:
-                    add(AssessmentIssue.CURRENT_BASE_REQUIRED, AssessmentVerdict.UNKNOWN)
+                    add(
+                        AssessmentIssue.CURRENT_BASE_REQUIRED,
+                        AssessmentVerdict.UNKNOWN,
+                    )
                 else:
-                    add(AssessmentIssue.CURRENT_BASE_REQUIRED, AssessmentVerdict.REFUSED)
+                    add(
+                        AssessmentIssue.CURRENT_BASE_REQUIRED,
+                        AssessmentVerdict.REFUSED,
+                    )
         else:
             merge_context_state = MergeContextState.CURRENT
 
     if value.expected_paths != value.actual_paths:
         path_state = PathState.MISMATCH
-        add(AssessmentIssue.EXPECTED_PATH_MISMATCH, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.EXPECTED_PATH_MISMATCH,
+            AssessmentVerdict.REFUSED,
+        )
     else:
         path_state = PathState.EXACT
-    if value.path_collisions:
+    relevant_collisions = tuple(
+        collision
+        for collision in value.path_collisions
+        if any(
+            _path_overlap(collision.path, candidate_path)
+            for candidate_path in value.actual_paths
+        )
+    )
+    if relevant_collisions:
         path_state = PathState.COLLISION
         add(AssessmentIssue.PATH_COLLISION, AssessmentVerdict.REFUSED)
 
     semantic_state = SemanticCollisionState.CLEAR
     if not value.semantic_owners_complete:
         semantic_state = SemanticCollisionState.UNKNOWN
-        add(AssessmentIssue.SEMANTIC_OWNER_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+        add(
+            AssessmentIssue.SEMANTIC_OWNER_COVERAGE_PARTIAL,
+            AssessmentVerdict.UNKNOWN,
+        )
     for expected in value.expected_semantic_owners:
-        observed = tuple(row for row in value.current_semantic_owners if row.active and _path_overlap(expected.path_prefix, row.path_prefix))
+        observed = tuple(
+            row
+            for row in value.current_semantic_owners
+            if row.active
+            and _path_overlap(expected.path_prefix, row.path_prefix)
+        )
         if any(row.owner_id != expected.owner_id for row in observed):
             semantic_state = SemanticCollisionState.COLLISION
-            add(AssessmentIssue.SEMANTIC_OWNER_COLLISION, AssessmentVerdict.REFUSED)
+            add(
+                AssessmentIssue.SEMANTIC_OWNER_COLLISION,
+                AssessmentVerdict.REFUSED,
+            )
         elif not observed:
             semantic_state = SemanticCollisionState.UNKNOWN
-            add(AssessmentIssue.SEMANTIC_OWNER_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+            add(
+                AssessmentIssue.SEMANTIC_OWNER_COVERAGE_PARTIAL,
+                AssessmentVerdict.UNKNOWN,
+            )
 
-    active_carriers = tuple(row for row in value.carriers if row.active and row.operation_key == value.operation_key)
-    exact_carriers = tuple(row for row in active_carriers if row.branch == value.candidate_branch and row.candidate_sha == value.candidate_sha)
-    if len(active_carriers) == 1 and len(exact_carriers) == 1:
+    active_carriers = tuple(row for row in value.carriers if row.active)
+    operation_carriers = tuple(
+        row
+        for row in active_carriers
+        if row.operation_key == value.operation_key
+    )
+    exact_carriers = tuple(
+        row
+        for row in operation_carriers
+        if row.branch == value.candidate_branch
+        and row.candidate_sha == value.candidate_sha
+    )
+    foreign_target_claims = tuple(
+        row
+        for row in active_carriers
+        if row.operation_key != value.operation_key
+        and (
+            row.branch == value.candidate_branch
+            or row.candidate_sha == value.candidate_sha
+        )
+    )
+    if (
+        len(operation_carriers) == 1
+        and len(exact_carriers) == 1
+        and not foreign_target_claims
+    ):
         carrier_state = CarrierAssessmentState.EXACT
-    elif not value.carriers_complete and not active_carriers:
+    elif not value.carriers_complete and not operation_carriers:
         carrier_state = CarrierAssessmentState.UNKNOWN
-        add(AssessmentIssue.CARRIER_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+        add(
+            AssessmentIssue.CARRIER_COVERAGE_PARTIAL,
+            AssessmentVerdict.UNKNOWN,
+        )
     else:
         carrier_state = CarrierAssessmentState.CONFLICT
-        add(AssessmentIssue.OPERATION_CARRIER_CONFLICT, AssessmentVerdict.REFUSED)
-    if not value.carriers_complete and active_carriers:
-        add(AssessmentIssue.CARRIER_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+        add(
+            AssessmentIssue.OPERATION_CARRIER_CONFLICT,
+            AssessmentVerdict.REFUSED,
+        )
+    if not value.carriers_complete and operation_carriers:
+        add(
+            AssessmentIssue.CARRIER_COVERAGE_PARTIAL,
+            AssessmentVerdict.UNKNOWN,
+        )
 
-    conflicting_writers = tuple(writer for writer in value.writers if writer.active and writer.operation_key != value.operation_key and any(_path_overlap(writer_path, candidate_path) for writer_path in writer.paths for candidate_path in value.actual_paths))
+    conflicting_writers = tuple(
+        writer
+        for writer in value.writers
+        if writer.active
+        and writer.operation_key != value.operation_key
+        and any(
+            _path_overlap(writer_path, candidate_path)
+            for writer_path in writer.paths
+            for candidate_path in value.actual_paths
+        )
+    )
     if conflicting_writers:
         writer_state = WriterAssessmentState.CONFLICT
-        add(AssessmentIssue.CARRIER_WRITER_CONFLICT, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.CARRIER_WRITER_CONFLICT,
+            AssessmentVerdict.REFUSED,
+        )
     elif not value.writers_complete:
         writer_state = WriterAssessmentState.UNKNOWN
-        add(AssessmentIssue.WRITER_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+        add(
+            AssessmentIssue.WRITER_COVERAGE_PARTIAL,
+            AssessmentVerdict.UNKNOWN,
+        )
     else:
         writer_state = WriterAssessmentState.CLEAR
 
@@ -868,37 +1305,76 @@ def assess_github_release(input_packet: AssessmentInput) -> GithubReleaseAssessm
     check_unknown = False
     if value.required_checks and not value.checks_complete:
         check_unknown = True
-        add(AssessmentIssue.CHECK_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+        add(
+            AssessmentIssue.CHECK_COVERAGE_PARTIAL,
+            AssessmentVerdict.UNKNOWN,
+        )
     for required_name in value.required_checks:
-        named = tuple(row for row in value.checks if row.name == required_name)
-        applicable = tuple(row for row in named if row.head_sha == value.candidate_sha and not row.superseded)
-        superseded = tuple(row for row in named if row.superseded or row.head_sha != value.candidate_sha)
+        named = tuple(
+            row for row in value.checks if row.name == required_name
+        )
+        applicable = tuple(
+            row
+            for row in named
+            if row.head_sha == value.candidate_sha and not row.superseded
+        )
+        superseded = tuple(
+            row
+            for row in named
+            if row.superseded or row.head_sha != value.candidate_sha
+        )
         if not applicable:
             if superseded:
-                add(AssessmentIssue.CHECK_SUPERSEDED, AssessmentVerdict.HELD)
+                add(
+                    AssessmentIssue.CHECK_SUPERSEDED,
+                    AssessmentVerdict.HELD,
+                )
             if value.checks_complete:
                 check_pending = True
-                add(AssessmentIssue.CHECK_PENDING, AssessmentVerdict.HELD)
+                add(
+                    AssessmentIssue.CHECK_PENDING,
+                    AssessmentVerdict.HELD,
+                )
             else:
                 check_unknown = True
-                add(AssessmentIssue.CHECK_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+                add(
+                    AssessmentIssue.CHECK_COVERAGE_PARTIAL,
+                    AssessmentVerdict.UNKNOWN,
+                )
             continue
         latest_attempt = max(row.attempt for row in applicable)
-        latest = next(row for row in applicable if row.attempt == latest_attempt)
-        if latest.status is not CheckStatus.COMPLETED or latest.conclusion is None:
+        latest = next(
+            row for row in applicable if row.attempt == latest_attempt
+        )
+        if (
+            latest.status is not CheckStatus.COMPLETED
+            or latest.conclusion is None
+        ):
             check_pending = True
-            add(AssessmentIssue.CHECK_PENDING, AssessmentVerdict.HELD)
+            add(
+                AssessmentIssue.CHECK_PENDING,
+                AssessmentVerdict.HELD,
+            )
         elif latest.conclusion is CheckConclusion.SUCCESS:
             pass
         elif latest.conclusion is CheckConclusion.CANCELLED:
             check_failed = True
-            add(AssessmentIssue.CHECK_CANCELLED, AssessmentVerdict.REFUSED)
+            add(
+                AssessmentIssue.CHECK_CANCELLED,
+                AssessmentVerdict.REFUSED,
+            )
         elif latest.conclusion is CheckConclusion.UNKNOWN:
             check_unknown = True
-            add(AssessmentIssue.CHECK_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
+            add(
+                AssessmentIssue.CHECK_COVERAGE_PARTIAL,
+                AssessmentVerdict.UNKNOWN,
+            )
         else:
             check_failed = True
-            add(AssessmentIssue.CHECK_FAILED, AssessmentVerdict.REFUSED)
+            add(
+                AssessmentIssue.CHECK_FAILED,
+                AssessmentVerdict.REFUSED,
+            )
     if check_failed:
         check_state = CheckAssessmentState.FAILED
     elif check_unknown:
@@ -908,48 +1384,97 @@ def assess_github_release(input_packet: AssessmentInput) -> GithubReleaseAssessm
     else:
         check_state = CheckAssessmentState.GREEN
 
-    current_reviews = tuple(row for row in value.reviews if row.head_sha == value.candidate_sha)
-    review_blocked = any(row.state is ReviewState.CHANGES_REQUESTED for row in current_reviews)
-    approvals = {row.reviewer for row in current_reviews if row.required and row.state is ReviewState.APPROVED}
+    current_reviews = tuple(
+        row for row in value.reviews if row.head_sha == value.candidate_sha
+    )
+    review_blocked = any(
+        row.state is ReviewState.CHANGES_REQUESTED
+        for row in current_reviews
+    )
+    approvals = {
+        row.reviewer
+        for row in current_reviews
+        if row.required and row.state is ReviewState.APPROVED
+    }
+    if not value.reviews_complete:
+        add(
+            AssessmentIssue.REVIEW_COVERAGE_PARTIAL,
+            AssessmentVerdict.UNKNOWN,
+        )
     if review_blocked:
         review_state = ReviewAssessmentState.BLOCKED
-        add(AssessmentIssue.CHANGES_REQUESTED, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.CHANGES_REQUESTED,
+            AssessmentVerdict.REFUSED,
+        )
     elif not value.reviews_complete:
         review_state = ReviewAssessmentState.UNKNOWN
-        add(AssessmentIssue.REVIEW_COVERAGE_PARTIAL, AssessmentVerdict.UNKNOWN)
-    elif len(approvals) < value.required_approvals or value.unresolved_required_threads > 0:
+    elif (
+        len(approvals) < value.required_approvals
+        or value.unresolved_required_threads > 0
+    ):
         review_state = ReviewAssessmentState.PENDING
     else:
         review_state = ReviewAssessmentState.SATISFIED
     if len(approvals) < value.required_approvals:
-        add(AssessmentIssue.REVIEW_REQUIRED, AssessmentVerdict.HELD)
+        add(
+            AssessmentIssue.REVIEW_REQUIRED,
+            AssessmentVerdict.HELD,
+        )
     if value.unresolved_required_threads > 0:
-        add(AssessmentIssue.UNRESOLVED_REVIEW_THREAD, AssessmentVerdict.HELD)
+        add(
+            AssessmentIssue.UNRESOLVED_REVIEW_THREAD,
+            AssessmentVerdict.HELD,
+        )
 
     if value.production_proof_required:
         if value.production_proof_state is ProductionProofState.MISSING:
-            add(AssessmentIssue.PRODUCTION_PROOF_MISSING, AssessmentVerdict.HELD)
+            add(
+                AssessmentIssue.PRODUCTION_PROOF_MISSING,
+                AssessmentVerdict.HELD,
+            )
         elif value.production_proof_state is ProductionProofState.PARTIAL:
-            add(AssessmentIssue.PRODUCTION_PROOF_PARTIAL, AssessmentVerdict.HELD)
+            add(
+                AssessmentIssue.PRODUCTION_PROOF_PARTIAL,
+                AssessmentVerdict.HELD,
+            )
         elif value.production_proof_state is ProductionProofState.UNKNOWN:
-            add(AssessmentIssue.PRODUCTION_PROOF_UNKNOWN, AssessmentVerdict.UNKNOWN)
+            add(
+                AssessmentIssue.PRODUCTION_PROOF_UNKNOWN,
+                AssessmentVerdict.UNKNOWN,
+            )
 
     completion_state = CompletionClaimState.VALID
     if value.claimed_capability_state is CapabilityState.PROVEN_LIVE:
         if value.production_proof_state is ProductionProofState.UNKNOWN:
             completion_state = CompletionClaimState.UNKNOWN
-            add(AssessmentIssue.PRODUCTION_PROOF_UNKNOWN, AssessmentVerdict.UNKNOWN)
+            add(
+                AssessmentIssue.PRODUCTION_PROOF_UNKNOWN,
+                AssessmentVerdict.UNKNOWN,
+            )
         elif value.production_proof_state is not ProductionProofState.PRESENT:
             completion_state = CompletionClaimState.OVERSTATED
-            add(AssessmentIssue.COMPLETION_CLAIM_OVERSTATED, AssessmentVerdict.REFUSED)
+            add(
+                AssessmentIssue.COMPLETION_CLAIM_OVERSTATED,
+                AssessmentVerdict.REFUSED,
+            )
 
     if value.requested_merge_method not in value.allowed_merge_methods:
-        add(AssessmentIssue.MERGE_METHOD_REFUSED, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.MERGE_METHOD_REFUSED,
+            AssessmentVerdict.REFUSED,
+        )
 
     if value.prior_effect_state is EffectState.EFFECT_UNKNOWN:
-        add(AssessmentIssue.PRIOR_EFFECT_UNKNOWN, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.PRIOR_EFFECT_UNKNOWN,
+            AssessmentVerdict.REFUSED,
+        )
     elif value.prior_effect_state is EffectState.APPLIED:
-        add(AssessmentIssue.PRIOR_EFFECT_APPLIED, AssessmentVerdict.REFUSED)
+        add(
+            AssessmentIssue.PRIOR_EFFECT_APPLIED,
+            AssessmentVerdict.REFUSED,
+        )
 
     if refused:
         verdict = AssessmentVerdict.REFUSED
@@ -963,7 +1488,13 @@ def assess_github_release(input_packet: AssessmentInput) -> GithubReleaseAssessm
     normalized_issues = tuple(sorted(issues, key=lambda item: item.value))
     source_refs = _all_source_refs(value)
     input_digest = _digest(_primitive(value))
-    expected_head_merge_eligible = bool(verdict is AssessmentVerdict.ELIGIBLE and value.candidate_sha == value.expected_head_sha and value.prior_effect_state is EffectState.NOT_APPLIED and value.requested_merge_method in value.allowed_merge_methods)
+    expected_head_merge_eligible = bool(
+        verdict is AssessmentVerdict.ELIGIBLE
+        and value.candidate_sha == value.expected_head_sha
+        and value.base_ref == value.protected_ref
+        and value.prior_effect_state is EffectState.NOT_APPLIED
+        and value.requested_merge_method in value.allowed_merge_methods
+    )
     provisional = GithubReleaseAssessment(
         schema=OUTPUT_SCHEMA,
         verdict=verdict,
@@ -999,7 +1530,10 @@ def assess_github_release(input_packet: AssessmentInput) -> GithubReleaseAssessm
     )
     payload = provisional.to_dict()
     payload.pop("canonical_digest")
-    return dataclasses.replace(provisional, canonical_digest=_digest(payload))
+    return dataclasses.replace(
+        provisional,
+        canonical_digest=_digest(payload),
+    )
 
 
 __all__ = [
