@@ -118,8 +118,7 @@ exact-carrier requirement
 expiry
 ```
 
-The default first operating mode is `SUPERVISED_LIVE_CANARY`. There is **no mandatory multi-week
-shadow**. The first integration targets **one supervised live reversible canary** with exact stop,
+The default first operating mode is `SUPERVISED_LIVE_CANARY`. There is **no mandatory multi-week shadow**. The first integration targets **one supervised live reversible canary** with exact stop,
 rollback and falsifier controls.
 
 ## 8. Source and effect semantics
