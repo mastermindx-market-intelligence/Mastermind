@@ -226,6 +226,12 @@ def www_authenticate(
 
     if not isinstance(policy, ResourcePolicy):
         _refuse()
+    # A frozen dataclass instance can be manually constructed or replaced after
+    # policy loading. Revalidate the exact value at the final quoted boundary so
+    # no raw quote or parser-ambiguous URI can create an extra challenge field.
+    resource_metadata_url, _parts = _split_https_url(
+        policy.resource_metadata_url
+    )
     scopes = _normalized_scopes(
         required_scopes,
         require_mastermind_prefix=True,
@@ -242,7 +248,7 @@ def www_authenticate(
         if error_description not in _ALLOWED_CHALLENGE_DESCRIPTIONS[error]:
             _refuse()
 
-    parts = [f'Bearer resource_metadata="{policy.resource_metadata_url}"']
+    parts = [f'Bearer resource_metadata="{resource_metadata_url}"']
     if scopes:
         parts.append(f'scope="{" ".join(scopes)}"')
     if error is not None and error_description is not None:

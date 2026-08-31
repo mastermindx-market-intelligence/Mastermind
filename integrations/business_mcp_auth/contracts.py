@@ -43,6 +43,9 @@ _POLICY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,95}$")
 _SCOPE_RE = re.compile(r"^[a-z][a-z0-9._:-]{2,95}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_PERCENT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
+_PATH_ATOM_RE = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:@/-]")
+_URI_DANGEROUS = frozenset('"<> {}\\^|`')
 
 
 class AuthErrorCode(str, enum.Enum):
@@ -176,9 +179,33 @@ def _policy_id(value: Any) -> str:
     return token
 
 
+def _validate_exact_path(path: str) -> None:
+    """Validate one exact RFC 3986 path without decoding or normalizing it."""
+
+    index = 0
+    while index < len(path):
+        character = path[index]
+        if character == "%":
+            if _PERCENT_RE.fullmatch(path[index : index + 3]) is None:
+                _refuse()
+            index += 3
+            continue
+        if _PATH_ATOM_RE.fullmatch(character) is None:
+            _refuse()
+        index += 1
+
+
 def _split_https_url(value: Any) -> tuple[str, SplitResult]:
+    """Validate and preserve one exact, non-ambiguous HTTPS URI spelling."""
+
     token = _exact_text(value, maximum=2048)
-    if "\\" in token or any(character.isspace() for character in token):
+    if any(character.isspace() for character in token):
+        _refuse()
+    if any(character in token for character in _URI_DANGEROUS):
+        _refuse()
+    # Empty query and fragment delimiters are still query/fragment syntax and
+    # must not disappear merely because urlsplit projects an empty value.
+    if "?" in token or "#" in token:
         _refuse()
     try:
         parsed = urlsplit(token)
@@ -191,12 +218,18 @@ def _split_https_url(value: Any) -> tuple[str, SplitResult]:
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
         or port not in (None, 443)
         or (parsed.path and not parsed.path.startswith("/"))
     ):
         _refuse()
+
+    authority = token[len("https://") :].split("/", 1)[0]
+    # Percent-encoded host/port spellings create parser differentials and are
+    # never needed for an exact configured resource identity. IPv6 brackets
+    # remain legal here and are rejected later if they appear in the path.
+    if not authority or "%" in authority:
+        _refuse()
+    _validate_exact_path(parsed.path)
     return token, parsed
 
 
