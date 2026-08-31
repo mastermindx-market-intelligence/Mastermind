@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from control_plane.chairman_cognition import (
@@ -8,6 +11,43 @@ from control_plane.chairman_cognition import (
     ChairmanCognitionError,
     evaluate_document,
 )
+
+
+def _digest(value) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+
+
+def _classification_payload(option: dict) -> dict:
+    return {
+        "change_classes": sorted(option["change_classes"]),
+        "affected_departments": sorted(option["affected_departments"]),
+    }
+
+
+def _bind_document(document: dict) -> dict:
+    receipts = {item["source_ref"]: item for item in document["source_receipts"]}
+    strategy_ref = document["strategic_constraints_source_ref"]
+    receipts[strategy_ref]["revision"] = (
+        f"constraints-sha256:{_digest(document['strategic_constraints'])}"
+    )
+    bindings: dict[str, set[str]] = {}
+    for option in document["options"]:
+        ref = option["classification_source_ref"]
+        bindings.setdefault(ref, set()).add(
+            f"classification-sha256:{_digest(_classification_payload(option))}"
+        )
+    for ref, tokens in bindings.items():
+        base = receipts[ref]["revision"].split(";classification-sha256:", 1)[0]
+        receipts[ref]["revision"] = ";".join([base, *sorted(tokens)])
+    return document
 
 
 def _metrics(value: int = 50) -> dict[str, int]:
@@ -51,6 +91,7 @@ def _option(**changes) -> dict:
         "stop_condition": "Stop after one exact branch head.",
         "rollback_plan": "Abandon the unmerged branch.",
         "falsifier": "Any duplicate owner is a failure.",
+        "classification_source_ref": "SRC-GITHUB",
         "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
         "affected_departments": ["executive"],
         "benefits": _metrics(),
@@ -87,14 +128,14 @@ def _envelope(**changes) -> dict:
 
 
 def _document(option: dict | None = None, envelope: dict | None = None) -> dict:
-    return {
+    document = {
         "schema": INPUT_SCHEMA,
         "as_of": "2026-08-30T16:00:00Z",
         "source_receipts": [
             {
                 "source_ref": "SRC-STRATEGY",
                 "owner": "STRATEGIC_STATE",
-                "revision": "sha256:current-strategic-state",
+                "revision": "strategy-current",
                 "state": "CURRENT",
                 "load_bearing": True,
                 "observed_at": "2026-08-30T16:00:00Z",
@@ -128,6 +169,7 @@ def _document(option: dict | None = None, envelope: dict | None = None) -> dict:
         "delegation_envelope": envelope or _envelope(),
         "options": [option or _option()],
     }
+    return _bind_document(document)
 
 
 def _result(document: dict) -> dict:
@@ -344,6 +386,7 @@ def test_bounded_autonomous_modification_consumes_strategic_constraint(
     document["strategic_constraints"][
         "unbounded_autonomous_strategic_modification"
     ] = level
+    _bind_document(document)
     item = _result(document)
     assert item["disposition"] == disposition
     assert item["reason"] == reason
@@ -398,6 +441,7 @@ def test_runtime_canary_requires_controls_in_bounded_autonomous_mode() -> None:
     document["strategic_constraints"][
         "unbounded_autonomous_strategic_modification"
     ] = "permitted"
+    _bind_document(document)
     item = _result(document)
     assert item["disposition"] == "REFUSED"
     assert item["reason"] == "CANARY_CONTROLS_REQUIRED"
@@ -424,6 +468,7 @@ def test_duplicate_plane_constraint_is_consumed_and_never_delegates(
 ) -> None:
     document = _document(_option(creates_duplicate_control_plane=True))
     document["strategic_constraints"]["duplicate_control_planes"] = level
+    _bind_document(document)
     item = _result(document)
     assert item["disposition"] == disposition
     assert item["reason"] == reason

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -17,6 +18,42 @@ from control_plane.chairman_cognition import (
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
+
+
+def _digest(value) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+
+
+def _classification_payload(option: dict) -> dict:
+    return {
+        "change_classes": sorted(option["change_classes"]),
+        "affected_departments": sorted(option["affected_departments"]),
+    }
+
+
+def _bind_document(document: dict) -> dict:
+    constraints_digest = _digest(document["strategic_constraints"])
+    strategy_ref = document["strategic_constraints_source_ref"]
+    receipts = {item["source_ref"]: item for item in document["source_receipts"]}
+    receipts[strategy_ref]["revision"] = f"constraints-sha256:{constraints_digest}"
+
+    bindings: dict[str, set[str]] = {}
+    for option in document["options"]:
+        ref = option["classification_source_ref"]
+        token = f"classification-sha256:{_digest(_classification_payload(option))}"
+        bindings.setdefault(ref, set()).add(token)
+    for ref, tokens in bindings.items():
+        base = receipts[ref]["revision"].split(";classification-sha256:", 1)[0]
+        receipts[ref]["revision"] = ";".join([base, *sorted(tokens)])
+    return document
 
 
 def _benefits(**changes):
@@ -64,6 +101,7 @@ def _option(option_id="OPT-A", **changes):
         "stop_condition": "Stop at one immutable review-ready branch head.",
         "rollback_plan": "Delete no canonical state; abandon the branch if rejected.",
         "falsifier": "Any duplicate lifecycle or authority owner is a failure.",
+        "classification_source_ref": "SRC-GITHUB",
         "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
         "affected_departments": ["executive"],
         "benefits": _benefits(),
@@ -108,14 +146,14 @@ def _envelope(**changes):
 
 
 def _document(*options, envelope=None):
-    return {
+    document = {
         "schema": INPUT_SCHEMA,
         "as_of": "2026-08-30T15:00:00Z",
         "source_receipts": [
             {
                 "source_ref": "SRC-STRATEGY",
                 "owner": "STRATEGIC_STATE",
-                "revision": "sha256:current-strategic-state",
+                "revision": "strategy-current",
                 "state": "CURRENT",
                 "load_bearing": True,
                 "observed_at": "2026-08-30T15:00:00Z",
@@ -149,6 +187,7 @@ def _document(*options, envelope=None):
         "delegation_envelope": envelope,
         "options": list(options or [_option()]),
     }
+    return _bind_document(document)
 
 
 def _adjudication(packet, option_id="OPT-A"):

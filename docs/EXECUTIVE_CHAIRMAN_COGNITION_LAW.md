@@ -312,17 +312,30 @@ It is complete only when, on a real multi-program company objective:
   watcher repair, carrier archaeology or initiative babysitting;
 - Chairman-only forks are rare, explicit and genuinely preference/constitution decisions.
 
-## 14. R2 complete strategic-constraint coverage
+## 14. R2 complete strategic-constraint coverage and content binding
 
-A1 must never carry a Strategic State rule as decorative text. Every input therefore contains a
-required root `strategic_constraints_source_ref` that resolves to exactly one `CURRENT`,
-load-bearing `STRATEGIC_STATE` receipt. That receipt is included in every option's aggregate source
-state. Each option must independently cite at least one other load-bearing source; current
-Slack/Linear context cannot establish or repair currentness for a stale load-bearing fact.
+A1 must never carry a Strategic State rule as decorative text or let a caller swap a map underneath a
+current-looking receipt. Every input therefore contains a required root
+`strategic_constraints_source_ref` that resolves to exactly one `CURRENT`, load-bearing
+`STRATEGIC_STATE` receipt. The canonical constraint map is content-bound to that receipt by an exact
+semicolon-delimited field:
+
+```text
+constraints-sha256:<sha256(canonical constraint map)>
+```
+
+A1 recomputes the digest and rejects a mismatched map as not content-bound. This is structural
+integrity, not authentication of the caller: the accepted A2/B2/current-source adapter must still own
+the receipt, and the actual effect owner must reread current canonical state.
+
+The Strategic State receipt is included in every option's aggregate source state. Each option must
+independently cite at least one other load-bearing source; current Slack/Linear context cannot
+establish or repair currentness for a stale load-bearing fact.
 
 Every option carries closed classification facts:
 
 ```text
+classification_source_ref
 change_classes:
   NEW_FEATURE
   MAINTENANCE_REPAIR
@@ -337,9 +350,21 @@ change_classes:
 affected_departments: prophet | product | marketing | executive
 ```
 
-`UNKNOWN` cannot coexist with another class. Modifying actions require classification.
-`ORGANIZATIONAL_EXPANSION` requires at least one affected department. Classification is evidence for
-constraint applicability; it never overrides action, effect, carrier, constitutional or owner law.
+Classification is not self-attested model authority. `classification_source_ref` must be cited by the
+option, load-bearing, and owned by an accepted classification source such as Chairman directive,
+Strategic State, Agent OS, Executive OS, GitHub, Steward, Control Room or Operation Assurance. The
+classification payload is content-bound to that receipt through:
+
+```text
+classification-sha256:<sha256(canonical change_classes + affected_departments)>
+```
+
+Slack and Linear cannot be used as classification owners. A stale classification owner makes the
+option stale; a missing, advisory-only, wrong-owner or mismatched classification binding makes the
+closed input invalid. `UNKNOWN` cannot coexist with another class. Modifying actions require
+classification. `ORGANIZATIONAL_EXPANSION` requires at least one affected department.
+Classification is evidence for applicability; it never overrides action, effect, carrier,
+constitutional or owner law.
 
 The current required constraint set is exactly the six current Strategic State rules:
 

@@ -4,499 +4,253 @@
 **Chairman:** Chris  
 **Owner:** `SOL:META-CEO:MASTERMIND`  
 **Operation:** `mastermind-chairman-cognition-loop-20260830-sol-001`  
-**Protected pickup:** `Mastermind@620263090fb9f272f763e420ba103b0ff8dc5f31`  
-**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
 **Workstream parent:** existing `WS:CHAIRMAN-CONTROL-ROOM`  
-**Cognition route:** `CHAT_PRO_DEFAULT`
+**Cognition route:** `CHAT_PRO_DEFAULT`  
+**Current capability:** `BUILT_NOT_PROVEN / PRODUCTION_INERT`
 
-## 1. Chairman outcome
+## 1. Outcome
 
-Chris wants to stop serving as Mastermind's continuously active chief chairman engineer: the person
-who holds the entire company in working memory, discovers the next missing system, defines the
-architecture, assigns initiatives, allocates cognition/compute, reconciles agents and carriers, and
-keeps all layers moving toward the end vision.
+Transfer recurring chief-chairman-engineer cognition from Chris into the existing logical Meta-CEO
+office. The system must reconstruct current company truth, compare it with the desired future,
+identify the binding constraint, preserve materially incomparable strategic alternatives, choose one
+bounded transformation inside explicit authority, route execution through existing owners, and learn
+from actual outcomes.
 
-The target capability is one logical Meta-CEO office that can look down across the complete company,
-look forward toward the desired end state, and repeatedly decide and cause the next highest-leverage
-organizational transformation—while Chris retains constitutional control over terminal preference,
-principles, risk and irreversible decisions.
+Chris remains Constitutional Chairman for terminal objectives, constitutional rules, unbounded
+delegation, irreversible decisions, major budget expansion, production-deployment policy and
+live-capital authority.
 
-## 2. Product thesis
-
-### Chairman job
-
-State intent, preference, risk tolerance or a major correction once; receive a compact explanation of
-what Mastermind is doing, why, what changed, and only the genuine decision forks that cannot be
-resolved inside the accepted delegation envelope.
-
-### Machine job
-
-Maintain a source-attributed model of desired state, current capability, dependencies, bottlenecks,
-capacity, evidence and authority; generate strategic alternatives; preserve incomparable tradeoffs;
-select and decompose bounded transformations; cause execution through existing owners; learn from
-outcomes.
-
-### Moat
-
-The moat is not a larger prompt. It is the closed learning loop between:
-
-- proprietary company/product/market context;
-- durable architecture and decision provenance;
-- actual implementation and production evidence;
-- explicit organizational constraints and capacity;
-- repeated prediction-versus-outcome learning;
-- a Meta-CEO that can redesign the organization that produces the next capability.
-
-### 10/10 end state
-
-Mastermind can operate hundreds of recoverable responsibilities with a smaller active cognition pool,
-continuously improve its own organization, and convert Chairman intent into tested product,
-intelligence and company capability without routine Chairman orchestration.
-
-## 3. Architecture decision: one office, two modes
-
-Rejected:
-
-```text
-Chris -> Meta-Chairman agent -> Meta-CEO agent -> Program CEOs
-```
-
-That creates ambiguous action authority, another succession problem and pressure for another durable
-memory/lifecycle owner.
+## 2. One office, two modes
 
 Accepted:
 
 ```text
 Chris, Constitutional Chairman
-  -> one logical SOL:META-CEO:MASTERMIND office
-       CHAIRMAN_COGNITION mode
-       CEO_EXECUTION mode
+  -> SOL:META-CEO:MASTERMIND
+       CHAIRMAN_COGNITION
+       CEO_EXECUTION
   -> existing Program CEO / Project Sol / Integrator / Auditor topology
-  -> bounded workers through existing Executive/Capacity/provider owners
 ```
 
-The mode boundary is cognitive responsibility, not a new identity or process requirement. One Chat
-surface may perform both modes for a small cycle; larger decisions may use independent specialist
-Sols and one Integrator/Auditor, while exactly one Meta-CEO remains action-authoritative.
+Rejected: a separate Meta-Chairman agent, strategy lifecycle, scheduler, queue, authority registry,
+session registry or memory database.
 
-## 4. The strategic world model is a composition
+**No `chairman_brain.db` is authorized.**
 
-No `chairman_brain.db` is authorized. The world model is assembled by progressive disclosure from
-existing canonical owners.
+## 3. Existing owners remain canonical
 
-### Tier 1 — constitution and intent
+Chairman Cognition composes, but does not replace:
 
-- Charter and standing source law;
-- current explicit Chairman directive;
-- `config/strategic_state.yml` objectives, resource policy, constraints and review triggers;
-- current delegation envelope.
+- Strategic State and Charter for objectives and standing boundaries;
+- Agent OS for durable workstreams, decisions, discoveries and handoffs;
+- Executive OS for Job / Attempt / Worker / Event lifecycle and CEO admission;
+- GitHub for implementation, CI, review, release and evidence;
+- Linear for selected portfolio projection only;
+- Capacity and Model Router for provider/account/surface eligibility;
+- RuntimeBinding for the exact current execution surface;
+- Wake for attention and delivery identity;
+- Executive Steward and Control Room for normalized whole-company reads;
+- Executive Attention Frontier for advisory attention ordering;
+- Runtime Observability for diagnostic evidence;
+- Operation Assurance for liveness/soundness evidence.
 
-### Tier 2 — whole-company orientation
+Slack and Linear prose remain transport/projection evidence. They do not become authority or repair a
+stale canonical fact merely because they are recent.
 
-- Agent OS workstreams, decisions, discoveries, handoffs and dependency readiness;
-- Executive OS Job/Attempt/Worker/Event and effect state;
-- corrected Executive Steward responsibility/attention composition;
-- selected Linear portfolio projection and known disagreements.
+## 4. Strategic option model
 
-### Tier 3 — one decision bundle
-
-- exact GitHub branches, PRs, CI, reviews, releases and production evidence;
-- Capacity/Model Router availability and scarcity;
-- RuntimeBinding, Wake and company-dialogue state;
-- relevant observability and operation-assurance evidence;
-- product, research, user or market evidence for the target program.
-
-### Tier 4 — raw evidence
-
-Raw source records, diffs, logs, traces, screenshots, datasets and transcripts only when load-bearing.
-Raw transcripts never become organizational memory or authority.
-
-## 5. Strategic option contract
-
-A strategic option is not an implementation prompt. It states:
+Each option names:
 
 ```text
-option identity and observable outcome
-action/effect class
-source references and freshness
+observable outcome
+action and reversibility
+effect state
+source references
 canonical affected-scope references
-reversibility and effect state
-operation and carrier identity
-repository/path scope where applicable
-budget and active-child envelope
-expected benefits and costs by explicit dimensions
-assumptions, falsifier, stop condition and rollback
-capability unlocked and proof required
+stable operation and carrier
+repository/path scope
+expected head where applicable
+budget and active-child ceiling
+stop condition / rollback / falsifier
+classification source
+change classes and affected departments
+benefit and cost dimensions
 ```
 
-A model may create option content. It may not create the current authority source that makes a
-modifying option eligible. The closed V1 action vocabulary explicitly includes:
+The action vocabulary includes `PORTFOLIO_HOLD`, research/audit/architecture analysis, source branch
+and merge, Executive child commission, reversible runtime canary, Program start/pause/resume/retire,
+Program combine/split, resource reallocation and organizational restructure.
+
+New Programs and Executive children require an explicit `NEW_CHILD` carrier state. Existing effects
+use allowed exact-carrier prefixes and cannot silently fail over.
+
+## 5. Value, authority and serviceability are separate
+
+A high-value option is not authorized merely because a model prefers it. A valid delegation envelope
+does not cure stale evidence, `EFFECT_UNKNOWN`, a known-applied effect, an ambiguous carrier, missing
+canary controls or a prohibited strategic constraint.
+
+A1 always emits `execution_authority_granted=false`. The actual effect owner must reread current
+canonical state and authority immediately before mutation.
+
+## 6. Strategic frontier
+
+A1 computes a genuine Pareto frontier over explicit benefit and cost dimensions. It has no hidden
+universal score and no silent tie-break. Unknown dimensions prevent false dominance. A mechanical
+recommendation exists only when exactly one eligible option remains non-dominated.
+
+`PORTFOLIO_HOLD` remains a first-class no-effect alternative, so the system can decide not to start
+more work.
+
+## 7. Delegation envelope
+
+`mastermind.chairman_delegation_envelope.v1` projects explicit Chairman authority. It binds:
 
 ```text
-PORTFOLIO_HOLD
-PROGRAM_START / PROGRAM_PAUSE / PROGRAM_RESUME / PROGRAM_RETIRE
-PROGRAM_COMBINE / PROGRAM_SPLIT
-RESOURCE_REALLOCATION / ORGANIZATIONAL_RESTRUCTURE
+authority source references
+SUPERVISED_LIVE_CANARY or BOUNDED_AUTONOMOUS mode
+allowed actions and reversibility
+repository/path scope
+canonical affected-scope prefixes
+allowed exact-carrier prefixes
+budget and active-child ceilings
+exact-carrier requirement
+expiry
 ```
 
-`PORTFOLIO_HOLD` has no effect and is eligible as read-only cognition. Organizational modifications
-require canonical affected-scope references and the existing owner of those responsibilities.
+The default first operating mode is `SUPERVISED_LIVE_CANARY`. There is **no mandatory multi-week
+shadow**. The first integration targets **one supervised live reversible canary** with exact stop,
+rollback and falsifier controls.
 
-## 6. Frontier construction
+## 8. Source and effect semantics
 
-V1 uses deterministic Pareto dominance over five benefit and five cost dimensions. It deliberately
-has no configurable weights, model-authored priority scalar or tie-breaking preference.
+- future-dated evidence is malformed;
+- stale, conflicting or unknown load-bearing evidence refuses the dependent option;
+- `EFFECT_UNKNOWN` requires same-carrier reconciliation before any retry;
+- a known-applied effect is terminal and never re-enters a frontier;
+- duplicate control planes remain refused or Chairman-only, never delegated;
+- source branches and merges require exact expected heads;
+- prefix checks use exact-or-delimited descendants rather than raw string starts-with behavior.
 
-An option dominates another only when all ten dimensions are known, it is no worse on every
-benefit/cost dimension and better on at least one. Any unknown dimension keeps the alternatives
-incomparable. This favors truthful over-inclusion over false suppression.
+## 9. R2 — total Strategic State constraint coverage
 
-The deterministic engine emits:
+R2 makes the current Strategic State rules operational rather than decorative.
 
-- `strategic_frontier`: current/effect-safe non-dominated options;
-- `actionable_frontier`: frontier options eligible by delegation/serviceability preflight;
-- a mechanical recommendation only for a unique actionable frontier;
-- otherwise an explicit multi-option fork or no-action state.
+### 9.1 Constraint map binding
 
-The Meta-CEO may still reason over incomparable options, but its explanation must name the actual
-tradeoff and may not pretend a hidden score decided it.
-
-## 7. Delegation and authority
-
-### 7.1 Envelope source
-
-The accepted envelope is a projection of explicit Chairman intent from its canonical record. The A1
-pure core accepts a source-attributed envelope but cannot authenticate its human origin; downstream
-execution must independently re-read the canonical envelope source immediately before effect.
-
-### 7.2 First envelope shape
-
-The recommended initial envelope is deliberately useful but bounded:
+The input requires `strategic_constraints_source_ref`. It must resolve to exactly one CURRENT,
+load-bearing `STRATEGIC_STATE` receipt. The exact canonical constraint map is **content-bound** to
+that receipt through:
 
 ```text
-mode: SUPERVISED_LIVE_CANARY
-allowed:
-  durable organizational/source records
-  branch-local source changes
-  expected-head source merge after accepted review
-  bounded Executive child commission
-  reversible non-production canary
-not allowed:
-  constitutional/terminal-objective change
-  unbounded budget expansion
-  generic admin/credential infrastructure
-  autonomous production deploy
-  live capital
-  duplicate lifecycle/queue/session/authority/memory plane
-scope:
-  named repositories and path prefixes only
-  named canonical affected-scope prefixes
-  named allowed exact-carrier prefixes
-  max three active children for the first cycle
-  small explicit budget ceiling
-  exact carrier for every non-child-creation modification
-  explicit NEW_CHILD for a new Program or Executive child
+constraints-sha256:<sha256(canonical constraint map)>
 ```
 
-### 7.3 Action-time enforcement
+A1 recomputes the digest. A caller cannot swap constraint values under a current-looking receipt.
+The packet exposes the verified constraint digest and the exact source reference.
 
-The Chairman Cognition packet is advice and preflight. Actual mutation still requires current:
+### 9.2 Classification binding
 
-- Chairman intent/envelope;
-- exact action-authoritative Sol target;
-- stable operation and one carrier;
-- owner-specific service/runtime gates;
-- current effect state;
-- exact app/tool confirmation where applicable;
-- expected-head protection for merge;
-- production proof for acceptance.
+Every option has `classification_source_ref`, `change_classes` and `affected_departments`.
+Classification is not trusted merely because the option says it is maintenance rather than a new
+feature. The classification source must be cited, load-bearing and owned by an accepted canonical
+classification owner: Chairman directive, Strategic State, Agent OS, Executive OS, GitHub, Steward,
+Control Room or Operation Assurance.
 
-## 8. Accelerated learning versus prolonged shadow
-
-The user explicitly prefers rapid trial-and-error. There is no mandatory multi-week shadow.
-The architecture therefore removes a mandatory long passive-shadow phase.
-
-Promotion sequence:
+The classification payload is content-bound through:
 
 ```text
-PURE DETERMINISTIC CORE
-  -> one manually assembled current-source packet
-  -> one supervised live reversible canary
-  -> terminal evidence review
-  -> expand / contract / revoke envelope
-  -> several independent bounded cycles
-  -> zero-touch execution integration
-  -> multi-program portfolio autonomy
+classification-sha256:<sha256(canonical classes + departments)>
 ```
 
-The first live canary is intentionally a real effect, but not a production deployment or capital
-action. It must be reversible, exact-carrier-bound and stop after one independently useful outcome.
+Slack and Linear cannot be classification owners. A stale classification source makes the option
+stale; a missing, advisory-only, wrong-owner or mismatched binding makes the input invalid.
 
-Shadow remains available when the proposed action is too consequential, the source adapter is
-uncalibrated, or the current effect path cannot be bounded. It is not the default ceremony.
-
-## 9. Organizational topology selection
-
-Chairman Cognition may choose among topologies instead of always spawning more agents:
-
-- **single Meta-CEO pass** for bounded, low-ambiguity decisions;
-- **specialist council** for high-value ambiguous strategy;
-- **Program CEO multiplexing** for related projects;
-- **Integrator-first** when fanout has outrun synthesis capacity;
-- **Auditor-first** when evidence or authority is uncertain;
-- **falsifier-first** when one cheap experiment can kill an expensive architecture;
-- **pause/kill/merge** when programs duplicate or have lost strategic value;
-- **wait** when a real dependency or option value dominates immediate action.
-
-Every council receives the same frozen intent/current-source receipt and a distinct mandate. One
-Integrator preserves dissent. One independent Auditor verifies outcome, authority, duplication,
-evidence and executable scope. The Meta-CEO accepts, rejects or requests bounded repair.
-
-## 10. Bottleneck model
-
-The loop explicitly measures or estimates:
+Closed classes include:
 
 ```text
-Chairman decision latency
-Meta-CEO cognition availability
-program-definition quality
-decomposition throughput
-worker placement latency
-worker execution throughput
-integration and review capacity
-production-proof latency
-source ambiguity and correction load
-context/session exhaustion
-transport and Wake reliability
-compute/cognition utilization
-rework and duplicate-carrier rate
-deploy lag
+NEW_FEATURE
+MAINTENANCE_REPAIR
+EXISTING_CAPABILITY_COMPLETION
+ARCHITECTURE_RECORD
+RESEARCH
+RELEASE
+RUNTIME_CANARY
+ORGANIZATIONAL_EXPANSION
+RESOURCE_REALLOCATION
+UNKNOWN
 ```
 
-The selected move should attack the binding constraint, not the loudest open PR. Examples:
+`UNKNOWN` is exclusive. A modifying option must be classified. `ORGANIZATIONAL_EXPANSION` must name
+an affected department.
 
-- idle compute + no executable packets -> increase decomposition, not hardware;
-- many workers + delayed integration -> reduce fanout and add Integrator capacity;
-- repeated Chairman message carriage -> prioritize Wake/RuntimeBinding/return closure;
-- multiple programs blocked by one read-integrity seam -> repair that seam first;
-- infrastructure without product consumer -> stop and attach the real user/machine journey.
+### 9.3 Current constraints
 
-## 11. A1 implementation
+All six current constraints are required and evaluated:
 
-### Observable mission
+```text
+autonomous_production_deploy
+autonomous_live_capital_execution
+duplicate_control_planes
+marketing_org_expansion_before_distribution_proof
+new_feature_expansion
+unbounded_autonomous_strategic_modification
+```
 
-Given one closed JSON document containing source receipts, strategic constraints, an optional
-Chairman delegation envelope and strategic options, emit a deterministic
-`mastermind.chairman_cognition_packet.v1`.
+`NEW_FEATURE` activates the constrained new-feature rule. Marketing
+`ORGANIZATIONAL_EXPANSION` activates the prohibited distribution-proof rule. Safe completion,
+maintenance, research, release and runtime-canary classes do not accidentally become expansion.
 
-### Files
+A future constraint never disappears. Its selector is `UNKNOWN`; for modifying work, prohibited
+refuses, constrained requires Chairman, and permitted may continue through every other gate while the
+unknown applicability remains visible. Read-only work remains no-effect.
+
+### 9.4 Complete output
+
+Every adjudication emits sorted, digest-covered `constraint_results` containing ID, current level,
+applicability and effect, plus one exact `blocking_constraint`. Final precedence is:
+
+```text
+REFUSED > CHAIRMAN_REQUIRED > eligibility
+```
+
+All results remain visible even when one blocker determines the final disposition.
+
+## 10. A1 boundary
+
+A1 is a pure deterministic standard-library core and JSON CLI. It does not gather company sources,
+call a model, write a file, invoke a connector, create a Job, select capacity, bind a session, send
+Slack, update Linear or Agent OS, merge, deploy, trade or persist memory.
+
+Its schemas and tests live in:
 
 ```text
 control_plane/chairman_cognition.py
 scripts/chairman_cognition.py
 tests/test_chairman_cognition.py
+tests/test_chairman_cognition_hardening.py
 tests/test_chairman_cognition_source_contract.py
 ```
 
-### Method
-
-Deterministic standard-library parsing and comparison only. No model inference is embedded in A1.
-The model generates options; A1 validates grammar, computes the frontier and projects eligibility.
-
-### Failure behavior
-
-- unknown field/action/source owner -> invalid input;
-- stale/conflicting/unknown load-bearing source -> option refused;
-- ambiguous effect -> reconcile first;
-- known-applied effect -> terminal/non-actionable, never replayed or recommended;
-- duplicate control plane -> refused;
-- current strategic prohibition -> refused;
-- missing/expired/non-current envelope -> Chairman required or refused;
-- missing exact carrier/operation/expected head -> refused;
-- Executive child commission without explicit `NEW_CHILD` carrier state -> refused;
-- source action without one repository and explicit paths -> invalid input;
-- non-Chairman-owned delegation source or envelope disabling exact-carrier law -> invalid input;
-- canary without stop/rollback/falsifier -> refused;
-- invalid CLI input -> fixed opaque `INVALID_INPUT`, exit 2, no payload leakage.
-
-### Non-goals
-
-No source gatherer, model call, strategy memory, scheduler, queue, Executive Job, Capacity route,
-RuntimeBinding, Wake, Slack, Linear, Agent OS, GitHub API, merge, deploy, credential or capital effect.
-
-## 12. Real source composition A2
-
-A2 extends existing read owners rather than teaching A1 to crawl the company.
-
-Preferred composition:
+## 11. Program sequence
 
 ```text
-current strategic_state
-+ current Chairman directive/envelope
-+ ceo_boot_packet / Agent OS brief
-+ corrected Executive Steward normalized snapshot
-+ GitHub evidence packets
-+ EAF attention/serviceability projection
-+ Capacity and relevant diagnostic/assurance receipts
--> mastermind.chairman_cognition_input.v1
+CCL-A1 deterministic decision core
+-> CCL-A2 owner-preserving source composer and trusted bindings
+-> CCL-A3 one real supervised reversible canary
+-> CCL-A4 prediction/outcome learning through Agent OS + GitHub
+-> CCL-A5 zero-touch integration through existing Executive/Capacity/Runtime/Wake owners
+-> CCL-A6 bounded multi-program portfolio autonomy
 ```
 
-Until corrected Steward is protected and installed, a Meta-CEO may manually assemble a bounded input
-from exact owner reads. The resulting packet must list missing/unknown sources and cannot authorize a
-modification that depends on them.
+A2 must migrate to the R2 grammar on its existing carrier. It must emit the Strategic State source
+binding, full six-constraint map, classification facts and classification bindings. A1 protection
+precedes that migration.
 
-## 13. First live canary A3
+## 12. Completion ruler
 
-The first canary should test the whole cognition-to-execution loop, not merely the JSON parser.
-
-Acceptance journey:
-
-1. Chris's current directive and strategic state are current sources;
-2. Meta-CEO assembles a real portfolio packet;
-3. it proposes at least three materially different moves, including `DO_NOT_START_MORE_WORK` where
-   appropriate;
-4. A1 preserves the truthful frontier and authority/serviceability boundaries;
-5. Meta-CEO selects one reversible bounded option under the accepted envelope;
-6. the option enters one existing Executive/GitHub carrier path;
-7. worker/result/Integrator/Auditor returns are consumed;
-8. the capability is proved or rejected with real evidence;
-9. Agent OS records decision, outcome and exact next action;
-10. the envelope is expanded, held or contracted from evidence.
-
-No long shadow corpus is required before this canary. One canary does not grant fleet autonomy.
-
-## 14. Learning architecture A4
-
-For each strategic decision record:
-
-```text
-beliefs and source revisions
-options considered and frontier
-selection rationale and authority envelope
-predicted capability, cost, time and dependency unlock
-falsifier and stop/rollback
-actual capability state and evidence
-actual time/cost/rework
-Chairman interventions required
-what assumption changed
-next envelope decision
-```
-
-Point-in-time storage prevents hindsight rewriting. GitHub owns immutable implementation/evidence;
-Agent OS owns the durable decision/discovery/handoff; Linear receives only selected portfolio
-projection. No separate decision-history database is created.
-
-## 15. Program waves
-
-### CCL-A1 — this vertical
-
-Strategic-state update, source law, deterministic frontier/delegation preflight, CLI and tests.
-
-### CCL-A2 — source composer
-
-Build a pure adapter over accepted boot/Steward/evidence inputs. Do not crawl raw systems or create a
-second Steward.
-
-### CCL-A3 — supervised live canary
-
-One real reversible strategic action under a current envelope, with terminal evidence and learning.
-Manual same-carrier bridging is acceptable only where the canonical zero-touch path is not yet live.
-
-### CCL-A4 — decision learning
-
-Point-in-time prediction/outcome evaluator and Agent OS closeout pattern; no autonomous envelope
-expansion.
-
-### CCL-A5 — zero-touch integration
-
-Connect accepted packet/action to existing exact Sol target, Executive admission, Capacity, worker
-return, Wake and continuation owners. No direct provider/session shortcut.
-
-### CCL-A6 — bounded portfolio autonomy
-
-Multiple independent programs, bounded active-child/fanout envelope, context rotation, Integrator and
-Auditor capacity, no Chairman message shuttling or account allocation.
-
-## 16. Current capability ledger at pickup
-
-```text
-Chat-native Meta-CEO hierarchy law                 PROTECTED / SPEC_ONLY CORE
-exact Chat provisioning and hierarchy fleet        NOT_BUILT
-Executive Steward read core                        BUILT_NOT_PROVEN / repair carrier open
-Executive Attention Frontier                       SPEC_ONLY / carrier open
-Runtime Observability                              F0 PROTECTED / runtime NOT_BUILT
-Operation Assurance                                SPEC_ONLY / carrier open
-zero-touch worker return/retry/Wake chain           PARTIAL / active carriers
-Sol executive/capability surfaces                  SPEC_ONLY or BUILT_NOT_PROVEN carriers
-Chairman Cognition source law                       NOT_BUILT before this carrier
-Chairman Cognition deterministic A1                 NOT_BUILT before this carrier
-real Chairman Cognition live canary                 NOT_BUILT
-portfolio strategic autonomy                        NOT_BUILT
-```
-
-## 17. Proof ruler
-
-A1 acceptance requires:
-
-- current protected base and Skillpack pin;
-- no changed-path collision;
-- strategic state validates and preserves standing prohibitions;
-- closed grammar and fixed failure behavior;
-- tests for every authority/effect/canary/frontier boundary;
-- AST/static fences proving no I/O/runtime/control-plane imports;
-- deterministic repeated output and digest;
-- exact-head repository/security proof;
-- independent adversarial review;
-- expected-head release only.
-
-The overall program acceptance remains the real Chairman experience described in Section 1, not the
-existence of this module.
-
-## 18. R2 Strategic State binding and total constraint evaluation
-
-A1's input now binds the constraint map to an exact `strategic_constraints_source_ref`. The receipt
-must be `CURRENT`, load-bearing and owned by `STRATEGIC_STATE`; a stale, conflicting, unknown,
-wrong-owner or advisory-only strategy receipt is malformed. Every option also needs another
-load-bearing source. Non-load-bearing context may enrich explanation but cannot establish or cure
-currentness.
-
-Each strategic option carries closed facts for deterministic selector evaluation:
-
-```text
-change_classes:
-  NEW_FEATURE
-  MAINTENANCE_REPAIR
-  EXISTING_CAPABILITY_COMPLETION
-  ARCHITECTURE_RECORD
-  RESEARCH
-  RELEASE
-  RUNTIME_CANARY
-  ORGANIZATIONAL_EXPANSION
-  RESOURCE_REALLOCATION
-  UNKNOWN
-affected_departments:
-  prophet | product | marketing | executive
-```
-
-`UNKNOWN` is exclusive. A modifying option cannot omit classification. An
-`ORGANIZATIONAL_EXPANSION` cannot omit an affected department. `NEW_FEATURE` activates
-`new_feature_expansion`; unknown classification makes applicability unknown. Marketing
-`ORGANIZATIONAL_EXPANSION` activates the distribution-proof constraint. Maintenance, completion,
-research, release and runtime-canary classes do not accidentally become new-feature or marketing
-expansion.
-
-The selector table covers all six current Strategic State constraints. A future constraint with no
-accepted selector remains visible as `UNKNOWN` rather than disappearing. On modifying options, a
-future constraint at `prohibited` refuses and at `constrained` requires Chairman adjudication;
-`permitted` continues through every other gate while preserving the unknown result. Read-only options
-remain no-effect while still exposing the unknown selector.
-
-Every option emits sorted `constraint_results`, a deterministic digest and an exact
-`blocking_constraint`. Constraint result effects use `REFUSED > CHAIRMAN_REQUIRED > NONE`.
-Classification never weakens the independently coded production, live-capital, duplicate-plane or
-bounded-autonomy boundaries. Existing-carrier `SOURCE_BRANCH_WRITE` and `SOURCE_MERGE` both require
-`expected_head_sha`.
-
-This R2 change is a closed-schema migration. A2 and later producers must emit the strategy source
-reference, classification facts and complete current constraint map before they can be reconciled to
-the protected A1 contract. R2 itself remains pure, deterministic and production-inert.
+A1 merge proves only a protected, production-inert decision contract. The overall Chairman outcome is
+complete only when a real current-source cycle selects a bounded transformation, the existing owner
+executes and reconciles it, learning changes the next decision, and Chris performs zero routine
+message carriage, account selection, session hunting, watcher repair, carrier archaeology or
+initiative babysitting across a representative interval.

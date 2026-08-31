@@ -35,11 +35,14 @@ ERROR_SCHEMA = "mastermind.chairman_cognition_error.v1"
 _OPTION_ID_RE = re.compile(r"^[A-Z][A-Z0-9_.:-]{2,127}$")
 _OPERATION_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{2,191}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _PATH_PREFIX_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\x00-\x1f]{1,240}$")
 _ISO_UTC_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]00:00)$"
 )
 _REF_BOUNDARY_CHARS = frozenset(":/#")
+_CONSTRAINT_BINDING_LABEL = "constraints-sha256"
+_CLASSIFICATION_BINDING_LABEL = "classification-sha256"
 
 MAX_OPTIONS = 64
 MAX_SOURCE_RECEIPTS = 128
@@ -82,6 +85,18 @@ ALLOWED_SOURCE_OWNERS = frozenset(
         "STEWARD",
         "CONTROL_ROOM",
         "OBSERVABILITY",
+        "OPERATION_ASSURANCE",
+    }
+)
+CLASSIFICATION_SOURCE_OWNERS = frozenset(
+    {
+        "CHAIRMAN_DIRECTIVE",
+        "STRATEGIC_STATE",
+        "AGENT_OS",
+        "EXECUTIVE_OS",
+        "GITHUB",
+        "STEWARD",
+        "CONTROL_ROOM",
         "OPERATION_ASSURANCE",
     }
 )
@@ -296,6 +311,7 @@ class StrategicOption:
     stop_condition: str | None
     rollback_plan: str | None
     falsifier: str | None
+    classification_source_ref: str
     change_classes: tuple[str, ...]
     affected_departments: tuple[str, ...]
     benefits: Mapping[str, int | None]
@@ -356,10 +372,18 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         "strategic_constraints_source_ref",
         256,
     )
-    _require_current_strategic_source(
+    strategic_receipt = _require_current_strategic_source(
         strategic_constraints_source_ref, source_receipts
     )
     strategic_constraints = _parse_constraints(doc["strategic_constraints"])
+    strategic_constraints_digest = _payload_digest(strategic_constraints)
+    _require_revision_binding(
+        strategic_receipt,
+        label=_CONSTRAINT_BINDING_LABEL,
+        digest=strategic_constraints_digest,
+        where="strategic constraints source",
+    )
+
     envelope, envelope_state = _parse_envelope(
         doc["delegation_envelope"], source_receipts, as_of
     )
@@ -372,6 +396,29 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
             raise ChairmanCognitionError(
                 f"option {option.option_id} references unknown source receipt"
             )
+        if option.classification_source_ref not in source_receipts:
+            raise ChairmanCognitionError(
+                f"option {option.option_id} references unknown classification source"
+            )
+        if option.classification_source_ref not in option.source_refs:
+            raise ChairmanCognitionError(
+                f"option {option.option_id} classification source must be cited"
+            )
+        classification_receipt = source_receipts[option.classification_source_ref]
+        if classification_receipt.owner not in CLASSIFICATION_SOURCE_OWNERS:
+            raise ChairmanCognitionError(
+                f"option {option.option_id} classification source owner is not allowed"
+            )
+        if not classification_receipt.load_bearing:
+            raise ChairmanCognitionError(
+                f"option {option.option_id} classification source must be load-bearing"
+            )
+        _require_revision_binding(
+            classification_receipt,
+            label=_CLASSIFICATION_BINDING_LABEL,
+            digest=_classification_digest(option),
+            where=f"option {option.option_id} classification source",
+        )
         option_load_bearing = [
             source_receipts[ref]
             for ref in option.source_refs
@@ -432,6 +479,7 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         "as_of": as_of,
         "input_digest": hashlib.sha256(canonical_json_bytes(doc)).hexdigest(),
         "strategic_constraints_source_ref": strategic_constraints_source_ref,
+        "strategic_constraints_digest": strategic_constraints_digest,
         "evaluated_constraint_ids": sorted(strategic_constraints),
         "delegation_envelope": {
             "state": envelope_state.value,
@@ -525,6 +573,15 @@ def _require_current_strategic_source(
     if receipt.state is not SourceState.CURRENT:
         raise ChairmanCognitionError(
             "strategic constraints source must be CURRENT"
+        )
+    load_bearing_strategy_refs = sorted(
+        item.source_ref
+        for item in source_receipts.values()
+        if item.owner == "STRATEGIC_STATE" and item.load_bearing
+    )
+    if load_bearing_strategy_refs != [source_ref]:
+        raise ChairmanCognitionError(
+            "exactly one load-bearing strategic constraints source is required"
         )
     return receipt
 
@@ -704,6 +761,7 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                 "stop_condition",
                 "rollback_plan",
                 "falsifier",
+                "classification_source_ref",
                 "change_classes",
                 "affected_departments",
                 "benefits",
@@ -856,6 +914,11 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                     item["rollback_plan"], "rollback_plan", 500
                 ),
                 falsifier=_nullable_str(item["falsifier"], "falsifier", 500),
+                classification_source_ref=_nonempty(
+                    item["classification_source_ref"],
+                    "classification_source_ref",
+                    256,
+                ),
                 change_classes=change_classes,
                 affected_departments=affected_departments,
                 benefits=_parse_dimensions(
@@ -1217,6 +1280,36 @@ def _constraint_result_payload(result: ConstraintResult) -> dict[str, str]:
     }
 
 
+def _classification_payload(option: StrategicOption) -> dict[str, Any]:
+    return {
+        "change_classes": sorted(option.change_classes),
+        "affected_departments": sorted(option.affected_departments),
+    }
+
+
+def _classification_digest(option: StrategicOption) -> str:
+    return _payload_digest(_classification_payload(option))
+
+
+def _payload_digest(value: Any) -> str:
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _require_revision_binding(
+    receipt: SourceReceipt,
+    *,
+    label: str,
+    digest: str,
+    where: str,
+) -> None:
+    if _HEX64_RE.fullmatch(digest) is None:
+        raise ChairmanCognitionError(f"{where} digest is malformed")
+    expected = f"{label}:{digest}"
+    fields = receipt.revision.split(";")
+    if expected not in fields:
+        raise ChairmanCognitionError(f"{where} is not content-bound")
+
+
 def _ref_matches_prefix(ref: str, prefix: str) -> bool:
     if ref == prefix:
         return True
@@ -1398,6 +1491,7 @@ __all__ = [
     "AFFECTED_DEPARTMENTS",
     "BENEFIT_DIMENSIONS",
     "CHANGE_CLASSES",
+    "CLASSIFICATION_SOURCE_OWNERS",
     "COST_DIMENSIONS",
     "CarrierState",
     "ChairmanCognitionError",

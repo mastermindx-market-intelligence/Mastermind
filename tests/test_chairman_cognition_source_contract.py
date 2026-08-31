@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -47,20 +48,57 @@ _CURRENT_CONSTRAINTS = {
 }
 
 
+def _digest(value) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+
+
+def _classification_payload(option: dict) -> dict:
+    return {
+        "change_classes": sorted(option["change_classes"]),
+        "affected_departments": sorted(option["affected_departments"]),
+    }
+
+
+def _bind_document(document: dict) -> dict:
+    receipts = {item["source_ref"]: item for item in document["source_receipts"]}
+    strategy_ref = document["strategic_constraints_source_ref"]
+    receipts[strategy_ref]["revision"] = (
+        f"constraints-sha256:{_digest(document['strategic_constraints'])}"
+    )
+    bindings: dict[str, set[str]] = {}
+    for option in document["options"]:
+        ref = option["classification_source_ref"]
+        bindings.setdefault(ref, set()).add(
+            f"classification-sha256:{_digest(_classification_payload(option))}"
+        )
+    for ref, tokens in bindings.items():
+        base = receipts[ref]["revision"].split(";classification-sha256:", 1)[0]
+        receipts[ref]["revision"] = ";".join([base, *sorted(tokens)])
+    return document
+
+
 def _text(path: Path) -> str:
     assert path.is_file(), f"missing Chairman Cognition source: {path}"
     return path.read_text(encoding="utf-8")
 
 
 def _valid_document() -> dict:
-    return {
+    document = {
         "schema": INPUT_SCHEMA,
         "as_of": "2026-08-30T16:00:00Z",
         "source_receipts": [
             {
                 "source_ref": "SRC-STRATEGY",
                 "owner": "STRATEGIC_STATE",
-                "revision": "sha256:current-strategic-state",
+                "revision": "strategy-current",
                 "state": "CURRENT",
                 "load_bearing": True,
                 "observed_at": "2026-08-30T16:00:00Z",
@@ -98,6 +136,7 @@ def _valid_document() -> dict:
                 "stop_condition": None,
                 "rollback_plan": None,
                 "falsifier": None,
+                "classification_source_ref": "SRC-CHAIRMAN",
                 "change_classes": ["RESEARCH"],
                 "affected_departments": ["executive"],
                 "benefits": {
@@ -117,6 +156,7 @@ def _valid_document() -> dict:
             }
         ],
     }
+    return _bind_document(document)
 
 
 def _duplicate_payload(secret: str, *, nested: bool) -> str:
@@ -146,6 +186,9 @@ def test_source_law_freezes_one_office_two_modes_and_no_duplicate_owner():
         "NEW_CHILD_CARRIER_REQUIRED",
         "DUPLICATE_CONTROL_PLANE_REFUSED",
         "strategic_constraints_source_ref",
+        "classification_source_ref",
+        "constraints-sha256",
+        "classification-sha256",
         "constraint_results",
         "blocking_constraint",
     ):
@@ -176,6 +219,8 @@ def test_architecture_preserves_canonical_owners_and_accelerated_live_canary():
         "NEW_FEATURE",
         "ORGANIZATIONAL_EXPANSION",
         "future constraint",
+        "content-bound",
+        "classification source",
     ):
         assert marker in spec
 
@@ -196,6 +241,8 @@ def test_program_has_real_vertical_and_completion_not_docs():
         "zero routine",
         "R2",
         "all six current constraints",
+        "constraint map",
+        "classification",
     ):
         assert marker in plan
 
@@ -347,6 +394,7 @@ def _r2_option(**changes) -> dict:
         "stop_condition": "Stop after one exact reviewed head.",
         "rollback_plan": "Abandon the unmerged branch.",
         "falsifier": "Any ignored current constraint is failure.",
+        "classification_source_ref": "SRC-GITHUB",
         "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
         "affected_departments": ["executive"],
         "benefits": {
@@ -369,14 +417,14 @@ def _r2_option(**changes) -> dict:
 
 
 def _r2_document(option: dict | None = None, *, envelope: dict | None = None) -> dict:
-    return {
+    document = {
         "schema": INPUT_SCHEMA,
         "as_of": "2026-08-30T16:00:00Z",
         "source_receipts": [
             {
                 "source_ref": "SRC-STRATEGY",
                 "owner": "STRATEGIC_STATE",
-                "revision": "sha256:current-strategic-state",
+                "revision": "strategy-current",
                 "state": "CURRENT",
                 "load_bearing": True,
                 "observed_at": "2026-08-30T16:00:00Z",
@@ -403,6 +451,7 @@ def _r2_document(option: dict | None = None, *, envelope: dict | None = None) ->
         "delegation_envelope": _r2_envelope() if envelope is None else envelope,
         "options": [option or _r2_option()],
     }
+    return _bind_document(document)
 
 
 def _r2_result(document: dict) -> dict:
@@ -494,6 +543,7 @@ def test_r2_future_unknown_selector_never_silently_disappears() -> None:
     ):
         document = _r2_document()
         document["strategic_constraints"]["future_constraint"] = level
+        _bind_document(document)
         item = _r2_result(document)
         result = next(
             row
@@ -515,6 +565,41 @@ def test_r2_strategy_source_is_exact_current_load_bearing_owner() -> None:
         strategy.update(mutation)
         with pytest.raises(ChairmanCognitionError):
             evaluate_document(document)
+
+
+def test_r2_constraint_map_is_content_bound_to_strategy_receipt() -> None:
+    document = _r2_document()
+    document["strategic_constraints"]["new_feature_expansion"] = "permitted"
+    with pytest.raises(ChairmanCognitionError, match="not content-bound"):
+        evaluate_document(document)
+
+
+def test_r2_requires_exactly_one_load_bearing_strategy_source() -> None:
+    document = _r2_document()
+    document["source_receipts"].append(
+        {
+            "source_ref": "SRC-STRATEGY-OTHER",
+            "owner": "STRATEGIC_STATE",
+            "revision": document["source_receipts"][0]["revision"],
+            "state": "CURRENT",
+            "load_bearing": True,
+            "observed_at": "2026-08-30T16:00:00Z",
+        }
+    )
+    with pytest.raises(ChairmanCognitionError, match="exactly one"):
+        evaluate_document(document)
+
+
+def test_r2_classification_is_content_bound_and_owner_limited() -> None:
+    document = _r2_document()
+    document["options"][0]["change_classes"] = ["NEW_FEATURE"]
+    with pytest.raises(ChairmanCognitionError, match="not content-bound"):
+        evaluate_document(document)
+
+    document = _r2_document()
+    document["source_receipts"][2]["owner"] = "SLACK"
+    with pytest.raises(ChairmanCognitionError, match="owner is not allowed"):
+        evaluate_document(document)
 
 
 def test_r2_non_load_bearing_context_cannot_establish_or_cure_current() -> None:
