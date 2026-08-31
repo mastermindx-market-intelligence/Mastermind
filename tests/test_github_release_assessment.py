@@ -143,6 +143,13 @@ def test_moved_candidate_head_refuses_expected_head_release() -> None:
     assert AssessmentIssue.CANDIDATE_HEAD_MOVED in result.issues
 
 
+def test_base_ref_must_match_protected_release_target() -> None:
+    result = _assess(base_ref="refs/heads/release")
+    assert result.verdict is AssessmentVerdict.REFUSED
+    assert result.expected_head_merge_eligible is False
+    assert AssessmentIssue.BASE_REF_MISMATCH in result.issues
+
+
 def test_compatible_protected_movement_holds_when_current_base_is_required() -> None:
     result = _assess(
         protected_sha="c" * 40,
@@ -207,12 +214,40 @@ def test_path_collision_and_semantic_owner_collision_are_distinct_refusals() -> 
     assert AssessmentIssue.PATH_COLLISION not in semantic_result.issues
 
 
+def test_disjoint_path_collision_fact_does_not_false_refuse_candidate() -> None:
+    result = _assess(
+        path_collisions=(
+            PathCollisionFact(
+                path="unrelated/other.md",
+                other_operation_key="other-op",
+                source_ref="github:collision:unrelated",
+            ),
+        )
+    )
+    assert result.verdict is AssessmentVerdict.ELIGIBLE
+    assert AssessmentIssue.PATH_COLLISION not in result.issues
+
+
 def test_multiple_active_operation_carriers_refuse_without_electing_newest() -> None:
     other = CarrierFact(
         carrier_ref="github:pr:2",
         operation_key="mastermind-scf-gh1-test-op",
         branch="sol/duplicate",
         candidate_sha="d" * 40,
+        active=True,
+        source_ref="github:pr:2",
+    )
+    result = _assess(carriers=_input().carriers + (other,))
+    assert result.verdict is AssessmentVerdict.REFUSED
+    assert AssessmentIssue.OPERATION_CARRIER_CONFLICT in result.issues
+
+
+def test_different_operation_claiming_same_branch_or_head_is_carrier_conflict() -> None:
+    other = CarrierFact(
+        carrier_ref="github:pr:2",
+        operation_key="other-operation",
+        branch="sol/scf-gh1-test",
+        candidate_sha=CANDIDATE,
         active=True,
         source_ref="github:pr:2",
     )
@@ -296,6 +331,24 @@ def test_changes_requested_refuses_and_unresolved_thread_holds() -> None:
 def test_review_coverage_partial_is_unknown_when_review_is_required() -> None:
     result = _assess(required_approvals=1, reviews_complete=False)
     assert result.verdict is AssessmentVerdict.UNKNOWN
+    assert AssessmentIssue.REVIEW_COVERAGE_PARTIAL in result.issues
+
+
+def test_known_changes_requested_preserves_partial_review_coverage_issue() -> None:
+    review = ReviewFact(
+        reviewer="auditor",
+        head_sha=CANDIDATE,
+        state=ReviewState.CHANGES_REQUESTED,
+        required=True,
+        source_ref="github:review:auditor",
+    )
+    result = _assess(
+        required_approvals=1,
+        reviews=(review,),
+        reviews_complete=False,
+    )
+    assert result.verdict is AssessmentVerdict.REFUSED
+    assert AssessmentIssue.CHANGES_REQUESTED in result.issues
     assert AssessmentIssue.REVIEW_COVERAGE_PARTIAL in result.issues
 
 
