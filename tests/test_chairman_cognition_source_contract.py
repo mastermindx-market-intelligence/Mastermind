@@ -606,7 +606,6 @@ def test_r2_non_load_bearing_context_cannot_establish_or_cure_current() -> None:
     document = _r2_document()
     github = document["source_receipts"][2]
     github["load_bearing"] = False
-    github["owner"] = "SLACK"
     document["options"][0]["source_refs"] = ["SRC-GITHUB"]
     with pytest.raises(ChairmanCognitionError, match="load-bearing"):
         evaluate_document(document)
