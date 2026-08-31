@@ -14,6 +14,12 @@ from enum import Enum
 from typing import Iterable
 
 SCHEMA = "mastermind.sol_capability_status.v1"
+MAX_CAPABILITIES = 128
+MAX_SCOPES = 128
+MAX_DEPENDENCIES = 64
+MAX_SOURCE_REFS = 32
+MAX_ISSUES = 64
+
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SCOPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/*-]{0,127}$")
 _SOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/@-]{0,255}$")
@@ -108,11 +114,21 @@ def _instant(value: str, field: str) -> datetime:
     return parsed
 
 
-def _tuple_tokens(values: object, field: str, pattern: re.Pattern[str], message: str,
-                  *, upper: bool = False, nonempty: bool = False) -> tuple[str, ...]:
+def _tuple_tokens(
+    values: object,
+    field: str,
+    pattern: re.Pattern[str],
+    message: str,
+    *,
+    maximum: int,
+    upper: bool = False,
+    nonempty: bool = False,
+) -> tuple[str, ...]:
     if not isinstance(values, tuple) or (nonempty and not values):
         suffix = "non-empty immutable tuple" if nonempty else "immutable tuple"
         raise CapabilityProjectionError(f"{field} must be a {suffix}")
+    if len(values) > maximum:
+        raise CapabilityProjectionError(f"{field} must contain at most {maximum} items")
     out: list[str] = []
     for value in values:
         item = _token(value, field, pattern, message, upper=upper)
@@ -123,17 +139,35 @@ def _tuple_tokens(values: object, field: str, pattern: re.Pattern[str], message:
 
 
 def _scopes(values: object, field: str) -> tuple[str, ...]:
-    return _tuple_tokens(values, field, _SCOPE, "contains an invalid scope")
+    return _tuple_tokens(
+        values,
+        field,
+        _SCOPE,
+        "contains an invalid scope",
+        maximum=MAX_SCOPES,
+    )
 
 
 def _sources(values: object, field: str) -> tuple[str, ...]:
     return _tuple_tokens(
-        values, field, _SOURCE, "contains an invalid source reference", nonempty=True
+        values,
+        field,
+        _SOURCE,
+        "contains an invalid source reference",
+        maximum=MAX_SOURCE_REFS,
+        nonempty=True,
     )
 
 
 def _issues(values: object, field: str) -> tuple[str, ...]:
-    return _tuple_tokens(values, field, _ISSUE, "contains an invalid issue code", upper=True)
+    return _tuple_tokens(
+        values,
+        field,
+        _ISSUE,
+        "contains an invalid issue code",
+        maximum=MAX_ISSUES,
+        upper=True,
+    )
 
 
 def _canonical(value: object) -> bytes:
@@ -293,8 +327,22 @@ def _fact(value: CapabilityFact) -> CapabilityFact:
         raise CapabilityProjectionError(f"{name}.required_write_scopes must be a subset of required_scopes")
     if writes and not value.write_capable:
         raise CapabilityProjectionError(f"{name}.required_write_scopes require write_capable=true")
+    if value.privilege_class is PrivilegeClass.R0_OBSERVE and any(
+        (
+            value.production_armed,
+            value.confirmation_required,
+            value.prepared_action_required,
+            value.write_capable,
+            bool(writes),
+        )
+    ):
+        raise CapabilityProjectionError(f"{name}.R0_OBSERVE must be zero-effect")
     if not isinstance(value.dependencies, tuple):
         raise CapabilityProjectionError(f"{name}.dependencies must be an immutable tuple")
+    if len(value.dependencies) > MAX_DEPENDENCIES:
+        raise CapabilityProjectionError(
+            f"{name}.dependencies must contain at most {MAX_DEPENDENCIES} items"
+        )
     deps: list[DependencyFact] = []
     seen: set[str] = set()
     for raw in value.dependencies:
@@ -383,7 +431,9 @@ def _project(f: CapabilityFact, observed: datetime) -> CapabilityStatus:
         if missing_writes:
             proof = CapabilityState.PARTIAL
         write_ok = bool(
-            f.write_capable and read_ok and not missing and not partial and f.production_armed and proof_ok
+            f.privilege_class is not PrivilegeClass.R0_OBSERVE
+            and f.write_capable and read_ok and not missing and not partial
+            and f.production_armed and proof_ok
             and proof not in (CapabilityState.PARTIAL, CapabilityState.DARK_OR_DISCONNECTED,
                               CapabilityState.BROKEN, CapabilityState.SPEC_ONLY,
                               CapabilityState.NOT_BUILT, CapabilityState.REJECTED_BY_DESIGN)
@@ -417,9 +467,16 @@ def project_sol_capability_status(facts: Iterable[CapabilityFact], *, observed_a
     if isinstance(facts, (str, bytes)):
         raise CapabilityProjectionError("facts must be an iterable of CapabilityFact")
     try:
-        normalized = [_fact(v) for v in facts]
+        iterator = iter(facts)
     except TypeError as exc:
         raise CapabilityProjectionError("facts must be an iterable of CapabilityFact") from exc
+    normalized: list[CapabilityFact] = []
+    for index, value in enumerate(iterator):
+        if index >= MAX_CAPABILITIES:
+            raise CapabilityProjectionError(
+                f"facts must contain at most {MAX_CAPABILITIES} capabilities"
+            )
+        normalized.append(_fact(value))
     names = [f.name for f in normalized]
     if len(names) != len(set(names)):
         duplicate = next(name for name in names if names.count(name) > 1)
@@ -435,6 +492,7 @@ def project_sol_capability_status(facts: Iterable[CapabilityFact], *, observed_a
 
 
 __all__ = [
+    "MAX_CAPABILITIES", "MAX_DEPENDENCIES", "MAX_ISSUES", "MAX_SCOPES", "MAX_SOURCE_REFS",
     "Availability", "CapabilityFact", "CapabilityProjectionError", "CapabilityState",
     "CapabilityStatus", "CapabilityStatusEnvelope", "DependencyFact", "DependencyStatus",
     "PrivilegeClass", "SCHEMA", "project_sol_capability_status",
