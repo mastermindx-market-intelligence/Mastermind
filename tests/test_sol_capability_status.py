@@ -46,10 +46,10 @@ def _fact(**overrides) -> CapabilityFact:
     return CapabilityFact(**values)
 
 
-def _project(*facts: CapabilityFact):
+def _project(*facts: CapabilityFact, observed_at: str = OBSERVED_AT):
     return project_sol_capability_status(
         facts,
-        observed_at=OBSERVED_AT,
+        observed_at=observed_at,
         capability_generation="scf-cap1.v1",
     )
 
@@ -78,6 +78,40 @@ def test_current_live_read_capability_can_be_proven_without_write_arming() -> No
     assert status.availability is Availability.AVAILABLE
     assert status.read_serviceable is True
     assert status.write_serviceable is False
+
+
+def test_future_dated_live_proof_cannot_promote_or_arm_write() -> None:
+    status = _project(
+        _fact(
+            name="submit-pr-review",
+            privilege_class=PrivilegeClass.W1_ROUTINE,
+            production_armed=True,
+            write_capable=True,
+            required_scopes=("contents:read", "pull_requests:write"),
+            current_scopes=("contents:read", "pull_requests:write"),
+            live_proof_current=True,
+            last_proven_at="2026-08-30T20:00:01Z",
+        )
+    ).capabilities[0]
+    assert status.proof_state is CapabilityState.BUILT_NOT_PROVEN
+    assert status.availability is Availability.READ_ONLY
+    assert status.read_serviceable is True
+    assert status.write_serviceable is False
+    assert "LIVE_PROOF_FUTURE" in status.issues
+    assert "LIVE_PROOF_MISSING" in status.issues
+
+
+def test_future_dated_claimed_proven_live_is_downgraded() -> None:
+    status = _project(
+        _fact(
+            source_state=CapabilityState.PROVEN_LIVE,
+            live_proof_current=True,
+            last_proven_at="2026-08-31T00:00:00Z",
+        )
+    ).capabilities[0]
+    assert status.proof_state is CapabilityState.BUILT_NOT_PROVEN
+    assert status.availability is Availability.AVAILABLE
+    assert "LIVE_PROOF_FUTURE" in status.issues
 
 
 def test_write_capability_with_broad_scope_but_production_disarmed_is_read_only() -> None:
@@ -118,6 +152,32 @@ def test_missing_required_scope_keeps_write_unavailable_and_explicit() -> None:
     assert "REQUIRED_SCOPE_MISSING" in status.issues
 
 
+def test_excess_ambient_scope_is_visible_without_granting_or_removing_serviceability() -> None:
+    status = _project(
+        _fact(
+            current_scopes=(
+                "contents:read",
+                "organization:admin",
+                "pull_requests:read",
+            )
+        )
+    ).capabilities[0]
+    assert status.excess_scopes == ("organization:admin",)
+    assert "EXCESS_SCOPE_PRESENT" in status.issues
+    assert status.availability is Availability.AVAILABLE
+    assert status.read_serviceable is True
+    assert status.write_serviceable is False
+    assert status.proof_state is CapabilityState.BUILT_NOT_PROVEN
+
+
+def test_excess_scope_changes_canonical_digest() -> None:
+    baseline = _project(_fact())
+    widened = _project(
+        _fact(current_scopes=("contents:read", "pull_requests:read", "repo:admin"))
+    )
+    assert baseline.canonical_digest != widened.canonical_digest
+
+
 def test_missing_required_dependency_is_dark_or_disconnected() -> None:
     dependency = DependencyFact(
         name="github-native-connector",
@@ -131,6 +191,37 @@ def test_missing_required_dependency_is_dark_or_disconnected() -> None:
     assert status.proof_state is CapabilityState.DARK_OR_DISCONNECTED
     assert "DEPENDENCY_NOT_BUILT" in status.issues
     assert status.dependencies[0].state is CapabilityState.NOT_BUILT
+
+
+def test_required_rejected_dependency_preserves_constitutional_refusal() -> None:
+    dependency = DependencyFact(
+        name="generic-shell",
+        state=CapabilityState.REJECTED_BY_DESIGN,
+        required=True,
+        available=True,
+        source_ref="policy:generic-shell",
+    )
+    status = _project(_fact(dependencies=(dependency,))).capabilities[0]
+    assert status.availability is Availability.REFUSED
+    assert status.proof_state is CapabilityState.REJECTED_BY_DESIGN
+    assert status.read_serviceable is False
+    assert status.write_serviceable is False
+    assert "DEPENDENCY_REJECTED_BY_DESIGN" in status.issues
+
+
+def test_optional_rejected_dependency_remains_visible_but_does_not_refuse_parent() -> None:
+    dependency = DependencyFact(
+        name="optional-generic-shell",
+        state=CapabilityState.REJECTED_BY_DESIGN,
+        required=False,
+        available=False,
+        source_ref="policy:optional-generic-shell",
+    )
+    status = _project(_fact(dependencies=(dependency,))).capabilities[0]
+    assert status.availability is Availability.AVAILABLE
+    assert status.proof_state is CapabilityState.BUILT_NOT_PROVEN
+    assert status.read_serviceable is True
+    assert status.dependencies[0].state is CapabilityState.REJECTED_BY_DESIGN
 
 
 def test_degraded_required_dependency_keeps_partial_state_visible() -> None:
@@ -255,6 +346,7 @@ def test_output_is_secret_free_and_carries_required_contract_fields() -> None:
         "required_scopes",
         "current_scopes",
         "missing_scopes",
+        "excess_scopes",
         "confirmation_required",
         "prepared_action_required",
         "canonical_owner",
