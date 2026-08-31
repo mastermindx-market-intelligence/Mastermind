@@ -18,7 +18,7 @@ from integrations.chairman_surfaces import web_sol_protocol as wsp
 
 OPERATION = "web-sol-surface-adapter-s0s1-20260829-sol-001"
 ISSUED = "2026-08-29T06:00:00Z"
-EXPIRES = "2026-08-29T06:05:00Z"
+EXPIRES = "2026-08-29T06:00:30Z"
 NONCE = "nonce-0000000000000001"
 PROFILE = "aaaaaaaaaaaaaaaaaaaaaaaa"
 INSTANCE_ID = "c" * 64
@@ -80,7 +80,6 @@ def receipt_for(
         "binding_id": request["binding_id"],
         "conversation_fingerprint": request["conversation_fingerprint"],
         "binding_fingerprint": request["binding_fingerprint"],
-        "binding_revision": request["binding_revision"],
         "action": request["action"],
         "operation_key": request["operation_key"],
         "nonce": request["nonce"],
@@ -169,7 +168,7 @@ def test_inspect_builds_one_closed_request_without_raw_locator_values(monkeypatc
     assert len(seen) == 1
     request, path, expected_instance_id = seen[0]
     assert request["action"] == "INSPECT"
-    assert request["binding_revision"] == 0
+    assert "binding_revision" not in request
     assert request["binding_id"] == row["binding_id"]
     assert expected_instance_id == instance.adapter_instance_id(row)
     assert path == instance.socket_path(expected_instance_id)
@@ -340,7 +339,6 @@ def test_derived_socket_exchange_round_trips_one_request_without_retry(tmp_path)
             "binding_id": "11111111-1111-4111-8111-111111111111",
             "conversation_fingerprint": "a" * 64,
             "binding_fingerprint": "b" * 64,
-            "binding_revision": 0,
             "action": "INSPECT",
             "operation_key": OPERATION,
             "issued_at": ISSUED,

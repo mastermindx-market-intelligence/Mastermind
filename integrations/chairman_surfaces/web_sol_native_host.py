@@ -32,7 +32,6 @@ _MATCH_FIELDS = (
     "binding_id",
     "conversation_fingerprint",
     "binding_fingerprint",
-    "binding_revision",
     "action",
     "operation_key",
     "nonce",
@@ -351,6 +350,14 @@ def _receipt_matches(
     return all(receipt[field] == request[field] for field in _MATCH_FIELDS)
 
 
+def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
+    return (
+        "foreground_effect_unknown"
+        if request["action"] == "FOREGROUND"
+        else default
+    )
+
+
 def forward_request(
     request: dict[str, Any],
     *,
@@ -380,11 +387,28 @@ def forward_request(
         if _is_probe_event(message):
             ignored += 1
             if ignored > 32:
-                raise NativeHostError("probe_event_limit")
+                raise NativeHostError(
+                    _untrusted_receipt_code(accepted, "probe_event_limit")
+                )
             continue
-        receipt = wsp.validate_receipt(message)
+        if (
+            isinstance(message, dict)
+            and all(field in message for field in _MATCH_FIELDS)
+            and not _receipt_matches(accepted, message)
+        ):
+            raise NativeHostError(
+                _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
+            )
+        try:
+            receipt = wsp.validate_receipt(message)
+        except wsp.WebSolProtocolError as exc:
+            raise NativeHostError(
+                _untrusted_receipt_code(accepted, "receipt_invalid")
+            ) from exc
         if not _receipt_matches(accepted, receipt):
-            raise NativeHostError("receipt_identity_mismatch")
+            raise NativeHostError(
+                _untrusted_receipt_code(accepted, "receipt_identity_mismatch")
+            )
         return receipt
 
 

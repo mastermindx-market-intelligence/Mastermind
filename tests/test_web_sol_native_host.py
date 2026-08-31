@@ -33,11 +33,10 @@ def valid_request(action: str = "INSPECT") -> dict:
         "binding_id": "11111111-1111-4111-8111-111111111111",
         "conversation_fingerprint": HEX_A,
         "binding_fingerprint": HEX_B,
-        "binding_revision": 7,
         "action": action,
         "operation_key": "web-sol-surface-adapter-s0s1-20260829-sol-001",
         "issued_at": "2026-08-29T05:00:00Z",
-        "expires_at": "2026-08-29T05:05:00Z",
+        "expires_at": "2026-08-29T05:00:30Z",
         "nonce": "nonce-0000000000000001",
     }
 
@@ -69,7 +68,6 @@ def valid_receipt(request: dict, *, status: str | None = None) -> dict:
         "binding_id": request["binding_id"],
         "conversation_fingerprint": request["conversation_fingerprint"],
         "binding_fingerprint": request["binding_fingerprint"],
-        "binding_revision": request["binding_revision"],
         "action": request["action"],
         "operation_key": request["operation_key"],
         "nonce": request["nonce"],
@@ -225,7 +223,6 @@ def test_forward_ignores_bounded_probe_event_and_accepts_one_exact_receipt():
         ),
         ("conversation_fingerprint", "c" * 64),
         ("binding_fingerprint", "d" * 64),
-        ("binding_revision", 8),
         ("action", "FOREGROUND"),
         ("operation_key", "different-operation"),
         ("nonce", "different-nonce-00000001"),
@@ -251,6 +248,22 @@ def test_mismatched_receipt_is_refused_and_never_retried(
             read_chrome=lambda _timeout: receipt,
             timeout_seconds=1.0,
         )
+    assert writes == [request]
+
+
+def test_untrusted_foreground_receipt_is_effect_unknown_and_never_retried():
+    module = host()
+    request = valid_request("FOREGROUND")
+    writes: list[dict] = []
+
+    with pytest.raises(module.NativeHostError) as caught:
+        module.forward_request(
+            request,
+            write_chrome=writes.append,
+            read_chrome=lambda _timeout: {"schema": wsp.RECEIPT_SCHEMA},
+            timeout_seconds=1.0,
+        )
+    assert caught.value.code == "foreground_effect_unknown"
     assert writes == [request]
 
 

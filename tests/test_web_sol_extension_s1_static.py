@@ -110,13 +110,13 @@ def test_background_receipts_copy_request_identity_and_never_expose_browser_hand
         "binding_id",
         "conversation_fingerprint",
         "binding_fingerprint",
-        "binding_revision",
         "action",
         "operation_key",
         "nonce",
     ):
         assert f"{field}: request.{field}" in text
 
+    assert "binding_revision" not in text
     assert "tab_id:" not in text
     assert "window_id:" not in text
     assert "tabId:" not in text

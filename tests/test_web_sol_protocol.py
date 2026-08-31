@@ -17,11 +17,10 @@ def valid_request(**overrides) -> dict:
         "binding_id": "11111111-1111-4111-8111-111111111111",
         "conversation_fingerprint": VALID_HEX_A,
         "binding_fingerprint": VALID_HEX_B,
-        "binding_revision": 7,
         "action": "INSPECT",
         "operation_key": "web-sol-surface-adapter-s0s1-20260829-sol-001",
         "issued_at": "2026-08-29T04:45:00Z",
-        "expires_at": "2026-08-29T04:50:00Z",
+        "expires_at": "2026-08-29T04:45:30Z",
         "nonce": "nonce-0000000000000001",
     }
     request.update(overrides)
@@ -51,7 +50,6 @@ def valid_receipt(**overrides) -> dict:
         "binding_id": "11111111-1111-4111-8111-111111111111",
         "conversation_fingerprint": VALID_HEX_A,
         "binding_fingerprint": VALID_HEX_B,
-        "binding_revision": 7,
         "action": "INSPECT",
         "operation_key": "web-sol-surface-adapter-s0s1-20260829-sol-001",
         "nonce": "nonce-0000000000000001",
@@ -75,8 +73,8 @@ def test_valid_request_round_trips_as_detached_normalized_copy():
     normalized = wsp.validate_request(request)
     assert normalized == request
     assert normalized is not request
-    normalized["binding_revision"] = 99
-    assert request["binding_revision"] == 7
+    normalized["nonce"] = "different-nonce-00000001"
+    assert request["nonce"] == "nonce-0000000000000001"
 
 
 def test_valid_receipt_round_trips_as_deep_detached_copy():
@@ -141,8 +139,6 @@ def test_request_refuses_every_action_except_inspect_and_foreground(action):
         ("binding_id", "not-a-uuid"),
         ("conversation_fingerprint", "abc"),
         ("binding_fingerprint", "abc"),
-        ("binding_revision", -1),
-        ("binding_revision", True),
         ("operation_key", ""),
         ("nonce", "tiny"),
         ("issued_at", "not-time"),
@@ -223,19 +219,49 @@ def test_probe_refuses_values_outside_closed_boolean_enum_contract(field, value)
     [
         "INSPECTED",
         "FOREGROUNDED_VERIFIED",
+        "FOREGROUND_EFFECT_UNKNOWN",
         "TARGET_NOT_FOUND",
         "TARGET_CHANGED",
         "AUTH_REQUIRED",
         "PROVIDER_ERROR",
         "UNSUPPORTED",
         "AMBIGUOUS_TARGET",
+        "REQUEST_EXPIRED",
+        "REQUEST_NOT_YET_VALID",
+        "REQUEST_WINDOW_INVALID",
         "UNKNOWN",
     ],
 )
-def test_receipt_status_vocabulary_is_closed_and_accepted(status):
+def test_receipt_status_vocabulary_is_closed_and_accepted_with_matching_evidence(status):
     receipt = valid_receipt(status=status)
     if status == "FOREGROUNDED_VERIFIED":
         receipt["action"] = "FOREGROUND"
+    elif status == "FOREGROUND_EFFECT_UNKNOWN":
+        receipt["action"] = "FOREGROUND"
+        receipt["observation"] = valid_observation(
+            target_present=False,
+            exact_conversation_loaded=False,
+            page_responsive=False,
+            document_ready_state="loading",
+            visibility="hidden",
+            composer_available=None,
+            generation_state="unknown",
+            auth_required=None,
+            provider_error_present=None,
+        )
+    elif status == "TARGET_NOT_FOUND":
+        receipt["observation"] = valid_observation(
+            target_present=False,
+            exact_conversation_loaded=False,
+        )
+    elif status == "TARGET_CHANGED":
+        receipt["observation"] = valid_observation(
+            exact_conversation_loaded=False,
+        )
+    elif status == "AUTH_REQUIRED":
+        receipt["observation"] = valid_observation(auth_required=True)
+    elif status == "PROVIDER_ERROR":
+        receipt["observation"] = valid_observation(provider_error_present=True)
     normalized = wsp.validate_receipt(receipt)
     assert normalized["status"] == status
 

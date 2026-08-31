@@ -34,7 +34,6 @@ def request(
         "binding_id": "12345678-1234-4234-8234-123456789abc",
         "conversation_fingerprint": "a" * 64,
         "binding_fingerprint": "b" * 64,
-        "binding_revision": 0,
         "action": "FOREGROUND",
         "operation_key": "wsx-reliability-fixture",
         "issued_at": issued.isoformat().replace("+00:00", "Z"),
@@ -167,7 +166,7 @@ vm.runInContext(source, context, {filename: "background.js"});
 const request = {
   schema: "mastermind.web_sol_surface_action.v1",
   binding_id: "12345678-1234-4234-8234-123456789abc",
-  conversation_fingerprint: A, binding_fingerprint: B, binding_revision: 0,
+  conversation_fingerprint: A, binding_fingerprint: B,
   action: "FOREGROUND", operation_key: "wsx-js-reliability-fixture",
   issued_at: new Date().toISOString(),
   expires_at: new Date(Date.now() + 30000).toISOString(),

@@ -40,6 +40,7 @@ class SurfaceAction(str, Enum):
 class ReceiptStatus(str, Enum):
     INSPECTED = "INSPECTED"
     FOREGROUNDED_VERIFIED = "FOREGROUNDED_VERIFIED"
+    FOREGROUND_EFFECT_UNKNOWN = "FOREGROUND_EFFECT_UNKNOWN"
     TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
     TARGET_CHANGED = "TARGET_CHANGED"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -58,7 +59,6 @@ _REQUEST_KEYS = frozenset(
         "binding_id",
         "conversation_fingerprint",
         "binding_fingerprint",
-        "binding_revision",
         "action",
         "operation_key",
         "issued_at",
@@ -72,7 +72,6 @@ _RECEIPT_KEYS = frozenset(
         "binding_id",
         "conversation_fingerprint",
         "binding_fingerprint",
-        "binding_revision",
         "action",
         "operation_key",
         "nonce",
@@ -151,7 +150,6 @@ _MAX_OPERATION_KEY = 256
 _MIN_NONCE = 16
 _MAX_NONCE = 128
 _MAX_PACKAGE_VERSION = 64
-_MAX_BINDING_REVISION = (1 << 63) - 1
 
 
 def _error(path: str, message: str) -> WebSolProtocolError:
@@ -217,11 +215,6 @@ def _require_hex64(value: Any, path: str) -> None:
         raise _error(path, "must be 64 lowercase hexadecimal characters")
 
 
-def _require_revision(value: Any, path: str) -> None:
-    if type(value) is not int or not 0 <= value <= _MAX_BINDING_REVISION:
-        raise _error(path, "must be a non-negative integer")
-
-
 def _require_operation_key(value: Any, path: str) -> None:
     if (
         not isinstance(value, str)
@@ -268,12 +261,16 @@ def transport_capability_digest() -> str:
         "package_version": WEB_SOL_PACKAGE_VERSION,
         "roles": sorted(_TRANSPORT_ROLES),
         "actions": sorted(action.value for action in SurfaceAction),
-        "schemas": [
-            ACTION_SCHEMA,
-            HELLO_ACK_SCHEMA,
-            HELLO_SCHEMA,
-            RECEIPT_SCHEMA,
-        ],
+        "schemas": sorted(
+            [
+                ACTION_SCHEMA,
+                HELLO_ACK_SCHEMA,
+                HELLO_SCHEMA,
+                INSTANCE_CONFIG_SCHEMA,
+                PROBE_SCHEMA,
+                RECEIPT_SCHEMA,
+            ]
+        ),
     }
     payload = json.dumps(
         document,
@@ -409,7 +406,6 @@ def _validate_identity_fields(
     _require_uuid(value["binding_id"], "$.binding_id")
     _require_hex64(value["conversation_fingerprint"], "$.conversation_fingerprint")
     _require_hex64(value["binding_fingerprint"], "$.binding_fingerprint")
-    _require_revision(value["binding_revision"], "$.binding_revision")
     action = _require_action(value["action"], "$.action")
     _require_operation_key(value["operation_key"], "$.operation_key")
     _require_nonce(value["nonce"], "$.nonce")
@@ -418,6 +414,8 @@ def _validate_identity_fields(
         expires = _parse_zulu(value["expires_at"], "$.expires_at")
         if expires <= issued:
             raise _error("$.expires_at", "must be later than issued_at")
+        if (expires - issued).total_seconds() > MAX_ACTION_TTL_SECONDS:
+            raise _error("$.expires_at", "request ttl exceeds the protocol ceiling")
     return action
 
 
@@ -519,6 +517,108 @@ def validate_action_window(
     return request
 
 
+def _require_probe_truth(condition: bool, path: str, message: str) -> None:
+    if not condition:
+        raise _error(path, message)
+
+
+def _validate_receipt_semantics(
+    *,
+    action: SurfaceAction,
+    status: ReceiptStatus,
+    probe: dict[str, Any],
+) -> None:
+    if status is ReceiptStatus.INSPECTED:
+        _require_probe_truth(
+            action is SurfaceAction.INSPECT,
+            "$.status",
+            "INSPECTED requires INSPECT action",
+        )
+        _require_probe_truth(
+            probe["target_present"] and probe["exact_conversation_loaded"],
+            "$.observation.exact_conversation_loaded",
+            "INSPECTED requires the exact target to be present and loaded",
+        )
+        _require_probe_truth(
+            probe["auth_required"] is not True,
+            "$.observation.auth_required",
+            "must not be true for INSPECTED",
+        )
+        _require_probe_truth(
+            probe["provider_error_present"] is not True,
+            "$.observation.provider_error_present",
+            "must not be true for INSPECTED",
+        )
+        return
+
+    if status is ReceiptStatus.FOREGROUNDED_VERIFIED:
+        _require_probe_truth(
+            action is SurfaceAction.FOREGROUND,
+            "$.status",
+            "FOREGROUNDED_VERIFIED requires FOREGROUND action",
+        )
+        _require_probe_truth(
+            probe["target_present"] and probe["exact_conversation_loaded"],
+            "$.observation.exact_conversation_loaded",
+            "FOREGROUNDED_VERIFIED requires the exact target to be present and loaded",
+        )
+        _require_probe_truth(
+            probe["visibility"] == "visible",
+            "$.observation.visibility",
+            "must be visible for FOREGROUNDED_VERIFIED",
+        )
+        _require_probe_truth(
+            probe["auth_required"] is not True,
+            "$.observation.auth_required",
+            "must not be true for FOREGROUNDED_VERIFIED",
+        )
+        _require_probe_truth(
+            probe["provider_error_present"] is not True,
+            "$.observation.provider_error_present",
+            "must not be true for FOREGROUNDED_VERIFIED",
+        )
+        return
+
+    if status is ReceiptStatus.FOREGROUND_EFFECT_UNKNOWN:
+        _require_probe_truth(
+            action is SurfaceAction.FOREGROUND,
+            "$.status",
+            "FOREGROUND_EFFECT_UNKNOWN requires FOREGROUND action",
+        )
+        return
+
+    if status is ReceiptStatus.TARGET_NOT_FOUND:
+        _require_probe_truth(
+            not probe["target_present"],
+            "$.observation.target_present",
+            "must be false for TARGET_NOT_FOUND",
+        )
+        return
+
+    if status is ReceiptStatus.TARGET_CHANGED:
+        _require_probe_truth(
+            not probe["exact_conversation_loaded"],
+            "$.observation.exact_conversation_loaded",
+            "must be false for TARGET_CHANGED",
+        )
+        return
+
+    if status is ReceiptStatus.AUTH_REQUIRED:
+        _require_probe_truth(
+            probe["auth_required"] is True,
+            "$.observation.auth_required",
+            "must be true for AUTH_REQUIRED",
+        )
+        return
+
+    if status is ReceiptStatus.PROVIDER_ERROR:
+        _require_probe_truth(
+            probe["provider_error_present"] is True,
+            "$.observation.provider_error_present",
+            "must be true for PROVIDER_ERROR",
+        )
+
+
 def validate_receipt(value: dict[str, Any]) -> dict[str, Any]:
     """Validate one bounded S0/S1 receipt and return a deep detached copy."""
 
@@ -532,15 +632,5 @@ def validate_receipt(value: dict[str, Any]) -> dict[str, Any]:
     except (ValueError, TypeError) as exc:
         raise _error("$.status", "unknown receipt status") from exc
     probe = _validate_probe(receipt["observation"])
-    if status is ReceiptStatus.FOREGROUNDED_VERIFIED:
-        if action is not SurfaceAction.FOREGROUND:
-            raise _error(
-                "$.status",
-                "FOREGROUNDED_VERIFIED requires FOREGROUND action",
-            )
-        if not probe["exact_conversation_loaded"]:
-            raise _error(
-                "$.observation.exact_conversation_loaded",
-                "must be true for FOREGROUNDED_VERIFIED",
-            )
+    _validate_receipt_semantics(action=action, status=status, probe=probe)
     return copy.deepcopy(receipt)

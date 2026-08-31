@@ -12,7 +12,7 @@ const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
 const PACKAGE_VERSION = "0.1.0";
-const EXPECTED_CAPABILITY_DIGEST = "732b8860cc6e0c2558a166dfb7ea808ccc63154cb0a62261f1e6b439e4b10123";
+const EXPECTED_CAPABILITY_DIGEST = "87276c884840bf14e3717a7249c07e6fff5ae09c591782dadadb05f9affa2d26";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 
@@ -23,7 +23,7 @@ const OBSERVATION_KEYS = new Set([
 ]);
 const ACTION_KEYS = new Set([
   "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
-  "binding_revision", "action", "operation_key", "issued_at", "expires_at", "nonce",
+  "action", "operation_key", "issued_at", "expires_at", "nonce",
 ]);
 const INSTANCE_CONFIG_KEYS = new Set([
   "schema", "instanceId", "nativeHost", "protocolMajor",
@@ -106,7 +106,6 @@ function validActionRequest(request) {
       request.operation_key.length > 256 || /\s/.test(request.operation_key)) return false;
   if (typeof request.nonce !== "string" || request.nonce.length < 16 ||
       request.nonce.length > 128 || /\s/.test(request.nonce)) return false;
-  if (!Number.isSafeInteger(request.binding_revision) || request.binding_revision < 0) return false;
   return typeof request.issued_at === "string" && typeof request.expires_at === "string";
 }
 
@@ -165,10 +164,14 @@ function receipt(request, status, observation) {
   return {
     schema: RECEIPT_SCHEMA, binding_id: request.binding_id,
     conversation_fingerprint: request.conversation_fingerprint,
-    binding_fingerprint: request.binding_fingerprint, binding_revision: request.binding_revision,
+    binding_fingerprint: request.binding_fingerprint,
     action: request.action, operation_key: request.operation_key, nonce: request.nonce,
     status, observed_at: new Date().toISOString(), observation,
   };
+}
+
+function foregroundEffectUnknown(request, observation) {
+  return receipt(request, "FOREGROUND_EFFECT_UNKNOWN", observation || unknownObservation());
 }
 
 function resolveExactTarget(conversationFingerprint) {
@@ -201,7 +204,9 @@ function classifyProbe(request, event, successStatus) {
   if (!event || event.conversation_fingerprint !== request.conversation_fingerprint) {
     return receipt(request, "TARGET_CHANGED", event ? event.observation : unknownObservation());
   }
-  if (!event.observation.exact_conversation_loaded) return receipt(request, "TARGET_CHANGED", event.observation);
+  if (!event.observation.target_present || !event.observation.exact_conversation_loaded) {
+    return receipt(request, "TARGET_CHANGED", event.observation);
+  }
   if (event.observation.auth_required === true) return receipt(request, "AUTH_REQUIRED", event.observation);
   if (event.observation.provider_error_present === true) return receipt(request, "PROVIDER_ERROR", event.observation);
   return receipt(request, successStatus, event.observation);
@@ -238,15 +243,17 @@ async function handleForeground(request) {
     await chrome.tabs.update(tabId, {active: true});
     const currentTab = await chrome.tabs.get(tabId);
     windowId = currentTab.windowId;
-    if (!Number.isInteger(windowId)) return receipt(request, "UNKNOWN", before.observation);
+    if (!Number.isInteger(windowId)) return foregroundEffectUnknown(request, before.observation);
     await chrome.windows.update(windowId, {focused: true});
   } catch (_error) {
-    return receipt(request, "UNKNOWN", before.observation);
+    return foregroundEffectUnknown(request, before.observation);
   }
 
   const after = await freshProbe(tabId, request.conversation_fingerprint);
   const afterReceipt = classifyProbe(request, after, "INSPECTED");
-  if (afterReceipt.status !== "INSPECTED") return afterReceipt;
+  if (afterReceipt.status !== "INSPECTED") {
+    return foregroundEffectUnknown(request, after ? after.observation : before.observation);
+  }
   try {
     const verifiedTab = await chrome.tabs.get(tabId);
     const verifiedWindow = await chrome.windows.get(windowId);
@@ -254,10 +261,10 @@ async function handleForeground(request) {
     if (current.status || current.tabId !== tabId || verifiedTab.active !== true ||
         verifiedTab.windowId !== windowId || verifiedWindow.id !== windowId ||
         verifiedWindow.focused !== true || after.observation.visibility !== "visible") {
-      return receipt(request, "UNKNOWN", after.observation);
+      return foregroundEffectUnknown(request, after.observation);
     }
   } catch (_error) {
-    return receipt(request, "UNKNOWN", after.observation);
+    return foregroundEffectUnknown(request, after.observation);
   }
   return receipt(request, "FOREGROUNDED_VERIFIED", after.observation);
 }

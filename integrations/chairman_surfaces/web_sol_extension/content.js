@@ -39,7 +39,10 @@ function normalizedReadyState() {
 
 function canonicalConversationIdentity() {
   const path = location.pathname.endsWith("/") ? location.pathname.slice(0, -1) : location.pathname;
-  return `${location.origin.toLowerCase()}${path}`;
+  const origin = location.origin.toLowerCase() === "https://chat.openai.com"
+    ? "https://chatgpt.com"
+    : location.origin.toLowerCase();
+  return `${origin}${path}`;
 }
 
 function authState(targetPresent, composerAvailable) {

@@ -22,6 +22,8 @@ from . import web_sol_native_host as native
 from . import web_sol_protocol as wsp
 
 SOCKET_TIMEOUT_SECONDS = 5.0
+_CHATGPT_CANONICAL_HOST = "chatgpt.com"
+_CHATGPT_HOST_ALIASES = frozenset({_CHATGPT_CANONICAL_HOST, "chat.openai.com"})
 
 
 class WebSolExtensionError(RuntimeError):
@@ -62,10 +64,13 @@ def _canonical_conversation_url(binding: dict[str, Any]) -> str:
     accepted = _accepted_binding(binding)
     parsed = urlsplit(accepted["locator"]["url"])
     path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
+    host = parsed.hostname.lower() if parsed.hostname else ""
+    if host in _CHATGPT_HOST_ALIASES:
+        host = _CHATGPT_CANONICAL_HOST
     return urlunsplit(
         (
             parsed.scheme.lower(),
-            parsed.netloc.lower(),
+            host,
             path,
             "",
             "",
@@ -112,7 +117,6 @@ def _request(
         "binding_id": accepted["binding_id"].lower(),
         "conversation_fingerprint": conversation_fingerprint(accepted),
         "binding_fingerprint": binding_fingerprint(accepted),
-        "binding_revision": 0,
         "action": action,
         "operation_key": operation_key,
         "issued_at": issued_at,
@@ -314,6 +318,10 @@ def _exchange_web_sol_socket(
     return response
 
 
+def _untrusted_receipt_code(action: str, default: str) -> str:
+    return "foreground_effect_unknown" if action == "FOREGROUND" else default
+
+
 def _invoke(
     binding: dict[str, Any],
     *,
@@ -349,18 +357,21 @@ def _invoke(
     try:
         accepted = wsp.validate_receipt(receipt)
     except wsp.WebSolProtocolError as exc:
-        raise WebSolExtensionError("invalid_receipt") from exc
+        raise WebSolExtensionError(
+            _untrusted_receipt_code(action, "invalid_receipt")
+        ) from exc
     for field in (
         "binding_id",
         "conversation_fingerprint",
         "binding_fingerprint",
-        "binding_revision",
         "action",
         "operation_key",
         "nonce",
     ):
         if accepted[field] != request[field]:
-            raise WebSolExtensionError("receipt_identity_mismatch")
+            raise WebSolExtensionError(
+                _untrusted_receipt_code(action, "receipt_identity_mismatch")
+            )
     return accepted
 
 

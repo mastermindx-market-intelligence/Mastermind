@@ -169,7 +169,6 @@ vm.runInContext(source, context, {filename: "background.js"});
     binding_id: "12345678-1234-4234-8234-123456789abc",
     conversation_fingerprint: "c".repeat(64),
     binding_fingerprint: "d".repeat(64),
-    binding_revision: 0,
     action: "INSPECT",
     operation_key: "wsx-f2-extension-handshake-test",
     issued_at: new Date().toISOString(),
