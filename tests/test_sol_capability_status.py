@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+import control_plane.sol_capability_status as capability_status_module
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.sol_capability_status import (
     MAX_CAPABILITIES,
@@ -375,6 +376,152 @@ def test_secret_shaped_source_or_issue_is_rejected_before_projection() -> None:
         _project(_fact(issues=("authorization=Bearer abc",)))
 
 
+@pytest.mark.parametrize(
+    "privilege_class",
+    (PrivilegeClass.W2_CONSEQUENTIAL, PrivilegeClass.A3_ADMIN),
+)
+def test_consequential_write_requires_prepared_action(
+    privilege_class: PrivilegeClass,
+) -> None:
+    with pytest.raises(CapabilityProjectionError, match="prepared_action_required"):
+        _project(
+            _fact(
+                name=f"{privilege_class.value.lower()}-write",
+                privilege_class=privilege_class,
+                write_capable=True,
+                production_armed=False,
+                required_scopes=("contents:read", "repo"),
+                required_write_scopes=("repo",),
+                current_scopes=("contents:read", "repo"),
+                prepared_action_required=False,
+                confirmation_required=(
+                    privilege_class is PrivilegeClass.A3_ADMIN
+                ),
+            )
+        )
+
+
+def test_admin_write_requires_confirmation() -> None:
+    with pytest.raises(CapabilityProjectionError, match="confirmation_required"):
+        _project(
+            _fact(
+                name="admin-write",
+                privilege_class=PrivilegeClass.A3_ADMIN,
+                write_capable=True,
+                production_armed=False,
+                required_scopes=("contents:read", "org:admin"),
+                required_write_scopes=("org:admin",),
+                current_scopes=("contents:read", "org:admin"),
+                prepared_action_required=True,
+                confirmation_required=False,
+            )
+        )
+
+
+def test_nonwrite_family_cannot_be_production_armed() -> None:
+    with pytest.raises(
+        CapabilityProjectionError,
+        match="production_armed requires write_capable=true",
+    ):
+        _project(
+            _fact(
+                privilege_class=PrivilegeClass.W1_ROUTINE,
+                production_armed=True,
+                write_capable=False,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "source_state",
+    (
+        CapabilityState.NOT_BUILT,
+        CapabilityState.SPEC_ONLY,
+        CapabilityState.REJECTED_BY_DESIGN,
+    ),
+)
+def test_nonexistent_spec_or_refused_source_cannot_be_production_armed(
+    source_state: CapabilityState,
+) -> None:
+    with pytest.raises(CapabilityProjectionError, match="cannot be production_armed"):
+        _project(
+            _fact(
+                name=f"armed-{source_state.value.lower()}",
+                privilege_class=PrivilegeClass.W1_ROUTINE,
+                source_state=source_state,
+                write_capable=True,
+                production_armed=True,
+                required_scopes=("contents:read", "repo"),
+                required_write_scopes=("repo",),
+                current_scopes=("contents:read", "repo"),
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("privilege_class", "confirmation_required"),
+    (
+        (PrivilegeClass.W2_CONSEQUENTIAL, False),
+        (PrivilegeClass.A3_ADMIN, True),
+    ),
+)
+def test_disarmed_spec_only_write_family_is_representable(
+    privilege_class: PrivilegeClass,
+    confirmation_required: bool,
+) -> None:
+    status = _project(
+        _fact(
+            name=f"future-{privilege_class.value.lower()}",
+            privilege_class=privilege_class,
+            source_state=CapabilityState.SPEC_ONLY,
+            observed_available=False,
+            write_capable=True,
+            production_armed=False,
+            required_scopes=("contents:read", "repo"),
+            required_write_scopes=("repo",),
+            current_scopes=(),
+            prepared_action_required=True,
+            confirmation_required=confirmation_required,
+        )
+    ).capabilities[0]
+    assert status.availability is Availability.UNAVAILABLE
+    assert status.write_serviceable is False
+    assert status.proof_state is CapabilityState.SPEC_ONLY
+
+
+@pytest.mark.parametrize(
+    ("privilege_class", "prepared_action_required", "confirmation_required"),
+    (
+        (PrivilegeClass.W2_CONSEQUENTIAL, False, False),
+        (PrivilegeClass.A3_ADMIN, True, False),
+    ),
+)
+def test_private_projection_seam_requires_privilege_guards_for_write_serviceability(
+    privilege_class: PrivilegeClass,
+    prepared_action_required: bool,
+    confirmation_required: bool,
+) -> None:
+    raw_fact = _fact(
+        name=f"raw-{privilege_class.value.lower()}",
+        privilege_class=privilege_class,
+        source_state=CapabilityState.BUILT_NOT_PROVEN,
+        write_capable=True,
+        production_armed=True,
+        required_scopes=("contents:read", "repo"),
+        required_write_scopes=("repo",),
+        current_scopes=("contents:read", "repo"),
+        prepared_action_required=prepared_action_required,
+        confirmation_required=confirmation_required,
+        live_proof_current=True,
+        last_proven_at="2026-08-30T19:59:00Z",
+    )
+    status = capability_status_module._project(
+        raw_fact,
+        capability_status_module._instant(OBSERVED_AT, "observed_at"),
+    )
+    assert status.write_serviceable is False
+
+
 def test_current_execution_registry_remains_source_owner_and_unarmed() -> None:
     registry = ExecutionCapabilityRegistry.load()
     profile = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -392,6 +539,7 @@ def test_current_execution_registry_remains_source_owner_and_unarmed() -> None:
             required_scopes=("workspace:read", "workspace:write"),
             required_write_scopes=("workspace:write",),
             current_scopes=("workspace:read", "workspace:write"),
+            prepared_action_required=True,
             write_capable=profile.write_capable,
             live_proof_current=False,
             source_refs=(f"capability-policy:{registry.policy_digest}",),
