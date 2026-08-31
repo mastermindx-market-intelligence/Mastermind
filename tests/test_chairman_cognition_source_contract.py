@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import io
 import json
 from pathlib import Path
@@ -11,6 +12,7 @@ import yaml
 from control_plane.chairman_cognition import (
     ENVELOPE_SCHEMA,
     INPUT_SCHEMA,
+    ChairmanCognitionError,
     evaluate_document,
 )
 from scripts import chairman_cognition as cli
@@ -34,6 +36,15 @@ _PLAN = (
 _MODULE = _ROOT / "control_plane" / "chairman_cognition.py"
 _CLI = _ROOT / "scripts" / "chairman_cognition.py"
 _STATE = _ROOT / "config" / "strategic_state.yml"
+
+_CURRENT_CONSTRAINTS = {
+    "autonomous_production_deploy": "prohibited",
+    "autonomous_live_capital_execution": "prohibited",
+    "duplicate_control_planes": "prohibited",
+    "marketing_org_expansion_before_distribution_proof": "prohibited",
+    "new_feature_expansion": "constrained",
+    "unbounded_autonomous_strategic_modification": "prohibited",
+}
 
 
 def _text(path: Path) -> str:
@@ -184,13 +195,7 @@ def test_strategic_state_records_current_chairman_cognition_objective():
     assert objective["status"] == "active"
     assert "Chairman-engineering" in objective["objective"]
     assert "first_chairman_cognition_supervised_live_cycle" in state["review_triggers"]
-    assert state["constraints"]["autonomous_production_deploy"] == "prohibited"
-    assert state["constraints"]["autonomous_live_capital_execution"] == "prohibited"
-    assert state["constraints"]["duplicate_control_planes"] == "prohibited"
-    assert (
-        state["constraints"]["unbounded_autonomous_strategic_modification"]
-        == "prohibited"
-    )
+    assert state["constraints"] == _CURRENT_CONSTRAINTS
     assert sum(float(v) for v in state["resource_policy"].values()) == 1.0
 
 
@@ -278,3 +283,280 @@ def test_cli_rejects_duplicate_keys_that_would_otherwise_form_valid_document(
         "schema": "mastermind.chairman_cognition_error.v1",
     }
     assert secret not in captured.err
+
+
+def _r2_envelope(*, mode: str = "SUPERVISED_LIVE_CANARY") -> dict:
+    return {
+        "schema": ENVELOPE_SCHEMA,
+        "envelope_id": "ENV-R2-001",
+        "authority_source_refs": ["SRC-CHAIRMAN"],
+        "mode": mode,
+        "allowed_actions": [
+            "SOURCE_BRANCH_WRITE",
+            "PRODUCTION_DEPLOY",
+            "LIVE_CAPITAL_EXECUTION",
+            "ORGANIZATIONAL_RESTRUCTURE",
+            "REVERSIBLE_RUNTIME_CANARY",
+        ],
+        "allowed_reversibility": ["REVERSIBLE"],
+        "allowed_repositories": ["mastermindx-market-intelligence/Mastermind"],
+        "allowed_path_prefixes": {
+            "mastermindx-market-intelligence/Mastermind": ["control_plane"]
+        },
+        "allowed_scope_prefixes": ["WS:CHAIRMAN-CONTROL-ROOM"],
+        "allowed_carrier_prefixes": ["github:Mastermind:", "agentos:"],
+        "max_budget_units": 10,
+        "max_active_children": 2,
+        "require_exact_carrier": True,
+        "expires_at": "2026-09-30T00:00:00Z",
+    }
+
+
+def _r2_option(**changes) -> dict:
+    option = {
+        "option_id": "OPT-R2",
+        "title": "Complete one existing Chairman cognition capability",
+        "action": "SOURCE_BRANCH_WRITE",
+        "reversibility": "REVERSIBLE",
+        "source_refs": ["SRC-CHAIRMAN", "SRC-GITHUB"],
+        "scope_refs": ["WS:CHAIRMAN-CONTROL-ROOM"],
+        "effect_state": "NONE",
+        "operation_key": "chairman-cognition-r2-test-001",
+        "carrier_state": "EXACT_EXISTING",
+        "carrier_ref": "github:Mastermind:branch:ccl-r2",
+        "expected_head_sha": "a" * 40,
+        "repositories": ["mastermindx-market-intelligence/Mastermind"],
+        "paths": ["control_plane/chairman_cognition.py"],
+        "budget_units": 1,
+        "active_children_after": 1,
+        "creates_duplicate_control_plane": False,
+        "stop_condition": "Stop after one exact reviewed head.",
+        "rollback_plan": "Abandon the unmerged branch.",
+        "falsifier": "Any ignored current constraint is failure.",
+        "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
+        "affected_departments": ["executive"],
+        "benefits": {
+            "strategic_leverage": 70,
+            "dependency_unlock": 70,
+            "learning_value": 70,
+            "chairman_load_reduction": 70,
+            "user_or_machine_value": 70,
+        },
+        "costs": {
+            "time_to_evidence": 20,
+            "execution_cost": 20,
+            "coordination_risk": 20,
+            "irreversibility_risk": 5,
+            "scarce_cognition_cost": 20,
+        },
+    }
+    option.update(changes)
+    return option
+
+
+def _r2_document(option: dict | None = None, *, envelope: dict | None = None) -> dict:
+    return {
+        "schema": INPUT_SCHEMA,
+        "as_of": "2026-08-30T16:00:00Z",
+        "source_receipts": [
+            {
+                "source_ref": "SRC-STRATEGY",
+                "owner": "STRATEGIC_STATE",
+                "revision": "sha256:current-strategic-state",
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T16:00:00Z",
+            },
+            {
+                "source_ref": "SRC-CHAIRMAN",
+                "owner": "CHAIRMAN_DIRECTIVE",
+                "revision": "conversation:2026-08-30",
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T16:00:00Z",
+            },
+            {
+                "source_ref": "SRC-GITHUB",
+                "owner": "GITHUB",
+                "revision": "a" * 40,
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T16:00:00Z",
+            },
+        ],
+        "strategic_constraints_source_ref": "SRC-STRATEGY",
+        "strategic_constraints": copy.deepcopy(_CURRENT_CONSTRAINTS),
+        "delegation_envelope": _r2_envelope() if envelope is None else envelope,
+        "options": [option or _r2_option()],
+    }
+
+
+def _r2_result(document: dict) -> dict:
+    return evaluate_document(document)["adjudications"][0]
+
+
+def test_r2_emits_complete_sorted_constraint_results_and_exact_blocker() -> None:
+    packet = evaluate_document(_r2_document())
+    item = packet["adjudications"][0]
+    ids = [result["constraint_id"] for result in item["constraint_results"]]
+    assert ids == sorted(_CURRENT_CONSTRAINTS)
+    assert item["blocking_constraint"] is None
+    assert item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+
+@pytest.mark.parametrize("constraint_id", sorted(_CURRENT_CONSTRAINTS))
+def test_r2_each_current_constraint_is_required(constraint_id: str) -> None:
+    document = _r2_document()
+    del document["strategic_constraints"][constraint_id]
+    with pytest.raises(ChairmanCognitionError, match="missing load-bearing strategic constraint"):
+        evaluate_document(document)
+
+
+def test_r2_new_feature_and_unknown_class_require_chairman() -> None:
+    for change_classes in (["NEW_FEATURE"], ["UNKNOWN"]):
+        item = _r2_result(_r2_document(_r2_option(change_classes=change_classes)))
+        assert item["disposition"] == "CHAIRMAN_REQUIRED"
+        assert item["blocking_constraint"] == "new_feature_expansion"
+
+
+def test_r2_marketing_expansion_and_missing_department_are_refused() -> None:
+    marketing = _r2_option(
+        action="ORGANIZATIONAL_RESTRUCTURE",
+        carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+        repositories=[],
+        paths=[],
+        expected_head_sha=None,
+        change_classes=["ORGANIZATIONAL_EXPANSION"],
+        affected_departments=["marketing"],
+    )
+    item = _r2_result(_r2_document(marketing))
+    assert item["disposition"] == "REFUSED"
+    assert item["blocking_constraint"] == (
+        "marketing_org_expansion_before_distribution_proof"
+    )
+
+    missing_department = copy.deepcopy(marketing)
+    missing_department["affected_departments"] = []
+    with pytest.raises(ChairmanCognitionError, match="affected department"):
+        evaluate_document(_r2_document(missing_department))
+
+
+def test_r2_safe_completion_and_runtime_canary_do_not_trigger_expansion_rules() -> None:
+    completion = _r2_result(_r2_document())
+    assert completion["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+    runtime = _r2_option(
+        action="REVERSIBLE_RUNTIME_CANARY",
+        repositories=[],
+        paths=[],
+        expected_head_sha=None,
+        change_classes=["RUNTIME_CANARY"],
+    )
+    item = _r2_result(_r2_document(runtime))
+    by_id = {result["constraint_id"]: result for result in item["constraint_results"]}
+    assert by_id["new_feature_expansion"]["applicability"] == "DOES_NOT_APPLY"
+    assert by_id["marketing_org_expansion_before_distribution_proof"][
+        "applicability"
+    ] == "DOES_NOT_APPLY"
+    assert item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+
+def test_r2_future_unknown_selector_never_silently_disappears() -> None:
+    for level, disposition in (
+        ("prohibited", "REFUSED"),
+        ("constrained", "CHAIRMAN_REQUIRED"),
+        ("permitted", "ELIGIBLE_WITHIN_DELEGATION"),
+    ):
+        document = _r2_document()
+        document["strategic_constraints"]["future_constraint"] = level
+        item = _r2_result(document)
+        result = next(
+            row
+            for row in item["constraint_results"]
+            if row["constraint_id"] == "future_constraint"
+        )
+        assert result["applicability"] == "UNKNOWN"
+        assert item["disposition"] == disposition
+
+
+def test_r2_strategy_source_is_exact_current_load_bearing_owner() -> None:
+    for mutation in (
+        {"owner": "GITHUB"},
+        {"state": "STALE"},
+        {"load_bearing": False},
+    ):
+        document = _r2_document()
+        strategy = document["source_receipts"][0]
+        strategy.update(mutation)
+        with pytest.raises(ChairmanCognitionError):
+            evaluate_document(document)
+
+
+def test_r2_non_load_bearing_context_cannot_establish_or_cure_current() -> None:
+    document = _r2_document()
+    github = document["source_receipts"][2]
+    github["load_bearing"] = False
+    github["owner"] = "SLACK"
+    with pytest.raises(ChairmanCognitionError, match="load-bearing"):
+        evaluate_document(document)
+
+    document = _r2_document()
+    document["source_receipts"][2]["state"] = "STALE"
+    document["source_receipts"].append(
+        {
+            "source_ref": "SRC-LINEAR",
+            "owner": "LINEAR",
+            "revision": "projection-current",
+            "state": "CURRENT",
+            "load_bearing": False,
+            "observed_at": "2026-08-30T16:00:00Z",
+        }
+    )
+    document["options"][0]["source_refs"].append("SRC-LINEAR")
+    item = _r2_result(document)
+    assert item["source_state"] == "STALE"
+    assert item["disposition"] == "REFUSED"
+
+
+def test_r2_classification_cannot_bypass_constitutional_constraints() -> None:
+    cases = (
+        ("PRODUCTION_DEPLOY", {}, "autonomous_production_deploy"),
+        ("LIVE_CAPITAL_EXECUTION", {}, "autonomous_live_capital_execution"),
+        (
+            "ORGANIZATIONAL_RESTRUCTURE",
+            {"creates_duplicate_control_plane": True},
+            "duplicate_control_planes",
+        ),
+    )
+    for action, extra, blocker in cases:
+        option = _r2_option(
+            action=action,
+            change_classes=["MAINTENANCE_REPAIR"],
+            **extra,
+        )
+        if action == "ORGANIZATIONAL_RESTRUCTURE":
+            option.update(
+                carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+                repositories=[],
+                paths=[],
+                expected_head_sha=None,
+            )
+        item = _r2_result(_r2_document(option))
+        assert item["disposition"] == "REFUSED"
+        assert item["blocking_constraint"] == blocker
+
+
+def test_r2_source_branch_write_requires_expected_head() -> None:
+    item = _r2_result(_r2_document(_r2_option(expected_head_sha=None)))
+    assert item["disposition"] == "REFUSED"
+    assert item["reason"] == "EXPECTED_HEAD_REQUIRED"
+
+
+def test_r2_constraint_output_and_digest_are_permutation_stable() -> None:
+    first = evaluate_document(_r2_document())
+    document = _r2_document()
+    document["strategic_constraints"] = dict(
+        reversed(list(document["strategic_constraints"].items()))
+    )
+    second = evaluate_document(document)
+    assert first == second
