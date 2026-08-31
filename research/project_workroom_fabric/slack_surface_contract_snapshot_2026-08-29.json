@@ -1,0 +1,259 @@
+{
+  "schema": "mastermind.project_workroom_platform_census.v1",
+  "observed_at": "2026-08-29T09:34:34-04:00",
+  "reviewed_at": "2026-08-29T19:34:31-04:00",
+  "operation_key": "mastermind-project-workroom-wr-r0-20260829-sol-001",
+  "architecture_operation_key": "mastermind-project-workroom-fabric-20260829-sol-001",
+  "source_revisions": {
+    "mastermind_protected_basis": "b8f7414e9906d6b5853640a18de68c3b91ffb44b",
+    "mastermind_architecture_head": "a29b4911e0d6d808cc7f06737d15c088d279cd30",
+    "macro_agentos_head": "17f91c220bda20f332131d6fa6c2f9bd21c8872c"
+  },
+  "workspace": {
+    "slack_workspace_id": "T0BRD2AQXQV",
+    "slack_workspace_name": "MastermindX",
+    "workspace_plan": "UNKNOWN_FROM_READ_ONLY_CENSUS",
+    "channel_inventory_completeness": "ACTING_PRINCIPAL_VISIBLE_PLUS_EXACT_INERT_CHANNEL_READBACK",
+    "paid_feature_enablement": {
+      "canvas": "EXISTING_CHANNEL_TAB_OBSERVED_BUT_DEDICATED_APP_STANDALONE_AND_ACCESS_BEHAVIOR_UNPROVEN",
+      "lists": "UNKNOWN_UNTIL_DEDICATED_APP_CANARY",
+      "workflow_apps": "UNKNOWN_UNTIL_DEDICATED_APP_CANARY_AND_ADMIN_READBACK",
+      "custom_channel_templates": "TEMPORARILY_NOT_CREATABLE_OR_EDITABLE_PLATFORM_WIDE_AS_OF_2026-08-20"
+    }
+  },
+  "v1_rulings": {
+    "workroom_visibility": "PUBLIC_INTERNAL_ONLY",
+    "private_workrooms": "DEFERRED_PENDING_GROUP_SCOPES_MEMBERSHIP_AND_PRIVACY_PROOF",
+    "workroom_channel_origin": "PROJECTOR_CREATED_BY_DEFAULT",
+    "existing_channel_adoption": "EXPLICIT_ONLY_IF_EXACT_MARKER_PROJECTOR_BOT_ALREADY_MEMBER_AND_MANAGED_SURFACES_APP_OWNED",
+    "automatic_channel_join": "FORBIDDEN_V1",
+    "home_canvas": "STATIC_PROJECTOR_OWNED_CHARTER_ONLY",
+    "home_canvas_channel_access": "READ_ONLY_REQUIRED",
+    "home_canvas_creation": "STANDALONE_FIRST_WITH_EXACT_CHANNEL_READ_GRANT_AND_BOOKMARK",
+    "channel_tabbed_home": "CANARY_ONLY_UNTIL_CREATE_DOWNGRADE_READBACK_AND_DISPOSITION_ARE_PROVEN",
+    "home_canvas_unavailable": "REMOVE_FROM_ACCEPTED_REDUCED_SURFACE_OR_STOP_PILOT; NEVER_WRITE_EXPOSED_FALLBACK",
+    "dynamic_status": "CONTROL_ROOM_PLUS_OPTIONAL_APP_OWNED_CHANNEL_READ_ONLY_RADAR",
+    "radar_list": "OPTIONAL_IF_LISTS_ENABLED; TODO_MODE_FALSE; APP_OWNED; CHANNEL_READ_ONLY",
+    "radar_channel_presence": "BOOKMARK_LINK_TO_LIST_PERMALINK; NATIVE_LIST_TAB_ATTACHMENT_UNDOCUMENTED",
+    "working_notes_canvas": "OPTIONAL_HUMAN_EDITABLE_NONCANONICAL_SEPARATE_CANVAS",
+    "folders": "UI_ONLY_OR_UNDOCUMENTED_FOR_CREATION; NOT_V1_AUTOMATION",
+    "workflows": "OPTIONAL_DEFERRED_UNTIL_PAID_PLAN_TRIGGER_AND_ADMIN_POLICY_CANARY",
+    "custom_templates": "REJECTED_AS_DEPENDENCY",
+    "linear_auto_project_channels": "DISABLED",
+    "raw_agent_dialogue_linear_sync": "FORBIDDEN",
+    "agent_relay_and_workroom_projector": "SEPARATE_LEAST_PRIVILEGE_PRINCIPALS",
+    "concurrent_apply": "REFUSE_USING_ONE_SHOT_EXISTING_HOST_STYLE_EXCLUSIVE_LOCK",
+    "remote_change": "REFUSE_NO_LAST_WRITER_WINS",
+    "post_ambiguity": "EFFECT_UNKNOWN_EXACT_TARGET_READBACK_NO_FAILOVER"
+  },
+  "canvas_effect_contract": {
+    "attached_create_initial_access": "WRITE",
+    "attached_create_production_default": false,
+    "standalone_create_requires_paid_capability_canary": true,
+    "create_ambiguous": "EFFECT_UNKNOWN_NO_SECOND_CREATE",
+    "create_applied_access_failed": "EFFECT_APPLIED_CANVAS_ACCESS_UNSAFE_NO_SECOND_CREATE",
+    "create_applied_access_unproven": "EFFECT_APPLIED_CANVAS_ACCESS_UNPROVEN_NO_SECOND_CREATE",
+    "automatic_standalone_fallback_after_attached_effect": false,
+    "automatic_delete_rollback": false,
+    "delete_allowed": "EXACT_DISPOSABLE_CANARY_OR_SEPARATE_ACCEPTED_CLEANUP_ONLY",
+    "delete_ambiguous": "EFFECT_UNKNOWN_NO_REPLACEMENT_CREATE",
+    "unsafe_object_disposition": "PRESERVE_EXACT_CANVAS_ID_UNTIL_SEPARATELY_ACCEPTED_RECONCILIATION"
+  },
+  "workroom_projector_v1_bot_scopes": [
+    "bookmarks:read",
+    "bookmarks:write",
+    "canvases:read",
+    "canvases:write",
+    "channels:manage",
+    "channels:read",
+    "files:read",
+    "lists:read",
+    "lists:write"
+  ],
+  "scope_notes": {
+    "channels_write_topic": "OMITTED_AS_REDUNDANT_BECAUSE_CHANNELS_MANAGE_IS_ALREADY_REQUIRED_AND_ACCEPTED_BY_SETTOPIC_SETPURPOSE",
+    "lists_scopes": "REMOVE_IF_DEDICATED_APP_CANARY_PROVES_LISTS_DISABLED_OR_OUT_OF_SCOPE",
+    "canvas_delete_scope": "NO_ADDITIONAL_SCOPE; METHOD_REMAINS_CANARY_OR_ACCEPTED_CLEANUP_ONLY",
+    "new_scope_behavior": "ANY_REQUIRED_SCOPE_OUTSIDE_CANDIDATE_SET_RETURNS_TO_SOL_BEFORE_APP_CREATION_OR_SECRET_ENROLLMENT"
+  },
+  "explicitly_absent_v1_scopes": [
+    "admin.*",
+    "app_mentions:read",
+    "channels:history",
+    "channels:join",
+    "channels:write.invites",
+    "channels:write.topic",
+    "chat:write",
+    "chat:write.public",
+    "commands",
+    "connections:write",
+    "groups:history",
+    "groups:read",
+    "groups:write",
+    "groups:write.invites",
+    "groups:write.topic",
+    "incoming-webhook",
+    "links:read",
+    "links:write",
+    "triggers:read",
+    "triggers:write",
+    "users:read"
+  ],
+  "core_methods": [
+    {"method": "auth.test", "purpose": "QUALIFY_TOKEN_WORKSPACE_AND_BOT_IDENTITY", "scope": "NONE"},
+    {"method": "conversations.list", "purpose": "COMPLETE_PUBLIC_CHANNEL_MARKER_CENSUS_WITH_PAGINATION", "scope": "channels:read"},
+    {"method": "conversations.info", "purpose": "READ_EXACT_CHANNEL_NAME_ARCHIVE_TOPIC_PURPOSE_AND_BOT_MEMBERSHIP", "scope": "channels:read"},
+    {"method": "conversations.create", "purpose": "CREATE_ONE_PUBLIC_INTERNAL_WORKROOM_AND_ESTABLISH_PROJECTOR_MEMBERSHIP", "scope": "channels:manage"},
+    {"method": "conversations.rename", "purpose": "RECONCILE_APP_MANAGED_PUBLIC_CHANNEL_SLUG", "scope": "channels:manage"},
+    {"method": "conversations.archive", "purpose": "ARCHIVE_EXACT_TERMINAL_APP_MANAGED_WORKROOM_AFTER_ACCEPTED_GATE", "scope": "channels:manage"},
+    {"method": "conversations.setTopic", "purpose": "WRITE_CLOSED_WORKROOM_MARKER_AND_COMPACT_CONTEXT", "scope": "channels:manage"},
+    {"method": "conversations.setPurpose", "purpose": "WRITE_STABLE_PROJECT_PURPOSE", "scope": "channels:manage"},
+    {"method": "canvases.create", "purpose": "CREATE_STANDALONE_APP_OWNED_STATIC_HOME_OR_OPTIONAL_NONCANONICAL_NOTES_CANVAS", "scope": "canvases:write"},
+    {"method": "canvases.sections.lookup", "purpose": "VERIFY_UNIQUE_MANAGED_SECTION_MARKERS", "scope": "canvases:read"},
+    {"method": "canvases.edit", "purpose": "BOUNDED_STATIC_CHARTER_EDIT_ONLY_AFTER_LOCK_METADATA_AND_DRIFT_CHECK", "scope": "canvases:write"},
+    {"method": "canvases.access.set", "purpose": "GRANT_EXACT_WORKROOM_CHANNEL_READ_ONLY_HOME_ACCESS_OR_REFUSE", "scope": "canvases:write"},
+    {"method": "files.info", "purpose": "READ_CANVAS_LIST_METADATA_OWNER_UPDATED_TIMESTAMP_AND_PERMALINK", "scope": "files:read"},
+    {"method": "bookmarks.list", "purpose": "READ_COMPLETE_WORKROOM_HEADER_LINK_SET", "scope": "bookmarks:read"},
+    {"method": "bookmarks.add", "purpose": "LINK_LINEAR_PROJECT_CONTROL_ROOM_HOME_RADAR_NOTES_AND_EVIDENCE", "scope": "bookmarks:write"},
+    {"method": "bookmarks.edit", "purpose": "RECONCILE_EXACT_PROJECTOR_OWNED_LINK", "scope": "bookmarks:write"},
+    {"method": "bookmarks.remove", "purpose": "REMOVE_ONLY_EXACT_PROJECTOR_OWNED_OBSOLETE_LINK", "scope": "bookmarks:write"}
+  ],
+  "canary_or_cleanup_methods": [
+    {
+      "method": "canvases.delete",
+      "purpose": "DELETE_ONLY_EXACT_DISPOSABLE_CANARY_OR_SEPARATELY_ACCEPTED_CLEANUP_TARGET; NEVER_AUTOMATIC_ROLLBACK",
+      "scope": "canvases:write"
+    }
+  ],
+  "optional_lists_methods": [
+    {"method": "slackLists.create", "purpose": "CREATE_APP_OWNED_PROJECT_RADAR_WITH_TODO_MODE_FALSE", "scope": "lists:write"},
+    {"method": "slackLists.update", "purpose": "MANAGE_RADAR_NAME_DESCRIPTION_AND_TODO_MODE_FALSE", "scope": "lists:write"},
+    {"method": "slackLists.items.list", "purpose": "READ_COMPLETE_RADAR_ROWS_AND_BUILD_OBSERVATION_HASH", "scope": "lists:read"},
+    {"method": "slackLists.items.create", "purpose": "CREATE_EXACT_APP_MANAGED_RADAR_ROW", "scope": "lists:write"},
+    {"method": "slackLists.items.update", "purpose": "UPDATE_EXACT_APP_MANAGED_RADAR_CELLS_UNDER_APPLY_LOCK", "scope": "lists:write"},
+    {"method": "slackLists.items.delete", "purpose": "REMOVE_ONLY_EXACT_PROJECTOR_OWNED_OBSOLETE_ROW_AFTER_RECONCILIATION", "scope": "lists:write"},
+    {"method": "slackLists.access.set", "purpose": "GRANT_WORKROOM_CHANNEL_READ_ACCESS_ONLY", "scope": "lists:write"},
+    {"method": "slackLists.access.delete", "purpose": "REVOKE_CHANNEL_ACCESS_ON_ACCEPTED_ARCHIVAL_OR_PRIVACY_REPAIR", "scope": "lists:write"}
+  ],
+  "actor_and_ownership_requirements": {
+    "bot_identity": "EXACT_DEDICATED_WORKROOM_PROJECTOR_APP_AND_BOT_READBACK_REQUIRED",
+    "existing_channel_management": "BOT_IS_MEMBER_TRUE_REQUIRED",
+    "managed_home": "APP_OWNED_FILE_AND_EXACT_READ_ACCESS_PROOF_REQUIRED",
+    "managed_radar": "APP_OWNED_LIST_REQUIRED",
+    "foreign_owner": "WORKROOM_FOREIGN_OWNER_REFUSAL",
+    "not_member": "WORKROOM_ACTOR_NOT_MEMBER_REFUSAL",
+    "automatic_join": false,
+    "human_membership_automation": false
+  },
+  "apply_lock_contract": {
+    "kind": "ONE_SHOT_EXISTING_HOST_STYLE_ADVISORY_OR_EXCLUSIVE_LOCK",
+    "state_owned": false,
+    "contains_desired_state": false,
+    "contains_lifecycle": false,
+    "contains_retry": false,
+    "contains_queue": false,
+    "concurrent_apply_behavior": "REFUSE",
+    "release": "PROCESS_EXIT_OR_EXPLICIT_FINALLY",
+    "path_owner_mode_timeout": "DEFER_TO_CURRENT_ACCEPTED_HOST_CREDENTIAL_ARCHITECTURE_AT_WR_A1"
+  },
+  "optional_or_deferred_capabilities": [
+    {
+      "capability": "PRIVATE_RESTRICTED_WORKROOMS",
+      "status": "DEFERRED",
+      "additional_scopes": ["groups:read", "groups:write", "groups:write.topic", "groups:write.invites"],
+      "reason": "ADDITIONAL_MEMBERSHIP_AUDIENCE_APP_ACCESS_AND_UNFURL_PRIVACY_PROOF_REQUIRED"
+    },
+    {
+      "capability": "CHANNEL_TABBED_HOME_CANVAS",
+      "status": "CANARY_ONLY",
+      "reason": "CHANNEL_ID_CREATE_STARTS_WRITE_EXPOSED_AND_ACCESS_MUTATION_MAY_REFUSE_CHANNEL_CANVAS"
+    },
+    {
+      "capability": "EXISTING_PUBLIC_CHANNEL_ADOPTION",
+      "status": "EXPLICIT_ONLY",
+      "reason": "REQUIRES_EXACT_MARKER_BOT_ALREADY_MEMBER_APP_OWNED_SURFACES_COMPLETE_SNAPSHOT_AND_APPROVED_ADOPT_EXISTING_PLAN"
+    },
+    {
+      "capability": "NATIVE_LIST_TAB_ATTACHMENT",
+      "status": "UNDOCUMENTED_PUBLIC_API",
+      "fallback": "LIST_CHANNEL_READ_ACCESS_PLUS_BOOKMARK_PERMALINK"
+    },
+    {
+      "capability": "BOOKMARK_FOLDER_CREATION",
+      "status": "UNDOCUMENTED_PUBLIC_API",
+      "fallback": "FLAT_BOUNDED_BOOKMARK_SET_AND_HOME_CANVAS_RESOURCES"
+    },
+    {
+      "capability": "WORKFLOW_APP_CUSTOM_FUNCTIONS_AND_TRIGGERS",
+      "status": "PLATFORM_SUPPORTED_BUT_WORKSPACE_PLAN_ADMIN_AND_DEPLOYMENT_UNPROVEN",
+      "reason": "NOT_REQUIRED_FOR_CORE_CHANNEL_HOME_DIALOGUE_PILOT"
+    },
+    {
+      "capability": "CUSTOM_CHANNEL_TEMPLATES",
+      "status": "TEMPORARILY_UNAVAILABLE_FOR_CREATE_OR_EDIT_AS_OF_2026-08-20",
+      "fallback": "DETERMINISTIC_DIRECT_SURFACE_PROVISIONING"
+    },
+    {
+      "capability": "AUTOMATIC_LINEAR_PROJECT_CHANNEL_CREATION",
+      "status": "SUPPORTED_BUT_REJECTED_V1",
+      "reason": "CREATES_PUBLIC_CHANNEL_FOR_EVERY_PROJECT_INVITES_MEMBERS_AND_BYPASSES_WORKROOM_ELIGIBILITY_POLICY"
+    },
+    {
+      "capability": "LINEAR_AGENT_CONTEXTUAL_ISSUE_CREATION",
+      "status": "HUMAN_CONVENIENCE_ONLY",
+      "reason": "CONTEXTUAL_INFERENCE_AND_TITLE_OR_CHANNEL_SIMILARITY_CANNOT_BE_AI_MUTATION_AUTHORITY"
+    },
+    {
+      "capability": "LINEAR_SLACK_BIDIRECTIONAL_THREAD_SYNC",
+      "status": "SELECTED_HUMAN_DISCUSSION_ONLY_AFTER_OSC_C1",
+      "reason": "RAW_AGENT_DIALOGUE_PROTOCOL_MUST_NOT_BE_MIRRORED_OR_USED_AS_LIFECYCLE"
+    }
+  ],
+  "current_estate": {
+    "visible_channels": [
+      {"id": "C0BRAJUMGBD", "name": "new-channel", "visibility": "PUBLIC", "managed_workroom_marker": false},
+      {"id": "C0BRD2B2L85", "name": "all-mastermind-x", "visibility": "PUBLIC_GENERAL", "managed_workroom_marker": false},
+      {"id": "C0BRDFZPLHK", "name": "ceo-control-room", "visibility": "PRIVATE", "managed_workroom_marker": false},
+      {"id": "C0BRET68EH4", "name": "social", "visibility": "PUBLIC", "observed_surfaces": ["CANVAS"], "managed_workroom_marker": false},
+      {"id": "C0BRFC9JXK8", "name": "build-events", "visibility": "PUBLIC", "managed_workroom_marker": false},
+      {"id": "C0BRH9VRUE6", "name": "company-intelligence", "visibility": "PUBLIC", "managed_workroom_marker": false},
+      {"id": "C0BRUL9F2V7", "name": "s0-sol-carrier-test", "visibility": "PRIVATE", "managed_workroom_marker": false},
+      {"id": "C0BSBM78V1N", "name": "agent-dispatch", "visibility": "PUBLIC", "observed_surfaces": ["FILES"], "managed_workroom_marker": false, "role": "LEGACY_GLOBAL_DIALOGUE_TRANSPORT"},
+      {"id": "C0BSGABKBFY", "name": "sol-runtime", "visibility": "PRIVATE", "managed_workroom_marker": false},
+      {"id": "C0BTD5804QK", "name": "mastermind-exec-ops", "visibility": "PRIVATE", "managed_workroom_marker": false, "role": "TRANSITION_COORDINATION_ONLY"},
+      {"id": "C0BTQ71QEA0", "name": "canary-project-workroom-20260829", "visibility": "PUBLIC", "managed_workroom_marker": false, "role": "INERT_UNMANAGED_EXACT_EFFECT"}
+    ],
+    "current_agent_relay": {
+      "app_name": "Mastermind Agent Relay",
+      "bot_display_name": "Mastermind Relay",
+      "observed_bot_user_id": "U0BTF3QGABF",
+      "manifest_bot_scopes": ["channels:history", "chat:write"],
+      "configured_channel_id": "C0BSBM78V1N",
+      "multi_workroom_support": "NOT_BUILT",
+      "scope_widening_for_workroom_projection": "FORBIDDEN"
+    },
+    "workroom_projector": {
+      "app_exists": false,
+      "credential_exists": false,
+      "host_runtime_exists": false,
+      "canary_exists": false
+    },
+    "managed_workroom_count": 0,
+    "authoritative_public_absence_proof": false
+  },
+  "linear_estate": {
+    "initiative_objects": 0,
+    "visible_projects": 50,
+    "initiative_memberships": 0,
+    "global_project_channel_auto_creation": "REJECTED_V1",
+    "selected_issue_projection_owner": "MAS-189_AFTER_MAS-66"
+  },
+  "capability_state": {
+    "architecture": "SPEC_ONLY",
+    "wr_r0": "RESEARCH_RECORDS_ONLY",
+    "wr_p0": "NOT_BUILT",
+    "workroom_projector": "NOT_BUILT",
+    "accepted_canvas_canary": "NOT_BUILT",
+    "accepted_workroom": "NOT_BUILT"
+  }
+}
