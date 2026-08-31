@@ -1,10 +1,10 @@
 # Wake ACK1 Exact-Session Ingress — Self-Review Amendment
 
-**Status:** PLAN_ONLY / RECORDS_ONLY. This file changes no source/runtime behavior.
+**Status:** PLAN_ONLY / RECORDS_ONLY / NOT_BUILT. This file changes no source/runtime behavior.
 
 **Execution precedence:** this amendment **supersedes conflicting or less-specific instructions** in `docs/superpowers/plans/2026-08-29-wake-ack1-exact-session-ingress.md`; the parent plan remains controlling everywhere else.
 
-**Protected source reviewed:** `Mastermind@7b8f3ca580f9872ca8ddf60f90c6022ce4a18e6b`, Skillpack `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.
+**Current protected source reviewed:** `Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`, Skillpack `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1. Protected predecessors are #257 RuntimeBinding, #262 current-owner architecture, #254 persisted Wake carrier, and Worker Browser B1 / #153. W3A #250 remains the sole unprotected current-delivery candidate at `85ba1246b376f6264e59671fd0e228a60866afff`; this plan repair authorizes no ACK1 implementation START.
 
 ## Why this amendment exists
 
@@ -31,6 +31,10 @@ DELIVERED
 ```
 
 Therefore ACK1 must repair the existing canonical Wake ledger state machine itself. It must not add a resolver daemon, alternate status table, special canary bypass, or synthetic combined ACK+resolution receipt.
+
+The current-owner review adds a separate acquisition correction. A control-side App Server/reader cannot prove what the target's current provider turn consumed. Raw provider/model bytes remain inside the existing worker-local current `CodexOperatorAdapter` generation/client. The existing WorkerBroker/OHF `ohf-deliver-attention` path may return only a closed authenticated exact-turn projection after matching target Attempt, generation, binding, provider session/native turn, nudge and terminal-trailer reduction. Accepted timeout/effect-unknown retains the W3A fence; it does not authorize a read, retry, failover, or optimistic fence clear.
+
+The Wake obligation's `attempt_id` is source correlation. Canonical root/workstream/seat routing selects the target, and the worker projection names the distinct target current Attempt whose RuntimeBinding is reprojected under the ACK transaction. An ambiguous source-Attempt/target-Attempt join refuses.
 
 ---
 
@@ -339,19 +343,16 @@ def acknowledge_consumed_wakes(
     registry: SessionTargetRegistry,
     *,
     claim: WakeAckClaim,
-    trusted: TrustedWakeAckObservation,
+    trusted: TrustedWorkerWakeAckProjection,
 ) -> tuple[PersistedWakeEvent, ...]:
-    # one BEGIN IMMEDIATE transaction, current RuntimeBinding proof, atomic ACK append
+    # one BEGIN IMMEDIATE transaction, target-current RuntimeBinding proof, atomic ACK append
 
 
-# integrations.executive_wake.codex_app_server_ack.CodexAppServerWakeAckIngress
-async def consume_claim(
-    self,
-    *,
-    native_handle: str,
-    nudge_id: str,
-) -> tuple[PersistedWakeEvent, ...]:
-    # one trusted provider read; None -> no mutation; valid typed observation -> core ingress
+# existing W3A current-owner path only
+# CodexOperatorAdapter.deliver_attention -> AttentionTurnObservation
+# -> WorkerBroker ohf-deliver-attention -> RemoteCodexOperatorAdapter
+# -> CodexCurrentWriterWakeClient -> TrustedWorkerWakeAckProjection
+# No new App Server/client/reader/endpoint is permitted.
 ```
 
 The data classes remain exactly as frozen in the parent plan. `WakeAckClaim.obligation_ids` is nonempty, unique and canonically sorted; duplicate input is a refusal, not silent deduplication.
@@ -364,13 +365,16 @@ After applying this amendment's precedence, the plan covers every protected spli
 
 - exact target delivery evidence before reasoning-session ACK;
 - exact current RuntimeBinding/generation/native-conversation verification;
+- exact target current Attempt distinguished from the Wake source Attempt;
+- worker-local exact-turn reduction through the existing generation/client and broker operation;
+- accepted timeout/effect-unknown retains the current-generation fence until exact same-owner completion reconciliation;
 - same Executive transaction for current-binding proof + ACK append;
 - model-authored surface restricted to opaque Wake ids;
 - identical replay/idempotence and changed replay conflict;
 - delivery remains distinct from ACK;
 - ACK closes delivery but does not falsely close source resolution;
 - source resolution is impossible before ACK and lawful after ACK;
-- no raw native handle in durable Wake events;
+- no raw provider session/native turn or model text in durable Wake events;
 - no new queue/ledger/session/lock/lifecycle plane;
 - production arming remains independent;
 - first real proof remains Codex/OHF only.

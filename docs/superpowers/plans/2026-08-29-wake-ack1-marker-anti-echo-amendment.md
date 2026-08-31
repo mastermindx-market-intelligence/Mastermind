@@ -1,10 +1,10 @@
 # Wake ACK1 Codex Marker Anti-Echo Amendment
 
-**Status:** PLAN_ONLY / RECORDS_ONLY. No runtime behavior is changed by this document.
+**Status:** PLAN_ONLY / RECORDS_ONLY / NOT_BUILT. No runtime behavior is changed by this document.
 
-**Execution precedence:** this amendment is the narrow controlling rule for Codex App Server ACK marker extraction. It supplements `2026-08-29-wake-ack1-exact-session-ingress.md` and its self-review amendment. Where marker parsing is less specific there, this file wins.
+**Execution precedence:** this amendment is the narrow controlling rule for worker-local Codex/OHF ACK marker reduction. It supplements `2026-08-29-wake-ack1-exact-session-ingress.md` and its self-review amendment. Where marker reduction is less specific there, this file wins.
 
-**Reviewed planning source:** `Mastermind@7b8f3ca580f9872ca8ddf60f90c6022ce4a18e6b`, Skillpack v1.0.1 / bootstrap-major 1.
+**Reviewed current source:** `Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`, Skillpack v1.0.1 / bootstrap-major 1. Protected #257/#262/#254 owners and Worker Browser B1 / #153 are preserved. W3A #250 remains the unprotected current source candidate at `85ba1246b376f6264e59671fd0e228a60866afff`; no implementation START follows from this records repair.
 
 ## Why this amendment is required
 
@@ -16,11 +16,11 @@ MASTERMIND_WAKE_ACK <WAKE-ID>
 
 Therefore mere presence of a syntactically valid marker-shaped line in model output is not sufficient evidence that the target intentionally emitted its consumption acknowledgement. A model can quote, explain, or place the supplied instruction inside a Markdown fence without having completed the requested recovery. Accepting that echo would recreate the exact failure this program is designed to eliminate: delivery/instruction visibility would be laundered into `TARGET_ACKNOWLEDGED`.
 
-The trusted provider adapter remains the correct owner of this reduction. Raw model text still never enters `control_plane`.
+The existing worker-local current `CodexOperatorAdapter` generation/client remains the only lawful owner of this reduction. It observes the exact W3A provider-native attention turn through the existing WorkerBroker/OHF operation and emits only a closed authenticated projection. Raw model text never crosses the broker boundary or enters `control_plane`.
 
 ## Frozen extraction law
 
-For the first Codex App Server ACK vertical, the injected provider client may return a `CodexWakeAckObservation` only when all accepted markers form one **terminal ACK trailer** in the exact target response.
+For the first Codex/OHF ACK vertical, the existing worker-local current generation/client may attach a `WorkerLocalWakeAckProjection` to the matching `AttentionTurnObservation` only when all accepted markers form one **terminal ACK trailer** in the exact completed target turn.
 
 A valid trailer has these properties:
 
@@ -67,19 +67,19 @@ Mutation controls must kill at least:
 
 The existing parent law remains binding:
 
-- observation is read from the exact same App Server native conversation/turn associated with the canonical delivered nudge;
-- `native_handle` and `nudge_id` are supplied by trusted host/provider context, not parsed from model output;
+- observation is reduced inside the exact current worker generation/client from the exact W3A provider-native conversation/turn associated with the canonical delivered nudge;
+- target Attempt, process generation, binding id/generation, provider session/native turn and `nudge_id` are supplied by the existing current-owner state, not parsed from model output or copied from the Wake source Attempt;
 - current RuntimeBinding and prior canonical `DELIVERED` evidence are revalidated inside ACK1's existing Executive transaction before persistence;
-- an ACK marker from a different thread/turn/native handle/nudge is refused;
+- an ACK marker from a different target Attempt/generation/session/turn/nudge is refused;
 - the marker itself carries no seat, binding, generation, provider, host, authority or source-resolution fact;
-- provider response, successful delivery, watcher wake and absence of error remain insufficient without the valid target-originated trailer plus trusted current-session validation.
+- provider response, successful delivery, watcher wake and absence of error remain insufficient without the valid target-originated trailer plus trusted target-current Attempt/session validation. Accepted timeout/effect-unknown produces no projection and retains the W3A generation fence; only exact same-owner completion reconciliation may clear it.
 
 ## Live-canary discriminator
 
 The harmless Codex/OHF canary is not accepted merely because the target response contains the literal marker grammar somewhere. The evidence bundle must include a sanitized adapter receipt proving:
 
 ```text
-exact native target/turn matched
+exact target Attempt/generation/provider session/native turn matched
 terminal_ack_trailer = true
 claimed_obligation_ids = expected exact set
 trusted current RuntimeBinding matched
@@ -91,4 +91,4 @@ Do not preserve raw model text in the durable proof bundle.
 
 ## Capability boundary
 
-This amendment adds no implementation and authorizes no ACK1 START. MAS-237 remains the hard predecessor. Production arming remains false. The capability is still `PLAN_ONLY / RECORDS_ONLY / NOT_BUILT` until the existing ACK1 implementation wave and real canary prove the full chain.
+This amendment adds no implementation and authorizes no ACK1 START. Protected #257/#262/#254 remain predecessors; the current W3A #250 worker-local owner chain must also be accepted/protected before implementation. Production arming remains false. The capability is still `PLAN_ONLY / RECORDS_ONLY / NOT_BUILT` until the existing ACK1 implementation wave and real canary prove the full chain.
