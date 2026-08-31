@@ -201,7 +201,12 @@ def test_required_rejected_dependency_preserves_constitutional_refusal() -> None
         available=True,
         source_ref="policy:generic-shell",
     )
-    status = _project(_fact(dependencies=(dependency,))).capabilities[0]
+    status = _project(
+        _fact(
+            dependencies=(dependency,),
+            source_state=CapabilityState.NOT_BUILT,
+        )
+    ).capabilities[0]
     assert status.availability is Availability.REFUSED
     assert status.proof_state is CapabilityState.REJECTED_BY_DESIGN
     assert status.read_serviceable is False
