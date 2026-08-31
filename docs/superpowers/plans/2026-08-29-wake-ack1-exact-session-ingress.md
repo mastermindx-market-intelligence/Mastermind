@@ -96,12 +96,17 @@ control_plane/operator_harness_wire.py
 control_plane/codex_operator_adapter.py
 control_plane/executive_worker_broker.py
 control_plane/remote_codex_operator_adapter.py
+control_plane/wake_dispatcher.py
+integrations/executive_wake/codex_app_server.py
 integrations/executive_wake/codex_app_server_rpc.py
+integrations/slack_agent_dialogue/persisted_wake_carrier.py
 tests/test_executive_wake_fabric.py
 tests/test_executive_wake_fabric_hardening.py
 tests/test_executive_wake_persisted_dispatch.py
 tests/test_wake_ack_ingress.py
+tests/test_codex_app_server_wake_dispatcher.py
 tests/test_codex_app_server_wake_rpc.py
+tests/test_slack_agent_dialogue_persisted_wake_carrier.py
 docs/EXECUTIVE_WAKE_FABRIC.md
 ```
 
@@ -652,6 +657,7 @@ git commit -m "feat(exec): add exact-session Wake ACK ingress core"
 - Modify: `tests/test_codex_app_server_wake_rpc.py`
 - Modify: `tests/test_codex_app_server_wake_dispatcher.py`
 - Modify: `tests/test_executive_wake_persisted_dispatch.py`
+- Modify: `tests/test_slack_agent_dialogue_persisted_wake_carrier.py`
 
 **Interfaces:**
 - Consumes protected/current W3A `ohf-deliver-attention`, its `AttentionTurnObservation`, the already-owned worker-local current `CodexOperatorAdapter` generation/client, the existing `CodexAppServerWakeDispatcher` / `dispatch_persisted_nudge(...)` coordinator, and Task-3 provider-neutral ACK ingress.
@@ -736,7 +742,7 @@ CodexOperatorAdapter.deliver_attention
   -> only after that append succeeds, acknowledge_consumed_wakes(...)
 ```
 
-`WakeTransportCompletion` is a frozen non-wire return envelope on the existing `WakeDispatcher.nudge(...)` interface. Its projection field is optional, typed, in-memory only and never copied into `TransportReceipt.details`, `WakeReceipt`, `PersistedNudgeResult`, Executive events, logs or proof. Existing non-Codex dispatchers may continue returning a bare `TransportReceipt`; `dispatch_persisted_nudge(...)` normalizes that value to a completion with no projection. The Codex current-writer dispatcher returns the typed envelope. The existing `PersistedWakeCarrier` supplies its current `SessionTargetRegistry` to `dispatch_persisted_nudge(...)`; the coordinator uses `repo.runtime` and that registry to call Task 3 only after every exact nudge member has a newly authenticated/persisted `DELIVERED` outcome. It does not invoke ACK1 on ACCEPTED, failure, reconciliation-required, partial persistence, no projection, or replay-only delivery state.
+`WakeTransportCompletion` is a frozen non-wire return envelope on the existing `WakeDispatcher.nudge(...)` interface. Its projection field is optional, typed, in-memory only and never copied into `TransportReceipt.details`, `WakeReceipt`, `PersistedNudgeResult`, Executive events, logs or proof. Existing non-Codex dispatchers may continue returning a bare `TransportReceipt`; one shared closed `normalize_transport_completion(...)` helper maps either return shape to `(TransportReceipt, TrustedWorkerWakeAckProjection | None)` and rejects every other value or untyped projection. **Every** existing `WakeDispatcher.nudge(...)` consumer uses this helper before receipt authentication, including both `dispatch_persisted_nudge(...)` and non-persisted `dispatch_nudge(...)` / `dispatch_wake(...)`. The Codex current-writer dispatcher returns the typed envelope. The existing `PersistedWakeCarrier` supplies its current `SessionTargetRegistry` to `dispatch_persisted_nudge(...)`; the coordinator uses `repo.runtime` and that registry to call Task 3 only after every exact nudge member has a newly authenticated/persisted `DELIVERED` outcome. It does not invoke ACK1 on ACCEPTED, failure, reconciliation-required, partial persistence, no projection, or replay-only delivery state.
 
 Define the exact transient interfaces rather than an implicit callback or side channel:
 
@@ -757,9 +763,14 @@ class WakeDispatcher(Protocol):
         self,
         wake: WakeNudge,
     ) -> TransportReceipt | WakeTransportCompletion: ...
+
+
+def normalize_transport_completion(
+    value: TransportReceipt | WakeTransportCompletion,
+) -> tuple[TransportReceipt, TrustedWorkerWakeAckProjection | None]: ...
 ```
 
-`CodexWakeDeliveryObservation` gains the same optional, `repr=False` trusted projection field; `CodexAppServerWakeDispatcher.nudge(...)` copies it only into `WakeTransportCompletion.target_ack_projection`. Extend `dispatch_persisted_nudge(...)` with a current `target_registry: SessionTargetRegistry | None` input. A present projection with no registry is a typed post-delivery refusal, never a fallback. After the exact `DELIVERED` append commits, the coordinator derives `WakeAckClaim(obligation_ids=projection.obligation_ids)` and calls:
+`CodexWakeDeliveryObservation` gains the same optional, `repr=False` trusted projection field; `CodexAppServerWakeDispatcher.nudge(...)` copies it only into `WakeTransportCompletion.target_ack_projection`. Extend `dispatch_persisted_nudge(...)` with the backward-compatible keyword-only signature `target_registry: SessionTargetRegistry | None = None`. A present projection with no registry is a typed post-delivery refusal, never a fallback. After the exact `DELIVERED` append commits, the coordinator derives `WakeAckClaim(obligation_ids=projection.obligation_ids)` and calls:
 
 ```python
 acknowledge_consumed_wakes(
@@ -771,6 +782,8 @@ acknowledge_consumed_wakes(
 ```
 
 The projection object goes out of scope after that call. The coordinator returns its ordinary persisted result and callers recover durable ACK truth through the canonical Wake ledger, not a second receipt.
+
+The non-persisted `dispatch_nudge(...)` path also calls `normalize_transport_completion(...)`, authenticates and returns only the ordinary `TransportReceipt`, and deliberately discards the optional projection without invoking ACK1. It has no repository and therefore no authority to persist `DELIVERED` or `TARGET_ACKNOWLEDGED`. It must not serialize, log, return or otherwise expose the projection, and it must never compensate with another provider call. Pin both bare non-Codex receipts and Codex completion envelopes through the persisted and non-persisted generic paths; the latter must preserve its current authenticated-receipt API and make zero ACK-core calls.
 
 The Task-3 core then reprojects the target's current RuntimeBinding under the existing Executive transaction before any ACK append. If Task 3 refuses after delivery, the durable truth remains `DELIVERED_UNACKNOWLEDGED`; the coordinator propagates the typed refusal and never rereads, redelivers, retries, fails over or mutates source resolution.
 
@@ -794,9 +807,11 @@ The target marker is reduced only by the worker-local current owner and submitte
 
 ```bash
 python -m pytest \
+  tests/test_codex_app_server_wake_dispatcher.py \
   tests/test_codex_app_server_wake_rpc.py \
   tests/test_wake_ack_ingress.py \
   tests/test_executive_wake_persisted_dispatch.py \
+  tests/test_slack_agent_dialogue_persisted_wake_carrier.py \
   -q
 git diff --check
 git add control_plane/operator_harness_contract.py \
@@ -804,8 +819,14 @@ git add control_plane/operator_harness_contract.py \
   control_plane/codex_operator_adapter.py \
   control_plane/executive_worker_broker.py \
   control_plane/remote_codex_operator_adapter.py \
+  control_plane/wake_dispatcher.py \
+  integrations/executive_wake/codex_app_server.py \
   integrations/executive_wake/codex_app_server_rpc.py \
-  tests/test_codex_app_server_wake_rpc.py
+  integrations/slack_agent_dialogue/persisted_wake_carrier.py \
+  tests/test_codex_app_server_wake_dispatcher.py \
+  tests/test_codex_app_server_wake_rpc.py \
+  tests/test_executive_wake_persisted_dispatch.py \
+  tests/test_slack_agent_dialogue_persisted_wake_carrier.py
 git commit -m "feat(exec): reduce Wake ACK on the current writer turn"
 ```
 
