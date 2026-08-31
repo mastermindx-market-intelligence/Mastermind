@@ -31,7 +31,7 @@ A valid trailer has these properties:
 4. each obligation id appears exactly once; duplicate ids are a refusal, not silent deduplication;
 5. a marker-shaped line inside a fenced code block is ignored/refused as acknowledgement evidence;
 6. a blockquoted marker (`> MASTERMIND_WAKE_ACK ...`), inline-code marker, list-item marker, prose-prefixed/suffixed marker, or escaped marker is not an ACK;
-7. a response that merely repeats or discusses the Wake instruction but has no valid terminal trailer returns no observation and causes zero ACK mutation;
+7. a response that merely repeats or discusses the Wake instruction but has no valid terminal trailer returns the matching accepted/delivered `AttentionTurnObservation` with no ACK projection and causes zero ACK mutation;
 8. if malformed/quoted marker-like material coexists with a valid terminal trailer, only the exact terminal trailer may be reduced; malformed material never contributes ids;
 9. an unknown/unclaimed `WAKE-*` id in a valid trailer is still refused later by the existing core ingress / prior-DELIVERED / current-binding checks. Adapter syntax never grants obligation authority.
 
@@ -42,13 +42,13 @@ The trailer rule is provider-adapter evidence only. It is not a lifecycle state,
 Extend the parent Task-4 Codex adapter matrix before implementation is GREEN:
 
 ```text
-no marker -> no observation / zero ACK mutation
-ordinary prose mentioning MASTERMIND_WAKE_ACK -> no observation
-inline-code marker -> no observation
-blockquote containing an otherwise exact marker -> no observation
-fenced-code block containing an otherwise exact marker -> no observation
-exact marker followed by later prose -> no observation
-list-item / prefixed marker -> no observation
+no marker -> matching accepted/delivered observation, no ACK projection / zero ACK mutation
+ordinary prose mentioning MASTERMIND_WAKE_ACK -> matching observation, no ACK projection
+inline-code marker -> matching observation, no ACK projection
+blockquote containing an otherwise exact marker -> matching observation, no ACK projection
+fenced-code block containing an otherwise exact marker -> matching observation, no ACK projection
+exact marker followed by later prose -> matching observation, no ACK projection
+list-item / prefixed marker -> matching observation, no ACK projection
 duplicate exact ids in terminal trailer -> REFUSE
 malformed id in terminal trailer -> REFUSE
 one exact terminal marker -> one typed claim

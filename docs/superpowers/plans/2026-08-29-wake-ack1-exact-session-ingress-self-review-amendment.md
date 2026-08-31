@@ -6,6 +6,8 @@
 
 **Current protected source reviewed:** `Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`, Skillpack `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1. Protected predecessors are #257 RuntimeBinding, #262 current-owner architecture, #254 persisted Wake carrier, and Worker Browser B1 / #153. W3A #250 remains the sole unprotected current-delivery candidate at `85ba1246b376f6264e59671fd0e228a60866afff`; this plan repair authorizes no ACK1 implementation START.
 
+**Current-owner composition rider:** the worker-local current generation validates the exact provider-native attention turn and returns only a closed projection on the existing `AttentionTurnObservation`. The current-writer client validates nested turn/session/generation/nudge identity against that outer observation, and the existing persisted-dispatch coordinator carries the resulting typed projection only in memory, persists canonical `DELIVERED` first, then invokes ACK1. Provider-native turn identity is deliberately absent from durable delivery/ACK events and must not be looked up there. A bare ACCEPTED/DELIVERED receipt, an absent projection, or a refused projection leaves the durable state `DELIVERED_UNACKNOWLEDGED` and never causes reread, resend, failover or source resolution.
+
 ## Why this amendment exists
 
 Plan self-review found a second protected-source mismatch that the parent plan's original Task 1 did not fully state:

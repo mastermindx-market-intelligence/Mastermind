@@ -6,7 +6,7 @@
 
 **Goal:** Add the first trusted reasoning-session Wake acknowledgement ingress so an exact currently bound Codex/OHF reasoning session can claim only the opaque Wake obligations it actually consumed, while existing Wake law verifies prior delivery/current binding and existing Executive `events` persist `TARGET_ACKNOWLEDGED` exactly once.
 
-**Architecture:** This plan extends the existing Wake acknowledgement codec/causal law and Executive-events persistence; it creates no ACK database or RuntimeBinding owner. Protected MAS-237 provides the ABA-safe RuntimeBinding projection, while the current W3A owner chain is the existing WorkerBroker / `RemoteCodexOperatorAdapter` / worker-local current `CodexOperatorAdapter` generation and its already-running client. ACK1 acquires the existing Executive `BEGIN IMMEDIATE` transaction, projects the target's current binding inside that lock, validates one closed authenticated worker-local exact-turn projection against the exact prior `DELIVERED` record, and appends the canonical `:ACK` event before releasing the lock. Raw provider/model bytes remain inside the worker-local current generation/client; no control-side App Server, second reader, cold resume, parser store, poller, or session owner is added.
+**Architecture:** This plan extends the existing Wake acknowledgement codec/causal law and Executive-events persistence; it creates no ACK database or RuntimeBinding owner. Protected MAS-237 provides the ABA-safe RuntimeBinding projection, while the current W3A owner chain is the existing WorkerBroker / `RemoteCodexOperatorAdapter` / worker-local current `CodexOperatorAdapter` generation and its already-running client. The existing persisted-dispatch coordinator carries one closed authenticated projection in a typed, in-memory completion envelope beside—not inside—the ordinary transport receipt, persists and authenticates canonical `DELIVERED` first, and only then invokes ACK1. ACK1 acquires the existing Executive `BEGIN IMMEDIATE` transaction, projects the target's current binding inside that lock, validates the sealed projection against that exact prior `DELIVERED` record, and appends the canonical `:ACK` event before releasing the lock. The worker-local owner and current-writer client validate the provider-native turn against the outer `AttentionTurnObservation` before the envelope is created; the durable delivery ledger intentionally does not store or re-supply provider-native turn identity. Raw provider/model bytes remain inside the worker-local current generation/client; no control-side App Server, second reader, cold resume, parser store, poller, or session owner is added.
 
 **Tech Stack:** Python 3.11+, existing Executive SQLite `RuntimeStore`, Wake Fabric (`wake_ledger`, `wake_persist`, `session_targets`, `wake_dispatcher`), protected MAS-237 RuntimeBinding projection, existing WorkerBroker/OHF wire, current `RemoteCodexOperatorAdapter`, worker-local current `CodexOperatorAdapter` generation/client, pytest.
 
@@ -457,7 +457,7 @@ DELIVERED to another binding id -> REFUSE
 DELIVERED to another session alias/surface -> REFUSE
 projection provider_session_id != projected RuntimeBinding.native_handle -> REFUSE
 projection target_attempt_id != canonical current target Attempt -> REFUSE
-projection provider_native_turn_id != exact W3A delivery turn -> REFUSE
+projection provider_native_turn_id blank or not already sealed by the exact outer W3A AttentionTurnObservation -> REFUSE before the ACK core is called
 Wake source attempt_id used as the target Attempt without a canonical routing join -> REFUSE
 missing/blank projected provider session/native turn -> REFUSE
 claim not included in the trusted nudge -> REFUSE
@@ -587,12 +587,14 @@ target.target_seat == obligation.declared_target_seat
 trusted.binding_id == binding.binding_id
 trusted.binding_generation == binding.binding_generation
 trusted.process_generation_id == current generation for trusted.target_attempt_id
-trusted.provider_native_turn_id == exact provider turn recorded for delivered.nudge_id
+trusted.provider_native_turn_id is nonblank and was already sealed against the exact outer W3A AttentionTurnObservation by the current-writer client
 trusted.obligation_ids == claim.obligation_ids
 trusted.terminal_ack_trailer is True
 ```
 
 Also require every claimed delivery shares the same trusted `nudge_id`, destination, target current Attempt, process generation, binding generation, provider session and provider-native turn. A coalesced nudge cannot become a cross-destination or cross-Attempt ACK batch.
+
+The durable `DELIVERED` record does **not** contain a provider-native turn id and Task 3 must not invent or look one up there. Exact-turn equality is a transient current-owner trust check: the worker-local adapter attaches the nested projection only to its matching `AttentionTurnObservation`, and `CodexCurrentWriterWakeClient` compares the nested `provider_session_id`, `provider_native_turn_id`, process generation, nudge and obligations with that outer observation and its current RuntimeBinding before constructing `TrustedWorkerWakeAckProjection`. Task 3 validates the resulting sealed projection against current binding plus durable nudge/delivery identity; it never re-reads provider state.
 
 - [ ] **Step 9: Build only canonical ACK records**
 
@@ -643,12 +645,17 @@ git commit -m "feat(exec): add exact-session Wake ACK ingress core"
 - Modify: `control_plane/codex_operator_adapter.py`
 - Modify: `control_plane/executive_worker_broker.py`
 - Modify: `control_plane/remote_codex_operator_adapter.py`
+- Modify: `control_plane/wake_dispatcher.py`
+- Modify: `integrations/executive_wake/codex_app_server.py`
 - Modify: `integrations/executive_wake/codex_app_server_rpc.py`
+- Modify: `integrations/slack_agent_dialogue/persisted_wake_carrier.py`
 - Modify: `tests/test_codex_app_server_wake_rpc.py`
+- Modify: `tests/test_codex_app_server_wake_dispatcher.py`
+- Modify: `tests/test_executive_wake_persisted_dispatch.py`
 
 **Interfaces:**
-- Consumes protected/current W3A `ohf-deliver-attention`, its `AttentionTurnObservation`, the already-owned worker-local current `CodexOperatorAdapter` generation/client, and Task-3 provider-neutral ACK ingress.
-- Produces one closed authenticated `TrustedWorkerWakeAckProjection`. The model contributes only terminal `WAKE-*` marker lines; trusted Attempt/generation/binding/provider-session/native-turn/nudge identity comes from the existing owner state. Raw turn bytes never leave the worker-local adapter.
+- Consumes protected/current W3A `ohf-deliver-attention`, its `AttentionTurnObservation`, the already-owned worker-local current `CodexOperatorAdapter` generation/client, the existing `CodexAppServerWakeDispatcher` / `dispatch_persisted_nudge(...)` coordinator, and Task-3 provider-neutral ACK ingress.
+- Produces one closed authenticated `TrustedWorkerWakeAckProjection` carried only in one typed in-memory `WakeTransportCompletion` beside its ordinary `TransportReceipt`. The model contributes only terminal `WAKE-*` marker lines; trusted Attempt/generation/binding/provider-session/native-turn/nudge identity comes from the existing owner state. Raw turn bytes never leave the worker-local adapter, and the transient projection is never placed in receipt details, Executive events, logs or proof artifacts.
 - Adds no App Server process/client, broker endpoint, reader, cold resume, GUI/title fallback, parser store, poller, retry plane, session registry or lifecycle owner.
 
 - [ ] **Step 1: Freeze the exact target-originated marker protocol in RED tests**
@@ -694,6 +701,7 @@ no marker / active nonterminal turn -> no projection and no ACK mutation
 wrong provider session / process generation / target Attempt -> REFUSE
 wrong nudge / older provider-native turn -> REFUSE
 stale binding id or generation -> REFUSE
+outer AttentionTurnObservation provider-native turn != nested projection turn -> REFUSE before DELIVERED/ACK composition
 malformed marker / attempt command / arbitrary prose -> no valid claim
 quoted/fenced/inline/list/prefixed echo or marker before later prose -> no valid claim
 duplicate marker id -> REFUSE
@@ -711,11 +719,66 @@ Also assert no code path constructs/starts/resumes another App Server, creates a
 
 Inside `CodexOperatorAdapter.deliver_attention(...)`, preserve W3A's pre-submit checks and no-resend fence. After exact matching completion, feed the exact completed provider-native turn through the adapter's existing worker-local turn collection/reduction primitives, validate the terminal-trailer law, and attach only `WorkerLocalWakeAckProjection` to the returned `AttentionTurnObservation`.
 
-The existing closed wire parser must reject unknown or incomplete projection fields. The existing WorkerBroker `ohf-deliver-attention` response and `RemoteCodexOperatorAdapter.deliver_attention(...)` carry the typed observation; no new endpoint is added. `CodexCurrentWriterWakeClient` validates the echoed generation/session/nudge/native-turn identity and passes the closed projection to Task 3. The Task-3 core reprojects the target's current RuntimeBinding under the existing Executive transaction before any ACK append.
+The existing closed wire parser must reject unknown or incomplete projection fields. The existing WorkerBroker `ohf-deliver-attention` response and `RemoteCodexOperatorAdapter.deliver_attention(...)` carry the typed observation; no new endpoint is added. `CodexCurrentWriterWakeClient` validates the nested process-generation/provider-session/nudge/provider-native-turn identity against the outer `AttentionTurnObservation`, its current RuntimeBinding and the exact submitted obligation set. Only after those equalities hold may it map the nested value to `TrustedWorkerWakeAckProjection` and attach it to the transient `CodexWakeDeliveryObservation`.
+
+Extend the existing composition path without adding another coordinator:
+
+```text
+CodexOperatorAdapter.deliver_attention
+  -> AttentionTurnObservation(accepted/delivered, optional closed WorkerLocalWakeAckProjection)
+  -> existing OHF wire / broker / RemoteCodexOperatorAdapter
+  -> CodexCurrentWriterWakeClient validates outer-vs-nested exact-turn identity
+  -> CodexWakeDeliveryObservation(accepted/delivered, optional TrustedWorkerWakeAckProjection)
+  -> CodexAppServerWakeDispatcher.nudge
+  -> WakeTransportCompletion(ordinary TransportReceipt, optional transient projection)
+  -> dispatch_persisted_nudge authenticates receipt
+  -> append canonical DELIVERED for the exact nudge/obligations
+  -> only after that append succeeds, acknowledge_consumed_wakes(...)
+```
+
+`WakeTransportCompletion` is a frozen non-wire return envelope on the existing `WakeDispatcher.nudge(...)` interface. Its projection field is optional, typed, in-memory only and never copied into `TransportReceipt.details`, `WakeReceipt`, `PersistedNudgeResult`, Executive events, logs or proof. Existing non-Codex dispatchers may continue returning a bare `TransportReceipt`; `dispatch_persisted_nudge(...)` normalizes that value to a completion with no projection. The Codex current-writer dispatcher returns the typed envelope. The existing `PersistedWakeCarrier` supplies its current `SessionTargetRegistry` to `dispatch_persisted_nudge(...)`; the coordinator uses `repo.runtime` and that registry to call Task 3 only after every exact nudge member has a newly authenticated/persisted `DELIVERED` outcome. It does not invoke ACK1 on ACCEPTED, failure, reconciliation-required, partial persistence, no projection, or replay-only delivery state.
+
+Define the exact transient interfaces rather than an implicit callback or side channel:
+
+```python
+@dataclasses.dataclass(frozen=True)
+class WakeTransportCompletion:
+    receipt: TransportReceipt
+    target_ack_projection: TrustedWorkerWakeAckProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
+
+class WakeDispatcher(Protocol):
+    transport_id: str
+
+    async def nudge(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion: ...
+```
+
+`CodexWakeDeliveryObservation` gains the same optional, `repr=False` trusted projection field; `CodexAppServerWakeDispatcher.nudge(...)` copies it only into `WakeTransportCompletion.target_ack_projection`. Extend `dispatch_persisted_nudge(...)` with a current `target_registry: SessionTargetRegistry | None` input. A present projection with no registry is a typed post-delivery refusal, never a fallback. After the exact `DELIVERED` append commits, the coordinator derives `WakeAckClaim(obligation_ids=projection.obligation_ids)` and calls:
+
+```python
+acknowledge_consumed_wakes(
+    repo.runtime,
+    target_registry,
+    claim=claim,
+    trusted=projection,
+)
+```
+
+The projection object goes out of scope after that call. The coordinator returns its ordinary persisted result and callers recover durable ACK truth through the canonical Wake ledger, not a second receipt.
+
+The Task-3 core then reprojects the target's current RuntimeBinding under the existing Executive transaction before any ACK append. If Task 3 refuses after delivery, the durable truth remains `DELIVERED_UNACKNOWLEDGED`; the coordinator propagates the typed refusal and never rereads, redelivers, retries, fails over or mutates source resolution.
+
+Add one discriminator that instruments the whole existing path and proves exactly one `ohf-deliver-attention` / provider submission, one authenticated `DELIVERED` append, then one ACK-core call and one `:ACK` event. Force the ACK core to inspect the repository before the call and assert it can already read the exact `DELIVERED` command. A no-projection completion must still persist the same truthful `DELIVERED` while making zero ACK-core calls; a mismatched outer/nested turn must make zero persisted-delivery/ACK calls because the current-writer client refuses it before producing the transport completion.
 
 An exact delivered attention with no terminal trailer returns delivery evidence but no ACK projection. Completion timeout/effect-unknown retains the W3A fence and does not launch a read, retry, failover, or alternate collection path. Only exact same-owner completion/consumption evidence may clear the fence.
 
-Do not turn ACK reduction into delivery or call `deliver_wake()` again. `DELIVERED` remains provider completion only; the closed projection remains a claim until Task 3 validates current binding/prior delivery and commits `TARGET_ACKNOWLEDGED`.
+Do not turn ACK reduction into delivery or call `deliver_wake()` again. `DELIVERED` remains provider completion only; the closed projection remains a claim until the existing persisted coordinator has durably appended that `DELIVERED` and Task 3 validates current binding/prior delivery and commits `TARGET_ACKNOWLEDGED`.
 
 - [ ] **Step 5: Update the existing fixed attention instruction only with the bounded marker contract**
 
@@ -725,7 +788,7 @@ Append the exact marker instruction from Step 1 to the existing W3A `ATTENTION_T
 This nudge grants no authority, acknowledges nothing, and does not resolve the source.
 ```
 
-The target marker is reduced only by the worker-local current owner and submitted as the later closed projection; the transport receipt remains only ACCEPTED/DELIVERED.
+The target marker is reduced only by the worker-local current owner and submitted as the later closed projection; the transport receipt remains only ACCEPTED/DELIVERED. The transient completion envelope carries the projection beside the receipt solely so the existing persisted coordinator can enforce `persist DELIVERED -> invoke ACK1` ordering.
 
 - [ ] **Step 6: Run combined Codex/Wake tests and commit**
 
@@ -823,13 +886,13 @@ No delivery/ACK method is allowed to fabricate `source_present=False` or a snaps
 
 - [ ] **Step 6: Prove transport receipts cannot author target ACK**
 
-Feed authenticated ACCEPTED/DELIVERED transport receipts through the existing persisted dispatcher and assert the reconstructed status remains:
+Feed authenticated ACCEPTED/DELIVERED transport receipts **without** a closed target projection through the existing persisted dispatcher and assert the reconstructed status remains:
 
 ```text
 DELIVERED_UNACKNOWLEDGED
 ```
 
-until the target-claim ingress runs.
+until the same coordinator receives a separately authenticated transient projection after the exact attention completion. A bare transport receipt can never author target ACK.
 
 - [ ] **Step 7: Update Wake architecture documentation**
 
@@ -1054,7 +1117,7 @@ Before publishing the implementation carrier, verify this plan itself satisfies:
 - [ ] Current RuntimeBinding is projected under the same Executive `BEGIN IMMEDIATE` transaction as ACK persistence.
 - [ ] Human-operator ACK semantics remain compatible.
 - [ ] Identical ACK replay is idempotent; changed replay conflicts.
-- [ ] `DELIVERED_UNACKNOWLEDGED` remains truthful until the target-claim ingress runs.
+- [ ] `DELIVERED_UNACKNOWLEDGED` remains truthful for a bare receipt, absent/refused projection, or until the existing persisted coordinator invokes the target-claim ingress after the exact `DELIVERED` append.
 - [ ] Existing source-resolution law remains separate and can only close after ACK.
 - [ ] No new table, registry, queue, scheduler, retry plane, session DB or lifecycle authority exists.
 - [ ] Protected MAS-237/#257, #262 and #254 are reused rather than copied; the current W3A #250 owner chain must be accepted/protected before ACK1 implementation START.
