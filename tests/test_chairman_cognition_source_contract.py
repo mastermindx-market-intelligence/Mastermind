@@ -426,11 +426,22 @@ def test_r2_each_current_constraint_is_required(constraint_id: str) -> None:
         evaluate_document(document)
 
 
-def test_r2_new_feature_and_unknown_class_require_chairman() -> None:
-    for change_classes in (["NEW_FEATURE"], ["UNKNOWN"]):
-        item = _r2_result(_r2_document(_r2_option(change_classes=change_classes)))
-        assert item["disposition"] == "CHAIRMAN_REQUIRED"
-        assert item["blocking_constraint"] == "new_feature_expansion"
+def test_r2_new_feature_requires_chairman() -> None:
+    item = _r2_result(
+        _r2_document(_r2_option(change_classes=["NEW_FEATURE"]))
+    )
+    assert item["disposition"] == "CHAIRMAN_REQUIRED"
+    assert item["blocking_constraint"] == "new_feature_expansion"
+
+
+def test_r2_unknown_class_fails_closed_against_prohibited_expansion() -> None:
+    item = _r2_result(
+        _r2_document(_r2_option(change_classes=["UNKNOWN"]))
+    )
+    assert item["disposition"] == "REFUSED"
+    assert item["blocking_constraint"] == (
+        "marketing_org_expansion_before_distribution_proof"
+    )
 
 
 def test_r2_marketing_expansion_and_missing_department_are_refused() -> None:
