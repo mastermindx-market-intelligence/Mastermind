@@ -9,11 +9,52 @@ OVERLAY = (
     / "specs"
     / "2026-08-30-operation-assurance-a1-controlling-execution-overlay.md"
 )
+LAW = ROOT / "docs" / "OPERATION_LIVENESS_SOUNDNESS_LAW.md"
+DESIGN = (
+    ROOT
+    / "docs"
+    / "superpowers"
+    / "specs"
+    / "2026-08-30-operation-liveness-soundness-design.md"
+)
+PLAN = (
+    ROOT
+    / "docs"
+    / "superpowers"
+    / "plans"
+    / "2026-08-30-operation-assurance-core.md"
+)
+
+CONTROLLING_A1_SOURCES = (
+    "docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md",
+    "docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md",
+    "docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md",
+    "docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md",
+)
+
+
+def _raw(path: Path = OVERLAY) -> str:
+    assert path.is_file(), f"missing OLS source artifact: {path.relative_to(ROOT)}"
+    return path.read_text(encoding="utf-8")
 
 
 def _text() -> str:
-    assert OVERLAY.is_file(), "missing controlling OLS-A1 execution overlay"
-    return " ".join(OVERLAY.read_text(encoding="utf-8").split())
+    return " ".join(_raw().split())
+
+
+def test_parent_entrypoints_reverse_link_to_controlling_a1_contract_near_top() -> None:
+    for path in (LAW, DESIGN, PLAN):
+        prefix = "\n".join(_raw(path).splitlines()[:100])
+        assert "CONTROLLING OLS-A1 IMPLEMENTATION NOTICE" in prefix
+        positions = []
+        for source in CONTROLLING_A1_SOURCES:
+            assert source in prefix, f"{path.relative_to(ROOT)} missing {source}"
+            positions.append(prefix.index(source))
+        assert positions == sorted(positions), (
+            f"{path.relative_to(ROOT)} lists controlling A1 sources out of precedence order"
+        )
+        assert "historical drafting residue" in prefix
+        assert "do not implement" in prefix.lower()
 
 
 def test_overlay_closes_the_plan_precedence_gap() -> None:

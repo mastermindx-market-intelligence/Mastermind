@@ -10,10 +10,65 @@ CLARIFICATION = (
     / "2026-08-30-operation-assurance-immutable-report-projection-clarification.md"
 )
 
+EXPECTED_REPORT_FIELDS = (
+    "schema",
+    "report_id",
+    "model_id",
+    "model_hash",
+    "source_snapshot_hash",
+    "checker_version",
+    "property_set_version",
+    "model_analysis_verdict",
+    "source_applicability_at_generation",
+    "abstraction_contract",
+    "progress_disposition",
+    "admission_recommendation",
+    "property_results",
+    "counterexamples",
+    "coverage",
+    "assumptions",
+    "known_model_gaps",
+    "exploration_receipt",
+    "generated_at",
+    "supersedes_report_id",
+    "report_hash",
+)
+
+
+def _raw() -> str:
+    assert CLARIFICATION.is_file()
+    return CLARIFICATION.read_text(encoding="utf-8")
+
 
 def _text() -> str:
-    assert CLARIFICATION.is_file()
-    return " ".join(CLARIFICATION.read_text(encoding="utf-8").split())
+    return " ".join(_raw().split())
+
+
+def _immutable_report_wire_fields() -> tuple[str, ...]:
+    raw = _raw()
+    marker = (
+        "`mastermind.operation_assurance_report.v1` contains the result "
+        "that was true at generation time:"
+    )
+    assert marker in raw, "missing exact immutable-report wire marker"
+    tail = raw.split(marker, 1)[1]
+    assert "```text" in tail, "missing immutable-report wire fence"
+    block = tail.split("```text", 1)[1].split("```", 1)[0]
+    return tuple(line.strip() for line in block.splitlines() if line.strip())
+
+
+def test_exact_immutable_report_wire_is_complete_and_generation_time_only() -> None:
+    fields = _immutable_report_wire_fields()
+    assert fields == EXPECTED_REPORT_FIELDS
+    for forbidden in (
+        "assurance_verdict",
+        "current_projection_verdict",
+        "source_applicability",
+        "current_assurance_status",
+        "current_recommendation",
+        "computed_at",
+    ):
+        assert forbidden not in fields
 
 
 def test_immutable_report_uses_generation_time_truth_only() -> None:
@@ -21,6 +76,8 @@ def test_immutable_report_uses_generation_time_truth_only() -> None:
     assert "mastermind.operation_assurance_report.v1" in text
     assert "model_analysis_verdict" in text
     assert "source_applicability_at_generation" in text
+    assert "progress_disposition" in text
+    assert "admission_recommendation" in text
     assert "The report is content-addressed and immutable" in text
     assert "never mutates these fields" in text
 
