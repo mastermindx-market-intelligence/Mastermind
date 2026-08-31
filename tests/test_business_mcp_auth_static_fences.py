@@ -7,6 +7,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_ROOT = ROOT / "integrations" / "business_mcp_auth"
+JWT_EDGE = "integrations/business_mcp_auth/jwt_verifier.py"
 PURE_MODULES = (
     "integrations/business_mcp_auth/__init__.py",
     "integrations/business_mcp_auth/contracts.py",
@@ -53,6 +55,59 @@ def test_pure_auth_modules_do_not_import_edge_or_control_plane_packages() -> Non
             name == "control_plane" or name.startswith("control_plane.")
             for name in imports
         )
+
+
+def test_jwt_verifier_is_the_only_pyjwt_importer_in_the_package() -> None:
+    importers: list[str] = []
+    for path in sorted(PACKAGE_ROOT.glob("*.py")):
+        imports = _imports(path)
+        if any(name == "jwt" or name.startswith("jwt.") for name in imports):
+            importers.append(path.relative_to(ROOT).as_posix())
+    assert importers == [JWT_EDGE]
+
+
+def test_jwt_verifier_has_a_closed_edge_dependency_surface() -> None:
+    path = ROOT / JWT_EDGE
+    imports = _imports(path)
+    forbidden_prefixes = (
+        "mcp",
+        "httpx",
+        "control_plane",
+        "subprocess",
+        "sqlite3",
+        "pathlib",
+        "socket",
+        "requests",
+        "urllib.request",
+    )
+    assert not any(
+        name == prefix or name.startswith(prefix + ".")
+        for name in imports
+        for prefix in forbidden_prefixes
+    )
+
+    source = path.read_text(encoding="utf-8")
+    assert "PyJWKClient" not in source
+    assert "MAX_TOKEN_BYTES = 16 * 1024" in source
+    assert 'algorithm="RS256"' in source
+    assert 'algorithms=["RS256"]' in source
+    assert '"verify_signature": True' in source
+    assert '"verify_exp": False' in source
+    assert '"verify_nbf": False' in source
+    assert '"verify_iat": False' in source
+    assert '"verify_aud": False' in source
+    assert '"verify_iss": False' in source
+    for forbidden in (
+        "open(",
+        "write_text",
+        "write_bytes",
+        "sqlite",
+        "create_task(",
+        "urlopen(",
+        "subprocess.",
+        "socket.",
+    ):
+        assert forbidden not in source
 
 
 def test_control_plane_does_not_import_business_auth() -> None:
