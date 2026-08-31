@@ -124,7 +124,10 @@ def _verifier(private_key):
     return JwtAuthenticator(policy=_policy(), jwks_cache=cache), cache
 
 
-@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize(
+    "constant",
+    ["NaN", "Infinity", "-Infinity", "1e10000"],
+)
 def test_nonfinite_header_number_is_refused_before_jwks(
     private_key,
     constant: str,
@@ -147,7 +150,10 @@ def test_nonfinite_header_number_is_refused_before_jwks(
     assert cache.calls == []
 
 
-@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize(
+    "constant",
+    ["NaN", "Infinity", "-Infinity", "1e10000"],
+)
 def test_nonfinite_payload_number_is_refused_before_jwks(
     private_key,
     constant: str,
