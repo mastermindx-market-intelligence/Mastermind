@@ -102,6 +102,7 @@ integrations/executive_wake/codex_app_server_rpc.py
 integrations/slack_agent_dialogue/persisted_wake_carrier.py
 tests/test_executive_wake_fabric.py
 tests/test_executive_wake_fabric_hardening.py
+tests/test_executive_wake_ack_end_to_end.py
 tests/test_executive_wake_persisted_dispatch.py
 tests/test_wake_ack_ingress.py
 tests/test_codex_app_server_wake_dispatcher.py
