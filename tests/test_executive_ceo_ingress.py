@@ -137,11 +137,24 @@ GROUNDING_B = {
 #: a value computed by the function under test.
 LITERAL_OPERATION_KEY = "options-chain-browser-closure-001"
 LITERAL_SLACK_INTENT_ID = "slack-4e40f3d7656227ee9dcead6b00c9d5f2"
+AUTOMATED_REQUEST_REF = "req-chairman-ceo-20260829-001"
+LITERAL_AUTOMATED_INTENT_ID = "auto-7f73c16f713e8251775a37fee5ce66d2"
 
 
 def _research_request(**overrides: Any) -> dict[str, Any]:
     payload = {
         "operation_key": LITERAL_OPERATION_KEY,
+        "objective": "Implement the assigned bounded deliverable and return evidence.",
+        "department": "executive-infrastructure",
+        "priority": 10,
+        "execution_profile": "research_only",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _automated_research_request(**overrides: Any) -> dict[str, Any]:
+    payload = {
         "objective": "Implement the assigned bounded deliverable and return evidence.",
         "department": "executive-infrastructure",
         "priority": 10,
@@ -168,6 +181,34 @@ def _status_bytes(*, intent_id: Any, schema: str | None = None, **extra_top: Any
     frame: dict[str, Any] = {
         "schema": schema if schema is not None else ceo_ingress.STATUS_SCHEMA,
         "intent_id": intent_id,
+    }
+    frame.update(extra_top)
+    return (json.dumps(frame) + "\n").encode("utf-8")
+
+
+def _submit_v2_bytes(
+    *,
+    request_ref: Any = AUTOMATED_REQUEST_REF,
+    observed_grounding: dict[str, Any] | None = None,
+    request: dict[str, Any] | None = None,
+    **extra_top: Any,
+) -> bytes:
+    frame: dict[str, Any] = {
+        "schema": ceo_ingress.SUBMIT_SCHEMA_V2,
+        "request_ref": request_ref,
+        "observed_grounding": (
+            observed_grounding if observed_grounding is not None else GROUNDING_A
+        ),
+        "request": request if request is not None else _automated_research_request(),
+    }
+    frame.update(extra_top)
+    return (json.dumps(frame) + "\n").encode("utf-8")
+
+
+def _status_v2_bytes(*, request_ref: Any = AUTOMATED_REQUEST_REF, **extra_top: Any) -> bytes:
+    frame: dict[str, Any] = {
+        "schema": ceo_ingress.STATUS_SCHEMA_V2,
+        "request_ref": request_ref,
     }
     frame.update(extra_top)
     return (json.dumps(frame) + "\n").encode("utf-8")
@@ -239,6 +280,14 @@ async def _submit(path: Path, *, observed_grounding=None, request=None, **extra)
 
 async def _status(path: Path, intent_id: str, **extra) -> dict:
     return await _raw_ceo_request(path, _status_bytes(intent_id=intent_id, **extra))
+
+
+async def _submit_v2(path: Path, **overrides: Any) -> dict:
+    return await _raw_ceo_request(path, _submit_v2_bytes(**overrides))
+
+
+async def _status_v2(path: Path, **overrides: Any) -> dict:
+    return await _raw_ceo_request(path, _status_v2_bytes(**overrides))
 
 
 def run(coro):
@@ -451,7 +500,7 @@ def test_unknown_schema_refuses(tmp_path, short_socket_root):
             response = await _status(
                 service.ceo_ingress_socket_path,
                 "slack-" + "a" * 32,
-                schema="mastermind.executive_ceo_ingress_status.v2",
+                schema="mastermind.executive_ceo_ingress_status.v3",
             )
             assert response["error"]["code"] == "unsupported_ingress_schema"
         finally:
@@ -1755,3 +1804,247 @@ def test_boot_packet_schema_matches_ceo_boot_packet_constant():
     from control_plane import ceo_boot_packet
 
     assert ceo_ingress.BOOT_PACKET_SCHEMA == ceo_boot_packet.SCHEMA
+
+
+# ===========================================================================
+# AD-ID1 — separately versioned transport-neutral automated admission
+# ===========================================================================
+
+
+def test_v2_schema_constants_are_additive_and_v1_constants_remain_frozen():
+    assert ceo_ingress.SUBMIT_SCHEMA == "mastermind.executive_ceo_ingress_submit.v1"
+    assert ceo_ingress.STATUS_SCHEMA == "mastermind.executive_ceo_ingress_status.v1"
+    assert ceo_ingress.SUBMIT_SCHEMA_V2 == "mastermind.executive_ceo_ingress_submit.v2"
+    assert ceo_ingress.STATUS_SCHEMA_V2 == "mastermind.executive_ceo_ingress_status.v2"
+
+
+def test_v2_concurrent_identical_requests_create_one_job_and_same_canonical_receipt(
+    tmp_path, short_socket_root
+):
+    async def exercise():
+        grounding = _FakeGrounding(sequence=[GROUNDING_A])
+        service = _service_with_ingress(
+            tmp_path, socket_root=short_socket_root, grounding=grounding
+        )
+        await service.start()
+        try:
+            first, second = await asyncio.gather(
+                _submit_v2(service.ceo_ingress_socket_path),
+                _submit_v2(service.ceo_ingress_socket_path),
+            )
+            assert first["ok"] is True
+            assert second["ok"] is True
+            assert first["result"]["intent_id"] == LITERAL_AUTOMATED_INTENT_ID
+            assert second["result"]["intent_id"] == LITERAL_AUTOMATED_INTENT_ID
+            first_canonical = dict(first["result"])
+            second_canonical = dict(second["result"])
+            first_duplicate = first_canonical.pop("duplicate")
+            second_duplicate = second_canonical.pop("duplicate")
+            assert first_canonical == second_canonical
+            assert sorted(
+                [first_duplicate, second_duplicate]
+            ) == [False, True]
+            assert len(service.runtime.jobs.list_jobs()) == 1
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+def test_v2_same_request_ref_changed_payload_conflicts_without_second_job(
+    tmp_path, short_socket_root
+):
+    async def exercise():
+        grounding = _FakeGrounding(sequence=[GROUNDING_A])
+        service = _service_with_ingress(
+            tmp_path, socket_root=short_socket_root, grounding=grounding
+        )
+        await service.start()
+        try:
+            first = await _submit_v2(service.ceo_ingress_socket_path)
+            conflicting = await _submit_v2(
+                service.ceo_ingress_socket_path,
+                request=_automated_research_request(
+                    objective="A materially different automated objective."
+                ),
+            )
+            assert first["ok"] is True
+            assert conflicting["ok"] is False
+            assert conflicting["error"]["code"] == "operation_conflict"
+            assert len(service.runtime.jobs.list_jobs()) == 1
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+def test_v2_submit_and_status_derive_the_same_identity(tmp_path, short_socket_root):
+    async def exercise():
+        service = _service_with_ingress(
+            tmp_path, socket_root=short_socket_root, grounding=_FakeGrounding()
+        )
+        await service.start()
+        try:
+            submitted = await _submit_v2(service.ceo_ingress_socket_path)
+            status = await _status_v2(service.ceo_ingress_socket_path)
+            assert submitted["ok"] is True
+            assert status["ok"] is True
+            assert submitted["result"]["intent_id"] == LITERAL_AUTOMATED_INTENT_ID
+            assert status["result"]["intent_id"] == LITERAL_AUTOMATED_INTENT_ID
+            assert submitted["result"]["job_id"] == status["result"]["job_id"]
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+def test_v2_durable_replay_precedes_fresh_grounding(tmp_path, short_socket_root):
+    async def exercise():
+        grounding = _FakeGrounding(sequence=[GROUNDING_A])
+        service = _service_with_ingress(
+            tmp_path, socket_root=short_socket_root, grounding=grounding
+        )
+        await service.start()
+        try:
+            first = await _submit_v2(service.ceo_ingress_socket_path)
+            calls_after_first = grounding.calls
+            grounding._sequence = [GROUNDING_B]
+            second = await _submit_v2(service.ceo_ingress_socket_path)
+            assert first["ok"] is True
+            assert second["ok"] is True
+            assert second["result"]["duplicate"] is True
+            assert grounding.calls == calls_after_first == 2
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+def test_v2_new_work_requires_the_trusted_grounding_double_read(
+    tmp_path, short_socket_root
+):
+    async def exercise():
+        grounding = _FakeGrounding(sequence=[GROUNDING_A, GROUNDING_B])
+        service = _service_with_ingress(
+            tmp_path, socket_root=short_socket_root, grounding=grounding
+        )
+        await service.start()
+        try:
+            response = await _submit_v2(service.ceo_ingress_socket_path)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "grounding_changed"
+            assert grounding.calls == 2
+            assert service.runtime.jobs.list_jobs() == []
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+def test_v2_is_covered_by_existing_host_admission_gate(tmp_path, short_socket_root):
+    async def exercise():
+        grounding = _FakeGrounding()
+        service = _service_with_ingress(
+            tmp_path,
+            socket_root=short_socket_root,
+            grounding=grounding,
+            armed=False,
+        )
+        await service.start()
+        try:
+            response = await _submit_v2(service.ceo_ingress_socket_path)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "ingress_unavailable"
+            assert grounding.calls == 0
+            assert service.runtime.jobs.list_jobs() == []
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+def test_v2_unarmed_gate_precedes_frame_validation(tmp_path, short_socket_root):
+    async def exercise():
+        grounding = _FakeGrounding()
+        service = _service_with_ingress(
+            tmp_path,
+            socket_root=short_socket_root,
+            grounding=grounding,
+            armed=False,
+        )
+        await service.start()
+        try:
+            malformed = await _raw_ceo_request(
+                service.ceo_ingress_socket_path,
+                (
+                    json.dumps({"schema": ceo_ingress.SUBMIT_SCHEMA_V2}) + "\n"
+                ).encode("utf-8"),
+            )
+            assert malformed["error"]["code"] == "ingress_unavailable"
+            assert grounding.calls == 0
+            assert service.runtime.jobs.list_jobs() == []
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "operation_key",
+        "intent_id",
+        "actor",
+        "branch",
+        "worktree",
+        "provider",
+        "account",
+        "session",
+        "host",
+        "requested_authorities",
+    ],
+)
+def test_v2_request_refuses_caller_identity_and_placement_fields(
+    tmp_path, short_socket_root, field
+):
+    async def exercise():
+        service = _service_with_ingress(
+            tmp_path, socket_root=short_socket_root, grounding=_FakeGrounding()
+        )
+        await service.start()
+        try:
+            response = await _submit_v2(
+                service.ceo_ingress_socket_path,
+                request=_automated_research_request(**{field: "smuggled"}),
+            )
+            assert response["ok"] is False
+            assert response["error"]["code"] == "invalid_input"
+            assert service.runtime.jobs.list_jobs() == []
+        finally:
+            await service.close()
+
+    run(exercise())
+
+
+def test_v2_exact_frames_refuse_transport_label_and_caller_intent_id(
+    tmp_path, short_socket_root
+):
+    async def exercise():
+        service = _service_with_ingress(
+            tmp_path, socket_root=short_socket_root, grounding=_FakeGrounding()
+        )
+        await service.start()
+        try:
+            extra_submit = await _submit_v2(
+                service.ceo_ingress_socket_path, transport="grok-secretary"
+            )
+            extra_status = await _status_v2(
+                service.ceo_ingress_socket_path, intent_id=LITERAL_AUTOMATED_INTENT_ID
+            )
+            assert extra_submit["error"]["code"] == "invalid_input"
+            assert extra_status["error"]["code"] == "invalid_input"
+            assert service.runtime.jobs.list_jobs() == []
+        finally:
+            await service.close()
+
+    run(exercise())

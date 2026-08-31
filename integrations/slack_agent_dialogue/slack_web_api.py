@@ -26,6 +26,8 @@ from integrations.slack_agent_dialogue.engine import (
 SLACK_API_ROOT = "https://slack.com/api/"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 MAX_RESPONSE_BYTES = 64 * 1024
+MAX_HISTORY_PAGES = 100
+MAX_CURSOR_CHARS = 4096
 _ALLOWED_REQUESTS = frozenset(
     {
         ("GET", "conversations.history"),
@@ -55,6 +57,15 @@ class SlackHttpResponse:
     final_url: str
     headers: Mapping[str, str]
     body: bytes
+
+
+@dataclass(frozen=True)
+class _ParsedHistoryPage:
+    messages: tuple[SlackMessage, ...]
+    mutation_evidence_complete: bool
+    has_more: bool
+    next_cursor: str
+    structurally_complete: bool
 
 
 class SlackHttpTransport(Protocol):
@@ -260,7 +271,7 @@ def _valid_ts(value: object) -> bool:
 
 
 class SlackWebApiDialogueClient:
-    """The exact three-method ``SlackDialogueClient`` Web API implementation."""
+    """The exact four-method ``SlackDialogueClient`` Web API implementation."""
 
     def __init__(
         self,
@@ -456,14 +467,12 @@ class SlackWebApiDialogueClient:
         payload: Mapping[str, Any],
         *,
         limit: int,
-        thread_ts: str | None,
-    ) -> HistoryPage:
+    ) -> _ParsedHistoryPage:
         raw_messages = payload.get("messages")
         has_more = payload.get("has_more")
         metadata = payload.get("response_metadata")
         if (
             not isinstance(raw_messages, list)
-            or len(raw_messages) > limit
             or not isinstance(has_more, bool)
             or not isinstance(metadata, Mapping)
             or not isinstance(metadata.get("next_cursor"), str)
@@ -472,29 +481,122 @@ class SlackWebApiDialogueClient:
         messages: list[SlackMessage] = []
         mutation_complete = True
         seen: set[str] = set()
+        structurally_complete = len(raw_messages) <= limit
         try:
-            for raw in raw_messages:
+            for raw in raw_messages[:limit]:
                 parsed, evidence_complete = self._parse_message(raw)
                 if parsed.ts in seen:
-                    raise ValueError("duplicate timestamp")
+                    structurally_complete = False
+                    continue
                 seen.add(parsed.ts)
                 messages.append(parsed)
                 mutation_complete = mutation_complete and evidence_complete
-            if thread_ts is not None:
-                parents = [message for message in messages if message.ts == thread_ts]
-                if len(parents) != 1 or parents[0].thread_ts not in {None, thread_ts}:
-                    raise ValueError("thread parent mismatch")
-                if any(
-                    message.ts != thread_ts and message.thread_ts != thread_ts
-                    for message in messages
-                ):
-                    raise ValueError("thread reply mismatch")
         except (TypeError, ValueError):
             raise _unavailable() from None
-        complete = has_more is False and metadata["next_cursor"] == ""
+        return _ParsedHistoryPage(
+            messages=tuple(messages),
+            mutation_evidence_complete=mutation_complete,
+            has_more=has_more,
+            next_cursor=metadata["next_cursor"],
+            structurally_complete=structurally_complete,
+        )
+
+    @staticmethod
+    def _cursor_is_valid(cursor: str) -> bool:
+        return (
+            1 <= len(cursor) <= MAX_CURSOR_CHARS
+            and cursor.strip() == cursor
+            and all(ord(character) >= 32 and ord(character) != 127 for character in cursor)
+        )
+
+    @staticmethod
+    def _incomplete_history(
+        messages: list[SlackMessage], *, mutation_evidence_complete: bool
+    ) -> HistoryPage:
         return HistoryPage(
             messages=tuple(messages),
-            complete=complete,
+            complete=False,
+            mutation_evidence_complete=mutation_evidence_complete,
+        )
+
+    async def _collect_history(
+        self,
+        *,
+        path: str,
+        base_query: Mapping[str, str],
+        limit: int,
+        thread_ts: str | None,
+    ) -> HistoryPage:
+        messages: list[SlackMessage] = []
+        seen_timestamps: set[str] = set()
+        seen_cursors: set[str] = set()
+        mutation_complete = True
+        cursor: str | None = None
+
+        for _page_number in range(MAX_HISTORY_PAGES):
+            remaining = limit - len(messages)
+            if remaining <= 0:
+                return self._incomplete_history(
+                    messages,
+                    mutation_evidence_complete=mutation_complete,
+                )
+            query = dict(base_query)
+            query["limit"] = str(remaining)
+            if cursor is not None:
+                query["cursor"] = cursor
+            parsed = self._history_page(
+                await self._get(path=path, query=query),
+                limit=remaining,
+            )
+            mutation_complete = (
+                mutation_complete and parsed.mutation_evidence_complete
+            )
+            if not parsed.structurally_complete or any(
+                message.ts in seen_timestamps for message in parsed.messages
+            ):
+                return self._incomplete_history(
+                    messages + list(parsed.messages),
+                    mutation_evidence_complete=mutation_complete,
+                )
+            messages.extend(parsed.messages)
+            seen_timestamps.update(message.ts for message in parsed.messages)
+
+            terminal = parsed.has_more is False and parsed.next_cursor == ""
+            continuation = parsed.has_more is True and self._cursor_is_valid(
+                parsed.next_cursor
+            )
+            if terminal:
+                if thread_ts is not None:
+                    parents = [message for message in messages if message.ts == thread_ts]
+                    if (
+                        len(parents) != 1
+                        or parents[0].thread_ts not in {None, thread_ts}
+                        or any(
+                            message.ts != thread_ts
+                            and message.thread_ts != thread_ts
+                            for message in messages
+                        )
+                    ):
+                        raise _unavailable()
+                return HistoryPage(
+                    messages=tuple(messages),
+                    complete=True,
+                    mutation_evidence_complete=mutation_complete,
+                )
+            if (
+                not continuation
+                or parsed.next_cursor in seen_cursors
+                or len(messages) >= limit
+            ):
+                return self._incomplete_history(
+                    messages,
+                    mutation_evidence_complete=mutation_complete,
+                )
+            seen_cursors.add(parsed.next_cursor)
+            cursor = parsed.next_cursor
+
+        return self._incomplete_history(
+            messages,
             mutation_evidence_complete=mutation_complete,
         )
 
@@ -503,11 +605,12 @@ class SlackWebApiDialogueClient:
     ) -> HistoryPage:
         self._require_channel(channel_id)
         self._require_limit(limit)
-        payload = await self._get(
+        return await self._collect_history(
             path="conversations.history",
-            query={"channel": channel_id, "limit": str(limit)},
+            base_query={"channel": channel_id},
+            limit=limit,
+            thread_ts=None,
         )
-        return self._history_page(payload, limit=limit, thread_ts=None)
 
     async def fetch_thread(
         self, *, channel_id: str, thread_ts: str, limit: int
@@ -516,21 +619,20 @@ class SlackWebApiDialogueClient:
         self._require_limit(limit)
         if not _valid_ts(thread_ts):
             raise _unavailable()
-        payload = await self._get(
+        return await self._collect_history(
             path="conversations.replies",
-            query={"channel": channel_id, "ts": thread_ts, "limit": str(limit)},
+            base_query={"channel": channel_id, "ts": thread_ts},
+            limit=limit,
+            thread_ts=thread_ts,
         )
-        return self._history_page(payload, limit=limit, thread_ts=thread_ts)
 
-    async def post_reply(
-        self, *, channel_id: str, thread_ts: str, text: str
+    def _validated_write_receipt(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        text: str,
+        thread_ts: str | None,
     ) -> SlackMessage:
-        self._require_channel(channel_id)
-        if not _valid_ts(thread_ts) or not isinstance(text, str) or not text:
-            raise _unavailable()
-        payload = await self._post(
-            json_body={"channel": channel_id, "thread_ts": thread_ts, "text": text}
-        )
         try:
             if payload.get("channel") != self._channel_id:
                 raise ValueError("wrong channel")
@@ -551,6 +653,28 @@ class SlackWebApiDialogueClient:
             return parsed
         except Exception:
             raise _effect_unknown() from None
+
+    async def post_parent(self, *, channel_id: str, text: str) -> SlackMessage:
+        self._require_channel(channel_id)
+        if not isinstance(text, str) or not text:
+            raise _unavailable()
+        payload = await self._post(json_body={"channel": channel_id, "text": text})
+        return self._validated_write_receipt(payload, text=text, thread_ts=None)
+
+    async def post_reply(
+        self, *, channel_id: str, thread_ts: str, text: str
+    ) -> SlackMessage:
+        self._require_channel(channel_id)
+        if not _valid_ts(thread_ts) or not isinstance(text, str) or not text:
+            raise _unavailable()
+        payload = await self._post(
+            json_body={"channel": channel_id, "thread_ts": thread_ts, "text": text}
+        )
+        return self._validated_write_receipt(
+            payload,
+            text=text,
+            thread_ts=thread_ts,
+        )
 
 
 __all__ = [
