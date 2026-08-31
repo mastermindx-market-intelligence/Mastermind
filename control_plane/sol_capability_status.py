@@ -1,8 +1,8 @@
 """Pure, secret-free Sol capability-status projection.
 
-This module implements the records-only SCF-CAP1 contract.  It projects
+This module implements the records-only SCF-CAP1 contract. It projects
 immutable capability/app/dependency facts into
-``mastermind.sol_capability_status.v1``.  It owns no capability registry,
+``mastermind.sol_capability_status.v1``. It owns no capability registry,
 credential, app, plugin, MCP server, lifecycle, queue, scheduler, RuntimeBinding,
 provider selection, network client, filesystem discovery, persistence, or
 production arming.
@@ -14,8 +14,8 @@ Canonical owners remain unchanged:
 * RuntimeBinding/SessionTargetRegistry own exact current surfaces;
 * each app/connector owner supplies current availability, scope and proof facts.
 
-The projector is intentionally a total deterministic function over caller-
-supplied frozen dataclasses.  Missing or contradictory facts fail closed.
+The projector is a deterministic function over caller-supplied frozen
+structures. Missing, contradictory, future-dated, or unsafe facts fail closed.
 """
 from __future__ import annotations
 
@@ -119,6 +119,18 @@ def _digest_value(value: object, *, field: str) -> str:
     return token
 
 
+def _parse_timestamp(value: str, *, field: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CapabilityProjectionError(
+            f"{field} must be an RFC3339 timestamp"
+        ) from exc
+    if parsed.tzinfo is None:
+        raise CapabilityProjectionError(f"{field} must include a timezone")
+    return parsed
+
+
 def _timestamp(value: object, *, field: str, optional: bool = False) -> str | None:
     if value is None and optional:
         return None
@@ -126,14 +138,7 @@ def _timestamp(value: object, *, field: str, optional: bool = False) -> str | No
         raise CapabilityProjectionError(f"{field} must be an RFC3339 timestamp")
     token = value.strip()
     _reject_secret_shape(token, field=field)
-    try:
-        parsed = datetime.fromisoformat(token.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise CapabilityProjectionError(
-            f"{field} must be an RFC3339 timestamp"
-        ) from exc
-    if parsed.tzinfo is None:
-        raise CapabilityProjectionError(f"{field} must include a timezone")
+    _parse_timestamp(token, field=field)
     return token
 
 
@@ -149,14 +154,18 @@ def _scopes(values: object, *, field: str) -> tuple[str, ...]:
         if _SCOPE_RE.fullmatch(token) is None:
             raise CapabilityProjectionError(f"{field} contains an invalid scope")
         if token in normalized:
-            raise CapabilityProjectionError(f"{field} contains duplicate scope {token!r}")
+            raise CapabilityProjectionError(
+                f"{field} contains duplicate scope {token!r}"
+            )
         normalized.append(token)
     return tuple(sorted(normalized))
 
 
 def _source_refs(values: object, *, field: str) -> tuple[str, ...]:
     if not isinstance(values, tuple) or not values:
-        raise CapabilityProjectionError(f"{field} must be a non-empty immutable tuple")
+        raise CapabilityProjectionError(
+            f"{field} must be a non-empty immutable tuple"
+        )
     normalized: list[str] = []
     for value in values:
         if not isinstance(value, str):
@@ -164,7 +173,9 @@ def _source_refs(values: object, *, field: str) -> tuple[str, ...]:
         token = value.strip()
         _reject_secret_shape(token, field=field)
         if _SOURCE_REF_RE.fullmatch(token) is None:
-            raise CapabilityProjectionError(f"{field} contains an invalid source reference")
+            raise CapabilityProjectionError(
+                f"{field} contains an invalid source reference"
+            )
         if token in normalized:
             raise CapabilityProjectionError(
                 f"{field} contains duplicate source reference {token!r}"
@@ -217,7 +228,7 @@ class DependencyFact:
 class CapabilityFact:
     """One immutable, secret-free capability/app observation.
 
-    This is input evidence, not a registration request.  Constructing a fact
+    This is input evidence, not a registration request. Constructing a fact
     grants no capability and performs no discovery.
     """
 
@@ -273,6 +284,7 @@ class CapabilityStatus:
     required_scopes: tuple[str, ...]
     current_scopes: tuple[str, ...]
     missing_scopes: tuple[str, ...]
+    excess_scopes: tuple[str, ...]
     confirmation_required: bool
     prepared_action_required: bool
     canonical_owner: str
@@ -296,6 +308,7 @@ class CapabilityStatus:
             "required_scopes": list(self.required_scopes),
             "current_scopes": list(self.current_scopes),
             "missing_scopes": list(self.missing_scopes),
+            "excess_scopes": list(self.excess_scopes),
             "confirmation_required": self.confirmation_required,
             "prepared_action_required": self.prepared_action_required,
             "canonical_owner": self.canonical_owner,
@@ -353,10 +366,12 @@ def _normalize_dependency(
             f"{capability_name}.dependency.{name}.available must be boolean or null"
         )
     source_ref = _source_refs(
-        (value.source_ref,), field=f"{capability_name}.dependency.{name}.source_ref"
+        (value.source_ref,),
+        field=f"{capability_name}.dependency.{name}.source_ref",
     )[0]
     issues = _issues(
-        value.issues, field=f"{capability_name}.dependency.{name}.issues"
+        value.issues,
+        field=f"{capability_name}.dependency.{name}.issues",
     )
     return DependencyStatus(
         name=name,
@@ -374,7 +389,8 @@ def _normalize_fact(value: CapabilityFact) -> CapabilityFact:
     name = _identifier(value.name, field="capability.name")
     app_id = _identifier(value.app_id, field=f"{name}.app_id")
     app_generation = _identifier(
-        value.app_generation, field=f"{name}.app_generation"
+        value.app_generation,
+        field=f"{name}.app_generation",
     )
     owner = _identifier(value.canonical_owner, field=f"{name}.canonical_owner")
     if not isinstance(value.privilege_class, PrivilegeClass):
@@ -398,12 +414,16 @@ def _normalize_fact(value: CapabilityFact) -> CapabilityFact:
     current_scopes = _scopes(value.current_scopes, field=f"{name}.current_scopes")
     schema_digest = _digest_value(value.schema_digest, field=f"{name}.schema_digest")
     last_proven_at = _timestamp(
-        value.last_proven_at, field=f"{name}.last_proven_at", optional=True
+        value.last_proven_at,
+        field=f"{name}.last_proven_at",
+        optional=True,
     )
     source_refs = _source_refs(value.source_refs, field=f"{name}.source_refs")
     issues = _issues(value.issues, field=f"{name}.issues")
     if not isinstance(value.dependencies, tuple):
-        raise CapabilityProjectionError(f"{name}.dependencies must be an immutable tuple")
+        raise CapabilityProjectionError(
+            f"{name}.dependencies must be an immutable tuple"
+        )
     normalized_dependencies: list[DependencyFact] = []
     seen_dependencies: set[str] = set()
     for dependency in value.dependencies:
@@ -447,7 +467,11 @@ def _normalize_fact(value: CapabilityFact) -> CapabilityFact:
     )
 
 
-def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
+def _project_fact(
+    fact: CapabilityFact,
+    *,
+    observed_at: datetime,
+) -> CapabilityStatus:
     dependencies = tuple(
         _normalize_dependency(row, capability_name=fact.name)
         for row in fact.dependencies
@@ -455,6 +479,9 @@ def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
     issues = set(fact.issues)
     missing_scopes = tuple(
         sorted(set(fact.required_scopes) - set(fact.current_scopes))
+    )
+    excess_scopes = tuple(
+        sorted(set(fact.current_scopes) - set(fact.required_scopes))
     )
     missing_read_scopes = tuple(
         scope for scope in missing_scopes if not _is_write_scope(scope)
@@ -464,7 +491,10 @@ def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
     )
     if missing_scopes:
         issues.add("REQUIRED_SCOPE_MISSING")
+    if excess_scopes:
+        issues.add("EXCESS_SCOPE_PRESENT")
 
+    dependency_rejected = False
     dependency_broken = False
     dependency_disconnected = False
     dependency_partial = False
@@ -478,12 +508,12 @@ def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
         elif dependency.available is False:
             dependency_disconnected = True
             issues.add("DEPENDENCY_UNAVAILABLE")
-        if dependency.state is CapabilityState.BROKEN:
+        if dependency.state is CapabilityState.REJECTED_BY_DESIGN:
+            dependency_rejected = True
+            issues.add("DEPENDENCY_REJECTED_BY_DESIGN")
+        elif dependency.state is CapabilityState.BROKEN:
             dependency_broken = True
             issues.add("DEPENDENCY_BROKEN")
-        elif dependency.state is CapabilityState.REJECTED_BY_DESIGN:
-            dependency_broken = True
-            issues.add("DEPENDENCY_REJECTED_BY_DESIGN")
         elif dependency.state is CapabilityState.NOT_BUILT:
             dependency_disconnected = True
             issues.add("DEPENDENCY_NOT_BUILT")
@@ -497,6 +527,23 @@ def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
         }:
             dependency_partial = True
             issues.add(f"DEPENDENCY_{dependency.state.value}")
+
+    proof_is_future = False
+    if fact.last_proven_at is not None:
+        proof_is_future = (
+            _parse_timestamp(
+                fact.last_proven_at,
+                field=f"{fact.name}.last_proven_at",
+            )
+            > observed_at
+        )
+        if proof_is_future:
+            issues.add("LIVE_PROOF_FUTURE")
+    live_proof_usable = bool(
+        fact.live_proof_current
+        and fact.last_proven_at is not None
+        and not proof_is_future
+    )
 
     proof_state = fact.source_state
     availability = Availability.UNAVAILABLE
@@ -515,6 +562,9 @@ def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
     elif fact.source_state is CapabilityState.BROKEN:
         availability = Availability.UNAVAILABLE
         issues.add("CAPABILITY_BROKEN")
+    elif dependency_rejected:
+        proof_state = CapabilityState.REJECTED_BY_DESIGN
+        availability = Availability.REFUSED
     elif dependency_broken:
         proof_state = CapabilityState.BROKEN
         availability = Availability.UNAVAILABLE
@@ -543,7 +593,6 @@ def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
         else:
             availability = Availability.AVAILABLE
 
-        live_proof_usable = fact.live_proof_current and fact.last_proven_at is not None
         if not live_proof_usable:
             issues.add("LIVE_PROOF_MISSING")
             if proof_state is CapabilityState.PROVEN_LIVE:
@@ -608,6 +657,7 @@ def _project_fact(fact: CapabilityFact) -> CapabilityStatus:
         required_scopes=fact.required_scopes,
         current_scopes=fact.current_scopes,
         missing_scopes=missing_scopes,
+        excess_scopes=excess_scopes,
         confirmation_required=fact.confirmation_required,
         prepared_action_required=fact.prepared_action_required,
         canonical_owner=fact.canonical_owner,
@@ -630,17 +680,22 @@ def project_sol_capability_status(
 ) -> CapabilityStatusEnvelope:
     """Project immutable facts into one deterministic capability envelope.
 
-    The caller owns acquisition and freshness adjudication.  This function
-    performs no I/O and grants no authority.
+    The caller owns acquisition and freshness adjudication. This function
+    performs no I/O and grants no authority. It nevertheless enforces that a
+    supplied live-proof timestamp cannot be later than the packet observation.
     """
 
     observed = _timestamp(observed_at, field="observed_at")
     assert observed is not None
+    observed_value = _parse_timestamp(observed, field="observed_at")
     generation = _identifier(
-        capability_generation, field="capability_generation"
+        capability_generation,
+        field="capability_generation",
     )
     if isinstance(facts, (str, bytes)):
-        raise CapabilityProjectionError("facts must be an iterable of CapabilityFact")
+        raise CapabilityProjectionError(
+            "facts must be an iterable of CapabilityFact"
+        )
     normalized: list[CapabilityFact] = []
     seen_names: set[str] = set()
     try:
@@ -659,7 +714,10 @@ def project_sol_capability_status(
         normalized.append(fact)
     normalized.sort(key=lambda row: row.name)
 
-    statuses = tuple(_project_fact(fact) for fact in normalized)
+    statuses = tuple(
+        _project_fact(fact, observed_at=observed_value)
+        for fact in normalized
+    )
     envelope_issues: set[str] = set()
     if not statuses:
         envelope_issues.add("NO_CAPABILITIES_OBSERVED")
