@@ -33,6 +33,7 @@ _REQUIRED_CONSTRAINTS = frozenset(
         "autonomous_production_deploy",
         "autonomous_live_capital_execution",
         "duplicate_control_planes",
+        "unbounded_autonomous_strategic_modification",
     }
 )
 _MAX_ADDITIONAL_RECEIPTS = 123

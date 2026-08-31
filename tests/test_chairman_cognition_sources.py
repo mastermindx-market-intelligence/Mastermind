@@ -232,6 +232,24 @@ def test_missing_or_invalid_strategic_state_fails_closed():
             compose_input(_bundle(boot=boot))
 
 
+def test_each_load_bearing_strategic_constraint_is_required_by_composer():
+    constraints = tuple(_boot_packet()["strategic_state"]["constraints"])
+    assert constraints == (
+        "autonomous_production_deploy",
+        "autonomous_live_capital_execution",
+        "duplicate_control_planes",
+        "unbounded_autonomous_strategic_modification",
+    )
+    for constraint in constraints:
+        boot = _boot_packet()
+        del boot["strategic_state"]["constraints"][constraint]
+        with pytest.raises(
+            ChairmanCognitionSourceError,
+            match="load-bearing strategic constraint missing",
+        ):
+            compose_input(_bundle(boot=boot))
+
+
 def test_unresolved_mastermind_revision_is_unknown_not_current():
     boot = _boot_packet(mastermind_sha=None)
     option = _option(source_refs=[STRATEGIC_SOURCE_REF])
