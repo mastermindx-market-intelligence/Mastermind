@@ -7,6 +7,9 @@ authority.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import re
 from collections.abc import Mapping
 from typing import Protocol
@@ -44,8 +47,70 @@ class JwksKeySource(Protocol):
     async def key_for(self, kid: str) -> Mapping[str, object]: ...
 
 
+class _DuplicateJsonMember(ValueError):
+    """Raised only inside the strict compact-token representation preflight."""
+
+
 def _refuse(code: AuthErrorCode) -> None:
     raise AuthError(code)
+
+
+def _canonical_segment_bytes(segment: str) -> bytes:
+    """Decode one unpadded base64url segment and reject alternate spellings."""
+
+    try:
+        decoded = base64.b64decode(
+            segment + "=" * (-len(segment) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+    except (binascii.Error, ValueError):
+        _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
+    canonical = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+    if canonical != segment:
+        _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
+    return decoded
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonMember
+        result[key] = value
+    return result
+
+
+def _strict_header_json(payload: bytes) -> dict[str, object]:
+    try:
+        value = json.loads(
+            payload.decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_json_object,
+        )
+    except (_DuplicateJsonMember, UnicodeDecodeError, json.JSONDecodeError):
+        _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
+    if not isinstance(value, dict):
+        _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
+    return value
+
+
+def _refuse_duplicate_payload_members(payload: bytes) -> None:
+    """Reject duplicate JSON names without trusting or requiring payload JSON.
+
+    Invalid/non-object payloads retain the existing post-key signature-decode
+    refusal. A syntactically valid JSON payload with duplicate members is an
+    ambiguous compact representation and is refused before any JWKS access.
+    """
+
+    try:
+        json.loads(
+            payload.decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_json_object,
+        )
+    except _DuplicateJsonMember:
+        _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return
 
 
 def _compact_token(token: object) -> str:
@@ -65,6 +130,12 @@ def _compact_token(token: object) -> str:
         for segment in segments
     ):
         _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
+
+    header_bytes, payload_bytes, _signature_bytes = (
+        _canonical_segment_bytes(segment) for segment in segments
+    )
+    _strict_header_json(header_bytes)
+    _refuse_duplicate_payload_members(payload_bytes)
     return token
 
 
