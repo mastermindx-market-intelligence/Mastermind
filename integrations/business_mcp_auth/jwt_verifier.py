@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import re
 from collections.abc import Mapping
 from typing import Protocol
@@ -51,6 +52,10 @@ class _DuplicateJsonMember(ValueError):
     """Raised only inside the strict compact-token representation preflight."""
 
 
+class _NonFiniteJsonNumber(ValueError):
+    """Raised when a JWT segment contains a JSON number outside RFC 8259."""
+
+
 def _refuse(code: AuthErrorCode) -> None:
     raise AuthError(code)
 
@@ -81,36 +86,61 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
+def _reject_nonfinite_json_constant(_value: str) -> object:
+    raise _NonFiniteJsonNumber
+
+
+def _refuse_nonfinite_json_values(value: object) -> None:
+    """Reject exponent overflow without recursively walking attacker data."""
+
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, float) and not math.isfinite(current):
+            raise _NonFiniteJsonNumber
+        if isinstance(current, dict):
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+
+
 def _strict_header_json(payload: bytes) -> dict[str, object]:
     try:
         value = json.loads(
             payload.decode("utf-8", errors="strict"),
             object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_nonfinite_json_constant,
         )
-    except (_DuplicateJsonMember, UnicodeDecodeError, json.JSONDecodeError):
+        _refuse_nonfinite_json_values(value)
+    except (RecursionError, ValueError):
         _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
     if not isinstance(value, dict):
         _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
     return value
 
 
-def _refuse_duplicate_payload_members(payload: bytes) -> None:
-    """Reject duplicate JSON names without trusting or requiring payload JSON.
+def _preflight_payload_json(payload: bytes) -> None:
+    """Reject ambiguous JSON while preserving malformed-payload error parity.
 
-    Invalid/non-object payloads retain the existing post-key signature-decode
-    refusal. A syntactically valid JSON payload with duplicate members is an
-    ambiguous compact representation and is refused before any JWKS access.
+    Invalid UTF-8 or malformed JSON retains the established post-key
+    signature-decode refusal. Duplicate members, non-finite numbers, parser
+    depth faults, and integer conversion-limit faults are unambiguous bounded
+    representation refusals and never reach JWKS access.
     """
 
     try:
-        json.loads(
+        value = json.loads(
             payload.decode("utf-8", errors="strict"),
             object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_nonfinite_json_constant,
         )
-    except _DuplicateJsonMember:
+        _refuse_nonfinite_json_values(value)
+    except (_DuplicateJsonMember, _NonFiniteJsonNumber, RecursionError):
         _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
     except (UnicodeDecodeError, json.JSONDecodeError):
         return
+    except ValueError:
+        _refuse(AuthErrorCode.TOKEN_HEADER_REFUSED)
 
 
 def _compact_token(token: object) -> str:
@@ -135,7 +165,7 @@ def _compact_token(token: object) -> str:
         _canonical_segment_bytes(segment) for segment in segments
     )
     _strict_header_json(header_bytes)
-    _refuse_duplicate_payload_members(payload_bytes)
+    _preflight_payload_json(payload_bytes)
     return token
 
 
