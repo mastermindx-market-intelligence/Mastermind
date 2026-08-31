@@ -6,6 +6,11 @@ import pytest
 
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.sol_capability_status import (
+    MAX_CAPABILITIES,
+    MAX_DEPENDENCIES,
+    MAX_ISSUES,
+    MAX_SCOPES,
+    MAX_SOURCE_REFS,
     Availability,
     CapabilityFact,
     CapabilityProjectionError,
@@ -396,6 +401,86 @@ def test_current_execution_registry_remains_source_owner_and_unarmed() -> None:
     assert status.availability is Availability.READ_ONLY
     assert status.write_serviceable is False
     assert status.proof_state is CapabilityState.BUILT_NOT_PROVEN
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"write_capable": True},
+        {"production_armed": True},
+        {"confirmation_required": True},
+        {"prepared_action_required": True},
+        {
+            "required_scopes": ("contents:read", "repo"),
+            "required_write_scopes": ("repo",),
+            "write_capable": True,
+        },
+    ),
+)
+def test_r0_observe_rejects_every_effect_bearing_fact(overrides: dict[str, object]) -> None:
+    with pytest.raises(CapabilityProjectionError, match="R0_OBSERVE must be zero-effect"):
+        _project(_fact(**overrides))
+
+
+def test_capability_iterable_stops_at_closed_ceiling() -> None:
+    def facts():
+        for index in range(MAX_CAPABILITIES + 1):
+            yield _fact(
+                name=f"capability-{index:03d}",
+                source_refs=(f"source:{index}",),
+            )
+
+    with pytest.raises(CapabilityProjectionError, match="at most"):
+        project_sol_capability_status(
+            facts(),
+            observed_at=OBSERVED_AT,
+            capability_generation="scf-cap1.v1",
+        )
+
+
+def test_scope_collections_have_closed_ceiling() -> None:
+    scopes = tuple(f"scope:{index}" for index in range(MAX_SCOPES + 1))
+    with pytest.raises(CapabilityProjectionError, match="at most"):
+        _project(
+            _fact(
+                required_scopes=scopes,
+                current_scopes=scopes,
+            )
+        )
+
+
+def test_dependency_collection_has_closed_ceiling() -> None:
+    dependencies = tuple(
+        DependencyFact(
+            name=f"dependency-{index:03d}",
+            state=CapabilityState.PROVEN_LIVE,
+            required=True,
+            available=True,
+            source_ref=f"dependency:{index}",
+        )
+        for index in range(MAX_DEPENDENCIES + 1)
+    )
+    with pytest.raises(CapabilityProjectionError, match="at most"):
+        _project(_fact(dependencies=dependencies))
+
+
+def test_source_and_issue_collections_have_closed_ceilings() -> None:
+    with pytest.raises(CapabilityProjectionError, match="at most"):
+        _project(
+            _fact(
+                source_refs=tuple(
+                    f"source:{index}" for index in range(MAX_SOURCE_REFS + 1)
+                )
+            )
+        )
+    with pytest.raises(CapabilityProjectionError, match="at most"):
+        _project(
+            _fact(
+                issues=tuple(
+                    f"ISSUE_{index:03d}" for index in range(MAX_ISSUES + 1)
+                )
+            )
+        )
 
 
 def test_output_is_secret_free_and_carries_required_contract_fields() -> None:
