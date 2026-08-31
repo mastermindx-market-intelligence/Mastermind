@@ -278,7 +278,9 @@ State after merge: `BUILT_NOT_PROVEN / SOURCE_ONLY / PRODUCTION_INERT`.
 ### Mission
 
 Compile one accepted Practice Pack into deterministic, source-linked adapters for supported reasoning
-surfaces without copying live state or making the adapter canonical.
+surfaces without copying live state or making the adapter canonical. Reuse the current accepted Sol
+Capability Fabric and Business/plugin package generation owners; do not create a second package or
+marketplace pipeline.
 
 Possible outputs, only where the surface contract is current and supported:
 
@@ -292,6 +294,8 @@ review/auditor bundle
 ### Rules
 
 - one exact source commit and pack digest;
+- current reviewed plugin/Skill package bytes are consumed rather than regenerated from prose;
+- no second marketplace, package registry, auto-sync channel or adapter lifecycle;
 - generated adapter is reproducible and carries source refs;
 - adapter contains procedure/reference only, never current company state;
 - surface-specific metadata does not widen the practice or capability profile;
@@ -459,9 +463,13 @@ real data, a measurable primary task, reversible canary path and no overlapping 
 
 ```text
 A  generalist Project Sol -> implementation -> ordinary functional review
-B  Product Design pack -> qualified selector -> implementation -> independent Design Audit
-C  B + accepted Figma/visual toolchain, only if FIGMA1 is proven
+B  generalist Project Sol -> implementation -> independent Design Audit
+C  Product Design pack -> qualified selector -> implementation -> the same independent Design Audit
+D  C + accepted Figma/visual toolchain, only if FIGMA1 is proven
 ```
+
+A->B isolates the audit increment, B->C the professional-method increment, and C->D the toolchain
+increment. A reduced arm set must record which effects remain confounded.
 
 ### Implementation sequence
 

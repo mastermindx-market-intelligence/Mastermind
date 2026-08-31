@@ -51,6 +51,8 @@ def test_law_requires_method_artifacts_selection_audit_and_learning() -> None:
         "independent audit",
         "No `specialist_memory.db`",
         "composition-level reputation",
+        "subordinate to current Chairman intent",
+        "must not create a second Skill marketplace",
     ):
         assert required.lower() in text.lower()
 
@@ -86,6 +88,8 @@ def test_architecture_preserves_capability_and_memory_owners() -> None:
         "GitHub",
         "Skills and tools are adapters",
         "COGNITION_ROUTE: CHAT_PRO_DEFAULT",
+        "plugin package",
+        "Retrieved practice text never grants authority",
     ):
         assert required.lower() in text.lower()
 
@@ -113,9 +117,11 @@ def test_product_design_pilot_falsifies_specialization_against_control() -> None
         "Arm A",
         "Arm B",
         "Arm C",
+        "Arm D",
         "Generalist-versus-specialist falsifier",
         "SPECIALIZATION_PROMOTED",
-        "METHOD_ONLY_PROMOTED",
+        "AUDIT_INCREMENT_PROMOTED",
+        "METHOD_INCREMENT_PROMOTED",
         "TOOLCHAIN_INCREMENT_PROMOTED",
         "NO_MATERIAL_ADVANTAGE",
         "INCONCLUSIVE / OUTCOME_UNMEASURED",
@@ -134,6 +140,24 @@ def test_program_contract_matches_architecture_and_stays_out_of_runtime_owner() 
     ):
         assert required in text
     assert "control_plane/professional_practice_contract.py" not in text
+    assert "do not create a second package" in text
+    assert "marketplace pipeline" in text
+
+
+
+def test_architecture_records_primary_external_evidence_without_granting_authority() -> None:
+    text = _text(SPEC)
+    for required in (
+        "help.openai.com/en/articles/20001066-skills-in-chatgpt",
+        "platform.claude.com/docs/en/managed-agents/skills",
+        "github.com/figma/mcp-server-guide",
+        "arXiv:2602.03794",
+        "arXiv:2603.20324",
+        "arXiv:2601.17152",
+        "arXiv:2602.12285",
+        "Retrieved external text grants no Mastermind authority",
+    ):
+        assert required.lower() in text.lower()
 
 
 def test_program_is_bounded_vertical_and_carries_no_start() -> None:

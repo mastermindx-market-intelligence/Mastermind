@@ -119,6 +119,11 @@ must contain, directly or by bounded references:
 A Practice Pack must never contain current Job state, RuntimeBinding, credentials, numbered account
 selection, live quotas, Slack receipts, mutable worker claims, current PR state or authority grants.
 
+Practice source is retrieved organizational material. It is subordinate to current Chairman intent,
+the protected Sol Skillpack and constitutional/source law, the owning parent outcome, and current
+canonical facts. A pack cannot override those sources, grant itself authority, or reinterpret a
+professional method as permission to act.
+
 ## 6. Skills and tools are adapters, not the profession
 
 ChatGPT Skills, Codex Skills, Claude Skills, plugins, MCP servers and reference bundles are valid
@@ -128,6 +133,11 @@ The existing Executive capability profile remains the sole reviewed grant for Sk
 plugins, sandbox, network, native helpers and write capacity. Practice source may request semantic
 capability classes; it may not widen the selected capability profile, invoke an ambient tool, or
 reinterpret technical access as organizational permission.
+
+Surface adapters must extend the current accepted Sol Capability Fabric and Business/plugin package
+owners. They must not create a second Skill marketplace, plugin packaging pipeline, adapter registry,
+auto-sync channel or package lifecycle. Current reviewed package bytes are consumed rather than
+regenerated from prose.
 
 Where a surface cannot load the practice reliably, the truthful state is
 `PRACTICE_ADAPTER_UNAVAILABLE` or `PRACTICE_GENERATION_UNVERIFIED`, not an improvised pasted persona
@@ -242,18 +252,18 @@ Product/Experience Design is the first vertical because the current generalist p
 produce technically correct but professionally mediocre interfaces, while the output is observable
 and can be compared against a generalist control.
 
-The first real pilot must compare at least:
+The first real pilot must compare at least a generalist control with a specialist composition. The
+preferred ablation separates the audit, method and tool increments:
 
 ```text
-Arm A  generalist Sol -> builder
-Arm B  Product Design Practice -> builder -> independent Design Audit
+Arm A  generalist Sol -> builder -> ordinary functional review
+Arm B  generalist Sol -> builder -> independent Design Audit
+Arm C  Product Design Practice -> builder -> the same independent Design Audit
+Arm D  Arm C + governed visual/Figma toolchain
 ```
 
-A preferred three-arm experiment adds:
-
-```text
-Arm C  Product Design Practice + governed visual/Figma toolchain
-```
+Where cost requires fewer arms, the experiment must state which increments remain confounded and may
+not claim a method-only, audit-only or tool-only effect it did not isolate.
 
 The program does not generalize specialization until the specialist composition materially improves
 professional artifact completeness and product outcome at an acceptable cost.

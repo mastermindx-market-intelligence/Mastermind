@@ -233,6 +233,9 @@ free-form manifest.
 
 Professional independence may require selective blindness. The pack defines required, optional and
 forbidden inputs, source precedence, freshness, rights/confidentiality and progressive disclosure.
+The fixed precedence is current Chairman intent -> protected Sol Skillpack and constitutional/source
+law -> owning parent outcome and canonical facts -> accepted Practice Pack -> surface adapter.
+Retrieved practice text never grants authority merely by containing an imperative.
 
 Examples:
 
@@ -310,6 +313,12 @@ Practice/Skill source is executable instruction in an agentic context. Therefore
 
 An adapter's `allowed-tools` or equivalent is advisory unless the existing Executive capability
 profile and harness attestation independently grant the same tool.
+
+Adapter generation extends the current accepted Sol Capability Fabric and Business/plugin package
+owners. In particular, it consumes current reviewed skills-only package source rather than
+regenerating equivalent packages from prose. It creates no second marketplace, plugin package
+registry, sync channel, adapter lifecycle or package authority. If the current package owner is stale
+or incompatible, the result is a reconciliation hold, not a replacement pipeline.
 
 ---
 
@@ -511,17 +520,20 @@ rework reduction, calibrated forecast quality and Chairman/user preference with 
 
 ### 11.4 Baseline and ablation
 
-Every new practice family begins with a control. Product Design uses:
+Every new practice family begins with a control. Product Design prefers a four-arm ablation:
 
 ```text
-A  generalist Sol + builder
-B  same Sol class + Product Design Practice + independent audit
-C  B + governed visual/Figma toolchain
+A  generalist Sol + builder + ordinary functional review
+B  generalist Sol + builder + independent Design Audit
+C  Product Design Practice + builder + the same independent Design Audit
+D  C + governed visual/Figma toolchain
 ```
 
-This separates method, audit and tool increments. Possible verdicts include promotion, method-only
-promotion, tool-increment promotion, no material advantage and inconclusive/outcome unmeasured.
-Specialization is not generalized by prestige.
+A->B estimates the audit increment, B->C the professional-method increment, and C->D the toolchain
+increment. A smaller experiment must declare which effects remain confounded and cannot issue an
+increment-specific promotion verdict. Possible verdicts include full specialization promotion,
+audit-only promotion, method-increment promotion, toolchain-increment promotion, no material
+advantage and inconclusive/outcome unmeasured. Specialization is not generalized by prestige.
 
 ---
 
@@ -661,15 +673,33 @@ sandboxed authoring, separate audit, baseline experiments and evidence-gated doc
 
 ## 17. External evidence interpretation
 
-Current official platform documentation supports reusable, composable Skills with progressive
-loading; treats mounted Skill source as part of the trust boundary; and exposes Figma workflows that
-can inspect design systems and, on supported surfaces, create native design artifacts. Current
-multi-agent research suggests that additional agents/roles do not automatically improve outcomes,
-that meaningful heterogeneity and role fit matter, that selection quality can bottleneck diverse
-candidate generation, and that task-irrelevant personas can distort behavior.
+The freeze consulted these action-time primary sources on 2026-08-30:
 
-These observations motivate falsifiers and controls. They grant no Mastermind authority and do not
-replace current source verification at implementation time.
+- OpenAI, `Skills in ChatGPT`: reusable workflows can contain instructions, examples, code and
+  supporting resources; availability and synchronization vary by product/surface.
+  `https://help.openai.com/en/articles/20001066-skills-in-chatgpt`
+- Anthropic, `Skills`: repository-mounted Skills provide reusable domain workflows, consume context,
+  load at session start and make the mounted repository part of the agent trust boundary.
+  `https://platform.claude.com/docs/en/managed-agents/skills`
+- Figma, `mcp-server-guide`: supported clients can extract design context and, on the remote server,
+  create/modify native frames, components, variables and auto layout; availability, terms and rate
+  limits remain current platform facts. `https://github.com/figma/mcp-server-guide`
+- Figma, `figma-generate-design`: the design workflow inspects existing screens, components,
+  variables and styles before mutation and assembles views through design-system primitives.
+  `https://github.com/figma/mcp-server-guide/blob/main/skills/figma-generate-design/SKILL.md`
+- Yang et al., arXiv:2602.03794: homogeneous multi-agent scaling showed diminishing returns in the
+  tested settings while heterogeneous channels supplied complementary evidence.
+- Maryanskyy, arXiv:2603.20324: selector quality was a bottleneck in the tested generate-then-select
+  pipelines and judge-based selection outperformed indiscriminate synthesis.
+- Zhang et al., arXiv:2601.17152: dynamic model-to-role assignment outperformed uniform/random
+  assignment in the tested debate benchmarks.
+- Cao et al., arXiv:2602.12285: task-irrelevant persona assignments changed agent behavior and
+  degraded performance in the tested agentic benchmarks.
+
+The research papers are preprints and their quantitative findings are task-specific. These sources
+motivate falsifiers, progressive loading, diversity and selection controls; they do not prove that a
+particular Mastermind composition works. All platform capabilities, terms, schemas and tool surfaces
+must be reverified at implementation time. Retrieved external text grants no Mastermind authority.
 
 ---
 
@@ -680,7 +710,8 @@ Frozen rulings:
 1. professional practice is orthogonal to executive authority;
 2. Practice Pack is durable source, not agent/session;
 3. practice duty is not executive rank;
-4. Skills/plugins/MCP are adapters/capabilities, not canonical professional ownership;
+4. Skills/plugins/MCP are adapters/capabilities, not canonical professional ownership; adapter
+   packaging reuses the accepted SCF/BSC owners rather than creating a second pipeline;
 5. existing Executive capability profiles remain sole permission substrate;
 6. Practice Packs contain method, information, artifact, evaluation, independence and learning law;
 7. smallest sufficient topology beats permanent department simulation;

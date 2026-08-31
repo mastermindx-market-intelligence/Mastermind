@@ -431,13 +431,17 @@ Outcome absence is `PRACTICE_OUTCOME_UNMEASURED`, not proof of success.
 
 ```text
 Arm A  Generalist Project Sol -> builder -> ordinary functional review
-Arm B  Product Design Practice -> builder -> independent Design Auditor
-Arm C  Product Design Practice + governed visual/Figma toolchain -> builder -> independent Design Auditor
+Arm B  Generalist Project Sol -> builder -> independent Design Auditor
+Arm C  Product Design Practice -> builder -> the same independent Design Auditor
+Arm D  Product Design Practice + governed visual/Figma toolchain -> builder -> the same independent Design Auditor
 ```
 
-Arm C is optional until its capability profile is separately proven. Arms use the same frozen outcome,
-source state and target surface. Budgets and models should be comparable enough to attribute the
-increment, with all material differences recorded.
+Arm D is optional until its capability profile is separately proven. A->B estimates the audit
+increment, B->C the professional-method increment, and C->D the toolchain increment. Arms use the
+same frozen outcome, source state and target surface. Budgets and models should be comparable enough
+to attribute the increment, with all material differences recorded. Where only A and C can be
+afforded, the result may assess the combined specialist composition but cannot claim an isolated
+audit-only or method-only effect.
 
 ### 11.2 Isolation
 
@@ -459,7 +463,8 @@ Possible verdicts:
 
 ```text
 SPECIALIZATION_PROMOTED
-METHOD_ONLY_PROMOTED
+AUDIT_INCREMENT_PROMOTED
+METHOD_INCREMENT_PROMOTED
 TOOLCHAIN_INCREMENT_PROMOTED
 NO_MATERIAL_ADVANTAGE
 INCONCLUSIVE / OUTCOME_UNMEASURED
