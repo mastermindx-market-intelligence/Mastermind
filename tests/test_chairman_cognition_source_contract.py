@@ -58,20 +58,24 @@ def _valid_document() -> dict:
         "as_of": "2026-08-30T16:00:00Z",
         "source_receipts": [
             {
+                "source_ref": "SRC-STRATEGY",
+                "owner": "STRATEGIC_STATE",
+                "revision": "sha256:current-strategic-state",
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T16:00:00Z",
+            },
+            {
                 "source_ref": "SRC-CHAIRMAN",
                 "owner": "CHAIRMAN_DIRECTIVE",
                 "revision": "conversation:2026-08-30",
                 "state": "CURRENT",
                 "load_bearing": True,
                 "observed_at": "2026-08-30T16:00:00Z",
-            }
+            },
         ],
-        "strategic_constraints": {
-            "autonomous_production_deploy": "prohibited",
-            "autonomous_live_capital_execution": "prohibited",
-            "duplicate_control_planes": "prohibited",
-            "unbounded_autonomous_strategic_modification": "prohibited",
-        },
+        "strategic_constraints_source_ref": "SRC-STRATEGY",
+        "strategic_constraints": copy.deepcopy(_CURRENT_CONSTRAINTS),
         "delegation_envelope": None,
         "options": [
             {
@@ -94,6 +98,8 @@ def _valid_document() -> dict:
                 "stop_condition": None,
                 "rollback_plan": None,
                 "falsifier": None,
+                "change_classes": ["RESEARCH"],
+                "affected_departments": ["executive"],
                 "benefits": {
                     "strategic_leverage": 50,
                     "dependency_unlock": 50,
@@ -139,6 +145,9 @@ def test_source_law_freezes_one_office_two_modes_and_no_duplicate_owner():
         "EFFECT_ALREADY_APPLIED",
         "NEW_CHILD_CARRIER_REQUIRED",
         "DUPLICATE_CONTROL_PLANE_REFUSED",
+        "strategic_constraints_source_ref",
+        "constraint_results",
+        "blocking_constraint",
     ):
         assert marker in law
 
@@ -164,6 +173,9 @@ def test_architecture_preserves_canonical_owners_and_accelerated_live_canary():
         "known-applied effect",
         "explicit `NEW_CHILD` carrier state",
         "No `chairman_brain.db`",
+        "NEW_FEATURE",
+        "ORGANIZATIONAL_EXPANSION",
+        "future constraint",
     ):
         assert marker in spec
 
@@ -182,6 +194,8 @@ def test_program_has_real_vertical_and_completion_not_docs():
         "CCL-A6",
         "One closed canary",
         "zero routine",
+        "R2",
+        "all six current constraints",
     ):
         assert marker in plan
 
@@ -497,6 +511,7 @@ def test_r2_non_load_bearing_context_cannot_establish_or_cure_current() -> None:
     github = document["source_receipts"][2]
     github["load_bearing"] = False
     github["owner"] = "SLACK"
+    document["options"][0]["source_refs"] = ["SRC-GITHUB"]
     with pytest.raises(ChairmanCognitionError, match="load-bearing"):
         evaluate_document(document)
 

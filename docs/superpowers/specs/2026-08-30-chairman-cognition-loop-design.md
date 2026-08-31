@@ -451,3 +451,52 @@ A1 acceptance requires:
 
 The overall program acceptance remains the real Chairman experience described in Section 1, not the
 existence of this module.
+
+## 18. R2 Strategic State binding and total constraint evaluation
+
+A1's input now binds the constraint map to an exact `strategic_constraints_source_ref`. The receipt
+must be `CURRENT`, load-bearing and owned by `STRATEGIC_STATE`; a stale, conflicting, unknown,
+wrong-owner or advisory-only strategy receipt is malformed. Every option also needs another
+load-bearing source. Non-load-bearing context may enrich explanation but cannot establish or cure
+currentness.
+
+Each strategic option carries closed facts for deterministic selector evaluation:
+
+```text
+change_classes:
+  NEW_FEATURE
+  MAINTENANCE_REPAIR
+  EXISTING_CAPABILITY_COMPLETION
+  ARCHITECTURE_RECORD
+  RESEARCH
+  RELEASE
+  RUNTIME_CANARY
+  ORGANIZATIONAL_EXPANSION
+  RESOURCE_REALLOCATION
+  UNKNOWN
+affected_departments:
+  prophet | product | marketing | executive
+```
+
+`UNKNOWN` is exclusive. A modifying option cannot omit classification. An
+`ORGANIZATIONAL_EXPANSION` cannot omit an affected department. `NEW_FEATURE` activates
+`new_feature_expansion`; unknown classification makes applicability unknown. Marketing
+`ORGANIZATIONAL_EXPANSION` activates the distribution-proof constraint. Maintenance, completion,
+research, release and runtime-canary classes do not accidentally become new-feature or marketing
+expansion.
+
+The selector table covers all six current Strategic State constraints. A future constraint with no
+accepted selector remains visible as `UNKNOWN` rather than disappearing. On modifying options, a
+future constraint at `prohibited` refuses and at `constrained` requires Chairman adjudication;
+`permitted` continues through every other gate while preserving the unknown result. Read-only options
+remain no-effect while still exposing the unknown selector.
+
+Every option emits sorted `constraint_results`, a deterministic digest and an exact
+`blocking_constraint`. Constraint result effects use `REFUSED > CHAIRMAN_REQUIRED > NONE`.
+Classification never weakens the independently coded production, live-capital, duplicate-plane or
+bounded-autonomy boundaries. Existing-carrier `SOURCE_BRANCH_WRITE` and `SOURCE_MERGE` both require
+`expected_head_sha`.
+
+This R2 change is a closed-schema migration. A2 and later producers must emit the strategy source
+reference, classification facts and complete current constraint map before they can be reconciled to
+the protected A1 contract. R2 itself remains pure, deterministic and production-inert.

@@ -1,17 +1,18 @@
 """Deterministic preflight for Mastermind Chairman-cognition decisions.
 
-This module is a read-only policy projector.  It accepts a closed, source-attributed
+This module is a read-only policy projector. It accepts one closed, source-attributed
 snapshot plus candidate strategic options and returns:
 
+* complete point-in-time strategic-constraint adjudication;
 * a Pareto frontier without inventing a hidden global priority score;
-* a deterministic authority/serviceability preflight for every option; and
+* deterministic authority/serviceability preflight for every option; and
 * at most one mechanical recommendation when exactly one eligible option remains
   non-dominated.
 
 It grants no organizational authority and performs no I/O, persistence, scheduling,
 routing, admission, wake, retry, provider, GitHub, Slack, Linear, Agent OS, or
-Executive OS action.  A downstream owner must re-read current canonical evidence and
-apply its own existing mutation/authority contract immediately before any effect.
+Executive OS action. A downstream owner must re-read current canonical evidence and
+apply its own existing mutation and authority contract immediately before any effect.
 """
 from __future__ import annotations
 
@@ -129,6 +130,32 @@ ALWAYS_CHAIRMAN_ACTIONS = frozenset(
     }
 )
 
+CHANGE_CLASSES = frozenset(
+    {
+        "NEW_FEATURE",
+        "MAINTENANCE_REPAIR",
+        "EXISTING_CAPABILITY_COMPLETION",
+        "ARCHITECTURE_RECORD",
+        "RESEARCH",
+        "RELEASE",
+        "RUNTIME_CANARY",
+        "ORGANIZATIONAL_EXPANSION",
+        "RESOURCE_REALLOCATION",
+        "UNKNOWN",
+    }
+)
+AFFECTED_DEPARTMENTS = frozenset({"prophet", "product", "marketing", "executive"})
+REQUIRED_CURRENT_CONSTRAINTS = frozenset(
+    {
+        "autonomous_production_deploy",
+        "autonomous_live_capital_execution",
+        "duplicate_control_planes",
+        "marketing_org_expansion_before_distribution_proof",
+        "new_feature_expansion",
+        "unbounded_autonomous_strategic_modification",
+    }
+)
+
 
 class ChairmanCognitionError(ValueError):
     """The closed Chairman-cognition input is malformed."""
@@ -209,6 +236,18 @@ class ReasonCode(str, enum.Enum):
     CANARY_CONTROLS_REQUIRED = "CANARY_CONTROLS_REQUIRED"
 
 
+class ConstraintApplicability(str, enum.Enum):
+    APPLIES = "APPLIES"
+    DOES_NOT_APPLY = "DOES_NOT_APPLY"
+    UNKNOWN = "UNKNOWN"
+
+
+class ConstraintEffect(str, enum.Enum):
+    NONE = "NONE"
+    CHAIRMAN_REQUIRED = "CHAIRMAN_REQUIRED"
+    REFUSED = "REFUSED"
+
+
 @dataclasses.dataclass(frozen=True)
 class SourceReceipt:
     source_ref: str
@@ -257,8 +296,18 @@ class StrategicOption:
     stop_condition: str | None
     rollback_plan: str | None
     falsifier: str | None
+    change_classes: tuple[str, ...]
+    affected_departments: tuple[str, ...]
     benefits: Mapping[str, int | None]
     costs: Mapping[str, int | None]
+
+
+@dataclasses.dataclass(frozen=True)
+class ConstraintResult:
+    constraint_id: str
+    level: str
+    applicability: ConstraintApplicability
+    effect: ConstraintEffect
 
 
 @dataclasses.dataclass(frozen=True)
@@ -268,16 +317,14 @@ class Adjudication:
     reason: ReasonCode
     serviceable: bool
     source_state: SourceState
+    constraint_results: tuple[ConstraintResult, ...]
+    constraint_results_digest: str
+    blocking_constraint: str | None
     execution_authority_granted: bool = False
 
 
 def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and evaluate one closed Chairman-cognition input document.
-
-    The returned packet is deterministic and contains no reusable authority token.
-    It can support a Meta-CEO decision, but the actual owner of any effect must re-read
-    canonical evidence and enforce its existing mutation contract.
-    """
+    """Validate and evaluate one closed Chairman-cognition input document."""
 
     doc = _closed_mapping(
         document,
@@ -285,6 +332,7 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
             "schema",
             "as_of",
             "source_receipts",
+            "strategic_constraints_source_ref",
             "strategic_constraints",
             "delegation_envelope",
             "options",
@@ -294,6 +342,7 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
     )
     if doc["schema"] != INPUT_SCHEMA:
         raise ChairmanCognitionError("unsupported input schema")
+
     as_of = _iso_utc(doc["as_of"], "document.as_of")
     source_receipts = _parse_source_receipts(doc["source_receipts"])
     if any(
@@ -301,6 +350,15 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         for receipt in source_receipts.values()
     ):
         raise ChairmanCognitionError("source receipt cannot postdate document.as_of")
+
+    strategic_constraints_source_ref = _nonempty(
+        doc["strategic_constraints_source_ref"],
+        "strategic_constraints_source_ref",
+        256,
+    )
+    _require_current_strategic_source(
+        strategic_constraints_source_ref, source_receipts
+    )
     strategic_constraints = _parse_constraints(doc["strategic_constraints"])
     envelope, envelope_state = _parse_envelope(
         doc["delegation_envelope"], source_receipts, as_of
@@ -314,11 +372,22 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
             raise ChairmanCognitionError(
                 f"option {option.option_id} references unknown source receipt"
             )
+        option_load_bearing = [
+            source_receipts[ref]
+            for ref in option.source_refs
+            if ref != strategic_constraints_source_ref
+            and source_receipts[ref].load_bearing
+        ]
+        if not option_load_bearing:
+            raise ChairmanCognitionError(
+                f"option {option.option_id} requires a load-bearing source receipt"
+            )
 
     adjudications = tuple(
         _adjudicate(
             option=option,
             source_receipts=source_receipts,
+            strategic_constraints_source_ref=strategic_constraints_source_ref,
             strategic_constraints=strategic_constraints,
             envelope=envelope,
             envelope_state=envelope_state,
@@ -362,6 +431,8 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         "schema": PACKET_SCHEMA,
         "as_of": as_of,
         "input_digest": hashlib.sha256(canonical_json_bytes(doc)).hexdigest(),
+        "strategic_constraints_source_ref": strategic_constraints_source_ref,
+        "evaluated_constraint_ids": sorted(strategic_constraints),
         "delegation_envelope": {
             "state": envelope_state.value,
             "envelope_id": envelope.envelope_id if envelope is not None else None,
@@ -378,6 +449,12 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
                 "reason": item.reason.value,
                 "serviceable": item.serviceable,
                 "source_state": item.source_state.value,
+                "constraint_results": [
+                    _constraint_result_payload(result)
+                    for result in item.constraint_results
+                ],
+                "constraint_results_digest": item.constraint_results_digest,
+                "blocking_constraint": item.blocking_constraint,
                 "execution_authority_granted": False,
             }
             for item in adjudications
@@ -429,6 +506,29 @@ def _parse_source_receipts(value: Any) -> dict[str, SourceReceipt]:
     return out
 
 
+def _require_current_strategic_source(
+    source_ref: str, source_receipts: Mapping[str, SourceReceipt]
+) -> SourceReceipt:
+    receipt = source_receipts.get(source_ref)
+    if receipt is None:
+        raise ChairmanCognitionError(
+            "strategic_constraints_source_ref references unknown source receipt"
+        )
+    if receipt.owner != "STRATEGIC_STATE":
+        raise ChairmanCognitionError(
+            "strategic constraints source must be owned by STRATEGIC_STATE"
+        )
+    if not receipt.load_bearing:
+        raise ChairmanCognitionError(
+            "strategic constraints source must be load-bearing"
+        )
+    if receipt.state is not SourceState.CURRENT:
+        raise ChairmanCognitionError(
+            "strategic constraints source must be CURRENT"
+        )
+    return receipt
+
+
 def _parse_constraints(value: Any) -> dict[str, str]:
     if not isinstance(value, Mapping) or not value:
         raise ChairmanCognitionError("strategic_constraints must be a non-empty mapping")
@@ -439,14 +539,8 @@ def _parse_constraints(value: Any) -> dict[str, str]:
         if level not in {"permitted", "constrained", "prohibited"}:
             raise ChairmanCognitionError("unknown strategic constraint level")
         out[key] = level
-    for required in (
-        "autonomous_production_deploy",
-        "autonomous_live_capital_execution",
-        "duplicate_control_planes",
-        "unbounded_autonomous_strategic_modification",
-    ):
-        if required not in out:
-            raise ChairmanCognitionError("missing load-bearing strategic constraint")
+    if not REQUIRED_CURRENT_CONSTRAINTS <= set(out):
+        raise ChairmanCognitionError("missing load-bearing strategic constraint")
     return out
 
 
@@ -610,6 +704,8 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                 "stop_condition",
                 "rollback_plan",
                 "falsifier",
+                "change_classes",
+                "affected_departments",
                 "benefits",
                 "costs",
             },
@@ -625,9 +721,7 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
         action = _nonempty(item["action"], "action", 64)
         if action not in ALL_ACTIONS:
             raise ChairmanCognitionError("unknown option action")
-        effect_state = _enum(
-            EffectState, item["effect_state"], "effect_state"
-        )
+        effect_state = _enum(EffectState, item["effect_state"], "effect_state")
         reversibility = _enum(
             Reversibility, item["reversibility"], "reversibility"
         )
@@ -636,9 +730,8 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
         if action in MODIFYING_ACTIONS and reversibility is Reversibility.READ_ONLY:
             raise ChairmanCognitionError("modifying action cannot use READ_ONLY reversibility")
         if action in READ_ONLY_ACTIONS and effect_state is not EffectState.NONE:
-            raise ChairmanCognitionError(
-                "read-only action must use NONE effect_state"
-            )
+            raise ChairmanCognitionError("read-only action must use NONE effect_state")
+
         scope_refs = _str_tuple(
             item["scope_refs"], "scope_refs", 0, MAX_SCOPE_REFS, 256
         )
@@ -677,9 +770,7 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
             raise ChairmanCognitionError(
                 "creates_duplicate_control_plane must be boolean"
             )
-        carrier_state = _enum(
-            CarrierState, item["carrier_state"], "carrier_state"
-        )
+        carrier_state = _enum(CarrierState, item["carrier_state"], "carrier_state")
         carrier_ref = _nullable_str(item["carrier_ref"], "carrier_ref", 256)
         if carrier_state is CarrierState.EXACT_EXISTING and carrier_ref is None:
             raise ChairmanCognitionError("exact existing carrier requires carrier_ref")
@@ -690,6 +781,41 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
             raise ChairmanCognitionError(
                 "carrier_ref is not valid for this carrier_state"
             )
+
+        change_classes = _str_tuple(
+            item["change_classes"],
+            "change_classes",
+            0,
+            len(CHANGE_CLASSES),
+            64,
+        )
+        if not set(change_classes) <= CHANGE_CLASSES:
+            raise ChairmanCognitionError("unknown change class")
+        if action in MODIFYING_ACTIONS and not change_classes:
+            raise ChairmanCognitionError(
+                "modifying action requires at least one change class"
+            )
+        if "UNKNOWN" in change_classes and len(change_classes) != 1:
+            raise ChairmanCognitionError(
+                "UNKNOWN change class cannot coexist with another class"
+            )
+        affected_departments = _str_tuple(
+            item["affected_departments"],
+            "affected_departments",
+            0,
+            len(AFFECTED_DEPARTMENTS),
+            32,
+        )
+        if not set(affected_departments) <= AFFECTED_DEPARTMENTS:
+            raise ChairmanCognitionError("unknown affected department")
+        if (
+            "ORGANIZATIONAL_EXPANSION" in change_classes
+            and not affected_departments
+        ):
+            raise ChairmanCognitionError(
+                "organizational expansion requires an affected department"
+            )
+
         out.append(
             StrategicOption(
                 option_id=option_id,
@@ -730,6 +856,8 @@ def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
                     item["rollback_plan"], "rollback_plan", 500
                 ),
                 falsifier=_nullable_str(item["falsifier"], "falsifier", 500),
+                change_classes=change_classes,
+                affected_departments=affected_departments,
                 benefits=_parse_dimensions(
                     item["benefits"], BENEFIT_DIMENSIONS, "benefits"
                 ),
@@ -743,200 +871,159 @@ def _adjudicate(
     *,
     option: StrategicOption,
     source_receipts: Mapping[str, SourceReceipt],
+    strategic_constraints_source_ref: str,
     strategic_constraints: Mapping[str, str],
     envelope: DelegationEnvelope | None,
     envelope_state: EnvelopeState,
 ) -> Adjudication:
-    source_state = _aggregate_source_state(
-        tuple(source_receipts[ref] for ref in option.source_refs)
+    source_inputs = [source_receipts[strategic_constraints_source_ref]]
+    source_inputs.extend(
+        source_receipts[ref]
+        for ref in option.source_refs
+        if ref != strategic_constraints_source_ref
+        and source_receipts[ref].load_bearing
     )
-    if source_state is not SourceState.CURRENT:
-        return _decision(
-            option, Disposition.REFUSED, ReasonCode.SOURCE_NOT_CURRENT, source_state
-        )
-    if option.effect_state is EffectState.EFFECT_UNKNOWN:
+    source_state = _aggregate_source_state(tuple(source_inputs))
+    constraint_results = _evaluate_constraints(
+        option, strategic_constraints, envelope
+    )
+    constraint_blocker = _blocking_constraint(constraint_results)
+
+    def decide(
+        disposition: Disposition,
+        reason: ReasonCode,
+        *,
+        serviceable: bool = False,
+        blocking_constraint: str | None = None,
+    ) -> Adjudication:
         return _decision(
             option,
+            disposition,
+            reason,
+            source_state,
+            constraint_results,
+            blocking_constraint=blocking_constraint,
+            serviceable=serviceable,
+        )
+
+    if source_state is not SourceState.CURRENT:
+        return decide(Disposition.REFUSED, ReasonCode.SOURCE_NOT_CURRENT)
+    if option.effect_state is EffectState.EFFECT_UNKNOWN:
+        return decide(
             Disposition.REFUSED,
             ReasonCode.EFFECT_UNKNOWN_RECONCILE_FIRST,
-            source_state,
         )
     if option.effect_state is EffectState.KNOWN_APPLIED:
-        return _decision(
-            option,
+        return decide(Disposition.REFUSED, ReasonCode.EFFECT_ALREADY_APPLIED)
+
+    if (
+        constraint_blocker is not None
+        and constraint_blocker.effect is ConstraintEffect.REFUSED
+    ):
+        return decide(
             Disposition.REFUSED,
-            ReasonCode.EFFECT_ALREADY_APPLIED,
-            source_state,
-        )
-    if option.creates_duplicate_control_plane:
-        if strategic_constraints["duplicate_control_planes"] == "prohibited":
-            return _decision(
-                option,
-                Disposition.REFUSED,
-                ReasonCode.DUPLICATE_CONTROL_PLANE_REFUSED,
-                source_state,
-            )
-        return _decision(
-            option,
-            Disposition.CHAIRMAN_REQUIRED,
-            ReasonCode.CONSTITUTIONAL_CHAIRMAN_BOUNDARY,
-            source_state,
-        )
-    if option.action == "PRODUCTION_DEPLOY" and strategic_constraints.get(
-        "autonomous_production_deploy"
-    ) == "prohibited":
-        return _decision(
-            option,
-            Disposition.REFUSED,
-            ReasonCode.STRATEGIC_CONSTRAINT_PROHIBITS,
-            source_state,
-        )
-    if option.action == "LIVE_CAPITAL_EXECUTION" and strategic_constraints.get(
-        "autonomous_live_capital_execution"
-    ) == "prohibited":
-        return _decision(
-            option,
-            Disposition.REFUSED,
-            ReasonCode.STRATEGIC_CONSTRAINT_PROHIBITS,
-            source_state,
+            _constraint_reason(constraint_blocker),
+            blocking_constraint=constraint_blocker.constraint_id,
         )
     if option.action in ALWAYS_CHAIRMAN_ACTIONS:
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.CONSTITUTIONAL_CHAIRMAN_BOUNDARY,
-            source_state,
         )
     if option.reversibility in {Reversibility.IRREVERSIBLE, Reversibility.UNKNOWN}:
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.IRREVERSIBLE_REQUIRES_CHAIRMAN,
-            source_state,
+        )
+    if (
+        constraint_blocker is not None
+        and constraint_blocker.effect is ConstraintEffect.CHAIRMAN_REQUIRED
+    ):
+        return decide(
+            Disposition.CHAIRMAN_REQUIRED,
+            _constraint_reason(constraint_blocker),
+            blocking_constraint=constraint_blocker.constraint_id,
         )
     if option.action in READ_ONLY_ACTIONS:
-        return _decision(
-            option,
+        return decide(
             Disposition.READ_ONLY_ELIGIBLE,
             ReasonCode.READ_ONLY_INHERENT,
-            source_state,
             serviceable=True,
         )
 
     if envelope is None or envelope_state is EnvelopeState.MISSING:
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.MISSING_DELEGATION_ENVELOPE,
-            source_state,
         )
     if envelope_state is EnvelopeState.SOURCE_NOT_CURRENT:
-        return _decision(
-            option,
+        return decide(
             Disposition.REFUSED,
             ReasonCode.ENVELOPE_SOURCE_NOT_CURRENT,
-            source_state,
         )
     if envelope_state is EnvelopeState.EXPIRED:
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.ENVELOPE_EXPIRED,
-            source_state,
         )
-    if envelope.mode is EnvelopeMode.BOUNDED_AUTONOMOUS:
-        autonomous_level = strategic_constraints[
-            "unbounded_autonomous_strategic_modification"
-        ]
-        if autonomous_level == "prohibited":
-            return _decision(
-                option,
-                Disposition.REFUSED,
-                ReasonCode.STRATEGIC_CONSTRAINT_PROHIBITS,
-                source_state,
-            )
-        if autonomous_level == "constrained":
-            return _decision(
-                option,
-                Disposition.CHAIRMAN_REQUIRED,
-                ReasonCode.STRATEGIC_CONSTRAINT_REQUIRES_CHAIRMAN,
-                source_state,
-            )
     if option.action not in envelope.allowed_actions:
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.ACTION_NOT_DELEGATED,
-            source_state,
         )
     if option.reversibility not in envelope.allowed_reversibility:
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.REVERSIBILITY_NOT_DELEGATED,
-            source_state,
         )
     if not _refs_allowed(option.scope_refs, envelope.allowed_scope_prefixes):
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.SCOPE_OUTSIDE_ENVELOPE,
-            source_state,
         )
     if option.budget_units > envelope.max_budget_units:
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.BUDGET_EXCEEDS_ENVELOPE,
-            source_state,
         )
     if option.active_children_after > envelope.max_active_children:
-        return _decision(
-            option,
+        return decide(
             Disposition.REFUSED,
             ReasonCode.ACTIVE_CHILDREN_EXCEED_ENVELOPE,
-            source_state,
         )
     if not _scope_allowed(option, envelope):
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.SCOPE_OUTSIDE_ENVELOPE,
-            source_state,
         )
     if option.operation_key is None:
-        return _decision(
-            option,
+        return decide(
             Disposition.REFUSED,
             ReasonCode.STABLE_OPERATION_REQUIRED,
-            source_state,
         )
-    if option.action == "SOURCE_MERGE" and option.expected_head_sha is None:
-        return _decision(
-            option,
+    if (
+        option.action in {"SOURCE_BRANCH_WRITE", "SOURCE_MERGE"}
+        and option.expected_head_sha is None
+    ):
+        return decide(
             Disposition.REFUSED,
             ReasonCode.EXPECTED_HEAD_REQUIRED,
-            source_state,
         )
     if (
         option.action in NEW_CHILD_ACTIONS
         and option.carrier_state is not CarrierState.NEW_CHILD
     ):
-        return _decision(
-            option,
+        return decide(
             Disposition.REFUSED,
             ReasonCode.NEW_CHILD_CARRIER_REQUIRED,
-            source_state,
         )
     if (
         option.action not in NEW_CHILD_ACTIONS
         and option.carrier_state is not CarrierState.EXACT_EXISTING
     ):
-        return _decision(
-            option,
+        return decide(
             Disposition.REFUSED,
             ReasonCode.EXACT_CARRIER_REQUIRED,
-            source_state,
         )
     if (
         option.carrier_ref is not None
@@ -944,18 +1031,14 @@ def _adjudicate(
             (option.carrier_ref,), envelope.allowed_carrier_prefixes
         )
     ):
-        return _decision(
-            option,
+        return decide(
             Disposition.CHAIRMAN_REQUIRED,
             ReasonCode.SCOPE_OUTSIDE_ENVELOPE,
-            source_state,
         )
     if option.carrier_state is CarrierState.AMBIGUOUS:
-        return _decision(
-            option,
+        return decide(
             Disposition.REFUSED,
             ReasonCode.EXACT_CARRIER_REQUIRED,
-            source_state,
         )
     requires_canary_controls = (
         option.action == "REVERSIBLE_RUNTIME_CANARY"
@@ -964,19 +1047,139 @@ def _adjudicate(
     if requires_canary_controls and not all(
         (option.stop_condition, option.rollback_plan, option.falsifier)
     ):
-        return _decision(
-            option,
+        return decide(
             Disposition.REFUSED,
             ReasonCode.CANARY_CONTROLS_REQUIRED,
-            source_state,
         )
-    return _decision(
-        option,
+    return decide(
         Disposition.ELIGIBLE_WITHIN_DELEGATION,
         ReasonCode.EXPLICIT_DELEGATION_ENVELOPE,
-        source_state,
         serviceable=True,
     )
+
+
+def _evaluate_constraints(
+    option: StrategicOption,
+    strategic_constraints: Mapping[str, str],
+    envelope: DelegationEnvelope | None,
+) -> tuple[ConstraintResult, ...]:
+    results: list[ConstraintResult] = []
+    for constraint_id in sorted(strategic_constraints):
+        level = strategic_constraints[constraint_id]
+        applicability = _constraint_applicability(
+            constraint_id, option, envelope
+        )
+        effect = _constraint_effect(
+            constraint_id, level, applicability, option
+        )
+        results.append(
+            ConstraintResult(
+                constraint_id=constraint_id,
+                level=level,
+                applicability=applicability,
+                effect=effect,
+            )
+        )
+    return tuple(results)
+
+
+def _constraint_applicability(
+    constraint_id: str,
+    option: StrategicOption,
+    envelope: DelegationEnvelope | None,
+) -> ConstraintApplicability:
+    if constraint_id == "autonomous_production_deploy":
+        return (
+            ConstraintApplicability.APPLIES
+            if option.action == "PRODUCTION_DEPLOY"
+            else ConstraintApplicability.DOES_NOT_APPLY
+        )
+    if constraint_id == "autonomous_live_capital_execution":
+        return (
+            ConstraintApplicability.APPLIES
+            if option.action == "LIVE_CAPITAL_EXECUTION"
+            else ConstraintApplicability.DOES_NOT_APPLY
+        )
+    if constraint_id == "duplicate_control_planes":
+        return (
+            ConstraintApplicability.APPLIES
+            if option.creates_duplicate_control_plane
+            else ConstraintApplicability.DOES_NOT_APPLY
+        )
+    if constraint_id == "unbounded_autonomous_strategic_modification":
+        return (
+            ConstraintApplicability.APPLIES
+            if option.action in MODIFYING_ACTIONS
+            and envelope is not None
+            and envelope.mode is EnvelopeMode.BOUNDED_AUTONOMOUS
+            else ConstraintApplicability.DOES_NOT_APPLY
+        )
+    if constraint_id == "new_feature_expansion":
+        if option.action in READ_ONLY_ACTIONS:
+            return ConstraintApplicability.DOES_NOT_APPLY
+        if "UNKNOWN" in option.change_classes:
+            return ConstraintApplicability.UNKNOWN
+        return (
+            ConstraintApplicability.APPLIES
+            if "NEW_FEATURE" in option.change_classes
+            else ConstraintApplicability.DOES_NOT_APPLY
+        )
+    if constraint_id == "marketing_org_expansion_before_distribution_proof":
+        if option.action in READ_ONLY_ACTIONS:
+            return ConstraintApplicability.DOES_NOT_APPLY
+        if "UNKNOWN" in option.change_classes:
+            return ConstraintApplicability.UNKNOWN
+        if "ORGANIZATIONAL_EXPANSION" not in option.change_classes:
+            return ConstraintApplicability.DOES_NOT_APPLY
+        if not option.affected_departments:
+            return ConstraintApplicability.UNKNOWN
+        return (
+            ConstraintApplicability.APPLIES
+            if "marketing" in option.affected_departments
+            else ConstraintApplicability.DOES_NOT_APPLY
+        )
+    return ConstraintApplicability.UNKNOWN
+
+
+def _constraint_effect(
+    constraint_id: str,
+    level: str,
+    applicability: ConstraintApplicability,
+    option: StrategicOption,
+) -> ConstraintEffect:
+    if applicability is ConstraintApplicability.DOES_NOT_APPLY:
+        return ConstraintEffect.NONE
+    if constraint_id == "duplicate_control_planes":
+        if level == "prohibited":
+            return ConstraintEffect.REFUSED
+        return ConstraintEffect.CHAIRMAN_REQUIRED
+    if option.action in READ_ONLY_ACTIONS:
+        return ConstraintEffect.NONE
+    if level == "prohibited":
+        return ConstraintEffect.REFUSED
+    if level == "constrained":
+        return ConstraintEffect.CHAIRMAN_REQUIRED
+    return ConstraintEffect.NONE
+
+
+def _blocking_constraint(
+    results: Sequence[ConstraintResult],
+) -> ConstraintResult | None:
+    for effect in (ConstraintEffect.REFUSED, ConstraintEffect.CHAIRMAN_REQUIRED):
+        for result in results:
+            if result.effect is effect:
+                return result
+    return None
+
+
+def _constraint_reason(result: ConstraintResult) -> ReasonCode:
+    if result.constraint_id == "duplicate_control_planes":
+        if result.effect is ConstraintEffect.REFUSED:
+            return ReasonCode.DUPLICATE_CONTROL_PLANE_REFUSED
+        return ReasonCode.CONSTITUTIONAL_CHAIRMAN_BOUNDARY
+    if result.effect is ConstraintEffect.REFUSED:
+        return ReasonCode.STRATEGIC_CONSTRAINT_PROHIBITS
+    return ReasonCode.STRATEGIC_CONSTRAINT_REQUIRES_CHAIRMAN
 
 
 def _decision(
@@ -984,17 +1187,34 @@ def _decision(
     disposition: Disposition,
     reason: ReasonCode,
     source_state: SourceState,
+    constraint_results: tuple[ConstraintResult, ...],
     *,
+    blocking_constraint: str | None = None,
     serviceable: bool = False,
 ) -> Adjudication:
+    payload = [_constraint_result_payload(result) for result in constraint_results]
     return Adjudication(
         option_id=option.option_id,
         disposition=disposition,
         reason=reason,
         serviceable=serviceable,
         source_state=source_state,
+        constraint_results=constraint_results,
+        constraint_results_digest=hashlib.sha256(
+            canonical_json_bytes(payload)
+        ).hexdigest(),
+        blocking_constraint=blocking_constraint,
         execution_authority_granted=False,
     )
+
+
+def _constraint_result_payload(result: ConstraintResult) -> dict[str, str]:
+    return {
+        "constraint_id": result.constraint_id,
+        "level": result.level,
+        "applicability": result.applicability.value,
+        "effect": result.effect.value,
+    }
 
 
 def _ref_matches_prefix(ref: str, prefix: str) -> bool:
@@ -1024,7 +1244,10 @@ def _scope_allowed(option: StrategicOption, envelope: DelegationEnvelope) -> boo
     repository = option.repositories[0]
     prefixes = envelope.allowed_path_prefixes.get(repository, ())
     return bool(prefixes) and all(
-        any(path == prefix or path.startswith(prefix.rstrip("/") + "/") for prefix in prefixes)
+        any(
+            path == prefix or path.startswith(prefix.rstrip("/") + "/")
+            for prefix in prefixes
+        )
         for path in option.paths
     )
 
@@ -1062,8 +1285,9 @@ def _dominates(left: StrategicOption, right: StrategicOption) -> bool:
 
 def _aggregate_source_state(receipts: Sequence[SourceReceipt]) -> SourceState:
     load_bearing = [receipt for receipt in receipts if receipt.load_bearing]
-    relevant = load_bearing or list(receipts)
-    states = {receipt.state for receipt in relevant}
+    if not load_bearing:
+        return SourceState.UNKNOWN
+    states = {receipt.state for receipt in load_bearing}
     if SourceState.CONFLICT in states:
         return SourceState.CONFLICT
     if SourceState.UNKNOWN in states:
@@ -1171,16 +1395,21 @@ def _parse_time(value: str) -> datetime:
 
 
 __all__ = [
+    "AFFECTED_DEPARTMENTS",
     "BENEFIT_DIMENSIONS",
+    "CHANGE_CLASSES",
     "COST_DIMENSIONS",
     "CarrierState",
     "ChairmanCognitionError",
+    "ConstraintApplicability",
+    "ConstraintEffect",
     "Disposition",
     "EffectState",
     "ENVELOPE_SCHEMA",
     "EnvelopeMode",
     "INPUT_SCHEMA",
     "PACKET_SCHEMA",
+    "REQUIRED_CURRENT_CONSTRAINTS",
     "ReasonCode",
     "Reversibility",
     "SourceState",

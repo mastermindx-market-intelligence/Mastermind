@@ -235,9 +235,57 @@ Across a representative multi-program interval, Chris performs zero routine:
 - initiative status reconstruction;
 - reminders to continue or close work.
 
+## R2 — complete current-constraint and source binding repair
+
+R2 is a same-carrier A1 repair, not a successor control plane. It closes the defect where only four of
+six current Strategic State constraints were operational and non-load-bearing context could appear
+current.
+
+### R2 ordered implementation
+
+1. RED tests add the required root Strategic State source, option classification, all six current
+   selectors, future-constraint behavior, load-bearing evidence and exact-head branch-write rules.
+2. Require `strategic_constraints_source_ref` to resolve to one `CURRENT`, load-bearing
+   `STRATEGIC_STATE` receipt and include it in every option source aggregate.
+3. Require each option to cite another load-bearing source; advisory Slack/Linear context never
+   establishes or repairs currentness.
+4. Add closed `change_classes` and `affected_departments` facts. `UNKNOWN` is exclusive; every
+   modifying option is classified; organizational expansion names a department.
+5. Evaluate all six current constraints:
+   - `autonomous_production_deploy`;
+   - `autonomous_live_capital_execution`;
+   - `duplicate_control_planes`;
+   - `marketing_org_expansion_before_distribution_proof`;
+   - `new_feature_expansion`;
+   - `unbounded_autonomous_strategic_modification`.
+6. Emit sorted digest-covered `constraint_results` and one `blocking_constraint`; preserve
+   `REFUSED > CHAIRMAN_REQUIRED > eligibility`.
+7. Treat every future constraint without a selector as `UNKNOWN`: prohibited refuses, constrained
+   requires Chairman for modifying work, permitted continues while exposing uncertainty. Read-only
+   work remains no-effect.
+8. Require `expected_head_sha` for existing-carrier `SOURCE_BRANCH_WRITE` and `SOURCE_MERGE`.
+9. Preserve pure no-I/O behavior, exact carriers/scopes, canary controls, effect semantics, Pareto
+   frontier, hard-false execution authority and owner revalidation.
+10. Run hosted focused/full/security proof, obtain fresh independent exact-head audit, then perform
+    expected-head release adjudication. No Ready or merge is implied by green CI.
+
+### R2 migration boundary
+
+R2 changes the closed A1 input grammar. A2 and later producers remain held until they are migrated on
+their own carriers to emit the strategy source reference, option classification and complete current
+constraint set. No A2 write is part of R2.
+
+### R2 stop condition
+
+One exact #284 head inside the existing nine-path PR, with a recorded RED failure, terminal-green
+hosted repository/security checks, fresh independent audit and no unresolved source collision. R2
+makes only A1 `BUILT_NOT_PROVEN / PRODUCTION_INERT`; it does not create a Job, execute a canary,
+change delegation, deploy, trade or prove the Chairman experience.
+
 ## Exact next action after A1
 
-Build and run one real current-source CCL-A2 input against the A1 CLI. The first packet should include
-the active zero-touch execution carriers, Steward/attention dependencies, the new CCL program and at
-least one product/intelligence alternative so the strategic frontier is not trivially self-serving.
-Then select the first CCL-A3 canary inside an explicit bounded envelope.
+After A1 is protected, migrate A2 to the R2 schema on its existing carrier, independently review it,
+and then build one real current-source packet. The packet must include active zero-touch execution
+carriers, Steward/attention dependencies, the CCL program and at least one product/intelligence
+alternative so the strategic frontier is not trivially self-serving. Only then select the next
+supervised CCL-A3 canary inside an explicit bounded envelope.

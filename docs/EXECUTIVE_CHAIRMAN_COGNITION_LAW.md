@@ -311,3 +311,57 @@ It is complete only when, on a real multi-program company objective:
 - Chris performs no routine message shuttling, provider/account allocation, session hunting,
   watcher repair, carrier archaeology or initiative babysitting;
 - Chairman-only forks are rare, explicit and genuinely preference/constitution decisions.
+
+## 14. R2 complete strategic-constraint coverage
+
+A1 must never carry a Strategic State rule as decorative text. Every input therefore contains a
+required root `strategic_constraints_source_ref` that resolves to exactly one `CURRENT`,
+load-bearing `STRATEGIC_STATE` receipt. That receipt is included in every option's aggregate source
+state. Each option must independently cite at least one other load-bearing source; current
+Slack/Linear context cannot establish or repair currentness for a stale load-bearing fact.
+
+Every option carries closed classification facts:
+
+```text
+change_classes:
+  NEW_FEATURE
+  MAINTENANCE_REPAIR
+  EXISTING_CAPABILITY_COMPLETION
+  ARCHITECTURE_RECORD
+  RESEARCH
+  RELEASE
+  RUNTIME_CANARY
+  ORGANIZATIONAL_EXPANSION
+  RESOURCE_REALLOCATION
+  UNKNOWN
+affected_departments: prophet | product | marketing | executive
+```
+
+`UNKNOWN` cannot coexist with another class. Modifying actions require classification.
+`ORGANIZATIONAL_EXPANSION` requires at least one affected department. Classification is evidence for
+constraint applicability; it never overrides action, effect, carrier, constitutional or owner law.
+
+The current required constraint set is exactly the six current Strategic State rules:
+
+```text
+autonomous_production_deploy
+autonomous_live_capital_execution
+duplicate_control_planes
+marketing_org_expansion_before_distribution_proof
+new_feature_expansion
+unbounded_autonomous_strategic_modification
+```
+
+Removing any current rule makes the input malformed. A future constraint is allowed but never
+silently ignored: its selector is `UNKNOWN`; on a modifying option, `prohibited` refuses,
+`constrained` requires Chairman adjudication, and `permitted` may continue through every other gate.
+Read-only options remain inherently non-modifying while still exposing the unknown selector.
+
+Every adjudication emits sorted, digest-covered `constraint_results` with constraint ID, current
+level, applicability (`APPLIES | DOES_NOT_APPLY | UNKNOWN`) and effect
+(`NONE | CHAIRMAN_REQUIRED | REFUSED`), plus one exact `blocking_constraint` or null. Final
+precedence is `REFUSED` over `CHAIRMAN_REQUIRED` over eligibility while preserving all results.
+
+Both `SOURCE_BRANCH_WRITE` and `SOURCE_MERGE` on an existing carrier require an exact
+`expected_head_sha`. The packet remains advice only: `execution_authority_granted=false` and the
+existing effect owner must revalidate current source, authority and prior effect before mutation.

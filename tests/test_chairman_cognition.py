@@ -55,7 +55,7 @@ def _option(option_id="OPT-A", **changes):
         "operation_key": "chairman-cognition-test-001",
         "carrier_state": "EXACT_EXISTING",
         "carrier_ref": "github:Mastermind:branch:test",
-        "expected_head_sha": None,
+        "expected_head_sha": "a" * 40,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": ["control_plane/chairman_cognition.py"],
         "budget_units": 5,
@@ -64,6 +64,8 @@ def _option(option_id="OPT-A", **changes):
         "stop_condition": "Stop at one immutable review-ready branch head.",
         "rollback_plan": "Delete no canonical state; abandon the branch if rejected.",
         "falsifier": "Any duplicate lifecycle or authority owner is a failure.",
+        "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
+        "affected_departments": ["executive"],
         "benefits": _benefits(),
         "costs": _costs(),
     }
@@ -111,6 +113,14 @@ def _document(*options, envelope=None):
         "as_of": "2026-08-30T15:00:00Z",
         "source_receipts": [
             {
+                "source_ref": "SRC-STRATEGY",
+                "owner": "STRATEGIC_STATE",
+                "revision": "sha256:current-strategic-state",
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T15:00:00Z",
+            },
+            {
                 "source_ref": "SRC-CHAIRMAN",
                 "owner": "CHAIRMAN_DIRECTIVE",
                 "revision": "conversation:2026-08-30",
@@ -127,10 +137,13 @@ def _document(*options, envelope=None):
                 "observed_at": "2026-08-30T15:00:00Z",
             },
         ],
+        "strategic_constraints_source_ref": "SRC-STRATEGY",
         "strategic_constraints": {
             "autonomous_production_deploy": "prohibited",
             "autonomous_live_capital_execution": "prohibited",
             "duplicate_control_planes": "prohibited",
+            "marketing_org_expansion_before_distribution_proof": "prohibited",
+            "new_feature_expansion": "constrained",
             "unbounded_autonomous_strategic_modification": "prohibited",
         },
         "delegation_envelope": envelope,
@@ -173,10 +186,12 @@ def test_read_only_action_is_eligible_without_envelope():
         operation_key=None,
         carrier_state="NOT_APPLICABLE",
         carrier_ref=None,
+        expected_head_sha=None,
         repositories=[],
         paths=[],
         budget_units=0,
         active_children_after=0,
+        change_classes=["RESEARCH"],
     )
     packet = evaluate_document(_document(option, envelope=None))
     item = _adjudication(packet)
@@ -194,7 +209,7 @@ def test_current_envelope_allows_bounded_reversible_source_write():
 
 def test_envelope_is_not_accepted_when_authority_source_is_stale():
     document = _document(_option(), envelope=_envelope())
-    document["source_receipts"][0]["state"] = "STALE"
+    document["source_receipts"][1]["state"] = "STALE"
     packet = evaluate_document(document)
     assert packet["delegation_envelope"]["state"] == "SOURCE_NOT_CURRENT"
     assert _adjudication(packet)["reason"] == "SOURCE_NOT_CURRENT"
@@ -311,7 +326,10 @@ def test_stable_operation_and_exact_carrier_are_required():
 
 def test_source_merge_requires_expected_head_sha():
     packet = evaluate_document(
-        _document(_option(action="SOURCE_MERGE"), envelope=_envelope())
+        _document(
+            _option(action="SOURCE_MERGE", expected_head_sha=None),
+            envelope=_envelope(),
+        )
     )
     assert _adjudication(packet)["reason"] == "EXPECTED_HEAD_REQUIRED"
 
@@ -326,7 +344,14 @@ def test_source_merge_requires_expected_head_sha():
 
 def test_live_canary_requires_stop_rollback_and_falsifier():
     for missing in ("stop_condition", "rollback_plan", "falsifier"):
-        changes = {missing: None, "action": "REVERSIBLE_RUNTIME_CANARY"}
+        changes = {
+            missing: None,
+            "action": "REVERSIBLE_RUNTIME_CANARY",
+            "expected_head_sha": None,
+            "repositories": [],
+            "paths": [],
+            "change_classes": ["RUNTIME_CANARY"],
+        }
         packet = evaluate_document(
             _document(_option(**changes), envelope=_envelope())
         )
@@ -460,7 +485,10 @@ def test_option_action_reversibility_and_carrier_grammar_is_consistent():
 
 
 def test_noncurrent_envelope_source_is_distinct_from_current_option_sources():
-    document = _document(_option(), envelope=_envelope(authority_source_refs=["SRC-ENVELOPE"]))
+    document = _document(
+        _option(),
+        envelope=_envelope(authority_source_refs=["SRC-ENVELOPE"]),
+    )
     document["source_receipts"].append(
         {
             "source_ref": "SRC-ENVELOPE",
@@ -529,6 +557,7 @@ def test_executive_child_commission_requires_explicit_new_child_carrier():
                 action="EXECUTIVE_CHILD_COMMISSION",
                 carrier_state="NEW_CHILD",
                 carrier_ref=None,
+                expected_head_sha=None,
             ),
             envelope=_envelope(),
         )
@@ -590,10 +619,12 @@ def test_read_only_options_cannot_carry_effect_state():
                     operation_key=None,
                     carrier_state="NOT_APPLICABLE",
                     carrier_ref=None,
+                    expected_head_sha=None,
                     repositories=[],
                     paths=[],
                     budget_units=0,
                     active_children_after=0,
+                    change_classes=["RESEARCH"],
                 ),
                 envelope=None,
             )

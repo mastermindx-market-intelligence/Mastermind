@@ -42,7 +42,7 @@ def _option(**changes) -> dict:
         "operation_key": "ccl-hardening-001",
         "carrier_state": "EXACT_EXISTING",
         "carrier_ref": "github:Mastermind:branch:ccl",
-        "expected_head_sha": None,
+        "expected_head_sha": "a" * 40,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": ["control_plane/chairman_cognition.py"],
         "budget_units": 1,
@@ -51,6 +51,8 @@ def _option(**changes) -> dict:
         "stop_condition": "Stop after one exact branch head.",
         "rollback_plan": "Abandon the unmerged branch.",
         "falsifier": "Any duplicate owner is a failure.",
+        "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
+        "affected_departments": ["executive"],
         "benefits": _metrics(),
         "costs": _costs(),
     }
@@ -90,6 +92,14 @@ def _document(option: dict | None = None, envelope: dict | None = None) -> dict:
         "as_of": "2026-08-30T16:00:00Z",
         "source_receipts": [
             {
+                "source_ref": "SRC-STRATEGY",
+                "owner": "STRATEGIC_STATE",
+                "revision": "sha256:current-strategic-state",
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T16:00:00Z",
+            },
+            {
                 "source_ref": "SRC-CHAIRMAN",
                 "owner": "CHAIRMAN_DIRECTIVE",
                 "revision": "conversation:2026-08-30",
@@ -106,10 +116,13 @@ def _document(option: dict | None = None, envelope: dict | None = None) -> dict:
                 "observed_at": "2026-08-30T16:00:00Z",
             },
         ],
+        "strategic_constraints_source_ref": "SRC-STRATEGY",
         "strategic_constraints": {
             "autonomous_production_deploy": "prohibited",
             "autonomous_live_capital_execution": "prohibited",
             "duplicate_control_planes": "prohibited",
+            "marketing_org_expansion_before_distribution_proof": "prohibited",
+            "new_feature_expansion": "constrained",
             "unbounded_autonomous_strategic_modification": "prohibited",
         },
         "delegation_envelope": envelope or _envelope(),
@@ -125,6 +138,7 @@ def _organizational_option(**changes) -> dict:
     return _option(
         action="ORGANIZATIONAL_RESTRUCTURE",
         carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+        expected_head_sha=None,
         repositories=[],
         paths=[],
         **changes,
@@ -151,6 +165,7 @@ def test_new_executive_child_requires_explicit_new_child_carrier() -> None:
         action="EXECUTIVE_CHILD_COMMISSION",
         carrier_state="NEW_CHILD",
         carrier_ref=None,
+        expected_head_sha=None,
         repositories=[],
         paths=[],
     )
@@ -183,10 +198,12 @@ def test_read_only_action_cannot_claim_an_applied_effect() -> None:
         operation_key=None,
         carrier_state="NOT_APPLICABLE",
         carrier_ref=None,
+        expected_head_sha=None,
         repositories=[],
         paths=[],
         budget_units=0,
         active_children_after=0,
+        change_classes=["RESEARCH"],
     )
     with pytest.raises(ChairmanCognitionError, match="NONE effect_state"):
         evaluate_document(_document(option, envelope=None))
@@ -194,14 +211,14 @@ def test_read_only_action_cannot_claim_an_applied_effect() -> None:
 
 def test_delegation_authority_source_must_be_load_bearing() -> None:
     document = _document()
-    document["source_receipts"][0]["load_bearing"] = False
+    document["source_receipts"][1]["load_bearing"] = False
     with pytest.raises(ChairmanCognitionError, match="load-bearing"):
         evaluate_document(document)
 
 
 def test_source_receipt_cannot_postdate_decision_snapshot() -> None:
     document = _document()
-    document["source_receipts"][1]["observed_at"] = "2026-08-30T16:00:01Z"
+    document["source_receipts"][2]["observed_at"] = "2026-08-30T16:00:01Z"
     with pytest.raises(ChairmanCognitionError, match="postdate"):
         evaluate_document(document)
 
@@ -214,10 +231,12 @@ def test_portfolio_hold_is_a_first_class_no_effect_option() -> None:
         operation_key=None,
         carrier_state="NOT_APPLICABLE",
         carrier_ref=None,
+        expected_head_sha=None,
         repositories=[],
         paths=[],
         budget_units=0,
         active_children_after=0,
+        change_classes=["RESEARCH"],
     )
     packet = evaluate_document(_document(option, envelope=None))
     assert packet["recommended_option_id"] == "OPT-HARDEN"
@@ -247,6 +266,7 @@ def test_program_start_uses_new_child_semantics() -> None:
         action="PROGRAM_START",
         carrier_state="EXACT_EXISTING",
         carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+        expected_head_sha=None,
         repositories=[],
         paths=[],
     )
@@ -256,6 +276,7 @@ def test_program_start_uses_new_child_semantics() -> None:
         action="PROGRAM_START",
         carrier_state="NEW_CHILD",
         carrier_ref=None,
+        expected_head_sha=None,
         repositories=[],
         paths=[],
     )
@@ -281,6 +302,7 @@ def test_chairman_organizational_actions_are_modeled_without_generic_task_aliase
     option = _option(
         action=action,
         carrier_ref="agentos:WS:CHAIRMAN-CONTROL-ROOM",
+        expected_head_sha=None,
         repositories=[],
         paths=[],
     )
@@ -335,10 +357,12 @@ def test_read_only_option_remains_eligible_in_bounded_autonomous_mode() -> None:
         operation_key=None,
         carrier_state="NOT_APPLICABLE",
         carrier_ref=None,
+        expected_head_sha=None,
         repositories=[],
         paths=[],
         budget_units=0,
         active_children_after=0,
+        change_classes=["RESEARCH"],
     )
     item = _result(_document(option, _envelope(mode="BOUNDED_AUTONOMOUS")))
     assert item["disposition"] == "READ_ONLY_ELIGIBLE"
@@ -361,7 +385,14 @@ def test_runtime_canary_requires_controls_in_bounded_autonomous_mode() -> None:
         + ["REVERSIBLE_RUNTIME_CANARY"],
     )
     document = _document(
-        _option(action="REVERSIBLE_RUNTIME_CANARY", stop_condition=None),
+        _option(
+            action="REVERSIBLE_RUNTIME_CANARY",
+            stop_condition=None,
+            expected_head_sha=None,
+            repositories=[],
+            paths=[],
+            change_classes=["RUNTIME_CANARY"],
+        ),
         envelope,
     )
     document["strategic_constraints"][
