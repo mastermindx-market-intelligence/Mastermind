@@ -553,6 +553,9 @@ def _project_fact(
     if fact.source_state is CapabilityState.REJECTED_BY_DESIGN:
         availability = Availability.REFUSED
         issues.add("CAPABILITY_REJECTED_BY_DESIGN")
+    elif dependency_rejected:
+        proof_state = CapabilityState.REJECTED_BY_DESIGN
+        availability = Availability.REFUSED
     elif fact.source_state is CapabilityState.NOT_BUILT:
         availability = Availability.UNAVAILABLE
         issues.add("CAPABILITY_NOT_BUILT")
@@ -562,9 +565,6 @@ def _project_fact(
     elif fact.source_state is CapabilityState.BROKEN:
         availability = Availability.UNAVAILABLE
         issues.add("CAPABILITY_BROKEN")
-    elif dependency_rejected:
-        proof_state = CapabilityState.REJECTED_BY_DESIGN
-        availability = Availability.REFUSED
     elif dependency_broken:
         proof_state = CapabilityState.BROKEN
         availability = Availability.UNAVAILABLE
