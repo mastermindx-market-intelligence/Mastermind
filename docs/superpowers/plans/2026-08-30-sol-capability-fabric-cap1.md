@@ -74,6 +74,20 @@ issue_codes[]
 source reference and issue codes. Facts are immutable tuples and closed enums. The projector does
 not parse prose, URLs, environment values, credentials or provider or account hints.
 
+Model-facing cardinality is closed:
+
+```text
+capabilities     <= 128
+scopes per set   <= 128
+dependencies     <= 64
+source refs      <= 32
+issue codes      <= 64
+```
+
+The capability iterable is consumed incrementally and stops with a typed refusal as soon as the
+129th item appears; it is never materialized without a ceiling. Each nested collection is validated
+before normalization or projection.
+
 ## 5. Output contract
 
 The envelope includes:
@@ -120,6 +134,11 @@ The digest is SHA-256 over canonical sorted JSON excluding the digest field itse
 
 ## 6. Deterministic projection law
 
+- `R0_OBSERVE` is constitutionally zero-effect: any R0 fact with `write_capable=true`,
+  `production_armed=true`, nonempty `required_write_scopes`, `confirmation_required=true` or
+  `prepared_action_required=true` is contradictory input and fails closed;
+- `write_serviceable=true` is impossible for `R0_OBSERVE` even if future code bypasses input
+  normalization; only W1/W2/A3 can represent an effect-bearing capability;
 - a capability whose own source state is `REJECTED_BY_DESIGN` is always `REFUSED`;
 - a **required** dependency in `REJECTED_BY_DESIGN` makes the top-level capability
   `REJECTED_BY_DESIGN / REFUSED`; it may not be laundered into generic `BROKEN` or availability;
@@ -182,6 +201,8 @@ or owner-native effect reconciliation.
 - explicit write-only scope absence preserves only read serviceability;
 - write-looking scope names are read-critical unless explicitly classified;
 - invalid write-scope partition fails closed;
+- R0 write, arming, prepared-action or confirmation contradictions fail closed;
+- every capability and nested collection ceiling rejects the first out-of-bounds item;
 - excess ambient scope is explicit, sorted, digest-bearing and authority-neutral;
 - missing required dependency becomes `DARK_OR_DISCONNECTED`;
 - required rejected dependency becomes `REJECTED_BY_DESIGN / REFUSED`;
