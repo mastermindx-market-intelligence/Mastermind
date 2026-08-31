@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import ast
+import io
+import json
 from pathlib import Path
 
+import pytest
 import yaml
+
+from scripts import chairman_cognition as cli
 
 _ROOT = Path(__file__).resolve().parents[1]
 _LAW = _ROOT / "docs" / "EXECUTIVE_CHAIRMAN_COGNITION_LAW.md"
@@ -161,3 +166,47 @@ def test_cli_is_a_bounded_json_projection_not_an_actuator():
     assert "unlink" not in calls
     assert "replace" not in calls
     assert "system" not in calls
+
+
+@pytest.mark.parametrize("use_stdin", [False, True])
+def test_cli_reader_rejects_duplicate_json_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    use_stdin: bool,
+) -> None:
+    payload = '{"schema":"shadow","schema":"mastermind.chairman_cognition_input.v1"}'
+    if use_stdin:
+        monkeypatch.setattr(cli.sys, "stdin", io.StringIO(payload))
+        path = "-"
+    else:
+        input_path = tmp_path / "duplicate.json"
+        input_path.write_text(payload, encoding="utf-8")
+        path = str(input_path)
+
+    with pytest.raises(ValueError, match="duplicate JSON object key"):
+        cli._read(path)
+
+
+@pytest.mark.parametrize("use_stdin", [False, True])
+def test_cli_duplicate_key_failure_is_opaque(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    use_stdin: bool,
+) -> None:
+    secret = "duplicate-secret-must-not-leak"
+    payload = f'{{"schema":"{secret}","schema":"valid-last-value"}}'
+    if use_stdin:
+        monkeypatch.setattr(cli.sys, "stdin", io.StringIO(payload))
+        path = "-"
+    else:
+        input_path = tmp_path / "duplicate-secret.json"
+        input_path.write_text(payload, encoding="utf-8")
+        path = str(input_path)
+
+    assert cli.main([path]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    error = json.loads(captured.err)
+    assert error["error"] == "INVALID_INPUT"
+    assert secret not in captured.err

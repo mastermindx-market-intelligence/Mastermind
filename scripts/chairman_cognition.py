@@ -18,6 +18,19 @@ from control_plane.chairman_cognition import (  # noqa: E402
 )
 
 
+class _DuplicateKeyError(ValueError):
+    """A JSON object repeated a key before A1 closed-map validation."""
+
+
+def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateKeyError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="JSON input path or '-' for stdin")
@@ -26,9 +39,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _read(path: str) -> object:
-    if path == "-":
-        return json.load(sys.stdin)
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+    return json.loads(text, object_pairs_hook=_strict_object)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,7 +50,13 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(raw, dict):
             raise ChairmanCognitionError("top-level JSON must be an object")
         packet = evaluate_document(raw)
-    except (ChairmanCognitionError, OSError, json.JSONDecodeError, UnicodeError):
+    except (
+        ChairmanCognitionError,
+        _DuplicateKeyError,
+        OSError,
+        json.JSONDecodeError,
+        UnicodeError,
+    ):
         print(
             json.dumps(
                 {"schema": ERROR_SCHEMA, "error": "INVALID_INPUT"},
