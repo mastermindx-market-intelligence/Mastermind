@@ -56,7 +56,7 @@ name
 app_id / app_generation
 privilege_class = R0_OBSERVE | W1_ROUTINE | W2_CONSEQUENTIAL | A3_ADMIN
 production_armed
-required_scopes / current_scopes
+required_scopes / required_write_scopes / current_scopes
 confirmation_required / prepared_action_required
 canonical_owner
 dependencies[]
@@ -96,6 +96,8 @@ privilege_class
 availability = AVAILABLE | READ_ONLY | DEGRADED | UNAVAILABLE | UNKNOWN | REFUSED
 production_armed
 required_scopes
+required_read_scopes
+required_write_scopes
 current_scopes
 missing_scopes
 excess_scopes
@@ -131,8 +133,13 @@ The digest is SHA-256 over canonical sorted JSON excluding the digest field itse
   `BUILT_NOT_PROVEN` where the capability otherwise remains readable;
 - a write-capable capability with `production_armed=false` is never write-serviceable; if reads remain
   serviceable it reports `READ_ONLY` and cannot exceed `BUILT_NOT_PROVEN` as a write capability;
-- missing required read scope makes the capability unavailable; missing only write scopes may retain
-  read serviceability but reports `READ_ONLY / PARTIAL`;
+- the caller supplies an explicit closed `required_write_scopes` subset; CAP1 never infers scope
+  authority from names such as `write`, `admin`, `manage` or provider-specific aliases;
+- any required scope not explicitly classified as write-only is read-critical and its absence makes the
+  capability unavailable; missing only explicit write scopes may retain read serviceability but reports
+  `READ_ONLY / PARTIAL`;
+- `required_write_scopes` outside `required_scopes`, or any nonempty write-only set on a read-only
+  capability, is invalid input and fails closed;
 - excess ambient scopes are reported but never counted toward required-scope authority;
 - missing, broken, disconnected, partial or unknown required dependencies remain explicit and fail
   closed;
@@ -172,7 +179,9 @@ or owner-native effect reconciliation.
 - future-dated proof cannot promote a read or arm a write and emits `LIVE_PROOF_FUTURE`;
 - claimed `PROVEN_LIVE` with future proof is downgraded;
 - broad required scopes plus `production_armed=false` remain unavailable for writes;
-- missing write scope preserves only read serviceability;
+- explicit write-only scope absence preserves only read serviceability;
+- write-looking scope names are read-critical unless explicitly classified;
+- invalid write-scope partition fails closed;
 - excess ambient scope is explicit, sorted, digest-bearing and authority-neutral;
 - missing required dependency becomes `DARK_OR_DISCONNECTED`;
 - required rejected dependency becomes `REJECTED_BY_DESIGN / REFUSED`;
