@@ -8,6 +8,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from control_plane.chairman_cognition import (
+    ENVELOPE_SCHEMA,
+    INPUT_SCHEMA,
+    evaluate_document,
+)
 from scripts import chairman_cognition as cli
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +39,77 @@ _STATE = _ROOT / "config" / "strategic_state.yml"
 def _text(path: Path) -> str:
     assert path.is_file(), f"missing Chairman Cognition source: {path}"
     return path.read_text(encoding="utf-8")
+
+
+def _valid_document() -> dict:
+    return {
+        "schema": INPUT_SCHEMA,
+        "as_of": "2026-08-30T16:00:00Z",
+        "source_receipts": [
+            {
+                "source_ref": "SRC-CHAIRMAN",
+                "owner": "CHAIRMAN_DIRECTIVE",
+                "revision": "conversation:2026-08-30",
+                "state": "CURRENT",
+                "load_bearing": True,
+                "observed_at": "2026-08-30T16:00:00Z",
+            }
+        ],
+        "strategic_constraints": {
+            "autonomous_production_deploy": "prohibited",
+            "autonomous_live_capital_execution": "prohibited",
+            "duplicate_control_planes": "prohibited",
+            "unbounded_autonomous_strategic_modification": "prohibited",
+        },
+        "delegation_envelope": None,
+        "options": [
+            {
+                "option_id": "OPT-DUPLICATE",
+                "title": "Hold while validating input integrity",
+                "action": "PORTFOLIO_HOLD",
+                "reversibility": "READ_ONLY",
+                "source_refs": ["SRC-CHAIRMAN"],
+                "scope_refs": [],
+                "effect_state": "NONE",
+                "operation_key": None,
+                "carrier_state": "NOT_APPLICABLE",
+                "carrier_ref": None,
+                "expected_head_sha": None,
+                "repositories": [],
+                "paths": [],
+                "budget_units": 0,
+                "active_children_after": 0,
+                "creates_duplicate_control_plane": False,
+                "stop_condition": None,
+                "rollback_plan": None,
+                "falsifier": None,
+                "benefits": {
+                    "strategic_leverage": 50,
+                    "dependency_unlock": 50,
+                    "learning_value": 50,
+                    "chairman_load_reduction": 50,
+                    "user_or_machine_value": 50,
+                },
+                "costs": {
+                    "time_to_evidence": 20,
+                    "execution_cost": 20,
+                    "coordination_risk": 20,
+                    "irreversibility_risk": 20,
+                    "scarce_cognition_cost": 20,
+                },
+            }
+        ],
+    }
+
+
+def _duplicate_payload(secret: str, *, nested: bool) -> str:
+    valid = json.dumps(_valid_document(), separators=(",", ":"))
+    if nested:
+        target = '"option_id":"OPT-DUPLICATE"'
+        replacement = f'"option_id":"{secret}","option_id":"OPT-DUPLICATE"'
+        assert target in valid
+        return valid.replace(target, replacement, 1)
+    return f'{{"schema":"{secret}",' + valid[1:]
 
 
 def test_source_law_freezes_one_office_two_modes_and_no_duplicate_owner():
@@ -168,39 +244,28 @@ def test_cli_is_a_bounded_json_projection_not_an_actuator():
     assert "system" not in calls
 
 
-@pytest.mark.parametrize("use_stdin", [False, True])
-def test_cli_reader_rejects_duplicate_json_keys(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    use_stdin: bool,
-) -> None:
-    payload = '{"schema":"shadow","schema":"mastermind.chairman_cognition_input.v1"}'
-    if use_stdin:
-        monkeypatch.setattr(cli.sys, "stdin", io.StringIO(payload))
-        path = "-"
-    else:
-        input_path = tmp_path / "duplicate.json"
-        input_path.write_text(payload, encoding="utf-8")
-        path = str(input_path)
-
-    with pytest.raises(ValueError, match="duplicate JSON object key"):
-        cli._read(path)
-
-
-@pytest.mark.parametrize("use_stdin", [False, True])
-def test_cli_duplicate_key_failure_is_opaque(
+@pytest.mark.parametrize(
+    "use_stdin,nested",
+    [(False, False), (True, True)],
+)
+def test_cli_rejects_duplicate_keys_that_would_otherwise_form_valid_document(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     use_stdin: bool,
+    nested: bool,
 ) -> None:
     secret = "duplicate-secret-must-not-leak"
-    payload = f'{{"schema":"{secret}","schema":"valid-last-value"}}'
+    payload = _duplicate_payload(secret, nested=nested)
+
+    permissive_document = json.loads(payload)
+    assert evaluate_document(permissive_document)["recommended_option_id"] == "OPT-DUPLICATE"
+
     if use_stdin:
         monkeypatch.setattr(cli.sys, "stdin", io.StringIO(payload))
         path = "-"
     else:
-        input_path = tmp_path / "duplicate-secret.json"
+        input_path = tmp_path / "duplicate-valid.json"
         input_path.write_text(payload, encoding="utf-8")
         path = str(input_path)
 
@@ -208,5 +273,8 @@ def test_cli_duplicate_key_failure_is_opaque(
     captured = capsys.readouterr()
     assert captured.out == ""
     error = json.loads(captured.err)
-    assert error["error"] == "INVALID_INPUT"
+    assert error == {
+        "error": "INVALID_INPUT",
+        "schema": "mastermind.chairman_cognition_error.v1",
+    }
     assert secret not in captured.err
