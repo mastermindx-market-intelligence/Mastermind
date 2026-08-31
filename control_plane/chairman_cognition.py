@@ -38,6 +38,7 @@ _PATH_PREFIX_RE = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\x00-\x1f]{1,240}
 _ISO_UTC_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]00:00)$"
 )
+_REF_BOUNDARY_CHARS = frozenset(":/#")
 
 MAX_OPTIONS = 64
 MAX_SOURCE_RECEIPTS = 128
@@ -996,8 +997,21 @@ def _decision(
     )
 
 
+def _ref_matches_prefix(ref: str, prefix: str) -> bool:
+    if ref == prefix:
+        return True
+    if not ref.startswith(prefix):
+        return False
+    if prefix[-1] in _REF_BOUNDARY_CHARS:
+        return True
+    return ref[len(prefix)] in _REF_BOUNDARY_CHARS
+
+
 def _refs_allowed(refs: Sequence[str], prefixes: Sequence[str]) -> bool:
-    return all(any(ref.startswith(prefix) for prefix in prefixes) for ref in refs)
+    return all(
+        any(_ref_matches_prefix(ref, prefix) for prefix in prefixes)
+        for ref in refs
+    )
 
 
 def _scope_allowed(option: StrategicOption, envelope: DelegationEnvelope) -> bool:

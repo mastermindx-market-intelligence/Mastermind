@@ -397,3 +397,42 @@ def test_duplicate_plane_constraint_is_consumed_and_never_delegates(
     assert item["disposition"] == disposition
     assert item["reason"] == reason
     assert item["execution_authority_granted"] is False
+
+
+def test_scope_prefix_requires_exact_or_delimited_boundary() -> None:
+    sibling = _option(scope_refs=["WS:CHAIRMAN-CONTROL-ROOM-EVIL"])
+    sibling_item = _result(_document(sibling))
+    assert sibling_item["disposition"] == "CHAIRMAN_REQUIRED"
+    assert sibling_item["reason"] == "SCOPE_OUTSIDE_ENVELOPE"
+
+    exact_item = _result(
+        _document(_option(scope_refs=["WS:CHAIRMAN-CONTROL-ROOM"]))
+    )
+    assert exact_item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+    child_item = _result(
+        _document(_option(scope_refs=["WS:CHAIRMAN-CONTROL-ROOM:REPAIR"]))
+    )
+    assert child_item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+
+def test_carrier_prefix_requires_exact_or_delimited_boundary() -> None:
+    exact_prefix = "github:Mastermind:branch:ccl"
+    envelope = _envelope(allowed_carrier_prefixes=[exact_prefix])
+
+    sibling_item = _result(
+        _document(
+            _option(carrier_ref=exact_prefix + "-EVIL"),
+            envelope,
+        )
+    )
+    assert sibling_item["disposition"] == "CHAIRMAN_REQUIRED"
+    assert sibling_item["reason"] == "SCOPE_OUTSIDE_ENVELOPE"
+
+    exact_item = _result(_document(_option(carrier_ref=exact_prefix), envelope))
+    assert exact_item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
+
+    child_item = _result(
+        _document(_option(carrier_ref=exact_prefix + "/repair"), envelope)
+    )
+    assert child_item["disposition"] == "ELIGIBLE_WITHIN_DELEGATION"
