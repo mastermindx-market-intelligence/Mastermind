@@ -432,56 +432,43 @@ def test_each_load_bearing_strategic_constraint_is_required_by_composer():
 def test_unresolved_mastermind_revision_is_unknown_not_current():
     boot = _boot_packet(mastermind_sha=None)
     option = _option(source_refs=[STRATEGIC_SOURCE_REF])
-    result = evaluate_bundle(_bundle(boot=boot, option=option))
-    summary = next(
-        item
-        for item in result["source_summary"]
-        if item["source_ref"] == STRATEGIC_SOURCE_REF
-    )
-    assert summary["state"] == "UNKNOWN"
-    assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+    with pytest.raises(
+        ChairmanCognitionError,
+        match="strategic constraints source must be CURRENT",
+    ):
+        evaluate_bundle(_bundle(boot=boot, option=option))
 
 
 def test_stale_local_master_cannot_be_laundered_as_current():
     boot = _boot_packet(mastermind_sha="c" * 40)
     option = _option(source_refs=[STRATEGIC_SOURCE_REF])
-    result = evaluate_bundle(_bundle(boot=boot, option=option))
-    summary = next(
-        item
-        for item in result["source_summary"]
-        if item["source_ref"] == STRATEGIC_SOURCE_REF
-    )
-    assert summary["state"] == "CONFLICT"
-    assert "canonical:" + _MASTERMIND_SHA in summary["revision"]
-    assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+    with pytest.raises(
+        ChairmanCognitionError,
+        match="strategic constraints source must be CURRENT",
+    ):
+        evaluate_bundle(_bundle(boot=boot, option=option))
 
 
 def test_noncanonical_mastermind_checkout_is_unknown_even_when_sha_matches():
     boot = _boot_packet()
     boot["mastermind"]["branch"] = "feature/unaccepted-strategy"
     option = _option(source_refs=[STRATEGIC_SOURCE_REF])
-    result = evaluate_bundle(_bundle(boot=boot, option=option))
-    summary = next(
-        item
-        for item in result["source_summary"]
-        if item["source_ref"] == STRATEGIC_SOURCE_REF
-    )
-    assert summary["state"] == "UNKNOWN"
-    assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+    with pytest.raises(
+        ChairmanCognitionError,
+        match="strategic constraints source must be CURRENT",
+    ):
+        evaluate_bundle(_bundle(boot=boot, option=option))
 
 
 def test_stale_or_unknown_mastermind_attestation_propagates():
     for state in ("STALE", "UNKNOWN", "CONFLICT"):
         bundle = _bundle(option=_option(source_refs=[STRATEGIC_SOURCE_REF]))
         bundle["mastermind_revision_attestation"]["state"] = state
-        result = evaluate_bundle(bundle)
-        summary = next(
-            item
-            for item in result["source_summary"]
-            if item["source_ref"] == STRATEGIC_SOURCE_REF
-        )
-        assert summary["state"] == state
-        assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+        with pytest.raises(
+            ChairmanCognitionError,
+            match="strategic constraints source must be CURRENT",
+        ):
+            evaluate_bundle(bundle)
 
 
 def test_missing_or_degraded_agentos_is_unknown_not_fabricated_current():
