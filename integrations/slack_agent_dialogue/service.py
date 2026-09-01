@@ -1,4 +1,4 @@
-"""Command-scoped AF_UNIX service/client for Active-Session Dialogue A1.
+"""Command-scoped AF_UNIX service/client for Active-Session Dialogue.
 
 The service owns no token, lifecycle state, queue, cursor, or background loop.
 A caller composes it with an injected ``DialogueEngine`` for one bounded command
@@ -16,6 +16,7 @@ import stat
 import struct
 import sys
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -26,8 +27,10 @@ from integrations.slack_agent_dialogue.engine import (
     jsonable,
 )
 from integrations.slack_agent_dialogue.engine import ERROR_CODES as DialogueEngineErrorCodes
+from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2, DialogueEngineV2
 
 CONTROL_VERSION = "mastermind.agent_dialogue_control.v1"
+CONTROL_VERSION_V2 = "mastermind.agent_dialogue_control.v2"
 DEFAULT_MAX_REQUEST_BYTES = 32 * 1024
 DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
 
@@ -48,6 +51,13 @@ _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 # the target kernel's ``sockaddr_un.sun_path`` buffer. Validate the encoded
 # path that Python passes to the kernel, not its character count.
 AF_UNIX_PATH_MAX_BYTES = 107 if sys.platform.startswith("linux") else 103
+
+
+class _SocketCleanupResult(Enum):
+    REMOVED = "removed"
+    ABSENT = "absent"
+    REPLACED = "replaced"
+    REFUSED = "refused"
 
 
 class DialogueServiceError(RuntimeError):
@@ -75,6 +85,9 @@ class ServiceConfig:
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     request_timeout_seconds: float = 15.0
+    socket_parent_mode: int = 0o700
+    socket_mode: int = 0o600
+    socket_group_gid: int | None = None
 
     def __post_init__(self) -> None:
         path = Path(self.socket_path)
@@ -102,6 +115,20 @@ class ServiceConfig:
             raise ValueError("max_response_bytes out of range")
         if not 0.1 <= self.request_timeout_seconds <= 120:
             raise ValueError("request_timeout_seconds out of range")
+        private_modes = (
+            self.socket_parent_mode == 0o700
+            and self.socket_mode == 0o600
+            and self.socket_group_gid is None
+        )
+        shared_modes = (
+            self.socket_parent_mode == 0o710
+            and self.socket_mode == 0o660
+            and isinstance(self.socket_group_gid, int)
+            and not isinstance(self.socket_group_gid, bool)
+            and self.socket_group_gid >= 0
+        )
+        if not private_modes and not shared_modes:
+            raise ValueError("socket reachability configuration is invalid")
 
 
 def _peer_uid(connection: socket.socket) -> int | None:
@@ -195,27 +222,85 @@ def _context(value: Any) -> DialogueContext:
     return context
 
 
-class AgentDialogueService:
-    """Owner-only one-request-at-a-time service over an injected engine."""
+def _context_v2(value: Any) -> DialogueContextV2:
+    item = _exact_mapping(
+        value,
+        {
+            "work_ref",
+            "commission_ref",
+            "session_ref",
+            "operation_key",
+            "watch_mode",
+            "actor_ref",
+            "applies_to",
+        },
+    )
+    context = DialogueContextV2(
+        work_ref=item["work_ref"],
+        commission_ref=item["commission_ref"],
+        session_ref=item["session_ref"],
+        operation_key=item["operation_key"],
+        watch_mode=item["watch_mode"],
+        actor_ref=item["actor_ref"],
+        applies_to=item["applies_to"],
+    )
+    try:
+        context.normalized()
+    except Exception:
+        raise DialogueServiceError("REQUEST_INVALID") from None
+    return context
 
-    def __init__(self, config: ServiceConfig, engine: DialogueEngine) -> None:
+
+class AgentDialogueService:
+    """Peer-authorized one-request-at-a-time service over injected engines."""
+
+    def __init__(
+        self,
+        config: ServiceConfig,
+        engine: DialogueEngine,
+        *,
+        engine_v2: DialogueEngineV2 | None = None,
+    ) -> None:
         self.config = config
         self.engine = engine
+        self.engine_v2 = engine_v2
         self._server: asyncio.AbstractServer | None = None
+        self._bound_socket_identity: tuple[int, int] | None = None
+        self._server_close_issued = False
+        self._close_lock: asyncio.Lock | None = None
         self._handled = asyncio.Event()
 
     def _prepare_socket(self) -> None:
         parent = self.config.socket_path.parent
-        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.config.socket_group_gid is None:
+            parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        else:
+            created = False
+            try:
+                parent.mkdir(
+                    mode=self.config.socket_parent_mode,
+                    parents=True,
+                    exist_ok=False,
+                )
+                created = True
+            except FileExistsError:
+                pass
+            if created:
+                parent.chmod(self.config.socket_parent_mode)
         info = parent.lstat()
         if (
             not stat.S_ISDIR(info.st_mode)
             or stat.S_ISLNK(info.st_mode)
             or info.st_uid != os.geteuid()
+            or (
+                self.config.socket_group_gid is not None
+                and info.st_gid != self.config.socket_group_gid
+            )
         ):
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
-        parent.chmod(0o700)
-        if stat.S_IMODE(parent.lstat().st_mode) != 0o700:
+        if self.config.socket_group_gid is None:
+            parent.chmod(0o700)
+        if stat.S_IMODE(parent.lstat().st_mode) != self.config.socket_parent_mode:
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
         try:
             socket_info = self.config.socket_path.lstat()
@@ -224,6 +309,13 @@ class AgentDialogueService:
         if (
             not stat.S_ISSOCK(socket_info.st_mode)
             or socket_info.st_uid != os.geteuid()
+            or (
+                self.config.socket_group_gid is not None
+                and (
+                    socket_info.st_gid != self.config.socket_group_gid
+                    or stat.S_IMODE(socket_info.st_mode) != self.config.socket_mode
+                )
+            )
         ):
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
         probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -238,19 +330,47 @@ class AgentDialogueService:
         self.config.socket_path.unlink(missing_ok=True)
 
     async def start(self) -> None:
-        if self._server is not None:
+        if (
+            self._server is not None
+            or self._bound_socket_identity is not None
+            or self._close_lock is not None
+        ):
             raise DialogueServiceError("SERVICE_UNAVAILABLE")
         path_prepared = False
         try:
             self._prepare_socket()
             path_prepared = True
+            self._close_lock = asyncio.Lock()
+            self._server_close_issued = False
             self._server = await asyncio.start_unix_server(
                 self._handle_connection,
                 path=str(self.config.socket_path),
                 limit=self.config.max_request_bytes + 1,
             )
-            self.config.socket_path.chmod(0o600)
-            if stat.S_IMODE(self.config.socket_path.lstat().st_mode) != 0o600:
+            bound_info = self.config.socket_path.lstat()
+            if (
+                not stat.S_ISSOCK(bound_info.st_mode)
+                or bound_info.st_uid != os.geteuid()
+                or (
+                    self.config.socket_group_gid is not None
+                    and bound_info.st_gid != self.config.socket_group_gid
+                )
+            ):
+                raise DialogueServiceError("SERVICE_UNAVAILABLE")
+            self._bound_socket_identity = (bound_info.st_dev, bound_info.st_ino)
+            self.config.socket_path.chmod(self.config.socket_mode)
+            socket_info = self.config.socket_path.lstat()
+            if (
+                (socket_info.st_dev, socket_info.st_ino)
+                != self._bound_socket_identity
+                or stat.S_IMODE(socket_info.st_mode) != self.config.socket_mode
+            ):
+                raise DialogueServiceError("SERVICE_UNAVAILABLE")
+            if self.config.socket_group_gid is not None and (
+                not stat.S_ISSOCK(socket_info.st_mode)
+                or socket_info.st_uid != os.geteuid()
+                or socket_info.st_gid != self.config.socket_group_gid
+            ):
                 raise DialogueServiceError("SERVICE_UNAVAILABLE")
         except DialogueServiceError:
             if path_prepared:
@@ -261,22 +381,104 @@ class AgentDialogueService:
                 await self.close()
             raise DialogueServiceError("SERVICE_UNAVAILABLE") from None
 
-    async def close(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
+    def _unlink_bound_socket(
+        self, bound_socket_identity: tuple[int, int] | None
+    ) -> _SocketCleanupResult:
+        if bound_socket_identity is None:
+            return _SocketCleanupResult.ABSENT
         try:
             info = self.config.socket_path.lstat()
-        except (FileNotFoundError, OSError):
-            return
-        if stat.S_ISSOCK(info.st_mode) and info.st_uid == os.geteuid():
+        except FileNotFoundError:
+            return _SocketCleanupResult.ABSENT
+        except OSError:
+            return _SocketCleanupResult.REFUSED
+        if (info.st_dev, info.st_ino) != bound_socket_identity:
+            return _SocketCleanupResult.REPLACED
+        owned_private_socket = (
+            self.config.socket_group_gid is None
+            and stat.S_ISSOCK(info.st_mode)
+            and info.st_uid == os.geteuid()
+        )
+        owned_shared_socket = (
+            self.config.socket_group_gid is not None
+            and stat.S_ISSOCK(info.st_mode)
+            and info.st_uid == os.geteuid()
+            and info.st_gid == self.config.socket_group_gid
+            and stat.S_IMODE(info.st_mode) == self.config.socket_mode
+        )
+        if not (owned_private_socket or owned_shared_socket):
+            return _SocketCleanupResult.REFUSED
+        try:
             self.config.socket_path.unlink()
+        except FileNotFoundError:
+            return _SocketCleanupResult.ABSENT
+        except OSError:
+            return _SocketCleanupResult.REFUSED
+        return _SocketCleanupResult.REMOVED
+
+    async def close(self) -> None:
+        close_lock = self._close_lock
+        if close_lock is None:
+            return
+        async with close_lock:
+            if self._close_lock is not close_lock:
+                return
+            server = self._server
+            bound_socket_identity = self._bound_socket_identity
+            primary_error: BaseException | None = None
+            shutdown_definite = server is None
+            try:
+                if server is not None:
+                    if not self._server_close_issued:
+                        server.close()
+                        self._server_close_issued = True
+                    await server.wait_closed()
+                    shutdown_definite = True
+            except BaseException as exc:
+                primary_error = exc
+
+            cleanup_result: _SocketCleanupResult | None = None
+            if self._server_close_issued or server is None:
+                try:
+                    cleanup_result = self._unlink_bound_socket(
+                        bound_socket_identity
+                    )
+                except BaseException:
+                    cleanup_result = _SocketCleanupResult.REFUSED
+
+            if shutdown_definite:
+                self._server = None
+            if cleanup_result in {
+                _SocketCleanupResult.REMOVED,
+                _SocketCleanupResult.ABSENT,
+                _SocketCleanupResult.REPLACED,
+            }:
+                self._bound_socket_identity = None
+            if self._server is None and self._bound_socket_identity is None:
+                self._server_close_issued = False
+                self._close_lock = None
+
+            if primary_error is not None:
+                raise primary_error
+            if cleanup_result is _SocketCleanupResult.REFUSED:
+                raise DialogueServiceError("SERVICE_UNAVAILABLE")
 
     async def serve_one(self) -> None:
         await self.start()
         try:
             await self._handled.wait()
+        finally:
+            await self.close()
+
+    async def serve_forever(self) -> None:
+        """Serve sequential callers until cancellation, then remove the socket."""
+
+        await self.start()
+        server = self._server
+        if server is None:
+            raise DialogueServiceError("SERVICE_UNAVAILABLE")
+        try:
+            await server.serve_forever()
         finally:
             await self.close()
 
@@ -356,10 +558,13 @@ class AgentDialogueService:
 
     async def _dispatch(self, request: Any) -> Any:
         item = _exact_mapping(request, {"version", "operation", "args"})
-        if item["version"] != CONTROL_VERSION:
-            raise DialogueServiceError("REQUEST_INVALID")
-        operation = item["operation"]
-        args = item["args"]
+        if item["version"] == CONTROL_VERSION:
+            return await self._dispatch_v1(item["operation"], item["args"])
+        if item["version"] == CONTROL_VERSION_V2 and self.engine_v2 is not None:
+            return await self._dispatch_v2(item["operation"], item["args"])
+        raise DialogueServiceError("REQUEST_INVALID")
+
+    async def _dispatch_v1(self, operation: Any, args: Any) -> Any:
         if not isinstance(operation, str) or not isinstance(args, dict):
             raise DialogueServiceError("REQUEST_INVALID")
 
@@ -417,6 +622,82 @@ class AgentDialogueService:
                 await self.engine.wait_for_reply(
                     thread_ts=values["thread_ts"],
                     context=_context(values["context"]),
+                    request_message_key=values["request_message_key"],
+                    expected_types=values["expected_types"],
+                    max_attempts=values["max_attempts"],
+                )
+            )
+        raise DialogueServiceError("REQUEST_INVALID")
+
+    async def _dispatch_v2(self, operation: Any, args: Any) -> Any:
+        engine = self.engine_v2
+        if engine is None or not isinstance(operation, str) or not isinstance(args, dict):
+            raise DialogueServiceError("REQUEST_INVALID")
+
+        if operation == "status":
+            _exact_mapping(args, set())
+            return engine.status()
+        if operation == "bind_or_verify_thread":
+            values = _exact_mapping(args, {"context"})
+            return self.engine_result(
+                await engine.bind_or_verify_thread(_context_v2(values["context"]))
+            )
+        if operation == "ensure_thread":
+            values = _exact_mapping(args, {"context", "created_at"})
+            if not isinstance(values["created_at"], str):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.ensure_thread(
+                    _context_v2(values["context"]),
+                    created_at=values["created_at"],
+                )
+            )
+        if operation == "send_message":
+            values = _exact_mapping(args, {"context", "thread_ts", "message"})
+            if not isinstance(values["thread_ts"], str) or not isinstance(
+                values["message"], dict
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.send_message(
+                    thread_ts=values["thread_ts"],
+                    context=_context_v2(values["context"]),
+                    message=values["message"],
+                )
+            )
+        if operation == "read_thread":
+            values = _exact_mapping(args, {"context", "thread_ts"})
+            if not isinstance(values["thread_ts"], str):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.read_thread(
+                    thread_ts=values["thread_ts"],
+                    context=_context_v2(values["context"]),
+                )
+            )
+        if operation == "wait_for_reply":
+            values = _exact_mapping(
+                args,
+                {
+                    "context",
+                    "thread_ts",
+                    "request_message_key",
+                    "expected_types",
+                    "max_attempts",
+                },
+            )
+            if (
+                not isinstance(values["thread_ts"], str)
+                or not isinstance(values["request_message_key"], str)
+                or not isinstance(values["expected_types"], list)
+                or any(not isinstance(item, str) for item in values["expected_types"])
+                or type(values["max_attempts"]) is not int
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            return self.engine_result(
+                await engine.wait_for_reply(
+                    thread_ts=values["thread_ts"],
+                    context=_context_v2(values["context"]),
                     request_message_key=values["request_message_key"],
                     expected_types=values["expected_types"],
                     max_attempts=values["max_attempts"],
@@ -528,6 +809,7 @@ __all__ = [
     "AF_UNIX_PATH_MAX_BYTES",
     "AgentDialogueService",
     "CONTROL_VERSION",
+    "CONTROL_VERSION_V2",
     "DialogueServiceError",
     "ERROR_CODES",
     "ServiceConfig",

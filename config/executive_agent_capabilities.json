@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_agent_capabilities/v3",
-  "policy_version": "2026-08-24.g4",
+  "policy_version": "2026-08-29.browser-b1",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "mcp_servers": {
@@ -15,6 +15,45 @@
       "enabled_tools": ["fetch_openai_doc", "search_openai_docs"],
       "default_tools_approval_mode": "approve",
       "tool_schema_digest": "9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7"
+    },
+    "playwright-worker-browser-b1": {
+      "config_name": "playwrightWorkerBrowser",
+      "transport": "stdio",
+      "command": "/usr/bin/python3",
+      "args": ["-I", "-S", "-c", "import hashlib,json,os,stat\nK=(\"MASTERMIND_BROWSER_ARTIFACT_DIR\",\"MASTERMIND_BROWSER_FIXTURE_A_URL\",\"MASTERMIND_BROWSER_FIXTURE_B_URL\",\"MASTERMIND_BROWSER_FIXTURE_NONCE\",\"MASTERMIND_BROWSER_ORIGIN\",\"MASTERMIND_BROWSER_PROXY_URL\",\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH\",\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256\",\"MASTERMIND_BROWSER_RUNTIME_ROOT\",\"MASTERMIND_BROWSER_WORKSPACE_PATH\",\"PLAYWRIGHT_BROWSERS_PATH\")\nF=\"MASTERMIND_BROWSER_RUNTIME_CONTAINER_FD\"\nN=\"worker-browser-b1-install-manifest.json\"\nd=-1; D=-1\ntry:\n e={k:os.environ[k] for k in K}\n r=e[\"MASTERMIND_BROWSER_RUNTIME_ROOT\"]\n m=e[\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH\"]\n if not os.path.isabs(r) or os.path.basename(r)!=\"runtime\" or m!=os.path.join(r,N): raise ValueError()\n c=os.path.dirname(r)\n q=getattr(os,\"O_NOFOLLOW\",0); z=getattr(os,\"O_DIRECTORY\",0)\n if not q or not z: raise OSError()\n d=os.open(c,os.O_RDONLY|q|z); i=os.fstat(d)\n x=os.open(\"runtime/\"+N,os.O_RDONLY|q,dir_fd=d)\n try:\n  a=os.fstat(x)\n  if not stat.S_ISREG(a.st_mode) or a.st_nlink!=1 or a.st_uid!=os.geteuid() or stat.S_IMODE(a.st_mode)!=0o400 or not 0<a.st_size<=4194304: raise OSError()\n  b=b\"\"\n  while len(b)<=4194304:\n   h=os.read(x,65536)\n   if not h: break\n   b+=h\n  j=os.fstat(x)\n finally: os.close(x)\n if len(b)>4194304 or (a.st_dev,a.st_ino,a.st_size,a.st_mtime_ns)!=(j.st_dev,j.st_ino,j.st_size,j.st_mtime_ns) or hashlib.sha256(b).hexdigest()!=e[\"MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256\"]: raise ValueError()\n v=json.loads(b.decode(\"utf-8\")); w=v[\"runtime_container\"]\n if b!=json.dumps(v,sort_keys=True,separators=(\",\",\":\"),ensure_ascii=False).encode()+b\"\\n\" or set(w)!={\"device\",\"gid\",\"inode\",\"mode\",\"uid\"} or any(type(w[k]) is not int for k in w) or w!={\"device\":i.st_dev,\"gid\":i.st_gid,\"inode\":i.st_ino,\"mode\":stat.S_IMODE(i.st_mode),\"uid\":i.st_uid} or i.st_uid!=os.geteuid() or stat.S_IMODE(i.st_mode)!=0o500: raise ValueError()\n D=os.dup(d)\n for C in (\"runtime\",\"bin\"):\n  Y=os.open(C,os.O_RDONLY|q|z,dir_fd=D); os.close(D); D=Y; U=os.fstat(D)\n  if not stat.S_ISDIR(U.st_mode) or U.st_uid!=os.geteuid() or stat.S_IMODE(U.st_mode)!=0o500: raise OSError()\n l=v[\"launcher\"]; y=os.open(\"worker-browser-b1-launcher\",os.O_RDONLY|q,dir_fd=D)\n try:\n  s=os.fstat(y); g=hashlib.sha256(); n=0\n  while n<=4194304:\n   h=os.read(y,65536)\n   if not h: break\n   n+=len(h); g.update(h)\n  t=os.fstat(y); k=os.stat(\"worker-browser-b1-launcher\",dir_fd=D,follow_symlinks=False)\n finally: os.close(y)\n P=lambda o:(o.st_dev,o.st_ino,o.st_mode,o.st_nlink,o.st_uid,o.st_gid,o.st_size,o.st_mtime_ns,o.st_ctime_ns)\n if set(l)!={\"gid\",\"mode\",\"path\",\"sha256\",\"uid\"} or l[\"path\"]!=os.path.join(r,\"bin\",\"worker-browser-b1-launcher\") or not stat.S_ISREG(s.st_mode) or s.st_nlink!=1 or s.st_uid!=os.geteuid() or stat.S_IMODE(s.st_mode)!=0o500 or n!=s.st_size or n>4194304 or P(s)!=P(t) or P(s)!=P(k) or l!={\"gid\":s.st_gid,\"mode\":0o500,\"path\":l[\"path\"],\"sha256\":g.hexdigest(),\"uid\":s.st_uid}: raise ValueError()\n os.close(D); D=-1\n os.set_inheritable(d,True); e[F]=str(d); os.fchdir(d)\n os.execve(\"runtime/bin/worker-browser-b1-launcher\",[\"runtime/bin/worker-browser-b1-launcher\"],e)\nexcept (KeyError,OSError,TypeError,UnicodeError,ValueError):\n if D>=0:\n  try: os.close(D)\n  except OSError: pass\n if d>=0:\n  try: os.close(d)\n  except OSError: pass\n raise SystemExit(\"runtime container bootstrap refused\")\n"],
+      "required": true,
+      "auth_status": "unsupported",
+      "server_identity": "playwright",
+      "server_version": "1.63.0-alpha-2026-08-05",
+      "enabled_tools": [
+        "browser_click",
+        "browser_close",
+        "browser_console_messages",
+        "browser_fill_form",
+        "browser_hover",
+        "browser_navigate",
+        "browser_network_requests",
+        "browser_resize",
+        "browser_snapshot",
+        "browser_tabs",
+        "browser_take_screenshot",
+        "browser_wait_for"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "859063beb705b4ed15b0defc2c42533d6bce1a3f18bf02c38f28f2422598fc0b"
+    }
+  },
+  "resources": {
+    "worker-browser-b1-local": {
+      "kind": "browser-devserver",
+      "manifest_path": "config/worker_browser_b1_control_room_devserver.json",
+      "manifest_digest": "de100f6c8cfbf1a77fb1c2e4c8a17193c4a51eb78d8eaf59fbed942e7d2e9e71",
+      "runtime_root": "/Volumes/Mastermind/worker-browser-b1/runtime",
+      "runtime_manifest_path": "/Volumes/Mastermind/worker-browser-b1/runtime/worker-browser-b1-install-manifest.json",
+      "runtime_manifest_digest": "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d",
+      "artifact_root": "/Volumes/Mastermind/worker-browser-b1/artifacts",
+      "browser": "chromium",
+      "browser_revision": "1237"
     }
   },
   "plugins": {},
@@ -31,6 +70,7 @@
       "native_helper": null,
       "skills": [],
       "mcp_servers": [],
+      "resources": [],
       "plugins": [],
       "forbidden": []
     },
@@ -46,6 +86,7 @@
       "native_helper": null,
       "skills": [],
       "mcp_servers": ["openai-developer-docs-v1"],
+      "resources": [],
       "plugins": [],
       "forbidden": []
     },
@@ -70,6 +111,7 @@
       },
       "skills": [],
       "mcp_servers": ["openai-developer-docs-v1"],
+      "resources": [],
       "plugins": [],
       "forbidden": []
     },
@@ -85,6 +127,7 @@
       "native_helper": null,
       "skills": [],
       "mcp_servers": [],
+      "resources": [],
       "plugins": [],
       "forbidden": []
     },
@@ -100,6 +143,26 @@
       "native_helper": null,
       "skills": [],
       "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    },
+    "operator.browser.local-review.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "loopback-browser-only",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "openai-developer-docs-v1",
+        "playwright-worker-browser-b1"
+      ],
+      "resources": ["worker-browser-b1-local"],
       "plugins": [],
       "forbidden": []
     }

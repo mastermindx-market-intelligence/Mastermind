@@ -178,12 +178,12 @@ def build_topology(
         "codex-pro-01",
         "codex-pro-02",
         "codex-pro-03",
-    ):
+    ) or len(slots) != len(PERSONAL_CAPABILITY_IDS):
         raise CapacityBrokerTopologyError("SLOT_INVENTORY_INVALID")
     configs: dict[str, bytes] = {}
     plists: dict[str, bytes] = {}
     rows: list[dict[str, Any]] = []
-    for slot, capability_id in zip(slots, PERSONAL_CAPABILITY_IDS, strict=True):
+    for slot, capability_id in zip(slots, PERSONAL_CAPABILITY_IDS):
         paths = _slot_paths(slot.slot_id)
         config = build_worker_config(
             slot=slot,

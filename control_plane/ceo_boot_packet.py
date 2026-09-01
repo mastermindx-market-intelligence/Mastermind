@@ -50,7 +50,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,12 @@ HANDOFF_LIMIT = 5
 #: Wall-clock budget for the Agent OS brief subprocess.  It scans a git store and
 #: worktrees, so it is seconds-to-tens-of-seconds on a warm workstation.
 DEFAULT_TIMEOUT = 60
+
+# The remote Control Room supplies one group-owning bounded runner and this cap.
+# Other existing callers retain the historical stdlib subprocess path unless they
+# explicitly opt into that runner contract.
+DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+Runner = Callable[..., Mapping[str, Any]]
 
 #: Budget for the two ``git rev-parse`` probes.  A hung git is a degraded packet, not
 #: a hung CEO.
@@ -165,6 +171,8 @@ def collect_brief(
     timeout: float,
     since: str | None,
     now: str | None,
+    runner: Runner | None = None,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Run the Agent OS brief in `macro_root` and return ``(brief, warnings)``.
 
@@ -182,28 +190,55 @@ def collect_brief(
     if now:
         cmd += ["--now", now]
 
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=os.fspath(macro_root),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return None, [f"agentos brief timed out after {timeout:g}s"]
-    except OSError as exc:
-        return None, [f"agentos brief could not be launched: {exc}"]
+    if runner is None:
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=os.fspath(macro_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return None, [f"agentos brief timed out after {timeout:g}s"]
+        except OSError as exc:
+            return None, [f"agentos brief could not be launched: {exc}"]
 
-    if proc.returncode != 0:
-        tail = (proc.stderr or "").strip()[-200:]
-        return None, [f"agentos brief exited {proc.returncode}: {tail or '<no stderr>'}"]
+        if proc.returncode != 0:
+            tail = (proc.stderr or "").strip()[-200:]
+            return None, [
+                f"agentos brief exited {proc.returncode}: {tail or '<no stderr>'}"
+            ]
+        stdout = proc.stdout
+    else:
+        try:
+            result = runner(
+                cmd,
+                cwd=macro_root,
+                timeout=timeout,
+                max_bytes=max_output_bytes,
+            )
+        except Exception:  # noqa: BLE001 - stable, non-secret boundary reason
+            return None, ["agentos brief bounded runner unavailable"]
+        if not isinstance(result, Mapping):
+            return None, ["agentos brief bounded runner invalid"]
+        if result.get("timed_out") is True:
+            return None, [f"agentos brief timed out after {timeout:g}s"]
+        if result.get("limit_exceeded") is True:
+            return None, ["agentos brief output exceeded hard limit"]
+        if result.get("invalid_utf8") is True:
+            return None, ["agentos brief emitted invalid UTF-8"]
+        if result.get("code") != 0:
+            return None, ["agentos brief command failed"]
+        stdout = result.get("stdout")
+        if type(stdout) is not str:
+            return None, ["agentos brief bounded runner invalid"]
 
     try:
-        brief = json.loads(proc.stdout)
+        brief = json.loads(stdout)
     except (ValueError, TypeError):
-        head = (proc.stdout or "").strip()[:200]
+        head = (stdout or "").strip()[:200]
         return None, [f"agentos brief emitted unparseable output: {head or '<empty>'}"]
 
     if not isinstance(brief, dict):
@@ -264,6 +299,35 @@ def _git(path: Path, *args: str) -> str | None:
     if proc.returncode != 0:
         return None
     value = (proc.stdout or "").strip()
+    return value or None
+
+
+def _bounded_git(
+    path: Path,
+    *args: str,
+    runner: Runner,
+    max_output_bytes: int,
+) -> str | None:
+    """Read one git fact through the caller's bounded process owner."""
+    try:
+        result = runner(
+            ["git", *args],
+            cwd=path,
+            timeout=_GIT_TIMEOUT,
+            max_bytes=min(max_output_bytes, 64 * 1024),
+        )
+    except Exception:  # noqa: BLE001 - degraded read-only boundary
+        return None
+    if not isinstance(result, Mapping):
+        return None
+    if any(
+        result.get(flag) is True
+        for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+    ):
+        return None
+    if result.get("code") != 0 or type(result.get("stdout")) is not str:
+        return None
+    value = result["stdout"].strip()
     return value or None
 
 
@@ -398,6 +462,9 @@ def build_packet(
     since: str | None = None,
     now: str | None = None,
     timeout: float = DEFAULT_TIMEOUT,
+    runner: Runner | None = None,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+    mastermind_identity: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Assemble the ``mastermind.ceo_boot_packet.v1`` document.
 
@@ -426,7 +493,12 @@ def build_packet(
         )
     else:
         brief, brief_warnings = collect_brief(
-            macro_root, timeout=timeout, since=since, now=now
+            macro_root,
+            timeout=timeout,
+            since=since,
+            now=now,
+            runner=runner,
+            max_output_bytes=max_output_bytes,
         )
         degraded.extend(brief_warnings)
 
@@ -434,14 +506,28 @@ def build_packet(
         if handoff_warning:
             degraded.append(handoff_warning)
 
-        macro_sha = _git_sha(macro_root)
+        macro_sha = (
+            _git_sha(macro_root)
+            if runner is None
+            else _bounded_git(
+                macro_root,
+                "rev-parse",
+                "HEAD",
+                runner=runner,
+                max_output_bytes=max_output_bytes,
+            )
+        )
         if macro_sha is None:
             degraded.append(f"macro git sha unreadable at {macro_root}")
 
-    mastermind_sha = _git_sha(root)
-    if mastermind_sha is None:
-        degraded.append(f"mastermind git sha unreadable at {root}")
-    mastermind_branch = _git_branch(root)
+    if mastermind_identity is None:
+        mastermind_sha = _git_sha(root)
+        if mastermind_sha is None:
+            degraded.append(f"mastermind git sha unreadable at {root}")
+        mastermind_branch = _git_branch(root)
+    else:
+        mastermind_sha = mastermind_identity.get("sha")
+        mastermind_branch = mastermind_identity.get("branch")
 
     strategic, strategic_err = load_strategic_summary()
     if strategic_err:

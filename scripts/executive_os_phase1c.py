@@ -1,12 +1,14 @@
 """Launch or query the private Executive OS Phase 1C-A control service.
 
 The production ``serve --config`` path consumes a root-owned, secret-free JSON
-configuration and a launchd-activated Unix socket.  Worker execution always
+configuration and launchd-activated Unix sockets.  Worker execution always
 crosses the distinct-UID worker broker; this entrypoint has no local adapter or
 TCP fallback.  G1 adds one exact-root deterministic COO-cycle operation and one
 bounded service tick; both remain disabled by checked-in host configuration.
-Restore operations are deliberately offline CLI commands and are never exposed
-through the live control socket.
+C1 may additionally expose the already-implemented dedicated CeoIngress state
+listener through the SAME service process while CEO write admission remains
+hard-disabled. Restore operations are deliberately offline CLI commands and are
+never exposed through the live control socket.
 """
 from __future__ import annotations
 
@@ -92,6 +94,16 @@ _CONFIG_OPTIONAL = frozenset(
         "operator_harness_version",
         "broker_timeout_seconds",
         "shutdown_grace_seconds",
+        "ceo_ingress_socket_path",
+        "ceo_ingress_launchd_socket_name",
+        "ceo_ingress_peer_uid",
+    }
+)
+_CEO_INGRESS_CONFIG_KEYS = frozenset(
+    {
+        "ceo_ingress_socket_path",
+        "ceo_ingress_launchd_socket_name",
+        "ceo_ingress_peer_uid",
     }
 )
 
@@ -211,6 +223,9 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
+    if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
+        raise ServiceError("CeoIngress control config fields must be supplied together")
     for name in (
         "runtime_root",
         "control_socket_path",
@@ -225,8 +240,16 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         "control_environment_attestation_path",
     ):
         config[name] = _path(config[name], name)
+    if ceo_ingress_present:
+        config["ceo_ingress_socket_path"] = _path(
+            config["ceo_ingress_socket_path"], "ceo_ingress_socket_path"
+        )
     for name in ("control_uid", "worker_uid", "worker_gid", "shared_run_gid"):
         config[name] = _integer(config[name], name)
+    if ceo_ingress_present:
+        config["ceo_ingress_peer_uid"] = _integer(
+            config["ceo_ingress_peer_uid"], "ceo_ingress_peer_uid"
+        )
     if config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
@@ -240,6 +263,16 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
     for name in ("launchd_socket_name", "worker_user"):
         if not isinstance(config[name], str) or not config[name].strip():
             raise ServiceError(f"control config {name} is required")
+    if ceo_ingress_present:
+        name = config["ceo_ingress_launchd_socket_name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ServiceError("control config ceo_ingress_launchd_socket_name is required")
+        if config["ceo_ingress_socket_path"] == config["control_socket_path"]:
+            raise ServiceError("CeoIngress socket must differ from Operator socket")
+        if config["ceo_ingress_launchd_socket_name"] == config["launchd_socket_name"]:
+            raise ServiceError("CeoIngress launchd socket name must differ from Operator")
+        if config["ceo_ingress_peer_uid"] == config["control_uid"]:
+            raise ServiceError("CeoIngress peer uid must differ from control uid")
     if "coo_autonomy_armed" in config and not isinstance(
         config["coo_autonomy_armed"], bool
     ):
@@ -595,6 +628,20 @@ def _persist_canary_envelope(
         raise
 
 
+class _C1UnavailableGroundingProvider:
+    """Explicit C1-only grounding gap; B2/PR-C owns production grounding.
+
+    R0 permits the diagnostic state frame to return while grounding is
+    unavailable.  The existing hot-state builder then emits null grounding,
+    a named degradation and ``do_not_submit=true``.  Keeping this provider
+    intentionally unavailable prevents C1 from becoming an accidental B2
+    arming path or from inventing a second source of trusted repository truth.
+    """
+
+    def observe(self):
+        raise RuntimeError("C1_GROUNDING_UNAVAILABLE")
+
+
 def _service_from_config(
     raw: Mapping[str, Any],
     *,
@@ -735,6 +782,18 @@ def _service_from_config(
             raise ServiceError("control/worker Operator Harness arming state differs")
 
     listener = activate_launchd_socket(str(raw["launchd_socket_name"]))
+    ceo_ingress_kwargs: dict[str, Any] = {}
+    if _CEO_INGRESS_CONFIG_KEYS <= set(raw):
+        ceo_listener = activate_launchd_socket(
+            str(raw["ceo_ingress_launchd_socket_name"])
+        )
+        ceo_ingress_kwargs = {
+            "ceo_ingress_socket_path": raw["ceo_ingress_socket_path"],
+            "ceo_ingress_peer_uid": int(raw["ceo_ingress_peer_uid"]),
+            "ceo_ingress_grounding_provider": _C1UnavailableGroundingProvider(),
+            "ceo_ingress_armed": False,
+            "ceo_ingress_activated_socket": ceo_listener,
+        }
     return ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
@@ -746,6 +805,7 @@ def _service_from_config(
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
+        **ceo_ingress_kwargs,
     )
 
 

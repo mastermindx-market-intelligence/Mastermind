@@ -759,6 +759,49 @@ def test_capability_classes_and_helpers():
     assert wrong_auth_launch.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
 
 
+def test_resource_capability_exact_digest_allows_and_missing_or_drift_refuses_before_tx5():
+    requested_resource = CapabilityIdentity(
+        kind="resource",
+        name="worker-browser-b1-local",
+        harness_binary_digest="digest-v1",
+        resource_contract_digest="f" * 64,
+    )
+    exact = ObservedCapabilityIdentity(
+        kind="resource",
+        name="worker-browser-b1-local",
+        resource_contract_digest="f" * 64,
+    )
+    requested = _requested(
+        capabilities=CapabilityManifest(required=(requested_resource,))
+    )
+
+    allowed = compare_launch(
+        requested,
+        _observed(
+            capabilities=(exact,),
+            effective_skills=(),
+            effective_mcp=(),
+        ),
+    )
+    assert allowed.decision is LaunchDecision.ALLOW
+
+    for observed in (
+        (),
+        (dataclasses.replace(exact, kind="skill"),),
+        (dataclasses.replace(exact, resource_contract_digest="0" * 64),),
+        (dataclasses.replace(exact, resource_contract_digest=None),),
+    ):
+        refused = compare_launch(
+            requested,
+            _observed(
+                capabilities=observed,
+                effective_skills=(),
+                effective_mcp=(),
+            ),
+        )
+        assert refused.decision is LaunchDecision.REFUSE_MISSING_REQUIRED
+
+
 def test_auth_realm_fact_rejects_credential_shaped_fields():
     with pytest.raises(ValueError):
         AuthRealmFact(worker_id="w", provider="codex", plan_type="refresh-token-xyz")

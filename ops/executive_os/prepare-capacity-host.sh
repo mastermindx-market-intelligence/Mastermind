@@ -245,8 +245,8 @@ for module in (yaml, _yaml):
         raise RuntimeError("PyYAML import escapes the runtime")
 PY
   evidence="$(/usr/bin/python3 -I -S -B "$ARTIFACTS" verify-runtime-tree --runtime-root "$root")" || return 1
-  record_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')" || return 1
-  tree_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')" || return 1
+  record_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')" || return 1
+  tree_digest="$(/bin/echo "$evidence" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')" || return 1
   [ "$record_digest" = "$PYYAML_RECORD_SHA256" ] || return 1
   [ "$tree_digest" = "$RUNTIME_TREE_SHA256" ] || return 1
   /bin/echo "$evidence"
@@ -259,7 +259,7 @@ verify_telemetry_boundary() {
     [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$expected")" = "0:0:555" ] || return 1
   done
   observed_inventory="$(/usr/bin/find "$root" -mindepth 1 -type d -print | /usr/bin/sort)"
-  expected_inventory="$(/bin/printf '%s\n' "$root/data" "$root/data/ai_costs" "$root/data/metabolism" | /usr/bin/sort)"
+  expected_inventory="$(/usr/bin/printf '%s\n' "$root/data" "$root/data/ai_costs" "$root/data/metabolism" | /usr/bin/sort)"
   [ "$observed_inventory" = "$expected_inventory" ] || return 1
   [ -z "$(/usr/bin/find "$root" ! -type d -print -quit)" ] || return 1
   assert_no_acl "$root"
@@ -272,14 +272,23 @@ label_disabled_unloaded() {
   if /bin/launchctl print "system/$label" >/dev/null 2>&1; then return 1; fi
 }
 
+membership_reports_not_member() {
+  local membership_status="$1" membership="$2" user="$3" group="$4"
+  [ "$membership_status" = "67" ] || return 1
+  [ "$membership" = "no $user is NOT a member of $group" ]
+}
+
 assert_control_isolated() {
-  local slot_id slot_group slot_gid slot_home membership
+  local slot_id slot_group slot_gid slot_home membership membership_status
   for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
     slot_group="$(slot_field "$slot_id" worker_group)"
     slot_gid="$(slot_field "$slot_id" worker_gid)"
     slot_home="$(slot_field "$slot_id" provider_home)"
-    membership="$(/usr/sbin/dseditgroup -o checkmember -m "$CONTROL_USER" "$slot_group" 2>&1 || true)"
-    case "$membership" in *"is not a member"*) ;; *) refuse "control principal is a member of a Personal Pro group" ;; esac
+    membership_status=0
+    membership="$(LC_ALL=C LANG=C /usr/sbin/dseditgroup -o checkmember -m "$CONTROL_USER" "$slot_group" 2>&1)" \
+      || membership_status=$?
+    membership_reports_not_member "$membership_status" "$membership" "$CONTROL_USER" "$slot_group" \
+      || refuse "control principal absence from a Personal Pro group could not be proven"
     case " $(/usr/bin/id -G "$CONTROL_USER") " in *" $slot_gid "*) refuse "control principal resolves a Personal Pro GID" ;; esac
     /usr/bin/sudo -u "$CONTROL_USER" /bin/test ! -r "$slot_home" || refuse "control principal can read a Personal Pro home"
     /usr/bin/sudo -u "$CONTROL_USER" /bin/test ! -x "$slot_home" || refuse "control principal can traverse a Personal Pro home"
@@ -346,7 +355,7 @@ verify_generation() {
   local generation="$1" mode="${2:-installed}" expected_inventory observed artifact
   [ -d "$generation" ] && [ ! -L "$generation" ] || return 1
   [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$generation")" = "0:0:555" ] || return 1
-  expected_inventory="$(/bin/printf '%s\n' broker-topology.json components.json host-preparation-receipt.json rollback-contract.json rollback-drill-receipt.json source-config.json | /usr/bin/sort)"
+  expected_inventory="$(/usr/bin/printf '%s\n' broker-topology.json components.json host-preparation-receipt.json rollback-contract.json rollback-drill-receipt.json source-config.json | /usr/bin/sort)"
   observed="$(/usr/bin/find "$generation" -mindepth 1 -maxdepth 1 -type f -print | while IFS= read -r artifact; do /usr/bin/basename "$artifact"; done | /usr/bin/sort)"
   [ "$observed" = "$expected_inventory" ] || return 1
   [ -z "$(/usr/bin/find "$generation" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ] || return 1
@@ -596,9 +605,13 @@ cleanup() {
       /bin/launchctl disable "system/$label" >/dev/null 2>&1 || true
       /bin/launchctl bootout "system/$label" >/dev/null 2>&1 || true
     done
-    for path in "${NEW_TOPOLOGY_PATHS[@]}"; do archive_path "$path" failed-topology || true; done
+    if [ "${#NEW_TOPOLOGY_PATHS[@]}" -gt 0 ]; then
+      for path in "${NEW_TOPOLOGY_PATHS[@]}"; do archive_path "$path" failed-topology || true; done
+    fi
     [ -z "$GENERATION_CANDIDATE" ] || archive_path "$GENERATION_CANDIDATE" failed-generation || true
-    for path in "${NEW_VERSIONED_PATHS[@]}"; do archive_path "$path" failed-versioned || true; done
+    if [ "${#NEW_VERSIONED_PATHS[@]}" -gt 0 ]; then
+      for path in "${NEW_VERSIONED_PATHS[@]}"; do archive_path "$path" failed-versioned || true; done
+    fi
     [ -z "$STAGING_SESSION" ] || archive_path "$STAGING_SESSION" failed-stage || true
   fi
   exit "$status"
@@ -650,7 +663,7 @@ verify_materialized_source "$SOURCE_STAGE" || refuse "staged Macro source did no
 "$PYTHON_BINARY" -I -S -B -m venv --copies --without-pip "$RUNTIME_STAGE"
 [ -z "$(/usr/bin/find "$RUNTIME_STAGE" -type l -print -quit)" ] || refuse "capacity runtime contains a symlink"
 /usr/bin/install -d -o root -g wheel -m 0700 "$STAGING_SESSION/runtime-pruned"
-EXPECTED_RUNTIME_BIN_INVENTORY="$(/bin/printf '%s\n' Activate.ps1 activate activate.csh activate.fish python python3 python3.12 | /usr/bin/sort)"
+EXPECTED_RUNTIME_BIN_INVENTORY="$(/usr/bin/printf '%s\n' Activate.ps1 activate activate.csh activate.fish python python3 python3.12 | /usr/bin/sort)"
 OBSERVED_RUNTIME_BIN_INVENTORY="$(/usr/bin/find "$RUNTIME_STAGE/bin" -mindepth 1 -maxdepth 1 -type f -print | while IFS= read -r path; do /usr/bin/basename "$path"; done | /usr/bin/sort)"
 [ "$OBSERVED_RUNTIME_BIN_INVENTORY" = "$EXPECTED_RUNTIME_BIN_INVENTORY" ] || refuse "fresh runtime executable inventory differs"
 for path in \
@@ -828,8 +841,8 @@ install_topology_artifacts
 verify_topology "$TOPOLOGY_STAGE/broker-topology.json" || refuse "reinstalled inert topology did not verify after rollback drill"
 verify_legacy_files_unchanged || refuse "legacy Executive files changed during rollback drill"
 
-RUNTIME_RECORD_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')"
-RUNTIME_TREE_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')"
+RUNTIME_RECORD_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["pyyaml_record_sha256"])')"
+RUNTIME_TREE_DIGEST="$(/bin/echo "$RUNTIME_EVIDENCE" | /usr/bin/python3 -I -S -B -c 'import json,sys; print(json.load(sys.stdin)["runtime_tree_sha256"])')"
 TOPOLOGY_DIGEST="$(/usr/bin/shasum -a 256 "$TOPOLOGY_STAGE/broker-topology.json" | /usr/bin/awk '{print $1}')"
 ROLLBACK_CONTRACT_DIGEST="$(/usr/bin/shasum -a 256 "$TOPOLOGY_STAGE/rollback-contract.json" | /usr/bin/awk '{print $1}')"
 

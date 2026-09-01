@@ -119,6 +119,21 @@ def test_topology_refuses_unreviewed_ambient_group_vectors(gids: list[int]) -> N
         )
 
 
+@pytest.mark.parametrize(
+    "capability_ids",
+    [
+        ("codex_account", "codex_account_2"),
+        ("codex_account", "codex_account_2", "codex_account_3", "extra"),
+    ],
+)
+def test_topology_refuses_capability_cardinality_drift(
+    monkeypatch: pytest.MonkeyPatch, capability_ids: tuple[str, ...]
+) -> None:
+    monkeypatch.setattr(topology, "PERSONAL_CAPABILITY_IDS", capability_ids)
+    with pytest.raises(topology.CapacityBrokerTopologyError, match="SLOT_INVENTORY"):
+        _built()
+
+
 def test_topology_and_rollback_receipts_bind_every_artifact_without_start_authority() -> None:
     value, configs, plists = _built()
     for row in value["brokers"]:
