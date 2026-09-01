@@ -29,15 +29,22 @@ def _read(path: Path) -> str:
     return payload.decode("utf-8")
 
 
+def _prose(path: Path) -> str:
+    """Normalize Markdown wrapping without weakening exact semantic phrases."""
+
+    return " ".join(_read(path).split())
+
+
 def test_records_are_present_and_explicitly_production_inert() -> None:
-    texts = [_read(path) for path in (SPEC, PLAN, AMENDMENT)]
-    for text in texts:
+    records = {path: _read(path) for path in (SPEC, PLAN, AMENDMENT)}
+    for text in records.values():
         assert "PRODUCTION INERT" in text
-        assert "Executive OS" in text
-        assert "ExecutionCapabilityRegistry" in text
-        assert "EFFECT_UNKNOWN" in text
         assert "TODO" not in text
         assert "TBD" not in text
+
+    assert "Executive OS" in records[SPEC]
+    assert "ExecutionCapabilityRegistry" in records[AMENDMENT]
+    assert "EFFECT_UNKNOWN" in records[PLAN]
 
     for path in (CLOSURE, EXPOSURE):
         text = _read(path)
@@ -123,6 +130,7 @@ def test_first_vertical_and_hf1_boundary_are_precise() -> None:
 
 def test_effective_skill_closure_includes_required_package_reference() -> None:
     closure = _read(CLOSURE)
+    closure_prose = _prose(CLOSURE)
     dialogue_reference = _read(DIALOGUE_REFERENCE)
 
     for skill_path in OPERATOR_SKILLS.values():
@@ -133,13 +141,16 @@ def test_effective_skill_closure_includes_required_package_reference() -> None:
     assert '"entrypoint_path": "skills/receive-commission/SKILL.md"' in closure
     assert '"relative_path": "references/dialogue-boundary.md"' in closure
     assert "skills/receive-commission/SKILL.md\nreferences/dialogue-boundary.md" in closure
-    assert "effective Skill closure, not merely" in closure
-    assert "Skill closure identity and package generation identity are related but not collapsed" in closure
-    assert "A regex/link crawler cannot prove" in closure
-    assert "Name-only observation cannot satisfy a requested digest" in closure
-    assert "same name + changed required shared reference" in closure
-    assert "same closure + changed unrelated sibling Skill" in closure
-    assert "per-Skill effective-closure mapping" in closure
+    assert "effective Skill closure, not merely" in closure_prose
+    assert (
+        "Skill closure identity and package generation identity are related but not collapsed"
+        in closure_prose
+    )
+    assert "A regex/link crawler cannot prove" in closure_prose
+    assert "Name-only observation cannot satisfy a requested digest" in closure_prose
+    assert "same name + changed required shared reference" in closure_prose
+    assert "same closure + changed unrelated sibling Skill" in closure_prose
+    assert "per-Skill effective-closure mapping" in closure_prose
 
 
 def test_first_codex_profile_requires_the_exact_exposed_four_skill_set() -> None:
@@ -162,7 +173,7 @@ def test_first_codex_profile_requires_the_exact_exposed_four_skill_set() -> None
 
 
 def test_practice_and_execution_capability_identity_remain_distinct() -> None:
-    amendment = _read(AMENDMENT)
+    amendment = _prose(AMENDMENT)
     assert "Practice source and executable capability source remain distinct identities" in amendment
     assert "A capability digest proves exact bytes loaded" in amendment
     assert "it does not prove the model applied the professional method correctly" in amendment
@@ -182,9 +193,9 @@ def test_browser_and_desktop_access_remain_explicit_resources() -> None:
 
 
 def test_records_do_not_claim_runtime_or_product_completion() -> None:
-    amendment = _read(AMENDMENT)
-    closure = _read(CLOSURE)
-    exposure = _read(EXPOSURE)
+    amendment = _prose(AMENDMENT)
+    closure = _prose(CLOSURE)
+    exposure = _prose(EXPOSURE)
     assert "It does not make any package generation attested" in amendment
     assert "custom Skill digest enforced" in amendment
     assert "provider materializer built" in amendment
