@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from datetime import datetime
 from typing import Any, Callable
 
 from scripts.agent_eval.canonical import (
