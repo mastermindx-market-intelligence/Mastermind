@@ -54,6 +54,7 @@ REQUIRED_RUNTIME_PATHS = frozenset({
     "control_plane/executive_inbox.py",
     "control_plane/executive_orchestration_principal.py",
     "control_plane/executive_orchestration_result.py",
+    "control_plane/executive_retry_safety.py",
     "control_plane/executive_runtime.py",
     "control_plane/executive_supervisor.py",
     "control_plane/executive_worker_broker.py",
