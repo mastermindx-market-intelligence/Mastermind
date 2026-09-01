@@ -11,6 +11,7 @@ import pytest
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
 from integrations.mastermind_secretary_mcp.adapter import SecretaryGroundingGateway
 from integrations.mastermind_secretary_mcp.schemas import (
+    PUBLIC_FACT_CONTRACTS,
     TOOL_SCHEMA_DIGEST,
     TOOL_SPECS,
     GatewayError,
@@ -141,20 +142,7 @@ def test_advertised_schema_and_runtime_share_one_closed_public_fact_language():
     fact_schema = output_schema["properties"]["data"]["oneOf"][1]["properties"][
         "facts"
     ]["items"]
-    expected_predicates = {
-        "attention.state",
-        "blocker.kind",
-        "blocker.present",
-        "responsibility.priority",
-        "responsibility.requires_attention",
-        "responsibility.state",
-        "runtime.age_seconds",
-        "runtime.continuity",
-        "runtime.state",
-        "surface.health",
-        "surface.observation_age_seconds",
-        "surface.repair_required",
-    }
+    expected_predicates = set(PUBLIC_FACT_CONTRACTS)
     assert {
         branch["properties"]["predicate"]["const"]
         for branch in fact_schema["allOf"][0]["oneOf"]
