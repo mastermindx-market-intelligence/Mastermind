@@ -4,15 +4,38 @@
 
 Deterministic fact-match against the scenario's ``expected_contract`` gold
 ``answer``. Never model-graded: the gold answer is split into semicolon-
-delimited FACT CLAUSES (the deterministic scoring unit), and a submission's
-own ``answer`` text is checked for normalized-substring containment of each
-clause. ``PASS`` when every clause is present, ``FAIL`` when none are,
-``PARTIAL`` otherwise. The gold ``rationale`` field's REASONING QUALITY is
-never deterministically checkable -- it is explicit rubric residue, always
-emitted as a separate ``UNKNOWN`` dimension result pointing at the
-scenario's own ``expected_contract`` artifact (never inlined as prose; the
-scorer-pass schema's ``evidence_refs`` field is a reference list, not a
-text field).
+delimited FACT CLAUSES.
+
+**Review repair (BLOCKER-1, adversarial review of PR #333):** the original
+containment-based check let a submission that merely CONTAINED the gold
+token score PASS even when the submission (a) regurgitated the source
+extract verbatim (which itself contains the gold token as a substring) or
+(b) NEGATED the correct answer ("The status is NOT INVALID_EFFECT_UNKNOWN")
+-- containment cannot distinguish "states X" from "quotes X" or "denies X".
+The fix is scoped by clause count, never by task class:
+
+- A gold with exactly ONE fact clause (a closed-vocabulary token, e.g.
+  ``INVALID_EFFECT_UNKNOWN``) is scored by NORMALIZED WHOLE-ANSWER
+  EQUALITY, never containment. Regurgitating the extract or negating the
+  token no longer scores PASS -- the whole submitted answer must equal the
+  gold token. Documented tradeoff: a correct-but-reworded answer (extra
+  words around the right token) now FAILS too. That is an accepted,
+  disclosed cost of closing the regurgitation/negation hole for
+  closed-vocabulary golds, not a bug -- see ``tests/test_agent_eval_s1_
+  scorers.py::test_tc1_probe3_reworded_correct_answer_fails_under_equality_by_design``.
+- A gold with MORE THAN ONE fact clause (free-form multi-fact prose) keeps
+  substring containment -- exact-whole-answer equality is too brittle for
+  a paraphrased multi-sentence explanation -- but every non-``UNKNOWN``
+  result now carries the standing reason code
+  ``CONTAINMENT_PROXY_NOT_ENTAILMENT``: containment is a PROXY for "the
+  submission states this fact," never a claim of actual semantic
+  entailment, and this scorer never lets that distinction go unstated.
+
+The gold ``rationale`` field's reasoning quality is NEVER scored -- it is
+emitted as a separate ``rubric_residue`` dimension, status ``UNKNOWN``,
+``evidence_refs`` citing the scenario's own ``expected_contract`` artifact
+(never inlined as prose -- the scorer-pass schema's ``evidence_refs``
+field is a reference list, not free text).
 
 This module performs no filesystem, network, or environment access -- the
 gold-fact content and the submission are both supplied by the caller
@@ -20,9 +43,12 @@ gold-fact content and the submission are both supplied by the caller
 integration); scoring is a pure function of its arguments.
 
 Scorer identity: ``mastermind.tc1_source_comprehension.v1``, method
-``DETERMINISTIC``. Dimensions: ``correctness`` (deterministic), ``rubric_
-residue`` (always ``UNKNOWN`` -- this scorer never claims to grade
-reasoning quality).
+``DETERMINISTIC``. Dimensions: ``gold_clause_containment`` (renamed from
+``correctness`` in the review repair -- the name now states the actual
+mechanism, equality-for-one-clause/containment-for-many, never implying a
+stronger "correctness" guarantee than the mechanism provides),
+``rubric_residue`` (always ``UNKNOWN`` -- this scorer never claims to
+grade reasoning quality).
 """
 from __future__ import annotations
 
@@ -31,9 +57,15 @@ import re
 from scripts.agent_eval import scoring
 
 SCORER_ID = "mastermind.tc1_source_comprehension.v1"
-DIMENSIONS: tuple[str, ...] = ("correctness", "rubric_residue")
+DIMENSIONS: tuple[str, ...] = ("gold_clause_containment", "rubric_residue")
 
 _WHITESPACE_RE = re.compile(r"\s+")
+
+#: BLOCKER-1: containment is never entailment -- this proxy code is
+#: attached to every non-UNKNOWN multi-clause result, disclosing that a
+#: PASS/PARTIAL/FAIL here means "the literal clause text is/isn't a
+#: substring," never a semantic-correctness claim.
+CONTAINMENT_PROXY_REASON_CODE = "CONTAINMENT_PROXY_NOT_ENTAILMENT"
 
 
 def _normalize(text: str) -> str:
@@ -60,10 +92,21 @@ def score_submission(expected_contract: dict, submission: dict) -> list[dict]:
     submitted_answer = _normalize(str(submission.get("answer") or ""))
 
     if not clauses:
-        correctness = {
-            "dimension": "correctness",
+        gold_clause_containment = {
+            "dimension": "gold_clause_containment",
             "status": "UNKNOWN",
             "reason_codes": ["NO_GOLD_FACT_CLAUSES"],
+            "evidence_refs": [],
+        }
+    elif len(clauses) == 1:
+        # BLOCKER-1: single closed-vocabulary clause -- normalized WHOLE-
+        # ANSWER EQUALITY, never containment (see module docstring).
+        status = "PASS" if submitted_answer == clauses[0] else "FAIL"
+        reason_codes = [] if status == "PASS" else ["GOLD_FACT_CLAUSE_MISSING"]
+        gold_clause_containment = {
+            "dimension": "gold_clause_containment",
+            "status": status,
+            "reason_codes": sorted(set(reason_codes)),
             "evidence_refs": [],
         }
     else:
@@ -74,10 +117,11 @@ def score_submission(expected_contract: dict, submission: dict) -> list[dict]:
             status, reason_codes = "FAIL", ["GOLD_FACT_CLAUSE_MISSING"]
         else:
             status, reason_codes = "PARTIAL", ["GOLD_FACT_CLAUSE_MISSING"]
-        correctness = {
-            "dimension": "correctness",
+        reason_codes = sorted(set(reason_codes) | {CONTAINMENT_PROXY_REASON_CODE})
+        gold_clause_containment = {
+            "dimension": "gold_clause_containment",
             "status": status,
-            "reason_codes": sorted(set(reason_codes)),
+            "reason_codes": reason_codes,
             "evidence_refs": [],
         }
 
@@ -87,7 +131,7 @@ def score_submission(expected_contract: dict, submission: dict) -> list[dict]:
         "reason_codes": ["RUBRIC_RESIDUE_NOT_SCORED"],
         "evidence_refs": [],
     }
-    return [correctness, rubric_residue]
+    return [gold_clause_containment, rubric_residue]
 
 
 def build_scorer_pass(

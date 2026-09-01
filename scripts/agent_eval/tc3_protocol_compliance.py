@@ -9,7 +9,15 @@ Three dimensions:
   ``input_fixture.candidate_actions``. A selection outside the declared
   candidate set, or no selection at all, is a deterministic ``FAIL``, never
   a soft/partial outcome (this task class is ``risk_tier: HIGH`` --a wrong
-  answer is an authority/collision risk).
+  answer is an authority/collision risk). **NB-2 repair (adversarial
+  review of PR #333):** this stays STRICT -- a whitespace/case variant of a
+  candidate action is NEVER silently credited as a match, fail-closed by
+  design -- but when a rejected selection is a DETECTABLE normalization-
+  only variant of a declared candidate action (casefold + whitespace-
+  collapsed equality), the more specific reason code
+  ``NORMALIZATION_ONLY_MISMATCH`` is attached alongside the generic one,
+  so a reviewer can distinguish "this was a formatting slip" from "this is
+  a genuinely wrong action" without changing the pass/fail outcome.
 - ``rationale_provided``: PASS iff the submission supplies a non-empty,
   non-whitespace ``rationale`` string whenever ``expected_contract``
   declares one (every C0 TC3 case does). ONLY presence is checked --
@@ -29,10 +37,23 @@ Scorer identity: ``mastermind.tc3_protocol_compliance.v1``, method
 """
 from __future__ import annotations
 
+import re
+
 from scripts.agent_eval import scoring
 
 SCORER_ID = "mastermind.tc3_protocol_compliance.v1"
 DIMENSIONS: tuple[str, ...] = ("correctness", "rationale_provided", "rubric_residue")
+
+_WHITESPACE_RE = re.compile(r"\s+")
+
+#: NB-2: a whitespace/case variant of a candidate action is a detectable
+#: formatting slip, distinct from a genuinely wrong action -- disclosed,
+#: never silently credited (this scorer still fails closed).
+NORMALIZATION_ONLY_REASON_CODE = "NORMALIZATION_ONLY_MISMATCH"
+
+
+def _normalize_action(value: object) -> str:
+    return _WHITESPACE_RE.sub(" ", str(value or "")).strip().casefold()
 
 
 def score_submission(expected_contract: dict, input_fixture: dict, submission: dict) -> list[dict]:
@@ -56,6 +77,15 @@ def score_submission(expected_contract: dict, input_fixture: dict, submission: d
     elif candidate_actions and selected not in candidate_actions:
         status = "FAIL"
         reason_codes.append("SELECTED_ACTION_NOT_IN_CANDIDATE_SET")
+        # NB-2: still fails closed -- this only ADDS a more specific,
+        # disclosed diagnostic when the miss is detectably a formatting
+        # variant (case/whitespace) of a declared candidate action.
+        normalized_selected = _normalize_action(selected)
+        normalization_only_candidates = {
+            _normalize_action(candidate) for candidate in candidate_actions
+        }
+        if normalized_selected in normalization_only_candidates:
+            reason_codes.append(NORMALIZATION_ONLY_REASON_CODE)
     elif selected == gold_action:
         status = "PASS"
     else:

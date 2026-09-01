@@ -266,6 +266,60 @@ def test_a_run_from_a_scenario_absent_in_the_manifest_fails(two_scenario_graph) 
     assert any(d.code == "SCENARIO_NOT_IN_EXPERIMENT" for d in excinfo.value.defects)
 
 
+# ---------------------------------------------------------------------------
+# MAJOR-2 review repair (adversarial review of PR #333): unknown_count
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_count_bucket_shows_rubric_residue_visibility_not_four_zeros() -> None:
+    """A dimension result whose status is literally UNKNOWN (e.g. every S1
+    scorer's permanent rubric_residue dimension) used to fall into NONE of
+    the four original dimension-gate buckets (valid_pass/valid_fail/
+    valid_partial/unscored) -- silently vanishing from the gate matrix a
+    reviewer reads instead of being visibly counted. A scenario that
+    REQUIRES rubric_residue must show unknown_count=1, not four zeros."""
+    scenario_a = _scenario_with(case="residue_case", required_dimensions=["rubric_residue"])
+    scenario_b = _scenario_with(case="other_case", required_dimensions=["configuration_integrity"])
+    config_a = build_baseline_configuration()
+    config_b = build_baseline_configuration()
+    experiment = _two_scenario_experiment(scenario_a, scenario_b, config_a, config_b)
+
+    draft_a = build_run_draft(scenario_a, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    run_a = validity.finalize_run_receipt(scenario_a, config_a, experiment, draft_a, **VALIDATOR_KW)
+    draft_b = build_run_draft(scenario_b, config_b, experiment, arm_id="arm_b", replicate_index=1)
+    run_b = validity.finalize_run_receipt(scenario_b, config_b, experiment, draft_b, **VALIDATOR_KW)
+
+    pass_a = _hand_scored_pass(run_a, dimension="rubric_residue", status="UNKNOWN")
+    pass_b = _hand_scored_pass(run_b, dimension="configuration_integrity", status="PASS")
+
+    evidence = scoring.summarize_multi_scenario_experiment(
+        experiment,
+        (scenario_a, scenario_b),
+        (run_a, run_b),
+        (pass_a, pass_b),
+        evidence_ref_id=_fresh_evidence_ref_id(),
+        intended_owner="person:sol",
+        review_at="2026-09-08T00:00:00Z",
+        created_at="2026-09-01T00:00:13Z",
+        analysis_version="mastermind.agent_evaluation_r0_analysis.v1",
+    )
+    assert scoring.validate_multi_scenario_evidence_ref_shape(evidence) == "SHAPE_VALID"
+
+    group_a = next(g for g in evidence["scenario_groups"] if g["scenario_id"] == scenario_a["scenario_id"])
+    gate = next(d for d in group_a["dimension_gates"] if d["dimension"] == "rubric_residue")
+    assert gate["unknown_count"] == 1
+    assert gate["valid_pass_count"] == 0
+    assert gate["valid_fail_count"] == 0
+    assert gate["valid_partial_count"] == 0
+    assert gate["unscored_count"] == 0  # not "four zeros" -- the UNKNOWN is counted, never silently dropped
+
+    # R0's existing rollup law is unaffected: the run's OWN scored_
+    # projection still correctly folds this required-but-UNKNOWN dimension
+    # up to UNSCORED at the run level.
+    run_a_entry = next(e for e in evidence["run_entries"] if e["run_id"] == run_a["run_id"])
+    assert run_a_entry["scored_projection"] == "UNSCORED"
+
+
 def _create_full_graph(artifact_store: "store.ArtifactStore", g: dict) -> None:
     for doc in (g["scenario_a"], g["scenario_b"], g["config_a"], g["config_b"], g["experiment"]):
         artifact_store.create(doc)

@@ -869,6 +869,46 @@ def _v_multi_run_entries(value: Any, path: str) -> list[dict]:
     return items
 
 
+def _v_dimension_gate_ext(value: Any, path: str) -> dict:
+    """MAJOR-2 review repair (adversarial review of PR #333): a SEPARATE
+    dimension-gate shape used ONLY inside multi-scenario ``scenario_
+    groups`` -- adds a required ``unknown_count`` bucket alongside R0's
+    original four. R0's single-scenario ``_v_dimension_gate``/``_v_
+    dimension_gates`` above are left COMPLETELY UNTOUCHED (not reused
+    here) to guarantee zero byte-stability risk to the single-scenario
+    evidence-ref schema/journey: R0's own untouched ``summarize_
+    experiment`` never populates ``unknown_count`` and must never be
+    required to. Without this bucket, a dimension result whose status is
+    literally ``UNKNOWN`` (e.g. every S1 scorer's permanent ``rubric_
+    residue`` dimension) fell into NONE of ``valid_pass_count``/``valid_
+    fail_count``/``valid_partial_count``/``unscored_count`` -- silently
+    disappearing from the gate matrix a reviewer reads, rather than being
+    visibly counted. E1 needs that residue visible, not vanished."""
+    return contracts.validate_closed_object(
+        value,
+        path,
+        {
+            "dimension": contracts.v_str,
+            "required": contracts.v_bool,
+            "valid_pass_count": contracts.v_nonneg_int,
+            "valid_fail_count": contracts.v_nonneg_int,
+            "valid_partial_count": contracts.v_nonneg_int,
+            "unscored_count": contracts.v_nonneg_int,
+            "unknown_count": contracts.v_nonneg_int,
+        },
+    )
+
+
+def _v_dimension_gates_ext(value: Any, path: str) -> list[dict]:
+    items = contracts.v_list_of(_v_dimension_gate_ext)(value, path)
+    dims = [item["dimension"] for item in items]
+    if dims != sorted(dims):
+        raise ContractError([ContractDefect(path, "LIST_NOT_SORTED", "dimension_gates must be sorted by dimension")])
+    if len(set(dims)) != len(dims):
+        raise ContractError([ContractDefect(path, "LIST_HAS_DUPLICATES", "dimension_gates must not repeat a dimension")])
+    return items
+
+
 def _v_scenario_group(value: Any, path: str) -> dict:
     return contracts.validate_closed_object(
         value,
@@ -876,7 +916,7 @@ def _v_scenario_group(value: Any, path: str) -> dict:
         {
             "scenario_id": contracts.v_scenario_id,
             "scenario_version": contracts.v_pos_int,
-            "dimension_gates": _v_dimension_gates,
+            "dimension_gates": _v_dimension_gates_ext,
             "counts": _v_counts,
             "sample_size": contracts.v_nonneg_int,
         },
@@ -1111,6 +1151,13 @@ def summarize_multi_scenario_experiment(
                     "valid_fail_count": statuses.count("FAIL"),
                     "valid_partial_count": statuses.count("PARTIAL"),
                     "unscored_count": statuses.count("UNSCORED"),
+                    # MAJOR-2 review repair: a dimension result whose
+                    # status is literally "UNKNOWN" (e.g. every S1
+                    # scorer's permanent rubric_residue dimension) used to
+                    # fall into NONE of the four buckets above -- silently
+                    # vanishing from the gate matrix. Counted explicitly
+                    # here so residue is visible, never dropped.
+                    "unknown_count": statuses.count("UNKNOWN"),
                 }
             )
         valid_count = sum(1 for e in entries_for_scenario if e["technical_validity"] == "VALID")
