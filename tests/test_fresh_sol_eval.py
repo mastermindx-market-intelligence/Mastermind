@@ -1065,3 +1065,256 @@ def test_cli_check_corpus_exits_nonzero_when_incomplete(tmp_path: Path, capsys: 
     captured = capsys.readouterr()
     assert "valid_count" in captured.out
 
+
+# ---------------------------------------------------------------------------
+# Task 4: the sixteen named isolation/evidence falsifiers (design §14 /
+# plan Task 4 Step 1).  Each name below makes the killed mutant obvious on
+# its own; several reuse fixtures already exercised earlier in this file,
+# but each is independently readable and independently fails if the named
+# law regresses.
+# ---------------------------------------------------------------------------
+
+
+def test_second_sample_never_reuses_native_thread(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory()
+    first = run_one(
+        repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+        run_root=tmp_path / "run1", client_factory=factory,
+    )
+    second = run_one(
+        repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+        run_root=tmp_path / "run2", client_factory=factory,
+    )
+    assert first.native_thread_id != second.native_thread_id
+
+
+def test_resume_and_fork_are_never_called(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory()
+    run_one(
+        repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+        run_root=tmp_path / "run", client_factory=factory,
+    )
+    client = factory.made[0]
+    assert client.thread_resume_calls == 0
+    assert client.thread_fork_calls == 0
+    # _FakeEvalClient additionally raises if run_one ever calls either RPC
+    # (see its request() handlers above) -- a regression that reintroduces
+    # a resume/fork call fails this test via that AssertionError, not just
+    # a zero-count check.
+
+
+def test_skillpack_comes_from_exact_git_commit_not_dirty_worktree(skillpack_git_repo):
+    repo = skillpack_git_repo["repo"]
+    arm = SkillpackArm("fixture-control", skillpack_git_repo["control_sha"], "1.0.0")
+    bundle = materialize_skillpack(repo, arm)
+    for source in bundle.sources:
+        assert b"DIRTY WORKING TREE COPY" not in source.content
+
+
+def test_wrapper_is_byte_identical_between_arms_except_skill_sources(skillpack_git_repo):
+    repo = skillpack_git_repo["repo"]
+    control_arm = SkillpackArm("control-1.0.0", skillpack_git_repo["control_sha"], "1.0.0")
+    amended_arm = SkillpackArm("amended-1.1.0", skillpack_git_repo["amended_sha"], "1.1.0")
+    control_md = build_eval_agents_md(materialize_skillpack(repo, control_arm))
+    amended_md = build_eval_agents_md(materialize_skillpack(repo, amended_arm))
+    assert control_md.split(b"----- BEGIN ", 1)[0] == amended_md.split(b"----- BEGIN ", 1)[0]
+    assert control_md != amended_md  # the source bytes themselves must still differ
+
+
+def test_missing_or_wrong_commit_skill_file_refuses(skillpack_git_repo, monkeypatch: pytest.MonkeyPatch):
+    import scripts.ohf.fresh_sol_eval as fresh_sol_eval_module
+
+    repo = skillpack_git_repo["repo"]
+    arm = SkillpackArm("fixture-control", skillpack_git_repo["control_sha"], "1.0.0")
+    real_git = fresh_sol_eval_module._git
+
+    def broken_git(repo_root, *args):
+        if args and args[0] == "show" and args[-1].endswith("SIBLING.md"):
+            return subprocess.CompletedProcess(args, returncode=128, stdout=b"", stderr=b"fixture: blob unreadable")
+        return real_git(repo_root, *args)
+
+    monkeypatch.setattr(fresh_sol_eval_module, "_git", broken_git)
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        materialize_skillpack(repo, arm)
+    assert excinfo.value.code == "PROCEDURE_SOURCE_UNAVAILABLE"
+
+
+def test_protocol_has_no_hardcoded_scenario_fallback(tmp_path: Path):
+    path = tmp_path / "PRESSURE_TEST_PROTOCOL.md"
+    text = _protocol_text().replace("S2 BODY", "COMPLETELY UNUSUAL NON-DEFAULT TEXT 991")
+    path.write_text(text, encoding="utf-8")
+    packets = parse_protocol(path)
+    assert "COMPLETELY UNUSUAL NON-DEFAULT TEXT 991" in packets["S2"].prompt
+    assert "repaired-then-stale" not in packets["S2"].prompt  # never a built-in default
+
+
+# test_served_model_mismatch_refuses_before_thread_start -- already defined
+# above (Task 2, Step 2).
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"mcp_configured": ("some_mcp",)},
+        {"plugins_configured": ("some_plugin",)},
+        {"skills": ({"name": "some-skill"},)},
+        {"mcp_status": ({"name": "unclassified_ambient_mcp"},)},
+    ],
+    ids=["mcp", "plugin", "skill", "unclassified_ambient"],
+)
+def test_ambient_mcp_plugin_skill_or_unclassified_capability_refuses(
+    mastermind_repo_root: Path, tmp_path: Path, kwargs
+):
+    factory = _fake_factory(**kwargs)
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+            run_root=tmp_path / "run", client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].thread_start_calls == 0
+
+
+# test_default_codex_home_refuses -- already defined above (Task 2, Step 4).
+# test_auth_json_contents_are_never_read_copied_or_serialized -- already
+# defined above (Task 2, Step 4).
+
+
+def test_notification_fragments_cannot_replace_canonical_thread_read(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    factory = _fake_factory(thread_read_turns="empty")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+            run_root=tmp_path / "run", client_factory=factory,
+        )
+    assert excinfo.value.code == "THREAD_READ_FAILED"
+    # The fake's wait_notification() always returns a fragment containing
+    # "NOTIFICATION FRAGMENT MUST NEVER BE USED AS OUTPUT"; run_one must
+    # never surface that text as a successful output.
+
+
+def test_existing_run_artifact_is_never_overwritten(tmp_path: Path):
+    observation = _observation()
+    bundle = _bundle_fixture()
+    write_run_artifact(
+        observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+        harness_kind="codex-app-server", harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+    )
+    target = tmp_path / "runs" / "control-1.0.0" / "S8" / "run-fixture-0001.md"
+    before = target.read_bytes()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        write_run_artifact(
+            observation=_observation(output="a different output entirely"), bundle=bundle,
+            protocol_sha256="d" * 64, harness_kind="codex-app-server",
+            harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+        )
+    assert excinfo.value.code == "EVIDENCE_COLLISION"
+    assert target.read_bytes() == before
+
+
+def test_effect_unknown_turn_is_never_retried_or_resumed(mastermind_repo_root: Path, tmp_path: Path):
+    class _DisconnectingClient:
+        def __init__(self, workspace, config_dir, home):
+            self.workspace = workspace
+            self.cwd = workspace
+            self.pid = None
+            self.notifications: list[dict[str, Any]] = []
+            self.thread_resume_calls = 0
+            self.thread_fork_calls = 0
+            self.turn_start_calls = 0
+            self.terminate_calls = 0
+
+        def start(self) -> None:
+            self.pid = next(_fake_pid_counter)
+
+        def request(self, method, params=None, timeout=15.0):
+            params = params or {}
+            if method == "initialize":
+                return {"userAgent": "fake"}
+            if method == "account/read":
+                return {"account": {"type": "chatgpt", "planType": "pro"}, "requiresOpenaiAuth": True}
+            if method == "config/read":
+                return {
+                    "config": {
+                        "model": "gpt-5.6-sol",
+                        "approval_policy": "never",
+                        "sandbox_mode": "read-only",
+                        "mcp_servers": {},
+                        "plugins": {},
+                    }
+                }
+            if method == "skills/list":
+                return {"data": [{"cwd": str(self.workspace), "skills": [], "errors": []}]}
+            if method == "mcpServerStatus/list":
+                return {"data": []}
+            if method == "thread/start":
+                return {"thread": {"id": "thr_fake_disconnect"}}
+            if method == "thread/resume":
+                self.thread_resume_calls += 1
+                raise AssertionError("an effect-unknown turn must never be resumed")
+            if method == "thread/fork":
+                self.thread_fork_calls += 1
+                raise AssertionError("an effect-unknown turn must never be forked")
+            if method == "turn/start":
+                self.turn_start_calls += 1
+                raise ConnectionError("fixture: connection dropped after dispatch")
+            raise AssertionError(f"unexpected fake RPC method: {method}")
+
+        def notify(self, method, params=None) -> None:
+            pass
+
+        def wait_notification(self, method, *, timeout=15.0):
+            raise AssertionError("turn/start already raised; wait_notification must not be reached")
+
+        def terminate(self):
+            self.terminate_calls += 1
+            return CleanupReceipt(
+                controller_returncode=0, private_group_id=self.pid,
+                private_group_empty=True, termination_outcome="sigterm",
+            )
+
+    made: list[_DisconnectingClient] = []
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _DisconnectingClient:
+        client = _DisconnectingClient(workspace, config_dir, home)
+        made.append(client)
+        return client
+
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+            run_root=tmp_path / "run", client_factory=factory,
+        )
+    assert excinfo.value.code == "TURN_EFFECT_UNKNOWN"
+    assert made[0].turn_start_calls == 1
+    assert made[0].thread_resume_calls == 0
+    assert made[0].thread_fork_calls == 0
+
+
+def test_unproven_process_group_cleanup_invalidates_run(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(cleanup_ok=False)
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+            run_root=tmp_path / "run", client_factory=factory,
+        )
+    assert excinfo.value.code == "CLEANUP_UNPROVEN"
+
+
+def test_secret_shaped_output_is_not_persisted(tmp_path: Path):
+    observation = _observation(output="here is sk-testFixtureSecretShape1234567890 leaking")
+    bundle = _bundle_fixture()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        write_run_artifact(
+            observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+            harness_kind="codex-app-server", harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+        )
+    assert excinfo.value.code == "EVIDENCE_SECRET_SHAPE_REFUSED"
+    assert not (tmp_path / "runs" / "control-1.0.0" / "S8" / "run-fixture-0001.md").exists()
+
+
+# test_mas136_matrix_is_exactly_four_control_twelve_amended -- already
+# defined above (Task 3, Step 4).
+
