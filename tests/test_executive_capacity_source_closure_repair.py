@@ -47,6 +47,12 @@ REPAIR_CARRIER_PATHS = (
 )
 
 PROTECTED_REPAIR_MERGE = "d3499f8bd5dd4ecc0c172c82146acf4e8733ddec"
+ACCEPTED_SOURCE_CLOSURE_REPAIR = "e53f524230ffc4e8730c844f6fc319d50a2050f3"
+UNRELATED_PROTECTED_DESCENDANT = "f61ced39d47f935b1dea369bd3ed25e06c954d08"
+UNRELATED_PROTECTED_DELTA = (
+    "docs/sol_skills/WATCHER_ACTION_LOOP.md",
+    "tests/test_sol_watcher_action_loop_skill.py",
+)
 
 
 def _run(*arguments: str, environment: dict[str, str] | None = None) -> tuple[int, str, str]:
@@ -100,7 +106,12 @@ def _tracked_symlink_repository(tmp_path: Path) -> tuple[Path, str]:
     vendor = repository / "vendor"
     vendor.mkdir()
     (vendor / "macro").symlink_to("macro_src")
-    _git(repository, "add", "vendor/macro")
+    for relative in REPAIR_CARRIER_PATHS:
+        destination = repository / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
+        destination.chmod(0o755 if relative.endswith(".sh") else 0o644)
+    _git(repository, "add", "vendor/macro", *REPAIR_CARRIER_PATHS)
     _git(repository, "commit", "-qm", "tracked symlink fixture")
     commit = _git(repository, "rev-parse", "HEAD")
     _git(repository, "update-ref", "refs/remotes/origin/master", commit)
@@ -120,6 +131,78 @@ def _protected_repair_repository(tmp_path: Path) -> Path:
         PROTECTED_REPAIR_MERGE,
     )
     return repository
+
+
+def _two_pin_repository(
+    tmp_path: Path,
+    *,
+    drift: str | None = None,
+    protected_carrier: bool = True,
+    repair_relation: str = "ancestor",
+) -> tuple[Path, str, str]:
+    repository = tmp_path / "two-pin-repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    _git(repository, "config", "user.name", "Fixture")
+    _git(repository, "config", "user.email", "fixture@example.invalid")
+
+    for relative in REPAIR_CARRIER_PATHS:
+        destination = repository / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
+        destination.chmod(0o755 if relative.endswith(".sh") else 0o644)
+    _git(repository, "add", *REPAIR_CARRIER_PATHS)
+    _git(repository, "commit", "-qm", "accepted repair A")
+    accepted_repair = _git(repository, "rev-parse", "HEAD")
+
+    if drift == "blob":
+        changed = repository / REPAIR_CARRIER_PATHS[-1]
+        changed.write_bytes(changed.read_bytes() + b"\n# authenticated drift\n")
+        _git(repository, "add", REPAIR_CARRIER_PATHS[-1])
+    elif drift == "mode":
+        changed = repository / REPAIR_CARRIER_PATHS[-1]
+        changed.chmod(0o755)
+        _git(repository, "add", REPAIR_CARRIER_PATHS[-1])
+    else:
+        unrelated = repository / "docs" / "unrelated-protected-change.md"
+        unrelated.parent.mkdir(parents=True)
+        unrelated.write_text("unrelated protected change\n", encoding="utf-8")
+        _git(repository, "add", "docs/unrelated-protected-change.md")
+    _git(repository, "commit", "-qm", "protected descendant B")
+    carrier_commit = _git(repository, "rev-parse", "HEAD")
+
+    if protected_carrier:
+        _git(
+            repository,
+            "update-ref",
+            "refs/remotes/origin/master",
+            carrier_commit,
+        )
+    else:
+        _git(
+            repository,
+            "update-ref",
+            "refs/remotes/origin/master",
+            accepted_repair,
+        )
+        _git(repository, "update-ref", "refs/heads/pr-head", carrier_commit)
+
+    if repair_relation == "ancestor":
+        repair_commit = accepted_repair
+    elif repair_relation == "nonancestor":
+        repair_commit = _git(
+            repository,
+            "commit-tree",
+            f"{accepted_repair}^{{tree}}",
+            "-m",
+            "non-ancestor repair candidate",
+        )
+        _git(repository, "update-ref", "refs/heads/repair-candidate", repair_commit)
+    elif repair_relation == "unreachable":
+        repair_commit = "f" * 40
+    else:
+        raise AssertionError(f"unsupported repair relation: {repair_relation}")
+    return repository, repair_commit, carrier_commit
 
 
 def _run_nonprivileged_checkout_block(
@@ -144,6 +227,9 @@ def _run_nonprivileged_checkout_block(
         ),
         "MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b": (
             f"MACRO_COMMIT={repair_merge_sha}"
+        ),
+        "CARRIER_COMMIT_SHA='<40-lower-hex-current-protected-carrier-sha>'": (
+            f"CARRIER_COMMIT_SHA={repair_merge_sha}"
         ),
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'": (
             f"REPAIR_MERGE_SHA={repair_merge_sha}"
@@ -175,6 +261,86 @@ def _run_nonprivileged_checkout_block(
         },
     )
     return completed, repair_parent / "mastermind"
+
+
+def _run_split_nonprivileged_checkout_block(
+    repository: Path,
+    *,
+    carrier_commit_sha: str,
+    repair_merge_sha: str,
+    repair_parent: Path,
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    block = next(
+        candidate.split("```", 1)[0]
+        for candidate in RUNBOOK.read_text(encoding="utf-8").split("```bash\n")[1:]
+        if 'REPAIR_CHECKOUT="$REPAIR_PARENT/mastermind"' in candidate
+    )
+    checkout_and_bundle_block = block.split('TRANSPORT_PARENT="', 1)[0]
+    carrier_declaration = (
+        "CARRIER_COMMIT_SHA='<40-lower-hex-current-protected-carrier-sha>'"
+    )
+    assert carrier_declaration in checkout_and_bundle_block
+    checkout_and_bundle_block = checkout_and_bundle_block.replace(
+        carrier_declaration,
+        f"CARRIER_COMMIT_SHA={carrier_commit_sha}",
+    )
+    repair_declarations = (
+        f"REPAIR_MERGE_SHA={ACCEPTED_SOURCE_CLOSURE_REPAIR}",
+        "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'",
+    )
+    repair_declaration = next(
+        (
+            candidate
+            for candidate in repair_declarations
+            if candidate in checkout_and_bundle_block
+        ),
+        None,
+    )
+    assert repair_declaration is not None
+    replacements = {
+        "MACRO_REPOSITORY=/absolute/path/to/macro": (
+            f"MACRO_REPOSITORY={shlex.quote(str(repository))}"
+        ),
+        "MASTERMIND_REPOSITORY=/absolute/path/to/Mastermind": (
+            f"MASTERMIND_REPOSITORY={shlex.quote(str(repository))}"
+        ),
+        "MACRO_COMMIT=dcdd939c45b23abce5ba04f95e330ac914a3904b": (
+            f"MACRO_COMMIT={carrier_commit_sha}"
+        ),
+        repair_declaration: f"REPAIR_MERGE_SHA={repair_merge_sha}",
+        'REPAIR_PARENT="$(/usr/bin/mktemp -d '
+        '/private/tmp/mastermind-h0-source-repair.XXXXXX)"': (
+            f"REPAIR_PARENT={shlex.quote(str(repair_parent))}"
+        ),
+    }
+    for original, replacement in replacements.items():
+        assert original in checkout_and_bundle_block
+        checkout_and_bundle_block = checkout_and_bundle_block.replace(
+            original, replacement
+        )
+    repair_parent.mkdir()
+    completed = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            checkout_and_bundle_block
+            + "/usr/bin/printf '%s\\n' RUNBOOK_TWO_PIN_PASS\n",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        env={
+            "HOME": "/var/empty",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "C",
+            "LC_ALL": "C",
+        },
+    )
+    return (
+        completed,
+        repair_parent / "mastermind",
+        repair_parent / "mastermind-exact-commit.bundle",
+    )
 
 
 def _assert_materialized_checkout_is_closed(
@@ -266,6 +432,154 @@ def test_runbook_materializes_exact_protected_tree_and_preserves_carrier_blobs(
         assert _git(checkout, "hash-object", relative) == expected_oid
         assert stat.S_IMODE(materialized.stat().st_mode) == (
             0o755 if mode == "100755" else 0o644
+        )
+
+
+def test_one_sha_runbook_contract_cannot_represent_current_descendant_and_repair(
+    tmp_path: Path,
+) -> None:
+    repository, repair_commit, carrier_commit = _two_pin_repository(tmp_path)
+    assert repair_commit != carrier_commit
+    assert _git(repository, "rev-parse", "refs/remotes/origin/master") == carrier_commit
+
+    completed, checkout = _run_nonprivileged_checkout_block(
+        repository,
+        repair_commit,
+        tmp_path / "one-sha-repair-parent",
+    )
+
+    assert completed.returncode != 0
+    assert not checkout.exists()
+
+
+def test_two_pin_runbook_accepts_current_descendant_without_relabelling_repair(
+    tmp_path: Path,
+) -> None:
+    repository, repair_commit, carrier_commit = _two_pin_repository(tmp_path)
+    repair_parent = tmp_path / "two-pin-repair-parent"
+
+    completed, checkout, carrier = _run_split_nonprivileged_checkout_block(
+        repository,
+        carrier_commit_sha=carrier_commit,
+        repair_merge_sha=repair_commit,
+        repair_parent=repair_parent,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.endswith("RUNBOOK_TWO_PIN_PASS\n")
+    assert _git(checkout, "rev-parse", "HEAD") == carrier_commit
+    assert _git(repository, "bundle", "list-heads", str(carrier)) == (
+        f"{carrier_commit} refs/remotes/origin/master"
+    )
+    for relative in REPAIR_CARRIER_PATHS:
+        repair_tree = _git(repository, "ls-tree", repair_commit, "--", relative)
+        carrier_tree = _git(repository, "ls-tree", carrier_commit, "--", relative)
+        assert carrier_tree == repair_tree
+        _mode, _kind, expected_oid, _path = carrier_tree.split()
+        assert _git(checkout, "hash-object", relative) == expected_oid
+
+
+@pytest.mark.parametrize("drift", ("blob", "mode"))
+def test_two_pin_runbook_refuses_authenticated_material_drift_before_bundle(
+    tmp_path: Path,
+    drift: str,
+) -> None:
+    repository, repair_commit, carrier_commit = _two_pin_repository(
+        tmp_path,
+        drift=drift,
+    )
+    drifted_path = REPAIR_CARRIER_PATHS[-1]
+    assert _git(repository, "ls-tree", repair_commit, "--", drifted_path) != _git(
+        repository,
+        "ls-tree",
+        carrier_commit,
+        "--",
+        drifted_path,
+    )
+
+    completed, _checkout, carrier = _run_split_nonprivileged_checkout_block(
+        repository,
+        carrier_commit_sha=carrier_commit,
+        repair_merge_sha=repair_commit,
+        repair_parent=tmp_path / f"{drift}-drift-repair-parent",
+    )
+
+    assert completed.returncode != 0
+    assert not carrier.exists()
+
+
+@pytest.mark.parametrize("repair_relation", ("nonancestor", "unreachable"))
+def test_two_pin_runbook_refuses_nonancestor_or_unreachable_repair_before_bundle(
+    tmp_path: Path,
+    repair_relation: str,
+) -> None:
+    repository, repair_commit, carrier_commit = _two_pin_repository(
+        tmp_path,
+        repair_relation=repair_relation,
+    )
+
+    completed, _checkout, carrier = _run_split_nonprivileged_checkout_block(
+        repository,
+        carrier_commit_sha=carrier_commit,
+        repair_merge_sha=repair_commit,
+        repair_parent=tmp_path / f"{repair_relation}-repair-parent",
+    )
+
+    assert completed.returncode != 0
+    assert not carrier.exists()
+
+
+def test_two_pin_runbook_refuses_unprotected_carrier_substitution_before_bundle(
+    tmp_path: Path,
+) -> None:
+    repository, repair_commit, carrier_commit = _two_pin_repository(
+        tmp_path,
+        protected_carrier=False,
+    )
+    assert _git(repository, "rev-parse", "refs/remotes/origin/master") == repair_commit
+    assert carrier_commit != repair_commit
+
+    completed, _checkout, carrier = _run_split_nonprivileged_checkout_block(
+        repository,
+        carrier_commit_sha=carrier_commit,
+        repair_merge_sha=repair_commit,
+        repair_parent=tmp_path / "unprotected-carrier-repair-parent",
+    )
+
+    assert completed.returncode != 0
+    assert not carrier.exists()
+
+
+def test_real_protected_pair_has_git_proven_non_h0_drift() -> None:
+    _git(
+        ROOT,
+        "merge-base",
+        "--is-ancestor",
+        ACCEPTED_SOURCE_CLOSURE_REPAIR,
+        UNRELATED_PROTECTED_DESCENDANT,
+    )
+    assert tuple(
+        _git(
+            ROOT,
+            "diff",
+            "--name-only",
+            ACCEPTED_SOURCE_CLOSURE_REPAIR,
+            UNRELATED_PROTECTED_DESCENDANT,
+        ).splitlines()
+    ) == UNRELATED_PROTECTED_DELTA
+    for relative in REPAIR_CARRIER_PATHS:
+        assert _git(
+            ROOT,
+            "ls-tree",
+            ACCEPTED_SOURCE_CLOSURE_REPAIR,
+            "--",
+            relative,
+        ) == _git(
+            ROOT,
+            "ls-tree",
+            UNRELATED_PROTECTED_DESCENDANT,
+            "--",
+            relative,
         )
 
 
@@ -384,6 +698,26 @@ def _bootstrap_arguments(
     )
 
 
+def _bootstrap_split_arguments(
+    carrier_commit: str,
+    repair_commit: str,
+    bundle: Path,
+    macro_transport: Path,
+    *,
+    operator_user: str | None = None,
+) -> tuple[str, ...]:
+    return (
+        carrier_commit,
+        repair_commit,
+        *_bootstrap_arguments(
+            repair_commit,
+            bundle,
+            macro_transport,
+            operator_user=operator_user,
+        )[1:],
+    )
+
+
 def _run_bootstrap(
     *arguments: str,
     environment: dict[str, str],
@@ -446,6 +780,7 @@ def _native_ceremony_command_from_runbook(
     )
     replacements = {
         "$REPAIR_CHECKOUT": str(repair_checkout),
+        "$CARRIER_COMMIT_SHA": repair_merge_sha,
         "$REPAIR_MERGE_SHA": repair_merge_sha,
         "$OPERATOR_USER": operator_user,
         "$MACRO_TRANSPORT": str(macro_transport),
@@ -628,6 +963,31 @@ def test_bootstrap_refuses_operator_identity_mismatch_before_bundle_observation(
     assert result == INVALID
     assert bundle.is_symlink()
     assert not root_namespace.exists()
+
+
+def test_bootstrap_two_pin_invocation_reaches_bundle_authentication_before_refusal(
+    tmp_path: Path,
+) -> None:
+    bundle_target = tmp_path / "operator-bundle-target"
+    bundle_target.write_bytes(b"inert bundle target\n")
+    bundle = tmp_path / "operator-bundle-symlink"
+    bundle.symlink_to(bundle_target)
+    macro_transport = tmp_path / "macro-transport.zip"
+    macro_transport.write_bytes(b"inert macro transport\n")
+
+    result = _run_bootstrap(
+        *_bootstrap_split_arguments(
+            "b" * 40,
+            "a" * 40,
+            bundle,
+            macro_transport,
+        ),
+        environment={},
+    )
+
+    assert result == (65, "H0_SOURCE_CLOSURE_REPAIR_REFUSED\n", "")
+    assert bundle.is_symlink()
+    assert bundle_target.read_bytes() == b"inert bundle target\n"
 
 
 @DARWIN_NATIVE
@@ -1404,9 +1764,11 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
     required = (
         "Alternative B",
         "dcdd939c45b23abce5ba04f95e330ac914a3904b",
-        "mastermind.capacity_source_transport/v2",
-        "build-source-transport-v2",
+        "mastermind.capacity_source_transport/v3",
+        "build-source-transport-v3",
+        "32 GiB",
         "MACRO_TRANSPORT_SHA256",
+        "CARRIER_COMMIT_SHA='<40-lower-hex-current-protected-carrier-sha>'",
         "REPAIR_MERGE_SHA='<40-lower-hex-protected-repair-merge-sha>'",
         "checkout --detach",
         "one native administrator dialog",
@@ -1433,7 +1795,8 @@ def test_runbook_freezes_alternative_b_build_and_one_offline_native_ceremony() -
     bootstrap = """/usr/bin/env -i \\
   HOME=/var/empty PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C \\
   /bin/bash "$REPAIR_CHECKOUT/ops/executive_os/bootstrap-capacity-source-closure.sh" \\
-  "$REPAIR_MERGE_SHA" "$OPERATOR_USER" "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \\
+  "$CARRIER_COMMIT_SHA" "$REPAIR_MERGE_SHA" "$OPERATOR_USER" \\
+  "$MACRO_TRANSPORT" "$MACRO_TRANSPORT_SHA256" \\
   "$REPAIR_CARRIER" "$REPAIR_CARRIER_SHA256"""
     assert bootstrap in runbook
     for forbidden in ("/bin/bash -s", "<<'H0_SOURCE_REPAIR'", "one root shell"):

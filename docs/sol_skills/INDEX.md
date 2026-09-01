@@ -82,11 +82,14 @@ once production-proven, to create one Executive CEO request.
 
 ### `WORKER_AVENUE_ROUTING.md`
 Mandatory companion for every Chairman-mediated/manual Slack worker handoff or routing
-recommendation. Sol states a preferred capability avenue, never autonomously chooses the
-quota-bearing account/session. For manual Slack routing it supplies the closed Chairman-facing
-avenue vocabulary, distinguishes capacity-selectable pre-START receiver binding from
-exact-session-required continuation, and takes precedence over generic worker/model examples on
-account binding.
+recommendation. Sol chooses a preferred capability avenue; routine concrete placement is not
+Chairman labor. For ordinary unbound `CAPACITY_SELECTABLE` work, this skill requires
+`WAITING_CAPACITY / needs_placement` rather than a worker-facing `PRECOMMISSION`, `OPEN_PICKUP`, or
+`ACCOUNT_BINDING: CHAIRMAN_SELECTS`. It preserves the closed Chairman-facing avenue vocabulary,
+pre-START capacity-selectable rebinding, exact-session-required continuation, post-START stickiness,
+and the rule that deliberate live delivery to a concrete eligible session is the receiver-assignment
+edge. `CHAIRMAN_SELECTS` remains only an explicit manual exception when the current live Chairman
+opts into manual quota allocation for that exact operation.
 
 ### `WATCHER_ACTION_LOOP.md`
 Use whenever Sol arms/operates a watcher/condition-watch for a worker or COO dialogue, or a
@@ -122,7 +125,8 @@ routing receipt including `WHY NOT FABLE` or `WHY FABLE`.
 When a loaded skill commissions, reviews, continues or closes a worker dialogue, apply these
 universal source laws at the same protected commit. Do not substitute older pasted copies.
 For Chairman-mediated/manual Slack delegation, also load `WORKER_AVENUE_ROUTING.md` from that
-same commit; its account-binding and Chairman-facing avenue vocabulary is the more specific law.
+same commit; its placement/account-binding and Chairman-facing avenue vocabulary are the more
+specific law.
 
 ## Hard laws shared by every skill
 
@@ -155,18 +159,27 @@ same commit; its account-binding and Chairman-facing avenue vocabulary is the mo
     and gates permit action. On a qualifying return, re-pin current procedure, adjudicate the return,
     execute the lawful same-carrier Sol edge, then report; escalate without acting only at a genuine
     Chairman-only/new-authority/missing-gate boundary.
-18. Chairman-mediated/manual Slack delegation recommends an avenue, not a quota account. Unless the
-    current live Chairman directive explicitly names the receiver, Sol must state one
-    `PREFERRED_AVENUE` from `Fable`, `Opus`, `Grok`, `CTO Sol`, or `Terra` and leave the concrete
-    account/session binding to the Chairman. Prefer Terra/CTO Sol when sufficient; Fable remains
-    reserved for the hardest principal-level work.
-19. Manual receiver binding is explicit. `CAPACITY_SELECTABLE` ordinary new work may receive a
-    Chairman `PRESTART_REBIND` to another eligible concrete quota account before `START` while the
-    operation key, carrier, scope and logical responsibility stay unchanged; the newest explicit live
-    Chairman assignment wins and a numbered-account mismatch alone is not a blocker. Use
-    `EXACT_SESSION_REQUIRED` when the provider conversation/session itself is part of the target.
-    After `START`, the concrete runtime binding is sticky until canonically reconciled; never silently
-    hop accounts, and `EFFECT_UNKNOWN` always blocks receiver change.
+18. Routine worker placement is not Chairman labor. For Chairman-mediated/manual Slack routing, Sol
+    states one `PREFERRED_AVENUE` from `Fable`, `Opus`, `Grok`, `CTO Sol`, or `Terra`. Ordinary
+    `CAPACITY_SELECTABLE` work with no exact receiver is `WAITING_CAPACITY / needs_placement`; do not
+    emit a worker-facing `PRECOMMISSION`, `OPEN_PICKUP`, or `ACCOUNT_BINDING: CHAIRMAN_SELECTS`
+    merely because automated placement is incomplete. `CHAIRMAN_SELECTS` is an explicit manual
+    exception only when the current live Chairman opts into manual quota allocation for that exact
+    operation. Prefer Terra/CTO Sol when sufficient; Fable remains reserved for the hardest
+    principal-level work.
+19. Receiver binding remains explicit. When a concrete eligible session is deliberately given
+    `CAPACITY_SELECTABLE` work through current live Chairman delivery, accepted Sol direct handoff,
+    or the canonical placement owner, that delivery is the receiver-assignment edge; the receiver
+    ACKs/reads/arms continuation and separately STARTs when gates clear without demanding a second
+    Chairman/Slack claim. Before `START`, a lawful `PRESTART_REBIND` may change the concrete receiver
+    under the same operation/carrier when no prior execution/effect or effect uncertainty exists.
+    Use `EXACT_SESSION_REQUIRED` when the provider conversation/session itself is part of the target.
+    After `START`, runtime binding is sticky until canonically reconciled; `EFFECT_UNKNOWN` blocks
+    receiver change.
+20. Placement/pickup law applies equally to every Sol/project seat and provider surface. No ChatGPT,
+    Codex, Claude, Fable, Grok or another surface is exempt from current protected placement procedure
+    because of historical account behavior or prior `PRECOMMISSION` / `OPEN_PICKUP` /
+    `CHAIRMAN_SELECTS` practice.
 
 ## Modification handshake
 

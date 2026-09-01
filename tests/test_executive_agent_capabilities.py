@@ -60,7 +60,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-08-24.g4"
+    assert registry.policy_version == "2026-08-29.browser-b1"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -384,3 +384,139 @@ def test_manifest_requires_exact_binary_digest():
     )
     with pytest.raises(CapabilityPolicyError, match="lowercase SHA-256"):
         profile.capability_manifest(harness_binary_digest="not-a-digest")
+
+
+def test_browser_profile_uses_existing_capability_registry_for_stdio_mcp_and_one_resource(
+    tmp_path,
+):
+    """Dropping either grant must refuse the rich browser Attempt at profile seal."""
+
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("operator.browser.local-review.v1")
+
+    assert profile.execution_surface == "codex-app-server"
+    assert profile.sandbox_policy == "read-only"
+    assert profile.network_policy == "loopback-browser-only"
+    assert profile.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert profile.mcp_servers == (
+        "openai-developer-docs-v1",
+        "playwright-worker-browser-b1",
+    )
+    assert len(profile.resource_grants) == 1
+    resource = profile.resource_grants[0]
+    assert resource.resource_id == "worker-browser-b1-local"
+    assert resource.kind == "browser-devserver"
+    assert resource.manifest_path == "config/worker_browser_b1_control_room_devserver.json"
+    assert len(resource.manifest_digest) == 64
+    assert resource.runtime_manifest_path == (
+        "/Volumes/Mastermind/worker-browser-b1/runtime/"
+        "worker-browser-b1-install-manifest.json"
+    )
+    assert resource.runtime_manifest_digest == (
+        "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d"
+    )
+
+    assert profile.mcp_server_grants[0] == registry.mcp_servers[
+        "openai-developer-docs-v1"
+    ]
+    mcp = profile.mcp_server_grants[1]
+    assert mcp.transport == "stdio"
+    assert mcp.command == "/usr/bin/python3"
+    assert mcp.args[:3] == ("-I", "-S", "-c")
+    assert len(mcp.args) == 4
+    assert "os.open" in mcp.args[3]
+    assert "os.fchdir" in mcp.args[3]
+    assert "os.execve" in mcp.args[3]
+    assert "runtime/bin/worker-browser-b1-launcher" in mcp.args[3]
+    assert "/dev/fd" not in mcp.args[3]
+    assert len(
+        json.dumps(list(mcp.args), ensure_ascii=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ) <= 4096
+    assert mcp.url is None
+    assert mcp.server_identity == "playwright"
+    assert mcp.server_version == "1.63.0-alpha-2026-08-05"
+    assert mcp.tool_schema_digest == (
+        "859063beb705b4ed15b0defc2c42533d6bce1a3f18bf02c38f28f2422598fc0b"
+    )
+    assert mcp.enabled_tools == (
+        "browser_click",
+        "browser_close",
+        "browser_console_messages",
+        "browser_fill_form",
+        "browser_hover",
+        "browser_navigate",
+        "browser_network_requests",
+        "browser_resize",
+        "browser_snapshot",
+        "browser_tabs",
+        "browser_take_screenshot",
+        "browser_wait_for",
+    )
+
+    manifest = profile.capability_manifest(harness_binary_digest="a" * 64)
+    assert [(item.kind, item.name) for item in manifest.required] == [
+        ("mcp_server", "openaiDeveloperDocs"),
+        ("mcp_server", "playwrightWorkerBrowser"),
+        ("resource", "worker-browser-b1-local"),
+    ]
+    assert manifest.required[2].resource_contract_digest == resource.grant_digest
+    raw = _raw_policy()
+    raw["resources"]["worker-browser-b1-local"]["runtime_manifest_digest"] = "1" * 64
+    changed = ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+    assert (
+        changed.resources["worker-browser-b1-local"].grant_digest
+        != resource.grant_digest
+    )
+    projection = profile.app_server_config_projection()
+    assert projection["mcp_servers"]["playwrightWorkerBrowser"] == {
+        "args": list(mcp.args),
+        "command": "/usr/bin/python3",
+        "default_tools_approval_mode": "approve",
+        "enabled": True,
+        "enabled_tools": list(mcp.enabled_tools),
+        "required": True,
+    }
+    overrides = "\n".join(profile.app_server_config_overrides())
+    assert "openaiDeveloperDocs.url" in overrides
+    assert "playwrightWorkerBrowser.command" in overrides
+    assert "playwrightWorkerBrowser.args" in overrides
+    assert "PLAYWRIGHT_MCP" not in overrides
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda raw: raw["mcp_servers"]["playwright-worker-browser-b1"].update(
+            url="https://example.invalid/mcp"
+        ),
+        lambda raw: raw["resources"]["worker-browser-b1-local"].update(
+            browser_profile="Chairman Chrome"
+        ),
+        lambda raw: raw["profiles"]["operator.appserver.readonly.v1"].update(
+            resources=["worker-browser-b1-local"]
+        ),
+        lambda raw: raw["resources"]["worker-browser-b1-local"].pop(
+            "runtime_manifest_digest"
+        ),
+        lambda raw: raw["resources"]["worker-browser-b1-local"].update(
+            runtime_manifest_digest="A" * 64
+        ),
+        lambda raw: raw["resources"]["worker-browser-b1-local"].update(
+            runtime_manifest_path="runtime/install-manifest.json"
+        ),
+        lambda raw: raw["mcp_servers"]["playwright-worker-browser-b1"].update(
+            command="/usr/bin/python3",
+            args=["-I", "-S", "-c", "import os; os.execve('/tmp/unbound', [], {})"],
+        ),
+        lambda raw: raw["mcp_servers"]["playwright-worker-browser-b1"].update(
+            args=["-I", "-S", "-c", "x" * 4097],
+        ),
+    ],
+)
+def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, mutation):
+    raw = _raw_policy()
+    mutation(raw)
+    with pytest.raises(CapabilityPolicyError):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
