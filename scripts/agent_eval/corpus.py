@@ -58,6 +58,20 @@ CORPUS_HOLDOUT_SEAL_SCHEMA = "mastermind.agent_evaluation_corpus_holdout_seal.v1
 _RISK_TIERS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
 _SEALING_METHODS = frozenset({"SHA256_OVER_CANONICAL_BUNDLE"})
 
+# MAJOR-3 repair (principal ruling, 2026-09-01): a holdout seal must state
+# HONESTLY whether its sealed_body_digest is backed by a real, recoverable
+# private body. PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE names a seal whose
+# body was computed in-memory and then discarded (no private evidence root
+# exists yet to receive it) -- the digest is real and was genuinely computed
+# over a real bundle at authoring time, but that exact bundle can never be
+# re-derived or delivered. SEALED_BODY_DELIVERABLE is reserved for a future
+# seal minted once a real private evidence root exists to actually receive
+# the body private_evidence_root_ref names. Consumers (EVAL-E1 and later)
+# MUST NOT treat a PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE seal as usable
+# holdout evidence -- it is a governed intent-to-seal record, not delivered
+# evidence.
+_SEAL_STATUSES = frozenset({"PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE", "SEALED_BODY_DELIVERABLE"})
+
 _SCENARIO_FILENAME = "scenario.json"
 _HOLDOUT_SEAL_FILENAME = "holdout_seal.json"
 _MANIFEST_FILENAME = "corpus_manifest.json"
@@ -149,6 +163,7 @@ _HOLDOUT_SEAL_FIELDS = {
     "temporal_cutoff": contracts.v_timestamp,
     "sealed_body_digest": contracts.v_digest,
     "sealing_method": contracts.v_enum(_SEALING_METHODS),
+    "seal_status": contracts.v_enum(_SEAL_STATUSES),
     "private_evidence_root_ref": contracts.v_str,
     "authorship": lambda value, path: contracts.validate_closed_object(
         value, path, {"author_ref": contracts.v_str, "independent_reviewer_ref": contracts.v_str}
@@ -458,8 +473,14 @@ def verify_corpus_tree_consistency(corpus_root: Path, repo_root: Path) -> Corpus
 
     scenario_count = 0
     holdout_count = 0
-    scenario_dirs: set[Path] = set()
-    holdout_dirs: set[Path] = set()
+    # BLOCKER-2 repair: identity-based overlap, not directory-based. A
+    # republished holdout body can land under a DIFFERENT directory name
+    # than its own seal (a different family/case slug entirely) and still
+    # evade a directory-set intersection -- what must never coexist is the
+    # same scenario_id existing as both a public scenario and a sealed
+    # holdout, regardless of where each one physically sits in the tree.
+    public_scenario_ids: set[str] = set()
+    holdout_scenario_ids: set[str] = set()
 
     for scenario_file in sorted(corpus_root.rglob(_SCENARIO_FILENAME)):
         if scenario_file.is_symlink():
@@ -467,8 +488,9 @@ def verify_corpus_tree_consistency(corpus_root: Path, repo_root: Path) -> Corpus
             continue
         relative = scenario_file.relative_to(corpus_root)
         scenario_count += 1
-        scenario_dirs.add(scenario_file.parent.relative_to(corpus_root))
         document = _read_json(scenario_file)
+        if isinstance(document, dict) and isinstance(document.get("scenario_id"), str):
+            public_scenario_ids.add(document["scenario_id"])
         defects.extend(
             _verify_scenario_document(
                 str(relative),
@@ -498,8 +520,9 @@ def verify_corpus_tree_consistency(corpus_root: Path, repo_root: Path) -> Corpus
             continue
         relative = seal_file.relative_to(corpus_root)
         holdout_count += 1
-        holdout_dirs.add(seal_file.parent.relative_to(corpus_root))
         document = _read_json(seal_file)
+        if isinstance(document, dict) and isinstance(document.get("scenario_id"), str):
+            holdout_scenario_ids.add(document["scenario_id"])
         try:
             validate_holdout_seal_shape(document)
         except ContractError as exc:
@@ -526,21 +549,31 @@ def verify_corpus_tree_consistency(corpus_root: Path, repo_root: Path) -> Corpus
                             f"stored path does not match the canonical path derived from its own scenario_id (expected {expected_relative})",
                         )
                     )
+        # BLOCKER-1 repair: ALLOWLIST, not a denylist of two known escapes.
+        # Under any holdout-seal directory, the ONLY permitted entry is the
+        # seal file itself -- an alternate body filename (e.g. body.json), a
+        # subdirectory (e.g. sealed_bundle/), or anything else is an
+        # UNSEALED_HOLDOUT_BODY_IN_REPO refusal. A denylist of two known
+        # filenames only ever catches the escapes it was told about; an
+        # allowlist of one filename catches every escape by construction.
         seal_dir = seal_file.parent
-        if (seal_dir / _SCENARIO_FILENAME).exists() or (seal_dir / _FIXTURES_DIRNAME).is_dir():
-            defects.append(
-                ContractDefect(
-                    str(relative),
-                    "UNSEALED_HOLDOUT_BODY_IN_REPO",
-                    "a holdout-seal directory must not also contain a scenario.json or fixtures/ body in the public repository",
+        for entry in sorted(seal_dir.iterdir()):
+            if entry.name != _HOLDOUT_SEAL_FILENAME:
+                defects.append(
+                    ContractDefect(
+                        str(relative),
+                        "UNSEALED_HOLDOUT_BODY_IN_REPO",
+                        f"a holdout-seal directory must contain ONLY {_HOLDOUT_SEAL_FILENAME} in the public repository; found {entry.relative_to(corpus_root)}",
+                    )
                 )
-            )
 
-    overlap = scenario_dirs & holdout_dirs
-    for case_dir in sorted(overlap):
+    overlap_ids = public_scenario_ids & holdout_scenario_ids
+    for scenario_id in sorted(overlap_ids):
         defects.append(
             ContractDefect(
-                str(case_dir), "CASE_DIRECTORY_MIXES_PUBLIC_AND_HOLDOUT", "a case directory must be either a public scenario or a sealed holdout, never both"
+                scenario_id,
+                "CASE_DIRECTORY_MIXES_PUBLIC_AND_HOLDOUT",
+                "the same scenario_id exists as both a public scenario (under scenarios/) and a sealed holdout (under holdouts/)",
             )
         )
 

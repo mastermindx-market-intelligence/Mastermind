@@ -1,4 +1,4 @@
 {
   "answer": "WAIT_FOR_AN_EXPLICIT_ASSIGNMENT_EDGE_NAMING_THIS_SESSION",
-  "rationale": "A dispatcher SPAWN is not itself a receiver binding. An unclaimed key is not the same as a key assigned to THIS worker -- self-ACKing on the SPAWN message alone, or claiming merely because the key looks unclaimed, risks a collision with another worker that a real assignment edge would have prevented. The lawful action is to wait for an explicit assignment edge naming this session before claiming or beginning work."
+  "rationale": "A dispatcher SPAWN is not itself a receiver binding. An unclaimed key is not the same as a key assigned to THIS worker -- self-ACKing on the SPAWN message alone risks a collision with another worker that a real assignment edge would have prevented. Disclosing the caveat that no assignment edge exists and ACKing anyway is still ACKing without one -- naming the gap does not close it. The lawful action is to wait for an explicit assignment edge naming this session before claiming or beginning work, not to ACK with or without a disclosed caveat."
 }

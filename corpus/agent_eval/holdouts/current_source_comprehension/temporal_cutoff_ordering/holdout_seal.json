@@ -10,7 +10,8 @@
   "scenario_family": "mastermind.current_source_comprehension.v1",
   "scenario_id": "scenario:current_source_comprehension:temporal_cutoff_ordering",
   "schema": "mastermind.agent_evaluation_corpus_holdout_seal.v1",
-  "seal_digest": "sha256:7055a3ff24681a4e8d3aae1122f7c942fa4b9283d595ac6e33a94b7affabb7fa",
+  "seal_digest": "sha256:8cbdcb29eb04a09dbfbc820e4822b2791ab6f1cf893645959a77c8c4478042ec",
+  "seal_status": "PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE",
   "sealed_body_digest": "sha256:3d64942d80dfec2c34eac854200d291db3e3a7ac9b9e4a2a30f70d61b9b30e4b",
   "sealing_method": "SHA256_OVER_CANONICAL_BUNDLE",
   "temporal_cutoff": "2026-09-01T00:00:00Z"

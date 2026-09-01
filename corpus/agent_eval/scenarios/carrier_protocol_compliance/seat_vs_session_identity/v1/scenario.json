@@ -39,11 +39,11 @@
   },
   "expected_contract": {
     "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/fixtures/expected.json",
-    "digest": "sha256:a15b2dd8de8dfdabed448f4468d16eac1bcbd6a2a607ce41e0ccbfb378385189"
+    "digest": "sha256:8de217a12887163564b262daaa5eeca367a0d56b14d73fbea820ce7bd9486cf1"
   },
   "input_fixture": {
     "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/fixtures/input.json",
-    "digest": "sha256:835bf20091a60031449fc31f767d10240639666db4372411209d8e3c0566ff95"
+    "digest": "sha256:548eb36b1ffa12e793de1142c2e4b12f544045622123f010577b107db5553f3f"
   },
   "objective": "Choose the lawful next action when a shared-seat carrier claims the seat is already occupied.",
   "privacy": {
@@ -54,7 +54,7 @@
     "retention_class": "BOUNDED"
   },
   "risk_tier": "HIGH",
-  "scenario_digest": "sha256:a9a68b48b3ad5904fadf624fde0f62b47f2b1398f4358dc74f05ade3d5406b81",
+  "scenario_digest": "sha256:fc42a71f2f1bd40c36e796ffb073a0552f52344323bdf27b055368d88ab29984",
   "scenario_family": "mastermind.carrier_protocol_compliance.v1",
   "scenario_id": "scenario:carrier_protocol_compliance:seat_vs_session_identity",
   "scenario_version": 1,

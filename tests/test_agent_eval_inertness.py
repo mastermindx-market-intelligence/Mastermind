@@ -671,11 +671,32 @@ ALLOWED_PATHS = frozenset(
 # authorization and its own operation-key citation, exactly like this one.
 ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/"})
 
+# NB-8 repair: a prefix in ALLOWED_PATH_PREFIXES is NOT a blanket allowance
+# for any file type dropped under that tree -- admission is further
+# constrained to the corpus law's own known filenames
+# (scripts/agent_eval/corpus.py / the C0 plan record's §2 corpus-home
+# layout): a scenario document, a holdout seal, the corpus manifest, a
+# fixture JSON file, or a corpus README. An unexpected extension, a stray
+# script, or a non-JSON fixture living under the prefix is still refused.
+_CORPUS_TREE_ALLOWED_BASENAMES = frozenset({"scenario.json", "holdout_seal.json", "corpus_manifest.json", "README.md"})
+
+
+def _corpus_prefix_path_is_allowed(path: str, prefix: str) -> bool:
+    suffix = path[len(prefix):]
+    parts = suffix.split("/")
+    basename = parts[-1]
+    if basename in _CORPUS_TREE_ALLOWED_BASENAMES:
+        return True
+    return len(parts) >= 2 and parts[-2] == "fixtures" and basename.endswith(".json")
+
 
 def _changed_path_is_allowed(path: str) -> bool:
     if path in ALLOWED_PATHS:
         return True
-    return any(path.startswith(prefix) for prefix in ALLOWED_PATH_PREFIXES)
+    for prefix in ALLOWED_PATH_PREFIXES:
+        if path.startswith(prefix) and _corpus_prefix_path_is_allowed(path, prefix):
+            return True
+    return False
 
 
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:

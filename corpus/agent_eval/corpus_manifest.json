@@ -1,17 +1,17 @@
 {
   "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
-  "corpus_tree_digest": "sha256:ca1ea97e0f5026c06fb92c5214cfccba6bd4ede96125f570d1de7392dea81352",
+  "corpus_tree_digest": "sha256:72e8f1ffc0eb261f3c61fb35aeb144cbb9223973f1874646eced506077f82f87",
   "entries": [
     {
-      "digest": "sha256:5e6e500d67f1b1ccd677db256f229aa5918de827fb34ff548e7085921663d7e2",
+      "digest": "sha256:2b6abb14d5b4c483545e38cc498a039ae10777b8e1eb30dcf7dafb8c8fe2c5d2",
       "relative_path": "holdouts/bounded_implementation_fence/multi_file_coordinated_fence/holdout_seal.json"
     },
     {
-      "digest": "sha256:b3b13a4e6d2cb661cbb1f9c9bb6c86ae1690caa4d42becf4455f3a4c0a6740be",
+      "digest": "sha256:739ee04053aadde18caa5c12993ab7753b1ace1b32782a376447615e1a0f8229",
       "relative_path": "holdouts/carrier_protocol_compliance/named_seat_override_freshness_fence/holdout_seal.json"
     },
     {
-      "digest": "sha256:356a8943ef084e42c1c2316d8857e1a2cff19a5e3fdee72341ebda026d2152c3",
+      "digest": "sha256:5cb88505f68d0cdbee03b2278aa3baccc3d01be02e57b3888bbc076830fc0723",
       "relative_path": "holdouts/current_source_comprehension/temporal_cutoff_ordering/holdout_seal.json"
     },
     {
@@ -31,15 +31,15 @@
       "relative_path": "scenarios/bounded_implementation_fence/doc_only_edit/v1/fixtures/expected.json"
     },
     {
-      "digest": "sha256:fe4a96f7cb02dd2201468f949ecbb5c51e798c061c2a3bb722fa172d1135372d",
+      "digest": "sha256:9765aa76b4596d372dbfbb9076a735fc0a10d97e117396593ee5b732ea7b9d41",
       "relative_path": "scenarios/bounded_implementation_fence/doc_only_edit/v1/fixtures/input.json"
     },
     {
-      "digest": "sha256:7473b7401f7f72ce484e71322a3806586edea5157f3db395b015f386f6e0c74a",
+      "digest": "sha256:151c892aadaa027a83517d93c4951c2e4561b2ed0c9aa2f0bdafad848c86e19a",
       "relative_path": "scenarios/bounded_implementation_fence/doc_only_edit/v1/scenario.json"
     },
     {
-      "digest": "sha256:98445f6ffdf2597b0ed60a56f6fad49a921260554b6df69201c472e5a762dbfb",
+      "digest": "sha256:cea2e859c0f9aa542c8ba5e5bec95f69d4bd82f6cf4ecf4bda7cbe3c9e911862",
       "relative_path": "scenarios/bounded_implementation_fence/test_file_addition/v1/fixtures/expected.json"
     },
     {
@@ -47,43 +47,43 @@
       "relative_path": "scenarios/bounded_implementation_fence/test_file_addition/v1/fixtures/input.json"
     },
     {
-      "digest": "sha256:386cf51563f07395cb83210d9bbdece09ea300b5a394eb4b3a01a58c3044bd51",
+      "digest": "sha256:fd5e8f316b326291a7d54ab4bf8159bf4e6eb5a2386cc702135239f0ddc17aa8",
       "relative_path": "scenarios/bounded_implementation_fence/test_file_addition/v1/scenario.json"
     },
     {
-      "digest": "sha256:a15b2dd8de8dfdabed448f4468d16eac1bcbd6a2a607ce41e0ccbfb378385189",
+      "digest": "sha256:8de217a12887163564b262daaa5eeca367a0d56b14d73fbea820ce7bd9486cf1",
       "relative_path": "scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/fixtures/expected.json"
     },
     {
-      "digest": "sha256:835bf20091a60031449fc31f767d10240639666db4372411209d8e3c0566ff95",
+      "digest": "sha256:548eb36b1ffa12e793de1142c2e4b12f544045622123f010577b107db5553f3f",
       "relative_path": "scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/fixtures/input.json"
     },
     {
-      "digest": "sha256:c894092bbf3ba98cc3068763485758ac96007d738abcd99a5b3107daa3dd8992",
+      "digest": "sha256:d1da837d921bd5b10cb93074b3d183ea249a57cd07df794f9ea379a27b248f57",
       "relative_path": "scenarios/carrier_protocol_compliance/seat_vs_session_identity/v1/scenario.json"
     },
     {
-      "digest": "sha256:0718a07f37da7072ce373f261add2be570290e5a5c81b4d47cdc23603f73d61f",
+      "digest": "sha256:9f064ba3b5bfb8675413d580ad65c1435bdf4b43a27dcde20262c50480041827",
       "relative_path": "scenarios/carrier_protocol_compliance/stale_relay_spawn_prompt/v1/fixtures/expected.json"
     },
     {
-      "digest": "sha256:4167e9b5d9c48eb96bc6dff005feb255bb9c6446b3163d2218cbefab8e94d636",
+      "digest": "sha256:259e85b6de62bcda580b50899c051e2f9bb09616698ec2f340d9a2e3bda15482",
       "relative_path": "scenarios/carrier_protocol_compliance/stale_relay_spawn_prompt/v1/fixtures/input.json"
     },
     {
-      "digest": "sha256:9f20df77e13af736c7dd7232504d82308891ad48eb989efce1f7e9f63d552248",
+      "digest": "sha256:453de12b8caa420b6996e8c33ee720ecdf98122cf7bd1b9893d971cbf05cfeed",
       "relative_path": "scenarios/carrier_protocol_compliance/stale_relay_spawn_prompt/v1/scenario.json"
     },
     {
-      "digest": "sha256:062a137fe9c527e5cf3a7be3f10df9cf4f0085ecc67d905b6ee4ac796957d50b",
+      "digest": "sha256:aeb59b9bf14dadf28ca073e243d1db84fd2e7b60f9c0fadf4efcf31bae1ba56c",
       "relative_path": "scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/expected.json"
     },
     {
-      "digest": "sha256:a7e6bb11c9752a7fc785f08240fd5a23f06df07f996da06d6198dea061531413",
+      "digest": "sha256:5ed2caf2d325b83890b16034ddf6522abf806be8498464c8a68d34d8425f6d67",
       "relative_path": "scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/input.json"
     },
     {
-      "digest": "sha256:8a1218449c95b4c3ee42e27419845d73dc739628fabf385f699f8c8790d87ee9",
+      "digest": "sha256:793376c0d87846dcd2bf8977c93ecf516f76a8e67abea523784244b0073c2d45",
       "relative_path": "scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/scenario.json"
     },
     {
@@ -124,6 +124,6 @@
     }
   ],
   "generated_at": "2026-09-01T01:15:00Z",
-  "manifest_digest": "sha256:99b111f18dc23eedb4e738440e025bbbf50597a1586b5a9a738e477346c274ac",
+  "manifest_digest": "sha256:da61603ddb946e42c5fd2677bfa6eca6a008c220d779dcde838a53f317fd477a",
   "schema": "mastermind.agent_evaluation_corpus_manifest.v1"
 }

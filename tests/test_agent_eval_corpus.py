@@ -125,7 +125,13 @@ def _write_scenario_case(corpus_root: Path, *, family: str, case: str, fields: d
     return document
 
 
-def _holdout_fields(*, family: str = "test_family", case: str = "held_out_case", corpus_revision: str = TEST_CORPUS_REVISION) -> dict:
+def _holdout_fields(
+    *,
+    family: str = "test_family",
+    case: str = "held_out_case",
+    corpus_revision: str = TEST_CORPUS_REVISION,
+    seal_status: str = "PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE",
+) -> dict:
     return {
         "scenario_id": f"scenario:{family}:{case}",
         "scenario_family": f"mastermind.{family}.v1",
@@ -134,6 +140,7 @@ def _holdout_fields(*, family: str = "test_family", case: str = "held_out_case",
         "temporal_cutoff": CUTOFF_AT,
         "sealed_body_digest": digest_value({"sealed": case}),
         "sealing_method": "SHA256_OVER_CANONICAL_BUNDLE",
+        "seal_status": seal_status,
         "private_evidence_root_ref": f"private-eval-root:agent_eval/holdouts/{family}/{case}/v1/bundle.json",
         "authorship": AUTHORSHIP,
         "created_at": "2026-09-01T01:00:00Z",
@@ -550,3 +557,129 @@ def test_cli_corpus_verify_rejects_missing_corpus_root() -> None:
     result = _run_cli("corpus-verify", "--corpus-root", "/nonexistent/path/definitely-not-here", "--repo-root", str(ROOT))
     assert result.returncode == 2
     assert "no such corpus directory" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# 8. Second adversarial-review repair: BLOCKER-1/2, MAJOR-3 (seal_status)
+# ---------------------------------------------------------------------------
+
+
+def test_holdout_seal_requires_seal_status() -> None:
+    """MAJOR-3: seal_status is a required field, not optional."""
+    fields = _holdout_fields()
+    del fields["seal_status"]
+    with pytest.raises(ContractError) as excinfo:
+        corpus.build_holdout_seal(fields)
+    assert any(d.code == "FIELD_MISSING" and "seal_status" in d.path for d in excinfo.value.defects)
+
+
+def test_holdout_seal_rejects_unknown_seal_status_value() -> None:
+    fields = _holdout_fields(seal_status="MADE_UP_STATUS")
+    with pytest.raises(ContractError) as excinfo:
+        corpus.build_holdout_seal(fields)
+    assert any(d.code == "NOT_IN_ENUM" for d in excinfo.value.defects)
+
+
+def test_holdout_seal_accepts_both_seal_status_values() -> None:
+    for status in ("PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE", "SEALED_BODY_DELIVERABLE"):
+        seal = corpus.build_holdout_seal(_holdout_fields(seal_status=status))
+        assert corpus.validate_holdout_seal_shape(seal) == "SHAPE_VALID"
+        assert seal["seal_status"] == status
+
+
+def test_blocker1_subdirectory_under_holdout_dir_is_refused(tmp_path: Path) -> None:
+    """BLOCKER-1 regression: reviewer escape #1 -- a sealed_bundle/ subdir
+    placed alongside the seal file must be refused, not merely a
+    scenario.json/fixtures/ pair (the old denylist-of-two check)."""
+    corpus_root = tmp_path / "corpus" / "agent_eval"
+    _write_holdout_case(corpus_root, family="alpha_family", case="case_one")
+    _write_manifest(corpus_root)
+    holdout_dir = corpus_root / "holdouts" / "alpha_family" / "case_one"
+    leaked = holdout_dir / "sealed_bundle" / "leaked.json"
+    leaked.parent.mkdir(parents=True, exist_ok=True)
+    leaked.write_bytes(b'{"leaked": true}')
+    report = corpus.verify_corpus_tree_consistency(corpus_root, tmp_path)
+    assert report.result == "INCONSISTENT"
+    assert any(d.code == "UNSEALED_HOLDOUT_BODY_IN_REPO" for d in report.defects)
+
+
+def test_blocker1_alternate_body_filename_under_holdout_dir_is_refused(tmp_path: Path) -> None:
+    """BLOCKER-1 regression: reviewer escape #2 -- an alternate body filename
+    (body.json, not scenario.json) must be refused too."""
+    corpus_root = tmp_path / "corpus" / "agent_eval"
+    _write_holdout_case(corpus_root, family="alpha_family", case="case_one")
+    _write_manifest(corpus_root)
+    holdout_dir = corpus_root / "holdouts" / "alpha_family" / "case_one"
+    (holdout_dir / "body.json").write_bytes(b'{"leaked": true}')
+    report = corpus.verify_corpus_tree_consistency(corpus_root, tmp_path)
+    assert report.result == "INCONSISTENT"
+    assert any(d.code == "UNSEALED_HOLDOUT_BODY_IN_REPO" for d in report.defects)
+
+
+def test_blocker2_same_scenario_id_republished_under_different_directory_is_refused(tmp_path: Path) -> None:
+    """BLOCKER-2 regression: reviewer's B6 probe -- a holdout's scenario_id
+    republished as a public scenario under an UNRELATED directory (not the
+    same case-directory name) must still be caught. The old directory-set
+    intersection only compared relative directory paths and could not see
+    this; the new check compares scenario_id identity across the whole
+    scenarios/ and holdouts/ trees."""
+    corpus_root = tmp_path / "corpus" / "agent_eval"
+    _write_holdout_case(corpus_root, family="alpha_family", case="case_one")
+    colliding_id = "scenario:alpha_family:case_one"
+    republished_fields = _scenario_fields(family="totally_unrelated_family", case="totally_unrelated_case")
+    republished_fields["scenario_id"] = colliding_id
+    republished = contracts.build_scenario(republished_fields)
+    republish_dir = corpus_root / "scenarios" / "totally_unrelated_family" / "totally_unrelated_case" / "v1"
+    _write_json(republish_dir / "fixtures" / "input.json", {"input": "leak"})
+    _write_json(republish_dir / "fixtures" / "expected.json", {"expected": "leak"})
+    _write_json(republish_dir / "scenario.json", republished)
+    _write_manifest(corpus_root)
+    report = corpus.verify_corpus_tree_consistency(corpus_root, tmp_path)
+    assert report.result == "INCONSISTENT"
+    assert any(d.code == "CASE_DIRECTORY_MIXES_PUBLIC_AND_HOLDOUT" and d.path == colliding_id for d in report.defects)
+
+
+def test_real_committed_holdouts_are_placeholder_status() -> None:
+    """The three real holdouts this PR ships are honestly marked
+    unrecoverable placeholders (MAJOR-3), never SEALED_BODY_DELIVERABLE."""
+    for holdout_file in sorted(REAL_CORPUS_ROOT.rglob("holdout_seal.json")):
+        document = json.loads(holdout_file.read_bytes())
+        assert document["seal_status"] == "PROVENANCE_PLACEHOLDER_BODY_UNRECOVERABLE"
+
+
+# ---------------------------------------------------------------------------
+# 9. Reviewer GAP closure: bare package import must not mutate the shared
+#    global validator registry as a side effect
+# ---------------------------------------------------------------------------
+
+
+def test_bare_package_import_does_not_import_corpus_or_scoring_submodules() -> None:
+    """``scripts.agent_eval.corpus`` (like ``scoring``) registers new
+    schemas onto the shared, process-global ``contracts._SHAPE_VALIDATORS``
+    dict as an import-time side effect (``register_shape_validator``), so a
+    bare `import scripts.agent_eval` silently pulling either submodule in
+    would make the corpus/scorer-pass/evidence-ref schemas globally visible
+    to unrelated code that only ever asked for the base package.
+    ``scripts/agent_eval/__init__.py``'s own docstring already claims it
+    imports no submodule at package-init time; this proves it in a FRESH
+    subprocess (never the current test process, whose global registry is
+    already polluted by every test file imported so far) rather than
+    trusting the docstring."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "import scripts.agent_eval\n"
+            "print('scripts.agent_eval.corpus' in sys.modules)\n"
+            "print('scripts.agent_eval.scoring' in sys.modules)\n"
+            "print('scripts.agent_eval.contracts' in sys.modules)\n",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.strip().splitlines()
+    assert lines == ["False", "False", "False"], f"bare `import scripts.agent_eval` unexpectedly pulled in a submodule: {result.stdout!r}"

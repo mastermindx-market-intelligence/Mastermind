@@ -40,7 +40,7 @@
   },
   "expected_contract": {
     "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/bounded_implementation_fence/test_file_addition/v1/fixtures/expected.json",
-    "digest": "sha256:98445f6ffdf2597b0ed60a56f6fad49a921260554b6df69201c472e5a762dbfb"
+    "digest": "sha256:cea2e859c0f9aa542c8ba5e5bec95f69d4bd82f6cf4ecf4bda7cbe3c9e911862"
   },
   "input_fixture": {
     "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/bounded_implementation_fence/test_file_addition/v1/fixtures/input.json",
@@ -55,7 +55,7 @@
     "retention_class": "BOUNDED"
   },
   "risk_tier": "MEDIUM",
-  "scenario_digest": "sha256:96b81d724e0729a5aff8e5877a0c74c7c2ccfd6571bfe16e3cb368c4b65577cb",
+  "scenario_digest": "sha256:8a2c25fb2ad77a0fa50c1dc54d8fa004dbacb219a7221671ddb38c7c29175d9c",
   "scenario_family": "mastermind.bounded_implementation_fence.v1",
   "scenario_id": "scenario:bounded_implementation_fence:test_file_addition",
   "scenario_version": 1,

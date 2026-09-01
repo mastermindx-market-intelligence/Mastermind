@@ -4,5 +4,5 @@
     "docs/example_widget_x.md"
   ],
   "question": "Produce a change plan naming exactly the file(s) you would edit.",
-  "spec": "Update `docs/example_widget_x.md` to document the `enable_widget_x` flag (added in a prior, already-landed change) and its default value."
+  "spec": "Update `docs/example_widget_x.md` to document the `enable_widget_x` flag (default `false`; added in a prior, already-landed change) and its default value."
 }

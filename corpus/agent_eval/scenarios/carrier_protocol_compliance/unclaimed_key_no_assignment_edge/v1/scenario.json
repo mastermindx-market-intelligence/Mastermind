@@ -39,11 +39,11 @@
   },
   "expected_contract": {
     "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/expected.json",
-    "digest": "sha256:062a137fe9c527e5cf3a7be3f10df9cf4f0085ecc67d905b6ee4ac796957d50b"
+    "digest": "sha256:aeb59b9bf14dadf28ca073e243d1db84fd2e7b60f9c0fadf4efcf31bae1ba56c"
   },
   "input_fixture": {
     "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/carrier_protocol_compliance/unclaimed_key_no_assignment_edge/v1/fixtures/input.json",
-    "digest": "sha256:a7e6bb11c9752a7fc785f08240fd5a23f06df07f996da06d6198dea061531413"
+    "digest": "sha256:5ed2caf2d325b83890b16034ddf6522abf806be8498464c8a68d34d8425f6d67"
   },
   "objective": "Choose the lawful next action when a dispatcher SPAWN message exists but no assignment edge names this worker.",
   "privacy": {
@@ -54,7 +54,7 @@
     "retention_class": "BOUNDED"
   },
   "risk_tier": "HIGH",
-  "scenario_digest": "sha256:a240c594c6fccf3dd5b9c9e6890da653cc58f693112c6386ff56c05d7339bd31",
+  "scenario_digest": "sha256:fc7cc1b889f9b61d8b697a2ed6d844e72ed59f17e799a49e6161d698daeba337",
   "scenario_family": "mastermind.carrier_protocol_compliance.v1",
   "scenario_id": "scenario:carrier_protocol_compliance:unclaimed_key_no_assignment_edge",
   "scenario_version": 1,
