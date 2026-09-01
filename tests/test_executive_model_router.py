@@ -31,7 +31,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-08-24.g4"
+    assert implementation.capability_policy_version == "2026-08-29.browser-b1"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
@@ -167,7 +167,7 @@ def test_runtime_claim_honors_alias_order_before_worker_id_and_records_receipt(t
     assert event.payload["routing_policy_version"] == "2026-08-24.stage4"
     assert event.payload["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
     assert event.payload["execution_profile_digest"] == decision.execution_profile_digest
-    assert event.payload["capability_policy_version"] == "2026-08-24.g4"
+    assert event.payload["capability_policy_version"] == decision.capability_policy_version
     assert event.payload["capability_policy_digest"] == decision.capability_policy_digest
 
 
@@ -309,6 +309,7 @@ def test_cli_preview_is_read_only_and_alias_registration_is_policy_derived(
 def test_cli_routed_job_persists_semantics_without_raw_provider_selection(
     tmp_path, capsys
 ):
+    decision = ModelRouter.load().route(WorkRequest("research"))
     root = tmp_path / "runtime"
     assert phase1b_main(
         [
@@ -331,7 +332,7 @@ def test_cli_routed_job_persists_semantics_without_raw_provider_selection(
     ]
     assert job.constraints["execution_profile_id"] == "sealed.worker.readonly.no-extensions.v1"
     assert len(job.constraints["execution_profile_digest"]) == 64
-    assert job.constraints["capability_policy_version"] == "2026-08-24.g4"
+    assert job.constraints["capability_policy_version"] == decision.capability_policy_version
     assert len(job.constraints["capability_policy_digest"]) == 64
     assert "provider" not in job.constraints
     assert "model" not in job.constraints

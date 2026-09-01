@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import re
 from collections.abc import Mapping
 from typing import Any, Callable, TypeVar
 
@@ -120,13 +121,35 @@ def workspace_identity(value: Any) -> WorkspaceIdentity:
 
 
 def capability_identity(value: Any) -> CapabilityIdentity:
-    return _construct(CapabilityIdentity, value, name="capability identity")
+    identity = _construct(CapabilityIdentity, value, name="capability identity")
+    digest = identity.resource_contract_digest
+    if identity.kind == "resource":
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise OperatorHarnessWireError(
+                "resource contract digest must be exact lowercase SHA-256"
+            )
+    elif digest is not None:
+        raise OperatorHarnessWireError(
+            "resource contract digest is valid only for resource capabilities"
+        )
+    return identity
 
 
 def observed_capability_identity(value: Any) -> ObservedCapabilityIdentity:
-    return _construct(
+    identity = _construct(
         ObservedCapabilityIdentity, value, name="observed capability identity"
     )
+    digest = identity.resource_contract_digest
+    if identity.kind == "resource":
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise OperatorHarnessWireError(
+                "resource contract digest must be exact lowercase SHA-256"
+            )
+    elif digest is not None:
+        raise OperatorHarnessWireError(
+            "resource contract digest is valid only for resource capabilities"
+        )
+    return identity
 
 
 def capability_manifest(value: Any) -> CapabilityManifest:

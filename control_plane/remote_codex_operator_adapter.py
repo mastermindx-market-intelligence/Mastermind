@@ -57,6 +57,11 @@ from control_plane.operator_harness_wire import (
     to_wire,
     turn_start_observation,
 )
+from control_plane.worker_browser_b1 import (
+    BrowserReviewError,
+    BrowserReviewReceipt,
+    browser_review_receipt,
+)
 
 
 TurnInputLoader = Callable[[TurnRef], str]
@@ -77,6 +82,7 @@ class RemoteCodexOperatorAdapter:
         self.turn_input_loader = turn_input_loader
         self._start_receipts: dict[str, dict[str, Any]] = {}
         self._turn_results: dict[str, dict[str, Any]] = {}
+        self._artifact_receipts: dict[str, BrowserReviewReceipt | None] = {}
 
     @staticmethod
     def _mapping(value: Any, *, name: str) -> dict[str, Any]:
@@ -348,9 +354,26 @@ class RemoteCodexOperatorAdapter:
             timeout_seconds=90,
         )
         try:
-            return reconcile_observation(result.get("observation"))
-        except OperatorHarnessWireError as exc:
+            observation = reconcile_observation(result.get("observation"))
+            raw_receipt = result.get("artifact_receipt")
+            receipt = (
+                None
+                if raw_receipt is None
+                else browser_review_receipt(raw_receipt)
+            )
+        except (OperatorHarnessWireError, BrowserReviewError) as exc:
             raise BrokerProtocolError("remote OHF stop receipt is invalid") from exc
+        self._artifact_receipts[generation.process_generation_id] = receipt
+        return observation
+
+    def terminal_artifact_receipt(
+        self, generation: ProcessGenerationRef
+    ) -> BrowserReviewReceipt | None:
+        if generation.process_generation_id not in self._artifact_receipts:
+            raise BrokerProtocolError(
+                "remote OHF terminal artifact receipt was not observed in protocol order"
+            )
+        return self._artifact_receipts[generation.process_generation_id]
 
     def cancel(
         self,
@@ -380,11 +403,19 @@ class RemoteCodexOperatorAdapter:
             timeout_seconds=30,
         )
         try:
-            return reconcile_observation(result.get("observation"))
-        except OperatorHarnessWireError as exc:
+            observation = reconcile_observation(result.get("observation"))
+            if result.get("terminal") is True:
+                raw_receipt = result.get("artifact_receipt")
+                self._artifact_receipts[generation.process_generation_id] = (
+                    None
+                    if raw_receipt is None
+                    else browser_review_receipt(raw_receipt)
+                )
+        except (OperatorHarnessWireError, BrowserReviewError) as exc:
             raise BrokerProtocolError(
                 "remote OHF reconciliation receipt is invalid"
             ) from exc
+        return observation
 
     def reconcile_absence(
         self,
@@ -407,11 +438,18 @@ class RemoteCodexOperatorAdapter:
             timeout_seconds=90,
         )
         try:
-            return reconcile_observation(result.get("observation"))
-        except OperatorHarnessWireError as exc:
+            observation = reconcile_observation(result.get("observation"))
+            raw_receipt = result.get("artifact_receipt")
+            self._artifact_receipts[generation.process_generation_id] = (
+                None
+                if raw_receipt is None
+                else browser_review_receipt(raw_receipt)
+            )
+        except (OperatorHarnessWireError, BrowserReviewError) as exc:
             raise BrokerProtocolError(
                 "remote OHF absence receipt is invalid"
             ) from exc
+        return observation
 
 
 __all__ = ["RemoteCodexOperatorAdapter"]
