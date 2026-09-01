@@ -176,7 +176,7 @@ def test_existing_installer_already_places_the_package_in_exact_release_closure(
     _assert_prose(
         amendment,
         "full `git archive` of one accepted Mastermind commit",
-        "both non-root service",
+        "control and worker service UIDs can read and traverse it",
         "is already part of the canonical exact-release source closure",
         "must not point Codex at a mutable provider home",
     )
