@@ -1,0 +1,136 @@
+# Executive Attention Economics — F0A Concurrent-Demand Amendment
+
+**Operation:** `mastermind-executive-attention-economics-20260830-sol-001`  
+**Parent freeze:** `MASTERMIND_EXECUTIVE_ATTENTION_ECONOMICS_F0_ARCHITECTURE_2026-08-30.md`  
+**Status:** `ARCHITECTURE_FREEZE / SPEC_ONLY / RECORDS_ONLY`  
+**Reason:** adversarial review before F0 protection
+
+This amendment is controlling wherever the parent F0 document's compact-frontier language could otherwise be misread as permission to hide simultaneous independent emergencies. It creates no live allocator, scheduler, queue, notification, lifecycle transition or authority.
+
+## 1. Failure mode discovered
+
+A compact executive surface is useful only while compaction preserves the complete urgent truth.
+
+The parent architecture already requires every `INTERRUPT_NOW` demand to remain visible and forbids quotas that suppress emergencies. The adversarial edge is stronger:
+
+> Two or more independent, unbundleable `INTERRUPT_NOW` demands may legitimately target the same authority at the same time. If the UI or machine projection merely picks a top item, it can silently convert a cognition-capacity collision into a false statement that the remaining emergencies can wait.
+
+That is unacceptable. EAF is an allocator of attention **recommendations**, not a magical source of additional executive capacity.
+
+## 2. Controlling law
+
+### 2.1 No interrupt compaction by omission
+
+After exact canonical-root fan-in, **every independent `INTERRUPT_NOW` root remains present in the active projection** for its authority partition.
+
+No `top_n`, score, context preference, fairness rule, model summary, UI density rule or Chairman-interruption target may hide an independent interrupt.
+
+If twenty source-backed emergencies reduce to one exact root, show the one root bundle plus all member receipts. If twenty remain independent after exact fan-in, the truth is twenty independent interrupts.
+
+### 2.2 Concurrent-demand pressure is first-class metadata
+
+Each authority partition exposes a deterministic read-only `concurrent_demand` summary. V1 should distinguish at least:
+
+- `NONE` — no active `INTERRUPT_NOW` demand for this authority;
+- `SINGLE` — one exact-root interrupt;
+- `MULTIPLE_INDEPENDENT` — two or more unbundleable exact-root interrupts;
+- `PROVEN_WINDOW_COLLISION` — source-backed decision windows plus source-backed service/capacity facts prove that all independent interrupts cannot be serviced in time under the current authority/capacity arrangement;
+- `FEASIBILITY_UNKNOWN` — multiple independent interrupts exist but the facts required to prove or disprove service feasibility are absent/stale/conflicted.
+
+`MULTIPLE_INDEPENDENT` is **congestion pressure**, not automatically a proof of overload. Do not infer human reasoning duration, availability or service capacity from item count alone.
+
+`PROVEN_WINDOW_COLLISION` requires real facts. If those facts do not exist, report `FEASIBILITY_UNKNOWN`; do not manufacture an overload score.
+
+These values are projection metadata, never Agent OS or Executive lifecycle states.
+
+### 2.3 Priority still cannot change authority
+
+Concurrent demand does not grant delegation authority.
+
+- A Chairman-only interrupt remains Chairman-only unless a separate canonical authority fact permits delegation.
+- A Sol interrupt remains Sol even when a Chairman partition is congested.
+- EAF may expose a source-backed `delegation_possible` fact only when an accepted authority owner says so; it may not invent, perform or persist delegation.
+- If a proven Chairman window collision has no lawful delegation route, EAF must show that impossibility plainly rather than hiding an interrupt to make the surface look feasible.
+
+### 2.4 Context batching cannot delay a true interrupt
+
+Context affinity remains a local optimization for `FOCUS_NOW` / `BATCH_NEXT`. It has zero power to demote or suppress `INTERRUPT_NOW`.
+
+Exact-root fan-in is allowed because it preserves one canonical underlying decision with all receipts. Mere topical similarity is not fan-in.
+
+### 2.5 Fairness and emergency service remain distinct
+
+The oldest-ready fairness sentinel protects ordinary eligible backlog from starvation. It never competes with or suppresses simultaneous interrupts.
+
+If `INTERRUPT_NOW` pressure persists for a long interval, the fairness sentinel remains observable as deferred ordinary debt, but it does not force an emergency demotion. The later learning layer should measure that debt so repeated emergency pressure cannot hide structural understaffing or bad alert admission.
+
+## 3. Product behavior
+
+When concurrent interrupt pressure exists, Control Room / Meta-CEO should show a compact but truthful banner such as:
+
+```text
+EXECUTIVE PRESSURE
+Authority: CHAIRMAN
+Independent interrupts: 3
+Exact-root members represented: 11
+Service feasibility: UNKNOWN
+Next safe ordinary focus: deferred by active interrupt pressure
+```
+
+This is not an alarm generated by EAF. It is a composition of already-admitted source-backed interrupt roots.
+
+The user must be able to open all independent roots. A summary count with hidden roots is insufficient.
+
+For `PROVEN_WINDOW_COLLISION`, show the exact colliding windows/capacity receipts and which decisions cannot all meet their windows under current facts. Do not say `overloaded` or `impossible` without those receipts.
+
+## 4. Wire-contract addition
+
+The future `mastermind.executive_attention_frontier.v1` result should include an authority-partition summary conceptually equivalent to:
+
+```text
+authority_frontiers[]
+  authority_requirement
+  interrupt_root_count
+  interrupt_member_count
+  concurrent_demand
+  feasibility_receipts[]
+  delegation_possible: true|false|unknown
+  delegation_source|null
+```
+
+The exact schema name is an A1 implementation detail. The semantics above are frozen.
+
+No field creates a queue, service lease, capacity reservation, delegation, worker placement or lifecycle transition.
+
+## 5. Adversarial corpus additions
+
+Add at least these cases to A1/A1R:
+
+16. two unrelated Chairman-only `INTERRUPT_NOW` roots, no capacity/service-time facts -> both remain visible; `FEASIBILITY_UNKNOWN`; neither is demoted;
+17. five interrupt symptoms with one canonical root plus two independent roots -> exactly three visible interrupt roots with all seven member receipts accounted for;
+18. source-backed overlapping decision windows plus accepted service-capacity facts proving not all can be serviced -> `PROVEN_WINDOW_COLLISION` with exact receipts and no hidden root;
+19. same apparent window collision but missing service-time/capacity fact -> `FEASIBILITY_UNKNOWN`, not `PROVEN_WINDOW_COLLISION`;
+20. congested Chairman partition plus urgent Sol partition -> authority remains separate; Sol work does not become Chairman work and Chairman congestion does not suppress the Sol frontier;
+21. old fairness sentinel during sustained interrupt pressure -> sentinel remains visible as deferred ordinary debt but does not demote an interrupt.
+
+Permutation stability and exact receipt accounting remain mandatory.
+
+## 6. Learning addition
+
+A5 should measure not only interruption reduction but **attention congestion debt**:
+
+- independent interrupt roots per authority over time;
+- duration of `MULTIPLE_INDEPENDENT` / `FEASIBILITY_UNKNOWN` pressure;
+- any `PROVEN_WINDOW_COLLISION` interval;
+- ordinary fairness-sentinel age accumulated while emergency pressure persists;
+- whether recurring pressure comes from real business incidents, insufficient delegation, stale source truth, or noisy upstream admission.
+
+These measurements diagnose system design and organizational capacity. They do not become automatic headcount, delegation, scheduling or authority decisions.
+
+## 7. Freeze effect
+
+The parent F0 architecture remains controlling except for this clarification. Together F0 + F0A freeze the V1 architecture as:
+
+**closed attention dispositions + absolute authority separation + exact root fan-in + source-backed vectors + Pareto/non-dominated frontier + deterministic local service + oldest-ready fairness + explicit concurrent-demand truth.**
+
+The architecture still rejects a universal priority scalar and still requires report-only shadow proof before product promotion.
