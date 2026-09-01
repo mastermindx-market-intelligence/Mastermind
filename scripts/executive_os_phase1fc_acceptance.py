@@ -65,6 +65,7 @@ VOID_PATH_ACCEPTANCE_ID = "P1FC-VOID-REPLACEMENT-INDEPENDENCE-V1"
 DISPATCH_REPLAY_ACCEPTANCE_ID = "P1FC-SUPERVISOR-CLAIM-CRASH-REPLAY-V1"
 DISPATCH_BOUNDARY_ACCEPTANCE_ID = "P1FC-EXACT-DISPATCH-BOUNDARY-V1"
 TX9_ACCEPTANCE_ID = "P1FC-TX9-QUARANTINE-V1"
+BOUNDED_EXHAUSTION_ACCEPTANCE_ID = "P1FC-TX9-BOUNDED-EXHAUSTION-V1"
 
 # Acceptance evidence must be byte-identical across the macOS control host and
 # Linux hosted CI.  These are inert fixture identities, not observations of the
@@ -1172,40 +1173,168 @@ def _cycle_receipt(root: Path) -> dict[str, Any]:
         payload={"summary": "deterministic adverse fixture", "errors": ["failed"]},
     )
     outcomes.append(cycle.run_once(root_id))
-    outcomes.append(cycle.run_once(root_id))
-    planner = runtime.jobs.get_job(planner_id)
-    assert planner is not None and planner.current_attempt_id
-    second = runtime.attempts.get_attempt(str(planner.current_attempt_id))
-    assert second is not None
-    runtime.attempts.fail_attempt(
-        second.attempt_id,
-        fence_generation=second.fence_generation,
-        lease_token=_lease_token(runtime, second.attempt_id),
-        payload={"summary": "deterministic exhausted fixture", "errors": ["failed"]},
-    )
-    outcomes.append(cycle.run_once(root_id))
-    events_before = len(runtime.events.list_events(job_id=root_id))
+    events_before = [event.to_dict() for event in runtime.events.list_events()]
     replay = cycle.run_once(root_id)
-    events_after = len(runtime.events.list_events(job_id=root_id))
+    events_after = [event.to_dict() for event in runtime.events.list_events()]
+    planner_after_replay = runtime.jobs.get_job(planner_id)
+    assert planner_after_replay is not None
     action_receipts = [outcome.to_dict() for outcome in outcomes]
+    retry_safety = action_receipts[-1]["receipt"]["evidence"]["retry_safety"]
     normalized = {
         "acceptance_id": CYCLE_ACCEPTANCE_ID,
         "root_job_id": root_id,
+        "planner_job_id": planner_id,
         "actions": [item["action"] for item in action_receipts],
         "command_ids": [item["command_id"] for item in action_receipts],
         "selected_job_ids": [item["selected_job_id"] for item in action_receipts],
+        "blocked_selected_job_id": action_receipts[-1]["selected_job_id"],
         "blocked_reason": action_receipts[-1]["receipt"].get("reason"),
+        "retry_safety_schema_version": retry_safety.get("schema_version"),
+        "retry_safety_cause": retry_safety.get("evidence", {}).get(
+            "retry_safety"
+        ),
+        "retry_safety_decision": retry_safety.get("decision"),
         "replay_outcome_digest": replay.to_dict()["outcome_digest"],
-        "events_before_replay": events_before,
-        "events_after_replay": events_after,
+        "replay_matches_blocked": replay.to_dict() == action_receipts[-1],
+        "planner_attempt_count_after_replay": planner_after_replay.attempt_count,
+        "events_before_replay": len(events_before),
+        "events_after_replay": len(events_after),
+        "event_stream_digest_before_replay": _digest(events_before),
+        "event_stream_digest_after_replay": _digest(events_after),
+        "event_stream_unchanged": events_before == events_after,
         "supervisor_dispatch_calls": dispatcher.calls,
     }
-    assert normalized["actions"] == [
-        "PLANNER_CREATED", "DISPATCHED", "REQUEUED", "DISPATCHED", "BLOCKED"
-    ]
-    assert events_before == events_after
+    assert normalized["actions"] == ["PLANNER_CREATED", "DISPATCHED", "BLOCKED"]
+    assert normalized["blocked_selected_job_id"] == planner_id
+    assert normalized["blocked_reason"] == "state_conflict"
+    assert normalized["retry_safety_schema_version"] == (
+        "mastermind.executive_retry_safety_receipt/v1"
+    )
+    assert normalized["retry_safety_cause"] == "GENERIC_FAILED"
+    assert normalized["retry_safety_decision"] == "NEEDS_RECONCILIATION"
+    assert normalized["planner_attempt_count_after_replay"] == 1
+    assert len(normalized["supervisor_dispatch_calls"]) == 1
+    assert normalized["replay_matches_blocked"] is True
+    assert normalized["event_stream_unchanged"] is True
     normalized["acceptance_digest"] = _digest(normalized)
     return normalized
+
+
+def _bounded_exhaustion_receipt(root: Path) -> dict[str, Any]:
+    runtime = Runtime.at(root, clock=lambda: 1_777_000_200_000)
+    _register(runtime, "worker-a")
+    admitted = submit_intent(runtime, _intent("CEO-ACCEPTANCE-EXHAUSTION"))
+    root_id = str(admitted["job_id"])
+    dispatcher = _ExactSupervisorFixtureDispatcher(runtime, root)
+    cycle = CooCycle(runtime, dispatcher=dispatcher)
+    planner_created = cycle.run_once(root_id)
+    first_dispatched = cycle.run_once(root_id)
+    planner_id = str(planner_created.selected_job_id)
+
+    def invalidate_for_tx9(
+        *, attempt_id: str, command_id: str, suffix: str, process_id: int
+    ) -> tuple[str, str]:
+        attempt = runtime.attempts.get_attempt(attempt_id)
+        assert attempt is not None
+        active = OrchestrationDispatchOutcome(
+            command_id=command_id,
+            job_id=planner_id,
+            attempt=attempt,
+            outcome="ACTIVE",
+            lease_token=_lease_token(runtime, attempt.attempt_id),
+        )
+        profile = _orchestration_profile(active)
+        sealed = runtime.operator_harness.seal_operator_harness_attempt(
+            attempt.attempt_id,
+            fence_generation=attempt.fence_generation,
+            lease_token=str(active.lease_token),
+            requested=profile,
+        )
+        operation = OperationId(f"ohf-op:acceptance-exhaustion-{suffix}")
+        epoch, generation = runtime.operator_harness.reserve_start(
+            sealed.attempt_id,
+            fence_generation=sealed.fence_generation,
+            lease_token=str(active.lease_token),
+            operation_id=operation,
+        )
+        runtime.operator_harness.bind_start_result(
+            epoch=epoch,
+            generation=generation,
+            operation_id=operation,
+            fence_generation=sealed.fence_generation,
+            lease_token=str(active.lease_token),
+            provider_session_id=f"SESSION-EXHAUSTION-{suffix.upper()}",
+            process=ProcessIdentityObservation(
+                process_id,
+                process_id,
+                f"start-{process_id}",
+                "boot-acceptance",
+            ),
+        )
+        assert runtime.operator_harness.invalidate_after_restore() == 1
+        return epoch.session_epoch_id, generation.process_generation_id
+
+    first_planner = runtime.jobs.get_job(planner_id)
+    assert first_planner is not None and first_planner.current_attempt_id
+    first_epoch_id, first_generation_id = invalidate_for_tx9(
+        attempt_id=str(first_planner.current_attempt_id),
+        command_id=str(first_dispatched.command_id),
+        suffix="first",
+        process_id=4501,
+    )
+    _register(runtime, "worker-b")
+    first_requeued = cycle.run_once(root_id)
+    second_dispatched = cycle.run_once(root_id)
+    second_planner = runtime.jobs.get_job(planner_id)
+    assert second_planner is not None and second_planner.current_attempt_id
+    second_attempt_id = str(second_planner.current_attempt_id)
+    second_epoch_id, second_generation_id = invalidate_for_tx9(
+        attempt_id=second_attempt_id,
+        command_id=str(second_dispatched.command_id),
+        suffix="second",
+        process_id=4502,
+    )
+    exhausted = cycle.run_once(root_id)
+    final_planner = runtime.jobs.get_job(planner_id)
+    assert final_planner is not None
+    action_receipts = [
+        first_requeued.to_dict(),
+        second_dispatched.to_dict(),
+        exhausted.to_dict(),
+    ]
+    proof = {
+        "acceptance_id": BOUNDED_EXHAUSTION_ACCEPTANCE_ID,
+        "root_job_id": root_id,
+        "planner_job_id": planner_id,
+        "actions": [item["action"] for item in action_receipts],
+        "first_attempt_id": first_planner.current_attempt_id,
+        "first_session_epoch_id": first_epoch_id,
+        "first_process_generation_id": first_generation_id,
+        "first_requeue_kind": first_requeued.receipt.get("requeue_kind"),
+        "first_retry_safety_decision": first_requeued.receipt.get(
+            "retry_safety", {}
+        ).get("decision"),
+        "second_attempt_id": second_attempt_id,
+        "second_session_epoch_id": second_epoch_id,
+        "second_process_generation_id": second_generation_id,
+        "second_terminal_status": final_planner.status.value,
+        "attempt_limit": final_planner.attempt_limit,
+        "planner_attempt_count": final_planner.attempt_count,
+        "blocked_selected_job_id": exhausted.selected_job_id,
+        "blocked_reason": exhausted.receipt.get("reason"),
+        "supervisor_dispatch_calls": dispatcher.calls,
+    }
+    assert proof["actions"] == ["REQUEUED", "DISPATCHED", "BLOCKED"]
+    assert proof["first_requeue_kind"] == "TX9_DETACHED"
+    assert proof["first_retry_safety_decision"] == "SAFE_REQUEUE"
+    assert proof["second_terminal_status"] == JobStatus.LOST.value
+    assert proof["attempt_limit"] == 2
+    assert proof["planner_attempt_count"] == proof["attempt_limit"]
+    assert proof["blocked_selected_job_id"] == planner_id
+    assert proof["blocked_reason"] == "plan_terminal_adverse"
+    assert len(proof["supervisor_dispatch_calls"]) == 2
+    proof["acceptance_digest"] = _digest(proof)
+    return proof
 
 
 def _tx9_receipt(root: Path) -> dict[str, Any]:
@@ -1327,6 +1456,9 @@ def run_acceptance(release_sha: str) -> dict[str, Any]:
             )
             cycle = _cycle_receipt(boundary / "cycle")
             tx9 = _tx9_receipt(boundary / "tx9")
+            bounded_exhaustion = _bounded_exhaustion_receipt(
+                boundary / "bounded-exhaustion"
+            )
             receipt: dict[str, Any] = {
                 "schema_version": "mastermind.executive_phase1fc_acceptance/v1",
                 "acceptance_id": ACCEPTANCE_ID,
@@ -1340,12 +1472,13 @@ def run_acceptance(release_sha: str) -> dict[str, Any]:
                 "void_replacement": void_replacement,
                 "cycle": cycle,
                 "tx9": tx9,
+                "bounded_exhaustion": bounded_exhaustion,
                 "inertness": {
                     "temporary_runtime_boundary": True,
                     "runtime_roots_removed_on_exit": True,
                     "provider_adapters_constructed": 0,
                     "provider_calls": 0,
-                    "executive_supervisor_fixture_instances": 6,
+                    "executive_supervisor_fixture_instances": 7,
                     "host_install_or_migration_calls": 0,
                     "production_armed": False,
                 },
