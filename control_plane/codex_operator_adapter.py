@@ -31,8 +31,11 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.operator_harness_contract import (
     ACCOUNT_REALM_STATUS,
+    ATTENTION_TURN_INSTRUCTION,
+    COMMAND_ID_RE,
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AdapterFailureClass,
+    AttentionTurnObservation,
     AuthIdentityConfidence,
     AuthRealmFact,
     CandidateResult,
@@ -60,6 +63,7 @@ from control_plane.operator_harness_contract import (
     TurnRef,
     TurnStartObservation,
     WorkspaceIdentity,
+    runtime_binding_id_for,
 )
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
@@ -89,6 +93,10 @@ from scripts.ohf.protocol import (
 _CLIENT_INFO = {"name": "mastermind-ohf", "title": "Mastermind OHF", "version": "p1b"}
 _FAKE_ENV_PREFIX = "OHF_FAKE_"
 _SAFE_ENV_KEYS = frozenset({"PATH", "LC_ALL", "LANG", "PYTHONPATH"})
+_ATTENTION_COMPLETION_METHOD = "turn/completed"
+_ATTENTION_COMPLETION_TIMEOUT_PREFIX = (
+    "timeout waiting for notification turn/completed"
+)
 
 
 class CodexAdapterError(RuntimeError):
@@ -272,6 +280,8 @@ class _GenerationState:
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
     turns: dict[str, str] = field(default_factory=dict)
+    attention_inflight: bool = False
+    attention_native_turn_id: str | None = None
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
@@ -1434,6 +1444,11 @@ class CodexOperatorAdapter:
         del operation_id
         state = self._state(generation)
         self._assert_turn(state, turn)
+        if state.attention_inflight:
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "turn refused while attention completion is unresolved",
+            )
         if launch.decision is not LaunchDecision.ALLOW:
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
@@ -1503,6 +1518,228 @@ class CodexOperatorAdapter:
         return TurnStartObservation(
             provider_native_turn_id=native_turn_id, acknowledged=True
         )
+
+    def deliver_attention(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        attempt_id: str,
+        binding_id: str,
+        binding_generation: int,
+        provider_session_id: str,
+        nudge_id: str,
+        opaque_ids: Sequence[str],
+        instruction: str,
+        completion_timeout_seconds: float,
+    ) -> AttentionTurnObservation:
+        """Use the exact current generation client for one bounded Wake turn."""
+
+        state = self._state(generation)
+        opaque = () if isinstance(opaque_ids, (str, bytes)) else tuple(opaque_ids)
+        timeout = completion_timeout_seconds
+        if (
+            not isinstance(attempt_id, str)
+            or COMMAND_ID_RE.fullmatch(attempt_id) is None
+            or not isinstance(binding_id, str)
+            or COMMAND_ID_RE.fullmatch(binding_id) is None
+            or type(binding_generation) is not int
+            or binding_generation < 1
+            or not isinstance(provider_session_id, str)
+            or COMMAND_ID_RE.fullmatch(provider_session_id) is None
+            or not isinstance(nudge_id, str)
+            or COMMAND_ID_RE.fullmatch(nudge_id) is None
+            or not 1 <= len(opaque) <= 32
+            or any(
+                not isinstance(item, str) or COMMAND_ID_RE.fullmatch(item) is None
+                for item in opaque
+            )
+            or instruction != ATTENTION_TURN_INSTRUCTION
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.1 <= float(timeout) <= 300.0
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "attention request is outside the closed current-writer contract",
+            )
+        if (
+            state.epoch.attempt_id != attempt_id
+            or binding_id
+            != runtime_binding_id_for(attempt_id, state.epoch.session_epoch_id)
+            or binding_generation != state.generation.generation_number
+            or binding_generation != generation.generation_number
+            or state.provider_session_id != provider_session_id
+            or state.writer_state is not ProviderWriterState.HELD
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "attention request does not match the current Attempt writer",
+            )
+        completed_turns = {
+            event.turn_id
+            for event in state.events
+            if event.kind == "turn/completed" and event.turn_id is not None
+        }
+        if state.attention_inflight or any(
+            turn_id not in completed_turns for turn_id in state.turns
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "attention refused while the current writer has an active turn",
+            )
+        pid = state.process.pid
+        if type(pid) is not int or pid <= 0:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "current attention writer is not live",
+            )
+        try:
+            observed_process = self.process_identity_observer(pid)
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "current attention writer identity is not observable",
+            ) from exc
+        if observed_process != state.process:
+            raise CodexAdapterError(
+                AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                "current attention writer process identity moved",
+            )
+        if not state.client.alive():
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "current attention writer is not live",
+            )
+
+        ids = "\n".join(f"- {item}" for item in opaque)
+        text = (
+            instruction
+            if not ids
+            else f"{instruction}\n\nOpaque Wake identities (not authority):\n{ids}"
+        )
+        params = {
+            "threadId": provider_session_id,
+            "clientUserMessageId": nudge_id,
+            "input": [{"type": "text", "text": text, "text_elements": []}],
+            "cwd": str(self.workspace_root),
+            "approvalPolicy": state.requested.approval_policy,
+        }
+
+        # Final I/O boundary: every exception from this request onward is
+        # effect-unknown and may never be translated into a retryable refusal.
+        state.attention_inflight = True
+        state.attention_native_turn_id = None
+        try:
+            started = state.client.request("turn/start", params, timeout=30.0)
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention provider submission has unknown effect",
+                effect_unknown=True,
+            ) from exc
+        turn = started.get("turn") if isinstance(started, Mapping) else None
+        native_turn_id = (
+            str(turn.get("id") or "").strip() if isinstance(turn, Mapping) else ""
+        )
+        if not native_turn_id:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention provider response omitted the turn id",
+                effect_unknown=True,
+            )
+        state.attention_native_turn_id = native_turn_id
+        try:
+            completion = state.client.wait_notification(
+                _ATTENTION_COMPLETION_METHOD,
+                timeout=float(timeout),
+            )
+        except JsonRpcError as exc:
+            if str(exc).startswith(_ATTENTION_COMPLETION_TIMEOUT_PREFIX):
+                return AttentionTurnObservation(
+                    process_generation_id=generation.process_generation_id,
+                    provider_session_id=provider_session_id,
+                    nudge_id=nudge_id,
+                    provider_native_turn_id=native_turn_id,
+                    accepted=True,
+                    delivered=False,
+                )
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion observation has unknown effect",
+                effect_unknown=True,
+            ) from exc
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion observation has unknown effect",
+                effect_unknown=True,
+            ) from exc
+        if not self._matches_attention_completion(
+            completion,
+            provider_session_id=provider_session_id,
+            native_turn_id=native_turn_id,
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion identity is ambiguous",
+                effect_unknown=True,
+            )
+        state.attention_inflight = False
+        state.attention_native_turn_id = None
+        return AttentionTurnObservation(
+            process_generation_id=generation.process_generation_id,
+            provider_session_id=provider_session_id,
+            nudge_id=nudge_id,
+            provider_native_turn_id=native_turn_id,
+            accepted=True,
+            delivered=True,
+        )
+
+    @staticmethod
+    def _matches_attention_completion(
+        completion: object,
+        *,
+        provider_session_id: str,
+        native_turn_id: str,
+    ) -> bool:
+        if not isinstance(completion, Mapping):
+            return False
+        params_value = completion.get("params")
+        if not isinstance(params_value, Mapping):
+            return False
+        completed_turn = params_value.get("turn")
+        return bool(
+            completion.get("method") == _ATTENTION_COMPLETION_METHOD
+            and str(params_value.get("threadId") or "").strip()
+            == provider_session_id
+            and isinstance(completed_turn, Mapping)
+            and str(completed_turn.get("id") or "").strip() == native_turn_id
+        )
+
+    def _reconcile_late_attention_completion(self, state: _GenerationState) -> None:
+        """Clear a timed-out attention fence only on its exact queued completion."""
+
+        native_turn_id = state.attention_native_turn_id
+        if not state.attention_inflight or not native_turn_id:
+            return
+        while True:
+            try:
+                completion = state.client.wait_notification(
+                    _ATTENTION_COMPLETION_METHOD,
+                    timeout=0.0,
+                )
+            except Exception:
+                # Absence, transport loss, and malformed reader behavior are all
+                # fail-closed: none is evidence that the provider completed.
+                return
+            if self._matches_attention_completion(
+                completion,
+                provider_session_id=state.provider_session_id,
+                native_turn_id=native_turn_id,
+            ):
+                state.attention_inflight = False
+                state.attention_native_turn_id = None
+                return
 
     def read_events(
         self, cursor: EventCursor, *, timeout_seconds: float = 30.0
@@ -1889,6 +2126,7 @@ class CodexOperatorAdapter:
                 recommended_failure_class=AdapterFailureClass.SESSION_MISSING,
             )
         if state.client.alive():
+            self._reconcile_late_attention_completion(state)
             try:
                 result = state.client.request(
                     "thread/read", {"threadId": state.provider_session_id}
