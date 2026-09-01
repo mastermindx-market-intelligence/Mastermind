@@ -38,8 +38,7 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))
-    assert "nativeMessaging" in permissions
-    assert permissions <= {"nativeMessaging", "tabs"}
+    assert permissions == {"nativeMessaging", "alarms"}
 
     forbidden_permissions = {
         "activeTab",

@@ -15,6 +15,12 @@ const PACKAGE_VERSION = "0.1.0";
 const EXPECTED_CAPABILITY_DIGEST = "87276c884840bf14e3717a7249c07e6fff5ae09c591782dadadb05f9affa2d26";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
+const CHATGPT_TAB_PATTERNS = Object.freeze([
+  "https://chat.openai.com/*",
+  "https://chatgpt.com/*",
+]);
+const RECONNECT_ALARM_PREFIX = "mmx-web-sol-native-reconnect-v1-";
+const RECONNECT_DELAYS_MINUTES = Object.freeze([1, 5, 15]);
 
 const OBSERVATION_KEYS = new Set([
   "schema", "target_present", "exact_conversation_loaded", "page_responsive",
@@ -200,6 +206,32 @@ async function freshProbe(tabId, expectedConversationFingerprint) {
   return event;
 }
 
+async function refreshTabMapping(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  removeTabMapping(tabId);
+  await freshProbe(tabId, null);
+}
+
+async function hydrateTargets() {
+  targets.clear();
+  tabFingerprints.clear();
+  if (!chrome.tabs || typeof chrome.tabs.query !== "function") return;
+  let openTabs;
+  try {
+    openTabs = await chrome.tabs.query({url: CHATGPT_TAB_PATTERNS});
+  } catch (_error) {
+    return;
+  }
+  if (!Array.isArray(openTabs)) return;
+  openTabs
+    .filter((tab) => tab && Number.isInteger(tab.id))
+    .sort((left, right) => left.id - right.id);
+  for (const tab of openTabs) {
+    if (!tab || !Number.isInteger(tab.id)) continue;
+    await refreshTabMapping(tab.id);
+  }
+}
+
 function classifyProbe(request, event, successStatus) {
   if (!event || event.conversation_fingerprint !== request.conversation_fingerprint) {
     return receipt(request, "TARGET_CHANGED", event ? event.observation : unknownObservation());
@@ -315,33 +347,65 @@ function validTransportAck(message) {
   return isNonce(message.boot_nonce) && isNonce(message.challenge_nonce);
 }
 
+function reconnectAlarmName(index) {
+  return `${RECONNECT_ALARM_PREFIX}${index}`;
+}
+
+function reconnectAlarmIndex(name) {
+  if (typeof name !== "string" || !name.startsWith(RECONNECT_ALARM_PREFIX)) return null;
+  const suffix = name.slice(RECONNECT_ALARM_PREFIX.length);
+  if (!/^[0-9]+$/.test(suffix)) return null;
+  const index = Number(suffix);
+  return Number.isSafeInteger(index) && index < RECONNECT_DELAYS_MINUTES.length ? index : null;
+}
+
+function scheduleReconnect(index) {
+  if (!INSTANCE_CONFIG || !chrome.alarms || typeof chrome.alarms.create !== "function") return;
+  if (!Number.isSafeInteger(index) || index < 0 || index >= RECONNECT_DELAYS_MINUTES.length) return;
+  chrome.alarms.create(reconnectAlarmName(index), {
+    delayInMinutes: RECONNECT_DELAYS_MINUTES[index],
+  });
+}
+
+async function clearReconnectAlarms() {
+  if (!chrome.alarms || typeof chrome.alarms.clear !== "function") return;
+  await Promise.all(
+    RECONNECT_DELAYS_MINUTES.map((_delay, index) =>
+      chrome.alarms.clear(reconnectAlarmName(index)).catch(() => false),
+    ),
+  );
+}
+
 function resetTransport(port) {
-  if (nativePort === port) nativePort = null;
+  if (nativePort !== port) return false;
+  nativePort = null;
   transportHandshakeReady = false;
   transportBootNonce = null;
   transportChallengeNonce = null;
   transportStage = "DISCONNECTED";
+  return true;
 }
 
-function rejectTransport(port) {
-  resetTransport(port);
+function rejectTransport(port, reconnectAttempt) {
+  const wasCurrent = resetTransport(port);
   try {
     port.disconnect();
   } catch (_error) {
-    return;
+    // The state is already reset; reconnect remains bounded below.
   }
+  if (wasCurrent) scheduleReconnect(reconnectAttempt + 1);
 }
 
-function handleTransportAck(message, port) {
+function handleTransportAck(message, port, reconnectAttempt) {
   if (!validTransportAck(message) || message.challenge_nonce !== transportChallengeNonce) {
-    rejectTransport(port);
+    rejectTransport(port, reconnectAttempt);
     return;
   }
   if (transportStage === "AWAITING_FIRST_ACK") {
     transportBootNonce = message.boot_nonce;
     const secondChallenge = randomChallengeNonce();
     if (secondChallenge === transportChallengeNonce) {
-      rejectTransport(port);
+      rejectTransport(port, reconnectAttempt);
       return;
     }
     transportChallengeNonce = secondChallenge;
@@ -350,21 +414,23 @@ function handleTransportAck(message, port) {
     return;
   }
   if (transportStage !== "AWAITING_FINAL_ACK" || message.boot_nonce !== transportBootNonce) {
-    rejectTransport(port);
+    rejectTransport(port, reconnectAttempt);
     return;
   }
   transportStage = "READY";
   transportChallengeNonce = null;
   transportHandshakeReady = true;
+  clearReconnectAlarms().catch(() => undefined);
 }
 
-function getNativePort() {
+function getNativePort(reconnectAttempt = -1) {
   if (!INSTANCE_CONFIG) return null;
   if (nativePort) return nativePort;
   try {
     nativePort = chrome.runtime.connectNative(INSTANCE_CONFIG.nativeHost);
   } catch (_error) {
     nativePort = null;
+    scheduleReconnect(reconnectAttempt + 1);
     return null;
   }
   const port = nativePort;
@@ -372,10 +438,15 @@ function getNativePort() {
   transportBootNonce = null;
   transportChallengeNonce = randomChallengeNonce();
   transportStage = "AWAITING_FIRST_ACK";
-  port.onDisconnect.addListener(() => resetTransport(port));
+  port.onDisconnect.addListener(() => {
+    const wasReady = nativePort === port && transportHandshakeReady;
+    if (resetTransport(port)) {
+      scheduleReconnect(wasReady ? 0 : reconnectAttempt + 1);
+    }
+  });
   port.onMessage.addListener((request) => {
     if (!transportHandshakeReady) {
-      handleTransportAck(request, port);
+      handleTransportAck(request, port, reconnectAttempt);
       return;
     }
     handleNativeRequest(request, port).catch(() => undefined);
@@ -386,7 +457,7 @@ function getNativePort() {
 
 chrome.runtime.onMessage.addListener((event, sender) => {
   if (!recordProbe(event, sender)) return;
-  const port = getNativePort();
+  const port = getNativePort(-1);
   if (!port || !transportHandshakeReady) return;
   port.postMessage({
     kind: PROBE_KIND,
@@ -395,6 +466,48 @@ chrome.runtime.onMessage.addListener((event, sender) => {
   });
 });
 
-if (chrome.tabs && chrome.tabs.onRemoved) {
-  chrome.tabs.onRemoved.addListener((tabId) => removeTabMapping(tabId));
+function refreshFromTabEvent(tabId) {
+  refreshTabMapping(tabId).catch(() => removeTabMapping(tabId));
 }
+
+if (chrome.tabs) {
+  if (chrome.tabs.onUpdated) {
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+      if (changeInfo && (typeof changeInfo.url === "string" || changeInfo.status === "complete")) {
+        refreshFromTabEvent(tabId);
+      }
+    });
+  }
+  if (chrome.tabs.onMoved) {
+    chrome.tabs.onMoved.addListener((tabId) => refreshFromTabEvent(tabId));
+  }
+  if (chrome.tabs.onAttached) {
+    chrome.tabs.onAttached.addListener((tabId) => refreshFromTabEvent(tabId));
+  }
+  if (chrome.tabs.onDetached) {
+    chrome.tabs.onDetached.addListener((tabId) => removeTabMapping(tabId));
+  }
+  if (chrome.tabs.onReplaced) {
+    chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+      removeTabMapping(removedTabId);
+      refreshFromTabEvent(addedTabId);
+    });
+  }
+  if (chrome.tabs.onRemoved) {
+    chrome.tabs.onRemoved.addListener((tabId) => removeTabMapping(tabId));
+  }
+}
+
+if (chrome.alarms && chrome.alarms.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    const index = reconnectAlarmIndex(alarm && alarm.name);
+    if (index === null || nativePort) return;
+    getNativePort(index);
+  });
+}
+
+getNativePort(-1);
+hydrateTargets().catch(() => {
+  targets.clear();
+  tabFingerprints.clear();
+});
