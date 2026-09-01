@@ -46,6 +46,7 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _PERCENT_RE = re.compile(r"%[0-9A-Fa-f]{2}")
 _PATH_ATOM_RE = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:@/-]")
 _URI_DANGEROUS = frozenset('"<> {}\\^|`')
+_NON_AUTHORIZING_OAUTH_SCOPES = frozenset({"offline_access"})
 
 
 class AuthErrorCode(str, enum.Enum):
@@ -203,8 +204,6 @@ def _split_https_url(value: Any) -> tuple[str, SplitResult]:
         _refuse()
     if any(character in token for character in _URI_DANGEROUS):
         _refuse()
-    # Empty query and fragment delimiters are still query/fragment syntax and
-    # must not disappear merely because urlsplit projects an empty value.
     if "?" in token or "#" in token:
         _refuse()
     try:
@@ -224,9 +223,6 @@ def _split_https_url(value: Any) -> tuple[str, SplitResult]:
         _refuse()
 
     authority = token[len("https://") :].split("/", 1)[0]
-    # Percent-encoded host/port spellings create parser differentials and are
-    # never needed for an exact configured resource identity. IPv6 brackets
-    # remain legal here and are rejected later if they appear in the path.
     if not authority or "%" in authority:
         _refuse()
     _validate_exact_path(parsed.path)
@@ -308,6 +304,8 @@ def load_resource_policy(value: object) -> ResourcePolicy:
             pattern=_SCOPE_RE,
             maximum_items=32,
         )
+        if set(required_scopes) & _NON_AUTHORIZING_OAUTH_SCOPES:
+            _refuse()
         allowed_subject_digests = _sorted_unique_strings(
             value.get("allowed_subject_digests"),
             pattern=_DIGEST_RE,
