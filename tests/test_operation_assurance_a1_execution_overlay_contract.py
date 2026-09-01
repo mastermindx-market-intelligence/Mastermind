@@ -2,13 +2,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OVERLAY = (
-    ROOT
-    / "docs"
-    / "superpowers"
-    / "specs"
-    / "2026-08-30-operation-assurance-a1-controlling-execution-overlay.md"
-)
 LAW = ROOT / "docs" / "OPERATION_LIVENESS_SOUNDNESS_LAW.md"
 DESIGN = (
     ROOT
@@ -24,6 +17,13 @@ PLAN = (
     / "plans"
     / "2026-08-30-operation-assurance-core.md"
 )
+OVERLAY = (
+    ROOT
+    / "docs"
+    / "superpowers"
+    / "specs"
+    / "2026-08-30-operation-assurance-a1-controlling-execution-overlay.md"
+)
 
 CONTROLLING_A1_SOURCES = (
     "docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md",
@@ -33,18 +33,31 @@ CONTROLLING_A1_SOURCES = (
 )
 
 
-def _raw(path: Path = OVERLAY) -> str:
+def _raw(path: Path) -> str:
     assert path.is_file(), f"missing OLS source artifact: {path.relative_to(ROOT)}"
     return path.read_text(encoding="utf-8")
 
 
-def _text() -> str:
-    return " ".join(_raw().split())
+def _text(path: Path) -> str:
+    return " ".join(_raw(path).split())
+
+
+def test_overlay_closes_the_plan_precedence_gap() -> None:
+    text = _text(OVERLAY)
+    for marker in (
+        "CONTROLLING EXECUTION OVERLAY",
+        "mastermind-operation-liveness-soundness-20260830-sol-001",
+        "2026-08-30-operation-assurance-core.md",
+        "2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md",
+        "2026-08-30-operation-assurance-immutable-report-projection-clarification.md",
+        "Where this overlay conflicts with the parent law, design, or implementation plan, this overlay wins",
+    ):
+        assert marker in text
 
 
 def test_parent_entrypoints_reverse_link_to_controlling_a1_contract_near_top() -> None:
     for path in (LAW, DESIGN, PLAN):
-        prefix = "\n".join(_raw(path).splitlines()[:100])
+        prefix = " ".join("\n".join(_raw(path).splitlines()[:100]).split())
         assert "CONTROLLING OLS-A1 IMPLEMENTATION NOTICE" in prefix
         positions = []
         for source in CONTROLLING_A1_SOURCES:
@@ -57,21 +70,8 @@ def test_parent_entrypoints_reverse_link_to_controlling_a1_contract_near_top() -
         assert "do not implement" in prefix.lower()
 
 
-def test_overlay_closes_the_plan_precedence_gap() -> None:
-    text = _text()
-    for marker in (
-        "CONTROLLING EXECUTION OVERLAY",
-        "mastermind-operation-liveness-soundness-20260830-sol-001",
-        "2026-08-30-operation-assurance-core.md",
-        "2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md",
-        "2026-08-30-operation-assurance-immutable-report-projection-clarification.md",
-        "Where this overlay conflicts with the parent law, design, or implementation plan, this overlay wins",
-    ):
-        assert marker in text
-
-
 def test_a1_model_wire_requires_the_corrected_fidelity_contract() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     for marker in (
         "abstraction_contract is required",
         "DECLARED_EXACT",
@@ -93,7 +93,7 @@ def test_a1_model_wire_requires_the_corrected_fidelity_contract() -> None:
 
 
 def test_immutable_report_keeps_model_analysis_and_applicability_orthogonal() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     for verdict in (
         "UNSAFE_COUNTEREXAMPLE",
         "PROVEN_WITHIN_FINITE_MODEL",
@@ -110,7 +110,7 @@ def test_immutable_report_keeps_model_analysis_and_applicability_orthogonal() ->
 
 
 def test_a1_never_claims_current_status_or_operational_proceed() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     assert "OLS-A1 never emits mastermind.operation_assurance_status.v1" in text
     assert "OLS-A1 never emits REPORT_ONLY_PROCEED" in text
     assert "AUTHOR_DECLARED_ONLY" in text
@@ -119,7 +119,7 @@ def test_a1_never_claims_current_status_or_operational_proceed() -> None:
 
 
 def test_gap_relevance_and_counterexample_realizability_control_certainty() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     for marker in (
         "DECLARED_MODEL_ONLY",
         "SOURCE_CONTRACT_VALIDATED",
@@ -136,7 +136,7 @@ def test_gap_relevance_and_counterexample_realizability_control_certainty() -> N
 
 
 def test_corrected_fixture_expectations_are_frozen() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     for fixture in (
         "safe_finite.json",
         "effect_unknown_failover.json",
@@ -152,7 +152,7 @@ def test_corrected_fixture_expectations_are_frozen() -> None:
 
 
 def test_overlay_preserves_the_pure_report_only_no_rebuild_boundary() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     assert "standard-library-only" in text
     assert "zero network, socket, subprocess, telemetry, filesystem-write, SQLite, runtime, or source-owner I/O" in text
     assert "No Executive OS, Agent OS, Wake, RuntimeBinding, Capacity, Steward, Control Room, watcher, retry, or Runtime Observability mutation" in text
@@ -161,7 +161,7 @@ def test_overlay_preserves_the_pure_report_only_no_rebuild_boundary() -> None:
 
 
 def test_fair_lasso_search_uses_a_closed_walk_product() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     assert "fairness-valid closed walk" in text
     assert "may combine multiple simple cycles" in text
     assert "seen-or-disabled fairness mask" in text
@@ -169,7 +169,7 @@ def test_fair_lasso_search_uses_a_closed_walk_product() -> None:
 
 
 def test_report_identity_is_non_circular_and_deterministic() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     assert "report_hash is computed from the canonical report body excluding report_id and report_hash" in text
     assert "report_id is oar_ plus the first 24 hexadecimal characters of report_hash" in text
     assert "duration_ms is excluded from the OLS-A1 canonical report" in text
@@ -177,13 +177,13 @@ def test_report_identity_is_non_circular_and_deterministic() -> None:
 
 
 def test_structural_refusal_and_semantic_gate_gap_are_distinct() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     assert "a missing required gate field is parser refusal" in text
     assert "a syntactically complete gate without a realizable release or terminal assessment boundary is EXTERNAL_GATE_INCOMPLETE" in text
 
 
 def test_redundant_assumption_references_must_agree() -> None:
-    text = _text()
+    text = _text(OVERLAY)
     assert "transition fairness_ref and fairness assumption transition_ids must agree exactly" in text
     assert "transition external_assumption_ref and environment assumption transition_ids must agree exactly" in text
     assert "duplicate effects for the same state variable are rejected" in text
