@@ -130,6 +130,11 @@ A Sol-owned watcher prompt is incomplete unless it contains all of:
 - one-carrier/no-blind-retry/no-lifecycle-inference laws;
 - terminal STOP and watcher-cycle shutdown behavior.
 
+These laws must be stated as positive operative requirements or explicit prohibitions. Merely
+mentioning the words is insufficient. A prompt saying “do not re-pin,” “do not fresh-read,” “do not
+post the same-carrier Sol edge,” “do not return a typed blocker,” “do not send terminal STOP before
+disarming,” or “infer Executive lifecycle from Slack” fails closed.
+
 A **notification-only watcher** whose sole behavior is “if something changes, notify me with the
 Sol action required” is insufficient for an already-authorized Sol-owned continuation loop.
 
@@ -154,9 +159,14 @@ ACTION_REQUIRED_OUTCOME: <closed value required by role>
 SISTER_SOL_POLICY: <closed value required by role>
 ```
 
+The header schema is closed. Between `MMX_SOL_WATCHER_V1` and the first blank line there must be
+exactly the seven fields above, each as one `KEY: value` line. Unknown fields, comments, notes,
+free-form instructions, and bare nonempty lines fail closed; the header cannot become an unscanned
+instruction channel.
+
 The header owns no authority or task state. It makes the prompt's claimed role and safety contract
 auditable against the already-existing responsibility, action-target, carrier and runtime owners.
-`ACTION_AUTHORITATIVE` always requires an exact Slack carrier. `aggregate:<stable-scope-id>` is
+ACTION_AUTHORITATIVE always requires an exact Slack carrier. `aggregate:<stable-scope-id>` is
 allowed only for `OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, or `TRIAGE_ONLY`; it identifies one bounded
 read/oversight scope and never grants authority over every child it contains. Any child-semantic
 modification still requires an exact current action target and exact lawful carrier.
@@ -231,9 +241,10 @@ The exact child action surface must act or receive canonical action-target trans
 Every non-authoritative role—`OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, and `TRIAGE_ONLY`—must be
 validated against positive child-modification instructions, not only against its header. It may not
 post/send/issue a child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, or `STOP`; merge/release or arm
-auto-merge; retry, resubmit, requeue, fail over; or commission/start a successor. Explicit
-prohibitions such as “never issue a Sol ruling” remain valid. A parent or triage prompt cannot smuggle
-child authority into prose while retaining a non-authoritative header.
+auto-merge; retry, resubmit, requeue, fail over; or commission/start a successor. Markdown emphasis
+or code delimiters do not hide a command. Explicit prohibitions such as “never issue a Sol ruling”
+remain valid. A parent or triage prompt cannot smuggle child authority into prose while retaining a
+non-authoritative header.
 
 #### Account-local export envelope
 
@@ -243,11 +254,12 @@ Validate an account-local JSON task export with:
 python3 scripts/audit_sol_watchers.py <tasks.json>
 ```
 
-The native task ID must be present and unique. Duplicate native task IDs are an identity ambiguity
-even when disabled. The enabled state must be a JSON boolean; missing, string, numeric, or conflicting
-`is_enabled` / `enabled` values fail closed. Ordinary reminders may be marked
-`audit_kind: NON_WATCHER`; unknown classifications fail closed. The report must expose
-`invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and
+The native task ID must be present and unique. `id` and `task_id` are independently trimmed before
+comparison and duplicate census, so whitespace cannot manufacture two identities. Duplicate native
+task IDs are an identity ambiguity even when disabled. The enabled state must be a JSON boolean;
+missing, string, numeric, or conflicting `is_enabled` / `enabled` values fail closed. Ordinary
+reminders may be marked `audit_kind: NON_WATCHER`; unknown classifications fail closed. The report
+must expose `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and
 `duplicate_task_ids` separately rather than laundering wrapper defects into a green watcher count.
 
 The validator is read-only and account-local. A passing prompt audit proves contract conformance,
