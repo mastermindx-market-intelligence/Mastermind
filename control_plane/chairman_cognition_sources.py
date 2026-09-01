@@ -17,7 +17,11 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from control_plane.chairman_cognition import INPUT_SCHEMA, evaluate_document
+from control_plane.chairman_cognition import (
+    INPUT_SCHEMA,
+    REQUIRED_CURRENT_CONSTRAINTS,
+    evaluate_document,
+)
 from control_plane.wake_events import canonical_json_bytes
 
 SOURCE_BUNDLE_SCHEMA = "mastermind.chairman_cognition_source_bundle.v1"
@@ -34,14 +38,7 @@ AGENT_OS_SOURCE_REF = "AGENT_OS:ceo_brief"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _RESERVED_OWNERS = frozenset({"CHAIRMAN_DIRECTIVE", "STRATEGIC_STATE", "AGENT_OS"})
-_REQUIRED_CONSTRAINTS = frozenset(
-    {
-        "autonomous_production_deploy",
-        "autonomous_live_capital_execution",
-        "duplicate_control_planes",
-        "unbounded_autonomous_strategic_modification",
-    }
-)
+_REQUIRED_CONSTRAINTS = REQUIRED_CURRENT_CONSTRAINTS
 _AGENT_OS_BRIEF_REQUIRED_FIELDS = frozenset(
     {
         "schema",
@@ -154,6 +151,7 @@ def compose_input(bundle: Mapping[str, Any]) -> dict[str, Any]:
         "schema": INPUT_SCHEMA,
         "as_of": as_of,
         "source_receipts": receipts,
+        "strategic_constraints_source_ref": STRATEGIC_SOURCE_REF,
         "strategic_constraints": constraints,
         "delegation_envelope": doc["delegation_envelope"],
         "options": doc["options"],
@@ -318,14 +316,16 @@ def _strategic_receipt(
     else:
         state = canonical_revision["state"]
 
-    content_digest = hashlib.sha256(canonical_json_bytes(strategic)).hexdigest()
+    strategic_digest = hashlib.sha256(canonical_json_bytes(strategic)).hexdigest()
+    constraints_digest = hashlib.sha256(canonical_json_bytes(normalized)).hexdigest()
     checkout_label = checkout_sha if checkout_known else "UNRESOLVED"
     return (
         {
             "source_ref": STRATEGIC_SOURCE_REF,
             "owner": "STRATEGIC_STATE",
             "revision": (
-                f"sha256:{content_digest};mastermind:{checkout_label};"
+                f"constraints-sha256:{constraints_digest};"
+                f"sha256:{strategic_digest};mastermind:{checkout_label};"
                 f"canonical:{canonical_sha}"
             ),
             "state": state,
