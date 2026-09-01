@@ -124,10 +124,11 @@ def test_control_room_cannot_conflate_scf_ols_and_runtime_evidence() -> None:
     assert "A source gap in any axis remains visible" in text
 
 
-def test_current_capability_state_remains_records_only_and_predecessor_gated() -> None:
+def test_current_capability_state_remains_records_only_and_directly_reviewable() -> None:
     text = _read(AMENDMENT)
     assert "OLS-F0 remains records-only and production-inert" in text
     assert "Protecting SCF-GH0 did not make any GitHub app" in text
-    assert "exact-head hosted checks and a fresh independent Auditor Sol review remain mandatory" in text
+    assert "Exact-head hosted checks and direct Program-CEO adversarial review are mandatory" in text
+    assert "A separate Auditor Sol placement is not a release prerequisite" in text
     assert "OLS-A1 remains predecessor-gated" in text
-    assert "No merge, Ready transition, implementation commission" in text
+    assert "The record itself grants no merge, Ready transition, implementation commission" in text

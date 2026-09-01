@@ -1,1030 +1,909 @@
 # Operation Assurance Core Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Operation:** `mastermind-operation-liveness-soundness-20260830-sol-001`  
+**Wave:** `OLS-A1`  
+**Owner:** bounded implementation worker under Sol acceptance  
+**Current protected pickup after F0:** exact protected descendant selected at commission time  
+**Capability target:** pure deterministic model parser, checker, immutable report, CLI, and hostile fixtures
 
-**Goal:** Build a pure, deterministic, report-only finite-state Operation Assurance core that validates a closed model, explores all reachable states within explicit bounds, and returns minimal source-attributed safety or liveness counterexamples without reading or mutating any Mastermind runtime owner.
+## CONTROLLING OLS-A1 IMPLEMENTATION NOTICE
 
-**Architecture:** A closed JSON model is parsed into immutable dataclasses. A standard-library explicit-state checker performs deterministic breadth-first reachability, reverse completion analysis, strongly connected component/lasso analysis, weak-fairness filtering, and verdict composition. A CLI is the first real machine consumer and emits `mastermind.operation_assurance_report.v1`; canonical source compilation, Steward/Control Room integration, admission attachment, and runtime conformance are later waves.
+Some earlier task examples are historical drafting residue. A worker must **do not implement** any
+example that conflicts with the following sources. Read them in this exact precedence order before
+writing the first test:
 
-**Tech Stack:** Python 3.11+, standard library only (`dataclasses`, `enum`, `hashlib`, `json`, `collections`, `datetime`, `argparse`, `pathlib`), pytest.
+1. `docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md`
+2. `docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md`
+3. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md`
+4. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md`
 
-**Spec:** `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-design.md`
+Also read the current owner boundaries:
 
-## Global Constraints
+- `docs/superpowers/specs/2026-08-31-operation-liveness-soundness-executive-steward-reconciliation.md`
+- `docs/superpowers/specs/2026-08-31-operation-liveness-soundness-sol-capability-fabric-reconciliation.md`
+- `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-runtime-observability-reconciliation.md`
 
-- This plan implements **OLS-A1 only**. It does not compile live Executive/Agent OS/Wake/RuntimeBinding state.
-- Create no database, lifecycle, queue, scheduler, watcher, retry, authority, session, worker, attention, or capacity owner.
-- No edits to Executive Runtime, Executive Steward, Wake, SessionTarget, RuntimeBinding, Model Router, watcher, Agent OS, or Control Room paths are allowed in OLS-A1.
-- V1 is report-only. A valid unsafe model still produces a report and normal CLI process completion.
-- Use the exact schemas `mastermind.operation_assurance_model.v1` and `mastermind.operation_assurance_report.v1`.
-- Use canonical UTF-8 JSON: sorted keys, separators `(",", ":")`, `ensure_ascii=False`, `allow_nan=False`.
-- Unknown fields, opaque/executable guards, non-finite domains, duplicate identities, unresolved references, and values outside declared domains fail closed during parsing.
-- Model-generated text has zero verdict authority.
-- `PROVEN_WITHIN_FINITE_MODEL` requires complete reachable-state exploration and zero load-bearing model/source gaps.
-- State/depth limits may only yield `BOUNDED_NO_COUNTEREXAMPLE`, `INCONCLUSIVE_MODEL_GAP`, or an unsafe counterexample already found.
-- Strong fairness is outside OLS-A1. Support `NONE` and `WEAK` only.
-- Counterexample ordering is deterministic: shortest path first, then canonical transition sequence, then state fingerprint.
-- Use TDD. Each task ends with exact focused tests and a commit.
-- Before implementation, create an isolated worktree from the exact accepted OLS-F0 protected descendant and collision-check the paths below.
+This plan is the executable navigation layer. The subject-specific sources above win where they are
+more precise.
 
-## File map
+## 1. Observable mission
+
+Given one authored closed `mastermind.operation_assurance_model.v1` JSON document, the CLI validates
+it exactly, deterministically checks the complete reachable finite model within declared bounds, and
+emits one canonical immutable `mastermind.operation_assurance_report.v1` with minimal
+source-attributed safety or liveness counterexamples and no runtime side effect.
+
+## 2. Why this wave matters
+
+This is the first independently useful Operation Assurance capability. It converts the architecture
+from records into a real machine consumer while preserving the no-rebuild boundary. It enables hostile
+fixtures and deterministic review before any live-source compiler or Control Room integration is
+attempted.
+
+## 3. Route and scope
+
+**Preferred avenue:** `CTO Sol` for reasoning-heavy bounded implementation.  
+**Receiver binding:** `CAPACITY_SELECTABLE`.  
+**Why:** finite-state semantics, canonical identity, fairness, and counterexample minimization require
+strong engineering reasoning, but the architecture is frozen and repository scope is bounded.  
+**Why not Fable:** no unresolved cross-repository or principal-level product ambiguity remains in A1.
+
+The concrete worker receives no merge, release, production, Executive, provider, or organizational
+authority merely from the route label.
+
+## 4. Exact repository and file map
+
+Repository: `mastermindx-market-intelligence/Mastermind`
+
+Create only:
 
 | Path | Responsibility |
 |---|---|
-| `control_plane/operation_assurance_model.py` | closed model types, parser, validation, canonicalization and model hash |
-| `control_plane/operation_assurance_report.py` | closed report/verdict/trace types and canonical serialization |
-| `control_plane/operation_assurance_checker.py` | transition evaluation, reachable graph, properties, SCC/lasso, verdict composition |
-| `scripts/operation_assurance.py` | report-only JSON CLI and error boundary |
-| `tests/test_operation_assurance_model.py` | model grammar and hash tests |
-| `tests/test_operation_assurance_report.py` | report-axis and serialization tests |
-| `tests/test_operation_assurance_checker.py` | reachability, soundness, safety, liveness, fairness and bounds |
-| `tests/test_operation_assurance_cli.py` | real machine-consumer contract |
-| `tests/fixtures/operation_assurance/*.json` | frozen hostile and valid operation models |
+| `control_plane/operation_assurance_model.py` | closed model types, exact parser, validation, canonicalization, model identity |
+| `control_plane/operation_assurance_report.py` | exact immutable report wire, identity, validation, serialization |
+| `control_plane/operation_assurance_checker.py` | reachability, properties, SCC/fairness products, witnesses, verdict composition |
+| `scripts/operation_assurance.py` | bounded report-only JSON CLI |
+| `tests/test_operation_assurance_model.py` | grammar, validation, canonical identity, hostile parsing |
+| `tests/test_operation_assurance_report.py` | report field set, orthogonal axes, immutable identity |
+| `tests/test_operation_assurance_checker.py` | safety, workflow, liveness, fairness, bounds, witnesses |
+| `tests/test_operation_assurance_cli.py` | real machine-consumer contract and error boundaries |
+| `tests/fixtures/operation_assurance/*.json` | valid, unsafe, bounded, gated, recurring, and hostile models |
 
----
+No edits to Executive Runtime, Executive Steward, Wake, SessionTarget, RuntimeBinding, Model Router,
+Agent OS, Control Room, Runtime Observability, Sol Capability Fabric, Project Workroom, Worker Browser,
+GitHub action code, or production deployment paths are permitted in OLS-A1.
 
-### Task 1: Closed model grammar and canonical identity
+## 5. Explicit non-goals
 
-**Files:**
-- Create: `control_plane/operation_assurance_model.py`
-- Create: `tests/test_operation_assurance_model.py`
+OLS-A1 does not:
 
-**Interfaces:**
-- Produces:
-  - `MODEL_SCHEMA: str`
-  - `PROPERTY_SET_V1: str`
-  - `OperationAssuranceModelError(ValueError)`
-  - immutable dataclasses `Guard`, `Effect`, `Transition`, `StateSafetyProperty`, `TransitionSafetyProperty`, `SafetyProperty`, `Obligation`, `Resource`, `Outcome`, `Gate`, `FairnessAssumption`, `SourceSnapshot`, `ExplorationLimits`, `OperationAssuranceModel`
-  - `canonical_bytes(value: object) -> bytes`
-  - `canonical_sha256(value: object) -> str`
-  - `parse_model(document: Mapping[str, object]) -> OperationAssuranceModel`
-  - `model_to_dict(model: OperationAssuranceModel) -> dict[str, object]`
-  - `state_fingerprint(variable_order: tuple[str, ...], state: tuple[str, ...]) -> str`
-- Consumed by Tasks 2–8.
+- gather or compile live Executive OS, Agent OS, Wake, RuntimeBinding, Capacity, GitHub, Slack, or
+  observability facts;
+- create a source compiler, source cache, federated reader, Steward extension, or graph database;
+- create or mutate lifecycle, admission, retry, placement, Wake, carrier, worker, session, lease,
+  effect, or authority state;
+- expose a web UI or Control Room card;
+- emit current assurance status;
+- claim production applicability;
+- perform runtime replay;
+- support strong fairness;
+- block or admit an operation;
+- execute any repair candidate.
 
-- [ ] **Step 1: Write the minimal valid-model and canonical-hash tests**
+OLS-A1 stops at a pure report-only CLI.
 
-Create a `_minimal_document()` fixture containing exactly:
+## 6. Technology and purity boundary
 
-```python
-{
-    "schema": "mastermind.operation_assurance_model.v1",
-    "model_id": "oam_test_minimal",
-    "operation_ref": {"operation_key": "test-operation-001", "root_job_id": None},
-    "compiler": {"name": "fixture", "version": "1.0.0"},
-    "source_snapshot": {
-        "schema": "mastermind.operation_assurance_source_snapshot.v1",
-        "sources": [{
-            "owner": "github",
-            "source_kind": "git_object",
-            "source_identity": "Mastermind@0123456789abcdef0123456789abcdef01234567",
-            "schema_version": "git/v1",
-            "digest": "a" * 64,
-            "effective_at": None,
-            "observed_at": "2026-08-30T10:00:00Z",
-            "correction_ref": None,
-            "freshness": "FRESH",
-            "conflict": "NONE",
-        }],
-        "snapshot_hash": "",
-    },
-    "state_domains": {
-        "phase": ["START", "DONE"],
-        "obligation.return": ["PENDING", "DISCHARGED"],
-        "resource.worker": ["FREE", "HELD"],
-    },
-    "initial_state": {
-        "phase": "START",
-        "obligation.return": "PENDING",
-        "resource.worker": "FREE",
-    },
-    "transitions": [{
-        "transition_id": "complete",
-        "kind": "PROGRESS",
-        "actor_class": "WORKER",
-        "authority_requirement": "COO_OR_WORKER",
-        "guards": [{"variable": "phase", "op": "EQ", "value": "START"}],
-        "effects": [
-            {"variable": "phase", "value": "DONE"},
-            {"variable": "obligation.return", "value": "DISCHARGED"},
-        ],
-        "progress_tags": ["TERMINAL_PROGRESS"],
-        "source_refs": ["Mastermind@0123456789abcdef0123456789abcdef01234567"],
-        "fairness_ref": None,
-        "external_assumption_ref": None,
-        "required_reachable": True,
-    }],
-    "terminal_outcomes": [{
-        "outcome_id": "done",
-        "kind": "TERMINAL_SUCCESS",
-        "guards": [{"variable": "phase", "op": "EQ", "value": "DONE"}],
-        "source_refs": ["Mastermind@0123456789abcdef0123456789abcdef01234567"],
-    }],
-    "recurring_progress_outcomes": [],
-    "obligations": [{
-        "obligation_id": "return",
-        "kind": "RETURN",
-        "state_variable": "obligation.return",
-        "pending_values": ["PENDING"],
-        "discharged_values": ["DISCHARGED"],
-        "persistent": False,
-        "source_refs": ["Mastermind@0123456789abcdef0123456789abcdef01234567"],
-    }],
-    "resources": [{
-        "resource_id": "worker",
-        "holder_variable": "resource.worker",
-        "released_values": ["FREE"],
-        "persistent": False,
-        "source_refs": ["Mastermind@0123456789abcdef0123456789abcdef01234567"],
-    }],
-    "external_gates": [],
-    "fairness_assumptions": [],
-    "environment_assumptions": [],
-    "safety_properties": [],
-    "property_set": "mastermind.operation_assurance.properties.v1",
-    "exploration_limits": {"max_states": 1000, "max_depth": 100},
-    "known_model_gaps": [],
-}
-```
+- Python 3.11+
+- standard library only in production modules
+- pytest for tests
+- immutable frozen dataclasses or equivalent immutable value objects
+- canonical UTF-8 JSON using sorted keys, compact separators, `ensure_ascii=False`, and
+  `allow_nan=False`
+- no randomness in production
+- no network, socket, subprocess, telemetry, SQLite, filesystem write, dynamic import, plugin, model,
+  provider, GitHub, Slack, browser, or source-owner I/O in model/report/checker modules
+- CLI may read exactly one explicit file or stdin and write one report to stdout
 
-Compute `source_snapshot.snapshot_hash` with `canonical_sha256({"schema": ..., "sources": ...})`.
-Assert parsing succeeds, variable order is lexical, and two documents with reversed mapping insertion
-order produce the same `model_hash`.
+A valid unsafe model still produces a report and normal CLI process completion. Invalid JSON or a
+refused model uses a bounded invalid-input exit. An internal checker failure uses a distinct bounded
+checker-refusal exit unless a complete validated report was already finalized.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+## 7. Exact model wire
 
-Run:
-
-```bash
-pytest -q tests/test_operation_assurance_model.py::test_minimal_model_parses_and_hash_is_canonical
-```
-
-Expected: import failure because `operation_assurance_model.py` does not exist.
-
-- [ ] **Step 3: Implement immutable model types and canonical helpers**
-
-Implement frozen dataclasses and:
-
-```python
-MODEL_SCHEMA = "mastermind.operation_assurance_model.v1"
-SOURCE_SNAPSHOT_SCHEMA = "mastermind.operation_assurance_source_snapshot.v1"
-PROPERTY_SET_V1 = "mastermind.operation_assurance.properties.v1"
-
-def canonical_bytes(value: object) -> bytes:
-    try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeError) as exc:
-        raise OperationAssuranceModelError(
-            f"value is not canonical JSON data: {exc}"
-        ) from exc
-
-def canonical_sha256(value: object) -> str:
-    return hashlib.sha256(canonical_bytes(value)).hexdigest()
-```
-
-Keep all enum-like wire values as validated strings in closed `frozenset` constants so serialization
-does not depend on Enum implementation details.
-
-- [ ] **Step 4: Implement exact-key parsing and cross-reference validation**
-
-Use explicit key sets for every object. Parsing must reject:
-
-- unknown or missing keys;
-- booleans where integers are required;
-- empty or duplicate finite-domain values;
-- initial-state keys not exactly equal to `state_domains`;
-- a guard/effect variable not declared;
-- a guard/effect value outside its variable domain;
-- guard operators outside `EQ`, `NEQ`, `IN`, `NOT_IN`;
-- sequence-valued guard operands for `EQ`/`NEQ` or scalar operands for `IN`/`NOT_IN`;
-- duplicate transition/outcome/obligation/resource/gate/fairness/property IDs;
-- missing transition, fairness, source or assumption references;
-- fairness kinds outside `NONE`, `WEAK`;
-- `max_states < 1` or `max_depth < 0`;
-- non-empty `known_model_gaps` entries without `gap_id`, `reason`, `load_bearing`, and `source_refs`;
-- source freshness outside `FRESH`, `STALE`, `UNKNOWN`;
-- source conflict outside `NONE`, `CONFLICT`, `UNKNOWN`;
-- supplied snapshot/model IDs that do not match their closed format.
-
-Do not silently coerce strings, integers or nulls.
-
-- [ ] **Step 5: Add hostile grammar tests**
-
-Add parametrized tests that mutate the minimal document one defect at a time:
-
-```python
-@pytest.mark.parametrize("mutate, expected", [
-    (lambda d: d.__setitem__("extra", True), "model fields mismatch"),
-    (lambda d: d["state_domains"].__setitem__("unbounded", []), "domain must be non-empty"),
-    (lambda d: d["transitions"][0]["guards"][0].__setitem__("op", "PYTHON"),
-     "guard op is unsupported"),
-    (lambda d: d["transitions"][0]["effects"][0].__setitem__("value", "MISSING"),
-     "effect value is outside the declared domain"),
-])
-def test_model_rejects_closed_wire_violations(mutate, expected):
-    document = _minimal_document()
-    mutate(document)
-    with pytest.raises(OperationAssuranceModelError, match=expected):
-        parse_model(document)
-```
-
-Also assert `float("nan")`, `float("inf")`, sets, bytes, and control characters cannot enter a
-canonical model.
-
-- [ ] **Step 6: Run model tests**
-
-Run:
-
-```bash
-pytest -q tests/test_operation_assurance_model.py
-```
-
-Expected: all tests pass.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add control_plane/operation_assurance_model.py tests/test_operation_assurance_model.py
-git commit -m "feat(ols): add closed operation assurance model"
-```
-
----
-
-### Task 2: Closed report wire with orthogonal truth axes
-
-**Files:**
-- Create: `control_plane/operation_assurance_report.py`
-- Create: `tests/test_operation_assurance_report.py`
-
-**Interfaces:**
-- Consumes: `canonical_sha256` and source/model identities from Task 1.
-- Produces:
-  - `REPORT_SCHEMA`, `CHECKER_VERSION`
-  - closed string constants for verdict, disposition, recommendation and property status
-  - frozen dataclasses `TraceStep`, `Counterexample`, `PropertyResult`, `ExplorationReceipt`, `OperationAssuranceReport`
-  - `report_to_dict(report) -> dict[str, object]`
-  - `finalize_report(..., generated_at: datetime) -> OperationAssuranceReport`
-
-- [ ] **Step 1: Write report-axis tests**
-
-Assert a report can represent:
+Schema:
 
 ```text
-assurance_verdict = BOUNDED_NO_COUNTEREXAMPLE
-progress_disposition = EXTERNALLY_GATED
-admission_recommendation = REPORT_ONLY_AWAIT_GATE
+mastermind.operation_assurance_model.v1
 ```
 
-without any field upgrading the verdict to proof. Assert `report_hash` is stable with a fixed UTC
-`generated_at`, changes when exploration limits change, and rejects naive/offset-non-UTC datetimes.
-
-- [ ] **Step 2: Run and verify RED**
-
-```bash
-pytest -q tests/test_operation_assurance_report.py
-```
-
-Expected: import failure.
-
-- [ ] **Step 3: Implement report dataclasses and exact serialization**
-
-Use these closed values:
-
-```python
-ASSURANCE_VERDICTS = frozenset({
-    "UNSAFE_COUNTEREXAMPLE",
-    "PROVEN_WITHIN_FINITE_MODEL",
-    "BOUNDED_NO_COUNTEREXAMPLE",
-    "INCONCLUSIVE_MODEL_GAP",
-    "MODEL_STALE_OR_INVALID",
-})
-PROGRESS_DISPOSITIONS = frozenset({
-    "AUTONOMOUSLY_LIVE",
-    "FAIRNESS_CONDITIONAL",
-    "EXTERNALLY_GATED",
-    "INTENTIONAL_WAIT",
-    "RECURRING_SERVICE",
-    "NO_PROGRESS",
-    "UNKNOWN",
-})
-ADMISSION_RECOMMENDATIONS = frozenset({
-    "REPORT_ONLY_PROCEED",
-    "REPORT_ONLY_REPAIR",
-    "REPORT_ONLY_RECONCILE",
-    "REPORT_ONLY_AWAIT_GATE",
-    "REPORT_ONLY_NO_RECOMMENDATION",
-})
-PROPERTY_STATUSES = frozenset({"PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE"})
-```
-
-`finalize_report` computes `report_id = "oar_" + sha256[:24]` and `report_hash` over every report
-field except `report_hash` itself. A fixed timestamp produces byte-identical output.
-
-- [ ] **Step 4: Enforce cross-axis anti-inflation invariants**
-
-Constructor validation must refuse:
-
-- `PROVEN_WITHIN_FINITE_MODEL` when `exploration.complete_state_space` is false;
-- proof when any property is `UNKNOWN`;
-- proof when `known_model_gaps` is non-empty;
-- `UNSAFE_COUNTEREXAMPLE` without a counterexample;
-- any non-unsafe verdict with a counterexample whose property status is `FAIL`;
-- any recommendation not prefixed `REPORT_ONLY_`;
-- naive/non-UTC timestamps;
-- duplicate property IDs or counterexample IDs.
-
-- [ ] **Step 5: Run report tests and commit**
-
-```bash
-pytest -q tests/test_operation_assurance_report.py
-git add control_plane/operation_assurance_report.py tests/test_operation_assurance_report.py
-git commit -m "feat(ols): add truthful assurance report wire"
-```
-
----
-
-### Task 3: Deterministic transition evaluation and bounded BFS
-
-**Files:**
-- Create: `control_plane/operation_assurance_checker.py`
-- Create: `tests/test_operation_assurance_checker.py`
-
-**Interfaces:**
-- Consumes: all Task 1 model types and Task 2 report types.
-- Produces:
-  - `OperationAssuranceCheckError(RuntimeError)`
-  - internal immutable `ReachabilityGraph`
-  - `check_model(model: OperationAssuranceModel, *, generated_at: datetime) -> OperationAssuranceReport`
-
-- [ ] **Step 1: Write deterministic reachability tests**
-
-Create a branch model:
+Top-level fields, exact and complete:
 
 ```text
-START --a_slow--> MID --finish_mid--> DONE
-START --b_fast----------------------> DONE
+schema
+model_id
+operation_ref
+compiler
+source_snapshot
+abstraction_contract
+state_domains
+initial_state
+transitions
+terminal_outcomes
+recurring_progress_outcomes
+obligations
+resources
+external_gates
+fairness_assumptions
+environment_assumptions
+safety_properties
+property_set
+exploration_limits
+known_model_gaps
 ```
 
-Assert:
-
-- all three states are discovered;
-- transition consideration order is `a_slow`, then `b_fast`, then `finish_mid`;
-- predecessor reconstruction to `MID` is deterministic;
-- two checker runs with the same timestamp are byte-identical.
-
-- [ ] **Step 2: Write bound-honesty tests**
-
-Set `max_states=1` and assert:
+Property set:
 
 ```text
-complete_state_space = false
-limit_reason = STATE_LIMIT_REACHED
-assurance_verdict != PROVEN_WITHIN_FINITE_MODEL
+mastermind.operation_assurance.properties.v1
 ```
 
-Set `max_depth=0` and assert the same with `DEPTH_LIMIT_REACHED`.
-
-- [ ] **Step 3: Run and verify RED**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py -k "reachability or limit"
-```
-
-Expected: import/API failure.
-
-- [ ] **Step 4: Implement canonical state representation and guard evaluation**
-
-State representation:
-
-```python
-State = tuple[str, ...]
-
-def _state_from_mapping(model, values):
-    return tuple(values[name] for name in model.variable_order)
-
-def _state_to_mapping(model, state):
-    return dict(zip(model.variable_order, state, strict=True))
-```
-
-Implement `EQ`, `NEQ`, `IN`, `NOT_IN` without dynamic evaluation. Apply effects simultaneously to a
-copied value list. Refuse any transition that somehow produces a value outside its domain even though
-the parser already guards that invariant.
-
-- [ ] **Step 5: Implement deterministic BFS**
-
-Use:
-
-```python
-queue = collections.deque([(initial_state, 0)])
-seen = {initial_state}
-parent: dict[State, tuple[State, str] | None] = {initial_state: None}
-outgoing: dict[State, tuple[tuple[str, State], ...]] = {}
-```
-
-For each state, evaluate transitions sorted by `transition_id`. Add unseen states until the queue
-drains or an explicit state/depth limit is reached. A depth limit suppresses expansion beyond the
-limit and marks the graph incomplete.
-
-Do not use wall-clock or memory heuristics in OLS-A1.
-
-- [ ] **Step 6: Add transition-scoped safety properties and shortest prefixes**
-
-Support two property forms already parsed in Task 1:
+### 7.1 Operation reference
 
 ```text
-STATE_FORBIDDEN:
-  violation_when guards all match the reached state
-
-TRANSITION_FORBIDDEN:
-  when guards all match the source state and transition.kind is in forbidden_transition_kinds
+operation_key
+root_job_id|null
+pre_admission_identity|null
 ```
 
-Check transition violations before applying the forbidden edge. Reconstruct the source-state prefix,
-then append one trace step describing the forbidden transition and expected after-state delta without
-adding the forbidden state to the accepted reachable graph.
+Exactly one of `root_job_id` and `pre_admission_identity` is non-null. This identity is descriptive
+analysis scope, not runtime authority.
 
-The first failure ordering is:
+### 7.2 Compiler descriptor
 
 ```text
-shortest prefix length
-property_id
+name
+version
+invocation_mode
+```
+
+For A1, `invocation_mode` is always `AUTHORED_INPUT`. Caller values cannot switch the checker into a
+trusted compiler or replay mode.
+
+### 7.3 Source snapshot
+
+```text
+schema
+sources[]
+snapshot_hash
+```
+
+Each source contains:
+
+```text
+owner
+source_kind
+source_identity
+schema_version
+digest
+effective_at|null
+observed_at|null
+correction_ref|null
+freshness
+conflict
+coverage
+truncated
+continuation|null
+```
+
+Positive authored labels never grant current attestation. Negative `STALE`, `CONFLICTED`,
+`INCOMPLETE`, or `UNKNOWN` information may weaken generation-time applicability.
+
+### 7.4 Abstraction contract
+
+```text
+kind
+concrete_scope
+preserves[]
+introduced_behavior
+excluded_behavior
+validation_kind
+validation_refs[]
+notes[]
+```
+
+Closed kinds:
+
+```text
+DECLARED_EXACT
+SOUND_OVERAPPROXIMATION
+TRACE_BACKED_UNDERAPPROXIMATION
+HEURISTIC_ABSTRACTION
+UNKNOWN_FIDELITY
+```
+
+Closed preservation claims:
+
+```text
+SAFETY
+REACHABLE_COUNTEREXAMPLE
+OPTION_TO_COMPLETE
+UNIVERSAL_PROGRESS
+LIVENESS_UNDER_DECLARED_FAIRNESS
+RESOURCE_OWNERSHIP
+EFFECT_RETRY_SAFETY
+```
+
+Closed validation kinds:
+
+```text
+AUTHOR_DECLARATION
+SOURCE_COMPILER_ATTESTATION
+SOURCE_CONTRACT_REPLAY
+RUNTIME_EVENT_REPLAY
+INDEPENDENT_FORMAL_EQUIVALENCE
+NONE
+```
+
+In A1, every positive validation claim is descriptive only.
+
+### 7.5 State domains and state
+
+- each variable ID is a non-empty canonical token;
+- each domain is a finite non-empty sequence of unique canonical JSON scalar values;
+- booleans are not accepted where integers are required;
+- the initial-state key set exactly equals the domain key set;
+- every initial value belongs to its declared domain;
+- variable order is lexical and stable.
+
+### 7.6 Guards and effects
+
+Guard fields:
+
+```text
+variable
+op
+value
+```
+
+Operators:
+
+```text
+EQ
+NEQ
+IN
+NOT_IN
+```
+
+Effects contain `variable` and `value`. Effects are simultaneous. Duplicate effects for one variable
+are parser refusal, not ordered writes.
+
+### 7.7 Transitions
+
+```text
 transition_id
-source state fingerprint
+kind
+actor_class
+authority_requirement
+guards[]
+effects[]
+progress_tags[]
+source_refs[]
+fairness_ref|null
+external_assumption_ref|null
+required_reachable
 ```
 
-- [ ] **Step 7: Add the EFFECT_UNKNOWN escape regression**
+Transition kinds are a closed set sufficient for progress, modify, reconcile, retry, failover,
+release, review, escalate, cancel, refuse, and no-op logical modeling. Logical stuttering is internal
+to analysis and is never serialized as an executable operation transition.
 
-Fixture semantics:
+Fairness and environment references are bidirectional: the transition and corresponding assumption
+must name each other exactly.
+
+### 7.8 Outcomes
 
 ```text
-effect = EFFECT_UNKNOWN
-retry_on_alternate.kind = RETRY
-safety property NO_EFFECT_UNKNOWN_ESCAPE forbids RETRY and FAILOVER
+outcome_id
+kind
+guards[]
+owned_persistent_obligation_ids[]
+owned_persistent_resource_ids[]
+source_refs[]
 ```
 
-Assert a one-step `UNSAFE_COUNTEREXAMPLE`, recommendation `REPORT_ONLY_REPAIR`, exact property ID,
-and no accepted retry successor in the reachable graph.
-
-- [ ] **Step 8: Run focused tests and commit**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py -k "reachability or safety or effect_unknown or limit"
-git add control_plane/operation_assurance_checker.py tests/test_operation_assurance_checker.py
-git commit -m "feat(ols): add deterministic reachability and safety checks"
-```
-
----
-
-### Task 4: Option-to-complete, proper completion, resources and dead transitions
-
-**Files:**
-- Modify: `control_plane/operation_assurance_checker.py`
-- Modify: `tests/test_operation_assurance_checker.py`
-
-**Interfaces:**
-- Extends `check_model`; no new public API.
-
-- [ ] **Step 1: Write stranded-state option-to-complete test**
-
-Model:
+Kinds:
 
 ```text
-START -> WORK
-WORK -> STRANDED
-WORK -> DONE
+TERMINAL_SUCCESS
+TERMINAL_REFUSAL
+TERMINAL_CANCELLED
+TERMINAL_FAILED_SAFE
+RECURRING_PROGRESS
 ```
 
-`STRANDED` has no gate/wait/recurring classification and no path to a terminal outcome. Assert the
-shortest counterexample ends at `STRANDED` with property `OPTION_TO_COMPLETE`.
+Terminal outcomes cannot own non-persistent pending obligations or held resources.
 
-- [ ] **Step 2: Write terminal-residue tests**
-
-Create terminal models where exactly one defect remains:
-
-- pending `PARENT_CONTINUATION`;
-- held non-persistent resource;
-- pending `EFFECT_RECONCILIATION`;
-- pending `TERMINAL_CLEANUP`.
-
-Each must fail `PROPER_COMPLETION` with the exact unresolved identity. A terminal state with only a
-persistent recurring obligation/resource may pass when its recurring outcome explicitly owns it.
-
-- [ ] **Step 3: Write dead-transition tests**
-
-A transition with `required_reachable=true` and impossible guards fails `REQUIRED_TRANSITION_REACHABLE`
-only when `complete_state_space=true`. With `max_states=1`, its status is `UNKNOWN`.
-
-- [ ] **Step 4: Run and verify RED**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py -k "option_to_complete or terminal_residue or required_transition"
-```
-
-- [ ] **Step 5: Implement reverse completion analysis**
-
-Build the reverse adjacency of the complete or partial reachable graph. Seed accepted good states from
-terminal, valid gate/wait, and recurring outcomes. Reverse BFS marks states with an option to reach a
-good outcome.
-
-For a state lacking an option, reconstruct the shortest initial prefix using the BFS parent map.
-When the graph is incomplete, only emit a `FAIL` for a concrete reached hard dead-end; otherwise
-property status is `UNKNOWN`.
-
-- [ ] **Step 6: Implement proper-completion residue checks**
-
-At each terminal outcome, inspect obligations and resources:
-
-```python
-pending = obligation.state_variable in obligation.pending_values
-released = resource.holder_variable in resource.released_values
-```
-
-Non-persistent pending/held items fail. Include sorted IDs in counterexample metadata.
-
-- [ ] **Step 7: Implement required-transition reachability**
-
-Track every transition that is enabled in at least one reached state. Compare against
-`required_reachable`. In incomplete graphs, unobserved required transitions are `UNKNOWN`.
-
-- [ ] **Step 8: Run tests and commit**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py -k "option_to_complete or terminal_residue or required_transition"
-git add control_plane/operation_assurance_checker.py tests/test_operation_assurance_checker.py
-git commit -m "feat(ols): add workflow soundness properties"
-```
-
----
-
-### Task 5: SCC, minimal lasso, recurring progress and weak fairness
-
-**Files:**
-- Modify: `control_plane/operation_assurance_checker.py`
-- Modify: `tests/test_operation_assurance_checker.py`
-
-**Interfaces:**
-- Extends `check_model`.
-- Internal helpers:
-  - `_strongly_connected_components(graph) -> tuple[tuple[State, ...], ...]`
-  - `_shortest_cycle(graph, entry, allowed_states, predicate) -> tuple[tuple[str, State], ...] | None`
-  - `_lasso_satisfies_weak_fairness(...) -> bool`
-
-- [ ] **Step 1: Write closed non-progress cycle test**
-
-Model:
+### 7.9 Obligations
 
 ```text
-START -> A
-A --spin_ab--> B
-B --spin_ba--> A
+obligation_id
+kind
+state_variable
+pending_values[]
+discharged_values[]
+persistent
+owner_or_authority
+source_refs[]
 ```
 
-An obligation remains pending and no transition has an accepted progress tag. Assert:
-
-- `UNSAFE_COUNTEREXAMPLE`;
-- property `NO_CLOSED_NON_PROGRESS_SCC`;
-- prefix `START -> A`;
-- cycle `A -> B -> A`;
-- deterministic lasso across reversed source insertion order.
-
-- [ ] **Step 2: Write recurring-service cycle test**
-
-Use the same topology, but each cycle discharges and recreates a persistent
-`RECURRING_PROGRESS` epoch and the cycle transition carries `RECURRING_PROGRESS`. Add a matching
-recurring outcome. Assert disposition `RECURRING_SERVICE` and no non-progress failure.
-
-- [ ] **Step 3: Write fairness-dependent cycle tests**
-
-Topology:
+### 7.10 Resources
 
 ```text
-A --spin--> A
-A --finish--> DONE
+resource_id
+holder_variable
+released_values[]
+persistent
+owner_or_authority
+source_refs[]
 ```
 
-Without fairness, the `spin` lasso can avoid completion and is a liveness witness. With weak fairness
-declared for `finish`, the one-state spin lasso is invalid because `finish` is continuously enabled
-but absent from the cycle. The report becomes `FAIRNESS_CONDITIONAL` rather than claiming
-unconditional autonomous liveness.
-
-Also test that weak fairness does not apply when `finish` is disabled in one cycle state.
-
-- [ ] **Step 4: Run and verify RED**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py -k "non_progress or recurring or weak_fair"
-```
-
-- [ ] **Step 5: Implement deterministic Tarjan SCC**
-
-Visit states sorted by fingerprint and outgoing edges sorted by transition ID/target fingerprint.
-Sort final SCCs by their minimum state fingerprint. A singleton is cyclic only with a self-loop.
-
-- [ ] **Step 6: Implement closed/non-progress classification**
-
-For each reachable cyclic SCC, compute:
-
-- outgoing edges leaving the SCC;
-- accepted terminal/gate/wait/recurring states;
-- progress-tagged transitions in the SCC;
-- obligations pending through every state.
-
-A `CLOSED_NON_PROGRESS_SCC` has no lawful good outcome, no recurring progress, no outgoing edge, and
-preserves at least one non-persistent pending obligation or otherwise makes no accepted progress.
-
-- [ ] **Step 7: Implement deterministic shortest lasso**
-
-Choose the SCC entry with the shortest BFS prefix. For each candidate entry, BFS within the SCC for a
-cycle returning to the entry. Select by `(prefix_length, cycle_length, transition_sequence,
-entry_fingerprint)`.
-
-Trace output must clearly separate `prefix` and `cycle`.
-
-- [ ] **Step 8: Implement weak-fairness filtering**
-
-For every `WEAK` fairness assumption and each declared transition:
-
-- determine whether the transition is enabled in every cycle state;
-- determine whether the transition occurs in the cycle;
-- reject the candidate lasso when continuously enabled and absent.
-
-Do not implement or silently emulate strong fairness.
-
-- [ ] **Step 9: Run tests and commit**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py -k "non_progress or recurring or weak_fair"
-git add control_plane/operation_assurance_checker.py tests/test_operation_assurance_checker.py
-git commit -m "feat(ols): add liveness lassos and weak fairness"
-```
-
----
-
-### Task 6: Starvation, gates/waits and final verdict composition
-
-**Files:**
-- Modify: `control_plane/operation_assurance_checker.py`
-- Modify: `tests/test_operation_assurance_checker.py`
-
-**Interfaces:**
-- Completes `check_model`.
-
-- [ ] **Step 1: Write starvation witness test**
-
-Create two obligations and a cycle that repeatedly services `urgent` while `ordinary` stays pending.
-The cycle satisfies all declared weak-fair transition assumptions but never discharges `ordinary`.
-Assert `STARVATION_WITNESS` with the pending obligation ID.
-
-- [ ] **Step 2: Write valid external-gate and intentional-wait tests**
-
-An `EXTERNALLY_GATED` state must include:
+### 7.11 Gates and waits
 
 ```text
+gate_id
+disposition
+state_guards[]
 owner_or_authority
 release_condition
+release_transition_ids[]
 return_or_observation_source
 wake_or_review_path
 time_contract
 correction_contract
 escalation_or_close_path
-source_refs
+source_refs[]
 ```
 
-A complete gate yields `progress_disposition=EXTERNALLY_GATED` and
-`REPORT_ONLY_AWAIT_GATE`, without claiming autonomous liveness.
+`release_transition_ids` is non-empty. `escalation_or_close_path` names one listed transition. A
+release transition must be enabled in the gate state and reach either a continuing state or named
+terminal outcome. Transitionless terminal-boundary prose is refused.
 
-A gate missing any field is a load-bearing model gap and yields
-`INCONCLUSIVE_MODEL_GAP`.
+### 7.12 Fairness assumptions
 
-Repeat for `INTENTIONAL_WAIT`. Add a capacity-parking fixture and a natural-evidence/calendar wait
-fixture.
-
-- [ ] **Step 3: Write stale/conflicting source precedence tests**
-
-A source item with `freshness=STALE` or `conflict=CONFLICT` must yield
-`MODEL_STALE_OR_INVALID` and `REPORT_ONLY_RECONCILE`, even if the graph otherwise completes.
-
-- [ ] **Step 4: Write final verdict lattice tests**
-
-Cover the full precedence:
+`NONE` is absence of an assumption. A1 accepts only:
 
 ```text
-stale/conflict
-> load-bearing model gap
-> concrete counterexample
-> complete finite all-pass
-> bounded no counterexample
+kind = WEAK
 ```
 
-A concrete counterexample found before a state limit remains unsafe unless the source itself is stale
-or conflicting. A non-load-bearing model gap prevents proof only when its declared semantics can
-affect a checked property; otherwise it remains visible as coverage residue and the implementation
-must document why it is non-load-bearing.
+Each assumption has `fairness_id`, `transition_ids`, and `source_refs`. Strong fairness is outside
+OLS-A1.
 
-- [ ] **Step 5: Run and verify RED**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py -k "starvation or external_gate or intentional_wait or stale or verdict"
-```
-
-- [ ] **Step 6: Implement gate/wait completeness and disposition**
-
-Validate gate fields in the model parser and compute disposition only from reached matching states.
-If more than one disposition applies, use this deterministic precedence:
+### 7.13 Environment assumptions
 
 ```text
-NO_PROGRESS
-EXTERNALLY_GATED
-INTENTIONAL_WAIT
-RECURRING_SERVICE
-FAIRNESS_CONDITIONAL
-AUTONOMOUSLY_LIVE
+assumption_id
+kind
+transition_ids[]
+required_for_property_ids[]
+source_refs[]
+```
+
+A human or external event assumption does not become scheduler fairness or a promise that the event
+will occur.
+
+### 7.14 Safety properties
+
+Exactly one of:
+
+```text
+STATE_FORBIDDEN: property_id, kind, violation_when, source_refs
+TRANSITION_FORBIDDEN: property_id, kind, when, forbidden_transition_kinds, source_refs
+```
+
+Mixed shapes or unknown fields are refused.
+
+### 7.15 Model gaps
+
+```text
+gap_id
+reason
+load_bearing
+affects_property_ids[]
+affects_transition_ids[]
+affects_variable_ids[]
+source_refs[]
+```
+
+Every reference resolves. Empty affected sets are legal only for a non-load-bearing gap whose reason
+states why no checked property can change.
+
+### 7.16 Exploration limits
+
+```text
+max_states
+max_depth
+```
+
+Both are exact integers, not booleans. `max_states >= 1`; `max_depth >= 0`. The state limit also bounds
+each augmented property/fairness product. Every exhausted analysis reports its exact reason.
+
+## 8. Exact immutable report wire
+
+Schema:
+
+```text
+mastermind.operation_assurance_report.v1
+```
+
+Exact fields:
+
+```text
+schema
+report_id
+model_id
+model_hash
+source_snapshot_hash
+checker_version
+property_set_version
+model_analysis_verdict
+source_applicability_at_generation
+abstraction_contract
+progress_disposition
+admission_recommendation
+property_results
+counterexamples
+coverage
+assumptions
+known_model_gaps
+exploration_receipt
+generated_at
+supersedes_report_id
+report_hash
+```
+
+Model-analysis verdicts:
+
+```text
+UNSAFE_COUNTEREXAMPLE
+PROVEN_WITHIN_FINITE_MODEL
+BOUNDED_NO_COUNTEREXAMPLE
+INCONCLUSIVE_MODEL_GAP
+```
+
+Generation-time applicability:
+
+```text
+AUTHOR_DECLARED_ONLY
+CURRENT_SOURCE_ATTESTED
+HISTORICAL_SOURCE_ATTESTED
+STALE
+CONFLICTED
+INCOMPLETE
 UNKNOWN
 ```
 
-`NO_PROGRESS` is emitted only with a concrete failed progress property.
+A1 cannot produce either trusted attested value from authored input.
 
-- [ ] **Step 7: Implement starvation search**
-
-For each non-persistent obligation that can remain pending in a reachable cyclic SCC, search the
-shortest fairness-valid lasso that never reaches a discharged value. Exclude valid gate/wait states
-whose contract explicitly owns that obligation.
-
-- [ ] **Step 8: Implement verdict/recommendation precedence**
-
-Use the exact order from Step 4. Every `PropertyResult` must be present and sorted by `property_id`.
-Include coverage, assumptions, gaps and exploration receipt in the finalized report.
-
-- [ ] **Step 9: Run checker tests and commit**
-
-```bash
-pytest -q tests/test_operation_assurance_checker.py
-git add control_plane/operation_assurance_checker.py tests/test_operation_assurance_checker.py
-git commit -m "feat(ols): compose truthful operation assurance verdicts"
-```
-
----
-
-### Task 7: Report-only CLI and frozen incident corpus
-
-**Files:**
-- Create: `scripts/operation_assurance.py`
-- Create: `tests/test_operation_assurance_cli.py`
-- Create: `tests/fixtures/operation_assurance/safe_finite.json`
-- Create: `tests/fixtures/operation_assurance/watcher_self_deadlock.json`
-- Create: `tests/fixtures/operation_assurance/dialogue_carrier_split.json`
-- Create: `tests/fixtures/operation_assurance/stranded_parent.json`
-- Create: `tests/fixtures/operation_assurance/effect_unknown_failover.json`
-- Create: `tests/fixtures/operation_assurance/capacity_valid_wait.json`
-- Create: `tests/fixtures/operation_assurance/chairman_external_gate.json`
-- Create: `tests/fixtures/operation_assurance/recurring_service.json`
-- Create: `tests/fixtures/operation_assurance/weak_fair_starvation.json`
-- Create: `tests/fixtures/operation_assurance/stale_projection.json`
-
-**Interfaces:**
-- Consumes: `parse_model`, `check_model`, `report_to_dict`.
-- Produces:
-  - `main(argv: Sequence[str] | None = None, *, stdin=None, stdout=None, stderr=None, generated_at=None) -> int`
-
-- [ ] **Step 1: Write CLI contract tests**
-
-Use direct `main()` injection and subprocess invocation.
-
-Assertions:
-
-- `safe_finite.json` emits valid report JSON and exit 0;
-- `effect_unknown_failover.json` emits `UNSAFE_COUNTEREXAMPLE` and exit 0;
-- malformed JSON exits 2 with one bounded error line and no traceback;
-- malformed model exits 2;
-- no CLI option can request admission, mutation, retry, Wake, placement or runtime writes;
-- output contains no absolute local path;
-- fixed injected `generated_at` yields byte-identical stdout.
-
-- [ ] **Step 2: Run and verify RED**
-
-```bash
-pytest -q tests/test_operation_assurance_cli.py
-```
-
-- [ ] **Step 3: Implement CLI**
-
-Supported syntax:
+Progress dispositions:
 
 ```text
-python3 scripts/operation_assurance.py MODEL.json
-python3 scripts/operation_assurance.py -
+AUTONOMOUSLY_LIVE
+FAIRNESS_CONDITIONAL
+EXTERNALLY_GATED
+INTENTIONAL_WAIT
+RECURRING_SERVICE
+NO_PROGRESS
+UNKNOWN
 ```
 
-Options:
+A1 recommendations:
 
 ```text
---pretty
+REPORT_ONLY_REPAIR
+REPORT_ONLY_RECONCILE
+REPORT_ONLY_AWAIT_GATE
+REPORT_ONLY_NO_RECOMMENDATION
 ```
 
-No network/store/runtime flags.
+`REPORT_ONLY_PROCEED` is rejected in A1.
 
-Implementation boundary:
+The report contains no `assurance_verdict`, `current_projection_verdict`, bare
+`source_applicability`, current source receipts, current status, current recommendation, recomputation
+time, or wall-clock duration.
+
+## 9. Canonical identity
+
+Implement:
 
 ```python
-def main(...):
-    try:
-        raw = stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
-        document = json.loads(raw)
-        model = parse_model(document)
-        report = check_model(model, generated_at=generated_at or datetime.now(UTC))
-        json.dump(report_to_dict(report), stdout, sort_keys=True,
-                  indent=2 if pretty else None, separators=None if pretty else (",", ":"),
-                  ensure_ascii=False, allow_nan=False)
-        stdout.write("\n")
-        return 0
-    except (OSError, json.JSONDecodeError, OperationAssuranceModelError,
-            OperationAssuranceCheckError) as exc:
-        stderr.write(f"operation assurance refused: {type(exc).__name__}\n")
-        return 2
+canonical_bytes(value) -> bytes
+canonical_sha256(value) -> str
+state_fingerprint(variable_order, state) -> str
 ```
 
-Do not forward exception detail that could contain a path or source payload.
+Canonical JSON uses sorted keys, separators `(",", ":")`, UTF-8, `ensure_ascii=False`, and
+`allow_nan=False`.
 
-- [ ] **Step 4: Add frozen fixtures**
+`model_hash` is the digest of the canonical normalized model excluding only its derived hash field if
+one exists. The report hash is computed from the canonical report body excluding `report_id` and
+`report_hash`. Then:
 
-Every hostile fixture must cite its current Mastermind source law or PR identity in
-`source_snapshot.sources`. Fixtures model the defect rather than copying Slack prose.
+```text
+report_id = "oar_" + report_hash[:24]
+```
 
-Expected verdicts:
+Fixed model plus fixed `generated_at` produces byte-identical report JSON.
 
-| Fixture | Expected |
-|---|---|
-| `safe_finite.json` | `PROVEN_WITHIN_FINITE_MODEL` |
-| `watcher_self_deadlock.json` | unsafe non-progress/ownerless Sol turn |
-| `dialogue_carrier_split.json` | unsafe carrier/return-path property |
-| `stranded_parent.json` | unsafe `PARENT_CONTINUATION` |
-| `effect_unknown_failover.json` | unsafe transition property |
-| `capacity_valid_wait.json` | externally valid intentional wait, no deadlock |
-| `chairman_external_gate.json` | external gate, no autonomous claim |
-| `recurring_service.json` | recurring-service disposition |
-| `weak_fair_starvation.json` | starvation witness |
-| `stale_projection.json` | stale/invalid before graph verdict |
+## 10. Counterexample wire
 
-- [ ] **Step 5: Run CLI and fixture tests**
+Every failed property receives exactly one deterministic minimal witness:
+
+```text
+counterexample_id
+property_id
+realizability
+validation_refs
+invalidating_gap_ids
+shortest_prefix
+cycle
+state_delta_per_step
+enabled_and_disabled_transition_reasons
+source_refs
+repair_candidates
+limitations
+```
+
+Realizability:
+
+```text
+DECLARED_MODEL_ONLY
+SOURCE_CONTRACT_VALIDATED
+RUNTIME_REPLAY_CONFIRMED
+POTENTIALLY_SPURIOUS
+INVALIDATED
+```
+
+A1 emits only `DECLARED_MODEL_ONLY` or `POTENTIALLY_SPURIOUS`, except an invalid negative fixture may
+exercise refusal semantics. Authored labels cannot upgrade a witness.
+
+Safety minimization: shortest prefix, then canonical transition sequence, then state fingerprint.
+Liveness minimization: shortest prefix + cycle, then canonical transition sequence, then state
+fingerprint.
+
+## 11. Mandatory property set
+
+The checker owns and always reports at least:
+
+- `NO_FORBIDDEN_STATE`
+- `NO_FORBIDDEN_TRANSITION`
+- `NO_EFFECT_UNKNOWN_ESCAPE`
+- `ONE_ACTION_AUTHORITY`
+- `OPTION_TO_COMPLETE`
+- `PROPER_COMPLETION`
+- `NO_DEAD_REQUIRED_TRANSITION`
+- `NO_POST_TERMINAL_TRANSITION`
+- `UNIVERSAL_PROGRESS`
+- `RECURRING_PROGRESS_VALID`
+- `NO_STARVATION_UNDER_DECLARED_FAIRNESS`
+- `FAIRNESS_REALIZABLE`
+
+Authored properties supplement but cannot remove mandatory coverage.
+
+## 12. Verdict composition
+
+1. malformed or unsupported model -> parser refusal, no report;
+2. fully materialized definite witness with no relevant invalidating gap ->
+   `UNSAFE_COUNTEREXAMPLE` within its fidelity/applicability scope;
+3. potentially spurious witness, unknown fidelity, or relevant load-bearing gap ->
+   `INCONCLUSIVE_MODEL_GAP` with candidate witness and limitations;
+4. all finite domains, complete base graph, every required analysis complete, every mandatory
+   property `PASS` or valid `NOT_APPLICABLE`, property-preserving abstraction, and normal termination
+   -> `PROVEN_WITHIN_FINITE_MODEL`;
+5. declared bound reached with no definite witness -> `BOUNDED_NO_COUNTEREXAMPLE` or
+   `INCONCLUSIVE_MODEL_GAP` according to the missing analysis;
+6. otherwise -> `INCONCLUSIVE_MODEL_GAP`.
+
+Source applicability is composed separately. Stale or conflict preserves the model result and forces
+`REPORT_ONLY_RECONCILE`. A declared-exact model-only unsafe witness yields `REPORT_ONLY_REPAIR`.
+A complete gate or wait may yield `REPORT_ONLY_AWAIT_GATE`. Every other A1 result yields
+`REPORT_ONLY_NO_RECOMMENDATION`.
+
+## 13. Ordered implementation sequence
+
+### Task 0 — isolated pickup and baseline
+
+- create an isolated worktree/branch from the exact accepted protected F0 descendant;
+- collision-check every file in Section 4 and all active PRs;
+- run the full repository test gate before changes;
+- stop on a dirty or failing baseline not explained by the accepted pickup.
+
+### Task 1 — model grammar and identity
+
+RED first:
+
+- minimal corrected model with required abstraction contract;
+- exact-key rejection;
+- canonical hash under mapping/list permutations;
+- duplicate/non-finite/out-of-domain/ref mismatch refusal;
+- authored trust ceiling.
+
+GREEN:
+
+- immutable types;
+- exact parser;
+- canonical helpers;
+- model serialization and identity.
+
+Focused verification:
 
 ```bash
-pytest -q tests/test_operation_assurance_cli.py
-for f in tests/fixtures/operation_assurance/*.json; do
-  python3 scripts/operation_assurance.py "$f" >/tmp/ols-report.json
-  python3 -m json.tool /tmp/ols-report.json >/dev/null
-done
+pytest -q tests/test_operation_assurance_model.py
 ```
 
-Expected: every fixture yields valid JSON; malformed-input tests alone return 2.
+### Task 2 — immutable report
 
-- [ ] **Step 6: Commit**
+RED first:
+
+- exact field set from Section 8;
+- orthogonal model/applicability/disposition/recommendation axes;
+- non-circular identity;
+- UTC generated-at validation;
+- no current fields or wall-clock duration;
+- proof anti-inflation invariants.
+
+GREEN:
+
+- immutable report types;
+- report validation;
+- finalization and canonical serialization.
+
+Focused verification:
 
 ```bash
-git add scripts/operation_assurance.py tests/test_operation_assurance_cli.py tests/fixtures/operation_assurance
-git commit -m "feat(ols): add report-only assurance CLI and incident corpus"
+pytest -q tests/test_operation_assurance_report.py
 ```
 
----
+### Task 3 — reachability and transition semantics
 
-### Task 8: Adversarial mutation fence and exact proof packet
+RED first:
 
-**Files:**
-- Modify: `tests/test_operation_assurance_model.py`
-- Modify: `tests/test_operation_assurance_report.py`
-- Modify: `tests/test_operation_assurance_checker.py`
-- Modify: `tests/test_operation_assurance_cli.py`
+- lexical transition order;
+- simultaneous effects;
+- shortest predecessor selection;
+- depth/state limit receipts;
+- deterministic state fingerprints;
+- terminal states retained for absorption checks.
 
-**Interfaces:**
-- No new public API.
+GREEN:
 
-- [ ] **Step 1: Add verdict-inflation mutation tests**
+- transition evaluator;
+- immutable reachability graph;
+- BFS with complete work counts.
 
-Tests must fail under each mutation:
+### Task 4 — safety and workflow soundness
 
-1. change incomplete exploration to proof;
-2. treat `known_model_gaps` as empty;
-3. treat stale source as fresh;
-4. allow unknown guard op;
-5. accept retry from `EFFECT_UNKNOWN`;
-6. classify a missing-gate contract as valid;
-7. ignore terminal residue;
-8. ignore one pending parent-continuation obligation;
-9. accept first discovered rather than shortest counterexample;
-10. omit lasso cycle;
-11. infer weak fairness without a declaration;
-12. return non-zero for a valid unsafe report and thereby turn CLI into an implicit gate.
+RED first:
 
-Each test includes a comment naming the forbidden mutation it kills.
+- forbidden state and transition;
+- `EFFECT_UNKNOWN` retry/failover escape;
+- one-action-authority violation;
+- option-to-complete;
+- proper terminal residue;
+- dead required transition;
+- cancellation and refusal terminals;
+- `NO_POST_TERMINAL_TRANSITION`.
 
-- [ ] **Step 2: Add deterministic-order property test**
+GREEN:
 
-Generate 100 permutations of transition list, state-domain key insertion order, source list and
-property list for one fixed model. With fixed `generated_at`, every report must serialize to the same
-bytes.
+- deterministic property evaluators;
+- reverse completion;
+- proper-completion and absorption analysis;
+- one minimal witness per failed property.
 
-Use `random.Random(0)` only inside the test; production code uses no randomness.
+### Task 5 — liveness, weak fairness, and starvation
 
-- [ ] **Step 3: Add no-side-effect test**
+RED first:
 
-Monkeypatch:
+- non-progress self-loop with outgoing completion edge;
+- weak fairness excludes only continuously enabled untaken transition;
+- transition disabled in one cycle state does not trigger weak fairness;
+- fair violating closed walk that combines two simple cycles;
+- vacuous/unrealizable fairness cannot manufacture proof;
+- persistent obligation starvation;
+- valid recurring progress;
+- empty obligation list cannot hide root livelock;
+- fairness product state-limit receipt.
 
-```python
-sqlite3.connect
-subprocess.run
-subprocess.Popen
-socket.socket
-urllib.request.urlopen
-Path.write_text
-Path.write_bytes
+GREEN:
+
+- cyclic SCC enumeration;
+- augmented seen-or-disabled fairness product;
+- recurring-progress and starvation evaluators;
+- deterministic shortest lasso construction.
+
+### Task 6 — final verdict composition
+
+RED first:
+
+- base BFS complete but fairness product incomplete cannot prove;
+- unknown mandatory property cannot prove;
+- relevant gap weakens witness/proof while unrelated non-load-bearing gap does not hide a definite
+  witness;
+- under-approximate no-witness cannot prove;
+- complete definite witness survives unrelated later bound;
+- internal exception never returns a healthy default.
+
+GREEN:
+
+- compose model verdict, applicability, disposition, and recommendation separately;
+- populate per-analysis coverage and exact incomplete reasons;
+- refuse partial unvalidated reports after internal failure.
+
+### Task 7 — CLI and fixtures
+
+Required fixtures:
+
+```text
+safe_finite.json
+effect_unknown_failover.json
+ownerless_modifying_transition.json
+carrier_split.json
+stranded_parent.json
+stale_binding.json
+stale_projection.json
+chairman_external_gate.json
+capacity_valid_wait.json
+natural_time_wait.json
+recurring_service.json
+safe_cancellation.json
+weak_fair_progress.json
+weak_fair_disabled_cycle.json
+combined_cycle_fair_lasso.json
+fairness_unrealizable.json
+terminal_transition_violation.json
+bounded_exploration.json
+unknown_fidelity.json
 ```
 
-to raise if called while parsing/checking a fixture. Reading the explicitly supplied model file is
-allowed only at the CLI boundary. The core model/checker/report modules perform no filesystem I/O.
+CLI behavior:
 
-- [ ] **Step 4: Run focused and full repository tests**
-
-```bash
-pytest -q \
-  tests/test_operation_assurance_model.py \
-  tests/test_operation_assurance_report.py \
-  tests/test_operation_assurance_checker.py \
-  tests/test_operation_assurance_cli.py
-
-python3 -m compileall -q \
-  control_plane/operation_assurance_model.py \
-  control_plane/operation_assurance_report.py \
-  control_plane/operation_assurance_checker.py \
-  scripts/operation_assurance.py
-
-pytest -q
+```text
+operation-assurance MODEL.json [--pretty]
+operation-assurance - [--pretty]
 ```
 
-Expected: focused tests and full repository tests pass on the exact head.
+No flag may request trusted source mode, replay mode, admission, mutation, retry, Wake, placement,
+GitHub, browser, or runtime action.
 
-- [ ] **Step 5: Verify changed-file boundary**
+Exit contract:
 
-```bash
-git diff --name-only "$(git merge-base HEAD origin/master)"...HEAD
-```
+- `0`: valid report, including unsafe/bounded/inconclusive;
+- `2`: invalid JSON or refused closed model;
+- `3`: internal checker/report refusal;
+- any other exit is reserved and not introduced in A1.
 
-Expected paths are only the four OLS-A1 source files and OLS-A1 tests/fixtures listed in this plan.
-Any other path requires STOP and Sol reconciliation.
+Output contains no absolute local path or secret. Errors are one bounded line with no traceback by
+default.
 
-- [ ] **Step 6: Produce continuation handoff**
+### Task 8 — adversarial and no-side-effect fence
+
+Add mutation-killing tests for at least:
+
+1. accepting unknown fields;
+2. accepting duplicate JSON object keys at the CLI parse boundary;
+3. accepting NaN/Infinity;
+4. trusting authored source/compiler/replay labels;
+5. omitting abstraction contract;
+6. allowing one-sided fairness or environment references;
+7. ordering duplicate effects;
+8. treating progress tags as recurring evidence;
+9. suppressing mandatory properties;
+10. limiting liveness to closed SCCs;
+11. searching only simple cycles;
+12. treating weak fairness as strong fairness;
+13. accepting vacuous fairness;
+14. proving after incomplete product search;
+15. erasing a definite witness after an unrelated bound;
+16. permitting post-terminal transitions;
+17. accepting descriptive gate prose without modeled release/closure;
+18. computing report identity circularly;
+19. including duration in canonical output;
+20. emitting current status from A1;
+21. emitting `REPORT_ONLY_PROCEED` from authored input;
+22. performing network, subprocess, telemetry, SQLite, runtime, or source-owner I/O.
+
+Run focused tests, then the complete repository gate.
+
+## 14. Complete machine journey
+
+### Valid safe model
+
+Input parses -> all analyses complete -> immutable report with finite-model verdict,
+`AUTHOR_DECLARED_ONLY`, and `REPORT_ONLY_NO_RECOMMENDATION` -> exit 0.
+
+### Definite authored unsafe model
+
+Input parses -> shortest witness materializes -> immutable report with
+`UNSAFE_COUNTEREXAMPLE`, `DECLARED_MODEL_ONLY`, and `REPORT_ONLY_REPAIR` -> exit 0.
+
+### Potentially spurious model
+
+Input parses -> candidate witness found under over-approximation/relevant gap -> report keeps witness,
+limitations, `POTENTIALLY_SPURIOUS`, and `INCONCLUSIVE_MODEL_GAP` -> exit 0.
+
+### Bounded analysis
+
+Input parses -> declared limit reached before complete no-witness proof -> report names exact incomplete
+analysis and bound -> exit 0.
+
+### Valid external gate or intentional wait
+
+Input contains machine-represented release/closure -> report preserves gate/wait disposition without
+upgrading bounded/inconclusive model truth -> exit 0.
+
+### Invalid input
+
+Duplicate key, non-finite value, unknown field, invalid reference, impossible gate, unsupported
+fairness, or malformed JSON -> bounded refusal, no assurance report -> exit 2.
+
+### Internal failure
+
+Unexpected checker failure -> no proof or healthy default; bounded refusal unless a complete validated
+report already exists -> exit 3.
+
+## 15. Acceptance tests and proof
+
+Required evidence on one immutable head:
+
+1. all focused model/report/checker/CLI tests pass;
+2. all mutation/falsifier tests pass;
+3. fixed generated-at permutation test produces byte-identical reports;
+4. no-side-effect test denies network, socket, subprocess, telemetry, SQLite, filesystem write, and
+   source-owner access;
+5. every hostile/valid fixture emits the frozen verdict/applicability/disposition/recommendation;
+6. unsafe valid fixture exits 0;
+7. invalid input exits 2 without traceback;
+8. complete repository CI and CodeQL are green;
+9. exact changed paths match Section 4 and contain no owner/runtime path;
+10. direct Sol review maps every plan requirement to implementation and evidence.
+
+Green CI alone is not completion. A1 completion establishes a real deterministic CLI capability, but
+not current source applicability, Control Room product, runtime conformance, canary, or enforcement.
+
+## 16. Stop condition
+
+Stop when the exact A1 path set is implemented, every focused and repository gate is green on the
+immutable head, direct Sol review accepts the user/machine journey, and the PR is merged at the
+expected head.
+
+Do not absorb OLS-A2 source compilation, Steward gather work, current status, Control Room UI,
+calibration, canary, runtime monitoring, or enforcement.
+
+## 17. Continuation handoff
 
 Return:
 
 ```text
-operation = OLS-A1 child operation key
-pickup_base
-head_sha
-changed_files
-focused_test_receipt
-full_repository_test_receipt
-hosted_CI_receipt
-mutation_falsifiers
-fixture verdict table
-counterexample minimality evidence
-known limitations
-current collisions
-what merge would and would not make true
+operation_key
+branch
+PR
+exact head SHA
+protected pickup SHA
+changed paths
+focused test commands and counts
+repository CI/check receipts
+fixture outcome matrix
+mutation/falsifier evidence
+no-side-effect evidence
+known gaps
+capability state
+what merge makes true
+what remains NOT_BUILT
+exact next action
 ```
 
-State explicitly:
-
-```text
-Capability after merge: BUILT_NOT_PROVEN / REPORT_ONLY / PRODUCTION_INERT
-No live source compiler, Steward/Control Room consumer, admission attachment, runtime conformance,
-hard gate, retry, Wake, placement or canary is created.
-```
-
-- [ ] **Step 7: Commit final test hardening**
-
-```bash
-git add tests/test_operation_assurance_model.py \
-        tests/test_operation_assurance_report.py \
-        tests/test_operation_assurance_checker.py \
-        tests/test_operation_assurance_cli.py
-git commit -m "test(ols): harden proof scope and counterexample semantics"
-```
-
-## Plan self-review receipt
-
-- **Spec coverage:** closed model, source identity, finite bounds, structural validation, safety,
-  option-to-complete, proper completion, dead transitions, SCC/lasso, weak fairness, starvation,
-  valid waits/gates, recurring services, stale/correction precedence, orthogonal verdict axes,
-  report-only CLI, hostile corpus, deterministic evidence and no-side-effects all map to a task.
-- **Deferred by design:** canonical source compiler, Steward/Control Room, admission integration,
-  runtime conformance, strong fairness, symbolic/Petri/TLA+/SPIN/Alloy backends, canary and enforcement.
-  Each is a later separately reviewed wave.
-- **Placeholder scan:** the plan contains no implementation placeholder or unspecified error-handling
-  step.
-- **Type consistency:** public names consumed by later tasks exactly match Task 1 and Task 2.
-- **Stop condition:** OLS-A1 stops at a pure report-only CLI and reviewed fixture corpus. It must not
-  absorb OLS-A2 or touch an existing canonical owner.
+The next action after accepted A1 is a separate OLS-A2 architecture/implementation decision using the
+protected Executive Steward pure read core and a separately accepted bounded gather/source-compiler
+seam. No worker self-starts it from this handoff.

@@ -1,221 +1,266 @@
 # Mastermind Operation Liveness & Soundness — Capability and Collision Ledger
 
 **Operation:** `mastermind-operation-liveness-soundness-20260830-sol-001`  
-**Assessment date:** 2026-08-30  
-**Mastermind protected source:** `28d365cceaef6efb0a26e0ac9af51ead44695d60`  
-**Macro main:** `ede7e065a90b294e9835e98e5326a84e1c14d038`  
-**Terminal protected master:** `afbc839e89c9e91d715c67872c44cf49895ee575`  
-**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1
+**Assessment date:** 2026-08-31  
+**Current protected Mastermind source:** `990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`  
+**Current OLS-F0 pre-repair carrier head:** `051723e002e1722f59bdc74b8a1a5621dc9f5852`  
+**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
+**State:** action-time research ledger; not runtime truth or admission authority
 
-This is an action-time research ledger, not runtime truth and not an admission gate.
+Current Steward boundary:
+`docs/superpowers/specs/2026-08-31-operation-liveness-soundness-executive-steward-reconciliation.md`.
 
-## 1. Procedure receipt
+Current GitHub/SCF boundary:
+`docs/superpowers/specs/2026-08-31-operation-liveness-soundness-sol-capability-fabric-reconciliation.md`.
 
-The Program CEO loaded from the same protected Mastermind commit:
+Current diagnostic boundary:
+`docs/superpowers/specs/2026-08-30-operation-liveness-soundness-runtime-observability-reconciliation.md`.
 
-- `docs/sol_skills/INDEX.md`
-- `docs/sol_skills/COLD_START.md`
-- `docs/sol_skills/RECONCILE_STATE.md`
-- `docs/sol_skills/COMMISSION_WAVE.md`
-- `docs/sol_skills/WORKER_AVENUE_ROUTING.md`
-- `docs/sol_skills/REVIEW_RETURN.md`
-- `docs/sol_skills/CLOSEOUT.md`
-- `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`
-- `docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md`
+## 1. Outcome and capability definition
 
-Bootstrap major 1 is compatible. The outer Chairman directive assigns the operation to this exact
-fresh Chat-native Sol session. The separate START receipt was posted to the original Slack carrier.
+The target is a source-attributed finite Operation Assurance system that distinguishes reachable
+safety/liveness failure from valid wait, external gate, recurring service, bounded uncertainty, and
+source/model insufficiency. Unsafe results produce minimal actionable witnesses. No assurance result
+originates lifecycle, authority, placement, retry, effect, or release state.
 
-## 2. Source precedence and disagreement
-
-| Claim | Higher-authority current evidence | Ruling |
-|---|---|---|
-| PR #268 was protected | GitHub PR #268 is open/draft, head `4c0cabfd5e66cc79e17fc06c542839b0cbd53e82` | Slack projection is stale; preserve disagreement |
-| local component safety proves whole-operation progress | current estate contains many separate inert/local seams and repeated cross-seam incidents | rejected |
-| watcher hardening owns operation assurance | #268 paths are watcher contract/runbook/audit only | distinct; use as hostile fixture |
-| Executive Attention Frontier owns liveness | #275 ranks valid attention demand and explicitly preserves owner boundaries | distinct; assurance supplies serviceability evidence only |
-| Agent OS can host a new OLS workstream now | Agent OS schema requires a valid program; `executive-os` is absent | registration gated on semantic registry repair |
-| Steward can be bypassed for source compilation | #228 is the accepted normalized-read owner and has a current blocker | no parallel reader |
-
-## 3. Capability ledger
+## 2. Current capability ledger
 
 ### `PROVEN_LIVE`
 
-#### Executive OS lifecycle ownership
+#### Executive OS canonical lifecycle ownership
 
-`control_plane/executive_runtime.py` is the durable SQLite authority for Job, Attempt, Worker, Event,
-lease/fence and result state. This program does not duplicate or reinterpret it.
+The existing Executive OS remains canonical for Job, Attempt, Worker, Event, lease, fence, effect,
+retry, requeue, and admission truth. This ledger does not reinterpret its production proof.
 
-#### Agent OS durable organizational memory
+#### GitHub implementation and evidence truth
 
-Macro `agentos/` has validated file-per-record workstreams, decisions, discoveries and handoffs plus
-generated read views. It is explicitly non-executing and cannot gate or start work.
+GitHub is the canonical source for repository, branch, commit, pull-request, review, check, workflow,
+and merge state.
 
 ### `BUILT_NOT_PROVEN`
 
-#### Transport-neutral request identity
+#### Executive Steward pure read core
 
-Protected source contains `control_plane/executive_ceo_ingress.py` and
-`control_plane/executive_delegation_identity.py`. Autonomous cutover remains separately gated.
+PR #228 is protected at `dcce6f7ab6efad360f4854d748ad0d65dc9e0f7c`. Its
+`mastermind.executive_steward.result.v1` pure composition core accepts caller-supplied,
+source-attributed facts and returns deterministic typed results. It has no gather adapter, source
+acquisition, current-source attestation, Control Room integration, or production-live composition.
 
-#### Deterministic child identity and canonical dialogue ensure
+#### Worker Browser B1
 
-Protected AD-CHILD/AD-DLG seams exist. They remain local/inert and do not prove end-to-end progress.
+Protected `990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc` contains the governed browser source boundary. It is
+path-disjoint product tooling and remains production-disarmed. It grants no OLS source, proof, or
+effect authority.
 
-#### Persisted Wake carrier
+#### Existing local operational seams
 
-Protected source contains the accepted persisted carrier implementation, but production arming and
-native transport completion remain separate.
-
-#### RuntimeBinding projection
-
-`control_plane/runtime_binding_projection.py` projects an ABA-safe current binding from accepted
-runtime writer facts without persisting a second binding store.
-
-#### Exact Sol action target Stage A
-
-Protected `28d365c...` contains `control_plane/sol_action_target.py`. The protected commit explicitly
-states `BUILT_NOT_PROVEN / PRODUCTION_INERT`; target transfer/enforcement is later.
-
-#### Operator Continuation contract
-
-`control_plane/operator_continuation.py` supplies a closed pure capsule/ACK contract. Full rollover
-runtime waves remain separately gated.
-
-#### Sol watcher hardening
-
-PR #268 is open/draft. It is not protected or production proof.
+Transport-neutral request identity, deterministic child identity, persisted Wake carrier,
+RuntimeBinding projection, exact Sol action target, and operator continuation contracts exist in
+various built/protected states. Each retains its own proof ceiling.
 
 ### `PARTIAL`
 
-#### Organizational continuity and parent continuation
+#### Organizational continuity
 
-Accepted source law identifies carrier split, unprojected returns, attention-owner defects and
-`PARENT_ACTIVE_NO_SUCCESSOR`. Full deterministic composition through Steward, Control Room and Wake
-is not yet proven.
+Parent-continuation, Wake, dialogue, runtime binding, and capacity contracts describe many local
+states, but whole-operation current composition and production proof remain incomplete.
 
 #### Retry/effect-unknown safety
 
-The effect-unknown law is strong and local. Whole-operation analysis that proves no alternate escape
-path exists is absent.
+Source law strongly prohibits blind retry and failover after ambiguous effects. A general compiled
+whole-operation verifier is not yet live.
 
-#### Capacity-aware progress
+#### Source composition
 
-Capacity contracts distinguish lawful parking from unsafe account hopping, but production placement
-and heterogeneous provider waves are incomplete.
-
-### `BROKEN`
-
-#### Executive Steward current release carrier
-
-PR #228 is open and its own release packet records a correctness blocker: presentation filtering can
-hide conflicting canonical identity before grouping. Operation Assurance source compilation must
-wait for repair/protection.
+The pure Steward core is protected, but canonical acquisition and a bounded source-compiler seam are
+not built. Therefore current operation models cannot yet be source-attested end to end.
 
 ### `SPEC_ONLY`
 
+#### OLS-F0
+
+The current PR carries architecture, exact proof vocabulary, owner boundaries, executable A1 plan,
+and source-law tests. Until merge it remains `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
+
 #### Executive Attention Frontier
 
-PR #275 is an architecture/source-law carrier. It owns attention pressure and serviceability
-projection, not liveness proof.
-
-#### Several autonomous-delegation production waves
-
-Protected architecture defines transport-neutral admission, provider-neutral returns, exact Sol turn
-authority, typed retry and cross-root concurrency, but several production waves remain source-only or
-inert.
+The Executive Attention Frontier is a separate source-law program. It owns attention pressure and
+serviceability projection; it never ranks from an OLS verdict alone, and Operation Assurance never
+ranks demand.
 
 ### `NOT_BUILT`
 
-- canonical Operation Assurance model;
-- deterministic whole-operation checker;
-- minimal counterexample report;
-- source compiler over corrected Steward;
+- production `control_plane/operation_assurance_model.py`;
+- production `control_plane/operation_assurance_report.py`;
+- production `control_plane/operation_assurance_checker.py`;
+- report-only `scripts/operation_assurance.py`;
+- hostile/valid A1 fixture corpus;
+- bounded canonical OLS source compiler;
+- current assurance status composition;
 - Control Room assurance experience;
-- report-only admission/expansion integration;
-- runtime model conformance;
-- calibrated incident corpus;
-- outcome-changing real canary.
+- historical calibration dataset and metrics;
+- report-only operational canary;
+- runtime-model conformance;
+- any evidence-based promotion gate.
 
 ### `REJECTED_BY_DESIGN`
 
-- assurance-owned lifecycle/database;
-- liveness queue or scheduler;
-- watcher registry;
+- assurance-owned lifecycle or operation database;
+- liveness queue, scheduler, supervisor, or watcher registry;
+- source-of-truth graph or parallel federated reader;
 - retry/failover engine;
-- authority/session/worker registry;
-- assurance-owned source graph;
-- LLM-authored verdict;
-- Petri net as the sole canonical model;
-- bounded search represented as proof;
-- hard admission gate before calibration and separate authority.
+- authority, session, worker, target, or capacity registry;
+- GitHub mirror, release engine, prepared-action store, or effect reconciler;
+- observability collector, sidecar, trace store, or health database;
+- LLM-authored or LLM-ranked verdict;
+- bounded search rendered as proof;
+- hard enforcement before calibration and separate promotion authority.
 
-## 4. Collision ledger
+## 3. Current source movement ledger
 
-| Carrier/path | Current owner/state | OLS boundary |
+| Protected movement | Exact capability | OLS consequence |
 |---|---|---|
-| PR #228 `control_plane/executive_steward.py` | open, known blocker | no edit; OLS-A2 waits |
-| PR #268 watcher files | open/draft | no edit; fixture source only |
-| PR #275 attention-economics research | open | no edit; explicit adjacent boundary |
-| PR #266 Model Router/cognition route | open/draft | no edit |
-| PR #212 continuity program-plan files | open | no edit |
-| Macro PR #6604 `config/mastermind_programs.yml` | open/draft records carrier | no concurrent registry write |
-| new `control_plane/operation_assurance_*.py` | no matching code/PR found | available for OLS-A1 after F0 |
-| new OLS docs/research/test paths | no matching code/PR found | sole F0 carrier |
+| `e19ef1c... -> eccf0a3...` / SCF-GH0 #294 | GitHub semantic contracts, records-only | reuse as adjacent GitHub source/effect law |
+| `eccf0a3... -> dcce6f7...` / PR #228 | Executive Steward pure read core | pure composition predecessor satisfied only |
+| `dcce6f7... -> 990b5b6...` / Worker Browser B1 #153 | governed browser source boundary | path-disjoint; preserve current tree, no OLS semantic change |
 
-## 5. Incident and hostile-case corpus
+## 4. Current collision ledger
 
-Required frozen cases:
+| Carrier/path | Current owner/state | OLS ruling |
+|---|---|---|
+| PR #279 OLS-F0 branch | sole OLS source carrier, open/draft | repair and release on same carrier only |
+| PR #228 Steward | merged/protected pure read core | reuse; no parallel federated reader |
+| PR #268 watcher hardening | separate open/draft carrier | hostile fixture source only; no edit |
+| Executive Attention Frontier | separate source-law carrier | never ranks OLS work or grants authority |
+| cognition-route and continuity carriers | separate owners | no edit or authority transfer |
+| SCF GitHub contracts | protected records-only source law | consume later; never duplicate |
+| Runtime Observability | separate diagnostic owner | consume typed receipts later; never collect |
+| Worker Browser B1 paths | protected product/browser owner | preserve; no OLS edit |
 
-1. Sol-owned watcher detects a qualifying return but remains in notification-only waiting.
-2. Sol and worker wait on different semantic carriers.
-3. Child terminal receipt is correct while parent remains active with no admitted successor.
-4. Delivery exists but exact target never ACKs or consumes.
-5. Action target is missing/conflicting or RuntimeBinding is stale.
-6. `EFFECT_UNKNOWN` coexists with an apparent alternate provider/session/carrier.
-7. Capacity is unavailable and work is lawfully parked.
-8. Natural evidence/calendar wait has not reached its review boundary.
-9. Agent OS dependencies or turn ownership form a reachable cycle.
-10. Ordinary work starves under a declared service/fairness contract.
-11. Slack says merged/done while GitHub says open/draft.
-12. Persistent service makes recurring progress without terminal completion.
-13. Cancellation reaches a lawful adverse terminal state and releases resources.
-14. Checker/source failure cannot produce a pass.
+The previous audit-placement child is terminal zero-effect and non-reusable. Chairman's current live
+direction replaces that ceremony with direct Program-CEO adversarial review, exact-head CI, and
+expected-head release. No separate auditor carrier remains a release dependency.
 
-## 6. Value model
+## 5. Current disagreement ledger
+
+### F0 parent documents versus later amendments
+
+Older law/design/plan examples contained withdrawn report fields and proof composition. Current repair
+adds one prominent implementation notice and consolidates the entry documents. Subject-specific
+amendments remain controlling where more precise.
+
+### Immutable report field list
+
+The highest-precedence immutable-report clarification omitted `progress_disposition` and
+`admission_recommendation` while later describing a generation-time recommendation. Current repair
+adds both to the one exact field list and keeps current status outside the immutable report.
+
+### Steward predecessor status
+
+Earlier OLS records described PR #228 as open and blocked. GitHub now proves it merged at
+`dcce6f7...`. The pure composition-core predecessor is satisfied, but gather, canonical acquisition,
+current-source attestation, and OLS-A2 remain `NOT_BUILT`.
+
+### Audit gate
+
+Earlier PR prose and SCF amendment required a separate Auditor Sol placement. Current Chairman intent
+supersedes that optional review mechanism. Release quality is now established through deterministic
+RED→GREEN source tests, exact-head hosted CI, direct Program-CEO adversarial review, no unresolved
+review thread, current-base preservation, and expected-head merge.
+
+## 6. Hostile and valid case corpus
+
+Required A1 fixtures include:
+
+1. Sol watcher detects a qualifying return but waits for Sol;
+2. worker and Sol observe different carriers;
+3. child reaches terminal while parent remains active without successor;
+4. delivery exists but target never ACKs or consumes;
+5. action target is missing, conflicting, or stale;
+6. `EFFECT_UNKNOWN` has an apparent alternate provider/session/carrier escape;
+7. capacity is unavailable and lawfully parked;
+8. natural evidence or calendar wait has not reached review boundary;
+9. owner/dependency cycle prevents progress;
+10. ordinary responsibility starves under a declared service contract;
+11. Slack or Linear says done while GitHub/runtime owner disagrees;
+12. persistent service produces accepted recurring progress;
+13. cancellation reaches a safe terminal and releases resources;
+14. post-terminal transition remains enabled;
+15. weak-fair lasso combines multiple simple cycles;
+16. vacuous fairness attempts to manufacture liveness;
+17. checker or source failure attempts to return proof;
+18. over-approximate witness is potentially spurious;
+19. bounded exploration finds no witness but cannot prove;
+20. source correction supersedes a historical report without mutation.
+
+## 7. Value model
 
 ### User value
 
 - fewer Chairman rescue interventions;
-- no requirement to inspect every Slack/thread/session;
-- clear distinction between unsafe operation, valid wait, external gate and unknown model;
-- actionable shortest repair path rather than generic `FAIL`.
+- clear distinction among unsafe, valid wait, external gate, recurring service, and unknown;
+- shortest causal path instead of generic failure;
+- explicit proof limits and source freshness.
 
 ### Machine value
 
-- safer fan-out and concurrency expansion;
-- deterministic regression corpus for cross-seam contracts;
-- explicit assumptions and model gaps;
-- correction-safe reusable evidence for Steward, Control Room and later admission.
+- deterministic regression protection across owner seams;
+- safe expansion of larger operation DAGs;
+- machine-readable model gaps and assumptions;
+- reusable immutable evidence for later product composition.
 
 ### Research value
 
-- cross-owner incident taxonomy;
-- point-in-time evaluation of false positives and misses;
-- measured state-space growth and abstraction quality;
-- independent formal-backend comparability.
+- point-in-time false-positive/negative measurement;
+- abstraction-fidelity and state-space growth analysis;
+- repair effectiveness and recurrence tracking;
+- comparison with optional independent formal backends.
 
-### Commercial/data-moat value
+### Commercial and data-moat value
 
-The moat is a growing proprietary corpus of source-attributed organizational failure traces,
-repairs, and forward outcomes across real autonomous operations. The checker remains original
-Mastermind code and uses only lawful first-party or licensed operational data.
+The durable asset is a growing first-party corpus of organizational failure traces, valid waits,
+repairs, and observed outcomes. The checker remains original Mastermind code and uses lawful
+first-party or licensed data.
 
-## 7. Exact next gates
+## 8. Exact release and rollout sequence
 
-1. Protect OLS-F0 architecture after exact-head CI and independent review.
-2. Commission OLS-A1 on new isolated paths.
-3. Do not start OLS-A2 until corrected Steward #228 is protected.
-4. Coordinate semantic registry/Agent OS workstream registration after current
-   `config/mastermind_programs.yml` collision clears.
-5. Keep all admission behavior report-only until calibration and a separate promotion ruling.
+1. repair the current F0 RED tests on the same PR #279 carrier;
+2. preserve current protected `990b5b6...` including Worker Browser B1;
+3. verify the exact effective diff contains only OLS records/tests;
+4. require terminal-green exact-head repository CI and security analysis;
+5. perform direct Program-CEO adversarial review against Chairman intent;
+6. merge F0 at the expected head;
+7. immediately open OLS-A1 from the protected F0 descendant;
+8. implement model, report, checker, CLI, fixtures, and adversarial tests as one complete vertical;
+9. merge A1 only after exact-head proof and direct acceptance;
+10. begin one-real-operation A2 source compiler only through Steward plus a separately accepted
+    bounded gather seam;
+11. compose A3 Control Room workflow;
+12. calibrate, then run a report-only canary before any promotion proposal.
+
+## 9. Current release standard
+
+F0 release requires:
+
+- one carrier and one modifying writer;
+- current compatible protected Skillpack;
+- exact protected base preserved;
+- deterministic source-law RED→GREEN evidence;
+- exact-head hosted checks terminal green;
+- no unresolved current-head review thread;
+- direct Program-CEO adversarial review;
+- expected-head merge.
+
+A separate independent Auditor Sol is optional defense-in-depth, not a mandatory release ceremony.
+Green CI is not implementation, production proof, or final program acceptance.
+
+## 10. Exact next capability
+
+After F0 protection, the next independently useful capability is OLS-A1:
+
+```text
+authored model -> deterministic checker -> immutable report -> report-only CLI -> hostile fixtures
+```
+
+It creates no current-source attestation, product UI, runtime conformance, canary, or enforcement.
+Those remain explicit later gates rather than hidden scope inside A1.

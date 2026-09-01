@@ -1,92 +1,35 @@
-# Operation Liveness & Soundness — Sol Capability Fabric / GitHub Reconciliation Amendment
+# Operation Liveness & Soundness — Sol Capability Fabric / GitHub Reconciliation
 
 **Date:** 2026-08-31  
 **Owner:** Sol, AI CEO of Mastermind-X  
 **Operation:** `mastermind-operation-liveness-soundness-20260830-sol-001`  
-**Original OLS freeze basis:** `mastermindx-market-intelligence/Mastermind@28d365cceaef6efb0a26e0ac9af51ead44695d60`  
-**Prior protected reconciliation:** `mastermindx-market-intelligence/Mastermind@e19ef1c54cc6f2b7bfc652a78bf94a209fcb42b9`  
-**Current protected reconciliation:** `mastermindx-market-intelligence/Mastermind@eccf0a3fae8b8597c2ad0bc4f830e31b220415d2`  
-**Current Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
-**New protected source:** Sol Capability Fabric GH0, Mastermind PR #294  
+**Prior protected source:** `mastermindx-market-intelligence/Mastermind@e19ef1c54cc6f2b7bfc652a78bf94a209fcb42b9`  
+**SCF protection:** `mastermindx-market-intelligence/Mastermind@eccf0a3fae8b8597c2ad0bc4f830e31b220415d2`  
+**Protected source:** Sol Capability Fabric GH0, Mastermind PR #294  
+**Current reconciliation:** `mastermindx-market-intelligence/Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`  
 **Status:** `NARROW PRECEDENCE AMENDMENT / SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`
 
-This amendment reconciles the Operation Liveness & Soundness architecture to the protected Sol
-Capability Fabric GitHub source law that landed after the current OLS-F0 branch base. It changes no
-OLS proof semantics, model or report vocabulary, checker algorithm, implementation path, lifecycle
-boundary, report-only policy, or authority. It creates no GitHub app, connector, release engine,
-prepared action, effect reconciler, runner observatory, source compiler, checker, Control Room
-surface, Executive operation, or production effect.
+This amendment reconciles Operation Assurance to the protected GitHub semantic contract. The source
+movement is path-disjoint but semantically adjacent: OLS later consumes exact GitHub evidence, while
+Sol Capability Fabric owns normalized GitHub status, release assessment, owner-local prepared action,
+action receipt, and runner explanation.
 
-For GitHub acquisition, status, release assessment, prepared-action, action-receipt, and runner
-semantics, this amendment defers to the protected Sol Capability Fabric GH0 contract and controls
-where older OLS records are silent. For Operation Assurance model, report, fidelity, trusted-input,
-total-proof, counterexample, and checker semantics, the existing immutable-report clarification,
-model-fidelity amendment, A1 trusted-input/total-proof clarification, and A1 controlling execution
-overlay remain controlling in their stated order.
+## 1. Exact protected SCF-GH0 movement
 
-## 1. Protected movement reconciliation
+SCF-GH0 protected exactly:
 
-Protected `master` advanced from `e19ef1c54cc6f2b7bfc652a78bf94a209fcb42b9` to
-`eccf0a3fae8b8597c2ad0bc4f830e31b220415d2` through the records-only merge:
+1. `research/sol_capability_fabric/GITHUB_CURRENT_ESTATE_LEDGER_2026-08-30.md`
+2. `research/sol_capability_fabric/GITHUB_NATIVE_CUSTOM_REUSE_MATRIX_2026-08-30.md`
+3. `research/sol_capability_fabric/GITHUB_SEMANTIC_CONTRACT_2026-08-30.md`
+4. `docs/superpowers/plans/2026-08-30-sol-capability-fabric-gh1.md`
+5. `tests/test_sol_capability_fabric_gh0.py`
 
-```text
-SCF-GH0: protect GitHub estate and semantic contract (#294)
-```
+It installed no GitHub app, connector, credential, status composer, release engine, runner service,
+prepared-action executor, workflow, or production capability.
 
-The protected movement added exactly:
+## 2. Contract ownership
 
-1. `research/sol_capability_fabric/GITHUB_CURRENT_ESTATE_LEDGER_2026-08-30.md`;
-2. `research/sol_capability_fabric/GITHUB_NATIVE_CUSTOM_REUSE_MATRIX_2026-08-30.md`;
-3. `research/sol_capability_fabric/GITHUB_SEMANTIC_CONTRACT_2026-08-30.md`;
-4. `docs/superpowers/plans/2026-08-30-sol-capability-fabric-gh1.md`;
-5. `tests/test_sol_capability_fabric_gh0.py`.
-
-No OLS source, checker path, report path, CLI path, fixture path, Runtime Observability amendment,
-Project Workroom source, Skillpack file, Executive OS path, Agent OS path, Wake path, RuntimeBinding
-path, or Control Room path changed. The movement is therefore **path-disjoint but semantically
-adjacent**: OLS will later consume exact GitHub evidence, while the protected Sol Capability Fabric
-now owns the normalized GitHub status, release-assessment, prepared-effect, and runner contracts.
-
-The current Skillpack remains v1.0.1/bootstrap-major 1 compatible and was loaded atomically from
-`eccf0a3fae8b8597c2ad0bc4f830e31b220415d2`.
-
-## 2. Owner separation
-
-The owner boundary is exact:
-
-| Concern | Canonical owner | OLS relationship |
-|---|---|---|
-| repository, ref, commit, pull request, review, check, workflow, artifact, and merge truth | GitHub | read-only source evidence |
-| current source-attributed GitHub target packet | future SCF-GH2 `mastermind.github_status.v1` | may consume after protection; never reimplement |
-| deterministic release/collision/completion classification | future SCF-GH1 `mastermind.github_release_assessment.v1` | may consume as one evidence axis; never infer liveness from it |
-| prepared GitHub action and authenticated owner-local token | exact future GitHub owner app, `mastermind.github_prepared_action.v1` | never create, verify, route, or commit |
-| effect result after one GitHub-native request and canonical read-back | exact future GitHub owner app, `mastermind.github_action_receipt.v1` | may model the exact receipt; never perform reconciliation or retry |
-| runner eligibility, health, and queue explanation | future SCF-RUN1 `mastermind.github_runner_status.v1` | optional read-only evidence; never become runner observability |
-| Job, Attempt, Worker, Event, effects, leases, fences, retry, and admission | Executive OS | canonical lifecycle truth; OLS never mutates |
-| finite organizational reachability, workflow soundness, fairness, and counterexamples | Operation Assurance | derived analysis only; no source or effect ownership |
-
-A GitHub release assessment of `ELIGIBLE` is not `PROVEN_WITHIN_FINITE_MODEL`. An OLS result of
-`PROVEN_WITHIN_FINITE_MODEL` is not GitHub merge or release eligibility. GitHub check success is not
-runtime conformance, target consumption, production proof, or organizational liveness. Conversely,
-a held or refused release does not by itself prove an operation deadlocked; the corresponding
-source-owned fact and transition semantics must be represented in the closed OLS model.
-
-Sol Capability Fabric answers:
-
-> What exact GitHub object and source state exist, which release/collision/completion gates apply,
-> and what exact owner-native GitHub effect occurred?
-
-Operation Assurance answers:
-
-> Under the declared finite organizational model, source snapshot, bounds, fairness assumptions,
-> and external assumptions, is a prohibited or non-progress state reachable, and what is the
-> minimal source-attributed counterexample?
-
-Neither answer upgrades or replaces the other.
-
-## 3. No-rebuild boundary added to OLS
-
-OLS must not create, copy, or absorb any of these protected SCF contracts:
+The protected SCF contract family is:
 
 ```text
 mastermind.github_status.v1
@@ -96,28 +39,52 @@ mastermind.github_action_receipt.v1
 mastermind.github_runner_status.v1
 ```
 
-OLS also must not create:
+Ownership remains federated:
 
-- a GitHub mirror, PR/check/workflow/artifact store, or release lifecycle;
-- an operation-to-GitHub carrier registry or current-writer election plane;
+| Concern | Canonical owner | OLS relationship |
+|---|---|---|
+| repository, ref, commit, PR, review, check, workflow, artifact, merge | GitHub | source evidence only |
+| normalized current GitHub target packet | SCF GitHub status owner | consume later; never reimplement |
+| deterministic release/collision/completion classification | SCF GH1 pure assessor | one evidence axis only |
+| owner-local prepared action and token | exact GitHub owner app | never create or commit |
+| effect state after one native request and read-back | exact GitHub owner app + GitHub | model receipt only |
+| runner eligibility/queue explanation | SCF RUN1 | optional evidence; never own runners |
+| lifecycle, admission, effects, retry, leases, fences | Executive OS | canonical runtime truth |
+| finite safety/liveness analysis and counterexamples | Operation Assurance | derived report only |
+
+Sol Capability Fabric answers which GitHub object exists, what release predicates apply, and what
+owner-native effect occurred. Operation Assurance answers whether a prohibited or non-progress state
+is reachable in a declared finite organizational model.
+
+A GitHub release assessment of `ELIGIBLE` is not `PROVEN_WITHIN_FINITE_MODEL`. An OLS result of
+`PROVEN_WITHIN_FINITE_MODEL` is not GitHub merge or release eligibility. GitHub check success is not
+runtime conformance, target consumption, production proof, or organizational liveness. Conversely, a
+held or refused release does not by itself prove an operation deadlocked. Neither answer upgrades or
+replaces the other.
+
+## 3. No-rebuild boundary
+
+OLS must not create or absorb:
+
+- a GitHub mirror;
+- an operation-to-GitHub carrier registry;
 - a second release/collision/completion assessor;
-- a prepared-action database, token registry, shared signing service, or universal action router;
-- a GitHub effect-reconciliation service or blind retry/failover path;
-- a runner observatory, queue owner, runner scheduler, or runner health database;
-- a generic HTTP/GraphQL actuator, connector wrapper, credential store, or account selector;
-- a model-selected repository, branch, merge method, principal, credential, or RuntimeBinding.
+- a prepared-action database;
+- a GitHub effect-reconciliation service;
+- a runner observatory;
+- a generic HTTP/GraphQL actuator;
+- a shared signing service, credential selector, account selector, or universal action router;
+- a second GitHub status cache or current-writer election plane.
 
-SCF contracts remain projections over GitHub and existing owners. They do not become OLS model truth
-merely because their fields are included in an authored document. Retrieved PR bodies, comments,
-reviews, issue text, commit messages, or Slack prose remain claims/evidence to validate, not
-self-authorizing lifecycle or source facts.
+Retrieved PR bodies, comments, reviews, issues, commit messages, or Slack text remain claims to
+validate. An operation key in prose does not grant authority or establish a unique carrier.
 
 ## 4. OLS-A1 purity consequence
 
 OLS-A1 remains the same pure vertical:
 
 ```text
-authored closed mastermind.operation_assurance_model.v1
+authored closed model
 -> exact parser and semantic validation
 -> deterministic finite-state exploration
 -> safety, workflow, fairness, recurring-progress, and starvation analysis
@@ -126,150 +93,126 @@ authored closed mastermind.operation_assurance_model.v1
 -> bounded report-only CLI
 ```
 
-The A1 model, checker, and report modules perform zero GitHub acquisition or effect. They must not
-import a GitHub connector, `control_plane.github_release_assessment`, a future SCF status composer,
-or an owner-app prepared-action/effect module. They perform zero network, socket, subprocess,
-browser, OAuth, credential, GraphQL, REST, workflow, merge, review, rerun, or repository mutation.
-The CLI may read only its explicitly supplied model file or stdin and may emit only its report to
-stdout under the already frozen A1 error boundary.
+The model, checker, and report modules perform zero GitHub acquisition or effect. They perform zero
+network, socket, subprocess, browser, OAuth, credential, GraphQL, REST, workflow, review, rerun,
+merge, or repository mutation.
 
-A GitHub-looking field supplied by an authored model has no special authority. It remains
-`AUTHOR_DECLARED_ONLY` unless a later accepted source compiler supplies the exact protected
-owner-native receipt required by the OLS trust ceiling.
+A1 must not import a GitHub connector, `control_plane.github_release_assessment`, a future SCF status
+composer, prepared-action module, action-receipt module, or runner-status module.
 
-## 5. OLS-A2 source-compiler consequence
+No SCF implementation, GitHub reader, release assessor, prepared action, action receipt, runner
+status, or current GitHub compositor belongs in A1. A GitHub-looking authored field remains
+`AUTHOR_DECLARED_ONLY` and grants no source or effect authority.
 
-The future OLS-A2 source compiler remains gated on:
+## 5. OLS-A2 source consequence
 
-1. accepted OLS-A1;
-2. a corrected and protected Executive Steward/OCR-6 normalized read seam or a separately accepted
-   bounded SCF machine-read seam;
-3. protected implementation of any SCF packet being consumed;
-4. fresh collision/current-source reconciliation proving no duplicate GitHub semantic owner.
+OLS-A2 may begin only after accepted OLS-A1 and one accepted source path exists. The preferred
+composition uses the corrected and protected Executive Steward/OCR-6 normalized read seam plus a
+bounded gather/source-compiler seam. A separately accepted bounded SCF machine-read seam may supply
+plain immutable GitHub packets when its implementation is protected.
 
-When available, OLS-A2 may consume immutable plain-data projections equivalent to
-`mastermind.github_status.v1` and `mastermind.github_release_assessment.v1`. It may not side-read raw
-GitHub APIs, reconstruct check/review applicability from prose, choose the newest carrier, infer an
-operation writer, or reproduce SCF release and effect semantics.
+A2 may consume data equivalent to `mastermind.github_status.v1` and
+`mastermind.github_release_assessment.v1`. It may not side-read raw GitHub APIs, parse PR prose into
+privileged fields, elect the newest branch, infer the writer from recency, or reproduce SCF release
+and effect semantics.
 
-Every load-bearing GitHub receipt used by OLS must retain, where the owner contract supplies it:
+The absence of a protected SCF implementation does not authorize OLS to build a temporary semantic
+twin. Missing capability remains `NOT_BUILT`; incomplete source remains `UNKNOWN`, `HELD`, or
+`REFUSED` according to the owner contract. These states are never converted to empty, false, healthy,
+eligible, or safe defaults.
 
-```text
-schema and capability generation
-repository and exact target kind / resource identity
-protected, base, merge-base, branch, candidate, and expected-head revisions
-changed paths, semantic owners, and canonical path digest
-required and observed checks with applicable head and attempt identity
-review decision, submissions, unresolved-thread coverage, and pagination state
-carrier state and current-writer evidence
-production-proof requirement and owner-native proof state
-freshness, coverage, truncation, continuation, source failures, and correction/supersession identity
-canonical content digest and source references
-```
+Every load-bearing GitHub packet retains exact repository, resource kind and identity, protected/base/
+head/merge-base revisions, changed paths, semantic owners, applicable check attempt, review coverage,
+carrier/writer evidence, production-proof state, freshness, coverage, truncation, continuation,
+correction identity, canonical digest, and source refs where supplied by the owner.
 
-Missing, stale, partial, truncated, contradictory, superseded, or wrong-head GitHub evidence remains
-explicit. `UNKNOWN`, `HELD`, and `REFUSED` are never converted to empty, false, healthy, eligible, or
-safe defaults. The absence of a protected SCF implementation does not authorize OLS to build a
-temporary semantic twin; the corresponding live-source capability remains `NOT_BUILT`, `UNKNOWN`,
-or held until its owner exists.
-
-A later corrected GitHub source never rewrites an immutable OLS report. The historical report keeps
-its generation-time source applicability; the current OLS status becomes stale/inapplicable until a
-new source-compiled model and report supersede it through the accepted current-status owner.
+A later source correction never rewrites an immutable OLS report. It changes current applicability or
+produces a new compiled model/report.
 
 ## 6. Effect and retry boundary
 
-The SCF action-receipt effect vocabulary is:
+The owner-native effect vocabulary is:
 
 ```text
 NOT_APPLIED | APPLIED | EFFECT_UNKNOWN
 ```
 
-OLS may model an exact source-owned `mastermind.github_action_receipt.v1` as an observed fact. OLS
-never calls `reconcile_github_effect`, never commits a prepared action, and never interprets an HTTP
-success, timeout, cancellation, or missing reply as an effect result.
+OLS may represent an exact `mastermind.github_action_receipt.v1` as a source fact. OLS never calls
+`reconcile_github_effect`, commits a prepared action, or treats HTTP success, timeout, cancellation,
+or missing response as proof of effect state.
 
-`EFFECT_UNKNOWN` remains a source-owned hard no-escape fact. In the OLS model it must prohibit retry,
-rerun, alternate app, alternate connector, alternate account, alternate branch writer, alternate
-carrier, or cross-surface failover until the canonical SCF/GitHub owner has reconciled the effect.
-OLS may prove that an authored transition violates that invariant; it cannot resolve the effect or
-grant the next transition itself.
+`EFFECT_UNKNOWN` remains a source-owned hard no-escape fact. It prohibits retry, rerun, alternate app,
+alternate connector, alternate account, alternate branch writer, alternate carrier, and cross-surface
+failover until the canonical owner reconciles the effect. OLS may prove that a modeled transition
+violates this rule; it cannot resolve the effect or grant the next transition.
 
-## 7. Product composition consequence
+## 7. Product composition
 
 The eventual Control Room composition joins, without conflating:
 
 ```text
-canonical Executive / Agent OS / Dialogue / Wake / RuntimeBinding operation state
-+ Operation Assurance model, immutable report, current applicability, and counterexample
-+ Sol Capability Fabric GitHub status / release assessment / exact effect receipt
+canonical Executive / Agent OS / Dialogue / Wake / RuntimeBinding state
++ immutable Operation Assurance report and current applicability
++ SCF GitHub status, release assessment, and action receipt
 + Runtime Observability diagnostic pointers and evidence gaps
 ```
 
-The UI must preserve separate labels and source identities. It must not render GitHub `ELIGIBLE` as
-an OLS proof, render OLS finite-model proof as merge-ready, render green CI as `PROVEN_LIVE`, render
-SCF `APPLIED` as target consumption, or render an OLS counterexample as proof that a GitHub write
-occurred. A source gap in any axis remains visible rather than being filled from another axis.
+The UI must not render GitHub `ELIGIBLE` as an OLS proof, render OLS finite-model proof as merge-ready,
+render green CI as `PROVEN_LIVE`, render SCF `APPLIED` as target consumption, or render an OLS
+counterexample as proof that a GitHub write occurred. A source gap in any axis remains visible rather
+than being filled from another axis.
 
-## 8. Implementation and proof consequences
+## 8. Release and implementation consequences
 
 ### OLS-F0
 
-This amendment joins the existing OLS-F0 carrier. OLS-F0 remains records-only and production-inert.
-Its merge would protect only architecture, proof language, precedence, owner boundaries, no-rebuild
-law, and the executable implementation sequence.
+OLS-F0 remains records-only and production-inert. Protection freezes architecture, precedence,
+owner boundaries, no-rebuild law, and the executable sequence. It creates no GitHub, runtime, or
+product effect.
 
 ### OLS-A1
 
-No SCF implementation, GitHub reader, release assessor, prepared action, action receipt, runner
-status, or current GitHub compositor belongs in A1. The accepted A1 changed-path ceiling remains the
-pure model/report/checker/CLI/fixture family already frozen by the OLS plan and overlays.
+A1 remains the pure model/report/checker/CLI/fixture family. It neither reads nor writes SCF or
+GitHub. OLS-A1 remains predecessor-gated until F0 protection.
 
-### OLS-A2 and later current-status composition
+### OLS-A2 and later
 
-A2 starts only after the gates in Section 5. Any later OLS current-status composition must consume
-SCF GitHub projections as source evidence through accepted owner seams; it must not create a second
-GitHub status compositor or cache. OLS status remains about assurance report applicability and
-runtime/model conformance, not GitHub release eligibility.
+A2 consumes protected owner packets through accepted seams; it never creates another GitHub status
+composer. Current OLS status concerns report applicability and model conformance, not GitHub release
+eligibility.
 
-### Admission, release, and production proof
+## 9. Capability ledger
 
-OLS remains report-only until a separately accepted policy wave says otherwise. No OLS verdict,
-counterexample, recommendation, or current status may merge, request review, rerun a job, commit a
-prepared action, reconcile a GitHub effect, or release production. SCF release eligibility likewise
-does not admit an Executive operation or prove the operation live.
+At current protected source:
 
-## 9. Capability ledger amendment
-
-At `eccf0a3fae8b8597c2ad0bc4f830e31b220415d2`:
-
-| Capability | Current state | OLS ruling |
+| Capability | State | OLS ruling |
 |---|---|---|
-| SCF-GH0 GitHub estate and semantic contract | `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED` | adjacent source law |
-| `mastermind.github_status.v1` live composer | `NOT_BUILT` | future SCF-GH2 owner |
-| `mastermind.github_release_assessment.v1` pure engine | `NOT_BUILT` | future SCF-GH1 owner |
-| prepared GitHub owner-app action / receipt | `NOT_BUILT` | future privilege-separated SCF owner |
-| runner observatory/status | `NOT_BUILT` | future SCF-RUN1 owner |
-| OLS GitHub evidence consumption | `NOT_BUILT` | future OLS-A2/current-status consumer after owner gates |
-| OLS assurance checker | `NOT_BUILT` | future OLS-A1 |
-| OLS-F0 architecture | `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT` | current carrier |
+| SCF-GH0 semantic contract | `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT / PROTECTED` | adjacent source law |
+| live GitHub status composer | `NOT_BUILT` | future SCF owner |
+| release assessment engine | `NOT_BUILT` | future SCF GH1 owner |
+| prepared GitHub action / action receipt | `NOT_BUILT` | future privilege-separated owner |
+| runner status/observatory | `NOT_BUILT` | future SCF RUN1 owner |
+| OLS-A1 checker | `NOT_BUILT` | next OLS vertical after F0 |
+| OLS GitHub evidence consumption | `NOT_BUILT` | later A2/current-status consumer |
 
 Protecting SCF-GH0 did not make any GitHub app, status composer, release assessor, prepared action,
-effect reconciler, runner observatory, OLS source compiler, checker, or product capability live.
+effect reconciler, runner observatory, OLS compiler, checker, or Control Room capability live.
 
-## 10. Final reconciliation ruling
+## 10. F0 release standard
 
-The protected movement to `eccf0a3fae8b8597c2ad0bc4f830e31b220415d2` is compatible with
-OLS-F0 under this exact boundary:
+Exact-head hosted checks and direct Program-CEO adversarial review are mandatory. Current protected
+source, changed paths, owner collisions, reviews, and effect history must be re-read at release time.
+A separate Auditor Sol placement is not a release prerequisite; it is optional defense-in-depth when
+available and useful.
 
-> Sol Capability Fabric owns normalized, source-attributed GitHub status, release/collision/
-> completion assessment, owner-local prepared effects, canonical GitHub effect receipts, and runner
-> explanation. Operation Assurance owns a derived finite organizational model and deterministic
-> safety/liveness analysis. OLS may later consume protected SCF outputs as read-only source evidence,
-> but it never recreates those contracts, performs their effects, or treats release eligibility as
-> organizational liveness.
+The record itself grants no merge, Ready transition, implementation commission, Executive mutation,
+GitHub effect, or OLS-A1 start. Those actions require current Chairman intent plus their own current
+source, permission, and expected-head gates.
 
-After this amendment and current-base preservation are on the same PR #279 carrier, exact-head hosted
-checks and a fresh independent Auditor Sol review remain mandatory. OLS-A1 remains predecessor-gated.
-No merge, Ready transition, implementation commission, Executive lifecycle mutation, GitHub effect,
-or production effect is authorized by this record.
+## 11. Final ruling
+
+> Sol Capability Fabric owns normalized source-attributed GitHub status, release assessment,
+> owner-local prepared effects, canonical action receipts, and runner explanation. Operation
+> Assurance owns derived finite organizational safety/liveness analysis. OLS may later consume
+> protected SCF outputs as read-only evidence, but never recreates those contracts, performs their
+> effects, or treats release eligibility as organizational liveness.

@@ -1,286 +1,181 @@
 # Mastermind Operation Liveness & Soundness — Architecture Freeze
 
-**Date:** 2026-08-30  
+**Date:** 2026-08-31  
 **Owner:** Sol, AI CEO of Mastermind-X  
 **Chairman:** Chris  
 **Operation:** `mastermind-operation-liveness-soundness-20260830-sol-001`  
-**Protected Mastermind source:** `28d365cceaef6efb0a26e0ac9af51ead44695d60`  
-**Macro source observed during freeze:** `ede7e065a90b294e9835e98e5326a84e1c14d038`  
-**Terminal protected source observed during freeze:** `afbc839e89c9e91d715c67872c44cf49895ee575`  
-**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1  
-**Capability state:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`
+**Original research basis:** `Mastermind@28d365cceaef6efb0a26e0ac9af51ead44695d60`  
+**Current protected reconciliation:** `Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`  
+**Capability state:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT` until F0 protection
+
+## CONTROLLING OLS-A1 IMPLEMENTATION NOTICE
+
+Earlier architecture and plan examples preserve useful reasoning but contain historical drafting
+residue. A fresh implementer must **do not implement** any older example that conflicts with these
+sources, read in exact precedence order:
+
+1. `docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md`
+2. `docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md`
+3. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md`
+4. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md`
+
+Adjacent source boundaries:
+
+- `docs/superpowers/specs/2026-08-31-operation-liveness-soundness-executive-steward-reconciliation.md`
+- `docs/superpowers/specs/2026-08-31-operation-liveness-soundness-sol-capability-fabric-reconciliation.md`
+- `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-runtime-observability-reconciliation.md`
+
+This document freezes product, data, intelligence, and authority architecture. The executable task
+contract is the current plan plus the precedence stack above.
 
 ## 1. Executive thesis
 
-Mastermind has accumulated strong local contracts:
+Mastermind already has strong local safety owners: Executive OS lifecycle, Agent OS responsibility,
+Dialogue/Wake continuity, RuntimeBinding identity, Capacity placement, effect-unknown refusal, and
+parent continuation. The missing capability is composed reasoning:
 
-- Executive OS owns durable Job/Attempt/Worker/Event state, leases, fences and effects.
-- Agent OS preserves durable organizational responsibility, decisions, discoveries and handoffs.
-- Agent Dialogue preserves the canonical company carrier.
-- Wake preserves attention obligations and delivery/ACK distinctions.
-- SessionTarget/RuntimeBinding and the protected Stage-A Sol action-target resolver preserve exact
-  target identity without alias election.
-- Capacity/Model Router preserve placement and eligibility.
-- Operator Continuation preserves bounded Attempt rollover context.
-- Effect-unknown law prevents blind retry/failover.
-- Parent-continuation law identifies the active-parent/no-successor hole.
+> Can an operation enter a reachable state where every local component behaves according to its own
+> rules, yet the organization can no longer complete, resume, reconcile, or escalate?
 
-Those local contracts do not yet answer a composed question:
+Operation Assurance turns that question into a deterministic, explainable, source-attributed finite
+analysis. Its value is not a decorative graph or another compliance checklist. Its value is enabling
+larger autonomous programs without making Chairman intervention the hidden recovery mechanism.
 
-> Can a proposed operation, under its declared topology and assumptions, progress without entering a
-> reachable state where every local owner is behaving legally but the organization can no longer
-> complete, resume, reconcile, or escalate?
+## 2. Product thesis and value model
 
-The capability must turn that question into a deterministic, explainable, source-attributed
-assessment. The moat is not a decorative graph. It is the ability to admit more ambitious autonomous
-work because Mastermind can expose cross-seam black holes before the Chairman becomes the recovery
-daemon.
+### 2.1 Primary user job
 
-## 2. Current-state archaeology and disagreement ledger
+A Program CEO needs to understand whether a proposed or running operation has a reachable black hole,
+why it exists, and the smallest owner-level repair that restores a lawful progress path.
 
-### 2.1 Protected implementation facts
+### 2.2 Machine job
 
-At the protected source used for this freeze:
+Compile one closed operation model, validate it exactly, explore every reachable state within
+published limits, evaluate mandatory safety/workflow/liveness properties, and return one deterministic
+minimal witness for every failed property.
 
-| Surface | Current observed state |
-|---|---|
-| Executive runtime | durable SQLite lifecycle with atomic Job/Attempt/Worker/Event changes; existing production/runtime proof must remain owner-specific |
-| transport-neutral request identity | protected local implementation |
-| deterministic child identity | protected local implementation |
-| canonical dialogue ensure | protected local implementation, not a new dialogue store |
-| persisted Wake carrier | protected but production-disarmed |
-| RuntimeBinding projection | protected, read-only and ABA-safe |
-| Sol action target Stage A | protected at `28d365c...`, `BUILT_NOT_PROVEN / PRODUCTION_INERT` |
-| Operator Continuation contract | protected pure contract; runtime phases separately gated |
-| parent-active/no-successor | accepted source law; full production composition not proven |
-| whole-operation assurance compiler/checker | `NOT_BUILT` |
-| Control Room assurance experience | `NOT_BUILT` |
-| report-only admission integration | `NOT_BUILT` |
-| real operational canary | `NOT_BUILT` |
+### 2.3 Research and signal value
 
-### 2.2 Current collisions
+The growing asset is a corpus of source-attributed organizational failure traces, valid waits,
+repairs, and forward outcomes. This supports calibration of model fidelity, false-positive/negative
+rates, state-space growth, and which source contracts most often cause cross-seam failure.
 
-- Mastermind PR #228 owns `control_plane/executive_steward.py` and its tests. It is open and has a
-  known identity-grouping correctness blocker. Operation Assurance must not fork a parallel
-  federated reader.
-- Mastermind PR #268 is open/draft at head `4c0cabfd5e66cc79e17fc06c542839b0cbd53e82`.
-  It owns watcher hardening paths and is a regression source, not this program's implementation
-  carrier.
-- Mastermind PR #275 is the Executive Attention Frontier architecture. It owns prioritization of
-  valid cognition demand, not operation liveness.
-- Mastermind PR #266 owns the current cognition-route guard/Model Router path.
-- Open Macro PR #6604 touches `config/mastermind_programs.yml`; semantic-registry edits for this
-  program must avoid a blind concurrent write.
+### 2.4 Commercial and operational value
 
-### 2.3 Corrected projection
+The capability reduces Chairman rescue work, makes autonomy expansion auditable, and creates a
+credible safety story for larger multi-agent programs without hiding uncertainty behind model prose.
 
-The commission recorded a Slack projection that PR #268 was protected. Action-time GitHub truth is
-open/draft. The architecture preserves that disagreement as evidence and follows GitHub for
-implementation truth.
+### 2.5 Data moat
 
-### 2.4 Agent OS registration gap
-
-Macro Agent OS requires every workstream to reference a valid program key. Current Macro still
-contains `DSC:EXECUTIVE-OS-NO-PROGRAM-ROW`: no `executive-os` program exists in
-`config/mastermind_programs.yml`. A new OLS workstream must not be attached to an approximate parent.
-
-The lawful durable sequence is:
-
-1. protect OLS source law in Mastermind;
-2. coordinate a records-only semantic-registry repair under the existing semantic-system-map owner
-   after current `config/mastermind_programs.yml` collisions clear;
-3. add `WS:OPERATION-LIVENESS-SOUNDNESS` only against that valid program key;
-4. use standalone Agent OS decisions/discoveries only when their schema and `affects` references are
-   truthful in the interim.
+The moat is first-party operational structure and correction history: exact owners, transitions,
+assumptions, counterexamples, repairs, and observed outcomes. Provenance supports the intelligence;
+it does not replace the useful explanation and repair workflow.
 
 ## 3. Research synthesis
 
 ### 3.1 Workflow-net soundness
 
-Classical workflow nets provide three essential ideas:
+Workflow-net research contributes three indispensable questions:
 
-1. every reachable execution state retains an option to complete;
-2. proper completion leaves only the intended terminal token and no residue;
-3. no declared task is dead.
+1. does every relevant reachable state retain an option to complete;
+2. does completion leave only intended residue;
+3. is every declared transition reachable when it is claimed usable?
 
-The literature also establishes an important boundary: classical soundness notions are decidable for
-workflow nets, while many extensions involving cancellation, reset behavior or priorities make those
-notions undecidable. Mastermind includes cancellation, retry, external gates, priorities, identities,
-unbounded future work, and correction. A direct claim of classical workflow-net soundness would
-therefore be false unless the operation is deliberately abstracted into a finite restricted model.
+Classical soundness does not directly cover Mastermind's external authority, correction, provider
+binding, ambiguous effects, recurring services, or arbitrary data. It is therefore a property family,
+not the canonical product model.
 
 ### 3.2 Temporal model checking
 
-TLA+/PlusCal makes the safety/liveness split explicit and treats weak and strong fairness as
-assumptions. SPIN finds shortest safety traces through breadth-first search and detects
-acceptance/non-progress cycles for liveness. These are directly useful for Mastermind's progress
-obligations and lasso counterexamples.
+Temporal-logic practice separates safety from liveness and makes fairness assumptions explicit.
+Explicit-state model checking provides deterministic reachability, strongly connected components,
+and prefix + cycle counterexamples. These concepts map directly to Mastermind's ownerless states,
+stranded parents, non-progress loops, and starvation.
 
-Apalache and Alloy reinforce the scope law:
+### 3.3 Petri nets and graph linting
 
-- finite state/data domains are load-bearing;
-- bounded checking reasons only within a published horizon;
-- complete finite checking may still exhaust practical time or memory;
-- liveness witnesses naturally have lasso form: a finite prefix and repeating cycle.
+Petri-net projections may later provide independent concurrency diagnostics. Static graph linting is
+useful for missing references and impossible topology. Neither can by itself establish the reachable
+behavior of the full finite model.
 
-### 3.3 Commercial workflow systems
+### 3.4 External formal backends
 
-Mainstream workflow platforms generally provide syntax/schema validation, local state testing,
-retry behavior and durable execution. Those capabilities are useful but do not compose
-organizational responsibility, exact action target, Wake/ACK, external-effect uncertainty, parent
-continuation, capacity and durable handoff across Mastermind's owner graph.
+TLA+, SPIN, Alloy, Apalache, SMT, or another reviewed backend may later audit selected models. None is
+a V1 runtime dependency, source compiler, or authority owner. The Mastermind wire remains stable even
+if an independent verifier is added.
 
-Mastermind's differentiator is the organizational composition, not merely validating a DAG file.
+### 3.5 Decidability boundary
 
-## 4. Rejected architectures
+Arbitrary workflows with unbounded creation, queues, clocks, opaque provider behavior, cancellation,
+priority, or free-form human action cannot receive an honest universal liveness proof. The product
+therefore uses a deliberately closed finite language and returns bounded or inconclusive outcomes
+when the abstraction is incomplete.
 
-### 4.1 One giant Petri net
-
-A Petri projection is excellent for tokens, concurrency, joins and residue. Encoding every
-RuntimeBinding generation, external effect, correction, external authority and recurring service as
-Petri-net machinery would produce a misleading or intractable model and obscure source ownership.
-
-**Ruling:** optional diagnostic/export backend, not canonical V1 model.
-
-### 4.2 Generic graph linter
-
-A dependency graph can find missing targets and simple cycles. It cannot determine whether a cycle is
-reachable, whether an exit is enabled, whether retry is unsafe because an effect is unknown, or
-whether starvation violates a declared fairness contract.
-
-**Ruling:** use graph lint as a cheap pre-pass, never as the full assurance claim.
-
-### 4.3 TLA+/SPIN/Alloy source as the product wire
-
-A general formal specification is powerful but still needs a source compiler, Mastermind identity
-mapping, correction law, explanation contract and product projection. It would also add an external
-toolchain before the domain model is stable.
-
-**Ruling:** independent export/audit after V1, not the first runtime dependency.
-
-### 4.4 Simulation only
-
-Fault schedules and property-based generation are essential for calibration and opaque integrations.
-They cannot prove absence of a trace they did not explore.
-
-**Ruling:** evidence and calibration, not proof authority.
-
-### 4.5 LLM workflow judge
-
-A model can spot plausible holes and explain formal output. It cannot deterministically enumerate the
-state space, guarantee minimal traces or hold admission authority.
-
-**Ruling:** explanation/authoring assistant only.
-
-### 4.6 New liveness runtime or supervisor
-
-A service that owns its own operation states, queue, retries, watchers or remediation would duplicate
-Executive OS and Wake.
-
-**Ruling:** rejected by design.
-
-## 5. Accepted architecture
-
-### 5.1 Four layers
+## 4. Accepted system architecture
 
 ```text
-existing canonical owners
+canonical owner facts or authored fixture
         |
         v
-source-attributed immutable snapshot/compiler
+mastermind.operation_assurance_model.v1
         |
+        +--> exact parser and cross-reference validation
+        +--> deterministic reachable-state graph
+        +--> safety and workflow soundness
+        +--> cyclic-SCC and fairness-product analysis
+        +--> recurring progress and starvation
         v
-closed finite Operation Assurance Model
+mastermind.operation_assurance_report.v1
         |
-        +--> deterministic static checks
-        +--> explicit-state reachable graph
-        +--> SCC/lasso/fairness analysis
-        +--> optional later independent formal exports
-        |
-        v
-source-attributed assurance report + minimal repair witness
-        |
-        +--> CLI / tests
-        +--> corrected Steward / Control Room
-        +--> report-only admission/expansion evidence
-        +--> runtime conformance
+        +--> report-only CLI in A1
+        +--> current-status composition after A2/A3
+        +--> Control Room explanation after A3
 ```
 
-### 5.2 Why explicit-state Python first
+A1 is pure authored-input analysis. A2 later compiles source-attributed models through existing
+owners. A3 joins immutable reports to current applicability in existing read/product surfaces.
 
-The first executable core should use the Python standard library and be pure:
+## 5. Model architecture
 
-- it integrates naturally with current Python contracts;
-- every state and transition can retain exact canonical IDs and source refs;
-- deterministic BFS gives minimal safety prefixes;
-- SCC algorithms give transparent non-progress components;
-- the implementation is hermetic and mutation-testable;
-- no Java, Go, solver, JVM, native binary or external service becomes an admission dependency;
-- an independent TLA+/SPIN/Alloy export remains possible after the model stabilizes.
-
-A symbolic backend is admitted later only after measured state explosion demonstrates need and the
-backend preserves identical verdict and evidence semantics.
-
-## 6. Model wire
-
-### 6.1 Top-level schema
-
-Conceptual closed wire:
-
-```json
-{
-  "schema": "mastermind.operation_assurance_model.v1",
-  "model_id": "oam_...",
-  "operation_ref": {"operation_key": "...", "root_job_id": null},
-  "compiler": {"name": "...", "version": "..."},
-  "source_snapshot": {"schema": "...", "sources": [], "snapshot_hash": "..."},
-  "state_domains": {},
-  "initial_state": {},
-  "transitions": [],
-  "terminal_outcomes": [],
-  "recurring_progress_outcomes": [],
-  "obligations": [],
-  "resources": [],
-  "external_gates": [],
-  "fairness_assumptions": [],
-  "environment_assumptions": [],
-  "safety_properties": [],
-  "property_set": "mastermind.operation_assurance.properties.v1",
-  "exploration_limits": {},
-  "known_model_gaps": []
-}
-```
-
-The exact implementation schema is allowed to refine field names before OLS-A1 review, but may not
-weaken the semantic requirements below.
-
-### 6.2 State
-
-A state is a canonical finite map of declared variables to values from closed finite domains.
-Examples:
+### 5.1 Closed top-level shape
 
 ```text
-job.<id>.status
-attempt.<id>.status
-worker.<id>.status
-binding.<responsibility>.generation
-turn.<child>.owner
-carrier.<operation>.identity
-effect.<operation>.state
-obligation.<id>.state
-gate.<id>.state
-resource.<id>.holder
-parent.<id>.continuation
-clock.<deadline>.phase
-service.<id>.progress_epoch
+schema
+model_id
+operation_ref
+compiler
+source_snapshot
+abstraction_contract
+state_domains
+initial_state
+transitions
+terminal_outcomes
+recurring_progress_outcomes
+obligations
+resources
+external_gates
+fairness_assumptions
+environment_assumptions
+safety_properties
+property_set
+exploration_limits
+known_model_gaps
 ```
 
-The model does not use arbitrary wall-clock arithmetic. Source-owned time is finitized into explicit
-phases such as `BEFORE_REVIEW`, `REVIEW_DUE`, `OVERDUE`, or another reviewed closed domain.
+The schema is `mastermind.operation_assurance_model.v1`; the mandatory property set is
+`mastermind.operation_assurance.properties.v1`.
 
-### 6.3 Transitions
+### 5.2 State representation
 
-Every transition contains:
+Each variable has a finite non-empty closed domain. A state is an immutable tuple ordered by lexical
+variable ID. The state fingerprint is a canonical SHA-256 digest over the variable/value map.
+
+No arbitrary object graph, Python value, NaN, Infinity, bytes, regex, executable guard, or implicit
+unbounded value enters the model.
+
+### 5.3 Transition representation
+
+Each transition has:
 
 ```text
 transition_id
@@ -291,212 +186,175 @@ guards
 effects
 progress_tags
 source_refs
-fairness_ref, optional
-external_assumption_ref, optional
+fairness_ref|null
+external_assumption_ref|null
+required_reachable
 ```
 
-Guards and effects use a closed declarative grammar. V1 allows equality/membership, obligation
-presence/state, resource holder, exact identity/binding generation, effect state, gate state and
-finite clock phase. No arbitrary executable expression is accepted.
+Guards use only reviewed equality/membership operations. Effects are simultaneous assignments.
+Duplicate assignment to one variable is refused. Actor and authority labels are model facts, never
+runtime grants.
 
-Nondeterminism is represented by multiple explicitly named transitions. Ingestion order never
-changes semantic ordering; the checker sorts by stable identity.
+### 5.4 Outcomes
 
-### 6.4 Obligations
+Terminal outcomes represent accepted finite execution completion. Recurring outcomes represent
+observable repeated service progress. Every outcome declares which persistent obligations or
+resources it may lawfully own. Terminal outcomes cannot legalize non-persistent residue.
 
-An obligation is the durable analytical representation of something that must be discharged:
+### 5.5 Obligations and resources
+
+An obligation identifies its state variable, pending/discharged values, persistence, owner semantics,
+and source refs. A resource identifies its holder variable, released values, persistence, and source
+refs. The checker evaluates proper completion and starvation from these first-class objects.
+
+### 5.6 Gates and waits
+
+A gate or intentional wait binds state guards, owner or authority, machine-observable release
+condition, explicit release transitions, observation source, Wake/review path, time contract,
+correction contract, and escalation or closure transition. Prose alone never creates a valid wait.
+
+### 5.7 Source snapshot
+
+Every source reference binds owner, kind, identity, exact revision, schema, digest, coverage,
+freshness, observation/effective time where owned, and correction reference. A source snapshot hash is
+canonical and immutable.
+
+## 6. Abstraction and evidence architecture
+
+The model's required `abstraction_contract` states:
 
 ```text
-ACTION
-RETURN
-PARENT_CONTINUATION
-EFFECT_RECONCILIATION
-CAPACITY_RELEASE
-RESOURCE_RELEASE
-WAKE_CONSUMPTION
-HANDOFF_CONSUMPTION
-TERMINAL_CLEANUP
-RECURRING_PROGRESS
+kind
+concrete_scope
+preserves
+introduced_behavior
+excluded_behavior
+validation_kind
+validation_refs
+notes
 ```
 
-It points to the existing canonical identity that owns the real fact. The model itself cannot create
-or satisfy a real obligation.
+A declared-exact authored model can support a finite-model claim only about that model. A sound
+over-approximation can support absence-of-violation for explicitly preserved properties but may
+produce spurious witnesses. A trace-backed under-approximation can validate observed witnesses but
+cannot prove universal absence. Heuristic or unknown fidelity remains diagnostic.
 
-### 6.5 Resources
+In OLS-A1, authored validation labels have zero trusted-evidence authority. The invocation boundary
+is fixed to `AUTHORED_INPUT`; positive applicability is capped at `AUTHOR_DECLARED_ONLY`, and a
+witness is at most `DECLARED_MODEL_ONLY` unless fidelity makes it potentially spurious.
 
-Resources cover finite exclusive or bounded assets relevant to progress:
+A future compiler or replay validator must supply unforgeable typed host-owned receipts rather than
+trust fields embedded in the model document.
 
-- Worker/Attempt ownership;
-- quota class/placement slot;
-- action-authoritative turn;
-- carrier writer;
-- external-effect right;
-- review slot;
-- parent continuation slot.
+## 7. Checker architecture
 
-A resource in the model is a projection, not an allocator or lock.
+### 7.1 Parse and refusal boundary
 
-### 6.6 Gates and waits
-
-A gate/wait records:
-
-```text
-gate_id
-disposition = EXTERNAL_GATE | INTENTIONAL_WAIT
-authority_or_owner
-release_condition
-observation_or_return_source
-wake_or_review_path
-time_contract
-correction_contract
-escalation_or_close_path
-source_refs
-```
-
-Missing any required field makes the state a model gap or progress defect, not a valid wait.
-
-### 6.7 Source snapshot
-
-Each source item includes:
-
-```text
-owner
-source_kind
-source_identity
-schema_version
-content_or_event_digest
-effective_at, nullable only when owner has no such concept
-observed_at, nullable only when owner has no such concept
-correction_generation_or_supersession_ref
-freshness_state
-conflict_state
-```
-
-Snapshot and model hashes use canonical UTF-8 JSON with sorted keys and no NaN/Infinity.
-
-## 7. Analysis semantics
-
-### 7.1 Structural validation
-
-Before exploration:
-
-- exact top-level and nested grammar;
-- finite non-empty state domains;
-- canonical identities and references;
-- one valid initial state;
-- transition guards/effects within domains;
-- all property/assumption references resolved;
-- no duplicate transition/obligation/resource/gate/fairness/property identities;
-- at least one accepted terminal, recurring or gated disposition unless the model explicitly claims
-  an intentionally impossible/refusal operation;
-- no executable code or forbidden opaque guard.
-
-Malformed models are refused; they do not yield an assurance verdict.
+The parser validates exact keys, types, IDs, domains, references, outcome ownership, gate closure,
+fairness links, assumption links, and exploration bounds. Malformed wire receives no assurance
+report.
 
 ### 7.2 Reachability
 
-Use deterministic BFS from the initial state.
+Breadth-first exploration discovers each state once, records canonical predecessor information, and
+orders enabled transitions by transition ID. It records states discovered, transitions considered,
+maximum depth, and peak frontier.
 
-Receipt:
+### 7.3 Safety
 
-```text
-states_discovered
-transitions_considered
-max_depth_reached
-complete_state_space
-limit_reason
-duration_ms
-peak_frontier
-```
+State-forbidden and transition-forbidden properties produce shortest prefixes. Mandatory built-ins
+cover identity/authority, effect-unknown escape, terminal absorption, and other frozen invariants.
 
-`complete_state_space=true` only when the queue drains without any configured state/depth/time/memory
-limit or unsupported transition.
+### 7.4 Option to complete
 
-### 7.3 Safety checks
-
-Safety violations are checked while exploring. The first counterexample is shortest by BFS.
-Tie-breaking is lexicographic over canonical transition IDs and then state fingerprints.
-
-Core V1 safety predicates:
-
-- `ONE_OPERATION_ONE_CARRIER`
-- `ONE_ACTION_AUTHORITY`
-- `CURRENT_BINDING_REQUIRED`
-- `NO_STALE_ATTEMPT_AUTHORITY`
-- `NO_EFFECT_UNKNOWN_ESCAPE`
-- `TYPED_RETRY_ONLY`
-- `NO_TERMINAL_RESIDUE`
-- `NO_SOURCE_CONFLICT_PASS`
-
-### 7.4 Option-to-complete
-
-After graph construction, reverse-reachability from all accepted good outcomes identifies states with
-an option to complete.
-
-A reachable nonterminal state not covered by a valid gate/wait/recurring outcome and absent from the
-reverse-reachable set violates `OPTION_TO_COMPLETE`.
-
-This is existential completion from each reachable state, not proof that every scheduler run will
-terminate.
+Reverse graph analysis marks states that can reach a terminal outcome, accepted recurring outcome,
+valid gate/wait, or another property-specific accepted boundary. A state with no accepted path is a
+workflow-soundness failure.
 
 ### 7.5 Proper completion
 
-For every accepted terminal state:
+Every reached terminal outcome is checked for non-persistent obligations, held resources, live
+children, open carrier turns, ambiguous effects, and parent-continuation residue represented in the
+model.
 
-- all non-persistent obligations discharged;
-- no active child;
-- no active lease/resource;
-- no unresolved effect;
-- no open required carrier turn;
-- parent terminal or continuation consumed;
-- no current modifying authority remains.
+### 7.6 Dead transitions
 
-Adverse terminal outcomes may preserve immutable historical evidence; that is not residue.
+Every transition marked `required_reachable` must occur on at least one reachable edge. Absence is a
+separate property result, not folded into liveness.
 
-### 7.6 Non-progress cycles
+### 7.7 Terminal absorption
 
-Run Tarjan or Kosaraju SCC analysis over reachable states.
+For every reached terminal state, the checker evaluates `NO_POST_TERMINAL_TRANSITION`. Any enabled
+operation transition is a concrete counterexample. Logical stuttering is not an operation action.
 
-Classify:
+### 7.8 Cyclic behavior
 
-- `CLOSED_NON_PROGRESS_SCC`: no accepted progress/terminal/gate/recurring outcome and no outgoing edge;
-- `FAIRNESS_DEPENDENT_CYCLE`: cycle can avoid progress but has an enabled progress exit whose eventual
-  service depends on declared fairness;
-- `RECURRING_SERVICE_CYCLE`: cycle discharges the required recurring obligation and is valid;
-- `BENIGN_TRANSIENT_CYCLE`: cycle cannot remain closed or does not preserve an unresolved obligation.
+Tarjan or Kosaraju SCC analysis covers all reachable cyclic SCCs, including components with outgoing
+completion edges. Liveness is not restricted to closed components because an execution may choose a
+non-progress cycle indefinitely.
 
-A liveness witness is prefix + cycle, not an arbitrary long log.
+### 7.9 Weak-fair closed-walk product
 
-### 7.7 Weak fairness
+For each candidate violating entry state, deterministic BFS explores:
 
-For a candidate lasso, a weak-fair transition cannot remain enabled at every cycle state without
-occurring in the cycle.
+```text
+(graph_state, seen_or_disabled_fairness_mask, violation_progress_mask)
+```
 
-The V1 checker may refute a lasso that violates that rule. It must not infer fairness for a transition
-without a declared, source-backed fairness reference.
+A return to the entry is accepted only when every named weak-fair transition was taken or disabled in
+at least one visited cycle state and the property-specific non-progress condition remains true. This
+allows a valid lasso to combine multiple simple cycles.
 
-Strong fairness requires detecting transitions enabled infinitely often but not continuously. It is
-out of the minimum OLS-A1 scope.
+### 7.10 Fairness realizability
 
-### 7.8 Starvation
+A declared weak-fair transition must be structurally and semantically capable of the service promise
+used by a proof. Unreachable, contradictory, or vacuous fairness cannot remove all violating runs.
+Strong fairness remains outside OLS-A1.
 
-For each persistent obligation, search violating lassos where:
+### 7.11 Recurring progress and starvation
 
-- the obligation remains pending through the cycle;
-- no cycle step discharges it;
-- the lasso satisfies the declared fairness assumptions;
-- the operation is not a valid external gate/wait/recurring service for that obligation.
+Recurring progress requires a reached named recurring outcome or other exact reviewed evidence—not a
+free-form progress tag. Persistent obligations are checked for fairness-valid lassos in which they
+remain pending forever without accepted recurring progress.
 
-Return the shortest deterministic witness found under the checker ordering.
+### 7.12 Total completion
 
-### 7.9 Dead transitions
+The base graph, reverse completion, safety checks, proper completion, dead-transition analysis, SCC
+discovery, each fairness product, recurring analysis, and starvation search each expose completion.
+No global proof is legal if any load-bearing analysis is incomplete.
 
-A transition marked `required_reachable=true` that is never enabled in the complete reachable graph is
-a defect. In bounded/incomplete exploration it remains `UNKNOWN`, never dead by proof.
+## 8. Counterexample architecture
 
-## 8. Report wire
+Every failed property receives one deterministic minimal witness containing:
 
-Conceptual `mastermind.operation_assurance_report.v1`:
+```text
+counterexample_id
+property_id
+model_hash
+source_snapshot_hash
+realizability
+validation_refs
+invalidating_gap_ids
+shortest_prefix
+cycle
+state_delta_per_step
+enabled_and_disabled_transition_reasons
+source_refs
+minimal deterministic repair candidates
+limitations
+```
+
+Safety witnesses minimize prefix length. Liveness witnesses minimize prefix + cycle length, then
+canonical transition sequence, then state fingerprint. Every step names the exact state delta and
+source refs. Disabled-transition explanations distinguish absent authority, failed guard, held
+resource, missing binding, source uncertainty, gate state, and other closed causes.
+
+Repair candidates are deterministic descriptions of which model/source contract must change. They
+are not executable actions or authority grants.
+
+## 9. Report architecture
+
+`mastermind.operation_assurance_report.v1` contains generation-time evidence only:
 
 ```text
 schema
@@ -506,366 +364,171 @@ model_hash
 source_snapshot_hash
 checker_version
 property_set_version
-assurance_verdict
+model_analysis_verdict
+source_applicability_at_generation
+abstraction_contract
 progress_disposition
-admission_mode
 admission_recommendation
 property_results
 counterexamples
 coverage
 assumptions
 known_model_gaps
-freshness
-supersedes_report_id
+exploration_receipt
 generated_at
+supersedes_report_id
 report_hash
 ```
 
-### 8.1 Verdict algorithm
+Report hash excludes `report_id` and `report_hash`; `report_id` derives from the hash. Fixed model and
+fixed generated-at produce byte-identical output. Wall-clock duration is separate diagnostic data and
+never enters canonical identity.
 
-1. source stale/conflicting after compilation -> `MODEL_STALE_OR_INVALID`;
-2. load-bearing model gap or unsupported semantics -> `INCONCLUSIVE_MODEL_GAP`;
-3. reachable violation -> `UNSAFE_COUNTEREXAMPLE`;
-4. complete finite exploration with all required properties satisfied ->
-   `PROVEN_WITHIN_FINITE_MODEL`;
-5. otherwise -> `BOUNDED_NO_COUNTEREXAMPLE`.
+The immutable report never contains current status, current source receipts, current recommendation,
+or recomputation time. Those belong to later existing-owner read composition.
 
-Progress disposition is then computed from accepted outcomes/assumptions and never upgrades the
-assurance verdict.
+## 10. Experience architecture
 
-### 8.2 Recommendation algorithm
+### 10.1 Control Room composition
 
-V1 recommendation is advisory and deterministic:
-
-- unsafe -> `REPORT_ONLY_REPAIR`;
-- stale/conflicted -> `REPORT_ONLY_RECONCILE`;
-- valid named external gate -> `REPORT_ONLY_AWAIT_GATE`;
-- finite proof or bounded result with no load-bearing gap -> `REPORT_ONLY_PROCEED`, while the UI still
-  distinguishes proof from bounded evidence;
-- inconclusive -> `REPORT_ONLY_NO_RECOMMENDATION`.
-
-This algorithm must not become a hard admission gate in OLS-A1.
-
-## 9. Counterexample minimization
-
-### 9.1 Safety
-
-BFS parent links reconstruct the shortest prefix to the first violating state under deterministic
-ordering.
-
-### 9.2 Liveness
-
-For each violating SCC:
-
-1. BFS from initial state to each candidate entry;
-2. choose shortest prefix, then canonical entry fingerprint;
-3. within the SCC, find the shortest cycle returning to the entry that demonstrates the property;
-4. break ties by canonical transition sequence.
-
-### 9.3 Actionability
-
-Each step carries:
+The eventual card joins without conflating:
 
 ```text
-before_state_hash
-transition_id
-actor/authority
-source_refs
-changed variables
-obligations created/discharged
-resources acquired/released
-disabled expected transitions and reason
-after_state_hash
+canonical operation state
++ immutable assurance report
++ current source applicability and supersession
++ source-owned GitHub release/effect status
++ bounded diagnostic evidence
 ```
 
-Repair candidates are deterministic pattern matches, not autonomous modifications:
-
-- missing owner -> name required owner/binding source;
-- missing continuation -> add explicit parent continuation obligation/path;
-- effect-unknown escape -> remove retry/failover edge and require reconciliation;
-- carrier split -> reconcile canonical carrier;
-- terminal residue -> add cleanup/release transition;
-- unserviceable action target -> restore exact binding or surface typed target conflict;
-- capacity cycle -> release/order resources or classify valid parking;
-- weak-fair starvation -> amend scheduler/service contract only through its owner.
-
-## 10. Failure and degradation vocabulary
+The headline names the model verdict and evidence scope, for example:
 
 ```text
-MODEL_SCHEMA_INVALID
-MODEL_DOMAIN_UNBOUNDED
-MODEL_REFERENCE_MISSING
-MODEL_SOURCE_CONFLICT
-MODEL_SOURCE_STALE
-MODEL_GUARD_UNSUPPORTED
-MODEL_TRANSITION_UNSUPPORTED
-STATE_LIMIT_REACHED
-DEPTH_LIMIT_REACHED
-TIME_LIMIT_REACHED
-MEMORY_LIMIT_REACHED
-CHECKER_INTERNAL_ERROR
-NO_TERMINAL_OR_PROGRESS_OUTCOME
-OWNERLESS_OBLIGATION
-ACTION_AUTHORITY_CONFLICT
-RUNTIME_BINDING_UNAVAILABLE
-RUNTIME_BINDING_STALE
-DIALOGUE_CARRIER_SPLIT
-WAKE_PATH_UNAVAILABLE
-PARENT_ACTIVE_NO_SUCCESSOR
-EFFECT_UNKNOWN_ESCAPE
-UNTYPED_RETRY
-RESOURCE_CYCLE
-TERMINAL_RESIDUE
-CLOSED_NON_PROGRESS_SCC
-FAIRNESS_DEPENDENT_CYCLE
-STARVATION_WITNESS
-EXTERNAL_GATE_INCOMPLETE
-INTENTIONAL_WAIT_INCOMPLETE
-RUNTIME_MODEL_DRIFT
+UNSAFE_COUNTEREXAMPLE — SOURCE_CONTRACT_VALIDATED
+MODEL COUNTEREXAMPLE — POTENTIALLY_SPURIOUS / VALIDATION REQUIRED
+PROVEN_WITHIN_FINITE_MODEL — AUTHOR_DECLARED_ONLY
 ```
 
-These are assurance findings/reasons, not Executive lifecycle states.
+### 10.2 Counterexample timeline
 
-## 11. Product experience
+The user sees the shortest prefix, repeating cycle, exact owner/resource/effect/binding state per
+step, why alternatives were disabled, and the smallest repair candidates. Clicking a step navigates
+to source-native receipts rather than an assurance-owned copy.
 
-### 11.1 Primary persona
+### 10.3 Required states
 
-Steward/Control Room operator or Sol reviewing an autonomous operation before expansion.
-
-### 11.2 Primary journey
-
-```text
-select operation / proposed plan
--> compile current source snapshot
--> see source coverage and model gaps
--> run assessment
--> inspect exact verdict/progress basis
--> when unsafe, inspect minimal causal trace
--> open canonical owner/evidence links
--> repair the operation contract in its owning system
--> recompile/reassess
--> compare before/after
--> proceed under report-only recommendation
-```
-
-### 11.3 Reference composition
-
-Header:
-
-```text
-Operation Assurance
-UNSAFE_COUNTEREXAMPLE · REPORT_ONLY_REPAIR
-Model 8b2... · 100% finite exploration · 1,248 states
-```
-
-Body:
-
-- **Why:** `EFFECT_UNKNOWN_ESCAPE`
-- **Counterexample:** five-step prefix, no cycle
-- **Break:** `ATT-...` loses provider response; transition `retry-on-alternate-realm` remains enabled
-- **Forbidden consequence:** second modifying carrier can launch before reconciliation
-- **Repair:** disable retry edge until existing effect owner emits reconciled terminal fact
-- **Sources:** exact Job/Attempt/Event/RuntimeBinding/law refs
-- **Assumptions and gaps:** visible, never hidden in a tooltip.
-
-For a valid gate:
-
-```text
-INCONCLUSIVE_MODEL_GAP · EXTERNALLY_GATED · REPORT_ONLY_AWAIT_GATE
-Gate: Chairman credential confirmation
-Return path: exact operation carrier
-No autonomous completion claim
-```
-
-### 11.4 Required failure states
-
-- source read unavailable;
-- source conflict;
-- model compile failure;
-- checker refused;
-- bounded state explosion;
-- stale report;
-- no counterexample but incomplete coverage;
-- valid wait;
-- external gate;
+- checking;
+- parser refusal;
+- finite-model proof;
+- bounded no-counterexample;
+- inconclusive model gap;
+- source stale or conflicted;
+- externally gated;
+- intentional wait;
 - recurring service;
-- runtime drift.
+- fairness conditional;
+- unsafe counterexample;
+- potentially spurious witness;
+- superseded report;
+- checker internal failure.
 
-## 12. Integration sequencing
+### 10.4 Failure experience
 
-### OLS-F0 — this architecture carrier
+Unknown data is shown as unknown. Partial pagination, stale revisions, moved Git head, missing
+RuntimeBinding, conflicting owner identity, absent Wake receipt, and unavailable diagnostics each
+remain distinct. No other axis fills the gap.
 
-Files:
+## 11. Source, time, and correction architecture
 
-- `docs/OPERATION_LIVENESS_SOUNDNESS_LAW.md`
-- `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-design.md`
-- `research/MASTERMIND_OPERATION_LIVENESS_SOUNDNESS_CAPABILITY_LEDGER_2026-08-30.md`
-- `docs/superpowers/plans/2026-08-30-operation-assurance-core.md`
-- `tests/test_operation_liveness_soundness_source_contract.py`
+There is no universal freshness TTL. Each source owner defines freshness and correction semantics.
+A model binds exact revisions; observation time alone cannot make data current.
 
-Proof:
+A source change after generation does not mutate the report. Current status becomes stale,
+superseded, unavailable, or inconclusive until a new model/report is created. Historical evidence
+remains auditable.
 
-- source-contract test;
-- exact-head repository CI;
-- collision recheck;
-- independent adversarial architecture review;
-- expected-head merge only.
+A correction can invalidate a witness without deleting it. The current projection points to the
+superseding report or corrected source receipt.
 
-### OLS-A1 — pure assurance core
+## 12. Authority and no-rebuild boundaries
 
-Expected new paths:
+Operation Assurance never:
 
-```text
-control_plane/operation_assurance_model.py
-control_plane/operation_assurance_checker.py
-control_plane/operation_assurance_report.py
-scripts/operation_assurance.py
-tests/test_operation_assurance_model.py
-tests/test_operation_assurance_checker.py
-tests/test_operation_assurance_cli.py
-tests/fixtures/operation_assurance/*.json
-```
+- creates or mutates Job, Attempt, Worker, Event, lease, fence, retry, or admission state;
+- creates a queue, scheduler, watcher, carrier, source graph, cache, or report database;
+- elects an action target, account, provider, host, branch writer, or credential;
+- gathers directly from Executive OS, Agent OS, Slack, GitHub, RuntimeBinding, or observability stores
+  inside A1;
+- performs a GitHub action, effect reconciliation, rerun, merge, or release;
+- treats a model verdict as current operational authority;
+- ranks executive demand.
 
-No edits to Executive Runtime, Steward, Wake, watcher, Model Router, SessionTarget, RuntimeBinding,
-Agent OS or Control Room.
+Executive OS, Agent OS, Dialogue/Wake, RuntimeBinding, Capacity, Steward, SCF, Runtime Observability,
+Project Workroom, GitHub, and Control Room remain the respective owners described in the law.
 
-Acceptance:
+## 13. Adjacent-program reconciliation
 
-- closed JSON parser rejects unknown/opaque/unbounded input;
-- deterministic full finite exploration;
-- shortest safety counterexamples;
-- deterministic lasso for closed non-progress SCC;
-- no-effect-unknown escape;
-- valid wait/gate/recurring distinction;
-- bounded result cannot say proved;
-- checker error cannot say pass;
-- repeated run byte-identical except an explicitly isolated generated timestamp;
-- CLI is report-only and performs no network/store/runtime mutation.
+- PR #228 is protected as a pure read core. It satisfies only the composition-core predecessor; A2
+  still needs accepted A1 and a bounded gather/source compiler. Operation Assurance must not build a
+  parallel federated reader.
+- PR #268 remains watcher hardening and supplies a hostile self-deadlock case. It grants no OLS
+  lifecycle or release authority.
+- Executive Attention Frontier may consume serviceability reasons; Operation Assurance never ranks.
+- Sol Capability Fabric owns GitHub status, release assessment, prepared actions, action receipts,
+  and runner status. GitHub eligibility and OLS liveness are orthogonal.
+- Runtime Observability owns diagnostic evidence. A complete trace is not proof of liveness; a missing
+  trace is not proof of deadlock.
+- Project Workroom and Worker Browser are product/collaboration surfaces, not assurance truth owners.
 
-### OLS-A2 — source compiler
+## 14. Vertical wave architecture
 
-Gate: corrected Executive Steward #228 protected.
+### OLS-F0
 
-Compile one real existing operation from accepted immutable read facts. No direct multi-store
-side-read and no new cache/database.
+Records-only architecture and exact implementation contract.
 
-### OLS-A3 — product projection
+### OLS-A1
 
-Extend the accepted Steward/Control Room read surfaces. The assurance engine remains pure and the UI
-stores no independent result truth.
-
-### OLS-A4 — calibration
-
-Frozen corpus:
-
-- Sol watcher self-deadlock;
-- dialogue carrier split;
-- parent terminal/parent active/no successor;
-- delivered but unacknowledged target;
-- stale or missing RuntimeBinding;
-- effect-unknown alternate route;
-- capacity unavailable valid parking;
-- natural-evidence/calendar wait;
-- circular dependencies;
-- weak-fair starvation;
-- stale Slack “done” versus canonical GitHub disagreement;
-- recurring service;
-- cancellation and lawful adverse terminal outcome.
-
-Measure:
+One independently useful machine capability:
 
 ```text
-incident detection recall
-valid-wait false positive rate
-counterexample minimality
-model/source coverage
-inconclusive rate
-state count / transition count / runtime
-repair acceptance rate
+real authored model -> deterministic checker -> immutable report -> real CLI consumer -> tests
 ```
 
-No enforcement promotion from one corpus.
+### OLS-A2
 
-### OLS-A5 — report-only admission/expansion
+One source-attributed compiler vertical after A1, using protected Steward and a separately accepted
+bounded gather seam. It compiles one real operation, not the whole estate.
 
-Attach the current assessment to selected CEO/COO plan expansion without blocking. If the assessment
-is stale, missing or inconclusive, show it honestly. Do not convert availability of the checker into a
-mandatory hard gate.
+### OLS-A3
 
-### OLS-A6 — runtime conformance
+One Control Room read/explanation vertical with immutable/current separation and all failure states.
 
-Consume existing accepted events and source snapshots. Detect unmodeled transitions, invalidated
-assumptions and stale source. Route attention through existing Wake only.
+### OLS-A4/A5
 
-### OLS-C1 — canary
+Historical calibration followed by a prospective report-only canary. A canary must change a repair or
+admission recommendation while all actual effects remain owned elsewhere.
 
-A low-risk real operation must:
+### OLS-A6/G1
 
-1. compile with a genuine counterexample;
-2. be repaired in the actual owner contract;
-3. recompile to a stronger truthful result;
-4. execute through the real path;
-5. reach its intended consumer without Chairman rescue;
-6. preserve zero duplicate lifecycle/queue/session/retry owners.
+Runtime conformance and any later narrowly justified promotion. Enforcement is not inferred from
+architecture, CI, or one canary.
 
-### OLS-G1 — promotion
+## 15. Acceptance ruler
 
-Only after prospective evidence may Sol propose a separate promotion law for narrow deterministic
-classes such as malformed model, effect-unknown retry escape, or ownerless modifying transition.
-Chairman/new authority is required for any material hard gate.
+F0 is accepted when the exact source contract is internally consistent, current protected paths are
+preserved, exact-head CI is green, direct Program-CEO adversarial review finds no blocker, and release
+uses the expected head.
 
-## 13. Capability ledger at freeze
+A1 is accepted only when hostile fixtures demonstrate safe finite proof, bounded honesty, model gaps,
+effect-unknown escape detection, ownerless state detection, fair-lasso behavior, valid capacity wait,
+valid Chairman gate, recurring progress, terminal absorption, and deterministic byte identity.
 
-| Capability | State | Evidence / limit |
-|---|---|---|
-| Executive lifecycle and event owner | `PROVEN_LIVE` at owner level | existing runtime and production program; this PR does not re-prove every deployment |
-| Agent OS durable organizational records | `PROVEN_LIVE` | current file-per-record store and generated CEO views |
-| transport-neutral root identity | `BUILT_NOT_PROVEN` for autonomous cutover | protected implementation; broader cutover pending |
-| deterministic child identity | `BUILT_NOT_PROVEN` | protected local seam |
-| canonical dialogue ensure | `BUILT_NOT_PROVEN` | protected, production-disarmed |
-| persisted Wake carrier | `BUILT_NOT_PROVEN` | protected, production-disarmed |
-| RuntimeBinding projection | `BUILT_NOT_PROVEN` | protected read-only seam |
-| exact Sol action target Stage A | `BUILT_NOT_PROVEN` | protected at `28d365c...`, production-inert |
-| parent-continuation detection | `PARTIAL` | accepted source law; complete product/runtime composition not proven |
-| watcher self-deadlock hardening | `BUILT_NOT_PROVEN` | PR #268 open/draft |
-| Executive Steward normalized read | `BUILT_NOT_PROVEN / BROKEN` | PR #228 open with correctness blocker |
-| Executive Attention Frontier | `SPEC_ONLY` | PR #275 open |
-| whole-operation assurance model/checker | `NOT_BUILT` | no matching code or PR found |
-| canonical source compiler | `NOT_BUILT` | depends on corrected Steward |
-| Control Room assurance card | `NOT_BUILT` | later wave |
-| report-only admission integration | `NOT_BUILT` | later wave |
-| runtime conformance | `NOT_BUILT` | later wave |
-| real canary | `NOT_BUILT` | completion requirement |
+The full program is accepted only when:
 
-## 14. Formal-method limitations that remain visible
+- **Truth:** current source compilation is exact, correction-safe, rights-safe, and fail-closed;
+- **Intelligence:** counterexamples and repairs are deterministic, minimal, and useful;
+- **Product:** the Control Room supports the complete workflow across real and failure states;
+- **Learning:** historical and prospective evidence shows whether the capability reduces rescue work
+  and improves safe autonomous expansion.
 
-- A finite abstraction can omit a real transition; runtime conformance and source coverage are
-  therefore part of product truth.
-- Human/Chairman behavior cannot be proved unless represented as an explicit environment assumption.
-- Provider internals remain opaque unless their owner supplies a contract.
-- Weak fairness does not imply strong fairness.
-- A proof in the model does not prove infrastructure availability or faithful implementation.
-- Complete finite exploration can still be operationally expensive.
-- Compositional proof is not accepted until assume/guarantee interfaces are formalized.
-- An actionable counterexample refutes the model/property but does not automatically identify the
-  only correct organizational repair.
-
-## 15. Primary-source bibliography
-
-1. W.M.P. van der Aalst, K.M. van Hee, A.H.M. ter Hofstede, N. Sidorova,
-   H.M.W. Verbeek, M. Voorhoeve, and M.T. Wynn, “Soundness of workflow nets:
-   classification, decidability, and analysis,” *Formal Aspects of Computing* 23(3), 2011.
-   https://research.tue.nl/en/publications/soundness-of-workflow-nets-classification-decidability-and-analys/
-2. H.M.W. Verbeek and M.T. Wynn, “Verification,” workflow-net soundness summary.
-   https://research.tue.nl/en/publications/verification/
-3. Leslie Lamport, PlusCal Tutorial Session 9, weak and strong fairness.
-   https://lamport.azurewebsites.net/tla/tutorial/session9.html
-4. Gerard J. Holzmann, SPIN Verifier's Roadmap, shortest safety trails and liveness cycles.
-   https://spinroot.com/spin/Man/4_SpinVerification.html
-5. Apalache documentation, finite parameters/data and bounded executions.
-   https://apalache-mc.org/docs/apalache/index.html
-6. Alloy 6 documentation, lasso traces and bounded/complete finite model checking.
-   https://alloytools.org/alloy6.html
-7. AWS Step Functions `ValidateStateMachineDefinition`, representative commercial static workflow
-   diagnostics.
-   https://docs.aws.amazon.com/step-functions/latest/apireference/API_ValidateStateMachineDefinition.html
+Green CI is necessary evidence, never the product acceptance test.

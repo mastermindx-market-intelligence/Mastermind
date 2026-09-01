@@ -3,77 +3,177 @@
 **Authority:** Chairman-directed Mastermind meta-control architecture.  
 **Owner:** Sol, AI CEO of Mastermind-X.  
 **Operation:** `mastermind-operation-liveness-soundness-20260830-sol-001`.  
-**Protected source at freeze:** `mastermindx-market-intelligence/Mastermind@28d365cceaef6efb0a26e0ac9af51ead44695d60`.  
+**Original architecture basis:** `mastermindx-market-intelligence/Mastermind@28d365cceaef6efb0a26e0ac9af51ead44695d60`.  
+**Current protected reconciliation:** `mastermindx-market-intelligence/Mastermind@990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`.  
 **Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1 / bootstrap-major 1.  
-**Status:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.  
+**Status:** `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT` until this source law is protected.  
 **Detailed design:** `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-design.md`.  
-**Program plan:** `docs/superpowers/plans/2026-08-30-operation-assurance-core.md`.
+**Executable A1 plan:** `docs/superpowers/plans/2026-08-30-operation-assurance-core.md`.
 
-This law defines how Mastermind may reason about the progress safety of a proposed or running
-autonomous operation. It creates no Job, Attempt, Worker, Event, queue, scheduler, retry, Wake,
-RuntimeBinding, session, authority grant, admission gate, provider call, Control Room mutation, or
-new persistence plane.
+## CONTROLLING OLS-A1 IMPLEMENTATION NOTICE
+
+The law, design, and original plan preserve the architecture and research history, but portions of
+their earlier examples are historical drafting residue. A worker must **do not implement** an older
+example where it conflicts with the following sources. Read them in this exact precedence order:
+
+1. `docs/superpowers/specs/2026-08-30-operation-assurance-immutable-report-projection-clarification.md`
+2. `docs/superpowers/specs/2026-08-30-operation-assurance-model-fidelity-counterexample-validation-amendment.md`
+3. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-trusted-input-total-proof-clarification.md`
+4. `docs/superpowers/specs/2026-08-30-operation-assurance-a1-controlling-execution-overlay.md`
+
+Current adjacent-owner reconciliations are also mandatory:
+
+- `docs/superpowers/specs/2026-08-31-operation-liveness-soundness-executive-steward-reconciliation.md`
+- `docs/superpowers/specs/2026-08-31-operation-liveness-soundness-sol-capability-fabric-reconciliation.md`
+- `docs/superpowers/specs/2026-08-30-operation-liveness-soundness-runtime-observability-reconciliation.md`
+
+The precedence notice changes no runtime authority. It gives a fresh implementer one unambiguous
+entry path into the current contract.
 
 ## 1. Chairman outcome
 
-Before Mastermind trusts a meaningful autonomous operation to run or expands its child graph, it
-must be able to answer:
+Before Mastermind trusts or expands a meaningful autonomous operation, it must be able to answer:
 
 > Under the exact finite model, source snapshot, bounds, fairness assumptions, and external
 > assumptions declared for this assessment, is there a reachable organizational black hole or
 > progress violation? If so, what is the shortest actionable counterexample?
 
-The target includes deadlock, non-progress cycles, ownerless obligations, stranded parents,
-unserviceable action targets, unsafe retry/failover after ambiguous effects, terminal residue,
-resource cycles, and starvation under declared fairness. It must preserve valid capacity parking,
-typed natural/calendar waits, recurring services, and genuine Chairman or external gates rather
-than misclassifying them as deadlock.
+The target includes deadlock, livelock, ownerless obligations, stranded parents, stale or conflicting
+action targets, unsafe retry or failover after ambiguous effects, terminal residue, resource cycles,
+carrier splits, starvation, and false-green projections. It must also preserve valid capacity
+parking, natural or calendar waits, recurring services, safe cancellation, and genuine Chairman or
+external gates.
 
-The product is not a universal theorem about future reality. It is a source-attributed assurance
-result over a declared abstraction.
+Operation Assurance is not a universal theorem about future reality. It is a deterministic,
+source-attributed result over a declared finite abstraction whose limits remain visible.
 
-## 2. Core architecture ruling
+## 2. Canonical architecture
 
-The canonical analytical object is a closed, versioned, finite labelled transition system:
+The canonical analytical object is a closed finite labelled transition system:
 
 ```text
 mastermind.operation_assurance_model.v1
 ```
 
-It is compiled from existing canonical owners or supplied as a source-attributed design-time model.
-It is an analysis-only value. It is never a lifecycle record and never an authority source.
-
-The first checker implementation uses deterministic explicit-state exploration and graph analysis in
-pure Python:
+The first executable vertical is:
 
 ```text
-closed model
--> structural and semantic validation
--> breadth-first reachable-state exploration
--> strongly connected component / lasso analysis
--> property evaluation
--> minimal source-attributed counterexample
+authored closed model
+-> exact structural and semantic validation
+-> deterministic breadth-first reachable-state exploration
+-> safety and workflow-soundness analysis
+-> all reachable cyclic-SCC analysis
+-> weak-fair closed-walk search
+-> recurring-progress and starvation analysis
+-> shortest deterministic source-attributed counterexample
 -> mastermind.operation_assurance_report.v1
+-> report-only CLI
 ```
 
-A workflow-net/Petri-net projection may be produced later as a diagnostic or independent audit
-backend. It is not the canonical model. TLA+, SPIN, Alloy, Apalache, SMT, or another formal backend
-may later independently validate selected models, but no external verifier is a V1 runtime
-dependency or a replacement for the Mastermind source compiler.
+The checker is a pure analytical consumer. The model and report are immutable values, not lifecycle,
+authority, routing, placement, retry, source, or product stores.
 
-## 3. Proof-language boundary
+Workflow-net soundness contributes option-to-complete, proper-completion, and no-dead-transition
+properties. Temporal model checking contributes the safety/liveness split, explicit fairness, and
+prefix + cycle witnesses. Neither formalism alone becomes Mastermind's product contract. The
+accepted architecture is a closed domain-specific transition model with deterministic explicit-state
+checking and optional later independent formal exports.
 
-Mastermind uses the following closed assurance verdicts:
+## 3. Canonical owner preservation
+
+| Concern | Existing canonical owner | Operation Assurance relationship |
+|---|---|---|
+| Job / Attempt / Worker / Event lifecycle, admission, leases, fences, retry, requeue, effect state | Executive OS | Read-only evidence; never mutate or reinterpret ownership |
+| durable workstream, decision, discovery, dependency, wait, and handoff identity | Agent OS | Read structured records; never become Agent OS |
+| canonical company dialogue and semantic turns | Agent Dialogue / Company Dialogue | Read-only carrier evidence; never create another transcript plane |
+| attention obligation, delivery, ACK, and source resolution | Executive Inbox / Wake | Read-only evidence; never schedule or deliver Wake |
+| current action target and provider-session binding | SessionTarget/RuntimeBinding | Consume exact source-owned identity; never elect or transfer |
+| eligibility, quota, and placement | Capacity Fabric / Model Router | Read-only evidence; never allocate or reserve |
+| normalized cross-owner composition | corrected Executive Steward / OCR-6 | Reuse the protected pure read core and later accepted gather seam; never fork it |
+| product explanation and interaction | Chairman Control Room | Consumer only; no new assurance truth store |
+| executive attention pressure and serviceability | Executive Attention Frontier | May consume typed assurance evidence later; Operation Assurance never ranks demand |
+| implementation, commits, PRs, checks, and immutable evidence | GitHub | Canonical implementation truth |
+| selected portfolio projection | Linear | Projection only |
+| transport and hot-state visibility | Slack / Agent Relay | Transport only |
+
+Forbidden replacements include an assurance-owned lifecycle, queue, scheduler, watcher registry,
+retry service, authority store, session registry, worker registry, transcript store, capacity
+allocator, attention allocator, source graph, GitHub mirror, observability store, or second Steward.
+
+## 4. Closed truth axes
+
+The immutable report keeps independent axes rather than collapsing them into one green/red field.
+
+### 4.1 Model-analysis verdict
 
 ```text
 UNSAFE_COUNTEREXAMPLE
 PROVEN_WITHIN_FINITE_MODEL
 BOUNDED_NO_COUNTEREXAMPLE
 INCONCLUSIVE_MODEL_GAP
-MODEL_STALE_OR_INVALID
 ```
 
-The verdict is separate from progress disposition:
+`PROVEN_WITHIN_FINITE_MODEL` means the complete reachable state space and every load-bearing
+analysis product completed under the declared finite model and assumptions. It is not a proof that
+the model is current or perfectly faithful to production.
+
+`BOUNDED_NO_COUNTEREXAMPLE` means only that no violating witness was found inside published bounds.
+It must never be rendered as proved safe.
+
+`INCONCLUSIVE_MODEL_GAP` preserves an unsupported construct, fidelity problem, relevant model gap,
+incomplete analysis, or potentially spurious witness without manufacturing a pass.
+
+### 4.2 Source applicability at generation
+
+```text
+AUTHOR_DECLARED_ONLY
+CURRENT_SOURCE_ATTESTED
+HISTORICAL_SOURCE_ATTESTED
+STALE
+CONFLICTED
+INCOMPLETE
+UNKNOWN
+```
+
+OLS-A1 is fixed to authored input. Positive labels inside authored JSON cannot grant current source
+attestation or replay authority. Negative source facts may only weaken the result.
+
+### 4.3 Abstraction fidelity
+
+```text
+DECLARED_EXACT
+SOUND_OVERAPPROXIMATION
+TRACE_BACKED_UNDERAPPROXIMATION
+HEURISTIC_ABSTRACTION
+UNKNOWN_FIDELITY
+```
+
+Every model declares what properties its abstraction preserves and what behavior may have been
+introduced or excluded. Model prose has zero authority.
+
+### 4.4 Counterexample realizability
+
+```text
+DECLARED_MODEL_ONLY
+SOURCE_CONTRACT_VALIDATED
+RUNTIME_REPLAY_CONFIRMED
+POTENTIALLY_SPURIOUS
+INVALIDATED
+```
+
+A model witness is never silently promoted to production truth. Telemetry alone cannot produce
+semantic runtime replay confirmation.
+
+### 4.5 Current derived status
+
+`MODEL_STALE_OR_INVALID` is a later current read-projection status, not an immutable model-analysis
+verdict. Corrected Steward / Control Room may derive it from an immutable report plus current source
+receipts without rewriting the report.
+
+### 4.6 Progress disposition and recommendation
+
+The immutable generation-time report also records one progress disposition and one report-only
+recommendation. These are analytical outputs, not current authority:
 
 ```text
 AUTONOMOUSLY_LIVE
@@ -85,62 +185,27 @@ NO_PROGRESS
 UNKNOWN
 ```
 
-The verdict is also separate from admission recommendation:
-
 ```text
-REPORT_ONLY_PROCEED
 REPORT_ONLY_REPAIR
 REPORT_ONLY_RECONCILE
 REPORT_ONLY_AWAIT_GATE
 REPORT_ONLY_NO_RECOMMENDATION
 ```
 
-V1 is report-only. None of these values blocks, creates, retries, requeues, cancels, wakes, places,
-fails over, or admits an Executive operation.
-
-`PROVEN_WITHIN_FINITE_MODEL` is legal only when all declared domains are finite, the complete
-reachable state space was explored, no load-bearing source is missing/conflicting/stale, no opaque
-guard or transition remains, all assumptions are enumerated, and the checker terminated normally.
-
-`BOUNDED_NO_COUNTEREXAMPLE` means only that no violating trace was found within the published state,
-depth, or resource bounds. It must never be rendered as proved safe.
-
-A checker exception, timeout, state limit, unsupported construct, unresolved source join, or
-unbounded domain can only weaken the result to `BOUNDED_NO_COUNTEREXAMPLE`,
-`INCONCLUSIVE_MODEL_GAP`, or `MODEL_STALE_OR_INVALID`. It can never produce a pass.
-
-## 4. Canonical owner preservation
-
-| Concern | Existing canonical owner | Operation Assurance relationship |
-|---|---|---|
-| Job / Attempt / Worker / Event lifecycle, admission, leases/fences, retry/requeue, effect state | Executive OS | Read only; never mutate or reinterpret lifecycle |
-| durable program/workstream/decision/discovery/handoff/dependency/wait identity | Agent OS | Read structured records; never become Agent OS |
-| canonical dialogue parent/messages/semantic turns | Agent Dialogue / Company Dialogue | Read only; never create another carrier or transcript store |
-| attention obligation, delivery, ACK and source resolution | Executive Inbox / Wake | Read only; never schedule or deliver Wake |
-| exact current Sol action target | `sol_action_target` plus SessionTarget/RuntimeBinding owners | Consume exact result when live; never elect, promote or transfer |
-| provider/account/host eligibility and capacity | Capacity Fabric / Model Router | Read only; never place or reserve capacity |
-| normalized cross-owner read | corrected Executive Steward / OCR-6 | Primary production source compiler seam after protection |
-| product composition | Chairman Control Room | Consumer only; no assurance database |
-| attention prioritization | Executive Attention Frontier | May consume typed assurance/serviceability evidence later; assurance never ranks |
-| implementation/evidence | GitHub | Canonical code, PR, CI and immutable proof |
-| selected portfolio projection | Linear | Projection only |
-| transport/hot state | Slack / Agent Relay | Transport only |
-
-Forbidden replacements include an assurance lifecycle, liveness queue, scheduler, watcher registry,
-retry service, authority store, session registry, worker registry, transcript store, capacity
-allocator, attention allocator, source-of-truth graph, or second Steward.
+OLS-A1 never emits `REPORT_ONLY_PROCEED`. V1 is report-only. No report value creates, blocks,
+cancels, retries, requeues, wakes, places, merges, or admits an Executive operation.
 
 ## 5. Closed model contract
 
-The detailed wire is frozen in the design, but every V1 model must include:
+Every `mastermind.operation_assurance_model.v1` contains exactly the reviewed top-level fields:
 
 ```text
 schema
 model_id
 operation_ref
-root_job_id or explicit pre-admission identity
-compiler_version
+compiler
 source_snapshot
+abstraction_contract
 state_domains
 initial_state
 transitions
@@ -157,301 +222,201 @@ exploration_limits
 known_model_gaps
 ```
 
-Every transition has a stable identity, closed guard grammar, closed effect grammar, actor/authority
-class, progress tags, and source references. Arbitrary Python, shell, SQL, regular expressions, or
-model-generated executable predicates are forbidden in the wire.
+The property set is:
 
-All identities and arrays are canonicalized and deterministically ordered. State fingerprints,
-model hashes, report hashes, and counterexample ordering are reproducible from canonical JSON.
+```text
+mastermind.operation_assurance.properties.v1
+```
 
-Unknown or missing owner facts remain explicitly unknown. Null never means false, healthy, absent,
-unlimited, available, or safe.
+All domains are finite and non-empty. Guards and effects use a closed grammar. Transition effects are
+simultaneous assignments. Unknown keys, duplicate identities, duplicate effects for one variable,
+non-finite values, values outside declared domains, unresolved or one-sided references, executable
+predicates, and unsupported fairness fail closed during parsing.
 
-## 6. Property families
+Caller-supplied compiler names, freshness labels, validation kinds, validation refs, timestamps, or
+source refs are descriptive input only in A1. They cannot mint trusted evidence.
 
-The checker evaluates separately named properties rather than one magic `sound=true` bit.
+## 6. Required property families
+
+The checker owns mandatory built-in coverage. Authored property lists cannot suppress it.
 
 ### 6.1 Identity and authority safety
 
-- one logical operation has one canonical identity and, while modifying, one canonical carrier until
-  reconciliation;
-- sanctioned actions require a current eligible owner and exact current binding where the governing
-  owner requires one;
+- one modifying logical operation has one carrier until canonical reconciliation;
+- a sanctioned transition has a current eligible actor and exact required binding;
 - one unresolved semantic turn has at most one action-authoritative Sol target;
-- stale or conflicting Attempt/Worker/RuntimeBinding evidence cannot authorize a transition.
+- stale, conflicting, or absent identity cannot authorize a transition.
 
 ### 6.2 Effect and retry safety
 
-- `EFFECT_UNKNOWN` cannot transition to retry, requeue, alternate provider, alternate host, alternate
-  session, alternate carrier, or a second modifying effect before canonical reconciliation;
-- a retry-safe transition must name the typed source-owned retry class;
-- transport loss, response loss, unknown failure, and ambiguous writer identity never imply retry
-  safety.
+`EFFECT_UNKNOWN` cannot escape through retry, rerun, requeue, alternate provider, alternate host,
+alternate account, alternate session, alternate carrier, or a second modifying effect before the
+canonical owner reconciles it.
 
 ### 6.3 Workflow soundness
 
-For every reachable state not explicitly classified as a valid external gate, intentional wait, or
-recurring-service state:
+- every relevant reachable state retains an option to complete, enter a valid wait/gate, or produce
+  accepted recurring progress;
+- proper terminal completion leaves no unowned non-persistent obligation, held resource, live child,
+  open carrier turn, or ambiguous effect;
+- every transition marked required-reachable is reached;
+- adverse exits are explicit terminal refusal, safe cancellation, or safe failure outcomes.
 
-- **option to complete:** at least one lawful path reaches an accepted outcome;
-- **proper completion:** accepted terminal outcomes leave no unresolved obligations, live children,
-  leases, resources, carrier turns, or ambiguous effects;
-- **no dead declared transitions:** every transition declared as required/usable is reachable unless
-  explicitly disabled by design;
-- **cancellation/failure completion:** lawful adverse exits are first-class outcomes, not hidden
-  exceptions.
+### 6.4 Terminal absorption
 
-### 6.4 Progress and continuity
-
-- an admitted nonterminal operation reaches a terminal outcome, valid external gate, valid
-  intentional wait, or recurring progress state under the exact declared assumptions;
-- a terminal child eventually yields parent continuation or lawful parent closure;
-- every wait has an accountable owner, observable return condition, canonical carrier or source
-  condition, correction behavior, and lawful escalation/closure;
-- every acquired resource has a release or transfer path;
-- every durable continuation obligation has a reachable consumer;
-- a reachable closed non-progress strongly connected component is a livelock counterexample.
-
-### 6.5 Starvation and fairness
-
-Fairness is never silently assumed.
-
-- weak fairness may be declared only for a transition that remains continuously enabled;
-- strong fairness may be declared only when the source contract explicitly warrants eventual service
-  for a transition enabled infinitely often;
-- no-fairness, weak-fairness and strong-fairness results are distinct;
-- a lasso in which an obligation remains pending forever is a starvation witness when it satisfies
-  the model's transition semantics and violates the declared fairness contract.
-
-The first implementation must support no-fairness and weak-fairness analysis. Strong-fairness
-analysis is a separately reviewed later capability unless the first implementation proves a correct
-closed algorithm and discriminating tests without widening its wave.
-
-## 7. Valid waiting and external gates
-
-A nonterminal state is not a deadlock merely because Mastermind cannot advance autonomously.
-
-`INTENTIONAL_WAIT` requires all of:
+Every reached terminal outcome is absorbing under the built-in property:
 
 ```text
-typed wait kind
-accountable durable owner
-observable release/review condition
-source/effective/observation time behavior
-correction behavior
-lawful escalation or closure
+NO_POST_TERMINAL_TRANSITION
 ```
 
-`EXTERNALLY_GATED` additionally requires a named external or Chairman/admin authority and a defined
-return path. A statement such as “waiting for Chairman” without a carrier/condition/owner is not a
-valid gate.
+Recurring progress is not terminal completion.
+
+### 6.5 Whole-operation progress
+
+The checker evaluates synthetic root progress even when an authored model contains no explicit
+obligation. A reachable fairness-valid non-progress lasso is a violation unless it is a valid
+modeled gate, intentional wait, or recurring service.
+
+### 6.6 Fairness and starvation
+
+OLS-A1 supports no-fairness and weak fairness only. Strong fairness is outside OLS-A1. Weak fairness
+may exclude a candidate closed walk only when the named transition is enabled in every visited cycle
+state and never taken.
+
+The search is not limited to a simple cycle or a closed SCC. It examines all reachable cyclic SCCs
+and uses an augmented seen-or-disabled fairness product so a valid witness may combine simple cycles.
+Fairness assumptions must themselves be realizable; a vacuous assumption cannot manufacture
+liveness.
+
+### 6.7 Total proof completion
+
+A drained base BFS queue is necessary but insufficient for proof. Safety, reverse completion,
+proper-completion, required-transition reachability, SCC discovery, every fairness product,
+recurring-progress analysis, and starvation analysis must all finish. A checker exception, timeout,
+state limit, product limit, unsupported construct, or internal validation failure can only weaken or
+refuse the result. It can never produce a pass.
+
+A fully materialized definite witness is not erased merely because an unrelated later analysis hits
+a declared bound.
+
+## 7. Valid waits and external gates
+
+A nonterminal state is not a deadlock merely because Mastermind cannot advance autonomously. A valid
+wait or gate has a typed disposition, accountable owner or authority, machine-observable release
+condition, source-relative time behavior, correction behavior, and explicit release, review,
+escalation, cancellation, refusal, or lawful-closure transitions.
+
+Descriptive prose such as “wait for Chairman” is not a return path. A terminal assessment boundary is
+represented by a transition reaching a named terminal outcome; transitionless terminal-boundary
+claims are refused.
 
 Capacity unavailable with no lawful receiver is valid parking only when existing Capacity/runtime
-owners can represent the wait and a lawful re-entry condition exists. It grants no manual
-cross-account failover.
-
-A persistent service is assessed through recurring progress or bounded-response obligations, not
-forced terminal completion.
+owners represent the wait and a lawful re-entry or closure transition exists. It grants no account
+hopping or implicit failover.
 
 ## 8. Counterexample contract
 
-`UNSAFE_COUNTEREXAMPLE` must contain an actionable witness:
+Every failed property produces one shortest deterministic actionable witness. A liveness witness is
+a prefix + cycle. The closed content includes:
 
 ```text
+counterexample_id
 property_id
-model_hash
-source_snapshot_hash
-assumptions
-exploration_receipt
+realizability
+validation_refs
+invalidating_gap_ids
 shortest_prefix
-cycle, when liveness/non-progress is involved
+cycle
 state_delta_per_step
 enabled_and_disabled_transition_reasons
-unresolved owner/resource/gate/effect/binding/wake/continuation
 source_refs
 minimal deterministic repair candidates
 limitations
 ```
 
-Safety prefixes are shortest under breadth-first search and deterministic transition ordering.
-Liveness witnesses are deterministic lassos: a shortest reachable prefix to a violating component
-plus a shortest reproducible cycle inside it, subject to the documented tie-break law.
+Safety prefixes use breadth-first distance and canonical transition ordering. Liveness lassos use the
+shortest reachable prefix, shortest fairness-valid violating closed walk, canonical transition
+sequence, and state fingerprint tie-breaks. The report keeps enough enabled and disabled transition
+reasons to show why the operation became stuck or could avoid progress forever.
 
-A language model may explain the witness after generation. It may not create, suppress, upgrade, or
-override the verdict, property result, source receipt, or repair precondition.
+A language model may explain a deterministic witness after generation. It may not create, suppress,
+upgrade, rank, or override a verdict, source receipt, realizability state, or repair precondition.
 
-## 9. Time, freshness and correction law
+## 9. Time, correction, and immutable identity
 
-Every load-bearing source receipt carries its canonical owner, source identity, schema/version,
-content digest or immutable event identity, effective time where owned, observation time where
-owned, and correction/supersession identity where available.
+Every load-bearing source receipt identifies its owner, resource, exact revision, content digest,
+coverage, observation/effective time where owned, and correction or supersession identity. Time never
+substitutes for revision. Missing, stale, partial, contradictory, or truncated evidence remains typed
+uncertainty.
 
-No universal freshness TTL is invented across Executive runtime, Git, Agent OS, Slack, external
-calendar gates, and strategic decisions. The source owner defines freshness.
+The immutable report hash is computed over the canonical report body excluding `report_id` and
+`report_hash`. `report_id` is then derived from that hash. Wall-clock duration is excluded from the
+canonical report; deterministic work counts belong in the exploration receipt.
 
-A report binds:
+A later correction never rewrites or re-hashes an old report. Current status is a separate read
+composition.
 
-```text
-model_hash
-source_snapshot_hash
-compiler_version
-checker_version
-property_set_version
-exploration_limits
-assumption_set
-generated_at
-```
+## 10. Product experience
 
-A later correction never rewrites the old result as if it had used the corrected source. The old
-report remains historical evidence and the current projection becomes `MODEL_STALE_OR_INVALID` until
-a new report supersedes it.
+The eventual Chairman Control Room card explains:
 
-## 10. Product and Control Room projection
+- model verdict, source applicability, abstraction fidelity, and witness realizability;
+- progress disposition and report-only recommendation;
+- exact source snapshot and current applicability;
+- complete versus bounded exploration and every limit reached;
+- fairness and environment assumptions;
+- mandatory property coverage and gaps;
+- shortest source-attributed counterexample timeline;
+- unresolved owner, resource, effect, target, Wake, carrier, or parent-continuation fact;
+- proposed repair and before/after reassessment;
+- report supersession and runtime-conformance evidence.
 
-The eventual Control Room card must explain, not merely color, the result:
+Required states include checking, finite-model proof, bounded-only, inconclusive, counterexample,
+externally gated, intentional wait, recurring service, stale, superseded, source unavailable, and
+checker refusal. Bounded, stale, or inconclusive results cannot be visually presented as safe.
 
-- assurance verdict, progress disposition and report-only recommendation;
-- source snapshot and freshness;
-- complete versus bounded exploration and exact limits;
-- environment and fairness assumptions;
-- property coverage and model gaps;
-- shortest counterexample timeline mapped to canonical identities;
-- disabled-transition reasons and unresolved owner/resource/effect/binding;
-- candidate repair and before/after reassessment;
-- runtime conformance and supersession history.
+## 11. Adjacent programs and current boundaries
 
-Required UI states include checking, finite-model proof, bounded-only, conditional/fairness,
-externally gated, intentional wait, recurring service, counterexample found, inconclusive, stale,
-and checker failure.
+- Executive Attention Frontier asks which valid demand deserves cognition; it never ranks from an OLS
+  verdict alone, and Operation Assurance never ranks demand.
+- PR #268 owns watcher self-deadlock hardening. It is a hostile-case source, not an OLS owner.
+- PR #228 is now protected as the pure Executive Steward read core. The current relationship is
+  frozen in `2026-08-31-operation-liveness-soundness-executive-steward-reconciliation.md`.
+- Operation Assurance must not create a parallel federated reader. A2 reuses Steward plus a separately
+  accepted bounded gather/source-compiler seam.
+- Sol Capability Fabric owns normalized GitHub status, release assessment, prepared action, effect
+  receipt, and runner explanation.
+- Runtime Observability owns diagnostic collection; a complete trace is not liveness proof and a
+  missing trace is not a deadlock proof.
+- Project Workroom remains a collaboration projection and grants no assurance authority.
+- Worker Browser B1 is path-disjoint product tooling and changes no OLS proof semantics.
 
-No green or “safe” presentation is legal for bounded, stale, inconclusive, or checker-failure states.
+## 12. Implementation and promotion sequence
 
-## 11. Architecture alternatives
+1. **OLS-F0:** protect this architecture, exact precedence, owner boundaries, and executable plan.
+2. **OLS-A1:** build the pure parser/checker/report/CLI vertical with hostile fixtures.
+3. **OLS-A1R:** direct adversarial CEO review plus mutation tests and exact-head hosted CI.
+4. **OLS-A2:** compile one source-attributed operation through the accepted Steward/gather seam.
+5. **OLS-A3:** compose immutable report and current status in existing Steward / Control Room owners.
+6. **OLS-A4:** calibrate against historical and hostile cases, including valid waits.
+7. **OLS-A5:** run a report-only operational canary that changes a repair decision without granting
+   enforcement authority.
+8. **OLS-A6:** verify runtime-model conformance using canonical events plus bounded diagnostic evidence.
+9. **OLS-G1:** only after prospective evidence, propose any narrow promotion gate as a separate law.
 
-### Pure workflow/Petri net — rejected as canonical model
+## 13. Release and completion law
 
-Workflow-net soundness contributes option-to-complete, proper-completion and dead-transition
-concepts. It is too narrow as the sole Mastermind model for external authority, corrections,
-RuntimeBinding, effects, retries, cancellations, priorities, and recurring services.
+F0 release requires a single current carrier, exact protected-base preservation, exact-head hosted
+checks, no unresolved review thread, direct Program-CEO adversarial review against Chairman intent,
+and an expected-head merge. A separate Auditor Sol placement is not a release prerequisite.
 
-### Pure graph linting — rejected
+Green CI proves the source/test gate, not implementation, runtime conformance, production proof, or
+final acceptance.
 
-Static topology catches missing edges and cycles but cannot establish reachable concurrent behavior,
-non-progress lassos, fairness-sensitive starvation, or effect-state safety.
+> Protecting OLS-F0 makes only the architecture and no-rebuild law true.
 
-### Direct TLA+/SPIN/Alloy specification as product contract — rejected for V1
-
-These are valuable independent verification backends. Making one the primary product wire would
-detach the model from canonical Mastermind identities, add tool/runtime dependencies, and still
-require a source compiler and explanation layer.
-
-### Simulation/property testing only — rejected as proof
-
-It is essential for hostile cases and calibration but can only show explored behavior.
-
-### Model-generated review — rejected for authority
-
-Models may help author candidate declarations and explanations. Deterministic validation and checking
-own all assurance verdicts.
-
-### Hybrid closed transition model + explicit checking + optional independent formal exports — accepted
-
-This is the smallest architecture that composes Mastermind-specific owners, produces actionable
-counterexamples, exposes proof limits, and remains implementation-independent.
-
-## 12. Decidability and abstraction limits
-
-Classical workflow-net soundness is decidable for the classical bounded formalism, while many
-extensions involving richer cancellation or priority semantics make soundness undecidable. Mastermind
-therefore does not accept arbitrary executable workflow code as a proof model.
-
-Unbounded worker creation, unbounded queues/data, opaque provider behavior, free-form human behavior,
-arbitrary clocks, model-generated transitions, and unknown source joins must be finitized through a
-reviewed abstraction or reported as `INCONCLUSIVE_MODEL_GAP`.
-
-A finite model may still be too large to exhaust. State/depth/time/memory limits are published in the
-report, and state-space exhaustion weakens the verdict without exception.
-
-V1 does not claim compositional assume-guarantee proof across independently checked submodels.
-Submodels may be inlined into one finite root model. True compositional proof is a later capability
-requiring explicit interface assumptions/guarantees and an independent soundness review.
-
-## 13. Relationship to adjacent programs
-
-### Executive Attention Frontier
-
-Attention Economics asks which valid executive demand deserves cognition and when. Operation
-Assurance asks whether one operation's declared progress system has a reachable black hole.
-
-Operation Assurance may later emit exact `serviceability_reasons` and counterexample references for
-EAF to consume. It never ranks demand, computes urgency, suppresses attention, allocates cognition,
-wakes a target, or transfers authority.
-
-### Sol watcher hardening / PR #268
-
-Watcher hardening addresses one concrete session-local self-deadlock and account-hardening family.
-It remains a hostile regression source. Operation Assurance must not edit or replace its watcher
-contract, audit script, runbook, or skill.
-
-### Executive Steward / PR #228
-
-The corrected Steward is the planned production read seam for cross-owner compilation. Until its
-identity-grouping correctness blocker is closed and protected, the assurance core remains pure and
-fixture-driven. It must not build a parallel federated reader.
-
-## 14. Implementation sequence
-
-1. **OLS-F0 — architecture/source law:** protect this law, detailed design, capability ledger and
-   implementation plan with a source-contract test. Records only.
-2. **OLS-A1 — pure finite assurance core:** closed model/parser, deterministic explicit checker,
-   report wire, CLI and hostile fixtures. No runtime reads/writes.
-3. **OLS-A1R — independent adversarial review:** mutation tests for verdict inflation, lasso
-   minimization, fairness, null/unknown, stale source and effect-unknown escape.
-4. **OLS-A2 — canonical source compiler:** after corrected Steward protection, compile one existing
-   operation/plan snapshot without new persistence.
-5. **OLS-A3 — Steward/Control Room projection:** explain reports and counterexamples through existing
-   read/product owners.
-6. **OLS-A4 — historical and synthetic calibration:** measure false positives/negatives, model gaps,
-   coverage and checker cost against frozen incidents and valid waits.
-7. **OLS-A5 — report-only admission/expansion integration:** attach the assessment before selected
-   operation expansion; no hard gate.
-8. **OLS-A6 — runtime conformance:** compare actual accepted events to the model through existing
-   event/Wake paths and invalidate stale assessments.
-9. **OLS-C1 — real operational canary:** find a real defect, repair the operation contract, rerun the
-   actual path, and prove changed operational outcome without Chairman rescue.
-10. **OLS-G1 — enforcement promotion ruling:** only calibrated deterministic defect classes may be
-    proposed for stronger gating under separate authority.
-
-## 15. Completion ruler
-
-The program is complete only when:
-
-- canonical source compilation is correction-safe and owner-attributed;
-- finite-model, bounded and inconclusive results are never conflated;
-- hostile historical incidents are caught with actionable minimal witnesses;
-- valid waits, capacity parking, external gates and recurring services avoid unacceptable false
-  positives;
-- Steward/Control Room explains the result;
-- one real report-only canary changes an operational outcome;
-- runtime/model drift is visible;
-- durable Agent OS and GitHub evidence allow a fresh session to recover the result;
-- any enforcement promotion receives a separate evidence-backed ruling.
-
-Protecting OLS-F0 makes only the architecture and no-rebuild law true. It does not make the checker,
-compiler, product, admission integration, runtime conformance, or canary live.
-
-## 16. Primary research basis
-
-The detailed design records the exact sources. Load-bearing findings include:
-
-- W.M.P. van der Aalst et al., *Soundness of workflow nets: classification, decidability, and
-  analysis* — classical workflow-net soundness and the undecidability introduced by many richer
-  extensions.
-- Leslie Lamport's TLA+/PlusCal fairness material — weak and strong fairness are explicit liveness
-  assumptions, not defaults.
-- SPIN verifier documentation — shortest safety traces through breadth-first search and
-  acceptance/non-progress cycles for liveness.
-- Apalache documentation — fixed finite data and bounded-execution limits for bounded symbolic
-  checking.
-- Alloy 6 documentation — lasso traces, bounded time horizons, and the practical cost of complete
-  finite model checking.
+It does not build or prove the checker, compiler, product, admission integration, runtime conformance,
+or canary. Program completion requires truth, intelligence, product, and learning: a current source
+compiler, deterministic checker, useful Control Room workflow, calibrated false-positive/negative
+performance, and a real report-only canary whose operational outcome is observable.
