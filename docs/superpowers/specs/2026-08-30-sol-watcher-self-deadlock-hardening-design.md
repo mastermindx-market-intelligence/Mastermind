@@ -5,7 +5,7 @@
 **Chairman:** Chris  
 **Approval:** Current live Chairman directive; written-spec review explicitly auto-approved.  
 **Authoring procedure basis:** `mastermindx-market-intelligence/Mastermind@fefd774701ea285b466cac2646a584801f4a976a`, `mastermind.sol_skillpack.v1` v1.0.1, bootstrap major 1.  
-**Current-base reconciliation:** protected `5a7046c46046a2ecf597c849aaab914b4f7cd5e1`; intervening Chat-native Meta-CEO source law is preserved and path-disjoint.  
+**Current-base reconciliation:** history-preserving join to protected `47eaa510aa0b9877d91052fbaa27156957aa963c`; the protected movement is path-disjoint from the exact nine-file watcher carrier.  
 **Operation:** `sol-watcher-self-deadlock-hardening-20260830-sol-001`
 
 ## Outcome
@@ -35,7 +35,7 @@ ACTION_REQUIRED_OUTCOME: <closed value by role>
 SISTER_SOL_POLICY: <closed value by role>
 ```
 
-The prompt body still carries current procedure, source reconciliation, scope, failure states, and terminal cleanup. The structured header only makes the most dangerous invariants mechanically auditable.
+The prompt body still carries current procedure, source reconciliation, scope, failure states, and terminal cleanup. The header schema is closed: the discriminator is followed by exactly those seven `KEY: value` fields and then one blank-line boundary. Unknown fields, comments, notes, or bare header lines fail closed so the header cannot become an unscanned instruction channel.
 
 `ACTION_AUTHORITATIVE` always requires one exact Slack carrier. `aggregate:<stable-scope-id>` is available only to `OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, or `TRIAGE_ONLY`, and identifies a bounded read/oversight scope rather than authority over every child it contains. Aggregate observers must fresh-read each exact child carrier used for a conclusion. An exact child semantic edge still requires the current exact action target and exact lawful carrier.
 
@@ -92,30 +92,33 @@ A triage task may use an aggregate scope. The exact child action surface must ac
 
 ### Non-authoritative body fence
 
-Every non-authoritative role—observer, parent orchestrator, and triage—must also be checked for positive authority hidden in body prose. It may not post/send/issue child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, or `STOP`; merge/release or arm auto-merge; retry/resubmit/requeue/fail over; or commission/start a successor. Explicit prohibitions remain valid. The header therefore cannot be used to launder a modifying body.
+Every non-authoritative role—observer, parent orchestrator, and triage—must also be checked for positive authority hidden in body prose. It may not post/send/issue child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, or `STOP`; merge/release or arm auto-merge; retry/resubmit/requeue/fail over; or commission/start a successor. Markdown emphasis and code delimiters are stripped for policy scanning. Explicit prohibitions remain valid. The header therefore cannot be used to launder a modifying body.
 
 ## Contract validation
 
 `control_plane.sol_watcher_contract.validate_watcher_prompt()` is deterministic and standard-library only. It verifies:
 
-- discriminator and required fields;
+- discriminator, exactly seven allowed header fields, and the blank-line body boundary;
 - closed role/outcome/event/policy combinations;
 - exact Slack carrier for action authority and closed aggregate scope for non-authoritative roles;
-- current-procedure re-pin instruction;
-- exact-carrier fresh-read instruction;
-- same-carrier/no-blind-retry/no-lifecycle-inference/terminal-STOP laws;
+- a positive current-procedure re-pin instruction rather than a negated keyword mention;
+- a positive exact-carrier fresh-read instruction;
+- positive same-carrier action and typed-blocker requirements;
+- an explicit blind-retry prohibition and explicit refusal to infer Executive lifecycle from Slack;
+- positive terminal-STOP-before-disarm ordering;
 - clause-local positive notification-only anti-patterns without false-rejecting explicit prohibitions;
-- all non-authoritative body authority widening.
+- all non-authoritative body authority widening, including Markdown-wrapped commands and bare imperative merge forms.
 
 `scripts/audit_sol_watchers.py` accepts an account-local JSON export and emits a machine-readable report. Every wrapper entry declares `audit_kind: SOL_WATCHER | NON_WATCHER`; omission defaults to `SOL_WATCHER` for backward compatibility. Enabled `NON_WATCHER` tasks remain visible but are excluded from watcher-conformance counts.
 
 The export envelope is fail-closed:
 
 - a native `id` or `task_id` must be present, non-empty, and unique;
-- conflicting `id` and `task_id` values refuse;
+- `id` and `task_id` are normalized independently with `strip()` before alias comparison and duplicate census;
+- conflicting normalized aliases refuse;
 - `is_enabled` or `enabled` must be a real JSON boolean; strings, numbers, missing values, or conflicting aliases refuse;
 - unknown audit kinds refuse even when disabled;
-- duplicate task IDs refuse even when disabled/non-watcher;
+- duplicate canonical task IDs refuse even when disabled/non-watcher;
 - non-object task entries refuse.
 
 The report separates `invalid_enabled_tasks`, `invalid_classification_tasks`, `invalid_export_tasks`, and `duplicate_task_ids`. A malformed wrapper cannot be coerced into a green watcher count. The CLI never connects to ChatGPT, Slack, GitHub, Executive OS, or a provider and never mutates a task.
@@ -161,14 +164,16 @@ Existing W3A/W3C/MAS-229/AD-SOL1 carriers must be continued rather than duplicat
 2. A valid action-authoritative watcher passes, including explicit `do not wait for Sol` and `no blind retry` law.
 3. An unrelated negation earlier in the same line cannot conceal a later positive self-deferral instruction.
 4. Every self-deferral synonym above is rejected.
-5. Every non-authoritative role rejects positive child modification/retry/release/successor instructions, while explicit prohibitions pass.
-6. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
-7. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
-8. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts.
-9. Missing/duplicate native IDs, non-boolean enabled flags, conflicting aliases, unknown classifications, and non-object entries fail the overall audit.
-10. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
-11. Focused tests and repository CI are green on the exact final head.
-12. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
+5. Every non-authoritative role rejects positive child modification/retry/release/successor instructions, including Markdown-wrapped and bare merge commands, while explicit prohibitions pass.
+6. Unknown or bare header lines fail closed and cannot hide instructions.
+7. Action authority refuses an aggregate carrier; bounded observer/parent/triage aggregate scopes pass.
+8. A negated re-pin/fresh-read/action/blocker/STOP requirement or positive lifecycle inference fails.
+9. Malformed/missing carrier, operation, role, or handled-edge identity fails closed.
+10. The CLI produces stable JSON and nonzero status for invalid enabled watchers while excluding declared non-watchers from watcher counts.
+11. Missing/duplicate native IDs, non-boolean enabled flags, conflicting aliases, unknown classifications, and non-object entries fail the overall audit; whitespace-equivalent ID aliases resolve to one canonical identity.
+12. The Skillpack explicitly requires the structured contract for new/materially updated temporary Sol watchers and names notification-only self-deadlock as a K3 failure.
+13. Focused tests and repository CI are green on the exact final head.
+14. All three account-local preflight and mutation receipts plus the one-authoritative/two-observer canary exist before `PROVEN_LIVE` is claimed.
 
 ## Non-goals
 
