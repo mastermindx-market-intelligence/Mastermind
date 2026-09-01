@@ -1144,6 +1144,16 @@ def _read_placement_selection(
     fails its own secret-safe validation, or ``select_placement`` itself
     refusing the input) becomes ``(None, "<reason>")`` — this function never
     raises, matching every other gather-layer reader in this module.
+
+    Reviewer m-7: unlike this module's other gather-layer readers (whose
+    ``degraded`` rows may embed ``str(exc)``/a path — an inherited,
+    out-of-scope idiom), this ONE reader's failure reason names only the
+    exception CLASS, never ``str(exc)`` or ``path`` itself. The facts
+    document this reads can carry caller-supplied enum/token values (an
+    invalid ``SourceOwner``/``Freshness``/... raises a stdlib ``ValueError``
+    whose message echoes the bad value verbatim), and the ``degraded`` list
+    is user-visible product surface — it must never become a channel for
+    replaying facts-document content or filesystem paths back out.
     """
     if not path:
         return None, None
@@ -1167,8 +1177,9 @@ def _read_placement_selection(
         )
         return decision.to_dict(), None
     except Exception as exc:  # noqa: BLE001 — gather layer never raises
-        detail = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-        return None, detail
+        # Name only the exception CLASS — never str(exc), never `path` — see
+        # the leak-safety note above.
+        return None, f"unreadable ({exc.__class__.__name__})"
 
 
 def build_control_room(

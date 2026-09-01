@@ -1061,9 +1061,64 @@ def test_build_control_room_names_a_malformed_facts_document_as_degraded(
     )
 
     assert doc["placement_selection"] is None
-    assert any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+    matching = [entry for entry in doc["degraded"] if entry.startswith("placement_selection:")]
+    assert matching
     # gather layer never raises even on a broken facts document.
     assert doc["schema"] == ccr.SCHEMA
+    # Reviewer m-7: the degraded row never embeds the raw facts-document
+    # path or the exception text itself — only the exception CLASS name.
+    assert str(facts_path) not in matching[0]
+    assert "not valid json" not in matching[0]
+
+
+def test_build_control_room_never_leaks_a_bad_wire_value_in_the_degraded_entry(
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, agent_os_state, bindings
+):
+    """Reviewer m-7: a facts document whose exception message WOULD embed
+    the caller-supplied value verbatim (a stdlib enum ``ValueError`` reads
+    ``"'<value>' is not a valid <EnumName>"``) must still never surface
+    that value through the ``degraded`` list — only the exception class.
+    """
+    macro_root = tmp_path / "macro"
+    (macro_root / "data" / "governance").mkdir(parents=True)
+    (macro_root / "data" / "governance" / "project_active_builds.json").write_text(
+        json.dumps(active_builds), encoding="utf-8"
+    )
+    (macro_root / "data" / "governance" / "agent_os_state.json").write_text(
+        json.dumps(agent_os_state), encoding="utf-8"
+    )
+
+    bindings_path = tmp_path / "bindings" / "surface_bindings.json"
+    sb.save_bindings(bindings, path=bindings_path)
+
+    facts = _facts_document()
+    secret_marker = "TOTALLY_SECRET_OCCUPANCY_VALUE_XYZ"
+    facts["candidates"][0]["occupancy"] = secret_marker
+    facts_path = tmp_path / "placement_facts.json"
+    facts_path.write_text(json.dumps(facts), encoding="utf-8")
+
+    fixture_packet = copy.deepcopy(boot_packet)
+    fixture_packet["macro"]["root"] = str(macro_root)
+    fixture_inbox = copy.deepcopy(inbox)
+    fixture_inbox["grounding"]["macro"]["root"] = str(macro_root)
+
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", lambda **kwargs: fixture_packet)
+    monkeypatch.setattr(
+        ccr.executive_inbox, "build_inbox",
+        lambda **kwargs: fixture_inbox,
+    )
+
+    doc = ccr.build_control_room(
+        repo_root=tmp_path, now="2026-08-21T00:10:00Z", bindings_path=bindings_path,
+        placement_selection_path=facts_path,
+    )
+
+    assert doc["placement_selection"] is None
+    matching = [entry for entry in doc["degraded"] if entry.startswith("placement_selection:")]
+    assert matching
+    blob = json.dumps(doc)
+    assert secret_marker not in blob
+    assert str(facts_path) not in matching[0]
 
 
 def test_build_control_room_without_the_flag_composes_no_placement_selection(

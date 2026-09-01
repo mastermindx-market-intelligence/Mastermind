@@ -1266,6 +1266,25 @@ def run_check(config: ServerConfig) -> int:
             len(attention.get("chairman", [])), len(attention.get("ceo", [])), len(attention.get("coo", []))
         )
     )
+    # CAP-C1 (reviewer m-9): one line when a placement_selection section is
+    # actually present; a degraded marker when the flag was given but the
+    # section came back None (the failure detail itself lives in the
+    # `degraded` list printed below, never repeated here). No line at all
+    # when the flag was never given — this stays exactly as quiet as every
+    # other never-asked-for optional feature.
+    placement_selection = doc.get("placement_selection")
+    if placement_selection is not None:
+        selected = placement_selection.get("selected")
+        tied = placement_selection.get("tied_worker_ids") or []
+        if selected is not None:
+            detail = f"selected={selected.get('worker_id')}"
+        elif tied:
+            detail = f"abstained, tied={len(tied)}"
+        else:
+            detail = "no selection"
+        print(f"placement_selection: state={placement_selection.get('state')} {detail}")
+    elif config.placement_selection_path:
+        print("placement_selection: degraded (see degraded list)")
     if doc["degraded"]:
         print("degraded:")
         for entry in doc["degraded"]:

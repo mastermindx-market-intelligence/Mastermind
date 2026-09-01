@@ -20,7 +20,7 @@ tests prove the FROZEN SPEC properties of the commission
  11. EFFECT_UNKNOWN handling (sole candidate vs excluded-but-ignored)
  12. permutation invariance
  13. heuristic-mutation immunity (timestamps/account numbering/titles never rank)
- 14. secret/leak safety + closed wire keys + no time/datetime/random import
+ 14. secret/leak safety + closed wire keys + AST-closed import allowlist
  15. source-correction replay + duplicate-identity reconciliation
 
 Plus: CONTRADICTORY occupancy -> RECONCILIATION_REQUIRED; CAPACITY_UNKNOWN
@@ -29,6 +29,7 @@ precedence pinning; wire enum value pinning.
 """
 from __future__ import annotations
 
+import ast
 import itertools
 import json
 from pathlib import Path
@@ -413,10 +414,61 @@ def test_no_source_ref_or_env_fields_leak_into_wire_dict():
     assert "agent_os" not in blob
 
 
-def test_module_imports_no_clock_or_randomness():
+#: Reviewer n-10: the module's COMPLETE import set, closed. A literal grep
+#: for three exact spellings ("import time"/"import datetime"/"import
+#: random") only catches those three exact forms — `import time as t`,
+#: `from time import monotonic`, `import os`, `import subprocess`, or any
+#: other clock/randomness/I/O import would sail through unnoticed. This
+#: allowlist is exact: any import this module does not already declare
+#: fails the test below, whether or not it is one of the three originally
+#: named culprits.
+_ALLOWED_MODULE_IMPORTS: frozenset[tuple[str | None, str]] = frozenset({
+    ("__future__", "annotations"),
+    (None, "dataclasses"),
+    (None, "enum"),
+    ("collections.abc", "Mapping"),
+    ("collections.abc", "Sequence"),
+    ("typing", "Any"),
+    ("control_plane.executive_orchestration_principal", "OrchestrationPrincipalError"),
+    ("control_plane.executive_orchestration_principal", "build_placement_snapshot"),
+    ("control_plane.executive_orchestration_principal", "validate_placement_snapshot"),
+    ("control_plane.executive_steward", "CapacityState"),
+    ("control_plane.executive_steward", "EffectState"),
+    ("control_plane.executive_steward", "Freshness"),
+    ("control_plane.executive_steward", "ResponsibilityFact"),
+    ("control_plane.executive_steward", "SourceOwner"),
+    ("control_plane.executive_steward", "SourceRef"),
+})
+
+
+def test_module_import_set_is_exactly_the_closed_allowlist():
+    """AST-based purity guard (reviewer n-10, replaces a three-literal grep).
+
+    Parses the module and walks its COMPLETE syntax tree (``ast.walk``, not
+    just module-level statements — a purity guard must also catch an import
+    smuggled inside a function body) collecting every ``import``/``from ...
+    import`` name as ``(module_or_None, imported_name)``. The result must
+    equal :data:`_ALLOWED_MODULE_IMPORTS` exactly — no more, no fewer —
+    which is what makes this a real purity gate rather than a denylist of
+    three specific spellings: any future clock, randomness, filesystem, or
+    network import (``time``, ``datetime``, ``random``, ``os``,
+    ``subprocess``, ``pathlib``, ``requests``, an aliased or ``from``-style
+    import of any of those, ...) fails it, not just the three originally
+    named.
+    """
     source = _MODULE_PATH.read_text(encoding="utf-8")
-    for banned in ("import time", "import datetime", "import random"):
-        assert banned not in source, f"{banned!r} must never appear in {_MODULE_PATH}"
+    tree = ast.parse(source, filename=str(_MODULE_PATH))
+
+    found: set[tuple[str | None, str]] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                found.add((None, alias.name))
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                found.add((node.module, alias.name))
+
+    assert found == set(_ALLOWED_MODULE_IMPORTS)
 
 
 # ---------------------------------------------------------------------------
@@ -590,3 +642,307 @@ def test_validate_placement_selection_rejects_bad_schema_version():
     payload["schema_version"] = "wrong"
     with pytest.raises(ValueError):
         eps.validate_placement_selection(payload)
+
+
+# ---------------------------------------------------------------------------
+# repair wave — M-3: validate_placement_selection cross-field invariants
+# ---------------------------------------------------------------------------
+
+def test_validate_placement_selection_rejects_selected_present_when_state_not_selected():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["state"] = "waiting_capacity"  # selected stays non-None -> now inconsistent
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_selected_state_with_no_selected_payload():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["selected"] = None  # state stays "selected" -> now inconsistent
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_unrecognized_tie_breaker_token():
+    a, b = _candidate(worker_id="worker-a"), _candidate(worker_id="worker-b")
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(), candidates=(a, b),
+        accepted_tie_breaker="worker_id_lexicographic",
+    )
+    payload = dict(decision.to_dict())
+    payload["tie_breaker_used"] = "most_recently_observed"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_tie_breaker_used_without_two_tied_ids():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["tie_breaker_used"] = "worker_id_lexicographic"  # state selected, tied_worker_ids still []
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_tie_breaker_used_on_a_non_selected_state():
+    a, b = _candidate(worker_id="worker-a"), _candidate(worker_id="worker-b")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b))
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    payload = dict(decision.to_dict())
+    payload["tie_breaker_used"] = "worker_id_lexicographic"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_tie_abstained_with_fewer_than_two_tied_ids():
+    a, b = _candidate(worker_id="worker-a"), _candidate(worker_id="worker-b")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b))
+    payload = dict(decision.to_dict())
+    payload["tied_worker_ids"] = ["worker-a"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_non_selected_non_tie_state_with_tied_ids():
+    candidate = _candidate(occupancy=eps.OccupancyState.OCCUPIED)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.state is eps.SelectionState.WAITING_CAPACITY
+    payload = dict(decision.to_dict())
+    payload["tied_worker_ids"] = ["worker-1", "worker-2"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evaluated_candidates_below_exclusion_count():
+    candidate = _candidate(occupancy=eps.OccupancyState.OCCUPIED)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    assert len(payload["exclusions"]) == 1
+    payload["evaluated_candidates"] = 0
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evaluated_candidates_below_tied_count():
+    a, b = _candidate(worker_id="worker-a"), _candidate(worker_id="worker-b")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b))
+    payload = dict(decision.to_dict())
+    assert len(payload["tied_worker_ids"]) == 2
+    payload["evaluated_candidates"] = 1
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_unsorted_tied_worker_ids():
+    a, b = _candidate(worker_id="worker-a"), _candidate(worker_id="worker-b")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b))
+    payload = dict(decision.to_dict())
+    payload["tied_worker_ids"] = list(reversed(payload["tied_worker_ids"]))
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_unsorted_exclusions():
+    a = _candidate(worker_id="worker-a", occupancy=eps.OccupancyState.OCCUPIED)
+    b = _candidate(worker_id="worker-b", occupancy=eps.OccupancyState.OCCUPIED)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b))
+    payload = dict(decision.to_dict())
+    assert len(payload["exclusions"]) == 2
+    payload["exclusions"] = list(reversed(payload["exclusions"]))
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_error_messages_never_interpolate_the_value():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["state"] = "a_totally_bogus_state_value_xyz"
+    with pytest.raises(ValueError) as excinfo:
+        eps.validate_placement_selection(payload)
+    assert "a_totally_bogus_state_value_xyz" not in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# repair wave — M-1/M-2: eager construction-time Phase-B snapshot refusal
+# ---------------------------------------------------------------------------
+
+def test_construction_refuses_worker_id_that_fails_the_phase_b_snapshot_regex():
+    # Passes this module's own token check (no whitespace/@//) but "!" is
+    # outside executive_orchestration_principal._ID_RE.
+    with pytest.raises(ValueError):
+        _candidate(worker_id="worker!1")
+
+
+def test_construction_refuses_provider_that_fails_the_phase_b_snapshot_regex():
+    # _PROVIDER_RE is lowercase-only; this module's own token check does not
+    # enforce case on its own.
+    with pytest.raises(ValueError):
+        _candidate(provider="ACME")
+
+
+def test_construction_refuses_account_label_that_fails_the_phase_b_snapshot_regex():
+    # _ACCOUNT_RE is lowercase-only.
+    with pytest.raises(ValueError):
+        _candidate(account_label="Account1")
+
+
+def test_construction_refuses_quota_class_that_fails_the_phase_b_snapshot_regex():
+    with pytest.raises(ValueError):
+        _candidate(quota_class="standard!")
+
+
+def test_construction_error_never_leaks_the_offending_value():
+    with pytest.raises(ValueError) as excinfo:
+        _candidate(provider="ACME")
+    assert "ACME" not in str(excinfo.value)
+
+
+def test_worker_id_rejects_at_symbol():
+    with pytest.raises(ValueError):
+        _candidate(worker_id="worker@1")
+
+
+def test_provider_rejects_slash():
+    with pytest.raises(ValueError):
+        _candidate(provider="acme/inc")
+
+
+def test_quota_class_rejects_at_symbol():
+    with pytest.raises(ValueError):
+        _candidate(quota_class="standard@tier")
+
+
+def test_capability_token_rejects_slash():
+    with pytest.raises(ValueError):
+        _candidate(capabilities=frozenset({"cap/a"}))
+
+
+def test_tie_breaker_used_field_rejects_at_symbol():
+    with pytest.raises(ValueError):
+        eps.PlacementSelectionDecision(
+            responsibility_ref="WS:CAP-C1",
+            state=eps.SelectionState.SELECTED,
+            selected=None,
+            tie_breaker_used="worker_id@lexicographic",
+            tied_worker_ids=(),
+            exclusions=(),
+            evaluated_candidates=0,
+        )
+
+
+def test_demand_required_capability_rejects_at_symbol():
+    with pytest.raises(ValueError):
+        eps.PlacementDemand(
+            required_capabilities=frozenset({"cap@a"}), quota_class="standard", provider="acme",
+        )
+
+
+def test_demand_provider_rejects_slash():
+    with pytest.raises(ValueError):
+        eps.PlacementDemand(
+            required_capabilities=frozenset(), quota_class="standard", provider="acme/inc",
+        )
+
+
+# ---------------------------------------------------------------------------
+# repair wave — M-4/n-9: gate-order refinement, mutant killers
+# ---------------------------------------------------------------------------
+
+def test_contradictory_candidate_excluded_but_clean_sibling_still_selected():
+    """Ruling m-6, pinned: CONTRADICTORY is a PER-CANDIDATE exclusion — it
+    never poisons a clean sibling's eligibility."""
+    contradictory = _candidate(worker_id="worker-bad", occupancy=eps.OccupancyState.CONTRADICTORY)
+    clean = _candidate(worker_id="worker-clean")
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(), candidates=(contradictory, clean),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    assert decision.selected["worker_id"] == "worker-clean"
+    assert eps.CandidateExclusion(
+        worker_id="worker-bad", reason=eps.ExclusionReason.CONTRADICTORY_BINDING
+    ) in decision.exclusions
+
+
+def test_gate_order_contradictory_beats_effect_unknown_on_one_candidate():
+    candidate = _candidate(occupancy=eps.OccupancyState.CONTRADICTORY, effect_state=EffectState.EFFECT_UNKNOWN)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.CONTRADICTORY_BINDING),
+    )
+
+
+def test_gate_order_effect_unknown_beats_stale_occupancy_fact_on_one_candidate():
+    candidate = _candidate(effect_state=EffectState.EFFECT_UNKNOWN, occupancy_freshness=Freshness.STALE)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.EFFECT_UNKNOWN),
+    )
+
+
+def test_gate_order_stale_capacity_fact_beats_occupied_on_one_candidate():
+    candidate = _candidate(capacity_freshness=Freshness.STALE, occupancy=eps.OccupancyState.OCCUPIED)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.STALE_CAPACITY_FACT),
+    )
+
+
+def test_gate_order_occupied_beats_closure_unproven_on_one_candidate():
+    candidate = _candidate(occupancy=eps.OccupancyState.OCCUPIED, host_source_closure_proven=False)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.OCCUPIED),
+    )
+
+
+def test_gate_order_closure_unproven_beats_capability_mismatch_on_one_candidate():
+    candidate = _candidate(host_source_closure_proven=False, capabilities=frozenset({"cap_b"}))
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-1", reason=eps.ExclusionReason.HOST_SOURCE_UNPROVEN),
+    )
+
+
+def test_to_dict_sorts_deliberately_unsorted_exclusions_and_tied_worker_ids():
+    decision = eps.PlacementSelectionDecision(
+        responsibility_ref="WS:CAP-C1",
+        state=eps.SelectionState.TIE_ABSTAINED,
+        selected=None,
+        tie_breaker_used=None,
+        tied_worker_ids=("worker-z", "worker-a"),
+        exclusions=(
+            eps.CandidateExclusion(worker_id="worker-z", reason=eps.ExclusionReason.OCCUPIED),
+            eps.CandidateExclusion(worker_id="worker-a", reason=eps.ExclusionReason.CAPABILITY_MISMATCH),
+        ),
+        evaluated_candidates=4,
+    )
+    payload = decision.to_dict()
+    assert payload["tied_worker_ids"] == ["worker-a", "worker-z"]
+    assert payload["exclusions"] == [
+        {"worker_id": "worker-a", "reason": "capability_mismatch"},
+        {"worker_id": "worker-z", "reason": "occupied"},
+    ]
+
+
+def test_non_adjacent_duplicate_worker_ids_yield_reconciliation_required():
+    dup1 = _candidate(worker_id="worker-dup")
+    other = _candidate(worker_id="worker-other")
+    dup2 = _candidate(worker_id="worker-dup")
+    decision = eps.select_placement(
+        responsibility=_responsibility(), demand=_demand(), candidates=(dup1, other, dup2),
+    )
+    assert decision.state is eps.SelectionState.RECONCILIATION_REQUIRED
+    assert decision.exclusions == (
+        eps.CandidateExclusion(worker_id="worker-dup", reason=eps.ExclusionReason.DUPLICATE_IDENTITY),
+    )
+
+
+def test_capacity_rank_map_is_total_over_capacity_state():
+    """Pins reviewer n-11's import-time assertion: every CapacityState
+    member is ranked, or is exactly CapacityState.UNKNOWN."""
+    ranked_or_unknown = set(eps._CAPACITY_RANK) | {CapacityState.UNKNOWN}
+    assert ranked_or_unknown == set(CapacityState)

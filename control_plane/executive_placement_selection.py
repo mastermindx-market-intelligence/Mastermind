@@ -25,6 +25,14 @@ point-in-time selection over already-gathered facts *would* choose. Phase-B
 runtime commitment (actually creating/binding a Job/Attempt/Worker) is
 explicitly held on PR #255 (:mod:`control_plane.executive_runtime`, which
 this module never imports, calls, or simulates).
+
+Per-candidate exclusion is a REFINEMENT of the aggregate precedence
+(:func:`_first_exclusion_reason` checks its gates in the same top-to-bottom
+order :data:`_AGGREGATE_PRECEDENCE` ranks reasons by), and a
+``CONTRADICTORY``/``EFFECT_UNKNOWN`` candidate is excluded PER-CANDIDATE
+only — a clean sibling in the same call may still be ``SELECTED`` (ruling
+m-6). Only a repeated ``worker_id`` is globally fatal to the whole
+decision.
 """
 from __future__ import annotations
 
@@ -34,6 +42,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from control_plane.executive_orchestration_principal import (
+    OrchestrationPrincipalError,
     build_placement_snapshot,
     validate_placement_snapshot,
 )
@@ -99,12 +108,37 @@ _CAPACITY_RANK: dict[CapacityState, int] = {
     CapacityState.DEGRADED: 1,
 }
 
+# Reviewer n-11: an eligible candidate's capacity_state is looked up in
+# _CAPACITY_RANK unconditionally (candidates whose capacity_state is
+# UNKNOWN are excluded earlier, at the CAPACITY_UNKNOWN gate, so they never
+# reach this lookup) — but a FUTURE CapacityState member added to
+# executive_steward without a matching _CAPACITY_RANK entry would otherwise
+# only surface as a bare KeyError deep on the winning path. Fail loudly at
+# IMPORT time instead: every CapacityState member must either be ranked
+# here or be exactly CapacityState.UNKNOWN (the one member deliberately
+# excluded from ranking because it never survives to be ranked).
+assert all(
+    member in _CAPACITY_RANK or member is CapacityState.UNKNOWN
+    for member in CapacityState
+), "every CapacityState member must be ranked in _CAPACITY_RANK or be CapacityState.UNKNOWN"
+
 #: Aggregate precedence, evaluated top-to-bottom, when eligible candidates
 #: is empty. Each entry is (state, set-of-exclusion-reasons-that-trigger-it);
 #: the first entry whose reason set intersects the exclusions actually
-#: present wins. Falling through with no match (only mismatches / capacity
-#: mismatches / HOST_SOURCE_UNPROVEN present, or zero candidates at all)
-#: yields NO_ELIGIBLE_CANDIDATE.
+#: present wins. ``HOST_SOURCE_UNPROVEN`` and the three mismatch reasons
+#: (``CAPABILITY_MISMATCH``/``QUOTA_CLASS_MISMATCH``/``PROVIDER_MISMATCH``)
+#: are DELIBERATELY absent from every bucket below — reviewer-ratified
+#: (M-4/n-…): a candidate that is merely the wrong shape for this demand,
+#: or whose host-source closure was never proven, is not "the org is
+#: waiting on capacity" or "evidence is stale" in the same sense staleness/
+#: occupancy/effect-unknown are — it falls through to
+#: ``NO_ELIGIBLE_CANDIDATE``, same as zero candidates at all.
+#: :func:`_first_exclusion_reason` is a REFINEMENT of this same precedence
+#: at the per-candidate level: its fixed gate order checks the trigger sets
+#: below in this exact top-to-bottom order (splitting each bucket into its
+#: own stable sub-order), so the per-candidate reason a caller sees is
+#: never surprising relative to what the aggregate would pick if it were
+#: the only reason present.
 _AGGREGATE_PRECEDENCE: tuple[tuple[SelectionState, frozenset[ExclusionReason]], ...] = (
     (SelectionState.RECONCILIATION_REQUIRED, frozenset({ExclusionReason.CONTRADICTORY_BINDING})),
     (SelectionState.EFFECT_UNKNOWN, frozenset({ExclusionReason.EFFECT_UNKNOWN})),
@@ -129,16 +163,28 @@ _AGGREGATE_PRECEDENCE: tuple[tuple[SelectionState, frozenset[ExclusionReason]], 
 # ---------------------------------------------------------------------------
 
 def _require_token(name: str, value: object) -> str:
-    if not isinstance(value, str) or not value or any(ch.isspace() for ch in value):
-        raise ValueError(f"{name} must be a non-empty token with no whitespace")
+    """Every text token in this module's wire — worker_id, provider,
+    quota_class, capabilities, tie-breaker strings, exclusion/tied worker
+    ids — is secret-safe: non-empty, no whitespace, and (reviewer M-1/M-2)
+    no ``"@"`` or ``"/"`` either, so an email address or a filesystem path
+    can never flow through ANY token field, not just ``account_label``.
+    """
+    if (
+        not isinstance(value, str)
+        or not value
+        or any(ch.isspace() for ch in value)
+        or "@" in value
+        or "/" in value
+    ):
+        raise ValueError(f"{name} must be a non-empty token with no whitespace, '@', or '/'")
     return value
 
 
 def _require_account_label(value: object) -> str:
-    token = _require_token("account_label", value)
-    if "@" in token or "/" in token:
-        raise ValueError("account_label must not contain '@' or '/' (no emails, no paths)")
-    return token
+    # _require_token already rejects '@'/'/' for every token (see above);
+    # this wrapper is kept, unchanged in name and call sites, as the
+    # explicit account-label-specific gate the FROZEN SPEC names.
+    return _require_token("account_label", value)
 
 
 def _require_capability_set(name: str, value: object) -> frozenset[str]:
@@ -214,9 +260,13 @@ class PlacementCandidateFact:
     """One point-in-time, source-attributed candidate worker observation.
 
     Every text field is a secret-safe token (no whitespace, no empty
-    strings); ``account_label`` additionally rejects ``"@"`` and ``"/"`` so
-    an email address or a filesystem path can never flow into a decision or
-    its wire form.
+    strings, no ``"@"``, no ``"/"``) so an email address or a filesystem
+    path can never flow into a decision or its wire form. Construction ALSO
+    eagerly builds (and discards) the Phase-B placement-snapshot shape from
+    this candidate's own ``worker_id``/``quota_class``/``provider``/
+    ``account_label``/``observed_at_ms`` — enforcing the snapshot's own
+    canonical regexes at construction time, on every candidate, so
+    ``select_placement`` can never raise late on the winning path.
     """
 
     worker_id: str
@@ -255,6 +305,33 @@ class PlacementCandidateFact:
             "closure_source",
         )
         _require_enum("effect_state", self.effect_state, EffectState)
+        # Reviewer M-1/M-2: eagerly enforce the Phase-B snapshot contract's
+        # own canonical regexes (executive_orchestration_principal._ID_RE /
+        # _PROVIDER_RE / _ACCOUNT_RE) at CONSTRUCTION time, on every
+        # candidate — not only the eventual winner. Without this, a
+        # candidate whose worker_id/quota_class/provider/account_label
+        # passes this module's own looser token check but fails the
+        # snapshot's stricter regex would only be discovered when
+        # select_placement() tries to build its snapshot on the winning
+        # path — a late, mid-algorithm raise on an input that had already
+        # been accepted as a typed fact. Constructing the fact now refuses
+        # it up front, so select_placement can never raise past this point.
+        try:
+            build_placement_snapshot(
+                worker_id=self.worker_id,
+                quota_class=self.quota_class,
+                provider=self.provider,
+                account_label=self.account_label,
+                observed_at_ms=self.observed_at_ms,
+            )
+        except OrchestrationPrincipalError as exc:
+            # OrchestrationPrincipalError's own messages already name only
+            # the failing field (see executive_orchestration_principal._text
+            # / _integer) and never interpolate the caller-supplied value —
+            # safe to relay verbatim.
+            raise ValueError(
+                f"candidate fields fail the Phase-B placement snapshot contract: {exc}"
+            ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +433,21 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     """Closed-key revalidation of a ``mastermind.executive_placement_selection.v1``
     wire dict. Raises ``ValueError``/``TypeError`` on any violation; never
     performs I/O.
+
+    Every error message names the offending FIELD only — never the
+    caller-supplied VALUE (reviewer M-3) — since this function's whole
+    point is to revalidate a wire dict from a potentially untrusted or
+    malformed source; interpolating the value back into the exception text
+    would defeat that.
+
+    Beyond per-field shape, this also enforces the CROSS-FIELD invariants a
+    well-formed decision always satisfies: ``selected`` is present iff
+    ``state == "selected"``; a set ``tie_breaker_used`` implies
+    ``state == "selected"`` and at least two ``tied_worker_ids``;
+    ``state == "tie_abstained"`` implies at least two ``tied_worker_ids``;
+    every other state implies an EMPTY ``tied_worker_ids``; and
+    ``evaluated_candidates`` is never smaller than either ``exclusions`` or
+    ``tied_worker_ids``.
     """
     if not isinstance(value, Mapping) or set(value) != _SELECTION_KEYS:
         actual = sorted(value) if isinstance(value, Mapping) else type(value).__name__
@@ -371,14 +463,17 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     try:
         state = SelectionState(value["state"])
     except ValueError as exc:
-        raise ValueError(f"state not recognized: {value['state']!r}") from exc
+        raise ValueError("state is not a recognized SelectionState value") from exc
 
     selected_raw = value["selected"]
     selected = validate_placement_snapshot(selected_raw) if selected_raw is not None else None
 
     tie_breaker_used = value["tie_breaker_used"]
-    if tie_breaker_used is not None and not isinstance(tie_breaker_used, str):
-        raise TypeError("tie_breaker_used must be a string or null")
+    if tie_breaker_used is not None:
+        if not isinstance(tie_breaker_used, str):
+            raise TypeError("tie_breaker_used must be a string or null")
+        if tie_breaker_used not in _RECOGNIZED_TIE_BREAKERS:
+            raise ValueError("tie_breaker_used is not a recognized tie-breaker token")
 
     tied_raw = value["tied_worker_ids"]
     if not isinstance(tied_raw, list) or not all(isinstance(w, str) for w in tied_raw):
@@ -399,7 +494,7 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
         try:
             reason = ExclusionReason(item["reason"])
         except ValueError as exc:
-            raise ValueError(f"exclusion reason not recognized: {item['reason']!r}") from exc
+            raise ValueError("exclusion reason is not a recognized ExclusionReason value") from exc
         exclusions.append({"worker_id": worker_id, "reason": reason.value})
     if exclusions != sorted(exclusions, key=lambda item: (item["worker_id"], item["reason"])):
         raise ValueError("exclusions must be sorted by worker_id then reason")
@@ -407,6 +502,25 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     evaluated_candidates = value["evaluated_candidates"]
     if type(evaluated_candidates) is not int or evaluated_candidates < 0:
         raise ValueError("evaluated_candidates must be an integer >= 0")
+
+    # --- cross-field invariants (reviewer M-3) ------------------------------
+    if (selected is not None) != (state is SelectionState.SELECTED):
+        raise ValueError("selected must be present iff state is 'selected'")
+    if tie_breaker_used is not None:
+        if state is not SelectionState.SELECTED:
+            raise ValueError("tie_breaker_used may only be set when state is 'selected'")
+        if len(tied_raw) < 2:
+            raise ValueError("tie_breaker_used requires at least two tied_worker_ids")
+    if state is SelectionState.TIE_ABSTAINED and len(tied_raw) < 2:
+        raise ValueError("state 'tie_abstained' requires at least two tied_worker_ids")
+    if state not in (SelectionState.SELECTED, SelectionState.TIE_ABSTAINED) and tied_raw:
+        raise ValueError(
+            "tied_worker_ids must be empty unless state is 'selected' or 'tie_abstained'"
+        )
+    if evaluated_candidates < len(exclusions):
+        raise ValueError("evaluated_candidates must be >= the number of exclusions")
+    if evaluated_candidates < len(tied_raw):
+        raise ValueError("evaluated_candidates must be >= the number of tied_worker_ids")
 
     return {
         "schema_version": SELECTION_SCHEMA,
@@ -427,20 +541,31 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
 def _first_exclusion_reason(
     candidate: PlacementCandidateFact, demand: PlacementDemand
 ) -> ExclusionReason | None:
-    """The first failing gate, in the FIXED documented order, or ``None`` if
-    the candidate survives every gate (i.e. is eligible)."""
-    if not demand.required_capabilities.issubset(candidate.capabilities):
-        return ExclusionReason.CAPABILITY_MISMATCH
-    if candidate.quota_class != demand.quota_class:
-        return ExclusionReason.QUOTA_CLASS_MISMATCH
-    if demand.provider is not None and demand.provider != candidate.provider:
-        return ExclusionReason.PROVIDER_MISMATCH
+    """The first failing gate, or ``None`` if the candidate survives every
+    gate (i.e. is eligible).
+
+    Reviewer-ratified order (M-4): this is a REFINEMENT of
+    :data:`_AGGREGATE_PRECEDENCE` at the per-candidate level — reasons that
+    would win the aggregate (``CONTRADICTORY_BINDING``, then
+    ``EFFECT_UNKNOWN``, then the stale/unknown-freshness/capacity-unknown
+    family, then ``OCCUPIED``/``BOUND_ELSEWHERE``) are checked first, in
+    that same order, and only THEN the reasons the aggregate deliberately
+    never elevates on their own (``HOST_SOURCE_UNPROVEN``, then the three
+    mismatches). A candidate failing multiple gates always reports the
+    highest-precedence one — e.g. a candidate that is both ``OCCUPIED`` and
+    has a stale capacity fact reports ``STALE_CAPACITY_FACT``, never
+    ``OCCUPIED``.
+
+    Ruling (m-6): a ``CONTRADICTORY`` or ``EFFECT_UNKNOWN`` candidate is
+    excluded PER-CANDIDATE only — it never poisons a clean sibling's
+    eligibility, and a clean sibling may still be ``SELECTED`` in the same
+    call. Only a repeated ``worker_id`` (duplicate identity) is globally
+    fatal to the whole decision; see :func:`select_placement` step 3.
+    """
     if candidate.occupancy is OccupancyState.CONTRADICTORY:
         return ExclusionReason.CONTRADICTORY_BINDING
-    if candidate.occupancy is OccupancyState.OCCUPIED:
-        return ExclusionReason.OCCUPIED
-    if candidate.occupancy is OccupancyState.BOUND_ELSEWHERE:
-        return ExclusionReason.BOUND_ELSEWHERE
+    if candidate.effect_state is EffectState.EFFECT_UNKNOWN:
+        return ExclusionReason.EFFECT_UNKNOWN
     if candidate.occupancy_source.freshness is Freshness.STALE:
         return ExclusionReason.STALE_OCCUPANCY_FACT
     if candidate.occupancy_source.freshness is Freshness.UNKNOWN:
@@ -451,10 +576,18 @@ def _first_exclusion_reason(
         return ExclusionReason.UNKNOWN_FRESHNESS
     if candidate.capacity_state is CapacityState.UNKNOWN:
         return ExclusionReason.CAPACITY_UNKNOWN
+    if candidate.occupancy is OccupancyState.OCCUPIED:
+        return ExclusionReason.OCCUPIED
+    if candidate.occupancy is OccupancyState.BOUND_ELSEWHERE:
+        return ExclusionReason.BOUND_ELSEWHERE
     if not candidate.host_source_closure_proven:
         return ExclusionReason.HOST_SOURCE_UNPROVEN
-    if candidate.effect_state is EffectState.EFFECT_UNKNOWN:
-        return ExclusionReason.EFFECT_UNKNOWN
+    if not demand.required_capabilities.issubset(candidate.capabilities):
+        return ExclusionReason.CAPABILITY_MISMATCH
+    if candidate.quota_class != demand.quota_class:
+        return ExclusionReason.QUOTA_CLASS_MISMATCH
+    if demand.provider is not None and demand.provider != candidate.provider:
+        return ExclusionReason.PROVIDER_MISMATCH
     return None
 
 
@@ -507,9 +640,19 @@ def select_placement(
     3. Any repeated ``worker_id`` -> ``RECONCILIATION_REQUIRED``; every
        duplicated id gets exactly one ``DUPLICATE_IDENTITY`` exclusion.
     4. Candidates are evaluated in canonical ``worker_id``-sorted order. Per
-       candidate, the first failing gate (see :func:`_first_exclusion_reason`
-       for the fixed order) yields its exclusion; a candidate failing no gate
-       is eligible.
+       candidate, the reason is the first failing gate in a FIXED order
+       that REFINES :data:`_AGGREGATE_PRECEDENCE` (see
+       :func:`_first_exclusion_reason`): ``CONTRADICTORY`` occupancy, then
+       ``EFFECT_UNKNOWN``, then occupancy-source staleness/unknown-freshness,
+       then capacity-source staleness/unknown-freshness, then
+       ``capacity_state`` ``UNKNOWN``, then ``OCCUPIED``, then
+       ``BOUND_ELSEWHERE``, then (ratified: these deliberately fall through
+       to ``NO_ELIGIBLE_CANDIDATE`` at the aggregate step rather than
+       elevating their own state) unproven host-source closure, then a
+       capability/quota-class/provider mismatch. A candidate failing no
+       gate is eligible; a ``CONTRADICTORY``/``EFFECT_UNKNOWN`` exclusion is
+       PER-CANDIDATE only — it never excludes a clean sibling, which may
+       still be ``SELECTED`` in the same call (ruling m-6).
     5. Eligible non-empty: rank ONLY by ``capacity_state`` (``AVAILABLE``
        before ``DEGRADED``); take the min-rank set. Exactly one winner ->
        ``SELECTED``. More than one: ``accepted_tie_breaker ==
@@ -520,7 +663,9 @@ def select_placement(
        over the exclusion reasons actually present — see
        :data:`_AGGREGATE_PRECEDENCE` — falling through to
        ``NO_ELIGIBLE_CANDIDATE`` when only mismatch/``HOST_SOURCE_UNPROVEN``
-       reasons are present, or when there were zero candidates at all.
+       reasons are present (deliberate, ratified — see
+       :data:`_AGGREGATE_PRECEDENCE`), or when there were zero candidates at
+       all.
 
     No clock, no environment, no I/O, no randomness: ranking, tie-breaking,
     and every aggregate decision are functions of the typed facts alone.
@@ -540,7 +685,7 @@ def select_placement(
             "selection may run"
         )
     if accepted_tie_breaker is not None and accepted_tie_breaker not in _RECOGNIZED_TIE_BREAKERS:
-        raise ValueError(f"accepted_tie_breaker not recognized: {accepted_tie_breaker!r}")
+        raise ValueError("accepted_tie_breaker is not a recognized tie-breaker token")
 
     responsibility_ref = responsibility.responsibility_ref
     evaluated_candidates = len(candidate_tuple)
