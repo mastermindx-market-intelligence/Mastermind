@@ -28,7 +28,6 @@ from control_plane.executive_runtime import (
     _current_orchestration_tree_material,
     _current_orchestration_tree_material_for_dispatch,
     _review_attempt_is_independent,
-    _strict_canonical_json_loads,
     _validated_aggregation_handoff,
     _validated_plan_admission,
     _validated_role_completion_material,
@@ -176,19 +175,15 @@ class CooCycle:
                 evidence={"error_type": type(exc).__name__},
             )
 
-        existing_blocks = [
-            event
-            for event in self.runtime.events.list_events(job_id=root_id)
-            if event.event_type == "COO_CYCLE_BLOCKED"
-        ]
-        if existing_blocks:
-            event = existing_blocks[0]
+        existing_block = self.runtime.jobs.validated_cycle_block(root_id)
+        if existing_block is not None:
+            command_id, payload = existing_block
             return self._outcome(
                 root_id,
                 "BLOCKED",
-                str(event.payload.get("selected_job_id") or root_id),
-                event.command_id,
-                event.payload,
+                str(payload["selected_job_id"]),
+                command_id,
+                payload,
             )
 
         provenance = root.orchestration_provenance
@@ -304,23 +299,37 @@ class CooCycle:
             selected = recoverable[0]
             if not selected.current_attempt_id:
                 return self._block(root_id, selected.job_id, "state_conflict")
-            command = (
-                f"coo-cycle:{root_id}:requeue:{selected.job_id}:"
-                f"{selected.current_attempt_id}"
+            expectation = self.runtime.jobs.project_retry_safety(
+                selected.job_id,
+                expected_attempt_id=str(selected.current_attempt_id),
             )
             try:
-                receipt = self.runtime.jobs.requeue_job(
-                    selected.job_id, command_id=command
+                committed = self.runtime.jobs.commit_coo_retry_decision(
+                    root_id,
+                    selected_job_id=selected.job_id,
+                    expectation=expectation,
+                    policy_sha=EXPECTED_POLICY_SHA256,
                 )
             except StateConflict as exc:
-                return self._block(
+                return self._outcome(
                     root_id,
+                    "RECONCILIATION_REQUIRED",
                     selected.job_id,
-                    _classify_invalid(exc),
-                    evidence={"error_type": type(exc).__name__},
+                    None,
+                    {
+                        "schema_version": "mastermind.executive_retry_reconciliation/v1",
+                        "decision": "NEEDS_RECONCILIATION",
+                        "effect_state": "NONE",
+                        "reason": _classify_invalid(exc),
+                        "error_type": type(exc).__name__,
+                    },
                 )
             return self._outcome(
-                root_id, "REQUEUED", selected.job_id, command, receipt
+                root_id,
+                committed.action,
+                selected.job_id,
+                committed.command_id,
+                committed.receipt,
             )
 
         # 3. Resolve one closed adverse terminal/review verdict.
