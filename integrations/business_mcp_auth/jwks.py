@@ -7,6 +7,8 @@ policy. Every network read targets the one immutable ``ResourcePolicy.jwks_uri``
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import math
 import re
@@ -47,8 +49,28 @@ class JwksFetcher(Protocol):
     ) -> bytes: ...
 
 
+class _DuplicateJsonMember(ValueError):
+    """One decoded JSON object repeated a member name."""
+
+
 def _error(code: AuthErrorCode) -> AuthError:
     return AuthError(code)
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Build one JSON object while refusing decoded duplicate names.
+
+    ``object_pairs_hook`` receives names after JSON escape decoding, so a literal
+    ``kid`` and an escaped-equivalent ``\u006bid`` collide here as required.
+    The hook is applied by ``json.loads`` at every object depth.
+    """
+
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonMember
+        result[key] = value
+    return result
 
 
 def _valid_kid(value: object) -> str:
@@ -81,8 +103,29 @@ def _exact_ascii_text(value: object, *, maximum: int) -> str:
 
 
 def _base64url_uint(value: object) -> str:
+    """Return one canonical unpadded positive Base64urlUInt spelling.
+
+    RFC 7518 Base64urlUInt is the minimum-length unsigned big-endian integer.
+    Strict decode plus byte-for-byte canonical re-encoding rejects padding,
+    alternate/non-zero pad bits and other spellings of the same integer. An
+    empty or leading-zero octet is not a positive minimum-length integer.
+    """
+
     token = _exact_ascii_text(value, maximum=8192)
     if _BASE64URL_RE.fullmatch(token) is None:
+        raise _error(AuthErrorCode.JWKS_REFUSED)
+    try:
+        decoded = base64.b64decode(
+            token + "=" * (-len(token) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+    except (binascii.Error, ValueError):
+        raise _error(AuthErrorCode.JWKS_REFUSED) from None
+    if not decoded or decoded[0] == 0:
+        raise _error(AuthErrorCode.JWKS_REFUSED)
+    canonical = base64.urlsafe_b64encode(decoded).rstrip(b"=").decode("ascii")
+    if canonical != token:
         raise _error(AuthErrorCode.JWKS_REFUSED)
     return token
 
@@ -149,8 +192,11 @@ def _parse_jwks(payload: bytes) -> dict[str, dict[str, object]]:
     if not isinstance(payload, bytes) or not payload or len(payload) > MAX_JWKS_BYTES:
         raise _error(AuthErrorCode.JWKS_REFUSED)
     try:
-        value = json.loads(payload.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        value = json.loads(
+            payload.decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_json_object,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
         raise _error(AuthErrorCode.JWKS_REFUSED) from None
     if not isinstance(value, Mapping) or set(value) != {"keys"}:
         raise _error(AuthErrorCode.JWKS_REFUSED)

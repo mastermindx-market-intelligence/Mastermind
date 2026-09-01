@@ -7,6 +7,8 @@ session, persistence, retry, lifecycle, or organizational authority.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from collections.abc import Callable
 
@@ -42,21 +44,28 @@ def _principal_matches_policy(
         principal.policy_id != policy.policy_id
         or principal.issuer != policy.issuer
         or principal.resource != policy.resource
+        or principal.scopes != policy.required_scopes
     ):
-        return False
-    if not isinstance(principal.scopes, tuple) or not all(
-        isinstance(scope, str) for scope in principal.scopes
-    ):
-        return False
-    if not set(policy.required_scopes).issubset(principal.scopes):
         return False
     if type(principal.issued_at) is not int or type(principal.expires_at) is not int:
         return False
     if principal.expires_at <= principal.issued_at:
         return False
-    if not _is_digest(principal.issuer_digest):
+
+    expected_issuer_digest = hashlib.sha256(
+        policy.issuer.encode("utf-8")
+    ).hexdigest()
+    if (
+        not _is_digest(principal.issuer_digest)
+        or not hmac.compare_digest(principal.issuer_digest, expected_issuer_digest)
+    ):
         return False
     if not _is_digest(principal.subject_digest):
+        return False
+    if not any(
+        hmac.compare_digest(principal.subject_digest, allowed)
+        for allowed in policy.allowed_subject_digests
+    ):
         return False
     if not (
         _is_digest(principal.client_ref)
@@ -79,8 +88,8 @@ class MastermindTokenVerifier(TokenVerifier):
         now: Callable[[], int],
         audit_sink: AuthAuditSink,
     ) -> None:
-        if not callable(getattr(authenticator, "verify_token", None)):
-            raise TypeError("authenticator must provide verify_token")
+        if not isinstance(authenticator, JwtAuthenticator):
+            raise TypeError("authenticator must be JwtAuthenticator")
         if not isinstance(policy, ResourcePolicy):
             raise TypeError("policy must be ResourcePolicy")
         if not callable(now):
@@ -111,8 +120,24 @@ class MastermindTokenVerifier(TokenVerifier):
             accepted=False,
         )
 
+    def _authenticator_policy_matches(self) -> bool:
+        """Revalidate the exact immutable verifier policy before token work."""
+
+        try:
+            bound_policy = self._authenticator.policy
+        except Exception:
+            return False
+        return isinstance(bound_policy, ResourcePolicy) and bound_policy == self._policy
+
     async def verify_token(self, token: str) -> AccessToken | None:
         """Return one closed MCP token projection or fail closed with ``None``."""
+
+        # The JWT verifier and MCP adapter must be one exact policy composition.
+        # Refuse before reading the clock or asking the authenticator to inspect
+        # attacker-controlled token bytes when that trusted composition drifted.
+        if not self._authenticator_policy_matches():
+            self._refuse_internal()
+            return None
 
         try:
             now = self._now()

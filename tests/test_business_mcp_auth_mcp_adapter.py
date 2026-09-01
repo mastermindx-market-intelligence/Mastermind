@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 from collections.abc import Callable
 
@@ -14,10 +15,12 @@ from integrations.business_mcp_auth.contracts import (
     AuthAuditEvent,
     AuthError,
     AuthErrorCode,
+    ResourcePolicy,
     VerifiedPrincipal,
     load_resource_policy,
     subject_digest,
 )
+from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 
 
@@ -58,12 +61,17 @@ def _policy():
     )
 
 
+def _issuer_digest(policy: ResourcePolicy | None = None) -> str:
+    selected = policy or _policy()
+    return hashlib.sha256(selected.issuer.encode("utf-8")).hexdigest()
+
+
 def _principal(**overrides: object) -> VerifiedPrincipal:
     policy = _policy()
     value = VerifiedPrincipal(
         policy_id=policy.policy_id,
         issuer=policy.issuer,
-        issuer_digest="1" * 64,
+        issuer_digest=_issuer_digest(policy),
         resource=policy.resource,
         subject_digest=policy.allowed_subject_digests[0],
         client_ref="2" * 64,
@@ -75,8 +83,11 @@ def _principal(**overrides: object) -> VerifiedPrincipal:
     return dataclasses.replace(value, **overrides)
 
 
-class _Authenticator:
-    def __init__(self, result: object) -> None:
+class _Authenticator(JwtAuthenticator):
+    """Controllable real-contract authenticator for the isolated MCP edge tests."""
+
+    def __init__(self, result: object, *, policy: ResourcePolicy) -> None:
+        self._policy = policy
         self.result = result
         self.calls: list[tuple[object, int]] = []
 
@@ -108,12 +119,17 @@ def _verifier(
     *,
     now: Callable[[], object] = lambda: NOW,
     sink: _Sink | None = None,
+    authenticator_policy: ResourcePolicy | None = None,
 ):
-    authenticator = _Authenticator(result)
+    policy = _policy()
+    authenticator = _Authenticator(
+        result,
+        policy=authenticator_policy or policy,
+    )
     audit_sink = sink or _Sink()
     verifier = MastermindTokenVerifier(
         authenticator=authenticator,
-        policy=_policy(),
+        policy=policy,
         now=now,
         audit_sink=audit_sink,
     )
@@ -158,7 +174,7 @@ def test_absent_jti_remains_explicit_null_in_closed_claims() -> None:
 
     assert isinstance(access, AccessToken)
     assert access.claims == {
-        "issuer_digest": "1" * 64,
+        "issuer_digest": _issuer_digest(),
         "client_ref": "2" * 64,
         "jti_digest": None,
     }

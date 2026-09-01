@@ -207,6 +207,12 @@ class JwtAuthenticator:
         self._policy = policy
         self._jwks_cache = jwks_cache
 
+    @property
+    def policy(self) -> ResourcePolicy:
+        """Return the exact immutable policy bound to this authenticator."""
+
+        return self._policy
+
     async def verify_authorization_header(
         self,
         header: object,
