@@ -103,7 +103,7 @@ def test_v4_source_packages_do_not_reuse_the_runtime_plugin_namespace() -> None:
     assert root["capability_packages"] == {}
     assert root["plugins"] == {}
 
-    assert "capability_packages, not a second registry" in amendment
+    assert "`capability_packages`, not a second registry" in amendment
     assert "plugins={}" in amendment
     assert "installed/runtime plugin grant namespace" in amendment
 
