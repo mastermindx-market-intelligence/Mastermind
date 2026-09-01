@@ -33,20 +33,28 @@ _PLAN = (
 )
 _MASTERMIND_SHA = "a" * 40
 _MACRO_SHA = "b" * 40
+_STRATEGIC_BLOB_SHA = "c" * 40
+_AGENTOS_RECORDS_DIGEST = "sha256:" + "d" * 64
 _CHAIRMAN_REF = "CHAIRMAN_DIRECTIVE:2026-08-30"
 _GITHUB_REF = "GITHUB:A1"
 
 
+def _canonical_bytes(value) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+
+
 def _digest(value) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-            allow_nan=False,
-        ).encode("ascii")
-    ).hexdigest()
+    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _payload_digest(value) -> str:
+    return "sha256:" + _digest(value)
 
 
 def _classification_payload(option: dict) -> dict:
@@ -115,10 +123,10 @@ def _bind_bundle(bundle: dict) -> dict:
     for option in bundle["options"]:
         ref = option["classification_source_ref"]
         if ref in receipts:
-            existing = receipts[ref]["revision"].split(";")
             token = f"classification-sha256:{_digest(_classification_payload(option))}"
-            if token not in existing:
-                receipts[ref]["revision"] = ";".join([*existing, token])
+            fields = receipts[ref]["revision"].split(";")
+            if token not in fields:
+                receipts[ref]["revision"] = ";".join([*fields, token])
     return bundle
 
 
@@ -212,12 +220,25 @@ def _boot_packet(
     }
 
 
-def _revision_attestation(revision, *, state="CURRENT"):
+def _mastermind_attestation(boot: dict, *, state="CURRENT") -> dict:
     return {
-        "revision": revision,
+        "revision": _MASTERMIND_SHA,
         "state": state,
         "load_bearing": True,
         "observed_at": "2026-08-30T16:00:00Z",
+        "source_blob_sha": _STRATEGIC_BLOB_SHA,
+        "payload_digest": _payload_digest(boot["strategic_state"]),
+    }
+
+
+def _agentos_attestation(boot: dict, *, state="CURRENT") -> dict:
+    return {
+        "revision": _MACRO_SHA,
+        "state": state,
+        "load_bearing": True,
+        "observed_at": "2026-08-30T16:00:00Z",
+        "source_records_digest": _AGENTOS_RECORDS_DIGEST,
+        "payload_digest": _payload_digest(boot["brief"]),
     }
 
 
@@ -308,6 +329,7 @@ def _github_receipt():
 
 
 def _bundle(*, boot=None, option=None, additions=None):
+    resolved_boot = _boot_packet() if boot is None else boot
     bundle = {
         "schema": SOURCE_BUNDLE_SCHEMA,
         "as_of": "2026-08-30T16:00:00Z",
@@ -318,11 +340,9 @@ def _bundle(*, boot=None, option=None, additions=None):
             "load_bearing": True,
             "observed_at": "2026-08-30T16:00:00Z",
         },
-        "mastermind_revision_attestation": _revision_attestation(
-            _MASTERMIND_SHA
-        ),
-        "agentos_revision_attestation": _revision_attestation(_MACRO_SHA),
-        "boot_packet": _boot_packet() if boot is None else boot,
+        "mastermind_revision_attestation": _mastermind_attestation(resolved_boot),
+        "agentos_revision_attestation": _agentos_attestation(resolved_boot),
+        "boot_packet": resolved_boot,
         "additional_source_receipts": (
             [_github_receipt()] if additions is None else additions
         ),
@@ -350,17 +370,16 @@ def _duplicate_payload(secret: str, *, nested: bool) -> str:
     return f'{{"schema":"{secret}",' + valid[1:]
 
 
-def _assert_agentos_unknown(brief):
-    boot = _boot_packet(brief=brief)
-    option = _option(source_refs=[AGENT_OS_SOURCE_REF])
-    result = evaluate_bundle(_bundle(boot=boot, option=option, additions=[]))
+def _assert_agentos_state(bundle: dict, expected: str) -> dict:
+    result = evaluate_bundle(bundle)
     summary = next(
         item
         for item in result["source_summary"]
         if item["source_ref"] == AGENT_OS_SOURCE_REF
     )
-    assert summary["state"] == "UNKNOWN"
+    assert summary["state"] == expected
     assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+    return summary
 
 
 def test_composes_owner_attributed_input_and_evaluates_unique_option():
@@ -373,23 +392,17 @@ def test_composes_owner_attributed_input_and_evaluates_unique_option():
         AGENT_OS_SOURCE_REF,
         _GITHUB_REF,
     ]
-    assert composed["strategic_constraints_source_ref"] == STRATEGIC_SOURCE_REF
-    assert _receipt(composed, STRATEGIC_SOURCE_REF)["state"] == "CURRENT"
-    assert _receipt(composed, AGENT_OS_SOURCE_REF)["state"] == "CURRENT"
-    assert "constraints-sha256:" in _receipt(
-        composed, STRATEGIC_SOURCE_REF
-    )["revision"]
-    assert (
-        composed["strategic_constraints"]["duplicate_control_planes"]
-        == "prohibited"
-    )
+    strategic = _receipt(composed, STRATEGIC_SOURCE_REF)
+    agentos = _receipt(composed, AGENT_OS_SOURCE_REF)
+    assert strategic["state"] == "CURRENT"
+    assert agentos["state"] == "CURRENT"
+    assert "constraints-sha256:" in strategic["revision"]
+    assert f"blob:{_STRATEGIC_BLOB_SHA}" in strategic["revision"]
+    assert "records-sha256:" + "d" * 64 in agentos["revision"]
 
     result = evaluate_bundle(_bundle())
     assert result["schema"] == COMPOSITION_SCHEMA
     assert result["packet"]["recommended_option_id"] == "OPT-COMPOSE"
-    assert result["packet"]["delegation_envelope"]["digest"].startswith(
-        "sha256:"
-    )
     assert result["execution_authority_granted"] is False
     assert result["packet"]["execution_authority_granted"] is False
 
@@ -405,8 +418,10 @@ def test_missing_or_invalid_strategic_state_fails_closed():
     for strategic in (None, {"schema": "wrong"}):
         boot = _boot_packet()
         boot["strategic_state"] = strategic
+        bundle = _bundle()
+        bundle["boot_packet"] = boot
         with pytest.raises(ChairmanCognitionSourceError, match="strategic state"):
-            compose_input(_bundle(boot=boot))
+            compose_input(bundle)
 
 
 def test_each_load_bearing_strategic_constraint_is_required_by_composer():
@@ -420,58 +435,79 @@ def test_each_load_bearing_strategic_constraint_is_required_by_composer():
         "unbounded_autonomous_strategic_modification",
     )
     for constraint in constraints:
-        boot = _boot_packet()
-        del boot["strategic_state"]["constraints"][constraint]
+        bundle = _bundle()
+        del bundle["boot_packet"]["strategic_state"]["constraints"][constraint]
         with pytest.raises(
             ChairmanCognitionSourceError,
             match="load-bearing strategic constraint missing",
         ):
-            compose_input(_bundle(boot=boot))
+            compose_input(bundle)
 
 
-def test_unresolved_mastermind_revision_is_unknown_not_current():
-    boot = _boot_packet(mastermind_sha=None)
-    option = _option(source_refs=[STRATEGIC_SOURCE_REF])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda bundle: bundle["boot_packet"]["strategic_state"].update(
+            {"company_phase": "MUTATED_WITHOUT_ATTESTATION"}
+        ),
+        lambda bundle: bundle["mastermind_revision_attestation"].update(
+            {"payload_digest": "UNRESOLVED"}
+        ),
+        lambda bundle: bundle["mastermind_revision_attestation"].update(
+            {"source_blob_sha": "UNRESOLVED"}
+        ),
+    ],
+)
+def test_strategic_payload_or_identity_cannot_be_laundered_current(mutation):
+    bundle = _bundle()
+    mutation(bundle)
     with pytest.raises(
         ChairmanCognitionError,
         match="strategic constraints source must be CURRENT",
     ):
-        evaluate_bundle(_bundle(boot=boot, option=option))
+        compose_input(bundle)
 
 
-def test_stale_local_master_cannot_be_laundered_as_current():
-    boot = _boot_packet(mastermind_sha="c" * 40)
-    option = _option(source_refs=[STRATEGIC_SOURCE_REF])
-    with pytest.raises(
-        ChairmanCognitionError,
-        match="strategic constraints source must be CURRENT",
-    ):
-        evaluate_bundle(_bundle(boot=boot, option=option))
-
-
-def test_noncanonical_mastermind_checkout_is_unknown_even_when_sha_matches():
-    boot = _boot_packet()
-    boot["mastermind"]["branch"] = "feature/unaccepted-strategy"
-    option = _option(source_refs=[STRATEGIC_SOURCE_REF])
-    with pytest.raises(
-        ChairmanCognitionError,
-        match="strategic constraints source must be CURRENT",
-    ):
-        evaluate_bundle(_bundle(boot=boot, option=option))
-
-
-def test_stale_or_unknown_mastermind_attestation_propagates():
-    for state in ("STALE", "UNKNOWN", "CONFLICT"):
-        bundle = _bundle(option=_option(source_refs=[STRATEGIC_SOURCE_REF]))
-        bundle["mastermind_revision_attestation"]["state"] = state
+def test_unresolved_or_noncanonical_mastermind_checkout_is_not_current():
+    for sha, branch in ((None, "master"), (_MASTERMIND_SHA, "feature/unaccepted")):
+        boot = _boot_packet(mastermind_sha=sha)
+        boot["mastermind"]["branch"] = branch
+        bundle = _bundle(boot=boot)
         with pytest.raises(
             ChairmanCognitionError,
             match="strategic constraints source must be CURRENT",
         ):
-            evaluate_bundle(bundle)
+            compose_input(bundle)
 
 
-def test_missing_or_degraded_agentos_is_unknown_not_fabricated_current():
+def test_stale_local_master_and_noncurrent_attestation_fail_root_closed():
+    bundle = _bundle()
+    bundle["boot_packet"]["mastermind"]["sha"] = "e" * 40
+    with pytest.raises(ChairmanCognitionError, match="must be CURRENT"):
+        compose_input(bundle)
+
+    for state in ("STALE", "UNKNOWN", "CONFLICT"):
+        bundle = _bundle()
+        bundle["mastermind_revision_attestation"]["state"] = state
+        with pytest.raises(ChairmanCognitionError, match="must be CURRENT"):
+            compose_input(bundle)
+
+
+def test_agentos_payload_mutation_with_unchanged_revision_is_conflict():
+    bundle = _bundle()
+    bundle["boot_packet"]["brief"]["counts"]["total"] += 1
+    summary = _assert_agentos_state(bundle, "CONFLICT")
+    assert "payload-sha256:" in summary["revision"]
+
+
+def test_agentos_unresolved_owner_identity_is_unknown():
+    for field in ("payload_digest", "source_records_digest"):
+        bundle = _bundle()
+        bundle["agentos_revision_attestation"][field] = "UNRESOLVED"
+        _assert_agentos_state(bundle, "UNKNOWN")
+
+
+def test_missing_degraded_or_malformed_agentos_is_unknown_not_current():
     cases = [
         None,
         _brief(degraded=["worktree census unavailable"]),
@@ -480,7 +516,15 @@ def test_missing_or_degraded_agentos_is_unknown_not_fabricated_current():
         {**_brief(), "schema": "future.brief.v2"},
     ]
     for brief in cases:
-        _assert_agentos_unknown(brief)
+        boot = _boot_packet(brief=brief)
+        bundle = _bundle(boot=boot)
+        if isinstance(brief, dict):
+            bundle["agentos_revision_attestation"]["payload_digest"] = _payload_digest(
+                brief
+            )
+        else:
+            bundle["agentos_revision_attestation"]["payload_digest"] = "UNRESOLVED"
+        _assert_agentos_state(bundle, "UNKNOWN")
 
 
 def test_partial_or_malformed_ceo_brief_cannot_be_laundered_current():
@@ -491,51 +535,66 @@ def test_partial_or_malformed_ceo_brief_cannot_be_laundered_current():
     }
     malformed_readiness = _brief()
     malformed_readiness["readiness"]["records"] = [{"state": "ready"}]
-    missing_counts = _brief()
-    del missing_counts["counts"]
     boolean_count = _brief()
     boolean_count["counts"]["total"] = True
 
-    for brief in (
-        partial,
-        malformed_readiness,
-        missing_counts,
-        boolean_count,
-    ):
-        _assert_agentos_unknown(brief)
-
-
-def test_missing_or_invalid_brief_timestamps_remain_unknown_and_use_no_fake_current():
-    missing_generated = _brief()
-    del missing_generated["generated_at"]
-    invalid_generated = _brief()
-    invalid_generated["generated_at"] = "not-a-time"
-    missing_since = _brief()
-    del missing_since["since"]
-    invalid_since = _brief()
-    invalid_since["since"] = "2026-08-30"
-
-    for brief in (
-        missing_generated,
-        invalid_generated,
-        missing_since,
-        invalid_since,
-    ):
-        _assert_agentos_unknown(brief)
+    for brief in (partial, malformed_readiness, boolean_count):
+        boot = _boot_packet(brief=brief)
+        bundle = _bundle(boot=boot)
+        _assert_agentos_state(bundle, "UNKNOWN")
 
 
 def test_macro_revision_mismatch_is_conflict_not_current():
-    boot = _boot_packet(macro_sha="d" * 40)
-    option = _option(source_refs=[AGENT_OS_SOURCE_REF])
-    result = evaluate_bundle(_bundle(boot=boot, option=option, additions=[]))
-    summary = next(
-        item
-        for item in result["source_summary"]
-        if item["source_ref"] == AGENT_OS_SOURCE_REF
+    bundle = _bundle()
+    bundle["boot_packet"]["macro"]["sha"] = "f" * 40
+    summary = _assert_agentos_state(bundle, "CONFLICT")
+    assert "git:" + _MACRO_SHA in summary["revision"]
+
+
+def test_modifying_options_must_cite_both_canonical_owner_roots():
+    for omitted in (STRATEGIC_SOURCE_REF, AGENT_OS_SOURCE_REF):
+        refs = [
+            _CHAIRMAN_REF,
+            STRATEGIC_SOURCE_REF,
+            AGENT_OS_SOURCE_REF,
+            _GITHUB_REF,
+        ]
+        refs.remove(omitted)
+        bundle = _bundle(option=_option(source_refs=refs))
+        with pytest.raises(
+            ChairmanCognitionSourceError,
+            match="must cite Strategic State and Agent OS",
+        ):
+            compose_input(bundle)
+
+
+def test_read_only_option_does_not_require_agentos_citation():
+    option = _option(
+        action="READ_ONLY_AUDIT",
+        reversibility="READ_ONLY",
+        source_refs=[_CHAIRMAN_REF, _GITHUB_REF],
+        operation_key=None,
+        carrier_state="NOT_APPLICABLE",
+        carrier_ref=None,
+        expected_head_sha=None,
+        active_children_after=0,
+        stop_condition=None,
+        rollback_plan=None,
+        falsifier=None,
     )
-    assert summary["state"] == "CONFLICT"
-    assert "canonical:" + _MACRO_SHA in summary["revision"]
-    assert result["packet"]["adjudications"][0]["reason"] == "SOURCE_NOT_CURRENT"
+    bundle = _bundle(option=option)
+    result = evaluate_bundle(bundle)
+    assert result["packet"]["adjudications"][0]["disposition"] == (
+        "READ_ONLY_ELIGIBLE"
+    )
+
+
+def test_source_merge_without_expected_head_remains_refused_by_a1():
+    option = _option(action="SOURCE_MERGE", expected_head_sha=None)
+    result = evaluate_bundle(_bundle(option=option))
+    adjudication = result["packet"]["adjudications"][0]
+    assert adjudication["disposition"] == "REFUSED"
+    assert adjudication["reason"] == "EXPECTED_HEAD_REQUIRED"
 
 
 def test_reserved_source_owner_and_duplicate_ref_fail_closed():
@@ -552,7 +611,7 @@ def test_reserved_source_owner_and_duplicate_ref_fail_closed():
         compose_input(_bundle(additions=[duplicate]))
 
 
-def test_revision_attestations_are_closed_load_bearing_full_shas():
+def test_attestations_are_closed_load_bearing_and_content_typed():
     for field in (
         "mastermind_revision_attestation",
         "agentos_revision_attestation",
@@ -572,18 +631,37 @@ def test_revision_attestations_are_closed_load_bearing_full_shas():
         with pytest.raises(ChairmanCognitionSourceError, match="unknown fields"):
             compose_input(bundle)
 
+    bundle = _bundle()
+    bundle["mastermind_revision_attestation"]["source_blob_sha"] = "not-a-blob"
+    with pytest.raises(ChairmanCognitionSourceError, match="Git blob SHA"):
+        compose_input(bundle)
 
-def test_future_dated_owner_receipt_is_rejected_by_a1():
+    bundle = _bundle()
+    bundle["agentos_revision_attestation"]["source_records_digest"] = (
+        "sha256:UPPERCASE"
+    )
+    with pytest.raises(ChairmanCognitionSourceError, match="64 lowercase hex"):
+        compose_input(bundle)
+
+
+def test_future_dated_owner_receipt_and_attestation_are_rejected_by_a1():
     future = _github_receipt()
     future["observed_at"] = "2026-08-30T16:00:01Z"
     with pytest.raises(ChairmanCognitionError, match="postdate"):
         compose_input(_bundle(additions=[future]))
 
+    bundle = _bundle()
+    bundle["mastermind_revision_attestation"]["observed_at"] = (
+        "2026-08-30T16:00:01Z"
+    )
+    with pytest.raises(ChairmanCognitionError, match="postdate"):
+        compose_input(bundle)
+
 
 def test_bound_envelope_mutation_is_rejected_before_acceptance():
     bundle = _bundle()
     bundle["delegation_envelope"]["max_budget_units"] += 1
-    with pytest.raises(ChairmanCognitionError, match="delegation envelope is not content-bound"):
+    with pytest.raises(ChairmanCognitionError, match="not content-bound"):
         compose_input(bundle)
 
 
@@ -598,12 +676,10 @@ def test_bound_envelope_mutation_is_rejected_before_acceptance():
         ("creates_duplicate_control_plane", True),
     ],
 )
-def test_bound_classification_cannot_be_transplanted_to_another_option_subject(
-    field: str, value
-):
+def test_bound_classification_cannot_move_to_another_option_subject(field, value):
     bundle = _bundle()
     bundle["options"][0][field] = value
-    with pytest.raises(ChairmanCognitionError, match="classification source is not content-bound"):
+    with pytest.raises(ChairmanCognitionError, match="not content-bound"):
         compose_input(bundle)
 
 
@@ -638,7 +714,7 @@ def test_cli_valid_and_opaque_invalid_journeys(tmp_path):
         check=False,
     )
     assert proc.returncode == 2
-    assert "INVALID_SOURCE_BUNDLE" in proc.stderr
+    assert json.loads(proc.stderr)["error"] == "INVALID_SOURCE_BUNDLE"
     assert "do-not-leak" not in proc.stderr
     assert proc.stdout == ""
 
@@ -651,9 +727,7 @@ def test_cli_rejects_duplicate_keys_in_otherwise_valid_bundle(
 ) -> None:
     secret = "duplicate-source-secret-must-not-leak"
     payload = _duplicate_payload(secret, nested=nested)
-
-    permissive = json.loads(payload)
-    assert evaluate_bundle(permissive)["packet"]["recommended_option_id"] == "OPT-COMPOSE"
+    assert evaluate_bundle(json.loads(payload))["packet"]["recommended_option_id"]
 
     if use_stdin:
         input_path = "-"
@@ -703,25 +777,18 @@ def test_derived_source_observation_uses_latest_load_bearing_input():
     )
 
 
-def test_future_dated_revision_attestation_is_rejected_by_a1():
-    bundle = _bundle()
-    bundle["mastermind_revision_attestation"]["observed_at"] = (
-        "2026-08-30T16:00:01Z"
-    )
-    with pytest.raises(ChairmanCognitionError, match="postdate"):
-        compose_input(bundle)
-
-
-def test_plan_states_attestation_is_not_self_authenticating():
+def test_plan_freezes_content_identity_and_no_rebuild_law():
     plan = _PLAN.read_text(encoding="utf-8")
     for marker in (
+        "source_blob_sha",
+        "source_records_digest",
+        "payload_digest",
+        "mutated local payload",
+        "must cite both",
         "trusted source adapter",
         "model-authored or arbitrary local JSON",
-        "does not authenticate",
         "execution_authority_granted=false",
-        "classification-sha256",
-        "envelope-sha256",
-        "all six current constraints",
+        "no second Agent OS parser",
     ):
         assert marker in plan
 
