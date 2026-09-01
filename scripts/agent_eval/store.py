@@ -282,9 +282,66 @@ class ArtifactStore:
 
     # -- graph verification -----------------------------------------------
 
+    def _require_evidence_ref_population_complete(self, document: dict) -> None:
+        """BLOCKER-1 review repair: close the evidence-ref laundering hole.
+
+        ``scoring.verify_evidence_ref_graph`` alone only re-resolves the
+        specific runs/scorer-passes the document ITSELF claims in
+        ``run_entries``/``scorer_refs`` -- a caller could hand-build an
+        evidence reference over a cherry-picked SUBSET of an experiment's
+        runs (e.g. dropping an inconvenient INVALID one) and it would
+        recompute internally-consistently against that subset, publish
+        cleanly, and `verify-tree-graph` would report zero defects. This is
+        the ONE place in R0 that owns both an ``ArtifactResolver`` and the
+        enumerator, so it is the only place that can catch the laundering:
+        recompute the evidence reference from the store's OWN COMPLETE
+        enumeration (plan §5.6 complete-enumeration law -- never a
+        caller-selected subset) and require exact equality with what the
+        document claims. A resolver-missing scenario/experiment is left to
+        the ordinary graph-verify resolution step, which already reports it.
+        """
+        if document.get("schema") != scoring.EVIDENCE_REF_SCHEMA:
+            return
+        scenario_ref = document["scenario_ref"]
+        scenario = self.resolve_scenario(scenario_ref["scenario_id"], scenario_ref["scenario_version"])
+        experiment = self.resolve_experiment(document["experiment_ref"]["experiment_id"])
+        if scenario is None or experiment is None:
+            return
+        recomputed = scoring.summarize_experiment(
+            experiment,
+            scenario,
+            self.enumerate_runs(),
+            self.enumerate_scorer_passes(),
+            evidence_ref_id=document["evidence_ref_id"],
+            intended_owner=document["intended_owner"],
+            review_at=document["review_at"],
+            created_at=document["created_at"],
+            analysis_version=document["analysis_version"],
+        )
+        mismatched_fields = [
+            field_name
+            for field_name in ("run_entries", "counts", "dimension_gates", "scorer_refs", "configuration_refs", "sample_size")
+            if recomputed[field_name] != document[field_name]
+        ]
+        if mismatched_fields:
+            raise VerificationContextError(
+                [
+                    ContractDefect(
+                        f"$.{field_name}",
+                        "EVIDENCE_POPULATION_INCOMPLETE",
+                        "evidence reference does not match the complete-enumeration population recomputed from the "
+                        "store (plan §5.6) -- a caller-selected subset of runs/scorer-passes is never a valid "
+                        "evidence reference",
+                    )
+                    for field_name in mismatched_fields
+                ]
+            )
+
     def verify_graph(self, relative_path: str | Path) -> VerificationResult:
         document = self.read_shape(relative_path)
-        return _graph_verify_for(document, self)
+        result = _graph_verify_for(document, self)
+        self._require_evidence_ref_population_complete(document)
+        return result
 
     def _enumerate_artifact_files(self) -> tuple[Path, ...]:
         found: list[Path] = []
@@ -304,7 +361,35 @@ class ArtifactStore:
         defects: list[ContractDefect] = []
         for relative in self._enumerate_artifact_files():
             try:
-                self.verify_graph(relative)
+                document = self.read_shape(relative)
+            except ContractError as exc:
+                for defect in exc.defects:
+                    defects.append(ContractDefect(f"{relative}::{defect.path}", defect.code, defect.message))
+                continue
+            # NB-3 review repair: a byte-identical copy of a valid artifact
+            # placed at the WRONG path (mislocated relative to the safe path
+            # its own ID derives) would otherwise graph-verify cleanly --
+            # the safe-path law (design §8.3) requires direct-ID resolution
+            # to be the ONLY route to an artifact, so a mislocated copy is a
+            # tree defect even though its content is individually valid.
+            try:
+                _artifact_id, expected_relative = _artifact_path_for(document)
+            except ContractError as exc:
+                for defect in exc.defects:
+                    defects.append(ContractDefect(f"{relative}::{defect.path}", defect.code, defect.message))
+                continue
+            if expected_relative != relative:
+                defects.append(
+                    ContractDefect(
+                        str(relative),
+                        "ARTIFACT_MISLOCATED",
+                        f"stored path does not match the canonical path derived from its own ID (expected {expected_relative})",
+                    )
+                )
+                continue
+            try:
+                _graph_verify_for(document, self)
+                self._require_evidence_ref_population_complete(document)
             except (ContractError, VerificationContextError) as exc:
                 for defect in exc.defects:
                     defects.append(ContractDefect(f"{relative}::{defect.path}", defect.code, defect.message))
@@ -342,15 +427,24 @@ class ArtifactStore:
         contracts.validate_document_shape(document)
         # 2. secret policy (amendment §4.4 step 2 -- environment-free, reject-only)
         assert_public_safe_evidence(document)
+        # 3. graph-verify (read-only; resolves dependencies already published)
+        _graph_verify_for(document, self)
+        # BLOCKER-1 review repair: recompute the evidence-ref population from
+        # the store's own complete enumeration and refuse a caller-selected
+        # subset (e.g. one that drops an inconvenient INVALID run) before it
+        # can ever be published.
+        self._require_evidence_ref_population_complete(document)
         # exact canonical artifact size bound (plan §5.7), checked on the
         # freshly built canonical bytes before any filesystem write
         canonical_bytes = canonical_json_bytes(document)
         if len(canonical_bytes) > MAX_CANONICAL_ARTIFACT_BYTES:
             raise ContractError([ContractDefect("$", "ARTIFACT_TOO_LARGE", "canonical document exceeds the size bound")])
-        # derive the safe path (pure computation; may itself reject a path hazard)
+        # NB-4 review repair: path derivation now follows graph verification,
+        # matching amendment §4.4's literal step order (shape-validate,
+        # secret-scan, graph-verify, THEN enter the create-only filesystem
+        # publication sequence) -- it is a pure computation with no I/O, so
+        # moving it does not change any behavior beyond ordering.
         artifact_id, relative_path = _artifact_path_for(document)
-        # 3. graph-verify (read-only; resolves dependencies already published)
-        _graph_verify_for(document, self)
 
         final_path = self._root / relative_path
         self._require_no_symlink_parents(final_path)

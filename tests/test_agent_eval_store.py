@@ -322,6 +322,30 @@ def test_orphan_scorer_pass_fails_verify_tree_graph(fresh_store) -> None:
     assert any(d.code == "RUN_NOT_RESOLVED" for d in defects)
 
 
+def test_mislocated_byte_identical_copy_is_a_tree_defect(fresh_store) -> None:
+    # NB-3 review repair: a byte-identical copy of a valid artifact placed
+    # at the WRONG path (its content still shape/digest-validates and would
+    # even graph-verify cleanly if resolved directly) must still be a tree
+    # defect -- the safe-path law (design §8.3) requires direct-ID
+    # resolution to be the ONLY route to an artifact, so an extra
+    # discoverable copy elsewhere undermines that even when its content is
+    # individually valid.
+    from scripts.agent_eval.canonical import canonical_json_bytes
+
+    scenario, config_a, config_b, experiment = _graph()
+    result = fresh_store.create(scenario)
+    assert fresh_store.verify_tree_graph() == ()
+
+    correct_path = fresh_store.root / result.path
+    mislocated_path = fresh_store.root / "scenarios" / "evaluation_contract_integrity" / "mislocated_copy" / "v1" / "scenario.json"
+    mislocated_path.parent.mkdir(parents=True, exist_ok=True)
+    mislocated_path.write_bytes(canonical_json_bytes(scenario))
+    assert correct_path.read_bytes() == mislocated_path.read_bytes()  # genuinely byte-identical
+
+    defects = fresh_store.verify_tree_graph()
+    assert any(d.code == "ARTIFACT_MISLOCATED" for d in defects)
+
+
 # ---------------------------------------------------------------------------
 # Corruption / interrupted publication
 # ---------------------------------------------------------------------------
@@ -432,6 +456,94 @@ def test_verify_tree_graph_is_clean_for_a_fully_valid_tree(fresh_store) -> None:
     )
     fresh_store.create(evidence)
     assert fresh_store.verify_tree_graph() == ()
+
+
+# ---------------------------------------------------------------------------
+# BLOCKER-1 review repair: evidence-ref laundering (cherry-picked run subset)
+# ---------------------------------------------------------------------------
+
+
+def test_create_refuses_an_evidence_ref_over_a_cherry_picked_run_subset(fresh_store) -> None:
+    # reviewer's exact probe: build a subset evidence ref over a two-run
+    # experiment (dropping the INVALID run), and assert create() refuses it
+    # -- summarize_experiment ITSELF is internally consistent with whatever
+    # subset it is handed, so the refusal must come from the store
+    # recomputing against its OWN complete enumeration, never trusting the
+    # caller's subset.
+    scenario, config_a, config_b, experiment = _graph()
+    fresh_store.create(scenario)
+    fresh_store.create(config_a)
+    fresh_store.create(config_b)
+    fresh_store.create(experiment)
+    run_valid = _finalize(scenario, config_a, experiment)
+    fresh_store.create(run_valid)
+    run_invalid = _finalize(scenario, config_a, experiment, model_served="claude-opus-9", run_id=fresh_run_id())
+    fresh_store.create(run_invalid)
+    sp_valid = _score(run_valid)
+    fresh_store.create(sp_valid)
+    fresh_store.create(_score(run_invalid))
+
+    laundered_evidence = scoring.summarize_experiment(
+        experiment,
+        scenario,
+        (run_valid,),  # the INVALID run is silently dropped from the population
+        (sp_valid,),
+        evidence_ref_id=f"evidence-ref:{uuid.uuid4()}",
+        intended_owner="person:sol",
+        review_at="2026-08-26T00:00:00Z",
+        created_at="2026-08-25T00:00:13Z",
+        analysis_version="mastermind.agent_evaluation_r0_analysis.v1",
+    )
+    assert laundered_evidence["counts"]["invalid_count"] == 0  # the laundering is internally "clean"
+
+    with pytest.raises(VerificationContextError) as excinfo:
+        fresh_store.create(laundered_evidence)
+    assert any(d.code == "EVIDENCE_POPULATION_INCOMPLETE" for d in excinfo.value.defects)
+    # refusal means nothing was published
+    assert fresh_store.resolve_evidence_ref(laundered_evidence["evidence_ref_id"]) is None
+
+
+def test_hand_planted_subset_evidence_ref_is_flagged_by_verify_tree_graph(fresh_store) -> None:
+    # reviewer's exact probe, second half: even if create()'s own refusal
+    # were somehow bypassed (a file placed directly on disk, never through
+    # the store's own publish path), verify-tree-graph must still catch a
+    # laundered evidence reference -- the guarantee lives at the boundary
+    # that owns both the resolver and the enumerator, not merely at one
+    # call site.
+    from scripts.agent_eval.canonical import canonical_json_bytes
+
+    scenario, config_a, config_b, experiment = _graph()
+    fresh_store.create(scenario)
+    fresh_store.create(config_a)
+    fresh_store.create(config_b)
+    fresh_store.create(experiment)
+    run_valid = _finalize(scenario, config_a, experiment)
+    fresh_store.create(run_valid)
+    run_invalid = _finalize(scenario, config_a, experiment, model_served="claude-opus-9", run_id=fresh_run_id())
+    fresh_store.create(run_invalid)
+    sp_valid = _score(run_valid)
+    fresh_store.create(sp_valid)
+    fresh_store.create(_score(run_invalid))
+
+    laundered_evidence = scoring.summarize_experiment(
+        experiment,
+        scenario,
+        (run_valid,),
+        (sp_valid,),
+        evidence_ref_id=f"evidence-ref:{uuid.uuid4()}",
+        intended_owner="person:sol",
+        review_at="2026-08-26T00:00:00Z",
+        created_at="2026-08-25T00:00:13Z",
+        analysis_version="mastermind.agent_evaluation_r0_analysis.v1",
+    )
+
+    # hand-plant it directly at its own canonical path, bypassing create()
+    final_path = fresh_store.root / store.evidence_ref_path(laundered_evidence["evidence_ref_id"])
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    final_path.write_bytes(canonical_json_bytes(laundered_evidence))
+
+    defects = fresh_store.verify_tree_graph()
+    assert any(d.code == "EVIDENCE_POPULATION_INCOMPLETE" for d in defects)
 
 
 def test_verify_tree_graph_reports_stale_validity_without_repairing(fresh_store) -> None:

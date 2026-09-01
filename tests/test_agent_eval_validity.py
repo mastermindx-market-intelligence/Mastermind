@@ -160,6 +160,79 @@ def test_nonpublic_destination_must_not_carry_raw_value() -> None:
 
 
 # ---------------------------------------------------------------------------
+# MAJOR-1 review repair: §3.7 boundary enforcement -- shape validation must
+# not merely trust a caller-supplied destination_class/value_digest pair.
+# sanitize_observed_destination is the only law-abiding PRODUCER, but this
+# is a shape-validation REFUSAL law, not merely a helper contract, so these
+# probes hit _v_observed_destination directly (never via the helper).
+# ---------------------------------------------------------------------------
+
+
+def test_honest_loopback_with_raw_value_is_refused() -> None:
+    # reviewer's exact probe: raw 127.0.0.1 with an HONEST LOOPBACK class
+    # must still be refused -- raw_value must be null for any non-PUBLIC
+    # class, honesty of the class does not create an exception.
+    scenario, config_a, _, experiment = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    assert contracts.classify_destination("127.0.0.1") == "LOOPBACK"
+    draft["observations"]["observed_network_destinations"] = [
+        {
+            "destination_class": "LOOPBACK",
+            "value_digest": contracts.digest_value("127.0.0.1"),
+            "raw_value": "127.0.0.1",
+        }
+    ]
+    with pytest.raises(ContractError) as excinfo:
+        contracts.validate_run_draft_shape(draft)
+    assert any(d.code == "NONPUBLIC_DESTINATION_MUST_NOT_CARRY_RAW_VALUE" for d in excinfo.value.defects)
+
+
+def test_forged_public_class_over_a_private_literal_is_refused() -> None:
+    # reviewer's exact probe: claiming PUBLIC over a private literal (to
+    # smuggle a raw value past the PUBLIC-only raw_value rule) must be
+    # refused by recomputing classify_destination(raw_value) and comparing.
+    scenario, config_a, _, experiment = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    assert contracts.classify_destination("10.0.0.5") == "PRIVATE_RANGE"
+    draft["observations"]["observed_network_destinations"] = [
+        {
+            "destination_class": "PUBLIC",  # forged
+            "value_digest": contracts.digest_value("10.0.0.5"),
+            "raw_value": "10.0.0.5",
+        }
+    ]
+    with pytest.raises(ContractError) as excinfo:
+        contracts.validate_run_draft_shape(draft)
+    assert any(d.code == "DESTINATION_CLASS_FORGED" for d in excinfo.value.defects)
+
+
+def test_forged_value_digest_is_refused() -> None:
+    # reviewer's exact probe: an honest PUBLIC class but a digest that does
+    # not actually hash the declared raw_value must be refused.
+    scenario, config_a, _, experiment = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    draft["observations"]["observed_network_destinations"] = [
+        {
+            "destination_class": "PUBLIC",
+            "value_digest": "sha256:" + "9" * 64,  # does not match digest_value("8.8.8.8")
+            "raw_value": "8.8.8.8",
+        }
+    ]
+    with pytest.raises(ContractError) as excinfo:
+        contracts.validate_run_draft_shape(draft)
+    assert any(d.code == "DESTINATION_DIGEST_FORGED" for d in excinfo.value.defects)
+
+
+def test_honest_public_destination_still_passes() -> None:
+    # positive control: an honestly-produced PUBLIC observation (exactly
+    # what sanitize_observed_destination emits) is accepted.
+    scenario, config_a, _, experiment = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    draft["observations"]["observed_network_destinations"] = [contracts.sanitize_observed_destination("8.8.8.8")]
+    assert contracts.validate_run_draft_shape(draft) == "SHAPE_VALID"
+
+
+# ---------------------------------------------------------------------------
 # R-B1-2/R-B1-3: destination classifier
 # ---------------------------------------------------------------------------
 
@@ -408,6 +481,27 @@ def test_pair_identity_missing_when_null_under_paired_by_scenario() -> None:
     draft["comparison"]["pair_key"] = None
     run = _finalize(scenario, config_a, experiment, draft)
     assert "PAIR_IDENTITY_MISSING" in run["validity"]["reason_codes"]
+
+
+def test_pair_identity_missing_when_nonnull_under_unpaired_method() -> None:
+    # MAJOR-2 review repair: R-B1-1 condition 3 ("method is UNPAIRED and
+    # pair_key is non-null") had no direct test -- a mutation of the
+    # UNPAIRED branch's guard could have survived undetected. Build a fresh
+    # UNPAIRED-method experiment (PAIRED_BY_SCENARIO is the only method the
+    # shared two-arm factory produces) and supply a non-null pair_key.
+    from tests.agent_eval_factories import build_two_arm_experiment_fields
+
+    scenario, config_a, config_b, experiment = _graph()
+    unpaired_fields = build_two_arm_experiment_fields(scenario, config_a, config_b)
+    unpaired_fields["pairing"] = {"method": "UNPAIRED", "random_seed": None}
+    unpaired_experiment = contracts.build_experiment(unpaired_fields)
+
+    draft = build_run_draft(scenario, config_a, unpaired_experiment, arm_id="arm_a", replicate_index=1)
+    draft["comparison"]["pair_key"] = f"pair:{scenario['scenario_id']}:v{scenario['scenario_version']}:r1"  # non-null, forbidden under UNPAIRED
+    run = _finalize(scenario, config_a, unpaired_experiment, draft)
+
+    assert "PAIR_IDENTITY_MISSING" in run["validity"]["reason_codes"]
+    assert run["validity"]["status"] == "INVALID_CONFIGURATION"
 
 
 def test_replicate_out_of_range() -> None:

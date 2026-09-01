@@ -25,6 +25,33 @@ from scripts.agent_eval.privacy import (
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVACY_MODULE = ROOT / "scripts" / "agent_eval" / "privacy.py"
+DESIGN_DOC_PATH = ROOT / "docs" / "superpowers" / "specs" / "2026-08-31-agent-evaluation-fabric-design.md"
+
+
+def _parse_observations_block_fields(design_text: str) -> frozenset[str]:
+    """Extract the run schema's top-level ``observations:`` block field
+    names directly from the protected design doc's own YAML-style listing
+    (design §7.5), rather than a hand-duplicated literal that could
+    silently drift from the record it is supposed to pin (review NB-1).
+    The block runs from a bare ``observations:`` line (column 0) until the
+    next column-0 line; each 2-space-indented child's key (text before its
+    first ``:``) is one field name.
+    """
+    lines = design_text.splitlines()
+    fields: list[str] = []
+    in_block = False
+    for line in lines:
+        if not in_block:
+            if line == "observations:":
+                in_block = True
+            continue
+        if line.startswith("  ") and not line.startswith("   "):
+            key = line.strip().split(":", 1)[0].strip()
+            if key:
+                fields.append(key)
+            continue
+        break  # dedent back to column 0 (or a deeper/blank line) ends the block
+    return frozenset(fields)
 
 
 # ---------------------------------------------------------------------------
@@ -263,16 +290,18 @@ def test_known_prefix_at_word_boundary_still_detected_after_boundary_fix() -> No
 
 
 def test_observed_evidence_fields_constant_matches_design_run_schema() -> None:
-    # Transcribed from design §7.5 `observations:` block.
-    assert OBSERVED_EVIDENCE_FIELDS == frozenset(
-        {
-            "observed_sources",
-            "observed_capability_ids",
-            "observed_tool_schema_digests",
-            "observed_network_destinations",
-            "dependency_degradations",
-        }
-    )
+    design_text = DESIGN_DOC_PATH.read_text(encoding="utf-8")
+    parsed = _parse_observations_block_fields(design_text)
+    # a parser that silently found nothing would make this test vacuously
+    # pass on drift instead of catching it -- pin the parser's own health
+    assert parsed == {
+        "observed_sources",
+        "observed_capability_ids",
+        "observed_tool_schema_digests",
+        "observed_network_destinations",
+        "dependency_degradations",
+    }, "design-doc parser did not find the expected observations: block -- fix the parser, not this assertion"
+    assert OBSERVED_EVIDENCE_FIELDS == parsed
 
 
 def test_private_host_value_inside_observed_network_destinations_is_not_rejected() -> None:
@@ -306,6 +335,27 @@ def test_forbidden_field_name_still_scanned_inside_a_sibling_of_observed_fields(
     doc = {"observations": {"observed_sources": [], "password": "leaked"}}
     findings = detect_secret_shapes(doc)
     assert any(f.code == "FORBIDDEN_FIELD_NAME" for f in findings)
+
+
+def test_matching_key_name_outside_dollar_observations_is_not_exempt() -> None:
+    # review NB-2 regression: the exemption is scoped to the PARENT PATH
+    # ($.observations exactly), never to the key name alone -- a field that
+    # merely SHARES a name with OBSERVED_EVIDENCE_FIELDS but lives somewhere
+    # else in the document (nested under an unrelated object, or an
+    # "observations" block that is itself nested rather than top-level) must
+    # still be scanned as an ordinary supplied value.
+    nested_elsewhere = {"context": {"observations": {"observed_sources": [{"artifact_ref": "person@example.com", "digest": "sha256:" + "a" * 64}]}}}
+    findings = detect_secret_shapes(nested_elsewhere)
+    assert any(f.code == "PRIVATE_IDENTITY_SHAPE" for f in findings)
+
+    top_level_but_wrong_key = {"observations": {"password": "leaked-not-observed-evidence"}}
+    findings2 = detect_secret_shapes(top_level_but_wrong_key)
+    assert any(f.code == "FORBIDDEN_FIELD_NAME" for f in findings2)
+
+    # the TRUE case (exact $.observations parent) is still exempt
+    true_case = {"observations": {"observed_sources": [{"artifact_ref": "person@example.com", "digest": "sha256:" + "a" * 64}]}}
+    findings3 = detect_secret_shapes(true_case)
+    assert findings3 == ()
 
 
 # ---------------------------------------------------------------------------

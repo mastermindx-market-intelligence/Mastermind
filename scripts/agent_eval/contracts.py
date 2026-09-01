@@ -1084,6 +1084,35 @@ def _v_observed_destination(value: Any, path: str) -> dict:
                 )
             ]
         )
+    # R-B1-2/amendment §3.7 boundary enforcement: sanitize_observed_destination
+    # is the only law-abiding way to PRODUCE this record, but shape validation
+    # itself must not simply trust a caller-supplied destination_class/
+    # value_digest pair -- a forged class (claim PUBLIC over a private
+    # literal to smuggle a raw value past the PUBLIC-only rule above, or
+    # claim a false LOOPBACK/PRIVATE_RANGE/UNRESOLVED_NAME to hide a real
+    # public exfil target) or a mismatched digest must be refused here, not
+    # merely produced correctly by callers who bother to use the helper.
+    if result["raw_value"] is not None:
+        if classify_destination(result["raw_value"]) != result["destination_class"]:
+            raise ContractError(
+                [
+                    ContractDefect(
+                        f"{path}.destination_class",
+                        "DESTINATION_CLASS_FORGED",
+                        "declared destination_class does not match classify_destination(raw_value)",
+                    )
+                ]
+            )
+        if digest_value(result["raw_value"]) != result["value_digest"]:
+            raise ContractError(
+                [
+                    ContractDefect(
+                        f"{path}.value_digest",
+                        "DESTINATION_DIGEST_FORGED",
+                        "declared value_digest does not match digest_value(raw_value)",
+                    )
+                ]
+            )
     return result
 
 

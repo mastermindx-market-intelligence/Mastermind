@@ -203,12 +203,21 @@ def _string_findings(text: str, path: str) -> list[SecretShapeFinding]:
     return found
 
 
+#: The exact parent path at which a key must live to qualify for the R-B1-4
+#: observed-evidence exemption below -- i.e. the run schema's top-level
+#: ``observations:`` block, design §7.5. Scoped to the PARENT PATH, not
+#: merely the key name, so a key that happens to share a name with
+#: :data:`OBSERVED_EVIDENCE_FIELDS` anywhere else in a document (e.g. nested
+#: under an unrelated object) is never accidentally exempted (review NB-2).
+_OBSERVATIONS_PARENT_PATH = "$.observations"
+
+
 def _walk(value: Any, path: str, findings: list[SecretShapeFinding], *, exempt: bool) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             key_str = key if isinstance(key, str) else None
             key_path = f"{path}.{key_str}" if key_str is not None else f"{path}.<key>"
-            child_exempt = exempt or (key_str in OBSERVED_EVIDENCE_FIELDS)
+            child_exempt = exempt or (path == _OBSERVATIONS_PARENT_PATH and key_str in OBSERVED_EVIDENCE_FIELDS)
             if key_str is not None and not exempt and key_str.strip().lower() in FORBIDDEN_FIELD_NAMES:
                 findings.append(SecretShapeFinding(key_path, "FORBIDDEN_FIELD_NAME", "forbidden_field_name"))
             _walk(item, key_path, findings, exempt=child_exempt)
@@ -225,10 +234,15 @@ def _walk(value: Any, path: str, findings: list[SecretShapeFinding], *, exempt: 
 def detect_secret_shapes(value: Any, path: str = "$") -> tuple[SecretShapeFinding, ...]:
     """Return deterministic supplied-value findings without reading ambient state.
 
-    A subtree rooted at a key in :data:`OBSERVED_EVIDENCE_FIELDS` (R-B1-4) is
-    exempt from field-name and string-shape scanning: it is runner-observed
-    evidence governed by the amendment's §3.7 sanitization law, not a
-    caller-supplied value.
+    A field in :data:`OBSERVED_EVIDENCE_FIELDS` (R-B1-4) is exempt from
+    field-name and string-shape scanning ONLY when its parent object's own
+    path is exactly ``$.observations`` -- the run schema's top-level
+    ``observations:`` block (design §7.5). It is runner-observed evidence
+    governed by the amendment's §3.7 sanitization law there, not a
+    caller-supplied value; the SAME key name appearing anywhere else in a
+    document is ordinary supplied-value territory and is scanned normally
+    (review NB-2 -- the exemption is scoped by parent path, never by key
+    name alone).
     """
     findings: list[SecretShapeFinding] = []
     _walk(value, path, findings, exempt=False)
