@@ -109,11 +109,11 @@ def _candidate(
         capabilities=capabilities,
         observed_at_ms=observed_at_ms,
         occupancy=occupancy,
-        occupancy_source=_source(SourceOwner.RUNTIME_BINDING, f"binding/{worker_id}", occupancy_freshness),
+        occupancy_source=_source(SourceOwner.RUNTIME_BINDING, f"binding-{worker_id}", occupancy_freshness),
         capacity_state=capacity_state,
-        capacity_source=_source(SourceOwner.CAPACITY, f"capacity/{worker_id}", capacity_freshness),
+        capacity_source=_source(SourceOwner.CAPACITY, f"capacity-{worker_id}", capacity_freshness),
         host_source_closure_proven=host_source_closure_proven,
-        closure_source=_source(SourceOwner.CAPACITY, f"closure/{worker_id}"),
+        closure_source=_source(SourceOwner.CAPACITY, f"closure-{worker_id}"),
         effect_state=effect_state,
     )
 
@@ -177,20 +177,21 @@ def test_exact_tie_without_tie_breaker_abstains():
     assert decision.tie_breaker_used is None
 
 
-def test_exact_tie_with_accepted_tie_breaker_picks_lexicographic_min():
+def test_addendum_a_any_non_null_tie_breaker_is_refused_worker_id_lexicographic():
+    """Addendum A discriminator: C1 has NO tie-breaker authority. The
+    formerly-recognized "worker_id_lexicographic" token — which used to
+    resolve a tie to SELECTED — is now refused exactly like any other
+    non-null token, and no decision is produced at all."""
     a = _candidate(worker_id="worker-a")
     b = _candidate(worker_id="worker-b")
-    decision = eps.select_placement(
-        responsibility=_responsibility(), demand=_demand(), candidates=(b, a),
-        accepted_tie_breaker="worker_id_lexicographic",
-    )
-    assert decision.state is eps.SelectionState.SELECTED
-    assert decision.selected["worker_id"] == "worker-a"
-    assert decision.tie_breaker_used == "worker_id_lexicographic"
-    assert decision.tied_worker_ids == ("worker-a", "worker-b")
+    with pytest.raises(ValueError):
+        eps.select_placement(
+            responsibility=_responsibility(), demand=_demand(), candidates=(b, a),
+            accepted_tie_breaker="worker_id_lexicographic",
+        )
 
 
-def test_unrecognized_tie_breaker_token_raises_value_error():
+def test_addendum_a_any_non_null_tie_breaker_is_refused_unrecognized_token():
     a = _candidate(worker_id="worker-a")
     b = _candidate(worker_id="worker-b")
     with pytest.raises(ValueError):
@@ -198,6 +199,29 @@ def test_unrecognized_tie_breaker_token_raises_value_error():
             responsibility=_responsibility(), demand=_demand(), candidates=(a, b),
             accepted_tie_breaker="most_recently_observed",
         )
+
+
+def test_addendum_a_tie_breaker_refusal_message_names_no_authority_not_the_token():
+    a = _candidate(worker_id="worker-a")
+    b = _candidate(worker_id="worker-b")
+    with pytest.raises(ValueError) as excinfo:
+        eps.select_placement(
+            responsibility=_responsibility(), demand=_demand(), candidates=(a, b),
+            accepted_tie_breaker="some_arbitrary_caller_supplied_token",
+        )
+    assert "some_arbitrary_caller_supplied_token" not in str(excinfo.value)
+    assert "no tie-breaker authority" in str(excinfo.value)
+
+
+def test_addendum_a_three_way_tie_still_abstains_with_every_tied_id():
+    a = _candidate(worker_id="worker-a")
+    b = _candidate(worker_id="worker-b")
+    c = _candidate(worker_id="worker-c")
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(c, a, b))
+    assert decision.state is eps.SelectionState.TIE_ABSTAINED
+    assert decision.selected is None
+    assert decision.tied_worker_ids == ("worker-a", "worker-b", "worker-c")
+    assert decision.tie_breaker_used is None
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +411,14 @@ def test_account_label_rejects_path_shape():
         _candidate(account_label="path/to/account")
 
 
+_EVIDENCE_ROW_WIRE_KEYS = {
+    "worker_id", "occupancy", "occupancy_source", "capacity_state",
+    "capacity_source", "host_source_closure_proven", "closure_source",
+    "effect_state",
+}
+_SOURCE_REF_WIRE_KEYS = {"owner", "ref", "observed_at", "freshness"}
+
+
 def test_wire_dict_keys_are_exactly_the_closed_set():
     candidate = _candidate()
     decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
@@ -394,24 +426,42 @@ def test_wire_dict_keys_are_exactly_the_closed_set():
     assert set(payload) == {
         "schema_version", "responsibility_ref", "state", "selected",
         "tie_breaker_used", "tied_worker_ids", "exclusions", "evaluated_candidates",
+        "selection_is_commitment", "evidence",
     }
+    assert payload["selection_is_commitment"] is False
     assert set(payload["selected"]) == {
         "schema_version", "worker_id", "quota_class", "provider", "account_label", "observed_at_ms",
     }
     for exclusion in payload["exclusions"]:
         assert set(exclusion) == {"worker_id", "reason"}
+    assert len(payload["evidence"]) == payload["evaluated_candidates"] == 1
+    for row in payload["evidence"]:
+        assert set(row) == _EVIDENCE_ROW_WIRE_KEYS
+        assert set(row["occupancy_source"]) == _SOURCE_REF_WIRE_KEYS
+        assert set(row["capacity_source"]) == _SOURCE_REF_WIRE_KEYS
+        assert set(row["closure_source"]) == _SOURCE_REF_WIRE_KEYS
 
 
-def test_no_source_ref_or_env_fields_leak_into_wire_dict():
+def test_no_env_fields_or_agent_os_leak_into_wire_dict():
+    """Addendum B deliberately puts source refs (owner/ref/observed_at/
+    freshness) on the wire via ``evidence`` — that IS the consumer-evidence
+    feature, so the candidate's own ``binding-``/``capacity-``/``closure-``
+    refs are now EXPECTED in the blob. What must still never appear: the
+    Python class name (an implementation detail, not a wire value) and any
+    text this module has no channel to have produced at all, like the
+    responsibility source's ``agent_os`` owner (a source this decision
+    never carries — only candidate-side sources ever reach ``evidence``)."""
     candidate = _candidate()
     decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
     payload = decision.to_dict()
     blob = json.dumps(payload)
-    assert "binding/" not in blob
-    assert "capacity/" not in blob
-    assert "closure/" not in blob
     assert "SourceRef" not in blob
     assert "agent_os" not in blob
+    # And the evidence refs ARE present — the positive half of the same
+    # claim, so this test cannot silently pass on an empty evidence list.
+    assert "binding-worker-1" in blob
+    assert "capacity-worker-1" in blob
+    assert "closure-worker-1" in blob
 
 
 #: Reviewer n-10: the module's COMPLETE import set, closed. A literal grep
@@ -666,16 +716,18 @@ def test_validate_placement_selection_rejects_selected_state_with_no_selected_pa
         eps.validate_placement_selection(payload)
 
 
-def test_validate_placement_selection_rejects_unrecognized_tie_breaker_token():
-    a, b = _candidate(worker_id="worker-a"), _candidate(worker_id="worker-b")
-    decision = eps.select_placement(
-        responsibility=_responsibility(), demand=_demand(), candidates=(a, b),
-        accepted_tie_breaker="worker_id_lexicographic",
-    )
-    payload = dict(decision.to_dict())
-    payload["tie_breaker_used"] = "most_recently_observed"
-    with pytest.raises(ValueError):
-        eps.validate_placement_selection(payload)
+def test_validate_placement_selection_rejects_any_non_null_tie_breaker_used():
+    """Addendum A: tie_breaker_used is RESERVED and must be null — ANY
+    non-null value is refused, not just an unrecognized token (there is no
+    longer a "recognized" set at all)."""
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    assert decision.state is eps.SelectionState.SELECTED
+    for token in ("worker_id_lexicographic", "most_recently_observed", ""):
+        payload = dict(decision.to_dict())
+        payload["tie_breaker_used"] = token
+        with pytest.raises(ValueError):
+            eps.validate_placement_selection(payload)
 
 
 def test_validate_placement_selection_rejects_tie_breaker_used_without_two_tied_ids():
@@ -756,6 +808,113 @@ def test_validate_placement_selection_rejects_unsorted_exclusions():
         eps.validate_placement_selection(payload)
 
 
+# ---------------------------------------------------------------------------
+# addendum B — validate_placement_selection: selection_is_commitment + evidence
+# ---------------------------------------------------------------------------
+
+def test_validate_placement_selection_rejects_missing_selection_is_commitment():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    del payload["selection_is_commitment"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_true_selection_is_commitment():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["selection_is_commitment"] = True
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evidence_row_missing_a_key():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    assert len(payload["evidence"]) == 1
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    del payload["evidence"][0]["effect_state"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evidence_row_extra_key():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0]["extra"] = "nope"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evidence_row_bad_enum_value():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0]["occupancy"] = "not_a_real_occupancy_state"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evidence_row_at_carrying_ref():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0] = dict(payload["evidence"][0])
+    payload["evidence"][0]["occupancy_source"] = dict(payload["evidence"][0]["occupancy_source"])
+    payload["evidence"][0]["occupancy_source"]["ref"] = "binding@leaked"
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evidence_source_ref_missing_key():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0]["capacity_source"] = dict(payload["evidence"][0]["capacity_source"])
+    del payload["evidence"][0]["capacity_source"]["freshness"]
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evidence_host_source_closure_proven_non_bool():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    payload["evidence"] = [dict(payload["evidence"][0])]
+    payload["evidence"][0]["host_source_closure_proven"] = "true"
+    with pytest.raises(TypeError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_unsorted_evidence():
+    a = _candidate(worker_id="worker-a", occupancy=eps.OccupancyState.OCCUPIED)
+    b = _candidate(worker_id="worker-b", occupancy=eps.OccupancyState.OCCUPIED)
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(a, b))
+    payload = dict(decision.to_dict())
+    assert len(payload["evidence"]) == 2
+    payload["evidence"] = list(reversed(payload["evidence"]))
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
+def test_validate_placement_selection_rejects_evaluated_candidates_not_equal_to_evidence_count():
+    candidate = _candidate()
+    decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
+    payload = dict(decision.to_dict())
+    assert payload["evaluated_candidates"] == len(payload["evidence"]) == 1
+    payload["evaluated_candidates"] = 2
+    with pytest.raises(ValueError):
+        eps.validate_placement_selection(payload)
+
+
 def test_validate_placement_selection_error_messages_never_interpolate_the_value():
     candidate = _candidate()
     decision = eps.select_placement(responsibility=_responsibility(), demand=_demand(), candidates=(candidate,))
@@ -821,7 +980,10 @@ def test_capability_token_rejects_slash():
         _candidate(capabilities=frozenset({"cap/a"}))
 
 
-def test_tie_breaker_used_field_rejects_at_symbol():
+def test_tie_breaker_used_field_is_reserved_and_rejects_any_non_none_value():
+    """Addendum A: tie_breaker_used is RESERVED — construction refuses ANY
+    non-None value, not merely a secret-shaped one (there is no longer a
+    "recognized" token this field could legitimately hold)."""
     with pytest.raises(ValueError):
         eps.PlacementSelectionDecision(
             responsibility_ref="WS:CAP-C1",
@@ -831,6 +993,18 @@ def test_tie_breaker_used_field_rejects_at_symbol():
             tied_worker_ids=(),
             exclusions=(),
             evaluated_candidates=0,
+            evidence=(),
+        )
+    with pytest.raises(ValueError):
+        eps.PlacementSelectionDecision(
+            responsibility_ref="WS:CAP-C1",
+            state=eps.SelectionState.TIE_ABSTAINED,
+            selected=None,
+            tie_breaker_used="worker_id_lexicographic",
+            tied_worker_ids=("worker-a", "worker-b"),
+            exclusions=(),
+            evaluated_candidates=2,
+            evidence=(),
         )
 
 
@@ -907,7 +1081,20 @@ def test_gate_order_closure_unproven_beats_capability_mismatch_on_one_candidate(
     )
 
 
-def test_to_dict_sorts_deliberately_unsorted_exclusions_and_tied_worker_ids():
+def _evidence_row(worker_id: str) -> eps.CandidateEvidence:
+    return eps.CandidateEvidence(
+        worker_id=worker_id,
+        occupancy=eps.OccupancyState.FREE,
+        occupancy_source=_source(SourceOwner.RUNTIME_BINDING, f"binding-{worker_id}"),
+        capacity_state=CapacityState.AVAILABLE,
+        capacity_source=_source(SourceOwner.CAPACITY, f"capacity-{worker_id}"),
+        host_source_closure_proven=True,
+        closure_source=_source(SourceOwner.CAPACITY, f"closure-{worker_id}"),
+        effect_state=EffectState.NONE,
+    )
+
+
+def test_to_dict_sorts_deliberately_unsorted_exclusions_tied_worker_ids_and_evidence():
     decision = eps.PlacementSelectionDecision(
         responsibility_ref="WS:CAP-C1",
         state=eps.SelectionState.TIE_ABSTAINED,
@@ -919,6 +1106,12 @@ def test_to_dict_sorts_deliberately_unsorted_exclusions_and_tied_worker_ids():
             eps.CandidateExclusion(worker_id="worker-a", reason=eps.ExclusionReason.CAPABILITY_MISMATCH),
         ),
         evaluated_candidates=4,
+        evidence=(
+            _evidence_row("worker-z"),
+            _evidence_row("worker-c"),
+            _evidence_row("worker-a"),
+            _evidence_row("worker-b"),
+        ),
     )
     payload = decision.to_dict()
     assert payload["tied_worker_ids"] == ["worker-a", "worker-z"]
@@ -926,6 +1119,23 @@ def test_to_dict_sorts_deliberately_unsorted_exclusions_and_tied_worker_ids():
         {"worker_id": "worker-a", "reason": "capability_mismatch"},
         {"worker_id": "worker-z", "reason": "occupied"},
     ]
+    assert [row["worker_id"] for row in payload["evidence"]] == [
+        "worker-a", "worker-b", "worker-c", "worker-z",
+    ]
+
+
+def test_decision_construction_refuses_evidence_count_mismatching_evaluated_candidates():
+    with pytest.raises(ValueError):
+        eps.PlacementSelectionDecision(
+            responsibility_ref="WS:CAP-C1",
+            state=eps.SelectionState.NO_ELIGIBLE_CANDIDATE,
+            selected=None,
+            tie_breaker_used=None,
+            tied_worker_ids=(),
+            exclusions=(),
+            evaluated_candidates=2,
+            evidence=(_evidence_row("worker-a"),),
+        )
 
 
 def test_non_adjacent_duplicate_worker_ids_yield_reconciliation_required():

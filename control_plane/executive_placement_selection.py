@@ -33,6 +33,18 @@ order :data:`_AGGREGATE_PRECEDENCE` ranks reasons by), and a
 only — a clean sibling in the same call may still be ``SELECTED`` (ruling
 m-6). Only a repeated ``worker_id`` is globally fatal to the whole
 decision.
+
+Sol addendum (no scope change): (A) **C1 has no tie-breaker authority** —
+an exact top tie among eligible candidates ALWAYS abstains
+(``TIE_ABSTAINED``); :func:`select_placement` refuses any non-``None``
+``accepted_tie_breaker`` outright, and ``tie_breaker_used`` is a RESERVED
+field, always ``None``, kept only as a forward-compatible wire slot for a
+later wave's typed, source-owned ruling receipt. (B) Every decision also
+carries ``evidence`` — one immutable row per candidate actually evaluated,
+including short-circuited and duplicate ones — and a constant
+``selection_is_commitment: false`` discriminator, so a downstream consumer
+can audit exactly what was seen and never has to infer non-commitment from
+a field's absence.
 """
 from __future__ import annotations
 
@@ -96,10 +108,6 @@ class ExclusionReason(_ValueEnum):
     CAPACITY_UNKNOWN = "capacity_unknown"
     DUPLICATE_IDENTITY = "duplicate_identity"
 
-
-#: The only tie-breaker token :func:`select_placement` will honor. Any other
-#: non-``None`` value is a refused input, never a silently-ignored one.
-_RECOGNIZED_TIE_BREAKERS = frozenset({"worker_id_lexicographic"})
 
 #: Ranking order for eligible candidates — capacity state ONLY. Nothing
 #: else (observation recency, account-label text, title) ever breaks a tie.
@@ -259,14 +267,18 @@ class PlacementDemand:
 class PlacementCandidateFact:
     """One point-in-time, source-attributed candidate worker observation.
 
-    Every text field is a secret-safe token (no whitespace, no empty
-    strings, no ``"@"``, no ``"/"``) so an email address or a filesystem
-    path can never flow into a decision or its wire form. Construction ALSO
-    eagerly builds (and discards) the Phase-B placement-snapshot shape from
-    this candidate's own ``worker_id``/``quota_class``/``provider``/
-    ``account_label``/``observed_at_ms`` — enforcing the snapshot's own
-    canonical regexes at construction time, on every candidate, so
-    ``select_placement`` can never raise late on the winning path.
+    Every text field — INCLUDING each ``*_source.ref`` — is a secret-safe
+    token (no whitespace, no empty strings, no ``"@"``, no ``"/"``) so an
+    email address or a filesystem path can never flow into a decision or
+    its wire form. Construction ALSO eagerly builds (and discards) the
+    Phase-B placement-snapshot shape from this candidate's own
+    ``worker_id``/``quota_class``/``provider``/``account_label``/
+    ``observed_at_ms`` — enforcing the snapshot's own canonical regexes at
+    construction time, on every candidate, so ``select_placement`` can
+    never raise late on the winning path. Addendum B: the ``*_source.ref``
+    checks close the same gap for ``evidence`` — every source ref here
+    flows verbatim into a decision's evidence rows, so it must already
+    satisfy that wire's own validator.
     """
 
     worker_id: str
@@ -305,6 +317,17 @@ class PlacementCandidateFact:
             "closure_source",
         )
         _require_enum("effect_state", self.effect_state, EffectState)
+        # Addendum B round-trip closure: every source ref here flows
+        # verbatim into a decision's `evidence` (addendum B), whose wire
+        # validator re-checks `ref` via this SAME `_require_token` (reuse,
+        # per the addendum). executive_steward.SourceRef's OWN validator is
+        # weaker (no "@"/"/" ban) — without this eager check here, a
+        # candidate could construct cleanly yet produce a decision whose
+        # own to_dict() output FAILS validate_placement_selection, breaking
+        # the closed round-trip this module promises everywhere else.
+        _require_token("occupancy_source.ref", self.occupancy_source.ref)
+        _require_token("capacity_source.ref", self.capacity_source.ref)
+        _require_token("closure_source.ref", self.closure_source.ref)
         # Reviewer M-1/M-2: eagerly enforce the Phase-B snapshot contract's
         # own canonical regexes (executive_orchestration_principal._ID_RE /
         # _PROVIDER_RE / _ACCOUNT_RE) at CONSTRUCTION time, on every
@@ -349,6 +372,94 @@ class CandidateExclusion:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class CandidateEvidence:
+    """One immutable audit row over exactly what was observed for one
+    evaluated candidate — addendum B: a downstream consumer of a decision
+    must be able to see EVERY fact that went into it, not just the winner
+    and the exclusion reasons, without re-deriving anything from a raw
+    candidate list this module never returns. A row exists for every
+    candidate handed to :func:`select_placement`, REGARDLESS of whether
+    that candidate was eligible, excluded, the eventual winner, or even a
+    duplicate ``worker_id`` — evidence is a record of what was looked at,
+    never a deduplicated or filtered view.
+    """
+
+    worker_id: str
+    occupancy: OccupancyState
+    occupancy_source: SourceRef
+    capacity_state: CapacityState
+    capacity_source: SourceRef
+    host_source_closure_proven: bool
+    closure_source: SourceRef
+    effect_state: EffectState
+
+    def __post_init__(self) -> None:
+        _require_token("worker_id", self.worker_id)
+        _require_enum("occupancy", self.occupancy, OccupancyState)
+        if not isinstance(self.occupancy_source, SourceRef):
+            raise TypeError("occupancy_source must be SourceRef")
+        _require_enum("capacity_state", self.capacity_state, CapacityState)
+        if not isinstance(self.capacity_source, SourceRef):
+            raise TypeError("capacity_source must be SourceRef")
+        _require_bool("host_source_closure_proven", self.host_source_closure_proven)
+        if not isinstance(self.closure_source, SourceRef):
+            raise TypeError("closure_source must be SourceRef")
+        _require_enum("effect_state", self.effect_state, EffectState)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "worker_id": self.worker_id,
+            "occupancy": self.occupancy.value,
+            "occupancy_source": _source_ref_dict(self.occupancy_source),
+            "capacity_state": self.capacity_state.value,
+            "capacity_source": _source_ref_dict(self.capacity_source),
+            "host_source_closure_proven": self.host_source_closure_proven,
+            "closure_source": _source_ref_dict(self.closure_source),
+            "effect_state": self.effect_state.value,
+        }
+
+
+def _source_ref_dict(source: SourceRef) -> dict[str, Any]:
+    """The four-field plain-dict serialization of a ``SourceRef`` — owner,
+    ref, observed_at, freshness — and nothing else (no other SourceRef
+    attribute exists to leak)."""
+    return {
+        "owner": source.owner.value,
+        "ref": source.ref,
+        "observed_at": source.observed_at,
+        "freshness": source.freshness.value,
+    }
+
+
+def _evidence_sort_key(row: dict[str, Any]) -> tuple:
+    """Canonical, fully deterministic sort key for one evidence wire row.
+
+    Sorting on ``worker_id`` alone is not enough: evidence deliberately
+    keeps one row per evaluated candidate even when ``worker_id`` repeats
+    (the duplicate-identity short-circuit still reports what was actually
+    observed for each duplicate), so two rows can share a ``worker_id``.
+    The full row content is folded into the key so ordering never depends
+    on the input candidate list's own order — required for
+    :func:`select_placement`'s permutation invariance.
+    """
+    def _source_key(source: dict[str, Any]) -> tuple[str, str, str, str]:
+        return (
+            source["owner"], source["ref"], source["observed_at"] or "", source["freshness"],
+        )
+
+    return (
+        row["worker_id"],
+        row["occupancy"],
+        _source_key(row["occupancy_source"]),
+        row["capacity_state"],
+        _source_key(row["capacity_source"]),
+        row["host_source_closure_proven"],
+        _source_key(row["closure_source"]),
+        row["effect_state"],
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class PlacementSelectionDecision:
     """The outcome of one :func:`select_placement` call.
 
@@ -359,6 +470,19 @@ class PlacementSelectionDecision:
     to the same snapshot contract PR #255's runtime already speaks, without
     itself creating any Job/Attempt/Worker/RuntimeBinding or provider
     action.
+
+    ``tie_breaker_used`` is RESERVED (addendum A): C1 has no tie-breaker
+    authority, so this field is always ``None`` on every decision this
+    module produces, and construction refuses any other value. It is kept
+    (rather than removed) as a forward-compatible wire slot for a later
+    wave's typed, source-owned ruling receipt.
+
+    ``evidence`` (addendum B) is one immutable :class:`CandidateEvidence`
+    row per candidate :func:`select_placement` was actually handed —
+    including candidates the algorithm short-circuited past (a stale
+    responsibility, or a duplicate ``worker_id``) — so a downstream
+    consumer can audit exactly what this decision saw without re-deriving
+    anything from a raw candidate list this module never returns.
     """
 
     responsibility_ref: str
@@ -368,6 +492,7 @@ class PlacementSelectionDecision:
     tied_worker_ids: tuple[str, ...]
     exclusions: tuple[CandidateExclusion, ...]
     evaluated_candidates: int
+    evidence: tuple[CandidateEvidence, ...]
 
     def __post_init__(self) -> None:
         _require_responsibility_ref(self.responsibility_ref)
@@ -375,7 +500,8 @@ class PlacementSelectionDecision:
         if self.selected is not None and not isinstance(self.selected, Mapping):
             raise TypeError("selected must be a mapping or None")
         if self.tie_breaker_used is not None:
-            _require_token("tie_breaker_used", self.tie_breaker_used)
+            # Addendum A: RESERVED — no tie-breaker authority exists in C1.
+            raise ValueError("tie_breaker_used is RESERVED and must be None in C1")
         if not isinstance(self.tied_worker_ids, tuple) or not all(
             isinstance(w, str) for w in self.tied_worker_ids
         ):
@@ -388,14 +514,21 @@ class PlacementSelectionDecision:
             raise TypeError("exclusions must be a tuple of CandidateExclusion")
         if type(self.evaluated_candidates) is not int or self.evaluated_candidates < 0:
             raise ValueError("evaluated_candidates must be an integer >= 0")
+        if not isinstance(self.evidence, tuple) or not all(
+            isinstance(item, CandidateEvidence) for item in self.evidence
+        ):
+            raise TypeError("evidence must be a tuple of CandidateEvidence")
+        if len(self.evidence) != self.evaluated_candidates:
+            raise ValueError("evidence must carry exactly one row per evaluated candidate")
 
     def to_dict(self) -> dict[str, Any]:
         """Closed-key, deterministically ordered wire document.
 
-        Nothing beyond these eight keys is ever emitted — no source-ref
-        fields, no environment, no clock read — so ``json.dumps(self.
-        to_dict(), sort_keys=True)`` is byte-identical across repeated calls
-        with equivalent inputs regardless of candidate list order.
+        Nothing beyond these ten keys is ever emitted — no source-ref
+        fields beyond the four ``evidence`` names, no environment, no clock
+        read — so ``json.dumps(self.to_dict(), sort_keys=True)`` is
+        byte-identical across repeated calls with equivalent inputs
+        regardless of candidate list order.
         """
         selected = dict(self.selected) if self.selected is not None else None
         exclusions = sorted(
@@ -404,6 +537,10 @@ class PlacementSelectionDecision:
                 for item in self.exclusions
             ),
             key=lambda item: (item["worker_id"], item["reason"]),
+        )
+        evidence = sorted(
+            (item.to_dict() for item in self.evidence),
+            key=_evidence_sort_key,
         )
         return {
             "schema_version": SELECTION_SCHEMA,
@@ -414,6 +551,12 @@ class PlacementSelectionDecision:
             "tied_worker_ids": sorted(self.tied_worker_ids),
             "exclusions": exclusions,
             "evaluated_candidates": self.evaluated_candidates,
+            # Addendum B — constant discriminator: selection creates NO
+            # capacity reservation, Job, Attempt, Worker, RuntimeBinding, or
+            # provider effect of any kind. Always exactly False; a consumer
+            # never has to infer non-commitment from a field's absence.
+            "selection_is_commitment": False,
+            "evidence": evidence,
         }
 
 
@@ -424,9 +567,89 @@ class PlacementSelectionDecision:
 _SELECTION_KEYS = frozenset({
     "schema_version", "responsibility_ref", "state", "selected",
     "tie_breaker_used", "tied_worker_ids", "exclusions", "evaluated_candidates",
+    "selection_is_commitment", "evidence",
 })
 
 _EXCLUSION_KEYS = frozenset({"worker_id", "reason"})
+
+_EVIDENCE_ROW_KEYS = frozenset({
+    "worker_id", "occupancy", "occupancy_source", "capacity_state",
+    "capacity_source", "host_source_closure_proven", "closure_source",
+    "effect_state",
+})
+
+_SOURCE_REF_KEYS = frozenset({"owner", "ref", "observed_at", "freshness"})
+
+
+def _validate_source_ref_dict(value: Any, *, name: str) -> dict[str, Any]:
+    """Closed-key revalidation of one ``evidence[*].*_source`` row — the
+    plain four-field serialization :func:`_source_ref_dict` produces.
+    Field-only error messages throughout — never the caller-supplied value.
+    """
+    if not isinstance(value, Mapping) or set(value) != _SOURCE_REF_KEYS:
+        raise ValueError(f"{name} must have exactly {sorted(_SOURCE_REF_KEYS)}")
+    try:
+        owner = SourceOwner(value["owner"])
+    except ValueError as exc:
+        raise ValueError(f"{name}.owner is not a recognized SourceOwner value") from exc
+    ref = _require_token(f"{name}.ref", value["ref"])
+    observed_at = value["observed_at"]
+    if observed_at is not None:
+        _require_token(f"{name}.observed_at", observed_at)
+    try:
+        freshness = Freshness(value["freshness"])
+    except ValueError as exc:
+        raise ValueError(f"{name}.freshness is not a recognized Freshness value") from exc
+    return {
+        "owner": owner.value,
+        "ref": ref,
+        "observed_at": observed_at,
+        "freshness": freshness.value,
+    }
+
+
+def _validate_evidence_row(value: Any) -> dict[str, Any]:
+    """Closed-key revalidation of one ``evidence`` wire row (addendum B).
+    Enum-membership + strengthened-token (``_require_token``, which rejects
+    ``"@"``/``"/"``) checks on every field; field-only error messages.
+    """
+    if not isinstance(value, Mapping) or set(value) != _EVIDENCE_ROW_KEYS:
+        raise ValueError(f"evidence row must have exactly {sorted(_EVIDENCE_ROW_KEYS)}")
+    worker_id = _require_token("evidence.worker_id", value["worker_id"])
+    try:
+        occupancy = OccupancyState(value["occupancy"])
+    except ValueError as exc:
+        raise ValueError("evidence.occupancy is not a recognized OccupancyState value") from exc
+    occupancy_source = _validate_source_ref_dict(
+        value["occupancy_source"], name="evidence.occupancy_source"
+    )
+    try:
+        capacity_state = CapacityState(value["capacity_state"])
+    except ValueError as exc:
+        raise ValueError("evidence.capacity_state is not a recognized CapacityState value") from exc
+    capacity_source = _validate_source_ref_dict(
+        value["capacity_source"], name="evidence.capacity_source"
+    )
+    host_source_closure_proven = value["host_source_closure_proven"]
+    if type(host_source_closure_proven) is not bool:
+        raise TypeError("evidence.host_source_closure_proven must be bool")
+    closure_source = _validate_source_ref_dict(
+        value["closure_source"], name="evidence.closure_source"
+    )
+    try:
+        effect_state = EffectState(value["effect_state"])
+    except ValueError as exc:
+        raise ValueError("evidence.effect_state is not a recognized EffectState value") from exc
+    return {
+        "worker_id": worker_id,
+        "occupancy": occupancy.value,
+        "occupancy_source": occupancy_source,
+        "capacity_state": capacity_state.value,
+        "capacity_source": capacity_source,
+        "host_source_closure_proven": host_source_closure_proven,
+        "closure_source": closure_source,
+        "effect_state": effect_state.value,
+    }
 
 
 def validate_placement_selection(value: Any) -> dict[str, Any]:
@@ -442,12 +665,13 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
 
     Beyond per-field shape, this also enforces the CROSS-FIELD invariants a
     well-formed decision always satisfies: ``selected`` is present iff
-    ``state == "selected"``; a set ``tie_breaker_used`` implies
-    ``state == "selected"`` and at least two ``tied_worker_ids``;
-    ``state == "tie_abstained"`` implies at least two ``tied_worker_ids``;
-    every other state implies an EMPTY ``tied_worker_ids``; and
-    ``evaluated_candidates`` is never smaller than either ``exclusions`` or
-    ``tied_worker_ids``.
+    ``state == "selected"``; ``tie_breaker_used`` must be ``null`` — C1 has
+    no tie-breaker authority (addendum A), so any non-``null`` value is
+    refused outright, regardless of state; ``tied_worker_ids`` is non-empty
+    iff ``state == "tie_abstained"``, and then requires at least two ids;
+    ``selection_is_commitment`` must be exactly ``false``; and
+    ``evaluated_candidates`` equals ``len(evidence)`` exactly and is never
+    smaller than ``len(exclusions)``.
     """
     if not isinstance(value, Mapping) or set(value) != _SELECTION_KEYS:
         actual = sorted(value) if isinstance(value, Mapping) else type(value).__name__
@@ -468,12 +692,11 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     selected_raw = value["selected"]
     selected = validate_placement_snapshot(selected_raw) if selected_raw is not None else None
 
+    # Addendum A: RESERVED — no tie-breaker authority exists in C1. ANY
+    # non-null value is refused, unconditionally, before any state check.
     tie_breaker_used = value["tie_breaker_used"]
     if tie_breaker_used is not None:
-        if not isinstance(tie_breaker_used, str):
-            raise TypeError("tie_breaker_used must be a string or null")
-        if tie_breaker_used not in _RECOGNIZED_TIE_BREAKERS:
-            raise ValueError("tie_breaker_used is not a recognized tie-breaker token")
+        raise ValueError("tie_breaker_used must be null (RESERVED — no tie-breaker authority in C1)")
 
     tied_raw = value["tied_worker_ids"]
     if not isinstance(tied_raw, list) or not all(isinstance(w, str) for w in tied_raw):
@@ -503,24 +726,31 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
     if type(evaluated_candidates) is not int or evaluated_candidates < 0:
         raise ValueError("evaluated_candidates must be an integer >= 0")
 
-    # --- cross-field invariants (reviewer M-3) ------------------------------
+    selection_is_commitment = value["selection_is_commitment"]
+    if selection_is_commitment is not False:
+        raise ValueError("selection_is_commitment must be exactly false")
+
+    evidence_raw = value["evidence"]
+    if not isinstance(evidence_raw, list):
+        raise TypeError("evidence must be a list")
+    evidence = [_validate_evidence_row(item) for item in evidence_raw]
+    if evidence != sorted(evidence, key=_evidence_sort_key):
+        raise ValueError("evidence must be sorted canonically (mirrors exclusions)")
+
+    # --- cross-field invariants (reviewer M-3, addendum A/B) ----------------
     if (selected is not None) != (state is SelectionState.SELECTED):
         raise ValueError("selected must be present iff state is 'selected'")
-    if tie_breaker_used is not None:
-        if state is not SelectionState.SELECTED:
-            raise ValueError("tie_breaker_used may only be set when state is 'selected'")
+    if state is SelectionState.TIE_ABSTAINED:
         if len(tied_raw) < 2:
-            raise ValueError("tie_breaker_used requires at least two tied_worker_ids")
-    if state is SelectionState.TIE_ABSTAINED and len(tied_raw) < 2:
-        raise ValueError("state 'tie_abstained' requires at least two tied_worker_ids")
-    if state not in (SelectionState.SELECTED, SelectionState.TIE_ABSTAINED) and tied_raw:
-        raise ValueError(
-            "tied_worker_ids must be empty unless state is 'selected' or 'tie_abstained'"
-        )
+            raise ValueError("state 'tie_abstained' requires at least two tied_worker_ids")
+    elif tied_raw:
+        raise ValueError("tied_worker_ids must be empty unless state is 'tie_abstained'")
     if evaluated_candidates < len(exclusions):
         raise ValueError("evaluated_candidates must be >= the number of exclusions")
     if evaluated_candidates < len(tied_raw):
         raise ValueError("evaluated_candidates must be >= the number of tied_worker_ids")
+    if evaluated_candidates != len(evidence):
+        raise ValueError("evaluated_candidates must equal the number of evidence rows")
 
     return {
         "schema_version": SELECTION_SCHEMA,
@@ -531,6 +761,8 @@ def validate_placement_selection(value: Any) -> dict[str, Any]:
         "tied_worker_ids": list(tied_raw),
         "exclusions": exclusions,
         "evaluated_candidates": evaluated_candidates,
+        "selection_is_commitment": False,
+        "evidence": evidence,
     }
 
 
@@ -598,24 +830,49 @@ def _aggregate_state(reasons_present: frozenset[ExclusionReason]) -> SelectionSt
     return SelectionState.NO_ELIGIBLE_CANDIDATE
 
 
+def _evidence_from_candidates(
+    candidates: Sequence[PlacementCandidateFact],
+) -> tuple[CandidateEvidence, ...]:
+    """One :class:`CandidateEvidence` row per element of ``candidates`` — the
+    FULL, un-deduplicated tuple :func:`select_placement` was handed, so a
+    duplicate ``worker_id`` still yields one row per occurrence.
+    """
+    return tuple(
+        CandidateEvidence(
+            worker_id=c.worker_id,
+            occupancy=c.occupancy,
+            occupancy_source=c.occupancy_source,
+            capacity_state=c.capacity_state,
+            capacity_source=c.capacity_source,
+            host_source_closure_proven=c.host_source_closure_proven,
+            closure_source=c.closure_source,
+            effect_state=c.effect_state,
+        )
+        for c in candidates
+    )
+
+
 def _decision(
     responsibility_ref: str,
     state: SelectionState,
     *,
     selected: Mapping[str, Any] | None = None,
-    tie_breaker_used: str | None = None,
     tied_worker_ids: tuple[str, ...] = (),
     exclusions: tuple[CandidateExclusion, ...] = (),
     evaluated_candidates: int,
+    evidence: tuple[CandidateEvidence, ...],
 ) -> PlacementSelectionDecision:
     return PlacementSelectionDecision(
         responsibility_ref=responsibility_ref,
         state=state,
         selected=selected,
-        tie_breaker_used=tie_breaker_used,
+        # Addendum A: RESERVED, always None — no tie-breaker authority
+        # exists in C1. select_placement() never sets this to anything else.
+        tie_breaker_used=None,
         tied_worker_ids=tied_worker_ids,
         exclusions=exclusions,
         evaluated_candidates=evaluated_candidates,
+        evidence=evidence,
     )
 
 
@@ -632,13 +889,18 @@ def select_placement(
     ---------------------
     1. Input refusal (typed ``ValueError``, no decision produced):
        ``responsibility.state != "waiting_capacity"``; ``accepted_tie_breaker``
-       not in the closed recognized set ``{"worker_id_lexicographic"}`` when
-       not ``None``; any element of ``candidates`` not a
+       not ``None`` (addendum A: C1 has NO tie-breaker authority — a later
+       wave may add a typed, source-owned ruling receipt binding the exact
+       candidate-set digest, but until then this parameter accepts only
+       ``None``); any element of ``candidates`` not a
        :class:`PlacementCandidateFact`.
     2. ``responsibility.source.freshness`` not ``CURRENT`` -> ``STALE_EVIDENCE``
-       (no selection, no exclusions, ``evaluated_candidates=len(candidates)``).
+       (no selection, no exclusions, ``evaluated_candidates=len(candidates)``,
+       ``evidence`` still populated from the full candidate tuple).
     3. Any repeated ``worker_id`` -> ``RECONCILIATION_REQUIRED``; every
-       duplicated id gets exactly one ``DUPLICATE_IDENTITY`` exclusion.
+       duplicated id gets exactly one ``DUPLICATE_IDENTITY`` exclusion
+       (``evidence`` still populated from the full, un-deduplicated tuple —
+       one row per occurrence, including duplicates).
     4. Candidates are evaluated in canonical ``worker_id``-sorted order. Per
        candidate, the reason is the first failing gate in a FIXED order
        that REFINES :data:`_AGGREGATE_PRECEDENCE` (see
@@ -655,10 +917,10 @@ def select_placement(
        still be ``SELECTED`` in the same call (ruling m-6).
     5. Eligible non-empty: rank ONLY by ``capacity_state`` (``AVAILABLE``
        before ``DEGRADED``); take the min-rank set. Exactly one winner ->
-       ``SELECTED``. More than one: ``accepted_tie_breaker ==
-       "worker_id_lexicographic"`` picks the lexicographic minimum
-       (``SELECTED``, ``tie_breaker_used`` set); otherwise ``TIE_ABSTAINED``
-       with every tied id in ``tied_worker_ids``.
+       ``SELECTED``. More than one -> ``TIE_ABSTAINED`` ALWAYS (addendum A:
+       C1 has no tie-breaker authority to resolve an exact top tie — every
+       tied id lands in ``tied_worker_ids``, ``selected`` stays ``None``,
+       and ``tie_breaker_used`` stays its RESERVED ``None``).
     6. Eligible empty: aggregate state by the CLOSED, documented precedence
        over the exclusion reasons actually present — see
        :data:`_AGGREGATE_PRECEDENCE` — falling through to
@@ -667,8 +929,14 @@ def select_placement(
        :data:`_AGGREGATE_PRECEDENCE`), or when there were zero candidates at
        all.
 
-    No clock, no environment, no I/O, no randomness: ranking, tie-breaking,
-    and every aggregate decision are functions of the typed facts alone.
+    ``evidence`` (addendum B) is populated in EVERY return path — including
+    both short-circuits above — from the FULL, un-deduplicated candidate
+    tuple exactly as received; :meth:`PlacementSelectionDecision.to_dict`
+    also emits the constant ``selection_is_commitment: false``
+    discriminator on every decision.
+
+    No clock, no environment, no I/O, no randomness: ranking and every
+    aggregate decision are functions of the typed facts alone.
     """
     if not isinstance(responsibility, ResponsibilityFact):
         raise TypeError("responsibility must be a ResponsibilityFact")
@@ -684,16 +952,30 @@ def select_placement(
             "responsibility.state must be 'waiting_capacity' before placement "
             "selection may run"
         )
-    if accepted_tie_breaker is not None and accepted_tie_breaker not in _RECOGNIZED_TIE_BREAKERS:
-        raise ValueError("accepted_tie_breaker is not a recognized tie-breaker token")
+    if accepted_tie_breaker is not None:
+        # Addendum A: no tie-breaker authority exists in C1. See the
+        # docstring above for the forward-compatible plan; the error text
+        # itself deliberately says only this much.
+        raise ValueError("accepted_tie_breaker: no tie-breaker authority exists in C1")
 
     responsibility_ref = responsibility.responsibility_ref
     evaluated_candidates = len(candidate_tuple)
+    # Canonical worker_id-sorted order, computed ONCE up front — this is
+    # what makes select_placement's OWN dataclass output (not just its
+    # to_dict() wire form) permutation-invariant: evidence is built from
+    # THIS order below, not the raw input order, exactly like exclusions
+    # already were.
+    ordered = sorted(candidate_tuple, key=lambda c: c.worker_id)
+    # Addendum B: built ONCE, from the full un-deduplicated candidate set
+    # (in canonical order), and reused on every return path below
+    # (including both short-circuits) — evidence is a record of what was
+    # observed, never a filtered or deduplicated view.
+    evidence = _evidence_from_candidates(ordered)
 
     if responsibility.source.freshness is not Freshness.CURRENT:
         return _decision(
             responsibility_ref, SelectionState.STALE_EVIDENCE,
-            evaluated_candidates=evaluated_candidates,
+            evaluated_candidates=evaluated_candidates, evidence=evidence,
         )
 
     seen_counts: dict[str, int] = {}
@@ -710,9 +992,8 @@ def select_placement(
         return _decision(
             responsibility_ref, SelectionState.RECONCILIATION_REQUIRED,
             exclusions=exclusions, evaluated_candidates=evaluated_candidates,
+            evidence=evidence,
         )
-
-    ordered = sorted(candidate_tuple, key=lambda c: c.worker_id)
 
     exclusions_list: list[CandidateExclusion] = []
     eligible: list[PlacementCandidateFact] = []
@@ -740,35 +1021,23 @@ def select_placement(
             return _decision(
                 responsibility_ref, SelectionState.SELECTED,
                 selected=selected, exclusions=exclusions,
-                evaluated_candidates=evaluated_candidates,
+                evaluated_candidates=evaluated_candidates, evidence=evidence,
             )
 
+        # Addendum A: an exact top tie ALWAYS abstains — C1 has no
+        # tie-breaker authority to resolve it, no matter how the caller
+        # invoked select_placement (accepted_tie_breaker was already
+        # refused above unless None).
         tied_worker_ids = tuple(sorted(c.worker_id for c in winners))
-        if accepted_tie_breaker == "worker_id_lexicographic":
-            winner = min(winners, key=lambda c: c.worker_id)
-            selected = build_placement_snapshot(
-                worker_id=winner.worker_id,
-                quota_class=winner.quota_class,
-                provider=winner.provider,
-                account_label=winner.account_label,
-                observed_at_ms=winner.observed_at_ms,
-            )
-            return _decision(
-                responsibility_ref, SelectionState.SELECTED,
-                selected=selected, tie_breaker_used="worker_id_lexicographic",
-                tied_worker_ids=tied_worker_ids, exclusions=exclusions,
-                evaluated_candidates=evaluated_candidates,
-            )
-
         return _decision(
             responsibility_ref, SelectionState.TIE_ABSTAINED,
             tied_worker_ids=tied_worker_ids, exclusions=exclusions,
-            evaluated_candidates=evaluated_candidates,
+            evaluated_candidates=evaluated_candidates, evidence=evidence,
         )
 
     reasons_present = frozenset(item.reason for item in exclusions)
     state = _aggregate_state(reasons_present)
     return _decision(
         responsibility_ref, state, exclusions=exclusions,
-        evaluated_candidates=evaluated_candidates,
+        evaluated_candidates=evaluated_candidates, evidence=evidence,
     )

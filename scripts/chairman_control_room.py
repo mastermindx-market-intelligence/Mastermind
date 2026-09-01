@@ -1266,23 +1266,34 @@ def run_check(config: ServerConfig) -> int:
             len(attention.get("chairman", [])), len(attention.get("ceo", [])), len(attention.get("coo", []))
         )
     )
-    # CAP-C1 (reviewer m-9): one line when a placement_selection section is
-    # actually present; a degraded marker when the flag was given but the
-    # section came back None (the failure detail itself lives in the
-    # `degraded` list printed below, never repeated here). No line at all
-    # when the flag was never given — this stays exactly as quiet as every
-    # other never-asked-for optional feature.
+    # CAP-C1 (reviewer m-9; addendum B): one line when a placement_selection
+    # section is actually present; a degraded marker when the flag was
+    # given but the section came back None (the failure detail itself
+    # lives in the `degraded` list printed below, never repeated here). No
+    # line at all when the flag was never given — this stays exactly as
+    # quiet as every other never-asked-for optional feature. For
+    # state=selected the line also names the no-commitment discriminator
+    # (addendum B: selection creates no reservation/Job/Attempt/Worker/
+    # RuntimeBinding/provider effect); for tie_abstained it names every
+    # tied id (addendum A: C1 has no tie-breaker authority, so an exact tie
+    # always abstains); every other non-selected state names its exclusion
+    # count.
     placement_selection = doc.get("placement_selection")
     if placement_selection is not None:
+        state = placement_selection.get("state")
         selected = placement_selection.get("selected")
         tied = placement_selection.get("tied_worker_ids") or []
-        if selected is not None:
-            detail = f"selected={selected.get('worker_id')}"
-        elif tied:
-            detail = f"abstained, tied={len(tied)}"
+        exclusions = placement_selection.get("exclusions") or []
+        if state == "selected" and selected is not None:
+            detail = (
+                f"selected={selected.get('worker_id')} "
+                "commitment=none (no reservation/worker/attempt/runtime-binding/provider effect)"
+            )
+        elif state == "tie_abstained":
+            detail = f"tied={','.join(tied)}"
         else:
-            detail = "no selection"
-        print(f"placement_selection: state={placement_selection.get('state')} {detail}")
+            detail = f"exclusions={len(exclusions)}"
+        print(f"placement_selection: state={state} {detail}")
     elif config.placement_selection_path:
         print("placement_selection: degraded (see degraded list)")
     if doc["degraded"]:
