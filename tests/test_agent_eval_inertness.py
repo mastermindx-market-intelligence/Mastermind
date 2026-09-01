@@ -679,6 +679,18 @@ ALLOWED_PATHS = frozenset(
         "tests/fixtures/agent_eval_ohf_bridge/README.md",
         "tests/fixtures/agent_eval_ohf_bridge/MANIFEST.json",
         "tests/fixtures/agent_eval_ohf_bridge/runs/control-1.0.0/S2/1cdaa1b19b584d50ba012dc3910637eb.md",
+        # --- EVAL-E1 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-e1-prereg-20260901-fable-001):
+        # RECORDS ONLY paired-pilot preregistration -- a new additive shape
+        # validator, its committed sealed record, and this wave's own plan
+        # record. Executes nothing (tests/test_agent_eval_prereg.py's own
+        # inertness section, plus the shared AST/subprocess fence above,
+        # which parametrizes over prereg.py automatically -- no separate
+        # fence edit needed for prereg.py itself).
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-e1-preregistration.md",
+        "scripts/agent_eval/prereg.py",
+        "tests/test_agent_eval_prereg.py",
+        "experiments/agent_eval/e1/preregistration.json",
     }
 )
 
