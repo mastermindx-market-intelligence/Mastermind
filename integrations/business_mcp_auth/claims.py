@@ -28,6 +28,7 @@ from integrations.business_mcp_auth.contracts import (
 _KID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _FORBIDDEN_HEADER_KEYS = frozenset({"jku", "x5u", "x5c", "jwk"})
 _REQUIRED_CLAIMS = frozenset({"iss", "sub", "aud", "iat", "exp", "scope"})
+_NON_AUTHORIZING_OAUTH_SCOPES = frozenset({"offline_access"})
 _MAX_SCOPE_CHARS = 4096
 _MAX_SCOPE_ITEMS = 32
 
@@ -67,10 +68,18 @@ def _scope_claim(value: Any, policy: ResourcePolicy) -> tuple[str, ...]:
         _refuse(AuthErrorCode.SCOPE_REFUSED)
     if len(tokens) != len(set(tokens)):
         _refuse(AuthErrorCode.SCOPE_REFUSED)
-    normalized = tuple(sorted(tokens))
-    if not set(policy.required_scopes).issubset(normalized):
+
+    granted = frozenset(tokens)
+    required = frozenset(policy.required_scopes)
+    if not required.issubset(granted):
         _refuse(AuthErrorCode.SCOPE_REFUSED)
-    return normalized
+    if granted - required - _NON_AUTHORIZING_OAUTH_SCOPES:
+        _refuse(AuthErrorCode.SCOPE_REFUSED)
+
+    # The verified principal carries resource authorization only.  The one
+    # accepted OAuth session capability is deliberately consumed at this
+    # boundary and never projected into MCP tool authority.
+    return policy.required_scopes
 
 
 def _optional_digest_claim(claims: Mapping[str, Any], name: str) -> str | None:

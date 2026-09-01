@@ -374,3 +374,91 @@ def test_mcp_adapter_refuses_non_jwt_authenticator_at_composition_time() -> None
             now=lambda: NOW,
             audit_sink=_Sink(),
         )
+
+
+def _claims_with_scope(policy: ResourcePolicy, scope: str) -> dict[str, object]:
+    return {
+        "iss": policy.issuer,
+        "sub": "chairman-a",
+        "aud": policy.resource,
+        "iat": 1_788_000_000,
+        "exp": 1_788_000_600,
+        "scope": scope,
+        "client_id": "chatgpt-business-client",
+    }
+
+
+@pytest.mark.parametrize(
+    "scope",
+    (
+        "mastermind.steward.read",
+        "mastermind.steward.read offline_access",
+        "offline_access mastermind.steward.read",
+    ),
+)
+def test_refresh_scope_is_accepted_but_not_projected_as_resource_authority(
+    scope: str,
+) -> None:
+    policy = _policy()
+
+    principal = claims_module.validate_verified_claims(
+        _claims_with_scope(policy, scope),
+        policy,
+        now=NOW,
+    )
+
+    assert principal.scopes == policy.required_scopes
+    assert "offline_access" not in principal.scopes
+
+
+@pytest.mark.parametrize(
+    "scope",
+    (
+        "offline_access",
+        "mastermind.steward.read mastermind.unknown",
+        "mastermind.steward.read mastermind.executive.read",
+        "mastermind.steward.read openid",
+        "mastermind.steward.read profile",
+        "mastermind.steward.read email",
+        "mastermind.steward.read offline_access openid",
+    ),
+)
+def test_missing_resource_scope_or_unapproved_extra_scope_is_refused(
+    scope: str,
+) -> None:
+    policy = _policy()
+
+    with pytest.raises(AuthError) as caught:
+        claims_module.validate_verified_claims(
+            _claims_with_scope(policy, scope),
+            policy,
+            now=NOW,
+        )
+
+    assert caught.value.code is AuthErrorCode.SCOPE_REFUSED
+
+
+def test_refresh_scope_never_reaches_mcp_access_token_scopes() -> None:
+    policy = _policy()
+    principal = claims_module.validate_verified_claims(
+        _claims_with_scope(
+            policy,
+            "mastermind.steward.read offline_access",
+        ),
+        policy,
+        now=NOW,
+    )
+    authenticator = _BoundAuthenticator(policy=policy, result=principal)
+    sink = _Sink()
+
+    access = _run(
+        _verifier(
+            authenticator=authenticator,
+            policy=policy,
+            sink=sink,
+        ).verify_token("raw-token")
+    )
+
+    assert access is not None
+    assert access.scopes == list(policy.required_scopes)
+    assert "offline_access" not in access.scopes
