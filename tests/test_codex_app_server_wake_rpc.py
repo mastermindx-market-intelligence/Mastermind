@@ -34,7 +34,7 @@ from control_plane.wake_dispatcher import WakePreSubmitError
 from integrations.executive_wake.codex_app_server import CODEX_WAKE_INSTRUCTION
 from integrations.executive_wake import codex_app_server_rpc as wake_rpc
 from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
-from scripts.ohf.laboratory import JsonRpcError
+from scripts.ohf.laboratory import AppServerStopProof, JsonRpcError
 
 
 NATIVE_HANDLE = "019cafe0-1111-7222-8333-abcdefabcdef"
@@ -74,11 +74,12 @@ class FakeOwnedAppServerClient:
     fail_request: bool = False
     completion_timeout: bool = False
     completion: Mapping[str, Any] | None = None
+    running: bool = True
     calls: list[tuple[str, object]] = field(default_factory=list)
 
     def alive(self) -> bool:
         self.calls.append(("alive", None))
-        return True
+        return self.running
 
     def request(
         self,
@@ -112,6 +113,41 @@ class FakeOwnedAppServerClient:
         self.calls.append(("drain_notifications", None))
         return []
 
+    def graceful_close(self, *, wait: float = 5.0) -> AppServerStopProof:
+        self.calls.append(("graceful_close", wait))
+        self.running = False
+        return AppServerStopProof(
+            controller_returncode=0,
+            private_group_id=4242,
+            private_group_empty=True,
+            leader_exit_confirmed_graceful=True,
+            survivors_detected_after_controller_exit=False,
+            termination_outcome="graceful",
+        )
+
+    def terminate(self, *, wait: float = 5.0) -> None:
+        self.calls.append(("terminate", wait))
+        self.running = False
+
+
+@dataclass
+class FakeBoundBrowserResource:
+    """Minimal real adapter boundary for the Browser B1 turn contract."""
+
+    prompt_calls: int = 0
+    observed_results: list[str] = field(default_factory=list)
+    stop_calls: int = 0
+
+    def turn_prompt_suffix(self) -> str:
+        self.prompt_calls += 1
+        return "\n\nBROWSER_B1_CLOSED_TURN_CONTRACT"
+
+    def observe_canonical_result(self, value: str) -> None:
+        self.observed_results.append(value)
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+
 
 def _owned_adapter(
     client: FakeOwnedAppServerClient,
@@ -119,13 +155,17 @@ def _owned_adapter(
     provider_session_id: str = NATIVE_HANDLE,
     observed_process: ProcessIdentityObservation = PROCESS,
     writer_state: ProviderWriterState = ProviderWriterState.HELD,
+    resource: FakeBoundBrowserResource | None = None,
 ):
     adapter = object.__new__(codex_adapter.CodexOperatorAdapter)
     adapter.worker_id = GENERATION.worker_id
     adapter.workspace_root = Path("/tmp/mastermind-w3a-owned-workspace")
     adapter.process_identity_observer = lambda _pid: observed_process
     requested = SimpleNamespace(approval_policy="never")
-    attestation = object()
+    attestation = SimpleNamespace(effective_config_digest="d" * 64)
+    adapter._active_workers = {
+        adapter.worker_id: GENERATION.process_generation_id,
+    }
     adapter._generations = {
         GENERATION.process_generation_id: SimpleNamespace(
             epoch=EPOCH,
@@ -136,6 +176,7 @@ def _owned_adapter(
             process=PROCESS,
             requested=requested,
             attestation=attestation,
+            resource=resource,
             events=[],
             turns={},
             turn_subordinates={},
@@ -583,6 +624,169 @@ def test_exact_completion_allows_later_ordinary_turn() -> None:
     assert observation.delivered is True
     _begin_ordinary_turn(adapter)
     assert [name for name, _payload in client.calls].count("turn/start") == 2
+
+
+def test_composed_exact_attention_completion_preserves_browser_turn_contract() -> None:
+    """Clearing the attention fence must not clear the Browser B1 resource."""
+
+    client = FakeOwnedAppServerClient()
+    resource = FakeBoundBrowserResource()
+    adapter = _owned_adapter(client, resource=resource)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.delivered is True
+    assert state.attention_inflight is False
+    assert state.attention_native_turn_id is None
+    assert state.resource is resource
+    assert resource.prompt_calls == 0
+    assert resource.observed_results == []
+
+    _begin_ordinary_turn(adapter)
+
+    turn_starts = [payload for name, payload in client.calls if name == "turn/start"]
+    assert len(turn_starts) == 2
+    assert turn_starts[1]["input"] == [
+        {
+            "type": "text",
+            "text": "ordinary governed turn\n\nBROWSER_B1_CLOSED_TURN_CONTRACT",
+        }
+    ]
+    assert state.resource is resource
+    assert resource.prompt_calls == 1
+    assert resource.observed_results == []
+
+
+def test_composed_attention_timeout_keeps_browser_resource_and_blocks_turn() -> None:
+    """A completion timeout must retain both fences after exactly one write."""
+
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    resource = FakeBoundBrowserResource()
+    adapter = _owned_adapter(client, resource=resource)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.accepted is True
+    assert observation.delivered is False
+    assert state.attention_inflight is True
+    assert state.attention_native_turn_id == "turn-wake-456"
+    assert state.resource is resource
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        _begin_ordinary_turn(adapter)
+
+    assert error.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert resource.prompt_calls == 0
+    assert resource.observed_results == []
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_composed_stale_completion_clears_neither_attention_nor_browser_fence() -> None:
+    """A stale native completion cannot release either composed owner state."""
+
+    client = FakeOwnedAppServerClient(
+        completion={
+            "method": "turn/completed",
+            "params": {
+                "threadId": NATIVE_HANDLE,
+                "turn": {"id": "stale-turn", "status": "completed"},
+            },
+        }
+    )
+    resource = FakeBoundBrowserResource()
+    adapter = _owned_adapter(client, resource=resource)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as attention_error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert attention_error.value.effect_unknown is True
+    assert state.attention_inflight is True
+    assert state.attention_native_turn_id == "turn-wake-456"
+    assert state.resource is resource
+
+    with pytest.raises(codex_adapter.CodexAdapterError):
+        _begin_ordinary_turn(adapter)
+
+    assert resource.prompt_calls == 0
+    assert resource.observed_results == []
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+@pytest.mark.parametrize("terminal_operation", ("graceful_stop", "cancel"))
+def test_composed_terminal_adapter_path_synthesizes_no_attention_or_browser_cleanup(
+    terminal_operation: str,
+) -> None:
+    """Provider termination is not an attention completion or resource cleanup."""
+
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    resource = FakeBoundBrowserResource()
+    adapter = _owned_adapter(client, resource=resource)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+    assert observation.delivered is False
+
+    if terminal_operation == "graceful_stop":
+        terminal = adapter.graceful_stop(GENERATION, operation_id=object())
+        assert terminal.provider_writer_state is ProviderWriterState.RELEASED
+    else:
+        terminal = adapter.cancel(
+            GENERATION,
+            reason="bounded test cancellation",
+            operation_id=object(),
+        )
+        assert terminal.provider_writer_state is ProviderWriterState.UNKNOWN
+
+    assert state.attention_inflight is True
+    assert state.attention_native_turn_id == "turn-wake-456"
+    assert state.resource is resource
+    assert resource.prompt_calls == 0
+    assert resource.observed_results == []
+    assert resource.stop_calls == 0
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
 @dataclass
