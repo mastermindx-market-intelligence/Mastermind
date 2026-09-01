@@ -325,7 +325,7 @@ def _strategic_receipt(
             "owner": "STRATEGIC_STATE",
             "revision": (
                 f"constraints-sha256:{constraints_digest};"
-                f"sha256:{strategic_digest};mastermind:{checkout_label};"
+                f"s:{strategic_digest};mastermind:{checkout_label};"
                 f"canonical:{canonical_sha}"
             ),
             "state": state,
