@@ -242,9 +242,9 @@ CCL-A1 deterministic decision core
 -> CCL-A6 bounded multi-program portfolio autonomy
 ```
 
-A2 must migrate to the R2 grammar on its existing carrier. It must emit the Strategic State source
-binding, full six-constraint map, classification facts and classification bindings. A1 protection
-precedes that migration.
+A2 must migrate to the R2/R3 grammar on its existing carrier. It must emit the Strategic State source
+binding, full six-constraint map, classification facts and classification bindings, and the exact
+Chairman delegation-envelope binding. A1 protection precedes that migration.
 
 ## 12. Completion ruler
 
@@ -253,3 +253,33 @@ complete only when a real current-source cycle selects a bounded transformation,
 executes and reconciles it, learning changes the next decision, and Chris performs zero routine
 message carriage, account selection, session hunting, watcher repair, carrier archaeology or
 initiative babysitting across a representative interval.
+
+## 13. R3 — Chairman delegation-envelope integrity
+
+R3 closes the authority-preflight gap left after R2. Merely citing a current load-bearing
+`CHAIRMAN_DIRECTIVE` receipt is insufficient because the caller could otherwise alter the envelope's
+allowed actions, mode, repository/path/scope/carrier boundaries, budget, child ceiling or expiry while
+retaining an unrelated current Chairman receipt.
+
+The envelope's complete authority-bearing payload is canonicalized and bound to the Chairman source
+through:
+
+```text
+envelope-sha256:<sha256(canonical delegation envelope)>
+```
+
+Canonicalization sorts semantically unordered fields and repository/path mappings before hashing. The
+digest covers the envelope schema and identity, complete authority-source set, mode, action and
+reversibility sets, repository/path scope, canonical affected-scope prefixes, exact-carrier prefixes,
+budget, active-child ceiling, exact-carrier requirement and expiry. Equivalent permutations retain
+the same digest; any substantive authority change requires a new binding.
+
+All cited authority receipts must remain load-bearing and Chairman-owned, and their aggregate state
+still controls freshness. At least one cited current Chairman receipt must carry the exact envelope
+digest. Missing or mismatched binding is malformed input, not an accepted envelope with a later
+warning. The deterministic packet exposes the verified digest.
+
+This is a source-integrity check, not a signature, bearer token or reusable authority object. A2 must
+originate the binding from the current accepted Chairman decision, and the existing effect owner must
+still reread current source, authority, carrier and prior-effect state at the mutation boundary. R3
+adds no store, registry, lifecycle, scheduler, runtime, provider path or production authority.
