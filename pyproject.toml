@@ -28,18 +28,23 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<10",
-    # The Executive MCP gateway's SDK (integrations/executive_mcp/server.py only).
-    # DELIBERATELY not a hard runtime dependency: `control_plane` must stay
-    # importable under the sealed, root-owned Executive Python runtime with no
-    # third-party package installed (EXEC-MCP-A commission R5), and it is
-    # declared explicitly here rather than inherited transitively from
-    # claude-agent-sdk so that an unrelated dependency bump cannot silently
-    # remove the gateway's SDK from CI.
-    # Exact SDK version resolved by EXEC-MCP-A (PR #64) on 2026-08-15.
-    # The floating `mcp>=1.2` constraint allowed a later SDK to rename
-    # `Server.list_tools` / `ToolAnnotations.readOnlyHint` and red hosted CI
-    # without any MCP product change. Do not float this pin.
-    "mcp==1.28.0",
+    # The historical mcp>= floor is intentionally retired; the maintained v1
+    # release below is exact so unrelated SDK movement cannot red hosted CI.
+    # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.
+    # It is deliberately not a base dependency: control_plane must remain
+    # importable in the sealed Executive runtime without the SDK installed.
+    # 1.28.1 is the maintained security-fix release on the v1 API line used by
+    # current Executive, Secretary, Company Dialogue, and Business app code.
+    "mcp==1.28.1",
+    # Exact current security-reviewed JWT implementation for hermetic A1 tests.
+    "PyJWT[crypto]==2.13.0",
+]
+
+# Isolated installation profile for remote Business MCP app/resource-server
+# processes. This does not arm, publish, authenticate, or install an app.
+business-mcp = [
+    "mcp==1.28.1",
+    "PyJWT[crypto]==2.13.0",
 ]
 
 [tool.setuptools.packages.find]

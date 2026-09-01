@@ -39,6 +39,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/executive_inbox.py
   control_plane/executive_orchestration_principal.py
   control_plane/executive_orchestration_result.py
+  control_plane/executive_retry_safety.py
   control_plane/executive_runtime.py
   control_plane/executive_supervisor.py
   control_plane/executive_worker_broker.py
@@ -49,6 +50,7 @@ RELEASE_TRACKED_PATHS=(
   control_plane/strategic_state.py
   control_plane/surface_bindings.py
   control_plane/worker_adapter.py
+  control_plane/worker_browser_b1.py
   ops/control_room_remote/mastermind-control-room-remote.service
   scripts/__init__.py
   scripts/chairman_control_room_remote.py
