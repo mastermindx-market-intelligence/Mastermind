@@ -69,3 +69,46 @@ def test_package_has_no_state_store_or_write_adapter():
             if token in text:
                 offenders.append((path.name, token))
     assert offenders == []
+
+
+def test_authenticated_http_stack_has_one_dispatch_and_a1_owns_challenges():
+    text = (PACKAGE / "app.py").read_text(encoding="utf-8")
+
+    assert "RequireAuthMiddleware" not in text
+    assert "mcp_auth_error_result" in text
+    assert "www_authenticate" in text
+    assert "BearerAuthBackend" in text
+    assert "AuthContextMiddleware" in text
+    assert text.count("StreamableHTTPSessionManager(") == 1
+    assert text.count("manager.handle_request") == 1
+    assert "Mount(" not in text
+    assert "RedirectResponse" not in text
+
+    # Starlette evaluates user middleware outermost-first in declaration order:
+    # transport refusal must happen before bearer verification.
+    transport = text.index("Middleware(_StewardTransportGuard")
+    authentication = text.index("Middleware(\n            AuthenticationMiddleware")
+    auth_context = text.index("Middleware(AuthContextMiddleware")
+    assert transport < authentication < auth_context
+
+
+def test_transport_guard_has_closed_pre_auth_boundary_vocabulary():
+    text = (PACKAGE / "app.py").read_text(encoding="utf-8")
+    required = (
+        "MAX_REQUEST_BODY_BYTES",
+        "_StewardTransportGuard",
+        "_A1AuthGate",
+        "scope.get(\"raw_path\")",
+        "scope.get(\"root_path\")",
+        "scope.get(\"query_string\")",
+        "application/json",
+        "authorization",
+        "origin",
+        "host",
+        "421",
+        "413",
+        "415",
+        "insufficient_scope",
+    )
+    for token in required:
+        assert token in text
