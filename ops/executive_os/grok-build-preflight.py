@@ -503,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
         outcome = observe_acp_cached_oauth(binary)
         assert_binary_unchanged(binary, identity)
         observed_at = now_iso()
-    except PreflightError:
+    except Exception:
         print(json.dumps({"ok": False, "error": PUBLIC_FAILURE}, sort_keys=True))
         return 2
 
