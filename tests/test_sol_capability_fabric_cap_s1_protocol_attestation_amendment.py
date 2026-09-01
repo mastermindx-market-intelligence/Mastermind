@@ -72,7 +72,9 @@ def test_amendment_narrowly_repairs_the_provider_reported_path_assumption() -> N
         VERTICAL.name,
         "A fake server's convenient `path` field cannot become production protocol truth",
         "absence of `path`",
-        "no model turn is allowed",
+        "If the pinned binary supports neither path mechanism",
+        "mechanism, no",
+        "model turn is allowed",
     )
 
 
