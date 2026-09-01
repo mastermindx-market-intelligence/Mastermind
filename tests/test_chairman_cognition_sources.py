@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -32,6 +33,93 @@ _PLAN = (
 )
 _MASTERMIND_SHA = "a" * 40
 _MACRO_SHA = "b" * 40
+_CHAIRMAN_REF = "CHAIRMAN_DIRECTIVE:2026-08-30"
+_GITHUB_REF = "GITHUB:A1"
+
+
+def _digest(value) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+
+
+def _classification_payload(option: dict) -> dict:
+    return {
+        "option_id": option["option_id"],
+        "action": option["action"],
+        "scope_refs": sorted(option["scope_refs"]),
+        "repositories": sorted(option["repositories"]),
+        "paths": sorted(option["paths"]),
+        "creates_duplicate_control_plane": option[
+            "creates_duplicate_control_plane"
+        ],
+        "change_classes": sorted(option["change_classes"]),
+        "affected_departments": sorted(option["affected_departments"]),
+    }
+
+
+def _envelope_payload(envelope: dict) -> dict:
+    return {
+        "schema": envelope["schema"],
+        "envelope_id": envelope["envelope_id"],
+        "authority_source_refs": sorted(envelope["authority_source_refs"]),
+        "mode": envelope["mode"],
+        "allowed_actions": sorted(envelope["allowed_actions"]),
+        "allowed_reversibility": sorted(envelope["allowed_reversibility"]),
+        "allowed_repositories": sorted(envelope["allowed_repositories"]),
+        "allowed_path_prefixes": {
+            repository: sorted(envelope["allowed_path_prefixes"][repository])
+            for repository in sorted(envelope["allowed_path_prefixes"])
+        },
+        "allowed_scope_prefixes": sorted(envelope["allowed_scope_prefixes"]),
+        "allowed_carrier_prefixes": sorted(envelope["allowed_carrier_prefixes"]),
+        "max_budget_units": envelope["max_budget_units"],
+        "max_active_children": envelope["max_active_children"],
+        "require_exact_carrier": envelope["require_exact_carrier"],
+        "expires_at": envelope["expires_at"],
+    }
+
+
+def _append_binding(receipt: dict, label: str, digest: str) -> None:
+    prefix = f"{label}:"
+    fields = [
+        field
+        for field in receipt["revision"].split(";")
+        if not field.startswith(prefix)
+    ]
+    fields.append(f"{label}:{digest}")
+    receipt["revision"] = ";".join(fields)
+
+
+def _bind_bundle(bundle: dict) -> dict:
+    receipts = {
+        bundle["chairman_directive"]["source_ref"]: bundle["chairman_directive"]
+    }
+    receipts.update(
+        {
+            item["source_ref"]: item
+            for item in bundle["additional_source_receipts"]
+        }
+    )
+    envelope = bundle["delegation_envelope"]
+    envelope_digest = _digest(_envelope_payload(envelope))
+    for ref in envelope["authority_source_refs"]:
+        if ref in receipts:
+            _append_binding(receipts[ref], "envelope-sha256", envelope_digest)
+    for option in bundle["options"]:
+        ref = option["classification_source_ref"]
+        if ref in receipts:
+            existing = receipts[ref]["revision"].split(";")
+            token = f"classification-sha256:{_digest(_classification_payload(option))}"
+            if token not in existing:
+                receipts[ref]["revision"] = ";".join([*existing, token])
+    return bundle
 
 
 def _brief(*, degraded=None, warnings=None, readiness_degraded=None):
@@ -112,6 +200,8 @@ def _boot_packet(
                 "autonomous_production_deploy": "prohibited",
                 "autonomous_live_capital_execution": "prohibited",
                 "duplicate_control_planes": "prohibited",
+                "marketing_org_expansion_before_distribution_proof": "prohibited",
+                "new_feature_expansion": "constrained",
                 "unbounded_autonomous_strategic_modification": "prohibited",
             },
         },
@@ -131,25 +221,30 @@ def _revision_attestation(revision, *, state="CURRENT"):
     }
 
 
-def _option(*, source_refs=None):
-    return {
+def _option(*, source_refs=None, **changes):
+    refs = list(
+        source_refs
+        or [
+            _CHAIRMAN_REF,
+            STRATEGIC_SOURCE_REF,
+            AGENT_OS_SOURCE_REF,
+            _GITHUB_REF,
+        ]
+    )
+    if _CHAIRMAN_REF not in refs:
+        refs.insert(0, _CHAIRMAN_REF)
+    option = {
         "option_id": "OPT-COMPOSE",
         "title": "Continue one bounded Chairman cognition vertical",
         "action": "SOURCE_BRANCH_WRITE",
         "reversibility": "REVERSIBLE",
-        "source_refs": source_refs
-        or [
-            "CHAIRMAN_DIRECTIVE:2026-08-30",
-            STRATEGIC_SOURCE_REF,
-            AGENT_OS_SOURCE_REF,
-            "GITHUB:PR-284",
-        ],
+        "source_refs": refs,
         "scope_refs": ["WS:CHAIRMAN-CONTROL-ROOM"],
         "effect_state": "NONE",
         "operation_key": "chairman-cognition-compose-test-001",
         "carrier_state": "EXACT_EXISTING",
         "carrier_ref": "github:Mastermind:branch:ccl-a2",
-        "expected_head_sha": None,
+        "expected_head_sha": "a" * 40,
         "repositories": ["mastermindx-market-intelligence/Mastermind"],
         "paths": ["control_plane/chairman_cognition_sources.py"],
         "budget_units": 1,
@@ -158,6 +253,9 @@ def _option(*, source_refs=None):
         "stop_condition": "Stop at one exact reviewable branch head.",
         "rollback_plan": "Abandon the unmerged branch.",
         "falsifier": "Any invented CURRENT source is failure.",
+        "classification_source_ref": _CHAIRMAN_REF,
+        "change_classes": ["EXISTING_CAPABILITY_COMPLETION"],
+        "affected_departments": ["executive"],
         "benefits": {
             "strategic_leverage": 80,
             "dependency_unlock": 75,
@@ -173,13 +271,15 @@ def _option(*, source_refs=None):
             "scarce_cognition_cost": 20,
         },
     }
+    option.update(changes)
+    return option
 
 
 def _envelope():
     return {
         "schema": ENVELOPE_SCHEMA,
         "envelope_id": "ENV-COMPOSE-001",
-        "authority_source_refs": ["CHAIRMAN_DIRECTIVE:2026-08-30"],
+        "authority_source_refs": [_CHAIRMAN_REF],
         "mode": "SUPERVISED_LIVE_CANARY",
         "allowed_actions": ["SOURCE_BRANCH_WRITE"],
         "allowed_reversibility": ["REVERSIBLE"],
@@ -198,9 +298,9 @@ def _envelope():
 
 def _github_receipt():
     return {
-        "source_ref": "GITHUB:PR-284",
+        "source_ref": _GITHUB_REF,
         "owner": "GITHUB",
-        "revision": "1927f82f8a30893b379a2a2e2b5b10abd625fccb",
+        "revision": "00ea4ac337af99e9d5a13be0e4b36ab861f4c336",
         "state": "CURRENT",
         "load_bearing": True,
         "observed_at": "2026-08-30T16:00:00Z",
@@ -208,11 +308,11 @@ def _github_receipt():
 
 
 def _bundle(*, boot=None, option=None, additions=None):
-    return {
+    bundle = {
         "schema": SOURCE_BUNDLE_SCHEMA,
         "as_of": "2026-08-30T16:00:00Z",
         "chairman_directive": {
-            "source_ref": "CHAIRMAN_DIRECTIVE:2026-08-30",
+            "source_ref": _CHAIRMAN_REF,
             "revision": "conversation:pro-mode-go",
             "state": "CURRENT",
             "load_bearing": True,
@@ -229,6 +329,7 @@ def _bundle(*, boot=None, option=None, additions=None):
         "delegation_envelope": _envelope(),
         "options": [_option() if option is None else option],
     }
+    return _bind_bundle(bundle)
 
 
 def _receipt(document, source_ref):
@@ -265,15 +366,19 @@ def _assert_agentos_unknown(brief):
 def test_composes_owner_attributed_input_and_evaluates_unique_option():
     composed = compose_input(_bundle())
     assert [item["source_ref"] for item in composed["source_receipts"]] == [
-        "CHAIRMAN_DIRECTIVE:2026-08-30",
+        _CHAIRMAN_REF,
         MASTERMIND_REVISION_SOURCE_REF,
         STRATEGIC_SOURCE_REF,
         AGENT_OS_REVISION_SOURCE_REF,
         AGENT_OS_SOURCE_REF,
-        "GITHUB:PR-284",
+        _GITHUB_REF,
     ]
+    assert composed["strategic_constraints_source_ref"] == STRATEGIC_SOURCE_REF
     assert _receipt(composed, STRATEGIC_SOURCE_REF)["state"] == "CURRENT"
     assert _receipt(composed, AGENT_OS_SOURCE_REF)["state"] == "CURRENT"
+    assert "constraints-sha256:" in _receipt(
+        composed, STRATEGIC_SOURCE_REF
+    )["revision"]
     assert (
         composed["strategic_constraints"]["duplicate_control_planes"]
         == "prohibited"
@@ -282,6 +387,9 @@ def test_composes_owner_attributed_input_and_evaluates_unique_option():
     result = evaluate_bundle(_bundle())
     assert result["schema"] == COMPOSITION_SCHEMA
     assert result["packet"]["recommended_option_id"] == "OPT-COMPOSE"
+    assert result["packet"]["delegation_envelope"]["digest"].startswith(
+        "sha256:"
+    )
     assert result["execution_authority_granted"] is False
     assert result["packet"]["execution_authority_granted"] is False
 
@@ -307,6 +415,8 @@ def test_each_load_bearing_strategic_constraint_is_required_by_composer():
         "autonomous_production_deploy",
         "autonomous_live_capital_execution",
         "duplicate_control_planes",
+        "marketing_org_expansion_before_distribution_proof",
+        "new_feature_expansion",
         "unbounded_autonomous_strategic_modification",
     )
     for constraint in constraints:
@@ -483,6 +593,33 @@ def test_future_dated_owner_receipt_is_rejected_by_a1():
         compose_input(_bundle(additions=[future]))
 
 
+def test_bound_envelope_mutation_is_rejected_before_acceptance():
+    bundle = _bundle()
+    bundle["delegation_envelope"]["max_budget_units"] += 1
+    with pytest.raises(ChairmanCognitionError, match="delegation envelope is not content-bound"):
+        compose_input(bundle)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("option_id", "OPT-OTHER"),
+        ("action", "SOURCE_MERGE"),
+        ("scope_refs", ["WS:CHAIRMAN-CONTROL-ROOM:OTHER"]),
+        ("repositories", ["mastermindx-market-intelligence/macro"]),
+        ("paths", ["control_plane/other.py"]),
+        ("creates_duplicate_control_plane", True),
+    ],
+)
+def test_bound_classification_cannot_be_transplanted_to_another_option_subject(
+    field: str, value
+):
+    bundle = _bundle()
+    bundle["options"][0][field] = value
+    with pytest.raises(ChairmanCognitionError, match="classification source is not content-bound"):
+        compose_input(bundle)
+
+
 def test_cli_valid_and_opaque_invalid_journeys(tmp_path):
     valid = tmp_path / "valid.json"
     valid.write_text(json.dumps(_bundle()), encoding="utf-8")
@@ -595,6 +732,9 @@ def test_plan_states_attestation_is_not_self_authenticating():
         "model-authored or arbitrary local JSON",
         "does not authenticate",
         "execution_authority_granted=false",
+        "classification-sha256",
+        "envelope-sha256",
+        "all six current constraints",
     ):
         assert marker in plan
 
