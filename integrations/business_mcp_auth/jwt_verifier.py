@@ -35,6 +35,7 @@ _COMPACT_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _DECODE_OPTIONS = {
     "verify_signature": True,
+    "enforce_minimum_key_length": True,
     "verify_exp": False,
     "verify_nbf": False,
     "verify_iat": False,
