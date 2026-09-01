@@ -56,6 +56,8 @@ Usage
 """
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import os
 import re
@@ -67,11 +69,47 @@ from typing import Any
 from control_plane import (
     ceo_boot_packet,
     executive_inbox,
-    executive_placement_selection,
     executive_runtime,
-    executive_steward,
     surface_bindings,
 )
+
+# CAP-C1 placement selection is an OPTIONAL capability: the extracted
+# control-room-remote release stages an exact file allowlist
+# (ops/control_room_remote/install.sh + REQUIRED_RUNTIME_PATHS, both paths
+# held by active PR #255) that deliberately does not ship the selector
+# modules, so this module must boot — and compose a complete document — when
+# they are absent. The import is DELIBERATELY dynamic, not static: a static
+# import would both crash the extracted boot and widen the release's audited
+# import closure, and both of those surfaces stay at base parity until their
+# #255 owner ships the modules. Absence fails soft into the named
+# "placement_selection: unavailable (module not shipped)" degraded path.
+
+
+def _optional_control_plane_module(name: str):
+    """``None`` when the module is genuinely not shipped; loud otherwise.
+
+    ``find_spec`` distinguishes the two failure classes: a missing file
+    yields a ``None`` spec (→ optional capability absent, degrade by name),
+    while a module that IS shipped but broken imports without a net so it
+    fails loudly instead of masquerading as "not shipped".
+    """
+    qualified = f"control_plane.{name}"
+    try:
+        spec = importlib.util.find_spec(qualified)
+    except ModuleNotFoundError:
+        spec = None
+    if spec is None:
+        return None
+    return importlib.import_module(qualified)
+
+
+executive_placement_selection = _optional_control_plane_module(
+    "executive_placement_selection"
+)
+# No separate guard is needed for executive_steward anywhere below: the
+# selector module statically imports it, so a release that lacks the steward
+# also fails the selector's find_spec/import above and BOTH names are None.
+executive_steward = _optional_control_plane_module("executive_steward")
 
 #: Schema version of the document this module emits.
 SCHEMA = "mastermind.chairman_control_room.v1"
@@ -917,7 +955,9 @@ def compose_control_room(
     # active_builds/agent_os_state input — this function still returns a
     # complete, well-formed document rather than raising.
     placement_selection_out: dict[str, Any] | None = None
-    if placement_selection is not None:
+    if placement_selection is not None and executive_placement_selection is None:
+        degraded.append("placement_selection: unavailable (module not shipped)")
+    elif placement_selection is not None:
         try:
             placement_selection_out = executive_placement_selection.validate_placement_selection(
                 placement_selection
@@ -1157,6 +1197,8 @@ def _read_placement_selection(
     """
     if not path:
         return None, None
+    if executive_placement_selection is None:
+        return None, "unavailable (module not shipped)"
     try:
         raw_text = Path(path).read_text(encoding="utf-8")
         raw = json.loads(raw_text)

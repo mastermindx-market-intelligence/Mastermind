@@ -1153,3 +1153,79 @@ def test_build_control_room_without_the_flag_composes_no_placement_selection(
 
     assert doc["placement_selection"] is None
     assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+
+
+def test_compose_and_gather_degrade_by_name_when_selector_module_is_not_shipped(
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, bindings
+):
+    """The extracted control-room-remote release stages an exact file
+    allowlist (ops/control_room_remote/install.sh, an active-PR-held path)
+    that need not include the optional CAP-C1 selector module.  This module
+    must still import, compose a complete document, and degrade the
+    placement section by name — never raise — when the selector is absent."""
+    monkeypatch.setattr(ccr, "executive_placement_selection", None)
+
+    wire = _valid_placement_selection_wire_dict()
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=wire)
+    assert doc["placement_selection"] is None
+    assert "placement_selection: unavailable (module not shipped)" in doc["degraded"]
+    assert doc["schema"] == ccr.SCHEMA
+
+    facts_path = tmp_path / "facts.json"
+    facts_path.write_text("{}", encoding="utf-8")
+    result, failure = ccr._read_placement_selection(facts_path)
+    assert result is None
+    assert failure == "unavailable (module not shipped)"
+    assert str(facts_path) not in failure
+
+
+def test_module_boots_with_both_selector_modules_absent_at_import_time(tmp_path):
+    """Stronger than the monkeypatch test above: pin absence at IMPORT time.
+
+    A meta-path finder blocks both optional modules the way a genuinely
+    unshipped extracted release would (find_spec resolves to "not found"),
+    then chairman_control_room is imported FRESH.  A future static
+    ``from control_plane import executive_placement_selection`` re-added at
+    the top of the module would make this test fail with ImportError —
+    exactly the extracted-release regression class the optional import
+    exists to prevent."""
+    import importlib
+    import sys
+
+    blocked = {
+        "control_plane.executive_placement_selection",
+        "control_plane.executive_steward",
+    }
+
+    class _AbsenceFinder:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname in blocked:
+                raise ModuleNotFoundError(f"blocked for test: {fullname}")
+            return None
+
+    saved = {name: sys.modules.get(name) for name in blocked}
+    saved["control_plane.chairman_control_room"] = sys.modules.get(
+        "control_plane.chairman_control_room"
+    )
+    finder = _AbsenceFinder()
+    sys.meta_path.insert(0, finder)
+    for name in blocked:
+        sys.modules.pop(name, None)
+    sys.modules.pop("control_plane.chairman_control_room", None)
+    try:
+        fresh = importlib.import_module("control_plane.chairman_control_room")
+        assert fresh.executive_placement_selection is None
+        assert fresh.executive_steward is None
+        facts_path = tmp_path / "facts.json"
+        facts_path.write_text("{}", encoding="utf-8")
+        result, failure = fresh._read_placement_selection(facts_path)
+        assert result is None
+        assert failure == "unavailable (module not shipped)"
+    finally:
+        sys.meta_path.remove(finder)
+        sys.modules.pop("control_plane.chairman_control_room", None)
+        for name, module in saved.items():
+            if module is not None:
+                sys.modules[name] = module
+            else:
+                sys.modules.pop(name, None)
