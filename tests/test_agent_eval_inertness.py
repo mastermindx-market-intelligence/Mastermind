@@ -828,6 +828,7 @@ def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
 
 def test_no_control_plane_config_dependency_or_workflow_file_touched() -> None:
     changed = compute_pr_diff_paths(ROOT)
+    assert changed, "expected at least one changed file relative to the effective PR base"
     not_applicable_reason = _fence_not_applicable_reason(changed)
     if not_applicable_reason is not None:
         pytest.skip(not_applicable_reason)
@@ -977,25 +978,46 @@ def test_fence_scoping_program_only_delta_within_allowlist_passes(tmp_path: Path
     assert not unexpected  # PASS
 
 
-def test_fence_scoping_unratcheted_program_adjacent_file_still_fails(tmp_path: Path) -> None:
-    """(d) A delta with one allowlisted program file plus one NEW file
-    that matches a PROGRAM_SURFACE_PREFIXES prefix but has not yet been
-    ratchet-added to ALLOWED_PATHS must still FAIL -- landing under this
-    program's own directory is never itself authorization; ratchet
-    discipline for in-program waves is completely unchanged by this
-    repair."""
-    repo = tmp_path / "adjacent_repo"
+@pytest.mark.parametrize(
+    "adjacent_path",
+    [
+        "scripts/agent_eval/unratcheted_new_module.py",
+        "corpus/agent_eval/unratcheted_new_file.json",
+        "tests/test_agent_eval_unratcheted_new_module.py",
+    ],
+    ids=["scripts_agent_eval_prefix", "corpus_agent_eval_prefix", "tests_test_agent_eval_prefix"],
+)
+def test_fence_scoping_unratcheted_program_adjacent_file_still_fails(tmp_path: Path, adjacent_path: str) -> None:
+    """(d) A NEW file that matches a PROGRAM_SURFACE_PREFIXES prefix but
+    has not yet been ratchet-added to ALLOWED_PATHS must still FAIL --
+    landing under any of this program's own directories is never itself
+    authorization; ratchet discipline for in-program waves is completely
+    unchanged by this repair.
+
+    Parametrized over ALL THREE PROGRAM_SURFACE_PREFIXES entries, each
+    tested ALONE (never alongside an already-allowlisted companion file
+    from a DIFFERENT prefix) -- reviewer finding on the first revision of
+    this test: pairing every case with ``scripts/agent_eval/cli.py`` made
+    ``_fence_not_applicable_reason`` return "applies" via that companion
+    file regardless of whether the ``tests/`` or ``corpus/`` prefix itself
+    still matched anything, so silently dropping either of those two
+    entries from ``PROGRAM_SURFACE_PREFIXES`` would have shipped green.
+    Testing each adjacent path completely alone means "applies" can only
+    be true because THAT prefix specifically still matches -- a dropped
+    prefix flips its own case to skip-as-not-applicable and this
+    parametrized test catches it."""
+    repo = tmp_path / f"adjacent_repo_{adjacent_path.replace('/', '_')}"
     _git_init(repo)
     _git_commit_file(repo, "README.md", "base\n", "base commit")
     _run_git(["update-ref", "refs/remotes/origin/master", "master"], repo)
     _run_git(["checkout", "-q", "-b", "feature"], repo)
-    _git_commit_file(repo, "scripts/agent_eval/cli.py", "x = 1\n", "program file, already allowlisted")
-    _git_commit_file(
-        repo, "scripts/agent_eval/unratcheted_new_module.py", "x = 1\n", "NEW program file, not yet ratchet-authorized"
-    )
+    _git_commit_file(repo, adjacent_path, "x = 1\n", "NEW program-adjacent file, not yet ratchet-authorized")
 
     changed = compute_pr_diff_paths(repo, head="HEAD", upstream="origin/master")
-    assert changed == {"scripts/agent_eval/cli.py", "scripts/agent_eval/unratcheted_new_module.py"}
-    assert _fence_not_applicable_reason(changed) is None  # applies -- matches PROGRAM_SURFACE_PREFIXES
+    assert changed == {adjacent_path}
+    # applies purely because THIS path matches its own PROGRAM_SURFACE_
+    # PREFIXES entry -- if that specific prefix were ever dropped, this
+    # assertion is exactly what would flip to "not applicable" instead.
+    assert _fence_not_applicable_reason(changed) is None
     unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
-    assert unexpected == {"scripts/agent_eval/unratcheted_new_module.py"}  # FAIL: not yet ratchet-authorized
+    assert unexpected == {adjacent_path}  # FAIL: not yet ratchet-authorized
