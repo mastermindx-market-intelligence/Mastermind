@@ -49,7 +49,7 @@ Before changing any watcher on an account:
 3. Read the account's native task list directly through that account's current Task/Automation
    surface.
 4. Do not infer an action-authoritative Sol target from account number, newest tab, latest response,
-   apparent health, remaining quota or timestamp order. **Never elect by recency.**
+   apparent health, remaining quota or timestamp order. The binding rule is **never elect by recency**.
 5. Preserve one operation/carrier binding. A prompt repair does not create a new logical child,
    retry a provider effect or transfer action authority.
 
@@ -82,10 +82,11 @@ The JSON input shape is:
 }
 ```
 
-The native task ID must be present and unique. Do not invent a replacement ID when the native
-surface omits one, and do not collapse two returned records with the same ID. Duplicate native task
-IDs are an export/identity ambiguity and fail the complete account audit even when both entries are
-disabled.
+The native task ID must be present and unique. Normalize `id` and `task_id` independently by trimming
+leading/trailing whitespace before comparing aliases or performing the duplicate census. Do not invent
+a replacement ID when the native surface omits one, and do not collapse two returned records with the
+same canonical ID. Duplicate native task IDs are an export/identity ambiguity and fail the complete
+account audit even when both entries are disabled.
 
 The enabled state must be a JSON boolean (`true` or `false`). Strings such as `"false"`, numeric
 values, a missing field, or conflicting `is_enabled` and `enabled` fields fail closed; the validator
@@ -113,7 +114,7 @@ Assign exactly one role from the current Skillpack:
 - `TRIAGE_ONLY` — estate audit detects unconsumed returns and reconciles/reports without electing a
   child owner.
 
-`ACTION_AUTHORITATIVE` requires one exact Slack carrier:
+ACTION_AUTHORITATIVE requires one exact Slack carrier:
 
 ```text
 CARRIER: slack:<channel-id>/<parent-message-ts>
@@ -164,16 +165,20 @@ For each invalid enabled watcher:
 2. Reconcile the latest valid semantic edge and current action-target role.
 3. Preserve the existing native watcher ID, schedule, operation key and carrier whenever the task is
    otherwise healthy.
-4. Replace or prepend the prompt with the exact `MMX_SOL_WATCHER_V1` header required by its role.
+4. Replace or prepend the prompt with the exact `MMX_SOL_WATCHER_V1` header required by its role. The
+   header is closed: after the discriminator and before the first blank line there must be exactly the
+   seven canonical fields, one `KEY: value` per line. Unknown fields, notes, comments and bare lines
+   fail closed and must not be used as an instruction channel.
 5. Remove positive notification-only instructions that cause an action-authoritative watcher to say
    “Sol action required,” “waiting for Sol,” “await Sol,” “defer to Sol,” “escalate to Sol,” or
    “pause for Sol.” A prohibition such as “do not wait for Sol” is valid and should remain explicit.
-6. Add the exact-carrier fresh-read fence, current-Skillpack re-pin, same-carrier/no-blind-retry/no-
-   lifecycle-inference laws, and terminal STOP-before-disarm sequence.
+6. Add positive operative requirements for exact-carrier fresh-read, current-Skillpack re-pin,
+   same-carrier action, typed blocker fallback and terminal STOP-before-disarm. Negated versions of
+   those requirements are invalid even if they contain the same keywords.
 7. For every non-authoritative role (`OBSERVER_ONLY`, `PARENT_ORCHESTRATOR`, and `TRIAGE_ONLY`), remove
    positive authority to emit child `CONTINUE`, `RULING`, `REQUEST_REPAIR`, `STOP`, merge/release,
-   retry/resubmit/requeue/fail over, or commission/start a successor. Explicit prohibitions remain
-   valid and should be preserved.
+   retry/resubmit/requeue/fail over, or commission/start a successor. Markdown emphasis or code
+   delimiters do not hide a command. Explicit prohibitions remain valid and should be preserved.
 8. Save the prompt through the native task surface and read it back. A local draft or proposed text
    is not a completed repair.
 
@@ -254,7 +259,7 @@ Account hardening is complete only when:
 
 - all three account receipts are present;
 - every enabled account-local temporary Sol watcher validates;
-- the adverse canary proves one action-authoritative edge and two observers;
+- the adverse canary proves one authoritative action and two observer accounts;
 - no native task ID unexpectedly multiplied;
 - no action-authority conflict was hidden;
 - a real no-Chairman continuation canary succeeds.
