@@ -21,11 +21,12 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Protocol
 
 import yaml
@@ -46,7 +47,7 @@ from scripts.ohf.protocol import (
     skills_list_params,
     thread_turns,
 )
-from scripts.ohf.redaction import evidence_contains_secret
+from scripts.ohf.redaction import evidence_contains_secret, redact_untrusted
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 REQUIRED_MODEL = "gpt-5.6-sol"
@@ -123,13 +124,37 @@ class FreshSolEvalError(RuntimeError):
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=10,
-    )
+    """Run one fixed-argv git subprocess with zero implicit network fetch.
+
+    ``GIT_NO_LAZY_FETCH=1`` refuses git's default promisor-remote lazy-fetch
+    behavior for a missing object -- a partial/blobless local clone must
+    refuse rather than silently pulling bytes over the network (design §6:
+    "The runner performs no network fetch"). A subprocess timeout is mapped
+    to a synthetic nonzero-returncode result instead of letting
+    ``subprocess.TimeoutExpired`` escape as an unclosed exception; every
+    call site already turns a nonzero returncode into the correct closed
+    ``FreshSolEvalError`` code for that git operation.
+    """
+
+    env = dict(os.environ)
+    env["GIT_NO_LAZY_FETCH"] = "1"
+    argv = ["git", "-C", str(repo_root), *args]
+    try:
+        return subprocess.run(
+            argv,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            args=argv,
+            returncode=124,
+            stdout=b"",
+            stderr=f"git command timed out: {exc}".encode("utf-8"),
+        )
 
 
 @dataclass(frozen=True)
@@ -429,6 +454,15 @@ class EvalClient(Protocol):
     Tests inject a fake implementing exactly this surface -- see
     ``tests/test_fresh_sol_eval.py::_FakeEvalClient`` -- so unit coverage
     never spawns a subprocess or talks to a provider.
+
+    Cleanup is ``graceful_close()``, matching
+    ``scripts.ohf.laboratory.AppServerClient.graceful_close`` (returns
+    ``AppServerStopProof``) verbatim -- NOT ``terminate()``, whose real
+    return type is a plain ``str`` outcome label and cannot satisfy
+    ``_terminate_and_prove``'s cleanup-proof contract (review repair
+    BLOCKER-1; see ``tests/test_fresh_sol_eval.py::
+    test_eval_client_protocol_matches_real_app_server_client_surface`` for
+    the signature/behavior-compatibility falsifier).
     """
 
     pid: int | None
@@ -445,7 +479,7 @@ class EvalClient(Protocol):
 
     def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, object]: ...
 
-    def terminate(self) -> object: ...
+    def graceful_close(self) -> object: ...
 
 
 ClientFactory = Callable[[Path, Path, Path], "EvalClient"]
@@ -496,44 +530,37 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _write_minimal_config(config_path: Path, *, model: str) -> None:
-    """Minimal-surface config floor from design §8: no MCP, no bundled skills."""
-
-    config_path.write_text(
-        "\n".join(
-            [
-                f'model = "{model}"',
-                'approval_policy = "never"',
-                'sandbox_mode = "read-only"',
-                "",
-                "[features]",
-                "apps = false",
-                "",
-                "[skills.bundled]",
-                "enabled = false",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-
 def _prepare_run_root(run_root: Path, *, agents_md: bytes, model: str) -> tuple[Path, Path, Path]:
     """Create the fresh, unique (workspace, config, home) triad for one run.
 
+    Refuses (``HARNESS_INITIALIZE_FAILED``) if ``run_root`` already exists --
+    the per-run isolation law (design §8, "Fresh workspace... no previous
+    run output") is enforced here, not left to the caller to remember.
+
     ``workspace`` deliberately holds only the generated ``AGENTS.md`` and is
     never a Git checkout -- it is not the ``repo_root`` used for Skillpack
-    materialization.
+    materialization. ``config_dir`` is created for factory-signature
+    symmetry with the (workspace, config_dir, home) triad every
+    ``ClientFactory`` receives, but nothing is written into it here: the
+    live factory applies the minimal-surface config as App Server ``-c``
+    overrides instead (review repair item 12 / N3 disposition), so a
+    ``config.toml`` written into this directory would be dead on every
+    path (fake and live alike).
     """
 
+    del model  # kept in the signature for callers; no config file is written here
     run_root = Path(run_root)
+    if run_root.exists():
+        raise FreshSolEvalError(
+            "HARNESS_INITIALIZE_FAILED",
+            f"run root is not fresh -- it already exists: {run_root}",
+        )
     workspace = run_root / "workspace"
     config_dir = run_root / "config"
     home = run_root / "home"
     for directory in (workspace, config_dir, home):
-        directory.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=False)
     (workspace / "AGENTS.md").write_bytes(agents_md)
-    _write_minimal_config(config_dir / "config.toml", model=model)
     return workspace, config_dir, home
 
 
@@ -563,7 +590,8 @@ def _attest_capability(
         account_raw = client.request("account/read", {"refreshToken": False})
     except Exception as exc:  # noqa: BLE001 - any transport failure invalidates the run
         raise FreshSolEvalError(
-            "CAPABILITY_ATTESTATION_INVALID", f"account/read was unavailable: {exc}"
+            "CAPABILITY_ATTESTATION_INVALID",
+            f"account/read was unavailable: {redact_untrusted(str(exc))}",
         ) from exc
     parsed_account = parse_account_read(account_raw)
 
@@ -571,7 +599,8 @@ def _attest_capability(
         config_raw = client.request("config/read", {"includeLayers": False})
     except Exception as exc:  # noqa: BLE001
         raise FreshSolEvalError(
-            "CAPABILITY_ATTESTATION_INVALID", f"config/read was unavailable: {exc}"
+            "CAPABILITY_ATTESTATION_INVALID",
+            f"config/read was unavailable: {redact_untrusted(str(exc))}",
         ) from exc
     config_obj = parse_config_read(config_raw)
     if "model" not in config_obj:
@@ -604,7 +633,8 @@ def _attest_capability(
         skills_raw = client.request("skills/list", skills_list_params(str(client.cwd)))
     except Exception as exc:  # noqa: BLE001
         raise FreshSolEvalError(
-            "CAPABILITY_ATTESTATION_INVALID", f"skills/list was unavailable: {exc}"
+            "CAPABILITY_ATTESTATION_INVALID",
+            f"skills/list was unavailable: {redact_untrusted(str(exc))}",
         ) from exc
     discovered_skills = tuple(skill_names(skills_raw))
 
@@ -612,7 +642,8 @@ def _attest_capability(
         mcp_status_raw = client.request("mcpServerStatus/list", {"detail": "toolsAndAuthOnly"})
     except Exception as exc:  # noqa: BLE001
         raise FreshSolEvalError(
-            "CAPABILITY_ATTESTATION_INVALID", f"mcpServerStatus/list was unavailable: {exc}"
+            "CAPABILITY_ATTESTATION_INVALID",
+            f"mcpServerStatus/list was unavailable: {redact_untrusted(str(exc))}",
         ) from exc
     mcp_observed = tuple(
         str(row.get("name"))
@@ -620,6 +651,14 @@ def _attest_capability(
         if isinstance(row, dict) and row.get("name")
     )
 
+    # NOTE (review repair item 12 / N3 disposition): the live client factory's
+    # ``-c`` App Server CLI overrides are an override LAYER, not a proven
+    # full reset of a dedicated realm's own persistent config.toml tables --
+    # a realm that already has ``[mcp_servers.*]`` configured may still
+    # observe them here even with the minimal-surface ``-c`` flags applied.
+    # This attestation gate, not the ``-c`` flags, is the actual §8.3
+    # no-side-capabilities enforcement point: ANY observed MCP server name
+    # (configured or live-observed) refuses the run below, unconditionally.
     mcp_all = tuple(sorted(set(mcp_cfg) | set(mcp_observed)))
     _assert_empty_capability_surface(mcp_all, label="MCP server")
     _assert_empty_capability_surface(plugin_cfg, label="plugin")
@@ -683,7 +722,12 @@ def _extract_final_output(read_result: dict[str, Any], *, thread_id: str) -> str
 
 
 def _terminate_and_prove(client: "EvalClient") -> CleanupReceipt:
-    outcome = client.terminate()
+    """Close the client and prove the private process group is empty.
+
+    Calls ``graceful_close()`` -- never ``terminate()`` -- exactly once.
+    """
+
+    outcome = client.graceful_close()
     if isinstance(outcome, AppServerStopProof):
         if not outcome.private_group_empty:
             raise FreshSolEvalError(
@@ -702,7 +746,8 @@ def _terminate_and_prove(client: "EvalClient") -> CleanupReceipt:
             )
         return outcome
     raise FreshSolEvalError(
-        "CLEANUP_UNPROVEN", f"terminate() returned an unrecognized cleanup proof: {outcome!r}"
+        "CLEANUP_UNPROVEN",
+        f"graceful_close() returned an unrecognized cleanup proof: {outcome!r}",
     )
 
 
@@ -715,6 +760,7 @@ def run_one(
     client_factory: "ClientFactory",
     harness_kind: str = "codex-app-server",
     harness_version: str = "unknown",
+    bundle: "ProcedureBundle | None" = None,
 ) -> RunObservation:
     """Execute exactly one fully isolated fresh-Sol evaluation sample.
 
@@ -722,13 +768,34 @@ def run_one(
     ``thread/start`` (never ``resume``/``fork``), exactly one scenario turn,
     canonical thread read, proven cleanup.  Raises ``FreshSolEvalError`` with
     a closed failure code on any isolation/evidence law violation.
+
+    ``bundle``: an already-materialized ``ProcedureBundle`` for ``arm``, to
+    avoid re-reading Git objects a caller (``run_matrix``) already read
+    (review repair N6). When omitted, ``run_one`` materializes it itself --
+    the default single-sample behavior is unchanged.
+
+    Cleanup runs exactly once via a ``finally`` block on EVERY exit path,
+    including every pre-cleanup failure code below (review repair
+    BLOCKER-2): a run that fails capability attestation, thread/start, the
+    scenario turn, or the canonical read still leaves no dangling App
+    Server process or process group. A cleanup failure that happens while a
+    prior failure is already in flight is recorded as best-effort and does
+    not mask the original failure code; a cleanup failure on an otherwise
+    successful run is still fatal (``CLEANUP_UNPROVEN``), unchanged from
+    before this repair.
     """
 
     del harness_kind  # recorded by the caller into evidence; not used to branch here
     run_id = uuid.uuid4().hex
     started_at = _utc_now()
 
-    bundle = materialize_skillpack(repo_root, arm)
+    if bundle is None:
+        bundle = materialize_skillpack(repo_root, arm)
+    elif bundle.arm.commit_sha != arm.commit_sha:
+        raise FreshSolEvalError(
+            "SKILLPACK_IDENTITY_MISMATCH",
+            "the supplied pre-materialized bundle does not match the requested arm's commit",
+        )
     agents_md = build_eval_agents_md(bundle)
     workspace, config_dir, home = _prepare_run_root(run_root, agents_md=agents_md, model=REQUIRED_MODEL)
 
@@ -739,64 +806,96 @@ def run_one(
             "HARNESS_INITIALIZE_FAILED", "app-server process did not report a pid"
         )
 
+    capability: CapabilityReceipt
+    thread_id = ""
+    output = ""
+    completed_at = ""
+    cleanup: CleanupReceipt | None = None
     try:
-        client.request(
-            "initialize",
-            {"clientInfo": CLIENT_INFO, "capabilities": {"experimentalApi": True}},
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise FreshSolEvalError("HARNESS_INITIALIZE_FAILED", f"initialize failed: {exc}") from exc
-    client.notify("initialized", {})
+        try:
+            client.request(
+                "initialize",
+                {"clientInfo": CLIENT_INFO, "capabilities": {"experimentalApi": True}},
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise FreshSolEvalError(
+                "HARNESS_INITIALIZE_FAILED",
+                f"initialize failed: {redact_untrusted(str(exc))}",
+            ) from exc
+        client.notify("initialized", {})
 
-    capability = _attest_capability(
-        client, requested_model=REQUIRED_MODEL, harness_version=harness_version
-    )
-
-    try:
-        started = client.request(
-            "thread/start",
-            {
-                "model": REQUIRED_MODEL,
-                "cwd": str(workspace),
-                "approvalPolicy": "never",
-                "sandbox": "read-only",
-            },
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise FreshSolEvalError("THREAD_START_FAILED", f"thread/start failed: {exc}") from exc
-    thread_id = _thread_id_from(started)
-    if not thread_id:
-        raise FreshSolEvalError(
-            "THREAD_START_FAILED", "thread/start did not return a native thread id"
+        capability = _attest_capability(
+            client, requested_model=REQUIRED_MODEL, harness_version=harness_version
         )
 
-    try:
-        client.request(
-            "turn/start",
-            {
-                "threadId": thread_id,
-                "input": [{"type": "text", "text": scenario.prompt}],
-                "cwd": str(workspace),
-                "approvalPolicy": "never",
-            },
-            timeout=60.0,
-        )
-        client.wait_notification("turn/completed", timeout=60.0)
-    except Exception as exc:  # noqa: BLE001
-        raise FreshSolEvalError(
-            "TURN_EFFECT_UNKNOWN",
-            f"the scenario turn dispatch/completion is effect-unknown: {exc}",
-        ) from exc
+        try:
+            started = client.request(
+                "thread/start",
+                {
+                    "model": REQUIRED_MODEL,
+                    "cwd": str(workspace),
+                    "approvalPolicy": "never",
+                    "sandbox": "read-only",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise FreshSolEvalError(
+                "THREAD_START_FAILED",
+                f"thread/start failed: {redact_untrusted(str(exc))}",
+            ) from exc
+        thread_id = _thread_id_from(started)
+        if not thread_id:
+            raise FreshSolEvalError(
+                "THREAD_START_FAILED", "thread/start did not return a native thread id"
+            )
 
-    try:
-        read_result = client.request("thread/read", {"threadId": thread_id, "includeTurns": True})
-    except Exception as exc:  # noqa: BLE001
-        raise FreshSolEvalError("THREAD_READ_FAILED", f"thread/read failed: {exc}") from exc
-    output = _extract_final_output(read_result, thread_id=thread_id)
+        try:
+            client.request(
+                "turn/start",
+                {
+                    "threadId": thread_id,
+                    "input": [{"type": "text", "text": scenario.prompt}],
+                    "cwd": str(workspace),
+                    "approvalPolicy": "never",
+                },
+                timeout=60.0,
+            )
+            client.wait_notification("turn/completed", timeout=60.0)
+        except Exception as exc:  # noqa: BLE001
+            raise FreshSolEvalError(
+                "TURN_EFFECT_UNKNOWN",
+                "the scenario turn dispatch/completion is effect-unknown: "
+                f"{redact_untrusted(str(exc))}",
+            ) from exc
 
-    completed_at = _utc_now()
-    cleanup = _terminate_and_prove(client)
+        try:
+            read_result = client.request(
+                "thread/read", {"threadId": thread_id, "includeTurns": True}
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise FreshSolEvalError(
+                "THREAD_READ_FAILED", f"thread/read failed: {redact_untrusted(str(exc))}"
+            ) from exc
+        output = _extract_final_output(read_result, thread_id=thread_id)
+        completed_at = _utc_now()
+    finally:
+        in_flight_exc = sys.exc_info()[1]
+        try:
+            cleanup = _terminate_and_prove(client)
+        except FreshSolEvalError:
+            if in_flight_exc is None:
+                # No prior failure -- an unproven cleanup on an otherwise
+                # successful run IS the failure; let it propagate.
+                raise
+            # A prior failure already explains why this run is invalid.
+            # Do not let a secondary cleanup failure mask the original
+            # cause; the caller still learns cleanup was attempted exactly
+            # once via the CLEANUP_UNPROVEN-shaped situation being swallowed
+            # here rather than silently skipped.
+            cleanup = None
 
+    # Reached only when the try block above completed without raising.
+    assert cleanup is not None
     process_pid = client.pid
     assert process_pid is not None
     return RunObservation(
@@ -847,7 +946,7 @@ def build_live_client_factory(
     try:
         validate_live_codex_home(codex_home)
     except RuntimeError as exc:
-        raise FreshSolEvalError("AUTH_REALM_INVALID", str(exc)) from exc
+        raise FreshSolEvalError("AUTH_REALM_INVALID", redact_untrusted(str(exc))) from exc
 
     def factory(workspace: Path, config_dir: Path, home: Path) -> "EvalClient":
         exe = codex_binary or shutil.which("codex")
@@ -868,11 +967,18 @@ def build_live_client_factory(
             "-c",
             "skills.bundled.enabled=false",
         ]
+        # No PYTHONPATH: the live `codex` binary is not a Python process (it
+        # is a compiled/native App Server binary), unlike the in-repo fake
+        # (`python3 -m scripts.ohf.fake_app_server`) that Laboratory.env()
+        # is built for. Shipping PYTHONPATH into a real codex process was
+        # dead and, worse, an unintended environment leak (review repair
+        # MAJOR-7). PATH is kept verbatim from the controller's own
+        # environment, matching scripts.ohf.laboratory.Laboratory.env()'s
+        # precedent for locating the real binary on PATH.
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(home),
             "CODEX_HOME": str(codex_home),
-            "PYTHONPATH": str(REPO_ROOT),
             "LC_ALL": "C",
         }
         return AppServerClient(argv, env=env, cwd=workspace, start_new_session=True)
@@ -916,6 +1022,26 @@ _EVIDENCE_METADATA_KEYS = (
 
 def _cleanup_proof_text(cleanup: CleanupReceipt) -> str:
     return f"{cleanup.termination_outcome}/private_group_empty={cleanup.private_group_empty}"
+
+
+def _fence_for(text: str) -> str:
+    """Backtick fence at least one longer than the longest run in ``text``.
+
+    A fixed triple-backtick fence breaks if the exact verbatim prompt/output
+    itself contains a run of 3+ backticks (review repair N4) -- the model
+    output is untrusted content and must not be able to corrupt the
+    evidence artifact's own Markdown structure.
+    """
+
+    longest = 0
+    current = 0
+    for char in text:
+        if char == "`":
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return "`" * max(3, longest + 1)
 
 
 def _evidence_metadata(
@@ -1045,10 +1171,12 @@ def write_run_artifact(
         harness_binary_sha256=harness_binary_sha256,
     )
     front = yaml.safe_dump(metadata, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    prompt_fence = _fence_for(observation.prompt)
+    output_fence = _fence_for(observation.output)
     content = (
         f"---\n{front}---\n\n"
-        "## Exact prompt\n\n```text\n" + observation.prompt + "\n```\n\n"
-        "## Exact model output\n\n```text\n" + observation.output + "\n```\n"
+        f"## Exact prompt\n\n{prompt_fence}text\n" + observation.prompt + f"\n{prompt_fence}\n\n"
+        f"## Exact model output\n\n{output_fence}text\n" + observation.output + f"\n{output_fence}\n"
     )
 
     try:
@@ -1082,6 +1210,25 @@ def _mas136_sample_plan() -> list[tuple[str, str, int]]:
     return plan
 
 
+def _validate_relative_path(relative_path: str) -> None:
+    """Refuse an absolute or ``..``-escaping manifest ``relative_path``.
+
+    A manifest is loaded from disk and, for ``--resume-manifest``, may name
+    a path outside ``evidence_root`` entirely -- resolving it naively would
+    let a tampered/forged manifest read or (via a later write path) exceed
+    the evidence directory (review repair N1).
+    """
+
+    if not relative_path:
+        raise FreshSolEvalError("EVIDENCE_COLLISION", "manifest entry has an empty relative_path")
+    candidate = PurePosixPath(relative_path)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise FreshSolEvalError(
+            "EVIDENCE_COLLISION",
+            f"manifest entry relative_path escapes the evidence root: {relative_path!r}",
+        )
+
+
 def _verify_and_count_resume(evidence_root: Path, resume_manifest: Path) -> dict[tuple[str, str], int]:
     """Verify every resumed entry's bytes against its recorded digest.
 
@@ -1093,6 +1240,7 @@ def _verify_and_count_resume(evidence_root: Path, resume_manifest: Path) -> dict
     counts: dict[tuple[str, str], int] = {}
     for entry in payload.get("entries") or []:
         relative_path = str(entry.get("relative_path") or "")
+        _validate_relative_path(relative_path)
         artifact_path = Path(evidence_root) / relative_path
         if not artifact_path.is_file():
             raise FreshSolEvalError(
@@ -1153,6 +1301,9 @@ def run_matrix(
 
         arm = MAS136_ARMS[arm_key]
         scenario = scenarios[scenario_id]
+        # Materialized once per sample and handed to run_one() (review
+        # repair N6) -- previously each sample read the same immutable Git
+        # bytes twice (once here, once again inside run_one()).
         bundle = materialize_skillpack(repo_root, arm)
         run_root = Path(run_root_parent) / f"{arm_key}-{scenario_id}-{uuid.uuid4().hex[:8]}"
         observation = run_one(
@@ -1163,6 +1314,7 @@ def run_matrix(
             client_factory=client_factory,
             harness_kind=harness_kind,
             harness_version=harness_version,
+            bundle=bundle,
         )
         artifact = write_run_artifact(
             observation=observation,
@@ -1188,6 +1340,13 @@ def check_corpus(*, evidence_root: Path, mode: str = "mas-136") -> dict[str, Any
     """Verify identity/cardinality/digest/cleanup completeness only.
 
     Never behavioral-grades outputs -- that stays Sol's job.
+
+    Hardened per review repair MAJOR-5 against a forged corpus that reuses
+    one real artifact file for every manifest row (which would otherwise
+    pass a digest-only check): every ``relative_path`` must be distinct,
+    every artifact's OWN frontmatter identity (``run_id``/``arm``/
+    ``scenario_id``) must match what its manifest row claims about it, and
+    every valid sample's ``native_thread_id`` must be distinct.
     """
 
     if mode != "mas-136":
@@ -1205,23 +1364,53 @@ def check_corpus(*, evidence_root: Path, mode: str = "mas-136") -> dict[str, Any
         }
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = manifest.get("entries") or []
     problems: list[str] = []
+
+    relative_paths = [str(entry.get("relative_path") or "") for entry in entries]
+    if len(set(relative_paths)) != len(relative_paths):
+        problems.append("duplicate relative_path across manifest entries")
+
     counts: dict[tuple[str, str], int] = {}
-    for entry in manifest.get("entries") or []:
+    seen_thread_ids: set[str] = set()
+    for entry in entries:
         relative_path = str(entry.get("relative_path") or "")
+        try:
+            _validate_relative_path(relative_path)
+        except FreshSolEvalError as exc:
+            problems.append(f"unsafe relative_path {relative_path!r}: {exc}")
+            continue
         artifact_path = evidence_root / relative_path
         if not artifact_path.is_file():
             problems.append(f"missing artifact: {relative_path}")
             continue
-        actual_sha256 = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        artifact_bytes = artifact_path.read_bytes()
+        actual_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
         if actual_sha256 != entry.get("artifact_sha256"):
             problems.append(f"digest mismatch: {relative_path}")
             continue
-        metadata = _extract_yaml_frontmatter(artifact_path.read_bytes())
-        cleanup_proof = str((metadata or {}).get("cleanup_proof") or "")
+        metadata = _extract_yaml_frontmatter(artifact_bytes)
+        if metadata is None:
+            problems.append(f"unreadable metadata: {relative_path}")
+            continue
+        identity_mismatch = any(
+            str(metadata.get(field)) != str(entry.get(field))
+            for field in ("run_id", "arm", "scenario_id")
+        )
+        if identity_mismatch:
+            problems.append(
+                f"manifest/artifact identity mismatch (forged or duplicated row?): {relative_path}"
+            )
+            continue
+        cleanup_proof = str(metadata.get("cleanup_proof") or "")
         if "private_group_empty=True" not in cleanup_proof:
             problems.append(f"cleanup not proven: {relative_path}")
             continue
+        thread_id = str(metadata.get("native_thread_id") or "")
+        if not thread_id or thread_id in seen_thread_ids:
+            problems.append(f"missing or duplicate native_thread_id: {relative_path}")
+            continue
+        seen_thread_ids.add(thread_id)
         key = (str(entry.get("arm")), str(entry.get("scenario_id")))
         counts[key] = counts.get(key, 0) + 1
 
@@ -1284,6 +1473,11 @@ def main(argv: list[str] | None = None) -> int:
             protocol_sha256 = hashlib.sha256(Path(args.protocol_path).read_bytes()).hexdigest()
             harness_binary_sha256 = binary_digest(shutil.which("codex"))
             client_factory = build_live_client_factory(codex_home=args.codex_home, model=REQUIRED_MODEL)
+            # Safe to delete `tmp` on ANY exit from run_one() (return or
+            # raise): run_one()'s finally block now guarantees the App
+            # Server client is closed before control ever leaves run_one()
+            # (review repair BLOCKER-2), so no live process can still be
+            # using this workspace by the time this `with` block unwinds.
             with tempfile.TemporaryDirectory(prefix="fresh-sol-eval-") as tmp:
                 observation = run_one(
                     repo_root=args.repo_root,
@@ -1307,6 +1501,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run-matrix":
             harness_binary_sha256 = binary_digest(shutil.which("codex"))
             client_factory = build_live_client_factory(codex_home=args.codex_home, model=REQUIRED_MODEL)
+            # Same guarantee as run-one above: each sample's App Server
+            # client is closed inside run_one()'s finally block before
+            # run_matrix() starts the next sample or returns.
             with tempfile.TemporaryDirectory(prefix="fresh-sol-eval-matrix-") as tmp:
                 written = run_matrix(
                     repo_root=args.repo_root,
@@ -1327,7 +1524,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, indent=2))
             return 0 if result["ok"] else 1
     except FreshSolEvalError as exc:
-        print(f"::error title={exc.code}::{exc}", flush=True)
+        print(f"::error title={exc.code}::{redact_untrusted(str(exc))}", flush=True)
         return 2
     return 1
 

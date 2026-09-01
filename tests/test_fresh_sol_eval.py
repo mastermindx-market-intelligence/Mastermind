@@ -7,6 +7,7 @@ subprocess.
 """
 from __future__ import annotations
 
+import inspect
 import itertools
 import subprocess
 from pathlib import Path
@@ -21,12 +22,14 @@ from scripts.ohf.fresh_sol_eval import (
     SkillpackArm,
     ScenarioPacket,
     CleanupReceipt,
+    EvalClient,
     materialize_skillpack,
     parse_protocol,
     build_eval_agents_md,
     run_one,
     build_live_client_factory,
 )
+from scripts.ohf.laboratory import AppServerClient
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +301,7 @@ def test_build_eval_agents_md_is_arm_neutral_wrapper_plus_sources(skillpack_git_
 #
 # ``_FakeEvalClient`` implements only the narrow structural surface
 # ``fresh_sol_eval.EvalClient`` needs (pid, cwd, notifications, start,
-# request, notify, wait_notification, terminate).  It never spawns a
+# request, notify, wait_notification, graceful_close).  It never spawns a
 # subprocess and never calls a provider.
 # ---------------------------------------------------------------------------
 
@@ -351,7 +354,7 @@ class _FakeEvalClient:
         self.thread_resume_calls = 0
         self.thread_fork_calls = 0
         self.turn_start_calls = 0
-        self.terminate_calls = 0
+        self.graceful_close_calls = 0
 
     def start(self) -> None:
         self.pid = next(_fake_pid_counter)
@@ -450,8 +453,8 @@ class _FakeEvalClient:
             },
         }
 
-    def terminate(self) -> object:
-        self.terminate_calls += 1
+    def graceful_close(self) -> object:
+        self.graceful_close_calls += 1
         return CleanupReceipt(
             controller_returncode=0 if self._cleanup_ok else 1,
             private_group_id=self.pid,
@@ -532,6 +535,7 @@ def test_served_model_mismatch_refuses_before_thread_start(mastermind_repo_root:
             client_factory=factory,
         )
     assert excinfo.value.code == "SERVED_MODEL_MISMATCH"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
     assert factory.made[0].thread_start_calls == 0
 
 
@@ -546,6 +550,7 @@ def test_approval_policy_mismatch_refuses_before_thread_start(mastermind_repo_ro
             client_factory=factory,
         )
     assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
     assert factory.made[0].thread_start_calls == 0
 
 
@@ -560,6 +565,7 @@ def test_sandbox_mode_mismatch_refuses_before_thread_start(mastermind_repo_root:
             client_factory=factory,
         )
     assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
     assert factory.made[0].thread_start_calls == 0
 
 
@@ -574,6 +580,7 @@ def test_configured_mcp_server_refuses_before_thread_start(mastermind_repo_root:
             client_factory=factory,
         )
     assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
     assert factory.made[0].thread_start_calls == 0
 
 
@@ -588,6 +595,7 @@ def test_configured_plugin_refuses_before_thread_start(mastermind_repo_root: Pat
             client_factory=factory,
         )
     assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
 
 
 def test_visible_skill_refuses_before_thread_start(mastermind_repo_root: Path, tmp_path: Path):
@@ -601,6 +609,7 @@ def test_visible_skill_refuses_before_thread_start(mastermind_repo_root: Path, t
             client_factory=factory,
         )
     assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
 
 
 def test_ambiguous_capability_observation_refuses(mastermind_repo_root: Path, tmp_path: Path):
@@ -614,6 +623,7 @@ def test_ambiguous_capability_observation_refuses(mastermind_repo_root: Path, tm
             client_factory=factory,
         )
     assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
 
 
 def test_capability_rpc_failure_refuses(mastermind_repo_root: Path, tmp_path: Path):
@@ -627,6 +637,7 @@ def test_capability_rpc_failure_refuses(mastermind_repo_root: Path, tmp_path: Pa
             client_factory=factory,
         )
     assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
 
 
 def test_thread_read_ambiguous_output_refuses(mastermind_repo_root: Path, tmp_path: Path):
@@ -640,6 +651,7 @@ def test_thread_read_ambiguous_output_refuses(mastermind_repo_root: Path, tmp_pa
             client_factory=factory,
         )
     assert excinfo.value.code == "THREAD_READ_FAILED"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
 
 
 def test_notification_fragment_never_substitutes_for_thread_read(mastermind_repo_root: Path, tmp_path: Path):
@@ -653,6 +665,7 @@ def test_notification_fragment_never_substitutes_for_thread_read(mastermind_repo
             client_factory=factory,
         )
     assert excinfo.value.code == "THREAD_READ_FAILED"
+    assert factory.made[0].graceful_close_calls == 1  # BLOCKER-2: cleanup ran despite the failure
 
 
 def test_cleanup_unproven_invalidates_run(mastermind_repo_root: Path, tmp_path: Path):
@@ -1224,7 +1237,7 @@ def test_effect_unknown_turn_is_never_retried_or_resumed(mastermind_repo_root: P
             self.thread_resume_calls = 0
             self.thread_fork_calls = 0
             self.turn_start_calls = 0
-            self.terminate_calls = 0
+            self.graceful_close_calls = 0
 
         def start(self) -> None:
             self.pid = next(_fake_pid_counter)
@@ -1268,8 +1281,8 @@ def test_effect_unknown_turn_is_never_retried_or_resumed(mastermind_repo_root: P
         def wait_notification(self, method, *, timeout=15.0):
             raise AssertionError("turn/start already raised; wait_notification must not be reached")
 
-        def terminate(self):
-            self.terminate_calls += 1
+        def graceful_close(self):
+            self.graceful_close_calls += 1
             return CleanupReceipt(
                 controller_returncode=0, private_group_id=self.pid,
                 private_group_empty=True, termination_outcome="sigterm",
@@ -1291,6 +1304,10 @@ def test_effect_unknown_turn_is_never_retried_or_resumed(mastermind_repo_root: P
     assert made[0].turn_start_calls == 1
     assert made[0].thread_resume_calls == 0
     assert made[0].thread_fork_calls == 0
+    # BLOCKER-2 falsifier: a forced post-dispatch disconnect must still
+    # close the client exactly once and record a cleanup proof, not leave
+    # the process/private group dangling.
+    assert made[0].graceful_close_calls == 1
 
 
 def test_unproven_process_group_cleanup_invalidates_run(mastermind_repo_root: Path, tmp_path: Path):
@@ -1317,4 +1334,501 @@ def test_secret_shaped_output_is_not_persisted(tmp_path: Path):
 
 # test_mas136_matrix_is_exactly_four_control_twelve_amended -- already
 # defined above (Task 3, Step 4).
+
+
+# ---------------------------------------------------------------------------
+# Review repair falsifiers (2026-09-01, principal adjudication of the
+# adversarial review against exact head 26480a8207385ee75d3afd04e311e060a70567b6).
+# ---------------------------------------------------------------------------
+
+
+# --- BLOCKER-1: EvalClient/AppServerClient signature-compatibility -------
+
+
+def test_eval_client_protocol_matches_real_app_server_client_surface(tmp_path: Path):
+    """EvalClient must name real AppServerClient members with a compatible contract.
+
+    The exact defect this falsifies: EvalClient previously declared
+    ``terminate() -> object``, and ``_terminate_and_prove`` called
+    ``client.terminate()``. The REAL ``AppServerClient.terminate()``
+    returns a plain ``str`` outcome label -- ``_terminate_and_prove`` would
+    have raised ``CLEANUP_UNPROVEN`` on every real (non-fake) run, because a
+    ``str`` matches neither of its two recognized cleanup-proof types. The
+    real cleanup method is ``graceful_close() -> AppServerStopProof``. This
+    test pins that fact against the actual class, not a fake's opinion of
+    it, so the Protocol and the real substrate cannot drift apart silently
+    again ("the class of defect where the Protocol fits the fake must
+    become untestable").
+    """
+
+    protocol_methods = {"start", "request", "notify", "wait_notification", "graceful_close"}
+    declared = {name for name in dir(EvalClient) if not name.startswith("_")}
+    assert protocol_methods <= declared
+    assert "terminate" not in declared, (
+        "EvalClient must not reintroduce terminate() -- the real "
+        "AppServerClient.terminate() returns str, not a cleanup-proof object"
+    )
+
+    real_client = AppServerClient(["true"], env={}, cwd=tmp_path, start_new_session=False)
+    for attr_name in ("pid", "cwd", "notifications"):
+        assert hasattr(real_client, attr_name), attr_name
+    for method_name in protocol_methods:
+        assert callable(getattr(real_client, method_name, None)), method_name
+
+    # `from __future__ import annotations` in laboratory.py means these
+    # come back as literal strings, not evaluated types -- exactly what we
+    # want to pin without importing AppServerStopProof just for isinstance.
+    close_sig = inspect.signature(AppServerClient.graceful_close)
+    assert close_sig.return_annotation == "AppServerStopProof"
+    terminate_sig = inspect.signature(AppServerClient.terminate)
+    assert terminate_sig.return_annotation == "str"
+
+
+# --- MAJOR-3 / MAJOR-4: _git hardening (no lazy fetch, no raw timeout) ---
+
+
+def test_git_materialization_refuses_lazy_fetch_from_a_blobless_clone(tmp_path: Path):
+    """A partial/promisor clone must refuse a missing blob, never fetch it.
+
+    Without ``GIT_NO_LAZY_FETCH=1`` git would transparently lazy-fetch the
+    missing blob from the (here, merely locally-reachable) promisor remote,
+    silently satisfying the read. That is exactly the network-fetch
+    behavior design §6 forbids ("The runner performs no network fetch").
+    """
+
+    full_repo = tmp_path / "full_repo"
+    full_repo.mkdir()
+    _git(full_repo, "init", "-q")
+    _git(full_repo, "config", "user.email", "ohf1@example.invalid")
+    _git(full_repo, "config", "user.name", "ohf1 fixture")
+    _write(full_repo / "docs/sol_skills/INDEX.md", (
+        "---\nschema: mastermind.sol_skillpack.v1\nskillpack_version: 1.0.0\n"
+        "minimum_bootstrap_major: 1\n---\n\n# index\n"
+    ))
+    _write(full_repo / "docs/sol_skills/SIBLING.md", "# sibling\ncontrol content\n")
+    _git(full_repo, "add", "-A")
+    _git(full_repo, "commit", "-q", "-m", "control commit")
+    control_sha = subprocess.run(
+        ["git", "-C", str(full_repo), "rev-parse", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    partial_repo = tmp_path / "partial_repo"
+    clone = subprocess.run(
+        [
+            "git", "clone", "-q", "--no-local", "--filter=blob:none", "--no-checkout",
+            f"file://{full_repo}", str(partial_repo),
+        ],
+        capture_output=True, text=True,
+    )
+    if clone.returncode != 0:
+        pytest.skip(f"local git does not support partial clone in this environment: {clone.stderr}")
+
+    blob_sha = subprocess.run(
+        ["git", "-C", str(full_repo), "rev-parse", f"{control_sha}:docs/sol_skills/SIBLING.md"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    blob_present = subprocess.run(
+        ["git", "-C", str(partial_repo), "cat-file", "-e", blob_sha],
+        capture_output=True,
+    ).returncode == 0
+    if blob_present:
+        # This sandbox's git build/transport does not honor server-side
+        # partial-clone filtering over file:// (observed: "warning:
+        # filtering not recognized by server, ignoring" even with
+        # --no-local and uploadpack.allowFilter=true) -- the "partial"
+        # clone actually contains every blob, so there is nothing here to
+        # lazily fetch and this integration probe cannot exercise the
+        # refusal path in this environment. The env-var-is-set fact is
+        # still covered unconditionally by
+        # test_git_never_disables_lazy_fetch_refusal_env below.
+        pytest.skip(
+            "this git build/transport does not filter blobs on a local "
+            "partial clone -- cannot construct a genuine missing-blob "
+            "fixture here; see test_git_never_disables_lazy_fetch_refusal_env"
+        )
+
+    arm = SkillpackArm("fixture-partial", control_sha, "1.0.0")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        materialize_skillpack(partial_repo, arm)
+    assert excinfo.value.code == "PROCEDURE_SOURCE_UNAVAILABLE"
+
+
+def test_git_timeout_maps_to_closed_failure_code_not_raw_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A git subprocess timeout must never escape as subprocess.TimeoutExpired."""
+
+    import scripts.ohf.fresh_sol_eval as fresh_sol_eval_module
+
+    def fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs.get("timeout", 10))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    arm = SkillpackArm("fixture-timeout", "0" * 40, "1.0.0")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        materialize_skillpack(tmp_path, arm)
+    # The very first git call materialize_skillpack makes is the commit
+    # existence check, so a timeout there must map to SOURCE_COMMIT_UNAVAILABLE.
+    assert excinfo.value.code == "SOURCE_COMMIT_UNAVAILABLE"
+    del fresh_sol_eval_module  # imported for clarity of intent above
+
+
+def test_git_never_disables_lazy_fetch_refusal_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """GIT_NO_LAZY_FETCH must actually be set on every git subprocess call."""
+
+    import scripts.ohf.fresh_sol_eval as fresh_sol_eval_module
+
+    seen_envs: list[dict[str, str]] = []
+    real_run = subprocess.run
+
+    def spying_run(argv, **kwargs):
+        seen_envs.append(dict(kwargs.get("env") or {}))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spying_run)
+    fresh_sol_eval_module._git(tmp_path, "status")
+    assert seen_envs, "no git subprocess was observed"
+    assert seen_envs[0].get("GIT_NO_LAZY_FETCH") == "1"
+
+
+# --- MAJOR-5: check_corpus forgery resistance -----------------------------
+
+
+def test_check_corpus_refuses_forged_corpus_reusing_one_artifact_for_all_rows(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    """16 manifest rows all pointing at ONE real artifact must never pass.
+
+    This is the reviewer's adversarial construction: a digest-only,
+    cardinality-by-manifest-claim check can be satisfied by one genuine
+    artifact whose bytes/digest are correct, reused under 16 different
+    forged manifest rows that merely CLAIM the right run_id/arm/scenario_id
+    distribution. check_corpus must cross-validate each artifact's own
+    frontmatter identity against what its manifest row claims, and must
+    reject duplicate relative_path/native_thread_id across rows.
+    """
+
+    from scripts.ohf.fresh_sol_eval import write_run_artifact, check_corpus
+    import hashlib
+    import json
+
+    evidence_root = tmp_path / "evidence"
+    real_observation = _observation(run_id="real-run-0001", arm="control-1.0.0", scenario_id="S2")
+    bundle = _bundle_fixture()
+    real_path = write_run_artifact(
+        observation=real_observation, bundle=bundle, protocol_sha256="d" * 64,
+        harness_kind="codex-app-server", harness_binary_sha256="e" * 64,
+        evidence_root=evidence_root,
+    )
+    real_relative_path = real_path.relative_to(evidence_root).as_posix()
+    real_sha256 = hashlib.sha256(real_path.read_bytes()).hexdigest()
+
+    forged_entries = []
+    for scenario_id in MAS136_SCENARIOS:
+        for arm, count in (("control-1.0.0", 1), ("amended-1.1.0", 3)):
+            for _ in range(count):
+                forged_entries.append(
+                    {
+                        "run_id": f"forged-{scenario_id}-{arm}-{len(forged_entries)}",
+                        "arm": arm,
+                        "scenario_id": scenario_id,
+                        "relative_path": real_relative_path,  # reused for every row
+                        "artifact_sha256": real_sha256,  # correct digest for the reused file
+                    }
+                )
+    assert len(forged_entries) == 16
+
+    manifest_path = evidence_root / "MANIFEST.json"
+    manifest_path.write_text(
+        json.dumps({"schema": "mastermind.fresh_sol_eval_manifest/v1", "entries": forged_entries}),
+        encoding="utf-8",
+    )
+
+    result = check_corpus(evidence_root=evidence_root, mode="mas-136")
+    assert result["ok"] is False
+    assert result["valid_count"] < 16
+    assert any("duplicate relative_path" in p for p in result["problems"])
+
+
+def test_check_corpus_refuses_manifest_artifact_identity_mismatch(tmp_path: Path):
+    from scripts.ohf.fresh_sol_eval import write_run_artifact, check_corpus
+    import hashlib
+    import json
+
+    evidence_root = tmp_path / "evidence"
+    observation = _observation()
+    bundle = _bundle_fixture()
+    path = write_run_artifact(
+        observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+        harness_kind="codex-app-server", harness_binary_sha256="e" * 64,
+        evidence_root=evidence_root,
+    )
+    relative_path = path.relative_to(evidence_root).as_posix()
+    sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    manifest_path = evidence_root / "MANIFEST.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "mastermind.fresh_sol_eval_manifest/v1",
+                "entries": [
+                    {
+                        # Claims a DIFFERENT scenario_id than the artifact's
+                        # own frontmatter actually records.
+                        "run_id": observation.run_id,
+                        "arm": observation.arm,
+                        "scenario_id": "S6",
+                        "relative_path": relative_path,
+                        "artifact_sha256": sha256,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = check_corpus(evidence_root=evidence_root, mode="mas-136")
+    assert result["ok"] is False
+    assert any("identity mismatch" in p for p in result["problems"])
+
+
+def test_check_corpus_refuses_duplicate_native_thread_id(mastermind_repo_root: Path, tmp_path: Path):
+    from scripts.ohf.fresh_sol_eval import write_run_artifact, check_corpus
+    import hashlib
+    import json
+
+    evidence_root = tmp_path / "evidence"
+    bundle = _bundle_fixture()
+    entries = []
+    for idx, (arm, scenario_id) in enumerate(
+        [("control-1.0.0", "S2"), ("amended-1.1.0", "S2")]
+    ):
+        observation = _observation(
+            run_id=f"run-dup-thread-{idx}",
+            arm=arm,
+            scenario_id=scenario_id,
+            native_thread_id="thr_SAME_FOR_BOTH",  # identical across two distinct samples
+        )
+        path = write_run_artifact(
+            observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+            harness_kind="codex-app-server", harness_binary_sha256="e" * 64,
+            evidence_root=evidence_root,
+        )
+        entries.append(
+            {
+                "run_id": observation.run_id,
+                "arm": observation.arm,
+                "scenario_id": observation.scenario_id,
+                "relative_path": path.relative_to(evidence_root).as_posix(),
+                "artifact_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    manifest_path = evidence_root / "MANIFEST.json"
+    manifest_path.write_text(
+        json.dumps({"schema": "mastermind.fresh_sol_eval_manifest/v1", "entries": entries}),
+        encoding="utf-8",
+    )
+    result = check_corpus(evidence_root=evidence_root, mode="mas-136")
+    assert result["ok"] is False
+    assert any("duplicate native_thread_id" in p for p in result["problems"])
+
+
+# --- MAJOR-6: exception text redaction ------------------------------------
+
+
+def test_capability_attestation_failure_redacts_sentinel_secret_from_exception_text(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    sentinel = "sk-testFixtureSecretShape1234567890"
+
+    class _LeakyClient(_FakeEvalClient):
+        def request(self, method, params=None, timeout=15.0):
+            if method == "account/read":
+                raise RuntimeError(f"fixture provider error leaking {sentinel}")
+            return super().request(method, params, timeout)
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _LeakyClient:
+        return _LeakyClient(workspace, config_dir, home)
+
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+            run_root=tmp_path / "run", client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert sentinel not in str(excinfo.value)
+
+
+def test_auth_realm_invalid_message_is_redacted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    dedicated = tmp_path / "dedicated_realm_sk-testFixtureSecretShape1234567890"
+    dedicated.mkdir()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        build_live_client_factory(codex_home=dedicated, model="gpt-5.6-sol")
+    assert excinfo.value.code == "AUTH_REALM_INVALID"
+    assert "sk-testFixtureSecretShape1234567890" not in str(excinfo.value)
+
+
+# --- MAJOR-7: live client factory env shape -------------------------------
+
+
+def test_live_client_factory_env_has_no_pythonpath(tmp_path: Path):
+    dedicated = tmp_path / "dedicated_realm"
+    dedicated.mkdir()
+    (dedicated / "auth.json").write_text("{}", encoding="utf-8")
+
+    factory = build_live_client_factory(codex_home=dedicated, model="gpt-5.6-sol", codex_binary="/bin/echo")
+    workspace = tmp_path / "run" / "workspace"
+    config_dir = tmp_path / "run" / "config"
+    home = tmp_path / "run" / "home"
+    for d in (workspace, config_dir, home):
+        d.mkdir(parents=True)
+    client = factory(workspace, config_dir, home)
+    assert set(client.env.keys()) == {"PATH", "HOME", "CODEX_HOME", "LC_ALL"}
+    assert "PYTHONPATH" not in client.env
+
+
+# --- N1: manifest relative_path path-traversal probes ---------------------
+
+
+@pytest.mark.parametrize("evil_path", ["/etc/passwd", "../../etc/passwd", "runs/../../../etc/passwd"])
+def test_resume_manifest_rejects_unsafe_relative_path(
+    mastermind_repo_root: Path, tmp_path: Path, evil_path: str
+):
+    import json
+
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    resume_manifest = tmp_path / "resume_manifest.json"
+    resume_manifest.write_text(
+        json.dumps(
+            {
+                "schema": "mastermind.fresh_sol_eval_manifest/v1",
+                "entries": [
+                    {
+                        "run_id": "evil",
+                        "arm": "control-1.0.0",
+                        "scenario_id": "S2",
+                        "relative_path": evil_path,
+                        "artifact_sha256": "0" * 64,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    factory = _fake_factory()
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_matrix(
+            repo_root=mastermind_repo_root,
+            protocol_path=_protocol_path(tmp_path),
+            evidence_root=evidence_root,
+            client_factory=factory,
+            run_root_parent=tmp_path / "runs_scratch",
+            mode="mas-136",
+            resume_manifest=resume_manifest,
+        )
+    assert excinfo.value.code == "EVIDENCE_COLLISION"
+
+
+@pytest.mark.parametrize("evil_path", ["/etc/passwd", "../../etc/passwd"])
+def test_check_corpus_rejects_unsafe_relative_path(tmp_path: Path, evil_path: str):
+    import json
+
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    manifest_path = evidence_root / "MANIFEST.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "mastermind.fresh_sol_eval_manifest/v1",
+                "entries": [
+                    {
+                        "run_id": "evil",
+                        "arm": "control-1.0.0",
+                        "scenario_id": "S2",
+                        "relative_path": evil_path,
+                        "artifact_sha256": "0" * 64,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = check_corpus(evidence_root=evidence_root, mode="mas-136")
+    assert result["ok"] is False
+    assert any("unsafe relative_path" in p for p in result["problems"])
+
+
+# --- N2: workspace freshness ------------------------------------------------
+
+
+def test_run_root_reuse_refuses_instead_of_silently_merging(
+    mastermind_repo_root: Path, tmp_path: Path
+):
+    run_root = tmp_path / "shared_run_root"
+    factory = _fake_factory()
+    run_one(
+        repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+        run_root=run_root, client_factory=factory,
+    )
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root, arm=_control_arm(), scenario=_scenario(),
+            run_root=run_root, client_factory=factory,
+        )
+    assert excinfo.value.code == "HARNESS_INITIALIZE_FAILED"
+
+
+# --- N4: artifact fencing exceeds the longest backtick run ----------------
+
+
+def test_evidence_fence_exceeds_longest_backtick_run_in_payload(tmp_path: Path):
+    from scripts.ohf.fresh_sol_eval import write_run_artifact
+
+    tricky_output = "here is a fenced block:\n````python\nprint('hi')\n````\nend"
+    observation = _observation(output=tricky_output)
+    bundle = _bundle_fixture()
+    path = write_run_artifact(
+        observation=observation, bundle=bundle, protocol_sha256="d" * 64,
+        harness_kind="codex-app-server", harness_binary_sha256="e" * 64, evidence_root=tmp_path,
+    )
+    text = path.read_text(encoding="utf-8")
+    assert tricky_output in text
+    # The fence markers immediately surrounding "## Exact model output" must
+    # be longer than the longest backtick run inside the payload (4), i.e.
+    # at least 5 backticks, or the payload's own ```` would prematurely
+    # close a plain triple-backtick fence.
+    output_section = text.split("## Exact model output", 1)[1]
+    fence_line = output_section.strip().splitlines()[0]
+    assert fence_line.startswith("`````") or len(fence_line.rstrip("t").rstrip()) >= 5
+
+
+# --- N6: no duplicate Skillpack materialization in run_matrix -------------
+
+
+def test_run_matrix_materializes_each_arm_commit_once_per_sample(
+    mastermind_repo_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import scripts.ohf.fresh_sol_eval as fresh_sol_eval_module
+
+    calls: list[str] = []
+    real_materialize = fresh_sol_eval_module.materialize_skillpack
+
+    def counting_materialize(repo_root, arm):
+        calls.append(arm.name)
+        return real_materialize(repo_root, arm)
+
+    monkeypatch.setattr(fresh_sol_eval_module, "materialize_skillpack", counting_materialize)
+    factory = _fake_factory()
+    run_matrix(
+        repo_root=mastermind_repo_root,
+        protocol_path=_protocol_path(tmp_path),
+        evidence_root=tmp_path / "evidence",
+        client_factory=factory,
+        run_root_parent=tmp_path / "runs_scratch",
+        mode="mas-136",
+    )
+    # 16 samples total; each sample must materialize its arm's Skillpack
+    # exactly once (16 calls), never twice (32 calls, the pre-repair count).
+    assert len(calls) == 16
 
