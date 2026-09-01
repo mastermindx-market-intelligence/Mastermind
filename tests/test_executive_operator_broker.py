@@ -53,14 +53,19 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_wire import to_wire
+from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
 class _Sweeper:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.lifecycle: list[str] | None = None
+        self.residual_pids_after: tuple[int, ...] = ()
 
     def sweep(self, reason: str) -> UIDSweepReceipt:
         self.calls.append(reason)
+        if self.lifecycle is not None:
+            self.lifecycle.append(f"uid_sweep:{reason}")
         return UIDSweepReceipt(
             schema_version=UID_SWEEP_SCHEMA_VERSION,
             observed_at="2026-08-24T00:00:00+00:00",
@@ -68,7 +73,7 @@ class _Sweeper:
             worker_uid=os.geteuid(),
             broker_pid=os.getpid(),
             residual_pids_before=(),
-            residual_pids_after=(),
+            residual_pids_after=self.residual_pids_after,
             signal_name="SIGKILL",
             signal_sent=False,
             quiescent_observations=2,
@@ -106,11 +111,18 @@ class _OperatorAdapter:
         self.process = ProcessIdentityObservation(7001, 7001, "start-7001", "boot")
         self.turn: TurnRef | None = None
         self.prompts: list[str] = []
+        self.lifecycle: list[str] = []
+        self.resource = None
+
+    def bind_attempt_resource(self, resource, **_kwargs):
+        self.lifecycle.append("resource_bind")
+        self.resource = resource
 
     def validate_requested_profile(self, requested):
         return ProfileValidation(requested, requested == self.requested, ())
 
     def start_session(self, **_kwargs):
+        self.lifecycle.append("provider_start")
         return SessionStartObservation("thread-1", self.process)
 
     def resume_session(self, *, provider_session, **_kwargs):
@@ -217,6 +229,7 @@ class _OperatorAdapter:
         assert operation_id.command_id.startswith("ohf-op:")
 
     def graceful_stop(self, _generation, **_kwargs):
+        self.lifecycle.append("provider_stop")
         return ReconcileObservation(
             ProcessLiveness.PROVEN_DEAD,
             self.process,
@@ -398,6 +411,200 @@ def test_operator_autonomy_guard_rechecks_before_each_provider_effect(tmp_path: 
             )
         assert "expired receipt detail" not in str(blocked.value)
         assert adapters[0].prompts == []
+
+    asyncio.run(scenario())
+
+
+def test_browser_resource_is_generation_bound_and_sealed_only_after_uid_sweep(
+    tmp_path: Path,
+) -> None:
+    lifecycle: list[str] = []
+
+    class Resource:
+        def __init__(self, epoch, generation) -> None:
+            self.epoch = epoch
+            self.generation = generation
+
+        def start(self) -> None:
+            lifecycle.append("resource_start")
+
+        def stop(self) -> None:
+            lifecycle.append("resource_stop")
+
+        def seal_after_uid_sweep(self, sweep):
+            assert sweep.passed is True
+            lifecycle.append("receipt_seal")
+            return BrowserReviewReceipt(
+                schema_version="mastermind.browser_review_receipt/v1",
+                attempt_id=self.epoch.attempt_id,
+                session_epoch_id=self.epoch.session_epoch_id,
+                process_generation_id=self.generation.process_generation_id,
+                workspace=WorkspaceIdentity("/tmp/browser", "a" * 40, 1, 2, 3, 4),
+                devserver={"local_origin": "http://127.0.0.1:48101", "manifest_digest": "b" * 64},
+                capability={"manifest_digest": "c" * 64, "profile_digest": "d" * 64, "profile_id": "operator.browser.local-review.v1"},
+                playwright_mcp={"identity": "playwright", "tool_schema_digest": "e" * 64, "version": "1.63.0-alpha-2026-08-05"},
+                    browser={
+                        "executable": "/tmp/chromium",
+                        "executable_sha256": "f" * 64,
+                        "revision": "1237",
+                        "runtime_manifest_digest": "7" * 64,
+                    },
+                viewports=({"width": 1440, "height": 900}, {"width": 390, "height": 844}),
+                artifacts={
+                    "screenshots": [
+                        {"bytes": 10, "relative_path": "desktop.png", "sha256": "0" * 64, "viewport": {"width": 1440, "height": 900}},
+                        {"bytes": 10, "relative_path": "mobile.png", "sha256": "1" * 64, "viewport": {"width": 390, "height": 844}},
+                    ],
+                    "console": {"bytes": 64, "observed": True, "rows": 1, "sha256": "2" * 64},
+                    "mcp_guard": {
+                        "bytes": 4096,
+                        "relative_path": "browser-mcp-guard-evidence.json",
+                        "schema_version": "mastermind.browser_mcp_guard_evidence/v2",
+                        "sha256": "8" * 64,
+                    },
+                    "network": {"bytes": 64, "observed": True, "rows": 1, "sha256": "3" * 64},
+                },
+                egress_falsifiers={
+                    "external_fetch": "REFUSED",
+                    "external_http": "REFUSED",
+                    "external_https": "REFUSED",
+                    "external_redirect": "REFUSED",
+                    "external_subresource": "REFUSED",
+                    "external_websocket": "REFUSED",
+                    "file_url": "REFUSED",
+                    "proxy_override": "REFUSED",
+                },
+                external_egress_observed=False,
+                visual_judgment={
+                    "defective_variant": "B",
+                    "fixture_nonce": "opaque-broker",
+                    "image_sha256": ["4" * 64, "5" * 64],
+                    "reason": "visible clipping",
+                    "source": "model_image_content",
+                },
+                cleanup={
+                    "browser_absent": True,
+                    "devserver_absent": True,
+                    "mcp_absent": True,
+                    "proxy_absent": True,
+                    "uid_sweep_digest": "6" * 64,
+                    "uid_sweep_passed": True,
+                },
+                tracked_workspace_changes_after_review=False,
+            )
+
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+
+        def resource_factory(_workspace, requested, epoch, generation):
+            assert requested == profile
+            adapters[-1].lifecycle = lifecycle
+            return Resource(epoch, generation)
+
+        broker.operator_resource_factory = resource_factory
+        sweeper.lifecycle = lifecycle
+        epoch = SessionEpochRef("epoch-browser", "ATT-BROWSER", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-browser", "epoch-browser", 1, "codex-01"
+        )
+        await broker.execute(
+            _request(
+                "ohf-start",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:start-browser")),
+                    "requested": to_wire(profile),
+                    "epoch": to_wire(epoch),
+                    "generation": to_wire(generation),
+                },
+                "start-browser",
+            ),
+            peer=peer,
+        )
+        stopped = await broker.execute(
+            _request(
+                "ohf-stop",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:stop-browser")),
+                    "generation": to_wire(generation),
+                },
+                "stop-browser",
+            ),
+            peer=peer,
+        )
+        assert lifecycle == [
+            "resource_start",
+            "resource_bind",
+            "provider_start",
+            "provider_stop",
+            "resource_stop",
+            "uid_sweep:operator_terminal",
+            "receipt_seal",
+        ]
+        assert sweeper.calls == ["operator_terminal"]
+        assert stopped["result"]["artifact_receipt"]["attempt_id"] == "ATT-BROWSER"
+        assert "receipt_digest" not in stopped["result"]["artifact_receipt"]
+
+    asyncio.run(scenario())
+
+
+def test_browser_receipt_is_not_sealed_when_uid_sweep_is_not_passing(
+    tmp_path: Path,
+) -> None:
+    lifecycle: list[str] = []
+
+    class Resource:
+        def start(self) -> None:
+            lifecycle.append("resource_start")
+
+        def stop(self) -> None:
+            lifecycle.append("resource_stop")
+
+        def seal_after_uid_sweep(self, _sweep):
+            lifecycle.append("receipt_seal")
+            raise AssertionError("a nonpassing UID sweep must never seal evidence")
+
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        sweeper.lifecycle = lifecycle
+        sweeper.residual_pids_after = (9001,)
+        broker.operator_resource_factory = (
+            lambda _workspace, _requested, _epoch, _generation: Resource()
+        )
+        adapters.clear()
+        epoch = SessionEpochRef("epoch-sweep-red", "ATT-SWEEP-RED", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-sweep-red", "epoch-sweep-red", 1, "codex-01"
+        )
+        await broker.execute(
+            _request(
+                "ohf-start",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:start-sweep-red")),
+                    "requested": to_wire(profile),
+                    "epoch": to_wire(epoch),
+                    "generation": to_wire(generation),
+                },
+                "start-sweep-red",
+            ),
+            peer=peer,
+        )
+        with pytest.raises(BrokerStateError, match="UID sweep"):
+            await broker.execute(
+                _request(
+                    "ohf-stop",
+                    {
+                        "operation_id": to_wire(OperationId("ohf-op:stop-sweep-red")),
+                        "generation": to_wire(generation),
+                    },
+                    "stop-sweep-red",
+                ),
+                peer=peer,
+            )
+        assert lifecycle == [
+            "resource_start",
+            "resource_stop",
+            "uid_sweep:operator_terminal",
+        ]
 
     asyncio.run(scenario())
 
