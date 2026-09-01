@@ -95,6 +95,12 @@ def test_tool_census_schemas_annotations_and_oauth_metadata_are_exact():
         schemes = rendered["securitySchemes"]
         assert schemes == [{"type": "oauth2", "scopes": [REQUIRED_SCOPE]}]
         assert rendered["_meta"]["securitySchemes"] == schemes
+        if tool.name == "list_responsibilities":
+            assert rendered["_meta"]["ui"] == {"resourceUri": UI_RESOURCE_URI}
+            assert rendered["_meta"]["openai/outputTemplate"] == UI_RESOURCE_URI
+        else:
+            assert "ui" not in rendered["_meta"]
+            assert "openai/outputTemplate" not in rendered["_meta"]
 
 
 def test_low_level_surface_is_six_tools_plus_one_ui_resource_only():
@@ -117,13 +123,31 @@ def test_contract_call_returns_structured_secretary_envelope():
     assert result["data"]["state"] == "FACTS"
 
 
-def test_describe_and_ui_resource_are_static_and_self_contained():
+def test_describe_and_ui_resource_are_static_self_contained_and_inert():
     payload = json.loads(describe())
     assert payload["server_name"] == SERVER_NAME
     assert payload["tools"] == EXPECTED_TOOLS
     assert payload["required_scope"] == REQUIRED_SCOPE
     assert payload["ui_resource"] == UI_RESOURCE_URI
-    assert UI_MIME_TYPE == "text/html+skybridge"
+    assert UI_MIME_TYPE == "text/html;profile=mcp-app"
     assert "<!doctype html>" in CONTROL_ROOM_HTML.lower()
     assert "http://" not in CONTROL_ROOM_HTML
     assert "https://" not in CONTROL_ROOM_HTML
+    assert "ui/notifications/tool-result" in CONTROL_ROOM_HTML
+    assert "event.source !== window.parent" in CONTROL_ROOM_HTML
+    assert 'message.jsonrpc !== "2.0"' in CONTROL_ROOM_HTML
+    assert "replaceChildren" in CONTROL_ROOM_HTML
+    assert "@media (max-width:480px)" in CONTROL_ROOM_HTML
+    for state in ("FACTS", "UNKNOWN", "DEGRADED", "REFUSED"):
+        assert state in CONTROL_ROOM_HTML
+    for forbidden in (
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "eval(",
+        "new Function",
+        "setTimeout(",
+        "setInterval(",
+    ):
+        assert forbidden not in CONTROL_ROOM_HTML
