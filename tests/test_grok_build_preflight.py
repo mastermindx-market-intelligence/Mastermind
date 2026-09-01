@@ -256,6 +256,22 @@ def test_main_exception_output_is_fixed_and_opaque(tmp_path: Path, monkeypatch, 
     assert json.loads(capsys.readouterr().out) == {"ok": False, "error": "PREFLIGHT_FAILED"}
 
 
+def test_main_unexpected_exception_output_is_fixed_and_opaque(
+    tmp_path: Path, monkeypatch, capsys
+):
+    m = load_module()
+    binary = executable(tmp_path)
+
+    def explode(path):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid provider output")
+
+    monkeypatch.setattr(m, "snapshot_binary", explode)
+    assert m.main(["--grok-binary", str(binary)]) == 2
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {"ok": False, "error": "PREFLIGHT_FAILED"}
+
+
 def test_acp_probe_emits_only_initialize_then_authenticate(tmp_path: Path, monkeypatch):
     m = load_module()
     binary = executable(tmp_path)
