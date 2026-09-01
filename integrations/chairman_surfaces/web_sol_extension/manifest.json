@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqkgiJufJguxzvJmcJY2q1JeESU1vPa9u5sPQ6h++i113s5X9mZQM9VNGhj89jzuL7/QrCUTGTWf6iF9wFU2aoo6orTqqhpkdxwpp8cZKiMHe5pKwLi0fkKzuD3PTOpTedLcYY38z7aQTj5TJFTJb3qZH+wq5wGE+v5E2zYHbDHXtFa5MdGboE6AUHuIqqXsijHLd/6MmrzZOrWuUNw1wDwu07hTbRsT2o+ZzRx9YcTBkWcgZyCqiF8NPUQsDlfpRwBK1Ygqv2XnCFSZ973YOI+datCrwRQ3V/TnrJv1+ge/MPiz/qQhKsSjEJO/vxpX8eOTULxnEWUl10kAG2frdRQIDAQAB",
   "permissions": [
-    "nativeMessaging"
+    "nativeMessaging",
+    "alarms"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",
