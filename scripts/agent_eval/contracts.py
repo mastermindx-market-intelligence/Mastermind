@@ -8,6 +8,7 @@ read ambient state.
 """
 from __future__ import annotations
 
+import ipaddress
 import re
 from datetime import datetime
 from typing import Any, Callable
@@ -1006,6 +1007,424 @@ def build_experiment(fields: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# R-B1-2: destination classifier (amendment §3.7, binding B1 opening ruling)
+# ---------------------------------------------------------------------------
+
+_DESTINATION_CLASSES = frozenset({"LOOPBACK", "PRIVATE_RANGE", "PUBLIC", "UNRESOLVED_NAME"})
+
+
+def classify_destination(raw_value: Any) -> str:
+    """R-B1-2: classify an observed network destination using ONLY
+    :mod:`ipaddress` semantics -- no DNS lookup, no network, ever.
+
+    loopback -> LOOPBACK; private/link-local/unique-local/otherwise
+    non-global -> PRIVATE_RANGE; global -> PUBLIC; anything that does not
+    parse as an IP literal (with an optional trailing ``:<port>``) ->
+    UNRESOLVED_NAME. R-B1-3: every hostname therefore classifies
+    UNRESOLVED_NAME by design (fail-closed) -- R0 never resolves names.
+    """
+    if not isinstance(raw_value, str) or not raw_value:
+        return "UNRESOLVED_NAME"
+    host = raw_value
+    if host.startswith("[") and "]" in host:
+        host = host[1: host.index("]")]
+    elif host.count(":") == 1:
+        candidate_host, _, candidate_port = host.rpartition(":")
+        if candidate_port.isdigit() and candidate_host:
+            host = candidate_host
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return "UNRESOLVED_NAME"
+    if addr.is_loopback:
+        return "LOOPBACK"
+    if addr.is_global:
+        return "PUBLIC"
+    return "PRIVATE_RANGE"
+
+
+def sanitize_observed_destination(raw_value: Any) -> dict:
+    """Amendment §3.7 observed-evidence sanitization law: build the
+    structured sanitized observation for one observed network destination.
+    ``raw_value`` is populated in the result only when the class is PUBLIC.
+    """
+    destination_class = classify_destination(raw_value)
+    value_digest = digest_value(raw_value if isinstance(raw_value, str) else "")
+    return {
+        "destination_class": destination_class,
+        "value_digest": value_digest,
+        "raw_value": raw_value if destination_class == "PUBLIC" else None,
+    }
+
+
+def _v_observed_destination(value: Any, path: str) -> dict:
+    result = validate_closed_object(
+        value,
+        path,
+        {
+            "destination_class": v_enum(_DESTINATION_CLASSES),
+            "value_digest": v_digest,
+            "raw_value": v_optional(v_str),
+        },
+    )
+    if result["destination_class"] == "PUBLIC" and result["raw_value"] is None:
+        raise ContractError(
+            [
+                ContractDefect(
+                    f"{path}.raw_value", "PUBLIC_DESTINATION_REQUIRES_RAW_VALUE", "PUBLIC destinations must carry raw_value"
+                )
+            ]
+        )
+    if result["destination_class"] != "PUBLIC" and result["raw_value"] is not None:
+        raise ContractError(
+            [
+                ContractDefect(
+                    f"{path}.raw_value",
+                    "NONPUBLIC_DESTINATION_MUST_NOT_CARRY_RAW_VALUE",
+                    "non-PUBLIC destinations must not carry raw_value",
+                )
+            ]
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Run draft / run receipt (design §7.4/§7.5, plan Task 4)
+# ---------------------------------------------------------------------------
+
+_COMPLETION_STATUSES = frozenset({"COMPLETED", "FAILED", "PARTIAL", "TIMED_OUT", "CANCELLED"})
+_EFFECT_STATES = frozenset({"NO_EFFECT", "EFFECT_KNOWN", "EFFECT_UNKNOWN"})
+_CLEANUP_STATUSES = frozenset({"PROVEN", "UNPROVEN", "NOT_REQUIRED"})
+_ARTIFACT_KINDS = frozenset({"LOG", "TRACE", "OUTPUT", "SCREENSHOT", "DIFF", "OTHER"})
+_VALIDITY_STATUSES = frozenset(
+    {"VALID", "INVALID_CONFIGURATION", "INVALID_LEAKAGE", "INVALID_EFFECT_UNKNOWN", "INVALID_CLEANUP", "DEGRADED_DEPENDENCY"}
+)
+
+
+def v_pair_key(value: Any, path: str) -> Any:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not (value.startswith("pair:") or value.startswith("block:")):
+        raise ContractError(
+            [ContractDefect(path, "PAIR_KEY_SHAPE", "pair_key must be null or start with 'pair:' or 'block:'")]
+        )
+    require_canonical_json_tree(value, path)
+    return value
+
+
+def _v_run_scenario_ref(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "scenario_id": v_scenario_id,
+            "scenario_version": v_pos_int,
+            "scenario_digest": v_digest,
+            "corpus_revision": v_corpus_revision,
+            "temporal_cutoff": v_timestamp,
+        },
+    )
+
+
+def _v_run_configuration_ref(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, {"configuration_id": v_configuration_id, "configuration_digest": v_digest})
+
+
+def _v_comparison(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "experiment_id": v_optional(v_experiment_id),
+            "arm_id": v_optional(v_arm_id),
+            "pair_key": v_pair_key,
+            "replicate_index": v_optional(v_pos_int),
+        },
+    )
+
+
+def _v_run_execution(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "runner_id": v_str,
+            "runner_code_ref": v_source_ref,
+            "execution_surface": v_str,
+            "execution_surface_version": v_str,
+            "provider": v_str,
+            "model_requested": v_str,
+            "model_served": v_str,
+            "reasoning_effort": v_enum(_REASONING_EFFORTS),
+            "auth_realm_class": v_auth_realm_class,
+            "process_fingerprint": v_digest,
+            "native_session_fingerprint": v_digest,
+            "completion_status": v_enum(_COMPLETION_STATUSES),
+            "termination_reason": v_str,
+            "fresh_process_observed": v_bool,
+            "fresh_workspace_observed": v_bool,
+            "fresh_session_observed": v_bool,
+            "resume_used": v_bool,
+        },
+    )
+
+
+def _v_run_context(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "source_policy_digest": v_digest,
+            "context_packet": v_artifact_pair,
+            "retrieval_configuration": v_optional(v_artifact_pair),
+        },
+    )
+
+
+def _v_observations(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "observed_sources": v_artifact_list,
+            "observed_capability_ids": v_sorted_unique_str_list,
+            "observed_tool_schema_digests": v_sorted_unique_digest_list,
+            "observed_network_destinations": v_list_of(_v_observed_destination),
+            "dependency_degradations": v_sorted_unique_str_list,
+        },
+    )
+
+
+def _v_run_capabilities(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "profile_id": v_str,
+            "profile_digest": v_digest,
+            "sandbox_digest": v_digest,
+            "network_policy_digest": v_digest,
+            "workspace_digest": v_digest,
+            "environment_digest": v_digest,
+        },
+    )
+
+
+def _v_effect(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value, path, {"state": v_enum(_EFFECT_STATES), "operation_ref": v_optional(v_str), "reconciliation_ref": v_optional(v_str)}
+    )
+
+
+def _v_cleanup(value: Any, path: str) -> dict:
+    return validate_closed_object(value, path, {"status": v_enum(_CLEANUP_STATUSES), "proof": v_optional(v_artifact_pair)})
+
+
+def _v_evidence_artifact(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value, path, {"artifact_ref": v_str, "digest": v_digest, "kind": v_enum(_ARTIFACT_KINDS)}
+    )
+
+
+def _v_evidence(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "output": v_artifact_pair,
+            "tool_events": v_artifact_pair,
+            "trace": v_optional(v_artifact_pair),
+            "artifacts": v_list_of(_v_evidence_artifact),
+        },
+    )
+
+
+def _v_resources(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "input_tokens": v_optional(v_nonneg_int),
+            "output_tokens": v_optional(v_nonneg_int),
+            "tool_calls": v_optional(v_nonneg_int),
+            "elapsed_ms": v_optional(v_nonneg_int),
+            "provider_usage_ref": v_optional(v_str),
+            "estimated_marginal_cost": v_optional(v_decimal),
+            "cost_currency": v_optional(v_str),
+        },
+    )
+
+
+def _v_timing(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value, path, {"started_at": v_timestamp, "completed_at": v_timestamp, "monotonic_duration_ms": v_nonneg_int}
+    )
+
+
+def _v_validity(value: Any, path: str) -> dict:
+    return validate_closed_object(
+        value,
+        path,
+        {
+            "status": v_enum(_VALIDITY_STATUSES),
+            "reason_codes": v_sorted_unique_str_list,
+            "validator_id": v_str,
+            "validator_version": v_str,
+            "validator_code_ref": v_source_ref,
+            "validated_at": v_timestamp,
+        },
+    )
+
+
+_RUN_COMMON_FIELDS: dict[str, Validator] = {
+    "run_id": v_run_id,
+    "scenario": _v_run_scenario_ref,
+    "configuration": _v_run_configuration_ref,
+    "comparison": _v_comparison,
+    "execution": _v_run_execution,
+    "procedure": _v_procedure,
+    "context": _v_run_context,
+    "observations": _v_observations,
+    "capabilities": _v_run_capabilities,
+    "randomness": _v_randomness,
+    "effect": _v_effect,
+    "cleanup": _v_cleanup,
+    "evidence": _v_evidence,
+    "resources": _v_resources,
+    "timing": _v_timing,
+}
+
+_RUN_DRAFT_FIELDS: dict[str, Validator] = {
+    "schema": v_enum(frozenset({RUN_DRAFT_SCHEMA})),
+    **_RUN_COMMON_FIELDS,
+}
+
+_RUN_FIELDS: dict[str, Validator] = {
+    "schema": v_enum(frozenset({RUN_SCHEMA})),
+    **_RUN_COMMON_FIELDS,
+    "validity": _v_validity,
+    "created_at": v_timestamp,
+    "run_digest": v_digest,
+}
+
+
+def _run_cross_field_defects(document: dict) -> list[ContractDefect]:
+    defects: list[ContractDefect] = []
+    comparison = document.get("comparison")
+    if isinstance(comparison, dict):
+        experiment_id = comparison.get("experiment_id")
+        arm_id = comparison.get("arm_id")
+        pair_key = comparison.get("pair_key")
+        replicate_index = comparison.get("replicate_index")
+        if experiment_id is None:
+            if arm_id is not None or pair_key is not None or replicate_index is not None:
+                defects.append(
+                    ContractDefect(
+                        "$.comparison",
+                        "STANDALONE_RUN_MUST_HAVE_NULL_COMPARISON",
+                        "a run with no experiment_id must have null arm_id, pair_key, and replicate_index",
+                    )
+                )
+        else:
+            if arm_id is None or replicate_index is None:
+                defects.append(
+                    ContractDefect(
+                        "$.comparison",
+                        "EXPERIMENT_RUN_REQUIRES_ARM_AND_REPLICATE",
+                        "a run with a nonnull experiment_id must have a nonnull arm_id and replicate_index",
+                    )
+                )
+    effect = document.get("effect")
+    if isinstance(effect, dict):
+        state = effect.get("state")
+        if state == "NO_EFFECT" and (effect.get("operation_ref") is not None or effect.get("reconciliation_ref") is not None):
+            defects.append(
+                ContractDefect(
+                    "$.effect", "NO_EFFECT_MUST_HAVE_NULL_REFS", "NO_EFFECT state must have null operation/reconciliation refs"
+                )
+            )
+        if state in {"EFFECT_KNOWN"} and effect.get("operation_ref") is None:
+            defects.append(
+                ContractDefect("$.effect.operation_ref", "EFFECT_KNOWN_REQUIRES_OPERATION_REF", "EFFECT_KNOWN requires a non-null operation_ref")
+            )
+    cleanup = document.get("cleanup")
+    if isinstance(cleanup, dict):
+        if cleanup.get("status") == "PROVEN" and cleanup.get("proof") is None:
+            defects.append(ContractDefect("$.cleanup.proof", "PROVEN_CLEANUP_REQUIRES_PROOF", "PROVEN cleanup requires a non-null proof"))
+        if cleanup.get("status") != "PROVEN" and cleanup.get("proof") is not None:
+            defects.append(
+                ContractDefect("$.cleanup.proof", "UNPROVEN_CLEANUP_MUST_NOT_CARRY_PROOF", "non-PROVEN cleanup must not carry a proof")
+            )
+    timing = document.get("timing")
+    resources = document.get("resources")
+    if isinstance(timing, dict) and isinstance(timing.get("started_at"), str) and isinstance(timing.get("completed_at"), str):
+        try:
+            started = parse_utc_z(timing["started_at"])
+            completed = parse_utc_z(timing["completed_at"])
+        except ContractError:
+            pass
+        else:
+            if started > completed:
+                defects.append(
+                    ContractDefect("$.timing.started_at", "STARTED_AFTER_COMPLETED", "timing.started_at must be at or before timing.completed_at")
+                )
+    if isinstance(timing, dict) and isinstance(resources, dict):
+        elapsed_ms = resources.get("elapsed_ms")
+        duration_ms = timing.get("monotonic_duration_ms")
+        if elapsed_ms is not None and duration_ms is not None and elapsed_ms != duration_ms:
+            defects.append(
+                ContractDefect(
+                    "$.timing.monotonic_duration_ms",
+                    "DURATION_ELAPSED_MISMATCH",
+                    "timing.monotonic_duration_ms must equal resources.elapsed_ms when both are present",
+                )
+            )
+    validity = document.get("validity")
+    created_at = document.get("created_at")
+    if isinstance(validity, dict) and isinstance(created_at, str) and isinstance(timing, dict):
+        try:
+            completed = parse_utc_z(timing["completed_at"])
+            validated = parse_utc_z(validity["validated_at"])
+            created = parse_utc_z(created_at)
+        except (ContractError, KeyError):
+            pass
+        else:
+            if not (completed <= validated <= created):
+                defects.append(
+                    ContractDefect(
+                        "$.validity.validated_at",
+                        "VALIDITY_TIME_ORDER_VIOLATED",
+                        "must hold: timing.completed_at <= validity.validated_at <= created_at",
+                    )
+                )
+    return defects
+
+
+def _check_run_fields(document: Any, *, is_draft: bool, require_digest: bool) -> dict:
+    field_set = _RUN_DRAFT_FIELDS if is_draft else _RUN_FIELDS
+    optional = frozenset({"run_digest"}) if (not is_draft and not require_digest) else frozenset()
+    validated = validate_closed_object(document, "$", field_set, optional=optional)
+    cross_defects = _run_cross_field_defects(document if isinstance(document, dict) else {})
+    if cross_defects:
+        raise ContractError(cross_defects)
+    if not is_draft and require_digest:
+        verify_document_digest(document, "run_digest")
+    return validated
+
+
+def validate_run_draft_shape(draft: Any) -> str:
+    """Validate a transient run-draft document (never stored)."""
+    _check_run_fields(draft, is_draft=True, require_digest=False)
+    return "SHAPE_VALID"
+
+
+def validate_run_shape(document: Any) -> str:
+    """Validate a persisted run receipt document."""
+    _check_run_fields(document, is_draft=False, require_digest=True)
+    return "SHAPE_VALID"
+
+
+# ---------------------------------------------------------------------------
 # Generic persisted-schema dispatch (extended by later tasks)
 # ---------------------------------------------------------------------------
 
@@ -1013,6 +1432,7 @@ _SHAPE_VALIDATORS: dict[str, Callable[[Any], str]] = {
     SCENARIO_SCHEMA: validate_scenario_shape,
     CONFIGURATION_SCHEMA: validate_configuration_shape,
     EXPERIMENT_SCHEMA: validate_experiment_shape,
+    RUN_SCHEMA: validate_run_shape,
 }
 
 

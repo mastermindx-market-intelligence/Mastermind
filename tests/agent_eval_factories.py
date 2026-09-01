@@ -219,6 +219,133 @@ def build_two_arm_experiment(scenario: dict, configuration_a: dict, configuratio
 
 
 # ---------------------------------------------------------------------------
+# Run drafts (Task 4)
+# ---------------------------------------------------------------------------
+
+PROOF_ARTIFACT = {"artifact_ref": _fixture_ref("cleanup_proof.json"), "digest": digest_value({"cleanup": "proven"})}
+
+
+def build_run_draft_fields(
+    scenario: dict,
+    configuration: dict,
+    experiment: dict,
+    *,
+    arm_id: str,
+    replicate_index: int,
+    model_served: str | None = None,
+    run_id: str | None = None,
+) -> dict:
+    """A clean, technically-VALID run-draft field set bound to ``configuration``
+    within ``experiment``. Pass ``model_served`` to deliberately diverge from
+    the configuration's requested model (produces MODEL_SERVED_MISMATCH)."""
+    scenario_id = scenario["scenario_id"]
+    scenario_version = scenario["scenario_version"]
+    pair_key = f"pair:{scenario_id}:v{scenario_version}:r{replicate_index}"
+    execution = configuration["execution"]
+    served = model_served if model_served is not None else execution["model_requested"]
+    return {
+        "run_id": run_id or fresh_run_id(),
+        "scenario": {
+            "scenario_id": scenario_id,
+            "scenario_version": scenario_version,
+            "scenario_digest": scenario["scenario_digest"],
+            "corpus_revision": scenario["corpus_revision"],
+            "temporal_cutoff": scenario["temporal"]["cutoff_at"],
+        },
+        "configuration": {
+            "configuration_id": configuration["configuration_id"],
+            "configuration_digest": configuration["configuration_digest"],
+        },
+        "comparison": {
+            "experiment_id": experiment["experiment_id"],
+            "arm_id": arm_id,
+            "pair_key": pair_key,
+            "replicate_index": replicate_index,
+        },
+        "execution": {
+            "runner_id": "mastermind.eval_r0_synthetic_runner.v1",
+            "runner_code_ref": REPO_REF_BASE,
+            "execution_surface": execution["execution_surface"],
+            "execution_surface_version": execution["execution_surface_version"],
+            "provider": execution["provider"],
+            "model_requested": execution["model_requested"],
+            "model_served": served,
+            "reasoning_effort": execution["reasoning_effort"],
+            "auth_realm_class": execution["auth_realm_class"],
+            "process_fingerprint": digest_value({"process": arm_id, "replicate": replicate_index}),
+            "native_session_fingerprint": digest_value({"session": arm_id, "replicate": replicate_index}),
+            "completion_status": "COMPLETED",
+            "termination_reason": "COMPLETED_NORMALLY",
+            "fresh_process_observed": True,
+            "fresh_workspace_observed": True,
+            "fresh_session_observed": True,
+            "resume_used": False,
+        },
+        "procedure": dict(configuration["procedure"]),
+        "context": {
+            "source_policy_digest": digest_value(scenario["source_policy"]),
+            "context_packet": dict(configuration["context"]["context_packet"]),
+            "retrieval_configuration": configuration["context"]["retrieval_configuration"],
+        },
+        "observations": {
+            "observed_sources": [
+                dict(item) for item in scenario["source_policy"]["allowlist_artifacts"]
+            ],
+            "observed_capability_ids": ["read_file"],
+            "observed_tool_schema_digests": [PUBLIC_TOOL_SCHEMA_DIGEST_A],
+            "observed_network_destinations": [],
+            "dependency_degradations": [],
+        },
+        "capabilities": {
+            "profile_id": configuration["capabilities"]["profile_id"],
+            "profile_digest": configuration["capabilities"]["profile_digest"],
+            "sandbox_digest": configuration["capabilities"]["sandbox_digest"],
+            "network_policy_digest": configuration["capabilities"]["network_policy_digest"],
+            "workspace_digest": digest_value({"workspace": arm_id, "replicate": replicate_index}),
+            "environment_digest": configuration["capabilities"]["environment_digest"],
+        },
+        "randomness": dict(configuration["randomness"]),
+        "effect": {"state": "NO_EFFECT", "operation_ref": None, "reconciliation_ref": None},
+        "cleanup": {"status": "PROVEN", "proof": dict(PROOF_ARTIFACT)},
+        "evidence": {
+            "output": {
+                "artifact_ref": _fixture_ref(f"{arm_id}/r{replicate_index}/output.json"),
+                "digest": digest_value({"output": arm_id, "replicate": replicate_index}),
+            },
+            "tool_events": {
+                "artifact_ref": _fixture_ref(f"{arm_id}/r{replicate_index}/tool_events.json"),
+                "digest": digest_value({"tool_events": arm_id, "replicate": replicate_index}),
+            },
+            "trace": None,
+            "artifacts": [],
+        },
+        "resources": {
+            "input_tokens": 100,
+            "output_tokens": 200,
+            "tool_calls": 2,
+            "elapsed_ms": 1500,
+            "provider_usage_ref": None,
+            "estimated_marginal_cost": "0.05",
+            "cost_currency": "USD",
+        },
+        "timing": {
+            "started_at": "2026-08-25T00:00:00Z",
+            "completed_at": "2026-08-25T00:00:05Z",
+            "monotonic_duration_ms": 1500,
+        },
+    }
+
+
+def build_run_draft(
+    scenario: dict, configuration: dict, experiment: dict, *, arm_id: str, replicate_index: int, model_served: str | None = None
+) -> dict:
+    fields = build_run_draft_fields(
+        scenario, configuration, experiment, arm_id=arm_id, replicate_index=replicate_index, model_served=model_served
+    )
+    return {"schema": contracts.RUN_DRAFT_SCHEMA, **fields}
+
+
+# ---------------------------------------------------------------------------
 # MemoryArtifactResolver — test-only, immutable, read-only (plan §5.6)
 # ---------------------------------------------------------------------------
 

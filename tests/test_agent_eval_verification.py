@@ -13,8 +13,30 @@ from tests.agent_eval_factories import (
     build_alternate_configuration,
     build_baseline_configuration,
     build_baseline_scenario,
+    build_run_draft,
     build_two_arm_experiment,
 )
+from scripts.agent_eval import validity as run_validity
+
+VALIDATOR_ID = "mastermind.eval_r0_finalizer.v1"
+VALIDATOR_VERSION = "1"
+VALIDATOR_CODE_REF = "git:mastermindx-market-intelligence/Mastermind@" + "a" * 40
+VALIDATED_AT = "2026-08-25T00:00:10Z"
+CREATED_AT = "2026-08-25T00:00:11Z"
+
+
+def _finalized_run(scenario, configuration, experiment, draft):
+    return run_validity.finalize_run_receipt(
+        scenario,
+        configuration,
+        experiment,
+        draft,
+        validator_id=VALIDATOR_ID,
+        validator_version=VALIDATOR_VERSION,
+        validator_code_ref=VALIDATOR_CODE_REF,
+        validated_at=VALIDATED_AT,
+        created_at=CREATED_AT,
+    )
 
 
 def _graph():
@@ -249,6 +271,12 @@ def _redigest_experiment(document: dict) -> dict:
     return add_document_digest({k: v for k, v in document.items() if k != "experiment_digest"}, "experiment_digest")
 
 
+def _redigest_run(document: dict) -> dict:
+    from scripts.agent_eval.canonical import add_document_digest
+
+    return add_document_digest({k: v for k, v in document.items() if k != "run_digest"}, "run_digest")
+
+
 def test_verify_experiment_graph_fails_on_substituted_configuration_digest() -> None:
     scenario, config_a, config_b, experiment, _ = _graph()
     tampered = copy.deepcopy(config_a)
@@ -287,3 +315,72 @@ def test_verify_experiment_graph_never_downgrades_missing_artifact_to_warning() 
     empty_resolver = MemoryArtifactResolver.build()
     with pytest.raises(VerificationContextError):
         verification.verify_experiment_graph(experiment, empty_resolver)
+
+
+# ---------------------------------------------------------------------------
+# Run graph verification (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_run_graph_recomputes_and_matches_stored_validity() -> None:
+    scenario, config_a, config_b, experiment, _ = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    run = _finalized_run(scenario, config_a, experiment, draft)
+    resolver = MemoryArtifactResolver.build(scenarios=(scenario,), configurations=(config_a, config_b), experiments=(experiment,))
+    result = verification.verify_run_graph(run, resolver)
+    assert result.scope == "EVALUATION_GRAPH_VERIFIED"
+    assert result.artifact_id == run["run_id"]
+
+
+def test_verify_run_graph_fails_on_forged_validity_status() -> None:
+    scenario, config_a, config_b, experiment, _ = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1, model_served="claude-opus-9")
+    run = _finalized_run(scenario, config_a, experiment, draft)
+    assert run["validity"]["status"] == "INVALID_CONFIGURATION"
+    forged = copy.deepcopy(run)
+    forged["validity"]["status"] = "VALID"
+    forged["validity"]["reason_codes"] = []
+    forged = _redigest_run(forged)
+    resolver = MemoryArtifactResolver.build(scenarios=(scenario,), configurations=(config_a, config_b), experiments=(experiment,))
+    with pytest.raises(VerificationContextError) as excinfo:
+        verification.verify_run_graph(forged, resolver)
+    assert any(d.code == "VALIDITY_NOT_RECOMPUTABLE" for d in excinfo.value.defects)
+
+
+def test_verify_run_graph_fails_on_stale_validity_after_observation_mutation() -> None:
+    scenario, config_a, config_b, experiment, _ = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    run = _finalized_run(scenario, config_a, experiment, draft)
+    assert run["validity"]["status"] == "VALID"
+    stale = copy.deepcopy(run)
+    # mutate an observation without recomputing validity -- this now
+    # requires re-digesting the whole document to even pass shape/own-digest
+    # checks, so simulate the "stale but shape-consistent" attack by
+    # re-digesting AFTER the mutation while keeping the OLD (now-wrong)
+    # validity block.
+    stale["observations"]["observed_sources"][0]["digest"] = "sha256:" + "9" * 64
+    stale = _redigest_run(stale)  # own digest now matches the mutated bytes
+    resolver = MemoryArtifactResolver.build(scenarios=(scenario,), configurations=(config_a, config_b), experiments=(experiment,))
+    with pytest.raises(VerificationContextError) as excinfo:
+        verification.verify_run_graph(stale, resolver)
+    assert any(d.code == "VALIDITY_NOT_RECOMPUTABLE" for d in excinfo.value.defects)
+
+
+def test_verify_run_graph_fails_when_scenario_cannot_be_resolved() -> None:
+    scenario, config_a, config_b, experiment, _ = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    run = _finalized_run(scenario, config_a, experiment, draft)
+    resolver = MemoryArtifactResolver.build(configurations=(config_a, config_b), experiments=(experiment,))  # scenario missing
+    with pytest.raises(VerificationContextError) as excinfo:
+        verification.verify_run_graph(run, resolver)
+    assert any(d.code == "SCENARIO_NOT_RESOLVED" for d in excinfo.value.defects)
+
+
+def test_verify_run_graph_never_claims_content_verified() -> None:
+    scenario, config_a, config_b, experiment, _ = _graph()
+    draft = build_run_draft(scenario, config_a, experiment, arm_id="arm_a", replicate_index=1)
+    run = _finalized_run(scenario, config_a, experiment, draft)
+    resolver = MemoryArtifactResolver.build(scenarios=(scenario,), configurations=(config_a, config_b), experiments=(experiment,))
+    result = verification.verify_run_graph(run, resolver)
+    assert result.scope != "EVIDENCE_CONTENT_VERIFIED"
+    assert run["evidence"]["output"]["artifact_ref"] in result.external_content_unverified_refs
