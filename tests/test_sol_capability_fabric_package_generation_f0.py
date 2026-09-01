@@ -238,8 +238,8 @@ def test_v4_is_opt_in_and_runtime_plugin_authority_remains_unavailable() -> None
     spec_lower = spec.lower()
     plan = _prose(PLAN)
 
-    assert 'CAPABILITY_POLICY_SCHEMA_V3 = "mastermind.executive_agent_capabilities/v3"' in spec
-    assert 'CAPABILITY_POLICY_SCHEMA_V4 = "mastermind.executive_agent_capabilities/v4"' in spec
+    assert "CAPABILITY_POLICY_SCHEMA_V3 = mastermind.executive_agent_capabilities/v3" in spec
+    assert "CAPABILITY_POLICY_SCHEMA_V4 = mastermind.executive_agent_capabilities/v4" in spec
     assert "CAPABILITY_POLICY_SCHEMA = CAPABILITY_POLICY_SCHEMA_V3" in spec
     assert "v3 non-empty plugin registry still refuses" in spec_lower
     assert "full runtime plugin grants remain unavailable" in spec_lower
