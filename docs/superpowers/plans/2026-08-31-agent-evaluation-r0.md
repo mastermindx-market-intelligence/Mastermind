@@ -208,6 +208,67 @@ evidence-ref:<uuid>      -> evidence-refs/<uuid>/evidence-ref.json
 
 This mapping is globally resolvable without a mutable index or repository-wide search. Reject slash, backslash, dot segment, control, empty/oversized segment, trailing dot/space, and Windows device names.
 
+### 5.6 Direct lookup vs complete relation enumeration (binding implementation ruling, adopted 2026-09-01)
+
+This subsection resolves an implementation ambiguity without changing the four-record candidate. It is lifted verbatim from the SOL R0 implementation ruling on summarize population.
+
+#### Direct identity lookup
+
+For a known canonical ID, lookup is always a direct schema-derived path:
+
+```text
+scenario ID/version -> scenarios/<family>/<case>/v<version>/scenario.json
+configuration ID    -> configurations/<uuid>/configuration.json
+experiment ID       -> experiments/<uuid>/manifest.json
+run ID              -> runs/<uuid>/receipt.json
+scorer-pass ID      -> scorer-passes/<uuid>/scorer-pass.json
+evidence-ref ID     -> evidence-refs/<uuid>/evidence-ref.json
+```
+
+No mutable index, fuzzy search, repository search, or fallback path may resolve a known ID.
+
+#### Experiment completeness
+
+`summarize --experiment-id` must not accept a caller-selected run subset as the final experiment population. It must perform one deterministic, read-only, sorted enumeration of canonical run and scorer-pass locations under the trusted private evaluation root, validate every encountered candidate, and include every artifact whose verified contract binds it to the target experiment and required scorer configuration.
+
+- invalid/degraded runs are included, never filtered;
+- corrupt/unreadable/ambiguous candidates fail the summary rather than disappear;
+- target-vs-observed arm/replicate coverage and missing required scorers are reported and force `INSUFFICIENT_EVIDENCE` / `UNSCORED` as applicable;
+- the evidence reference lists the exact receipt/scorer refs and digests it consumed;
+- a later newly created run/scorer produces a new superseding evidence reference; it never rewrites the historical one;
+- `verify-tree-graph` may enumerate the artifact root for integrity/completeness, but enumeration is a stateless read, not canonical identity or a stored index.
+
+#### Resolver boundary
+
+`MemoryArtifactResolver` is test-only and must live under the test utility surface or be an immutable construction with no add/update/delete/search/fallback method. Production `scripts/agent_eval/resolver.py` exposes the read-only direct-ID protocol; `ArtifactStore` supplies the production implementation.
+
+This ruling creates no experiment scheduler, run lifecycle, mutable registry, cursor, database, or second truth store. The R0 worker handoff and tests must include it explicitly.
+
+### 5.7 Exact canonical artifact size bound (binding implementation ruling, adopted 2026-09-01)
+
+This subsection is lifted verbatim from the SOL R0 implementation ruling naming the oversized-file threshold the plan requires but does not name.
+
+The R0 plan requires oversized-file refusal but does not name the threshold. The binding V1 implementation constant is:
+
+```python
+MAX_CANONICAL_ARTIFACT_BYTES = 4 * 1024 * 1024
+```
+
+Apply it to every persisted scenario, configuration, experiment, run, scorer-pass, and evidence-reference JSON document, and to every CLI JSON input before full read/decode.
+
+Required behavior:
+
+- use file metadata to reject a regular file larger than the limit before reading it into memory;
+- after canonical serialization, reject a newly built document whose exact UTF-8 canonical byte length exceeds the same limit;
+- the limit includes the final own-digest field for persisted artifacts;
+- `== 4 MiB` is permitted; `> 4 MiB` is refused;
+- refusal is a structured contract/resource error with no temporary or final artifact path created;
+- do not truncate, stream-accept a prefix, compress, split, or silently externalize the document;
+- bulky/raw output, tool events, media, and traces remain owner-native external artifacts referenced by `{artifact_ref, digest}` and are outside this canonical metadata-document limit;
+- tests cover exact-boundary pass, one-byte-over refusal, deceptive file metadata/read races, and no-write behavior.
+
+This is a bounded artifact-safety rule, not a storage quota, experiment-volume policy, scheduler, or new lifecycle. A later schema version may change the limit only explicitly.
+
 ---
 
 ## 6. Ordered TDD implementation
@@ -354,8 +415,10 @@ tests/test_agent_eval_contracts.py
 
 ```python
 validate_experiment_shape(document)
-ArtifactResolver  # read-only Protocol
-MemoryArtifactResolver  # deterministic tests/inert utility
+ArtifactResolver  # read-only Protocol (scripts/agent_eval/resolver.py, production)
+MemoryArtifactResolver  # test-only; lives in tests/agent_eval_factories.py, not
+                         # scripts/agent_eval/resolver.py; immutable, no
+                         # add/update/delete/search/fallback method (§5.6 resolver boundary)
 verify_scenario_graph(document, resolver) -> VerificationResult
 verify_configuration_graph(document, resolver) -> VerificationResult
 verify_experiment_graph(document, resolver) -> VerificationResult
@@ -383,7 +446,7 @@ arm_id, configuration_id, configuration_digest
 ```
 
 - [ ] Write RED tests for two unique sorted arms, unique config IDs/digests, scenario refs/corpus, pairing, positive replicate target, fixed stopping rule consistency, dimension disjointness, phase, authorship, time, digest.
-- [ ] Resolver methods map exact scenario version, configuration ID, experiment ID, run ID, scorer-pass ID, and evidence-ref ID. There is no write, network, environment, provider, search, or fallback method.
+- [ ] Resolver methods map exact scenario version, configuration ID, experiment ID, run ID, scorer-pass ID, and evidence-ref ID. There is no write, network, environment, provider, search, or fallback method. This excludes only fuzzy/repository search over the resolver's direct-ID lookup; it does not by itself supply `summarize`'s experiment run/scorer-pass population, which follows the complete-enumeration law in §5.6 instead.
 - [ ] Shape validators never consult resolver.
 - [ ] VerificationResult contains exact scope `EVALUATION_GRAPH_VERIFIED`, artifact ID, artifact digest, and `external_content_unverified_refs`.
 - [ ] Scenario graph verification checks shape/own digest and reports input/expected/allowlist artifacts as externally sealed/unverified; it does not claim content verification.
@@ -692,7 +755,7 @@ Exit codes:
 - [ ] No R0 command prints `EVIDENCE_CONTENT_VERIFIED`.
 - [ ] `finalize-run` resolves scenario/configuration/experiment IDs from root and writes an exclusive local receipt; store `create` publishes it separately.
 - [ ] `score-integrity` appends; cannot alter run bytes.
-- [ ] `summarize` resolves all experiment runs/scorers and writes one evidence ref.
+- [ ] `summarize` resolves all experiment runs/scorers per the complete-enumeration law in §5.6 (one deterministic sorted enumeration of the trusted root, never a caller-selected subset) and writes one evidence ref.
 - [ ] Complete one fresh-root journey:
   1. create scenario with corpus revision and artifact/digest source allowlist;
   2. create two configurations;

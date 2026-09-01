@@ -300,6 +300,8 @@ scorer-pass:<uuid4>
 evidence-ref:<uuid4>
 ```
 
+`<family>` and `<case>` each match `[a-z0-9][a-z0-9_-]{0,63}` — no colon, slash, dot, or uppercase character.
+
 Reruns create new IDs. Same ID + identical canonical bytes is idempotent import; same ID + changed bytes is a conflict.
 
 ### 6.3 Source-qualified references
@@ -564,6 +566,8 @@ run_digest:
 
 If experiment ID is nonnull, scenario/configuration/arm/pair/replicate must match the manifest. If null, arm/pair are null. The run contains no scorer list and no task outcome.
 
+`observations.observed_network_destinations` and other runner-observed evidence fields are not caller-supplied values; they are sanitized per the observed-evidence sanitization law in `docs/superpowers/specs/2026-09-01-agent-evaluation-r0-environment-free-secret-safety-amendment.md` §3.7, never rejected as a supplied secret shape.
+
 ### 7.6 Deterministic validity
 
 The finalizer compares run claims/observations against scenario, configuration, and experiment. Reasons include at least:
@@ -808,7 +812,7 @@ R0 must shape-validate and graph-verify one scenario, two configurations, one ex
 
 ### 14.1 F0 acceptance
 
-Require exact current base, three-record delta, current Skillpack, exact-head required checks, independent architecture/source-law review, collision review, and final Sol review of corpus/configuration/source-evidence/effect/raw-observation/verification-scope/direct-resolution/immutability/privacy/no-duplicate boundaries.
+Require exact current base, four-record delta, current Skillpack, exact-head required checks, independent architecture/source-law review, collision review, and final Sol review of corpus/configuration/source-evidence/effect/raw-observation/verification-scope/direct-resolution/immutability/privacy/no-duplicate boundaries.
 
 Merge proves only `SPEC_ONLY / RECORDS_ONLY / PRODUCTION_INERT`.
 
