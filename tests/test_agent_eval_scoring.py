@@ -499,19 +499,30 @@ def test_verify_evidence_ref_graph_fails_when_run_cannot_be_resolved() -> None:
 
 
 def test_verify_evidence_ref_graph_fails_on_stale_counts() -> None:
+    # verify_evidence_ref_graph resolves exactly the runs the evidence
+    # reference itself CLAIMS (the ArtifactResolver protocol is direct-ID
+    # only, §5.6 -- it has no enumeration method), then recomputes
+    # counts/projections FROM those resolved runs' true stored validity and
+    # compares against the document's claim. Forge the claimed
+    # scored_projection for the invalid run (with counts hand-adjusted to
+    # stay internally shape-consistent) -- graph verification must still
+    # catch that the TRUE resolved run recomputes a different projection.
     scenario, config_a, config_b, experiment, run_valid, run_invalid = _graph_with_two_runs()
     sp_valid = _score(run_valid)
     sp_invalid = _score(run_invalid)
     evidence = _evidence(scenario, experiment, (run_valid, run_invalid), (sp_valid, sp_invalid))
-    # forge internally-consistent-looking but WRONG counts by hand-editing
-    # both the run_entries AND the digest, simulating a stale/hand-crafted
-    # evidence reference that was never actually recomputed from storage.
     forged = copy.deepcopy(evidence)
-    forged["run_entries"] = [forged["run_entries"][0]]  # drop the invalid run entry
-    forged["counts"]["invalid_count"] = 0
-    forged["counts"]["total_count"] = 1
-    forged["sample_size"] = 1
+    for entry in forged["run_entries"]:
+        if entry["run_id"] == run_invalid["run_id"]:
+            assert entry["technical_validity"] == "INVALID_CONFIGURATION"
+            entry["technical_validity"] = "VALID"
+            entry["scored_projection"] = "VALID_PASS"
+    forged["counts"] = {"valid_count": 2, "invalid_count": 0, "degraded_count": 0, "unscored_count": 0, "total_count": 2}
+    forged["sample_size"] = 2
     forged = add_document_digest({k: v for k, v in forged.items() if k != "evidence_ref_digest"}, "evidence_ref_digest")
+    # confirm the forgery is shape-valid on its own -- the defect this test
+    # proves is specifically about graph-level recomputation, not a shape bug
+    assert scoring.validate_evidence_ref_shape(forged) == "SHAPE_VALID"
     resolver = MemoryArtifactResolver.build(
         scenarios=(scenario,),
         configurations=(config_a, config_b),
