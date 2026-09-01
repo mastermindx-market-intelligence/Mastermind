@@ -1,7 +1,6 @@
 """Read-only ABA-safe projection of the accepted current OHF writer."""
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 
 from control_plane.executive_runtime import (
@@ -9,6 +8,7 @@ from control_plane.executive_runtime import (
     Runtime,
     StateConflict,
 )
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.session_targets import RuntimeBinding, SessionTarget
 
 
@@ -58,9 +58,7 @@ def project_runtime_binding(
     facts = active_operator_binding_facts(
         runtime, attempt_id, target, connection=connection
     )
-    binding_id = "bind-" + hashlib.sha256(
-        f"{facts.attempt_id}:{facts.session_epoch_id}".encode("utf-8")
-    ).hexdigest()[:40]
+    binding_id = runtime_binding_id_for(facts.attempt_id, facts.session_epoch_id)
     return RuntimeBinding(
         session_alias=target.session_alias,
         binding_id=binding_id,

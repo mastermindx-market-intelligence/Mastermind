@@ -21,6 +21,7 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.operator_harness_contract import (
     AdapterFailureClass,
+    AttentionTurnObservation,
     AuthIdentityConfidence,
     AuthRealmFact,
     AuthRealmRequirement,
@@ -310,6 +311,12 @@ def turn_start_observation(value: Any) -> TurnStartObservation:
     return _construct(TurnStartObservation, value, name="turn start observation")
 
 
+def attention_turn_observation(value: Any) -> AttentionTurnObservation:
+    return _construct(
+        AttentionTurnObservation, value, name="attention turn observation"
+    )
+
+
 def reconcile_observation(value: Any) -> ReconcileObservation:
     raw = _closed(value, ReconcileObservation, name="reconcile observation")
     failure = raw["recommended_failure_class"]
@@ -400,6 +407,7 @@ def _wire_text(value: Any) -> str:
 
 __all__ = [
     "OperatorHarnessWireError",
+    "attention_turn_observation",
     "candidate_result",
     "event_cursor",
     "launch_comparison",
