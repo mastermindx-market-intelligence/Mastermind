@@ -68,6 +68,8 @@ from control_plane.executive_orchestration_principal import (
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.operator_harness_contract import (
+    ATTENTION_TURN_INSTRUCTION,
+    AttentionTurnObservation,
     CandidateResult,
     EventCursor,
     LaunchComparison,
@@ -147,6 +149,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-start",
         "ohf-resume",
         "ohf-begin-turn",
+        "ohf-deliver-attention",
         "ohf-collect-turn",
         "ohf-interrupt",
         "ohf-stop",
@@ -193,6 +196,14 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class BrokerPreSubmitError(WorkerBrokerError):
+    """The current-writer attention operation refused before provider I/O."""
+
+
+class BrokerEffectUnknownError(WorkerBrokerError):
+    """Provider I/O may have begun; the attention operation must not be resent."""
 
 
 class DedicatedUIDError(WorkerBrokerError):
@@ -389,6 +400,8 @@ class OperatorAdapter(Protocol):
     ) -> ProviderHomeIdentityObservation: ...
 
     def begin_turn(self, **kwargs: Any) -> Any: ...
+
+    def deliver_attention(self, **kwargs: Any) -> AttentionTurnObservation: ...
 
     def read_events(self, cursor: EventCursor, *, timeout_seconds: float) -> Any: ...
 
@@ -1402,6 +1415,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_start(payload, resume=True)
         if operation == "ohf-begin-turn":
             return await self._ohf_begin_turn(payload)
+        if operation == "ohf-deliver-attention":
+            return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
         if operation == "ohf-interrupt":
@@ -1807,6 +1822,108 @@ class ExecutiveWorkerBroker:
             if not isinstance(observation, TurnStartObservation):
                 raise BrokerStateError(
                     "operator begin-turn returned an untyped observation"
+                )
+            return {"observation": operator_to_wire(observation)}
+        finally:
+            await self._operator_release_busy(state)
+
+    async def _ohf_deliver_attention(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send one bounded nudge through the already-owned current writer."""
+
+        expected = {
+            "generation",
+            "attempt_id",
+            "binding_id",
+            "binding_generation",
+            "provider_session_id",
+            "nudge_id",
+            "opaque_ids",
+            "instruction",
+            "completion_timeout_seconds",
+        }
+        if set(payload) != expected:
+            raise BrokerPreSubmitError(
+                "ohf-deliver-attention payload fields are invalid"
+            )
+        try:
+            self._require_current_autonomy()
+            generation = wire_process_generation_ref(payload["generation"])
+        except (WorkerBrokerError, OperatorHarnessWireError) as exc:
+            raise BrokerPreSubmitError(
+                "current operator generation is unavailable"
+            ) from exc
+
+        attempt_id = payload["attempt_id"]
+        binding_id = payload["binding_id"]
+        binding_generation = payload["binding_generation"]
+        provider_session_id = payload["provider_session_id"]
+        nudge_id = payload["nudge_id"]
+        opaque_ids = payload["opaque_ids"]
+        instruction = payload["instruction"]
+        timeout = payload["completion_timeout_seconds"]
+        if (
+            not isinstance(attempt_id, str)
+            or _ID_RE.fullmatch(attempt_id) is None
+            or not isinstance(binding_id, str)
+            or _ID_RE.fullmatch(binding_id) is None
+            or type(binding_generation) is not int
+            or binding_generation < 1
+            or not isinstance(provider_session_id, str)
+            or _ID_RE.fullmatch(provider_session_id) is None
+            or not isinstance(nudge_id, str)
+            or _ID_RE.fullmatch(nudge_id) is None
+            or not isinstance(opaque_ids, list)
+            or not 1 <= len(opaque_ids) <= 32
+            or any(
+                not isinstance(item, str) or _ID_RE.fullmatch(item) is None
+                for item in opaque_ids
+            )
+            or instruction != ATTENTION_TURN_INSTRUCTION
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.1 <= float(timeout) <= 300.0
+        ):
+            raise BrokerPreSubmitError(
+                "attention request is outside the closed current-writer contract"
+            )
+
+        try:
+            state = await self._operator_state(generation)
+        except BrokerStateError as exc:
+            raise BrokerPreSubmitError(str(exc)) from exc
+        try:
+            if (
+                state.epoch.attempt_id != attempt_id
+                or state.provider_session_id != provider_session_id
+            ):
+                raise BrokerPreSubmitError(
+                    "attention request is outside the active Attempt writer"
+                )
+            try:
+                observation = await asyncio.to_thread(
+                    state.adapter.deliver_attention,
+                    generation=generation,
+                    attempt_id=attempt_id,
+                    binding_id=binding_id,
+                    binding_generation=binding_generation,
+                    provider_session_id=provider_session_id,
+                    nudge_id=nudge_id,
+                    opaque_ids=tuple(opaque_ids),
+                    instruction=instruction,
+                    completion_timeout_seconds=float(timeout),
+                )
+            except Exception as exc:
+                effect_unknown = getattr(exc, "effect_unknown", None)
+                if effect_unknown is not False:
+                    raise BrokerEffectUnknownError(
+                        "attention provider write has unknown effect"
+                    ) from exc
+                raise BrokerPreSubmitError(
+                    "attention refused before provider submission"
+                ) from exc
+            if not isinstance(observation, AttentionTurnObservation):
+                raise BrokerEffectUnknownError(
+                    "attention provider returned an untyped observation"
                 )
             return {"observation": operator_to_wire(observation)}
         finally:
@@ -3372,6 +3489,8 @@ __all__ = [
     "UID_SWEEP_SCHEMA_VERSION",
     "uid_sweep_receipt_is_passing",
     "BrokerPolicy",
+    "BrokerEffectUnknownError",
+    "BrokerPreSubmitError",
     "BrokerProtocolError",
     "BrokerStateError",
     "DedicatedUIDError",
