@@ -17,6 +17,7 @@ from control_plane.wake_ledger import (
     LedgerPhase,
     TrustedAckContext,
     WakeLedgerError,
+    WakeLedgerRecord,
     ack_record,
     acknowledge,
 )
@@ -124,8 +125,13 @@ def acknowledge_consumed_wakes(
     repository = WakeLedgerRepository(runtime)
     try:
         with runtime.store.transaction() as connection:
-            records_to_append = []
-            batch_identity = None
+            prepared: list[
+                tuple[
+                    object,
+                    WakeLedgerRecord,
+                    WakeLedgerRecord | None,
+                ]
+            ] = []
             for obligation_id in claim.obligation_ids:
                 records = repository.list_ledger_records_on_connection(
                     connection, obligation_id
@@ -142,11 +148,6 @@ def acknowledge_consumed_wakes(
                     )
                 obligation = requests[0].obligation
                 assert obligation is not None
-                if obligation.attempt_id == trusted.target_attempt_id:
-                    raise WakeAckIngressError(
-                        "target Attempt cannot be inferred from the Wake source Attempt"
-                    )
-
                 deliveries = [
                     record
                     for record in records
@@ -157,7 +158,55 @@ def acknowledge_consumed_wakes(
                     raise WakeAckIngressError(
                         "ACK ingress requires exactly one matching DELIVERED record"
                     )
-                delivered = deliveries[0]
+                existing_acks = [
+                    record
+                    for record in records
+                    if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+                ]
+                if len(existing_acks) > 1:
+                    raise WakeAckIngressError(
+                        "Wake ledger contains duplicate acknowledgement records"
+                    )
+                prepared.append(
+                    (
+                        obligation,
+                        deliveries[0],
+                        existing_acks[0] if existing_acks else None,
+                    )
+                )
+
+            existing_count = sum(existing is not None for _, _, existing in prepared)
+            if existing_count:
+                if existing_count != len(prepared):
+                    raise WakeAckIngressError(
+                        "coalesced Wake ACK replay is only partially persisted"
+                    )
+                replay_records = tuple(
+                    (
+                        _reconcile_existing_ack(
+                            obligation,
+                            delivered,
+                            existing,
+                            claim=claim,
+                            trusted=trusted,
+                        ),
+                        None,
+                    )
+                    for obligation, delivered, existing in prepared
+                    if existing is not None
+                )
+                return repository.append_records_on_connection(
+                    connection,
+                    replay_records,
+                )
+
+            records_to_append = []
+            batch_identity = None
+            for obligation, delivered, _existing in prepared:
+                if obligation.attempt_id == trusted.target_attempt_id:
+                    raise WakeAckIngressError(
+                        "target Attempt cannot be inferred from the Wake source Attempt"
+                    )
                 try:
                     target = registry.get(str(delivered.session_alias or ""))
                 except SessionTargetError as exc:
@@ -232,18 +281,6 @@ def acknowledge_consumed_wakes(
                         "coalesced Wake ACK claim crosses trusted delivery identity"
                     )
 
-                existing_acks = [
-                    record
-                    for record in records
-                    if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
-                ]
-                if len(existing_acks) > 1:
-                    raise WakeAckIngressError(
-                        "Wake ledger contains duplicate acknowledgement records"
-                    )
-                acknowledged_at = None
-                if existing_acks and existing_acks[0].ack is not None:
-                    acknowledged_at = existing_acks[0].ack.acknowledged_at
                 ack = acknowledge(
                     obligation,
                     trusted=TrustedAckContext(
@@ -253,7 +290,6 @@ def acknowledge_consumed_wakes(
                         reasoning_surface=str(binding.reasoning_surface),
                         binding_id=binding.binding_id,
                         binding_generation=binding.binding_generation,
-                        acknowledged_at=acknowledged_at,
                     ),
                     claimed_obligation_ids=claim.obligation_ids,
                     delivered_command_id=delivered.command_id,
@@ -268,6 +304,38 @@ def acknowledge_consumed_wakes(
         raise
     except (SessionTargetError, WakeLedgerError, StateConflict) as exc:
         raise WakeAckIngressError(f"Wake ACK ingress refused: {exc}") from exc
+
+
+def _reconcile_existing_ack(
+    obligation,
+    delivered: WakeLedgerRecord,
+    existing: WakeLedgerRecord,
+    *,
+    claim: WakeAckClaim,
+    trusted: TrustedWorkerWakeAckProjection,
+) -> WakeLedgerRecord:
+    """Return one exact durable ACK replay without requiring its writer to stay current."""
+
+    ack = existing.ack
+    if ack is None or ack.ack_mode is not AckMode.REASONING_SESSION:
+        raise WakeAckIngressError(
+            "existing acknowledgement is not a reasoning-session ACK"
+        )
+    if (
+        ack.claimed_obligation_ids != claim.obligation_ids
+        or ack.target_seat != obligation.declared_target_seat
+        or ack.session_alias != delivered.session_alias
+        or ack.reasoning_surface != delivered.reasoning_surface
+        or ack.binding_id != delivered.binding_id
+        or ack.binding_generation != delivered.binding_generation
+        or ack.delivered_command_id != delivered.command_id
+        or trusted.binding_id != ack.binding_id
+        or trusted.binding_generation != ack.binding_generation
+    ):
+        raise WakeAckIngressError(
+            "existing ACK semantic payload conflicts with replay"
+        )
+    return ack_record(obligation, ack)
 
 
 def _require_current_process_generation(

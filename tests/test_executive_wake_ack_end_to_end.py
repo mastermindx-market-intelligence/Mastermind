@@ -274,20 +274,40 @@ def test_real_vertical_orders_delivery_exact_session_ack_and_source_resolution(
         _resume_admitted_runtime(admitted)
     )
     assert generation2.generation_number == generation.generation_number + 1
-    with pytest.raises(WakeAckIngressError, match="binding|process generation"):
-        acknowledge_consumed_wakes(
-            runtime,
-            registry,
-            claim=WakeAckClaim(dispatcher.projection.obligation_ids),
-            trusted=dispatcher.projection,
-        )
-    with pytest.raises(WakeAckIngressError, match="target Attempt|RuntimeBinding"):
+
+    def stale_writer_must_not_be_reprojected(*_args, **_kwargs):
+        pytest.fail("durable ACK replay must not require the old writer to stay current")
+
+    monkeypatch.setattr(
+        wake_ack_ingress,
+        "project_runtime_binding",
+        stale_writer_must_not_be_reprojected,
+    )
+    monkeypatch.setattr(
+        wake_ack_ingress,
+        "_require_current_process_generation",
+        stale_writer_must_not_be_reprojected,
+    )
+    replay_after_resolution = acknowledge_consumed_wakes(
+        runtime,
+        registry,
+        claim=WakeAckClaim(dispatcher.projection.obligation_ids),
+        trusted=dispatcher.projection,
+    )
+    assert replay_after_resolution[0].inserted is False
+    assert replay_after_resolution[0].record == ack_before
+    assert sum(
+        item.record.phase is LedgerPhase.TARGET_ACKNOWLEDGED
+        for item in repo.list_records(obligation.obligation_id)
+    ) == 1
+
+    with pytest.raises(WakeAckIngressError, match="semantic payload"):
         acknowledge_consumed_wakes(
             runtime,
             registry,
             claim=WakeAckClaim(dispatcher.projection.obligation_ids),
             trusted=dataclasses.replace(
                 dispatcher.projection,
-                target_attempt_id=source_attempt_id,
+                binding_generation=dispatcher.projection.binding_generation + 1,
             ),
         )
