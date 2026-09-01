@@ -390,3 +390,40 @@ precedence is `REFUSED` over `CHAIRMAN_REQUIRED` over eligibility while preservi
 Both `SOURCE_BRANCH_WRITE` and `SOURCE_MERGE` on an existing carrier require an exact
 `expected_head_sha`. The packet remains advice only: `execution_authority_granted=false` and the
 existing effect owner must revalidate current source, authority and prior effect before mutation.
+
+## 15. R3 Chairman-delegation envelope content binding
+
+A current load-bearing `CHAIRMAN_DIRECTIVE` receipt proves only that a Chairman source exists and is
+current. It does not prove that the caller's supplied action set, repository/path scope, affected-scope
+prefixes, carrier prefixes, budget, child ceiling, mode or expiry were actually delegated. A1 must
+therefore reject a delegation envelope that merely cites an unrelated current Chairman receipt.
+
+The complete authority-bearing envelope payload is canonicalized and content-bound through an exact
+semicolon-delimited receipt field:
+
+```text
+envelope-sha256:<sha256(canonical delegation envelope)>
+```
+
+The digest includes the envelope schema and identity, complete authority-source-reference set, mode,
+allowed actions and reversibility, repository/path scope, canonical affected-scope prefixes, allowed
+exact-carrier prefixes, budget and active-child ceilings, exact-carrier requirement and expiry. Fields
+that are semantically sets are sorted before hashing; repository/path mappings are sorted by
+repository and by prefix. Reordering an equivalent envelope therefore preserves the digest, while any
+material authority change requires a new binding.
+
+Every authority source reference must still resolve to a load-bearing `CHAIRMAN_DIRECTIVE` receipt.
+Their aggregate source state still determines whether the envelope is current. In addition, at least
+one cited Chairman receipt must carry the exact envelope digest. A missing or mismatched binding makes
+the closed input malformed before the envelope can become `ACCEPTED`; it must never degrade into a
+false-positive `ELIGIBLE_WITHIN_DELEGATION` result.
+
+The packet exposes the verified envelope digest as deterministic evidence. This binding is structural
+integrity, not a reusable authority token or caller authentication mechanism. The accepted source
+composer must originate the receipt from the current canonical Chairman decision, and the existing
+effect owner must still reread current authority and effect state immediately before any mutation.
+
+A2 is intentionally incompatible until its existing carrier emits this envelope binding in addition
+to the R2 Strategic State and classification bindings. A1 remains `BUILT_NOT_PROVEN /
+PRODUCTION_INERT`; R3 creates no gatherer, authority registry, lifecycle, execution path, deployment,
+trade or production proof.
