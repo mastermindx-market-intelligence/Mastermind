@@ -343,3 +343,268 @@ def test_test_fake_is_not_reachable_from_production_package():
     assert SecretaryGroundingGateway.__module__.startswith(
         "integrations.mastermind_secretary_mcp"
     )
+
+
+# GS-1A R3 producer-parity RED: native identity and provenance are related but
+# distinct, and selection may not borrow authority from a different receipt.
+
+
+def _producer_source(owner: str, source_ref: str):
+    return {
+        "owner": owner,
+        "source_ref": source_ref,
+        "observed_at": "2026-09-01T10:00:00Z",
+    }
+
+
+def _producer_fact(
+    predicate: str,
+    value,
+    *,
+    owner: str,
+    source_ref: str,
+    subject: str = "responsibility:alpha",
+):
+    return {
+        "subject_ref": subject,
+        "predicate": predicate,
+        "value": value,
+        "freshness": "FRESH",
+        "sources": [_producer_source(owner, source_ref)],
+    }
+
+
+def _producer_data(facts: list[dict]):
+    return {"state": "FACTS", "facts": facts, "reason_codes": []}
+
+
+def test_producer_native_runtime_identity_and_provenance_are_distinct():
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    executive_receipt = "executive-runtime:ATT-aabbccddeeff00112233445566778899"
+    binding_receipt = "runtime-binding:ATT-aabbccddeeff00112233445566778899"
+    facts = [
+        _producer_fact(
+            "runtime.job_ref",
+            "JOB-001",
+            owner="executive_os",
+            source_ref=executive_receipt,
+        ),
+        _producer_fact(
+            "runtime.attempt_ref",
+            "ATT-aabbccddeeff00112233445566778899",
+            owner="executive_os",
+            source_ref=executive_receipt,
+        ),
+        _producer_fact(
+            "runtime.worker_ref",
+            "worker-sol-2",
+            owner="executive_os",
+            source_ref=executive_receipt,
+        ),
+        _producer_fact(
+            "runtime.binding_ref",
+            "bind-ocr6-sol-0001",
+            owner="runtime_binding",
+            source_ref=binding_receipt,
+        ),
+        _producer_fact(
+            "runtime.state",
+            "RUNNING",
+            owner="executive_os",
+            source_ref=executive_receipt,
+        ),
+        _producer_fact(
+            "runtime.effect_state",
+            "none",
+            owner="executive_os",
+            source_ref=executive_receipt,
+        ),
+        _producer_fact(
+            "runtime.continuation",
+            "ACKNOWLEDGED",
+            owner="runtime_binding",
+            source_ref=binding_receipt,
+        ),
+        _producer_fact(
+            "runtime.capacity_state",
+            "available",
+            owner="capacity",
+            source_ref="CAPACITY:realm-a",
+        ),
+    ]
+
+    envelope = contract_schemas.result_envelope(
+        "get_current_runtime", data=_producer_data(facts)
+    )
+
+    assert [row["value"] for row in envelope["data"]["facts"][:4]] == [
+        "JOB-001",
+        "ATT-aabbccddeeff00112233445566778899",
+        "worker-sol-2",
+        "bind-ocr6-sol-0001",
+    ]
+    assert envelope["data"]["facts"][0]["sources"][0]["source_ref"] == executive_receipt
+
+
+def test_producer_native_attention_owner_and_vocabulary_are_preserved():
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    attention_ref = "eia-aabbccddeeff00112233445566778899"
+    receipt = f"executive-inbox:{attention_ref}"
+    facts = [
+        _producer_fact(
+            "attention.ref",
+            attention_ref,
+            owner="executive_inbox",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "attention.target_seat",
+            "ceo",
+            owner="executive_inbox",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "attention.kind",
+            "review_required",
+            owner="executive_inbox",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "attention.reason",
+            "Exact head requires Sol review.",
+            owner="executive_inbox",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "attention.requested_action",
+            "Review the exact release head.",
+            owner="executive_inbox",
+            source_ref=receipt,
+        ),
+    ]
+
+    assert contract_schemas.result_envelope(
+        "get_attention", data=_producer_data(facts)
+    )["ok"] is True
+
+
+def test_producer_native_surface_identity_is_not_its_provenance_receipt():
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    surface_ref = "11111111-1111-4111-8111-111111111111"
+    receipt = f"surface-binding:{surface_ref}"
+    facts = [
+        _producer_fact(
+            "surface.ref", surface_ref, owner="surface_bindings", source_ref=receipt
+        ),
+        _producer_fact(
+            "surface.locator_kind",
+            "chatgpt_managed_env",
+            owner="surface_bindings",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "surface.review_state",
+            "approved",
+            owner="surface_bindings",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "surface.health",
+            "responsive",
+            owner="surface_bindings",
+            source_ref=receipt,
+        ),
+    ]
+
+    envelope = contract_schemas.result_envelope(
+        "resolve_surface", data=_producer_data(facts)
+    )
+    assert envelope["data"]["facts"][0]["value"] == surface_ref
+    assert envelope["data"]["facts"][0]["sources"][0]["source_ref"] == receipt
+
+
+def test_selected_surface_cannot_borrow_review_from_another_receipt():
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    surface_ref = "11111111-1111-4111-8111-111111111111"
+    receipt = f"surface-binding:{surface_ref}"
+    facts = [
+        _producer_fact(
+            "surface.ref", surface_ref, owner="surface_bindings", source_ref=receipt
+        ),
+        _producer_fact(
+            "surface.locator_kind",
+            "chatgpt_managed_env",
+            owner="surface_bindings",
+            source_ref=receipt,
+        ),
+        _producer_fact(
+            "surface.review_state",
+            "approved",
+            owner="surface_bindings",
+            source_ref="surface-binding:22222222-2222-4222-8222-222222222222",
+        ),
+        _producer_fact(
+            "surface.health",
+            "responsive",
+            owner="surface_bindings",
+            source_ref=receipt,
+        ),
+    ]
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        contract_schemas.result_envelope(
+            "resolve_surface", data=_producer_data(facts)
+        )
+
+
+def test_selected_runtime_refuses_its_own_effect_unknown_fact():
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    receipt = "executive-runtime:ATT-aabbccddeeff00112233445566778899"
+    facts = [
+        _producer_fact(
+            "runtime.job_ref", "JOB-001", owner="executive_os", source_ref=receipt
+        ),
+        _producer_fact(
+            "runtime.effect_state",
+            "effect_unknown",
+            owner="executive_os",
+            source_ref=receipt,
+        ),
+    ]
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        contract_schemas.result_envelope(
+            "get_current_runtime", data=_producer_data(facts)
+        )
+
+
+def test_schema_footprint_and_serialization_are_deterministically_bounded():
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    assert len(
+        contract_schemas.canonical_json(contract_schemas.tool_schema_snapshot())
+    ) < 160_000
+    with pytest.raises(GatewayError, match="INVALID_REQUEST"):
+        contract_schemas.canonical_json({"unordered": {"a", "b"}})
+
+
+def test_invalid_calendar_timestamp_is_refused():
+    from integrations.mastermind_secretary_mcp import schemas as contract_schemas
+
+    malformed = _producer_fact(
+        "attention.state",
+        "SOL_REQUIRED",
+        owner="agent_os",
+        source_ref="WS:SAFE",
+    )
+    malformed["sources"][0]["observed_at"] = "2026-02-30T10:00:00Z"
+
+    with pytest.raises(GatewayError, match="RESPONSE_REFUSED"):
+        contract_schemas.result_envelope(
+            "get_attention", data=_producer_data([malformed])
+        )
