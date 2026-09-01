@@ -649,8 +649,54 @@ ALLOWED_PATHS = frozenset(
         "tests/test_agent_eval_inertness.py",
         "tests/test_agent_eval_privacy.py",  # amendment §4.2 addition
         "tests/fixtures/agent_eval/README.md",
+        # --- EVAL-C0 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-c0-corpus-20260901-fable-001)
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-c0-corpus.md",
+        "scripts/agent_eval/corpus.py",
+        "tests/test_agent_eval_corpus.py",
     }
 )
+
+# EVAL-C0 fence ratchet (principal-authorized 2026-09-01, operation
+# mastermind-agent-evaluation-c0-corpus-20260901-fable-001): this is the
+# deliberate per-wave surface ratchet -- each wave's OWNED paths are added
+# to this fence only by explicit principal authorization, never by the
+# wave's own worker unilaterally widening its own gate. C0's corpus tree
+# (``corpus/agent_eval/``) grows case-by-case across this and future
+# C0-lineage waves without renaming any script or test, so it is the one
+# path allowed as a PREFIX rather than an ever-growing enumerated file
+# list -- every other wave's surface (R0's own paths above, and C0's three
+# new exact files above) stays exact-path-only. A future wave widening
+# this ratchet further still needs its own explicit principal
+# authorization and its own operation-key citation, exactly like this one.
+ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/"})
+
+# NB-8 repair: a prefix in ALLOWED_PATH_PREFIXES is NOT a blanket allowance
+# for any file type dropped under that tree -- admission is further
+# constrained to the corpus law's own known filenames
+# (scripts/agent_eval/corpus.py / the C0 plan record's §2 corpus-home
+# layout): a scenario document, a holdout seal, the corpus manifest, a
+# fixture JSON file, or a corpus README. An unexpected extension, a stray
+# script, or a non-JSON fixture living under the prefix is still refused.
+_CORPUS_TREE_ALLOWED_BASENAMES = frozenset({"scenario.json", "holdout_seal.json", "corpus_manifest.json", "README.md"})
+
+
+def _corpus_prefix_path_is_allowed(path: str, prefix: str) -> bool:
+    suffix = path[len(prefix):]
+    parts = suffix.split("/")
+    basename = parts[-1]
+    if basename in _CORPUS_TREE_ALLOWED_BASENAMES:
+        return True
+    return len(parts) >= 2 and parts[-2] == "fixtures" and basename.endswith(".json")
+
+
+def _changed_path_is_allowed(path: str) -> bool:
+    if path in ALLOWED_PATHS:
+        return True
+    for prefix in ALLOWED_PATH_PREFIXES:
+        if path.startswith(prefix) and _corpus_prefix_path_is_allowed(path, prefix):
+            return True
+    return False
 
 
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -699,7 +745,7 @@ def compute_pr_diff_paths(repo_dir: Path, *, head: str = "HEAD", upstream: str =
 def test_changed_paths_are_within_the_allowed_r0_surface() -> None:
     changed = compute_pr_diff_paths(ROOT)
     assert changed, "expected at least one changed file relative to the effective PR base"
-    unexpected = changed - ALLOWED_PATHS
+    unexpected = {path for path in changed if not _changed_path_is_allowed(path)}
     assert not unexpected, f"changed path(s) outside the allowed R0 surface: {sorted(unexpected)}"
 
 

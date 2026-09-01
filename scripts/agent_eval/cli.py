@@ -21,7 +21,7 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, scoring, store, validity
+from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, corpus, scoring, store, validity
 from scripts.agent_eval.canonical import canonical_json_bytes
 from scripts.agent_eval.errors import ArtifactConflictError, ContractError, VerificationContextError
 
@@ -243,6 +243,29 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     return _EXIT_INCOMPLETE
 
 
+def _cmd_corpus_verify(args: argparse.Namespace) -> int:
+    """EVAL-C0: scenario-vs-corpus consistency check over a committed public
+    corpus tree (never one of R0's three verification scopes -- this is a
+    narrower, additive governance check; see scripts/agent_eval/corpus.py)."""
+    corpus_root = Path(args.corpus_root)
+    repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
+    if not corpus_root.is_dir():
+        raise CliUsageError(f"no such corpus directory: {corpus_root}")
+    report = corpus.verify_corpus_tree_consistency(corpus_root, repo_root)
+    _print_json(
+        {
+            "result": report.result,
+            "corpus_revision": report.corpus_revision,
+            "corpus_tree_digest": report.corpus_tree_digest,
+            "scenario_count": report.scenario_count,
+            "holdout_count": report.holdout_count,
+            "defect_count": len(report.defects),
+            "defects": [{"path": d.path, "code": d.code, "message": d.message} for d in report.defects],
+        }
+    )
+    return _EXIT_OK if report.result == "CONSISTENT" else _EXIT_ERROR
+
+
 def _cmd_verify_tree_graph(args: argparse.Namespace) -> int:
     artifact_store = store.ArtifactStore(args.root)
     defects = artifact_store.verify_tree_graph()
@@ -323,6 +346,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_tree_graph.add_argument("--root", required=True)
     verify_tree_graph.set_defaults(func=_cmd_verify_tree_graph)
+
+    corpus_verify = subparsers.add_parser(
+        "corpus-verify",
+        help="EVAL-C0: scenario-vs-corpus consistency check over a committed public corpus tree; never repairs",
+    )
+    corpus_verify.add_argument("--corpus-root", required=True, help="path to the corpus/agent_eval directory")
+    corpus_verify.add_argument(
+        "--repo-root", required=False, help="repository root fixture artifact_refs resolve against (default: cwd)"
+    )
+    corpus_verify.set_defaults(func=_cmd_corpus_verify)
 
     return parser
 
