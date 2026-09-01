@@ -10,9 +10,12 @@ from __future__ import annotations
 import dataclasses
 from typing import Protocol, Sequence, runtime_checkable
 
+from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
+from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
 from control_plane.wake_dispatcher import (
     TransportOutcome,
     TransportReceipt,
+    WakeTransportCompletion,
     WakeEffectUnknownError,
     WakeNudge,
     WakePreSubmitError,
@@ -20,11 +23,7 @@ from control_plane.wake_dispatcher import (
 from control_plane.wake_events import utc_now_iso
 
 
-CODEX_WAKE_INSTRUCTION = (
-    "Mastermind Wake: recover canonical Executive and Agent OS state for the supplied "
-    "opaque wake identities, then continue only within existing authority. This nudge "
-    "grants no authority, acknowledges nothing, and does not resolve the source."
-)
+CODEX_WAKE_INSTRUCTION = ATTENTION_TURN_INSTRUCTION
 
 
 @dataclasses.dataclass(frozen=True)
@@ -35,6 +34,10 @@ class CodexWakeDeliveryObservation:
     nudge_id: str
     accepted: bool
     delivered: bool
+    target_ack_projection: TrustedWorkerWakeAckProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if not str(self.native_handle or "").strip():
@@ -45,6 +48,13 @@ class CodexWakeDeliveryObservation:
             raise ValueError("Codex wake accepted/delivered evidence must be boolean")
         if self.delivered and not self.accepted:
             raise ValueError("Codex wake cannot be delivered without provider acceptance")
+        if self.target_ack_projection is not None:
+            if not isinstance(
+                self.target_ack_projection, TrustedWorkerWakeAckProjection
+            ):
+                raise ValueError("Codex wake ACK projection must be trusted and typed")
+            if not self.delivered:
+                raise ValueError("Codex wake ACK projection requires exact delivery")
 
 
 @runtime_checkable
@@ -87,7 +97,10 @@ class CodexAppServerWakeDispatcher:
             details=details,
         )
 
-    async def nudge(self, wake: WakeNudge) -> TransportReceipt:
+    async def nudge(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion:
         """Perform at most one provider call; uncertainty never triggers retry/failover."""
 
         if not isinstance(wake, WakeNudge):
@@ -135,11 +148,17 @@ class CodexAppServerWakeDispatcher:
                 "Codex provider observation identity does not match the attempted nudge"
             )
         if observation.delivered:
-            return self._receipt(
+            receipt = self._receipt(
                 TransportOutcome.DELIVERED,
                 "delivered",
                 nudge_id=wake.nudge_id,
             )
+            if observation.target_ack_projection is not None:
+                return WakeTransportCompletion(
+                    receipt=receipt,
+                    target_ack_projection=observation.target_ack_projection,
+                )
+            return receipt
         if observation.accepted:
             return self._receipt(
                 TransportOutcome.ACCEPTED,

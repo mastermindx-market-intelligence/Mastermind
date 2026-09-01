@@ -8,16 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import sqlite3
 
 import pytest
 
 from control_plane import wake_dispatcher
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.session_targets import RuntimeBinding, route_obligation
+from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
 from control_plane.wake_dispatcher import (
     TransportOutcome,
     TransportReceipt,
+    WakeDispatchError,
     WakeNudge,
+    WakeTransportCompletion,
 )
 from control_plane.wake_ledger import (
     LedgerPhase,
@@ -99,15 +103,63 @@ def _seed_requested(repo: WakeLedgerRepository, *pairs) -> None:
     )
 
 
+def test_connection_scoped_wake_access_requires_executive_transaction(tmp_path):
+    """Catches a caller bypassing the existing Executive transaction owner."""
+
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, _binding_value = _pair()
+    record = requested_record(obligation)
+    with sqlite3.connect(runtime.store.path) as connection:
+        assert connection.in_transaction is False
+        with pytest.raises(StateConflict, match="active transaction"):
+            repo.list_ledger_records_on_connection(
+                connection, obligation.obligation_id
+            )
+        with pytest.raises(StateConflict, match="active transaction"):
+            repo.append_records_on_connection(
+                connection,
+                ((record, obligation),),
+            )
+
+
+def test_connection_scoped_wake_append_reuses_causal_and_replay_law(tmp_path):
+    """Catches a transaction-scoped append skipping causal or replay checks."""
+
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, _route, _binding_value = _pair()
+    record = requested_record(obligation)
+    with runtime.store.transaction() as connection:
+        first = repo.append_records_on_connection(
+            connection,
+            ((record, obligation),),
+        )
+        replay = repo.append_records_on_connection(
+            connection,
+            ((record, obligation),),
+        )
+        listed = repo.list_ledger_records_on_connection(
+            connection, obligation.obligation_id
+        )
+    assert first[0].inserted is True
+    assert replay[0].inserted is False
+    assert [item.phase for item in listed] == [LedgerPhase.WAKE_REQUESTED]
+
+
 @dataclasses.dataclass
 class _Dispatcher:
     transport_id: str = "codex-app-server"
     outcome: TransportOutcome = TransportOutcome.DELIVERED
     failure: BaseException | None = None
     repo: WakeLedgerRepository | None = None
+    emit_projection: bool = False
     nudge_calls: int = 0
 
-    async def nudge(self, wake: WakeNudge) -> TransportReceipt:
+    async def nudge(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion:
         self.nudge_calls += 1
         if self.repo is not None:
             for obligation_id in wake.obligation_ids:
@@ -118,7 +170,7 @@ class _Dispatcher:
                 assert LedgerPhase.DELIVERY_ATTEMPT in phases
         if self.failure is not None:
             raise self.failure
-        return TransportReceipt(
+        receipt = TransportReceipt(
             outcome=self.outcome,
             reason_code={
                 TransportOutcome.ACCEPTED: "accepted",
@@ -128,6 +180,23 @@ class _Dispatcher:
             }[self.outcome],
             created_at=_FROZEN,
             details=(("nudge_id", wake.nudge_id),),
+        )
+        if not self.emit_projection:
+            return receipt
+        projection = TrustedWorkerWakeAckProjection(
+            target_attempt_id="ATT-" + "1" * 32,
+            process_generation_id="generation-persisted-ack-1",
+            binding_id=wake.binding_id,
+            binding_generation=wake.binding_generation,
+            provider_session_id=str(wake.native_handle),
+            provider_native_turn_id="turn-persisted-ack-1",
+            nudge_id=wake.nudge_id,
+            obligation_ids=tuple(sorted(wake.obligation_ids)),
+            terminal_ack_trailer=True,
+        )
+        return WakeTransportCompletion(
+            receipt=receipt,
+            target_ack_projection=projection,
         )
 
 
@@ -161,6 +230,116 @@ def test_persisted_dispatch_records_attempt_before_provider_and_terminal_after(t
         LedgerPhase.DELIVERY_ATTEMPT,
         LedgerPhase.DELIVERED,
     ]
+
+
+def test_persisted_ack_projection_runs_once_only_after_exact_delivered_append(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    _seed_requested(repo, (obligation, route))
+    dispatcher = _Dispatcher(repo=repo, emit_projection=True)
+    registry = _bound_registry()
+    calls = []
+
+    def fake_ack(runtime_arg, registry_arg, *, claim, trusted):
+        calls.append((runtime_arg, registry_arg, claim, trusted))
+        assert [
+            item.record.phase for item in repo.list_records(obligation.obligation_id)
+        ] == [
+            LedgerPhase.WAKE_REQUESTED,
+            LedgerPhase.DELIVERY_ATTEMPT,
+            LedgerPhase.DELIVERED,
+        ]
+        return ()
+
+    monkeypatch.setattr(wake_dispatcher, "acknowledge_consumed_wakes", fake_ack)
+
+    first = _dispatch_persisted(
+        repo,
+        [(obligation, route)],
+        dispatcher=dispatcher,
+        binding=binding,
+        retry_policy=_POLICY,
+        target_registry=registry,
+    )
+    replay = _dispatch_persisted(
+        repo,
+        [(obligation, route)],
+        dispatcher=dispatcher,
+        binding=binding,
+        retry_policy=_POLICY,
+        target_registry=registry,
+    )
+
+    assert first.state == replay.state == "DELIVERED"
+    assert dispatcher.nudge_calls == 1
+    assert len(calls) == 1
+    assert calls[0][0] is runtime
+    assert calls[0][1] is registry
+    assert calls[0][2].obligation_ids == (obligation.obligation_id,)
+    assert calls[0][3].obligation_ids == (obligation.obligation_id,)
+
+
+def test_persisted_ack_projection_without_registry_refuses_after_truthful_delivery(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = Runtime.at(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    obligation, route, binding = _pair()
+    _seed_requested(repo, (obligation, route))
+    dispatcher = _Dispatcher(repo=repo, emit_projection=True)
+    ack_calls = []
+    monkeypatch.setattr(
+        wake_dispatcher,
+        "acknowledge_consumed_wakes",
+        lambda *args, **kwargs: ack_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(WakeDispatchError, match="SessionTargetRegistry"):
+        _dispatch_persisted(
+            repo,
+            [(obligation, route)],
+            dispatcher=dispatcher,
+            binding=binding,
+            retry_policy=_POLICY,
+        )
+
+    assert ack_calls == []
+    assert [item.record.phase for item in repo.list_records(obligation.obligation_id)] == [
+        LedgerPhase.WAKE_REQUESTED,
+        LedgerPhase.DELIVERY_ATTEMPT,
+        LedgerPhase.DELIVERED,
+    ]
+
+
+def test_nonpersisted_generic_path_discards_projection_without_ack_mutation(
+    monkeypatch,
+):
+    obligation, route, binding = _pair()
+    dispatcher = _Dispatcher(emit_projection=True)
+    ack_calls = []
+    monkeypatch.setattr(
+        wake_dispatcher,
+        "acknowledge_consumed_wakes",
+        lambda *args, **kwargs: ack_calls.append((args, kwargs)),
+    )
+
+    _nudge, transport, receipts = asyncio.run(
+        wake_dispatcher.dispatch_nudge(
+            [(obligation, route)],
+            dispatcher=dispatcher,
+            binding=binding,
+            retry_policy=_POLICY,
+        )
+    )
+
+    assert transport is not None and transport.outcome is TransportOutcome.DELIVERED
+    assert receipts[0].outcome.value == "DELIVERED"
+    assert ack_calls == []
 
 
 def test_lost_provider_response_two_outer_invocations_write_provider_once(tmp_path):

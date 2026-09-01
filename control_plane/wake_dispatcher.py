@@ -17,7 +17,12 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
-from control_plane.session_targets import RuntimeBinding, WakeRoute
+from control_plane.session_targets import RuntimeBinding, SessionTargetRegistry, WakeRoute
+from control_plane.wake_ack_ingress import (
+    TrustedWorkerWakeAckProjection,
+    WakeAckClaim,
+    acknowledge_consumed_wakes,
+)
 from control_plane.wake_events import (
     ISO_UTC_RE,
     WAKE_ID_RE,
@@ -297,6 +302,41 @@ class TransportReceipt:
 
 
 @dataclasses.dataclass(frozen=True)
+class WakeTransportCompletion:
+    """Transient non-wire transport result; the projection is never receipt data."""
+
+    receipt: TransportReceipt
+    target_ack_projection: TrustedWorkerWakeAckProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.receipt, TransportReceipt):
+            raise WakeDispatchError("Wake transport completion requires a receipt")
+        projection = self.target_ack_projection
+        if projection is not None:
+            if not isinstance(projection, TrustedWorkerWakeAckProjection):
+                raise WakeDispatchError(
+                    "Wake transport completion ACK projection must be trusted and typed"
+                )
+            if self.receipt.outcome is not TransportOutcome.DELIVERED:
+                raise WakeDispatchError(
+                    "Wake transport completion ACK projection requires DELIVERED"
+                )
+
+
+def normalize_transport_completion(
+    value: TransportReceipt | WakeTransportCompletion,
+) -> tuple[TransportReceipt, TrustedWorkerWakeAckProjection | None]:
+    if isinstance(value, TransportReceipt):
+        return value, None
+    if isinstance(value, WakeTransportCompletion):
+        return value.receipt, value.target_ack_projection
+    raise WakeDispatchError("adapter returned an invalid Wake transport completion")
+
+
+@dataclasses.dataclass(frozen=True)
 class PersistedNudgeResult:
     """Non-wire result of the persist-before-provider coordinator."""
 
@@ -561,7 +601,10 @@ def already_delivered_receipt(
 class WakeDispatcher(Protocol):
     transport_id: str
 
-    async def nudge(self, wake: WakeNudge) -> TransportReceipt: ...
+    async def nudge(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion: ...
 
 
 class UnsupportedWakeDispatcher:
@@ -784,6 +827,7 @@ async def dispatch_persisted_nudge(
     binding: RuntimeBinding | None = None,
     descriptor: WakeTransportDescriptor | None = None,
     retry_policy: WakeRetryPolicy | None = None,
+    target_registry: SessionTargetRegistry | None = None,
 ) -> PersistedNudgeResult:
     """Persist one exact nudge before making at most one provider submission."""
 
@@ -886,8 +930,12 @@ async def dispatch_persisted_nudge(
         return _reconciliation_required(nudge_attempt)
 
     wake = _nudge_from(attempts, binding=binding, first_route=first_route)
+    target_ack_projection: TrustedWorkerWakeAckProjection | None = None
     try:
-        raw_transport = await dispatcher.nudge(wake)
+        raw_completion = await dispatcher.nudge(wake)
+        raw_transport, target_ack_projection = normalize_transport_completion(
+            raw_completion
+        )
         transport = authenticate_transport_receipt(
             raw_transport, expected_nudge_id=wake.nudge_id
         )
@@ -905,12 +953,31 @@ async def dispatch_persisted_nudge(
         )
 
     phase = LedgerPhase(transport.outcome.value)
-    repo.append_records_atomic(
+    terminal_persisted = repo.append_records_atomic(
         tuple(
             (attempt_record(attempt, phase), obligation)
             for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
         )
     )
+    if target_ack_projection is not None:
+        if phase is not LedgerPhase.DELIVERED:
+            raise WakeDispatchError(
+                "Wake ACK projection cannot accompany a non-delivered transport"
+            )
+        if not all(item.inserted for item in terminal_persisted):
+            raise WakeDispatchError(
+                "Wake ACK projection requires newly persisted DELIVERED evidence"
+            )
+        if target_registry is None:
+            raise WakeDispatchError(
+                "Wake ACK projection requires the current SessionTargetRegistry"
+            )
+        acknowledge_consumed_wakes(
+            repo.runtime,
+            target_registry,
+            claim=WakeAckClaim(target_ack_projection.obligation_ids),
+            trusted=target_ack_projection,
+        )
     receipts: list[WakeReceipt] = []
     for attempt, (obligation, route) in zip(attempts, pairs, strict=True):
         receipt = make_receipt(
@@ -1013,7 +1080,8 @@ async def dispatch_nudge(
             "dispatcher transport identity does not match the canonical route"
         )
     wake = _nudge_from(attempts, binding=binding, first_route=first_route)
-    transport = await resolved.nudge(wake)
+    raw_completion = await resolved.nudge(wake)
+    transport, _discarded_projection = normalize_transport_completion(raw_completion)
     authenticated_transport = authenticate_transport_receipt(
         transport, expected_nudge_id=wake.nudge_id
     )
@@ -1203,6 +1271,7 @@ __all__ = [
     "WakePreSubmitError",
     "WakeReceipt",
     "WakeTransportDescriptor",
+    "WakeTransportCompletion",
     "already_delivered_receipt",
     "authenticate_receipt",
     "authenticate_transport_receipt",
@@ -1215,6 +1284,7 @@ __all__ = [
     "ledger_command_id",
     "make_receipt",
     "mint_nudge_id",
+    "normalize_transport_completion",
     "plan_eligible_nudge",
     "reconstruct_status",
     "wake_transport_descriptor",

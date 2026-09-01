@@ -8,7 +8,11 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 from control_plane.executive_runtime import StateConflict
-from control_plane.session_targets import RuntimeBinding, WakeRoute
+from control_plane.session_targets import (
+    RuntimeBinding,
+    SessionTargetRegistry,
+    WakeRoute,
+)
 from control_plane.wake_dispatcher import (
     PersistedNudgeState,
     WakeEffectUnknownError,
@@ -38,6 +42,7 @@ class PersistedWakeCarrier:
         dispatchers: WakeDispatcherRegistry,
         current_binding_for: Callable[[WakeRoute], RuntimeBinding | None],
         retry_policy: WakeRetryPolicy,
+        target_registry: SessionTargetRegistry | None = None,
     ) -> None:
         if not isinstance(repository, WakeLedgerRepository):
             raise TypeError("repository must be WakeLedgerRepository")
@@ -47,10 +52,15 @@ class PersistedWakeCarrier:
             raise TypeError("current_binding_for must be callable")
         if not isinstance(retry_policy, WakeRetryPolicy):
             raise TypeError("retry_policy must be WakeRetryPolicy")
+        if target_registry is not None and not isinstance(
+            target_registry, SessionTargetRegistry
+        ):
+            raise TypeError("target_registry must be SessionTargetRegistry or None")
         self._repository = repository
         self._dispatchers = dispatchers
         self._current_binding_for = current_binding_for
         self._retry_policy = retry_policy
+        self._target_registry = target_registry
 
     async def reconcile(
         self,
@@ -116,6 +126,7 @@ class PersistedWakeCarrier:
             dispatcher=dispatcher,
             binding=binding,
             retry_policy=self._retry_policy,
+            target_registry=self._target_registry,
         )
         if result.state is PersistedNudgeState.RECONCILIATION_REQUIRED:
             raise WakeEffectUnknownError(

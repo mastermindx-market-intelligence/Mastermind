@@ -8,10 +8,13 @@ import pytest
 
 from control_plane.wake_dispatcher import (
     TransportOutcome,
+    WakeTransportCompletion,
     WakeEffectUnknownError,
     WakeNudge,
     WakePreSubmitError,
+    normalize_transport_completion,
 )
+from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
 from control_plane.wake_transport import transport_implemented
 from integrations.executive_wake.codex_app_server import (
     CODEX_WAKE_INSTRUCTION,
@@ -52,12 +55,33 @@ class _FakeClient:
         return self.observation
 
 
-def _observation(*, accepted=True, delivered=False, native_handle="thread-opaque-123"):
+def _projection() -> TrustedWorkerWakeAckProjection:
+    return TrustedWorkerWakeAckProjection(
+        target_attempt_id="ATT-" + "1" * 32,
+        process_generation_id="generation-ack-1",
+        binding_id="bind-ack12345",
+        binding_generation=3,
+        provider_session_id="thread-opaque-123",
+        provider_native_turn_id="turn-ack-1",
+        nudge_id="NUDGE-" + "b" * 32,
+        obligation_ids=("WAKE-" + "a" * 32,),
+        terminal_ack_trailer=True,
+    )
+
+
+def _observation(
+    *,
+    accepted=True,
+    delivered=False,
+    native_handle="thread-opaque-123",
+    target_ack_projection=None,
+):
     return CodexWakeDeliveryObservation(
         native_handle=native_handle,
         nudge_id="NUDGE-" + "b" * 32,
         accepted=accepted,
         delivered=delivered,
+        target_ack_projection=target_ack_projection,
     )
 
 
@@ -124,6 +148,39 @@ def test_exact_bound_thread_confirmation_is_delivered():
     assert receipt.outcome is TransportOutcome.DELIVERED
     assert receipt.reason_code == "delivered"
     assert len(client.calls) == 1
+
+
+def test_exact_bound_ack_projection_is_transient_completion_not_receipt_detail():
+    projection = _projection()
+    client = _FakeClient(
+        _observation(
+            accepted=True,
+            delivered=True,
+            target_ack_projection=projection,
+        )
+    )
+    dispatcher = CodexAppServerWakeDispatcher(client)
+
+    completion = _nudge(dispatcher, _wake())
+
+    assert isinstance(completion, WakeTransportCompletion)
+    receipt, normalized = normalize_transport_completion(completion)
+    assert receipt.outcome is TransportOutcome.DELIVERED
+    assert dict(receipt.details) == {"nudge_id": "NUDGE-" + "b" * 32}
+    assert normalized is projection
+    assert "target_ack_projection" not in repr(completion)
+
+
+def test_transport_completion_normalizer_rejects_untyped_projection_or_value():
+    receipt = CodexAppServerWakeDispatcher._receipt(
+        TransportOutcome.DELIVERED,
+        "delivered",
+        nudge_id="NUDGE-" + "b" * 32,
+    )
+
+    assert normalize_transport_completion(receipt) == (receipt, None)
+    with pytest.raises(Exception, match="completion"):
+        normalize_transport_completion(object())
 
 
 def test_provider_echo_mismatch_is_effect_unknown_after_possible_write():

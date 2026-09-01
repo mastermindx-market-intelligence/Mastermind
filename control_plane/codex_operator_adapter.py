@@ -62,6 +62,7 @@ from control_plane.operator_harness_contract import (
     StageConfigReceipt,
     TurnRef,
     TurnStartObservation,
+    WorkerLocalWakeAckProjection,
     WorkspaceIdentity,
     runtime_binding_id_for,
 )
@@ -97,6 +98,10 @@ _ATTENTION_COMPLETION_METHOD = "turn/completed"
 _ATTENTION_COMPLETION_TIMEOUT_PREFIX = (
     "timeout waiting for notification turn/completed"
 )
+_WAKE_ACK_MARKER_PREFIX = "MASTERMIND_WAKE_ACK "
+_WAKE_ACK_MARKER_RE = re.compile(r"^MASTERMIND_WAKE_ACK (WAKE-[A-Za-z0-9._:-]+)$")
+_CANONICAL_WAKE_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}$")
+_MARKDOWN_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 
 class CodexAdapterError(RuntimeError):
@@ -122,6 +127,114 @@ BaseShaResolver = Callable[[Path], str]
 MAX_RAW_TURN_PAGES = 128
 MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES = 134_217_728
 RAW_TURN_TOTAL_TIMEOUT_SECONDS = 120.0
+
+
+def _attention_final_text(completion: Mapping[str, Any]) -> str | None:
+    """Reduce one unique final agent message without exporting provider bytes."""
+
+    params = completion.get("params")
+    turn = params.get("turn") if isinstance(params, Mapping) else None
+    items = turn.get("items") if isinstance(turn, Mapping) else None
+    if not isinstance(items, list):
+        return None
+    messages = [
+        item
+        for item in items
+        if isinstance(item, Mapping)
+        and str(item.get("type") or "") in {"agent_message", "agentMessage"}
+    ]
+    phased = [item for item in messages if item.get("phase") is not None]
+    if phased:
+        if len(phased) != len(messages) or any(
+            item.get("phase") not in {"commentary", "final_answer"} for item in phased
+        ):
+            return None
+        selected = [item for item in phased if item.get("phase") == "final_answer"]
+    else:
+        selected = messages
+    if len(selected) != 1:
+        return None
+    message = selected[0]
+    direct = message.get("text")
+    content = message.get("content")
+    blocks: list[str] = []
+    if isinstance(content, list):
+        for block in content:
+            if (
+                not isinstance(block, Mapping)
+                or block.get("type") not in {"text", "output_text"}
+                or not isinstance(block.get("text"), str)
+            ):
+                return None
+            blocks.append(str(block["text"]))
+    joined = "".join(blocks) if blocks else None
+    if direct is not None and not isinstance(direct, str):
+        return None
+    if isinstance(direct, str) and joined is not None and direct != joined:
+        raise CodexAdapterError(
+            AdapterFailureClass.VALIDATION_FAILURE,
+            "attention ACK trailer text representations conflict",
+            effect_unknown=False,
+        )
+    return direct if isinstance(direct, str) else joined
+
+
+def _fenced_line_states(lines: Sequence[str]) -> tuple[bool, ...]:
+    states: list[bool] = []
+    fence_character: str | None = None
+    fence_length = 0
+    for line in lines:
+        states.append(fence_character is not None)
+        if fence_character is None:
+            match = _MARKDOWN_FENCE_OPEN_RE.match(line)
+            if match is None:
+                continue
+            marker = match.group(1)
+            fence_character = marker[0]
+            fence_length = len(marker)
+        elif re.fullmatch(
+            rf" {{0,3}}{re.escape(fence_character)}{{{fence_length},}}[ \t]*",
+            line,
+        ):
+            fence_character = None
+            fence_length = 0
+    return tuple(states)
+
+
+def _terminal_wake_ack_ids(completion: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """Accept only one exact, unfenced, contiguous terminal ACK trailer."""
+
+    text = _attention_final_text(completion)
+    if text is None:
+        return None
+    lines = text.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or not lines[-1].startswith(_WAKE_ACK_MARKER_PREFIX):
+        return None
+    first = len(lines) - 1
+    while first > 0 and lines[first - 1].startswith(_WAKE_ACK_MARKER_PREFIX):
+        first -= 1
+    fence_states = _fenced_line_states(lines)
+    if any(fence_states[index] for index in range(first, len(lines))):
+        return None
+    ids: list[str] = []
+    for line in lines[first:]:
+        match = _WAKE_ACK_MARKER_RE.fullmatch(line)
+        if match is None or _CANONICAL_WAKE_ID_RE.fullmatch(match.group(1)) is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.VALIDATION_FAILURE,
+                "attention ACK trailer contains a malformed obligation id",
+                effect_unknown=False,
+            )
+        ids.append(match.group(1))
+    if len(ids) != len(set(ids)):
+        raise CodexAdapterError(
+            AdapterFailureClass.VALIDATION_FAILURE,
+            "attention ACK trailer contains a duplicate obligation id",
+            effect_unknown=False,
+        )
+    return tuple(sorted(ids))
 
 
 def _default_client_factory(
@@ -1686,6 +1799,22 @@ class CodexOperatorAdapter:
             )
         state.attention_inflight = False
         state.attention_native_turn_id = None
+        obligation_ids = _terminal_wake_ack_ids(completion)
+        wake_ack_projection = (
+            None
+            if obligation_ids is None
+            else WorkerLocalWakeAckProjection(
+                target_attempt_id=attempt_id,
+                process_generation_id=generation.process_generation_id,
+                binding_id=binding_id,
+                binding_generation=binding_generation,
+                provider_session_id=provider_session_id,
+                provider_native_turn_id=native_turn_id,
+                nudge_id=nudge_id,
+                obligation_ids=obligation_ids,
+                terminal_ack_trailer=True,
+            )
+        )
         return AttentionTurnObservation(
             process_generation_id=generation.process_generation_id,
             provider_session_id=provider_session_id,
@@ -1693,6 +1822,7 @@ class CodexOperatorAdapter:
             provider_native_turn_id=native_turn_id,
             accepted=True,
             delivered=True,
+            wake_ack_projection=wake_ack_projection,
         )
 
     @staticmethod

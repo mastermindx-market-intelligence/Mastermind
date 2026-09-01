@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
@@ -26,9 +27,11 @@ from control_plane.operator_harness_contract import (
     ProviderWriterState,
     SessionEpochRef,
     TurnRef,
+    WorkerLocalWakeAckProjection,
     runtime_binding_id_for,
 )
 from control_plane.session_targets import RuntimeBinding
+from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
 from control_plane.operator_harness_wire import attention_turn_observation, to_wire
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
 from control_plane.wake_dispatcher import WakePreSubmitError
@@ -39,9 +42,12 @@ from scripts.ohf.laboratory import AppServerStopProof, JsonRpcError
 
 
 NATIVE_HANDLE = "019cafe0-1111-7222-8333-abcdefabcdef"
-NUDGE_ID = "nudge-123"
+NUDGE_ID = "NUDGE-" + "2" * 32
 OPAQUE_IDS = ("WAKE-123", "WAKE-123:ATTEMPT:1")
-ATTEMPT_ID = "attempt-123"
+ACK_OID_A = "WAKE-" + "a" * 32
+ACK_OID_B = "WAKE-" + "b" * 32
+ACK_OPAQUE_IDS = (ACK_OID_A, ACK_OID_B, f"{ACK_OID_A}:A1", f"{ACK_OID_B}:A1")
+ATTEMPT_ID = "ATT-" + "1" * 32
 EPOCH = SessionEpochRef(
     session_epoch_id="epoch-123",
     attempt_id=ATTEMPT_ID,
@@ -56,7 +62,7 @@ GENERATION = ProcessGenerationRef(
 )
 BINDING = RuntimeBinding(
     session_alias="EXECUTIVE-CTO-FORGE",
-    binding_id="bind-685d52104959fdbdd2e81ce6790478f610ba202b",
+    binding_id=runtime_binding_id_for(ATTEMPT_ID, EPOCH.session_epoch_id),
     binding_generation=GENERATION.generation_number,
     native_handle=NATIVE_HANDLE,
     reasoning_surface="codex",
@@ -228,6 +234,169 @@ def test_attention_observation_is_closed_and_delivery_requires_acceptance() -> N
         accepted=True,
         delivered=True,
     )
+
+    assert [item.name for item in fields(WorkerLocalWakeAckProjection)] == [
+        "target_attempt_id",
+        "process_generation_id",
+        "binding_id",
+        "binding_generation",
+        "provider_session_id",
+        "provider_native_turn_id",
+        "nudge_id",
+        "obligation_ids",
+        "terminal_ack_trailer",
+    ]
+    assert observation.wake_ack_projection is None
+
+
+def _completion_with_text(text: str) -> dict[str, Any]:
+    return {
+        "method": "turn/completed",
+        "params": {
+            "threadId": NATIVE_HANDLE,
+            "turn": {
+                "id": "turn-wake-456",
+                "status": "completed",
+                "items": [
+                    {
+                        "type": "agentMessage",
+                        "phase": "final_answer",
+                        "text": text,
+                    }
+                ],
+            },
+        },
+    }
+
+
+def _deliver_marker_text(text: str) -> AttentionTurnObservation:
+    client = FakeOwnedAppServerClient(completion=_completion_with_text(text))
+    return _owned_adapter(client).deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=ACK_OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+
+def test_attention_instruction_preserves_disclaimer_and_adds_bounded_marker_contract() -> None:
+    assert "grants no authority, acknowledges nothing, and does not resolve the source" in (
+        ATTENTION_TURN_INSTRUCTION
+    )
+    assert (
+        "After you have actually consumed the supplied Wake obligation(s) and recovered "
+        "canonical Executive/Agent OS state, emit one final marker line per consumed obligation:"
+        in ATTENTION_TURN_INSTRUCTION
+    )
+    assert "MASTERMIND_WAKE_ACK <WAKE-ID>" in ATTENTION_TURN_INSTRUCTION
+    assert (
+        "Do not put seat, session, binding, provider, host, nudge, source-resolution or "
+        "authority data in the marker."
+        in ATTENTION_TURN_INSTRUCTION
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ordinary completion without a marker",
+        "I saw MASTERMIND_WAKE_ACK in the supplied instruction.",
+        f"`MASTERMIND_WAKE_ACK {ACK_OID_A}`",
+        f"> MASTERMIND_WAKE_ACK {ACK_OID_A}",
+        f"- MASTERMIND_WAKE_ACK {ACK_OID_A}",
+        f"```text\nMASTERMIND_WAKE_ACK {ACK_OID_A}\n```",
+        f"```text\nMASTERMIND_WAKE_ACK {ACK_OID_A}",
+        f"```text\n```not-a-closing-fence\nMASTERMIND_WAKE_ACK {ACK_OID_A}",
+        f"MASTERMIND_WAKE_ACK {ACK_OID_A}\nLater prose makes this nonterminal.",
+    ],
+)
+def test_worker_local_terminal_trailer_ignores_instruction_echo_shapes(text: str) -> None:
+    observation = _deliver_marker_text(text)
+
+    assert observation.delivered is True
+    assert observation.wake_ack_projection is None
+
+
+def test_worker_local_terminal_trailer_reduces_one_exact_marker() -> None:
+    observation = _deliver_marker_text(
+        f"Recovered canonical state.\n\nMASTERMIND_WAKE_ACK {ACK_OID_A}\n"
+    )
+
+    assert observation.wake_ack_projection == WorkerLocalWakeAckProjection(
+        target_attempt_id=ATTEMPT_ID,
+        process_generation_id=GENERATION.process_generation_id,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        provider_native_turn_id="turn-wake-456",
+        nudge_id=NUDGE_ID,
+        obligation_ids=(ACK_OID_A,),
+        terminal_ack_trailer=True,
+    )
+
+
+def test_worker_local_terminal_trailer_reduces_distinct_atomic_batch_only() -> None:
+    observation = _deliver_marker_text(
+        "\n".join(
+            (
+                f"```text\nMASTERMIND_WAKE_ACK {'WAKE-' + 'c' * 32}\n```",
+                "Recovered canonical state.",
+                f"MASTERMIND_WAKE_ACK {ACK_OID_B}",
+                f"MASTERMIND_WAKE_ACK {ACK_OID_A}",
+            )
+        )
+    )
+
+    assert observation.wake_ack_projection is not None
+    assert observation.wake_ack_projection.obligation_ids == tuple(
+        sorted((ACK_OID_A, ACK_OID_B))
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"MASTERMIND_WAKE_ACK {ACK_OID_A}\nMASTERMIND_WAKE_ACK {ACK_OID_A}",
+        "MASTERMIND_WAKE_ACK WAKE-malformed",
+    ],
+)
+def test_worker_local_terminal_trailer_refuses_duplicate_or_malformed_ids(text: str) -> None:
+    with pytest.raises(codex_adapter.CodexAdapterError, match="ACK trailer"):
+        _deliver_marker_text(text)
+
+
+def test_attention_projection_wire_is_closed_and_rejects_unknown_nested_fields() -> None:
+    projection = WorkerLocalWakeAckProjection(
+        target_attempt_id=ATTEMPT_ID,
+        process_generation_id=GENERATION.process_generation_id,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        provider_native_turn_id="turn-wake-456",
+        nudge_id=NUDGE_ID,
+        obligation_ids=(ACK_OID_A,),
+        terminal_ack_trailer=True,
+    )
+    observation = AttentionTurnObservation(
+        process_generation_id=GENERATION.process_generation_id,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        provider_native_turn_id="turn-wake-456",
+        accepted=True,
+        delivered=True,
+        wake_ack_projection=projection,
+    )
+    wire = to_wire(observation)
+
+    assert attention_turn_observation(wire) == observation
+    wire["wake_ack_projection"]["raw_model_text"] = "must not cross"
+    with pytest.raises(Exception, match="fields"):
+        attention_turn_observation(wire)
     assert observation.delivered is True
 
     with pytest.raises(ValueError):
@@ -1120,7 +1289,11 @@ class FakeRemoteAttentionAdapter:
         return self.response
 
 
-def _deliver_via_wake_client(fake: FakeRemoteAttentionAdapter):
+def _deliver_via_wake_client(
+    fake: FakeRemoteAttentionAdapter,
+    *,
+    opaque_ids: tuple[str, ...] = OPAQUE_IDS,
+):
     client = CodexCurrentWriterWakeClient(
         operator_adapter=fake,
         generation=GENERATION,
@@ -1132,7 +1305,7 @@ def _deliver_via_wake_client(fake: FakeRemoteAttentionAdapter):
         client.deliver_wake(
             native_handle=NATIVE_HANDLE,
             nudge_id=NUDGE_ID,
-            opaque_ids=OPAQUE_IDS,
+            opaque_ids=opaque_ids,
             instruction=CODEX_WAKE_INSTRUCTION,
         )
     )
@@ -1162,6 +1335,71 @@ def test_wake_client_delegates_to_bound_generation_and_returns_provider_observat
     assert fake.calls[0]["provider_session_id"] == NATIVE_HANDLE
     assert fake.calls[0]["binding_id"] == BINDING.binding_id
     assert fake.calls[0]["binding_generation"] == BINDING.binding_generation
+
+
+def _worker_projection(**overrides: object) -> WorkerLocalWakeAckProjection:
+    values: dict[str, object] = {
+        "target_attempt_id": ATTEMPT_ID,
+        "process_generation_id": GENERATION.process_generation_id,
+        "binding_id": BINDING.binding_id,
+        "binding_generation": BINDING.binding_generation,
+        "provider_session_id": NATIVE_HANDLE,
+        "provider_native_turn_id": "turn-wake-456",
+        "nudge_id": NUDGE_ID,
+        "obligation_ids": tuple(sorted((ACK_OID_A, ACK_OID_B))),
+        "terminal_ack_trailer": True,
+    }
+    values.update(overrides)
+    return WorkerLocalWakeAckProjection(**values)
+
+
+def test_wake_client_promotes_only_exact_outer_and_submitted_worker_projection() -> None:
+    worker_projection = _worker_projection()
+    fake = FakeRemoteAttentionAdapter(
+        response=AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id="turn-wake-456",
+            accepted=True,
+            delivered=True,
+            wake_ack_projection=worker_projection,
+        )
+    )
+
+    observation = _deliver_via_wake_client(fake, opaque_ids=ACK_OPAQUE_IDS)
+
+    assert observation.target_ack_projection == TrustedWorkerWakeAckProjection(
+        **dataclasses.asdict(worker_projection)
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"target_attempt_id": "attempt-foreign"},
+        {"binding_id": "bind-ffffffffffffffffffffffffffffffffffffffff"},
+        {"binding_generation": BINDING.binding_generation + 1},
+        {"obligation_ids": (ACK_OID_A,)},
+    ],
+)
+def test_wake_client_refuses_nested_projection_outside_exact_current_submission(
+    overrides: dict[str, object],
+) -> None:
+    fake = FakeRemoteAttentionAdapter(
+        response=AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id="turn-wake-456",
+            accepted=True,
+            delivered=True,
+            wake_ack_projection=_worker_projection(**overrides),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="ACK projection"):
+        _deliver_via_wake_client(fake, opaque_ids=ACK_OPAQUE_IDS)
 
 
 def test_wake_client_refuses_runtime_binding_generation_mispairing() -> None:
