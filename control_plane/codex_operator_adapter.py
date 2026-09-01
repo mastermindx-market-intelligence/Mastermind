@@ -98,6 +98,7 @@ _ATTENTION_COMPLETION_METHOD = "turn/completed"
 _ATTENTION_COMPLETION_TIMEOUT_PREFIX = (
     "timeout waiting for notification turn/completed"
 )
+_ATTENTION_TERMINAL_STATUSES = frozenset({"completed", "failed", "interrupted"})
 _WAKE_ACK_MARKER_PREFIX = "MASTERMIND_WAKE_ACK "
 _WAKE_ACK_MARKER_RE = re.compile(r"^MASTERMIND_WAKE_ACK (WAKE-[A-Za-z0-9._:-]+)$")
 _CANONICAL_WAKE_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}$")
@@ -171,11 +172,7 @@ def _attention_final_text(completion: Mapping[str, Any]) -> str | None:
     if direct is not None and not isinstance(direct, str):
         return None
     if isinstance(direct, str) and joined is not None and direct != joined:
-        raise CodexAdapterError(
-            AdapterFailureClass.VALIDATION_FAILURE,
-            "attention ACK trailer text representations conflict",
-            effect_unknown=False,
-        )
+        return None
     return direct if isinstance(direct, str) else joined
 
 
@@ -222,19 +219,20 @@ def _terminal_wake_ack_ids(completion: Mapping[str, Any]) -> tuple[str, ...] | N
     for line in lines[first:]:
         match = _WAKE_ACK_MARKER_RE.fullmatch(line)
         if match is None or _CANONICAL_WAKE_ID_RE.fullmatch(match.group(1)) is None:
-            raise CodexAdapterError(
-                AdapterFailureClass.VALIDATION_FAILURE,
-                "attention ACK trailer contains a malformed obligation id",
-                effect_unknown=False,
-            )
+            return None
         ids.append(match.group(1))
     if len(ids) != len(set(ids)):
-        raise CodexAdapterError(
-            AdapterFailureClass.VALIDATION_FAILURE,
-            "attention ACK trailer contains a duplicate obligation id",
-            effect_unknown=False,
-        )
+        return None
     return tuple(sorted(ids))
+
+
+def _attention_terminal_status(completion: Mapping[str, Any]) -> str | None:
+    """Classify one exact provider terminal outcome without exporting it."""
+
+    params = completion.get("params")
+    turn = params.get("turn") if isinstance(params, Mapping) else None
+    status = turn.get("status") if isinstance(turn, Mapping) else None
+    return status if status in _ATTENTION_TERMINAL_STATUSES else None
 
 
 def _default_client_factory(
@@ -1797,8 +1795,24 @@ class CodexOperatorAdapter:
                 "attention completion identity is ambiguous",
                 effect_unknown=True,
             )
+        terminal_status = _attention_terminal_status(completion)
+        if terminal_status is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion status is not a recognized terminal outcome",
+                effect_unknown=True,
+            )
         state.attention_inflight = False
         state.attention_native_turn_id = None
+        if terminal_status != "completed":
+            return AttentionTurnObservation(
+                process_generation_id=generation.process_generation_id,
+                provider_session_id=provider_session_id,
+                nudge_id=nudge_id,
+                provider_native_turn_id=native_turn_id,
+                accepted=True,
+                delivered=False,
+            )
         obligation_ids = _terminal_wake_ack_ids(completion)
         wake_ack_projection = (
             None
@@ -1866,7 +1880,7 @@ class CodexOperatorAdapter:
                 completion,
                 provider_session_id=state.provider_session_id,
                 native_turn_id=native_turn_id,
-            ):
+            ) and _attention_terminal_status(completion) is not None:
                 state.attention_inflight = False
                 state.attention_native_turn_id = None
                 return

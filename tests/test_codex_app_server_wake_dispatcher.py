@@ -127,25 +127,31 @@ def test_surface_or_transport_mismatch_refuses_before_provider_call(overrides):
     assert client.calls == []
 
 
-def test_accepted_but_not_observed_is_accepted_not_delivered():
+def test_known_terminal_failed_or_interrupted_is_accepted_not_delivered():
+    """Both recognized terminal failure statuses collapse to this closed observation."""
+
     client = _FakeClient(_observation(accepted=True, delivered=False))
     dispatcher = CodexAppServerWakeDispatcher(client)
 
     receipt = _nudge(dispatcher, _wake())
 
     assert receipt.outcome is TransportOutcome.ACCEPTED
+    assert receipt.outcome is not TransportOutcome.TARGET_UNAVAILABLE
     assert receipt.reason_code == "accepted"
     assert dict(receipt.details)["nudge_id"] == "NUDGE-" + "b" * 32
     assert len(client.calls) == 1
 
 
-def test_exact_bound_thread_confirmation_is_delivered():
+def test_completed_without_ack_projection_is_delivered_not_target_unavailable():
+    """Completed no/invalid ACK content remains delivery with no projection."""
+
     client = _FakeClient(_observation(accepted=True, delivered=True))
     dispatcher = CodexAppServerWakeDispatcher(client)
 
     receipt = _nudge(dispatcher, _wake())
 
     assert receipt.outcome is TransportOutcome.DELIVERED
+    assert receipt.outcome is not TransportOutcome.TARGET_UNAVAILABLE
     assert receipt.reason_code == "delivered"
     assert len(client.calls) == 1
 

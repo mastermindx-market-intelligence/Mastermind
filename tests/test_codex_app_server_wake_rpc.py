@@ -249,14 +249,20 @@ def test_attention_observation_is_closed_and_delivery_requires_acceptance() -> N
     assert observation.wake_ack_projection is None
 
 
-def _completion_with_text(text: str) -> dict[str, Any]:
-    return {
+_MISSING_STATUS = object()
+
+
+def _completion_with_text(
+    text: str,
+    *,
+    status: object = "completed",
+) -> dict[str, Any]:
+    completion = {
         "method": "turn/completed",
         "params": {
             "threadId": NATIVE_HANDLE,
             "turn": {
                 "id": "turn-wake-456",
-                "status": "completed",
                 "items": [
                     {
                         "type": "agentMessage",
@@ -267,6 +273,9 @@ def _completion_with_text(text: str) -> dict[str, Any]:
             },
         },
     }
+    if status is not _MISSING_STATUS:
+        completion["params"]["turn"]["status"] = status
+    return completion
 
 
 def _deliver_marker_text(text: str) -> AttentionTurnObservation:
@@ -365,9 +374,140 @@ def test_worker_local_terminal_trailer_reduces_distinct_atomic_batch_only() -> N
         "MASTERMIND_WAKE_ACK WAKE-malformed",
     ],
 )
-def test_worker_local_terminal_trailer_refuses_duplicate_or_malformed_ids(text: str) -> None:
-    with pytest.raises(codex_adapter.CodexAdapterError, match="ACK trailer"):
-        _deliver_marker_text(text)
+def test_worker_local_completed_duplicate_or_malformed_trailer_is_inert(
+    text: str,
+) -> None:
+    client = FakeOwnedAppServerClient(completion=_completion_with_text(text))
+    observation = _owned_adapter(client).deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=ACK_OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.accepted is True
+    assert observation.delivered is True
+    assert observation.wake_ack_projection is None
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_worker_local_completed_conflicting_text_representations_are_inert() -> None:
+    completion = _completion_with_text(f"MASTERMIND_WAKE_ACK {ACK_OID_A}")
+    item = completion["params"]["turn"]["items"][0]
+    item["content"] = [
+        {
+            "type": "output_text",
+            "text": f"MASTERMIND_WAKE_ACK {ACK_OID_B}",
+        }
+    ]
+    client = FakeOwnedAppServerClient(completion=completion)
+
+    observation = _owned_adapter(client).deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=ACK_OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.accepted is True
+    assert observation.delivered is True
+    assert observation.wake_ack_projection is None
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+@pytest.mark.parametrize("status", ("failed", "interrupted"))
+def test_known_terminal_provider_failure_is_accepted_not_delivered(
+    status: str,
+) -> None:
+    client = FakeOwnedAppServerClient(
+        completion=_completion_with_text(
+            f"MASTERMIND_WAKE_ACK {ACK_OID_A}",
+            status=status,
+        )
+    )
+    adapter = _owned_adapter(client)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=ACK_OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+
+    assert observation.accepted is True
+    assert observation.delivered is False
+    assert observation.wake_ack_projection is None
+    assert state.attention_inflight is False
+    assert state.attention_native_turn_id is None
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+@pytest.mark.parametrize(
+    "status",
+    (_MISSING_STATUS, "unknown", "inProgress"),
+    ids=("missing", "unknown", "nonterminal"),
+)
+def test_unrecognized_completion_status_retains_no_resend_fence(
+    status: object,
+) -> None:
+    client = FakeOwnedAppServerClient(
+        completion=_completion_with_text(
+            f"MASTERMIND_WAKE_ACK {ACK_OID_A}",
+            status=status,
+        )
+    )
+    adapter = _owned_adapter(client)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    with pytest.raises(codex_adapter.CodexAdapterError) as error:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=ACK_OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+
+    assert error.value.effect_unknown is True
+    assert state.attention_inflight is True
+    assert state.attention_native_turn_id == "turn-wake-456"
+    with pytest.raises(codex_adapter.CodexAdapterError) as second:
+        adapter.deliver_attention(
+            generation=GENERATION,
+            attempt_id=ATTEMPT_ID,
+            binding_id=BINDING.binding_id,
+            binding_generation=BINDING.binding_generation,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id="nudge-456",
+            opaque_ids=ACK_OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+            completion_timeout_seconds=3.0,
+        )
+    assert second.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    with pytest.raises(codex_adapter.CodexAdapterError) as ordinary:
+        _begin_ordinary_turn(adapter)
+    assert ordinary.value.failure_class.value == "ACTIVE_WRITER_CONFLICT"
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
 def test_attention_projection_wire_is_closed_and_rejects_unknown_nested_fields() -> None:
@@ -937,7 +1077,10 @@ def test_composed_attention_timeout_keeps_browser_resource_and_blocks_turn() -> 
     assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
-def test_reconcile_late_exact_attention_completion_clears_only_attention_fence() -> None:
+@pytest.mark.parametrize("status", ("completed", "failed", "interrupted"))
+def test_reconcile_late_recognized_terminal_status_clears_only_attention_fence(
+    status: str,
+) -> None:
     """The owned reader may reconcile a late exact completion without a resend."""
 
     client = FakeOwnedAppServerClient(completion_timeout=True)
@@ -962,7 +1105,7 @@ def test_reconcile_late_exact_attention_completion_clears_only_attention_fence()
             "method": "turn/completed",
             "params": {
                 "threadId": NATIVE_HANDLE,
-                "turn": {"id": "turn-wake-456", "status": "completed"},
+                "turn": {"id": "turn-wake-456", "status": status},
             },
         }
     )
@@ -987,6 +1130,48 @@ def test_reconcile_late_exact_attention_completion_clears_only_attention_fence()
             "text": "ordinary governed turn\n\nBROWSER_B1_CLOSED_TURN_CONTRACT",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "status",
+    (_MISSING_STATUS, "unknown", "inProgress"),
+    ids=("missing", "unknown", "nonterminal"),
+)
+def test_reconcile_late_unrecognized_status_keeps_no_resend_fence(
+    status: object,
+) -> None:
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    resource = FakeBoundBrowserResource()
+    adapter = _owned_adapter(client, resource=resource)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+    assert observation.delivered is False
+    client.queued_notifications.append(
+        _completion_with_text("late provider result", status=status)
+    )
+
+    adapter.reconcile(GENERATION)
+
+    assert state.attention_inflight is True
+    assert state.attention_native_turn_id == "turn-wake-456"
+    assert state.resource is resource
+    with pytest.raises(codex_adapter.CodexAdapterError):
+        _begin_ordinary_turn(adapter)
+    assert resource.prompt_calls == 0
+    assert resource.observed_results == []
+    assert resource.stop_calls == 0
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
 @pytest.mark.parametrize(
@@ -1224,6 +1409,68 @@ def test_real_broker_consumer_reaches_real_owned_adapter_once() -> None:
     assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
+@pytest.mark.parametrize(
+    "text",
+    (
+        f"MASTERMIND_WAKE_ACK {ACK_OID_A}\nMASTERMIND_WAKE_ACK {ACK_OID_A}",
+        "MASTERMIND_WAKE_ACK WAKE-malformed",
+    ),
+    ids=("duplicate", "malformed"),
+)
+def test_real_broker_treats_completed_invalid_ack_as_inert_after_one_write(
+    text: str,
+) -> None:
+    client = FakeOwnedAppServerClient(completion=_completion_with_text(text))
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client))
+
+    result = asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+
+    observation = attention_turn_observation(result["observation"])
+    assert observation.accepted is True
+    assert observation.delivered is True
+    assert observation.wake_ack_projection is None
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+def test_real_broker_treats_completed_conflicting_text_as_inert_after_one_write() -> None:
+    completion = _completion_with_text(f"MASTERMIND_WAKE_ACK {ACK_OID_A}")
+    completion["params"]["turn"]["items"][0]["content"] = [
+        {
+            "type": "output_text",
+            "text": f"MASTERMIND_WAKE_ACK {ACK_OID_B}",
+        }
+    ]
+    client = FakeOwnedAppServerClient(completion=completion)
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client))
+
+    result = asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+
+    observation = attention_turn_observation(result["observation"])
+    assert observation.accepted is True
+    assert observation.delivered is True
+    assert observation.wake_ack_projection is None
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+@pytest.mark.parametrize(
+    "status",
+    (_MISSING_STATUS, "unknown", "inProgress"),
+    ids=("missing", "unknown", "nonterminal"),
+)
+def test_real_broker_preserves_effect_unknown_for_unrecognized_status(
+    status: object,
+) -> None:
+    client = FakeOwnedAppServerClient(
+        completion=_completion_with_text("provider result", status=status)
+    )
+    broker = _real_broker_with_owned_adapter(_owned_adapter(client))
+
+    with pytest.raises(BrokerEffectUnknownError):
+        asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
 def test_real_broker_busy_refuses_before_provider_io() -> None:
     client = FakeOwnedAppServerClient()
     broker = _real_broker_with_owned_adapter(_owned_adapter(client), busy=True)
@@ -1335,6 +1582,39 @@ def test_wake_client_delegates_to_bound_generation_and_returns_provider_observat
     assert fake.calls[0]["provider_session_id"] == NATIVE_HANDLE
     assert fake.calls[0]["binding_id"] == BINDING.binding_id
     assert fake.calls[0]["binding_generation"] == BINDING.binding_generation
+
+
+@pytest.mark.parametrize("status", ("failed", "interrupted"))
+def test_wake_client_preserves_known_terminal_acceptance_without_delivery(
+    status: str,
+) -> None:
+    provider_client = FakeOwnedAppServerClient(
+        completion=_completion_with_text(
+            f"MASTERMIND_WAKE_ACK {ACK_OID_A}",
+            status=status,
+        )
+    )
+    wake_client = CodexCurrentWriterWakeClient(
+        operator_adapter=_owned_adapter(provider_client),
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        runtime_binding=BINDING,
+        completion_timeout_seconds=3.0,
+    )
+
+    observation = asyncio.run(
+        wake_client.deliver_wake(
+            native_handle=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            opaque_ids=ACK_OPAQUE_IDS,
+            instruction=CODEX_WAKE_INSTRUCTION,
+        )
+    )
+
+    assert observation.accepted is True
+    assert observation.delivered is False
+    assert observation.target_ack_projection is None
+    assert [name for name, _payload in provider_client.calls].count("turn/start") == 1
 
 
 def _worker_projection(**overrides: object) -> WorkerLocalWakeAckProjection:
