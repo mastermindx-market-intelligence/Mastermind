@@ -204,10 +204,6 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     if experiment is None:
         raise CliUsageError(f"experiment could not be resolved from --root: {args.experiment_id}")
     scenario_refs = sorted(experiment["scenario_refs"], key=lambda ref: (ref["scenario_id"], ref["scenario_version"]))
-    primary_scenario_ref = scenario_refs[0]
-    scenario = artifact_store.resolve_scenario(primary_scenario_ref["scenario_id"], primary_scenario_ref["scenario_version"])
-    if scenario is None:
-        raise CliUsageError("experiment's scenario could not be resolved from --root")
 
     # plan §5.6 complete-enumeration law: one deterministic, read-only,
     # sorted enumeration of the trusted root -- never a caller-selected
@@ -215,9 +211,67 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     runs = artifact_store.enumerate_runs()
     scorer_passes = artifact_store.enumerate_scorer_passes()
 
-    evidence = scoring.summarize_experiment(
+    if len(scenario_refs) <= 1:
+        # UNCHANGED single-scenario path (byte-stable): scenario_refs[0] is
+        # correct here because there is only ever one scenario to pick.
+        primary_scenario_ref = scenario_refs[0]
+        scenario = artifact_store.resolve_scenario(
+            primary_scenario_ref["scenario_id"], primary_scenario_ref["scenario_version"]
+        )
+        if scenario is None:
+            raise CliUsageError("experiment's scenario could not be resolved from --root")
+
+        evidence = scoring.summarize_experiment(
+            experiment,
+            scenario,
+            runs,
+            scorer_passes,
+            evidence_ref_id=args.id,
+            intended_owner=args.owner,
+            review_at=args.review_at,
+            created_at=args.created_at,
+            analysis_version=DEFAULT_ANALYSIS_VERSION,
+        )
+        result = artifact_store.create(evidence)
+        _print_json(
+            {
+                "scope": "EVALUATION_GRAPH_VERIFIED",
+                "disposition": result.disposition.value,
+                "evidence_ref_id": evidence["evidence_ref_id"],
+                "evidence_grade": evidence["evidence_grade"],
+                "verification_scopes": list(evidence["verification_scopes"]),
+                "counts": evidence["counts"],
+                "external_content_unverified": True,
+            }
+        )
+        # R0's evidence grade is always INSUFFICIENT_EVIDENCE (external
+        # content is never verified) -- report that honestly rather than
+        # as a clean 0.
+        return _EXIT_INCOMPLETE
+
+    # EVAL-S1: multi-scenario experiment. The R0 scenario_refs[0] shortcut
+    # above would silently apply the WRONG scenario's required_dimensions
+    # to every other scenario's runs -- see docs/superpowers/plans/2026-09-
+    # 01-agent-evaluation-s1-scorers.md. This path resolves EVERY declared
+    # scenario and groups runs by their OWN scenario. Store-integration
+    # wave (same operation): published through the SAME governed create-
+    # only ``ArtifactStore.create()`` path the single-scenario branch above
+    # uses -- store.py now dispatches the multi-scenario schema too, with
+    # the same enumeration-equality anti-laundering guarantee (a caller-
+    # selected subset of scenarios/runs is refused at create, never
+    # silently accepted).
+    scenarios = []
+    for ref in scenario_refs:
+        scenario = artifact_store.resolve_scenario(ref["scenario_id"], ref["scenario_version"])
+        if scenario is None:
+            raise CliUsageError(
+                f"experiment's scenario could not be resolved from --root: {ref['scenario_id']} v{ref['scenario_version']}"
+            )
+        scenarios.append(scenario)
+
+    evidence = scoring.summarize_multi_scenario_experiment(
         experiment,
-        scenario,
+        tuple(scenarios),
         runs,
         scorer_passes,
         evidence_ref_id=args.id,
@@ -235,11 +289,16 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
             "evidence_grade": evidence["evidence_grade"],
             "verification_scopes": list(evidence["verification_scopes"]),
             "counts": evidence["counts"],
+            "scenario_groups": [
+                {"scenario_id": group["scenario_id"], "scenario_version": group["scenario_version"], "counts": group["counts"]}
+                for group in evidence["scenario_groups"]
+            ],
             "external_content_unverified": True,
         }
     )
-    # R0's evidence grade is always INSUFFICIENT_EVIDENCE (external content
-    # is never verified) -- report that honestly rather than as a clean 0.
+    # R0/S1's evidence grade is always INSUFFICIENT_EVIDENCE (external
+    # content is never verified) -- report that honestly rather than as a
+    # clean 0.
     return _EXIT_INCOMPLETE
 
 
