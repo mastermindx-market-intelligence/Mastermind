@@ -107,7 +107,11 @@ class MastermindTokenVerifier(TokenVerifier):
         validate_resource_policy(authenticator.policy)
         self._authenticator = authenticator
         self._policy = validated_policy
-        self._audit_policy_id = validated_policy.policy_id
+        # This separately reconstructed snapshot is the immutable authority
+        # reference. The public compatibility field above may be replaced by
+        # hostile or concurrent code and therefore never defines acceptance.
+        self._expected_policy = validate_resource_policy(validated_policy)
+        self._audit_policy_id = self._expected_policy.policy_id
         self._now = now
         self._audit_sink = audit_sink
 
@@ -130,15 +134,26 @@ class MastermindTokenVerifier(TokenVerifier):
             accepted=False,
         )
 
-    def _authenticator_policy_matches(self) -> bool:
-        """Revalidate the exact immutable verifier policy before token work."""
+    def _validated_composition(self) -> ResourcePolicy | None:
+        """Return the frozen policy only while both live bindings still match it."""
 
         try:
-            expected_policy = validate_resource_policy(self._policy)
+            expected_policy = validate_resource_policy(self._expected_policy)
+            current_policy = validate_resource_policy(self._policy)
             bound_policy = validate_resource_policy(self._authenticator.policy)
         except Exception:
-            return False
-        return bound_policy == expected_policy
+            return None
+        if (
+            current_policy != expected_policy
+            or bound_policy != expected_policy
+        ):
+            return None
+        return expected_policy
+
+    def _authenticator_policy_matches(self) -> bool:
+        """Compatibility predicate for the exact immutable policy composition."""
+
+        return self._validated_composition() is not None
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Return one closed MCP token projection or fail closed with ``None``."""
@@ -146,7 +161,8 @@ class MastermindTokenVerifier(TokenVerifier):
         # The JWT verifier and MCP adapter must be one exact policy composition.
         # Refuse before reading the clock or asking the authenticator to inspect
         # attacker-controlled token bytes when that trusted composition drifted.
-        if not self._authenticator_policy_matches():
+        policy = self._validated_composition()
+        if policy is None:
             self._refuse_internal()
             return None
 
@@ -168,8 +184,16 @@ class MastermindTokenVerifier(TokenVerifier):
             self._refuse_internal()
             return None
 
+        # The awaited provider boundary permits concurrent replacement of either
+        # live policy binding. Revalidate before interpreting or projecting the
+        # returned principal so an in-flight drift can never become authority.
+        policy = self._validated_composition()
+        if policy is None:
+            self._refuse_internal()
+            return None
+
         try:
-            if not _principal_matches_policy(principal, self._policy):
+            if not _principal_matches_policy(principal, policy):
                 self._refuse_internal()
                 return None
             access = AccessToken(
