@@ -38,6 +38,22 @@
   --ok: #68a47a;
   --ok-wash: #17251c;
 
+  --au-cell-bg: linear-gradient(168deg, var(--panel-2), var(--panel) 78%);
+  --au-cell-border: var(--hairline);
+  --au-cell-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+  --au-band-fill: linear-gradient(96deg, color-mix(in srgb, var(--brass-wash) 76%, var(--panel)), var(--panel) 56%);
+  --au-band-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+  --au-row-hover: color-mix(in srgb, var(--panel) 72%, transparent);
+  --au-marker-core: var(--brass);
+  --au-marker-ring: 1px;
+  --au-marker-glow: 0 0 0 3px var(--brass-wash), 0 0 13px -2px color-mix(in srgb, var(--brass) 70%, transparent);
+  --au-marker-open-core: var(--panel-3);
+  --au-gate-fill: color-mix(in srgb, var(--danger-wash) 80%, transparent);
+  --au-gate-rule: 2px;
+  --au-hold-weight: 500;
+  --au-body-ink: var(--muted);
+  --au-quiet-border: 1px dashed color-mix(in srgb, var(--line) 88%, transparent);
+
   --shadow-card: inset 0 1px 0 rgba(255,255,255,.025), 0 16px 44px -36px rgba(0,0,0,.9);
   --shadow-drawer: -24px 0 70px rgba(0,0,0,.45);
   --radius-xs: 6px;
@@ -74,6 +90,21 @@ html[data-theme="light"] {
   --danger-wash: #f8e7e3;
   --ok: #34744a;
   --ok-wash: #e7f1e9;
+  --au-cell-bg: var(--panel);
+  --au-cell-border: var(--line);
+  --au-cell-shadow: 0 1px 2px rgba(28,35,28,.05), 0 14px 26px -24px rgba(30,40,30,.34);
+  --au-band-fill: color-mix(in srgb, var(--brass-wash) 58%, var(--panel));
+  --au-band-shadow: 0 1px 2px rgba(28,35,28,.05), 0 16px 30px -26px rgba(30,40,30,.3);
+  --au-row-hover: var(--panel-2);
+  --au-marker-core: var(--panel);
+  --au-marker-ring: 2px;
+  --au-marker-glow: 0 0 0 3px var(--brass-wash);
+  --au-marker-open-core: var(--panel);
+  --au-gate-fill: color-mix(in srgb, var(--danger-wash) 55%, var(--panel));
+  --au-gate-rule: 3px;
+  --au-hold-weight: 600;
+  --au-body-ink: var(--text);
+  --au-quiet-border: 1px dashed var(--line);
   --shadow-card: 0 1px 2px rgba(28,35,28,.045), 0 18px 40px -34px rgba(30,40,30,.25);
   --shadow-drawer: -24px 0 60px rgba(30,40,30,.16);
   color-scheme: light;
@@ -291,7 +322,7 @@ kbd {
 }
 .ccr-refresh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--slate); animation: ccr-pulse 1.5s ease-in-out infinite; }
 @keyframes ccr-pulse { 50% { opacity: .3; } }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .ccr-refresh-dot { animation: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .ccr-refresh-dot { animation: none; } .ccr-au-row { transition: none; } }
 
 /* main layout */
 .ccr-layout {
@@ -658,7 +689,7 @@ kbd {
 .ccr-detail-rail-name { padding: 13px 12px 13px 0; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
 .ccr-detail-rail-body { padding: 11px 0 11px 14px; border-left: 1px solid var(--hairline); color: var(--muted); font-size: 11px; min-width: 0; }
 .ccr-detail-line + .ccr-detail-line { margin-top: 5px; }
-.ccr-detail-line.mono { font-family: var(--font-mono); font-size: 9.5px; }
+.ccr-detail-line.mono { font-family: var(--font-mono); font-size: 9.5px; overflow-wrap: anywhere; }
 .ccr-detail-pr { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 7px 0; border-top: 1px solid var(--hairline); }
 .ccr-detail-pr:first-child { border-top: 0; }
 .ccr-detail-pr-title { color: var(--text); font-size: 10.5px; }
@@ -702,11 +733,268 @@ kbd {
 .ccr-palette-law { padding: 8px 13px 10px; border-top: 1px solid var(--hairline); color: var(--faint); font-size: 9px; }
 .ccr-palette-empty { padding: 28px 14px; color: var(--faint); font-size: 11px; text-align: center; }
 
+/* autonomy — responsibilities, owed turn, gate ---------------------------
+ *
+ * Two art directions over one semantic system.
+ *   Dark  = command centre. Depth is luminance: raised material, inset top
+ *           highlight, a restrained brass halo on the seat that owes the move,
+ *           a lit wash bleeding out of the chairman rule.
+ *   Light = research workspace. Depth is cast shadow on white material; the
+ *           owed marker is a heavy ring around a paper core with no glow, the
+ *           chairman band is a printed rule over a flat tint, and body ink
+ *           steps up from --muted to --text because 11px muted on near-white
+ *           paper loses the sentence a dark console does not.
+ * Both directions share hierarchy, order, semantics and copy exactly.
+ */
+.ccr-au-body { display: grid; gap: 16px; }
+
+/* chairman band — the only place this section raises its voice */
+.ccr-au-decisions {
+  padding: 15px 17px 16px;
+  border: 1px solid var(--au-cell-border);
+  border-left: 3px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--au-cell-shadow);
+}
+.ccr-au-decisions.ccr-has-items {
+  border-color: color-mix(in srgb, var(--brass) 30%, var(--au-cell-border));
+  border-left-color: var(--brass);
+  background: var(--au-band-fill);
+  box-shadow: var(--au-band-shadow);
+}
+.ccr-au-decisions-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: baseline; }
+.ccr-au-decisions-head .ccr-section-eyebrow { grid-column: 1; }
+.ccr-au-decisions-head h3 {
+  grid-column: 1;
+  margin-top: 2px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 640;
+  letter-spacing: -.025em;
+  color: var(--text-strong);
+}
+.ccr-au-decisions-head .ccr-count { grid-column: 2; grid-row: 1 / span 2; }
+.ccr-au-decisions.ccr-has-items .ccr-au-decisions-head h3 { font-size: 20px; }
+.ccr-au-decisions.ccr-has-items .ccr-count { color: var(--brass-ink); font-weight: 700; }
+.ccr-au-decision-list { display: grid; gap: 2px; margin-top: 12px; }
+.ccr-au-decision {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 0 12px;
+  border-top: 1px solid color-mix(in srgb, var(--brass) 20%, var(--hairline));
+}
+.ccr-au-decision:first-child { border-top: 0; padding-top: 2px; }
+.ccr-au-decision-title { color: var(--text-strong); font-size: 14px; font-weight: 620; letter-spacing: -.012em; }
+.ccr-au-decision-reason { margin-top: 4px; color: var(--au-body-ink); font-size: 11.5px; line-height: 1.42; }
+
+/* owed-turn ledger */
+.ccr-au-ledger {
+  padding: 13px 15px 11px;
+  border: 1px solid var(--au-cell-border);
+  border-radius: var(--radius-md);
+  background: var(--au-cell-bg);
+  box-shadow: var(--au-cell-shadow);
+}
+.ccr-au-ledger-track { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 1px; }
+.ccr-au-ledger-cell { min-width: 0; padding: 2px 10px 8px; border-left: 1px solid var(--hairline); }
+.ccr-au-ledger-cell:first-child { border-left: 0; padding-left: 0; }
+.ccr-au-ledger-count {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 620;
+  line-height: 1.05;
+  letter-spacing: -.04em;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+.ccr-au-ledger-name {
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ccr-au-ledger-cell.is-zero .ccr-au-ledger-count { color: var(--faint); font-weight: 500; }
+.ccr-au-ledger-cell.is-yours .ccr-au-ledger-count { color: var(--brass-ink); }
+.ccr-au-ledger-cell.is-yours .ccr-au-ledger-name { color: var(--brass); }
+.ccr-au-reading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline);
+}
+.ccr-au-reading-item { display: inline-flex; align-items: baseline; gap: 5px; color: var(--faint); font-size: 10px; }
+.ccr-au-reading-item strong { color: var(--muted); font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; }
+
+/* responsibility rows */
+.ccr-au-list { border-top: 1px solid var(--line); }
+.ccr-au-list-empty { padding: 26px 12px; border-bottom: 1px solid var(--hairline); color: var(--faint); font-size: 11.5px; }
+.ccr-au-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(200px, 1.12fr) minmax(148px, .6fr) minmax(228px, 1.24fr) minmax(120px, auto);
+  gap: 16px;
+  align-items: start;
+  padding: 14px 10px 15px 13px;
+  border-bottom: 1px solid var(--hairline);
+  cursor: pointer;
+  transition: background .14s ease;
+}
+.ccr-au-row:hover { background: var(--au-row-hover); }
+.ccr-au-row.is-decision::before,
+.ccr-au-row.is-owed-person::before,
+.ccr-au-row.is-owed-machine::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  border-radius: 3px;
+  background: var(--brass);
+}
+.ccr-au-row.is-decision::before { width: 3px; top: 12px; bottom: 12px; }
+.ccr-au-row.is-owed-machine::before { background: var(--slate); }
+.ccr-au-label {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.ccr-au-id { min-width: 0; }
+.ccr-au-title { color: var(--text-strong); font-size: 13.5px; font-weight: 630; letter-spacing: -.012em; line-height: 1.3; }
+.ccr-au-ref { margin-top: 4px; font-family: var(--font-mono); font-size: 9px; color: var(--faint); overflow-wrap: anywhere; }
+.ccr-au-state { margin-top: 3px; color: var(--muted); font-size: 10.5px; }
+
+.ccr-au-turn { min-width: 0; }
+.ccr-au-turn-name { color: var(--text-strong); font-size: 14.5px; font-weight: 640; letter-spacing: -.018em; }
+.ccr-au-turn-name.is-unknown { color: var(--faint); font-weight: 560; }
+.ccr-au-turn-reason { margin-top: 7px; color: var(--au-body-ink); font-size: 10.5px; line-height: 1.4; }
+
+/* the baton: one lit seat on a five-seat track */
+.ccr-au-track { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); margin-top: 10px; }
+.ccr-au-seat { position: relative; min-width: 0; padding-top: 12px; text-align: center; }
+.ccr-au-seat::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 2px;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  border: 1px solid var(--faint);
+  background: var(--bg-elevated);
+}
+.ccr-au-seat:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 5px);
+  width: calc(100% - 10px);
+  height: 1px;
+  background: var(--line);
+}
+.ccr-au-seat.is-owed::before {
+  border: var(--au-marker-ring) solid var(--brass);
+  background: var(--au-marker-core);
+  box-shadow: var(--au-marker-glow);
+}
+.ccr-au-seat.is-open.is-owed::before {
+  border-color: var(--faint);
+  background: var(--au-marker-open-core);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint) 16%, transparent);
+}
+.ccr-au-seat-name {
+  display: block;
+  padding: 0 1px;
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ccr-au-seat.is-owed .ccr-au-seat-name { color: var(--brass-ink); }
+.ccr-au-seat.is-open.is-owed .ccr-au-seat-name { color: var(--muted); }
+
+.ccr-au-read { min-width: 0; display: grid; gap: 12px; }
+.ccr-au-gate-text { color: var(--au-body-ink); font-size: 11.5px; line-height: 1.42; }
+.ccr-au-gate-text.is-quiet { color: var(--faint); font-size: 11px; }
+.ccr-au-gate-code { margin-top: 4px; font-family: var(--font-mono); font-size: 8.5px; color: var(--faint); overflow-wrap: anywhere; }
+.ccr-au-hold {
+  margin-top: 9px;
+  padding: 8px 10px;
+  border-left: var(--au-gate-rule) solid var(--danger);
+  border-radius: 0 6px 6px 0;
+  background: var(--au-gate-fill);
+  color: var(--danger-ink);
+  font-size: 10.5px;
+  font-weight: var(--au-hold-weight);
+  line-height: 1.4;
+}
+.ccr-au-mono { font-family: var(--font-mono); font-size: 9px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+.ccr-au-mono.is-quiet { color: var(--faint); }
+
+.ccr-au-right { min-width: 0; display: grid; gap: 9px; justify-items: end; }
+.ccr-au-marks { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.ccr-au-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
+/* history is drawn as history: no stripe, receded ink, never a live reading */
+/* History recedes by INK, never by luminance: a lighter ground reads as raised
+ * on paper and as lifted on the console, so the closed rail plus muted ink is
+ * the one mechanism that means "not live" in both art directions. */
+.ccr-au-row.is-history::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  border-radius: 0;
+  background: repeating-linear-gradient(var(--line) 0 3px, transparent 3px 7px);
+}
+.ccr-au-row.is-history .ccr-au-title { color: var(--muted); font-weight: 570; }
+.ccr-au-row.is-history .ccr-au-turn-name { color: var(--faint); font-weight: 570; }
+.ccr-au-row.is-history .ccr-au-gate-text,
+.ccr-au-row.is-history .ccr-au-turn-reason { color: var(--faint); }
+
+.ccr-au-gaps { border-top: 1px solid var(--hairline); }
+.ccr-au-gap-note { color: var(--faint); font-size: 10.5px; line-height: 1.42; max-width: 78ch; }
+.ccr-au-gap-list { display: grid; gap: 3px; margin-top: 9px; }
+.ccr-au-detail-sub { margin-top: 5px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+
+/* absent projection — calm, not an alarm */
+.ccr-au-quiet {
+  padding: 22px 20px 24px;
+  border: var(--au-quiet-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 45%, transparent);
+}
+.ccr-au-quiet-title { color: var(--muted); font-family: var(--font-display); font-size: 15px; font-weight: 620; letter-spacing: -.02em; }
+.ccr-au-quiet-text { margin-top: 6px; max-width: 68ch; color: var(--faint); font-size: 11.5px; line-height: 1.5; }
+
 /* responsive */
 @media (max-width: 1280px) {
   :root { --sidebar: 132px; --dock: 250px; }
   .ccr-main { padding-left: 24px; padding-right: 24px; }
   .ccr-mission-row { grid-template-columns: minmax(180px,.9fr) minmax(210px,1.2fr) minmax(205px,.9fr) minmax(90px,auto); gap: 11px; }
+  .ccr-au-row { grid-template-columns: minmax(170px,1fr) minmax(140px,.62fr) minmax(210px,1.2fr) minmax(110px,auto); gap: 12px; }
   .ccr-topbar { grid-template-columns: minmax(220px,.8fr) minmax(280px,470px) minmax(240px,.8fr); }
   .ccr-source-pulse { display: none; }
   .ccr-local-badge { display: none; }
@@ -722,6 +1010,9 @@ kbd {
   .ccr-mission-row { grid-template-columns: minmax(170px,.8fr) minmax(220px,1.2fr) minmax(205px,.9fr); }
   .ccr-mission-evidence { grid-column: 1 / -1; justify-content: flex-start; margin-top: -4px; }
   .ccr-surface-dock-mobile { display: block; }
+  .ccr-au-row { grid-template-columns: minmax(170px,1fr) minmax(150px,.7fr) minmax(220px,1.25fr); }
+  .ccr-au-right { grid-column: 1 / -1; justify-items: start; }
+  .ccr-au-marks, .ccr-au-actions { justify-content: flex-start; }
 }
 
 @media (max-width: 760px) {
@@ -750,8 +1041,8 @@ kbd {
     background: color-mix(in srgb, var(--bg) 93%, transparent);
     backdrop-filter: blur(12px);
   }
-  .ccr-nav-group { display: grid; grid-template-columns: repeat(4,1fr); }
-  .ccr-nav-link { min-height: 30px; justify-content: center; gap: 6px; font-size: 10.5px; }
+  .ccr-nav-group { display: grid; grid-template-columns: repeat(5,1fr); }
+  .ccr-nav-link { min-height: 30px; justify-content: center; gap: 4px; padding: 0 4px; font-size: 9.5px; }
   .ccr-sidebar-foot { display: none; }
   .ccr-main { padding: 24px 14px 64px; }
   .ccr-view-section { scroll-margin-top: calc(var(--topbar) + 50px); }
@@ -777,6 +1068,14 @@ kbd {
   .ccr-field-wide { grid-column: auto; }
   .ccr-stamps { grid-template-columns: 1fr 1fr; }
   .ccr-alarm { grid-template-columns: 1fr; }
+  .ccr-au-row { grid-template-columns: 1fr; gap: 13px; padding: 15px 8px 16px 12px; }
+  .ccr-au-track { max-width: 310px; }
+  .ccr-au-ledger { padding: 12px 12px 10px; }
+  .ccr-au-ledger-cell { padding: 2px 5px 7px; }
+  .ccr-au-ledger-count { font-size: 20px; }
+  .ccr-au-ledger-name { font-size: 8px; letter-spacing: .06em; }
+  .ccr-au-decisions { padding: 14px; }
+  .ccr-au-decision { grid-template-columns: 1fr; gap: 9px; justify-items: start; }
 }
 
 /* remote read-only projection ------------------------------------------- */

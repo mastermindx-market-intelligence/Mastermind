@@ -390,3 +390,258 @@ def test_remote_layout_has_explicit_embed_and_narrow_viewport_rules() -> None:
     remote_rules = styles[styles.index('html[data-control-room-mode="remote-read-only"]') :]
     assert "minmax(0,1fr)" in remote_rules
     assert "@media (max-width: 760px)" in remote_rules
+
+
+# --- autonomy responsibilities section ------------------------------------
+#
+# These pin the presentation contract of the Autonomy section only. They do not
+# grant it projection, lifecycle, identity or completion authority, and they do
+# not assert anything about the server-side projection module.
+
+
+def _autonomy_js() -> str:
+    source = JS.read_text(encoding="utf-8")
+    start = source.index("  // autonomy ---")
+    end = source.index("  // state ---", start)
+    return source[start:end]
+
+
+def _css_theme_blocks() -> tuple[str, str]:
+    source = CSS.read_text(encoding="utf-8")
+    light_start = source.index('html[data-theme="light"] {')
+    root = source[source.index(":root {") : light_start]
+    light = source[light_start : source.index("\n}", light_start)]
+    return root, light
+
+
+def _declared(block: str) -> dict[str, str]:
+    rows: dict[str, str] = {}
+    for line in block.splitlines():
+        line = line.strip()
+        if line.startswith("--au-") and ":" in line:
+            name, _, value = line.partition(":")
+            rows[name.strip()] = value.strip().rstrip(";")
+    return rows
+
+
+def test_x1_autonomy_has_one_mount_point_and_one_nav_entry() -> None:
+    markup = INDEX.read_text(encoding="utf-8")
+    probe = _MarkupProbe()
+    probe.feed(markup)
+
+    assert 'id="autonomy"' in markup
+    assert 'id="ccr-autonomy"' in markup
+    assert 'data-nav="autonomy"' in markup
+    assert 'id="nav-autonomy-count"' in markup
+    assert {"autonomy", "ccr-autonomy", "nav-autonomy-count"}.issubset(set(probe.ids))
+    assert len(probe.ids) == len(set(probe.ids))
+    assert probe.script_srcs == ["/static/control_room.js"]
+    assert probe.style_attrs == []
+    # The section is composed by the shared renderer, never by page markup.
+    assert "ccr-au-row" not in markup
+
+
+def test_x1_autonomy_renders_only_from_the_canonical_projection_key() -> None:
+    source = JS.read_text(encoding="utf-8")
+    assert "renderAutonomy(doc.autonomy)" in source
+
+    block = _autonomy_js()
+    assert "function renderAutonomy(projection)" in block
+    assert 'var mount = document.getElementById("ccr-autonomy")' in block
+    assert "if (!mount) return;" in block
+    # Presentation only: the section never talks to the server or re-derives truth.
+    for forbidden in ("postJSON", "getJSON", "/api/", "fetch(", "Date.now()", "Math.random"):
+        assert forbidden not in block
+
+
+def test_x1_autonomy_absent_projection_is_calm_and_truthful_not_an_error() -> None:
+    block = _autonomy_js()
+    assert "function auNotWired(mount)" in block
+    assert "Not wired yet" in block
+    assert "Nothing is hidden and nothing has failed" in block
+    assert "ccr-au-quiet" in block
+    assert 'if (!STATE.autonomy) {' in block
+    # The not-yet-wired branch must not borrow the degraded-source alarm.
+    assert "ccr-alarm" not in block
+    assert "ccr-problem" not in block
+
+    styles = CSS.read_text(encoding="utf-8")
+    quiet = styles[styles.index(".ccr-au-quiet {") : styles.index(".ccr-au-quiet-title")]
+    assert "var(--au-quiet-border)" in quiet
+    assert "--danger" not in quiet
+
+
+def test_x1_autonomy_never_presents_a_stale_card_as_live() -> None:
+    block = _autonomy_js()
+    assert 'return card.actionability_reason === "stale_history" || card.freshness === "stale";' in block
+    marks = block[block.index("function auMarks(card)") : block.index("function auRow(card)")]
+    assert 'if (card.is_actionable === true) marks.appendChild(chip("LIVE"' in marks
+    assert 'else if (auIsHistory(card)) marks.appendChild(chip("HISTORY"' in marks
+    assert 'else marks.appendChild(chip("NOT ACTIONABLE"' in marks
+
+    row = block[block.index("function auRow(card)") : block.index("function auLedger(projection)")]
+    assert 'if (auIsHistory(card)) cls += " is-history";' in row
+
+    styles = CSS.read_text(encoding="utf-8")
+    # History recedes by ink and a closed rail, never by an owed-turn stripe.
+    assert ".ccr-au-row.is-history::before" in styles
+    assert ".ccr-au-row.is-history .ccr-au-title { color: var(--muted)" in styles
+
+
+def test_x1_autonomy_placement_not_observable_is_never_shown_as_a_capability() -> None:
+    block = _autonomy_js()
+    chip_fn = block[block.index("function auPlacementChip(card)") : block.index("function auMarks(card)")]
+    assert 'placement.observable !== true' in chip_fn
+    assert 'placement.value === "not_observable"' in chip_fn
+    assert 'return chip("PLACEMENT NOT OBSERVABLE", "is-dim");' in chip_fn
+    # No token is ever synthesized locally; the map only relabels a supplied value.
+    assert "AU_PLACEMENT[value] || value.replace" in chip_fn
+
+    detail = block[block.index("function renderAutonomyDetail(card)") : block.index("function openAutonomyDetail")]
+    assert "Not observable from canonical sources." in detail
+
+
+def test_x1_autonomy_effect_unknown_bars_retry_and_failover() -> None:
+    block = _autonomy_js()
+    assert 'placement.value === "EFFECT_UNKNOWN" || worker.effect_state === "effect_unknown"' in block
+    assert (
+        "Effect not confirmed — retry and failover are not permitted "
+        "until a canonical source reads the effect."
+    ) in block
+    # The bar is stated in the row and again in the detail drawer.
+    assert block.count("retry and failover are not permitted") == 2
+    for forbidden in ("Retry", "Failover", "Force ", "Override"):
+        assert forbidden not in block
+
+
+def test_x1_autonomy_composition_leads_with_owed_action_not_event_volume() -> None:
+    block = _autonomy_js()
+    render = block[block.index("function renderAutonomy(projection)") :]
+    decisions = render.index("auDecisions(STATE.autonomy, byRef)")
+    ledger = render.index("auLedger(STATE.autonomy)")
+    listing = render.index('el("div", { className: "ccr-au-list" })')
+    gaps = render.index("auGapFold(STATE.autonomy)")
+    assert decisions < ledger < listing < gaps
+
+    ledger_fn = block[block.index("function auLedger(projection)") : block.index("function auDecisions")]
+    assert "projection.owed_by_seat" in ledger_fn
+    assert 'AU_SEAT_ORDER.forEach' in ledger_fn
+    for pair in ('["live", counts.actionable]', '["history", counts.stale]', '["gated", counts.blocked]'):
+        assert pair in ledger_fn
+    # No synthesized health, score or ranking of the organization.
+    for forbidden in ("score", "health", "rank", "priority"):
+        assert forbidden not in block
+
+
+def test_x1_autonomy_chairman_decision_band_names_the_reason() -> None:
+    block = _autonomy_js()
+    band = block[block.index("function auDecisions(projection, byRef)") : block.index("function auGapFold")]
+    assert "projection.chairman_decisions" in band
+    assert "card.chairman_decision_reason" in band
+    assert "Nothing here needs your decision." in band
+    assert "This reference is not in the loaded responsibility list." in band
+
+
+def test_x1_autonomy_source_loss_is_bounded_and_named() -> None:
+    block = _autonomy_js()
+    gaps = block[block.index("function auGapFold(projection)") : block.index("function auReceiptFold")]
+    assert "projection.source_failures" in gaps
+    assert "projection.issues" in gaps
+    assert "row.owner" in gaps
+    assert (
+        "Losing a source removes detail; it never changes what the canonical "
+        "sources above already recorded."
+    ) in gaps
+    assert "Every contributing source answered." in gaps
+
+
+def test_x1_autonomy_disagreements_keep_both_readings_and_both_owners() -> None:
+    block = _autonomy_js()
+    detail = block[block.index("function renderAutonomyDetail(card)") : block.index("function openAutonomyDetail")]
+    assert "Source drift — both readings kept" in detail
+    assert "(entry.values || []).join" in detail
+    assert "(entry.sources || []).forEach" in detail
+    for forbidden in ("winner", "vote", "prefer", "average"):
+        assert forbidden not in block
+
+
+def test_x1_autonomy_owed_action_reuses_the_existing_binding_law() -> None:
+    block = _autonomy_js()
+    binding = block[block.index("function auOwedBinding(card)") : block.index("function auTurnTrack(seat)")]
+    assert "if (REMOTE_READ_ONLY) return null;" in binding
+    assert "uniqueBinding(work, seat)" in binding
+    assert "bindingConfidence(binding).openable ? binding : null" in binding
+    # A responsibility with no unambiguous, openable destination offers no jump.
+    assert 'if (seat === "unknown") return null;' in binding
+
+
+def test_x1_autonomy_copy_stays_inside_the_front_facing_vocabulary_law() -> None:
+    block = _autonomy_js().lower()
+    for forbidden in ("falsifier", "refuted", "thesis", "证伪", "validated"):
+        assert forbidden not in block
+    assert "conditions are still being watched" in block
+
+
+def test_x1_autonomy_is_designed_for_two_themes_not_one_token_swap() -> None:
+    root, light = _css_theme_blocks()
+    dark_tokens = _declared(root)
+    light_tokens = _declared(light)
+
+    assert dark_tokens, "the autonomy section must declare its own material tokens"
+    assert set(dark_tokens) == set(light_tokens), (
+        "every autonomy token needs a value in both theme blocks; a colour whose "
+        "only definition lives inside one theme block is a skin, not a design"
+    )
+
+    # These are the mechanisms that must genuinely differ between the command
+    # centre reading and the research workspace reading.
+    for token in (
+        "--au-cell-bg",
+        "--au-cell-shadow",
+        "--au-band-fill",
+        "--au-marker-core",
+        "--au-marker-ring",
+        "--au-marker-glow",
+        "--au-row-hover",
+        "--au-body-ink",
+        "--au-hold-weight",
+        "--au-gate-rule",
+    ):
+        assert dark_tokens[token] != light_tokens[token], f"{token} is identical in both themes"
+
+    # Dark carries a halo; light must not.
+    assert "0 0 13px" in dark_tokens["--au-marker-glow"]
+    assert "0 0 13px" not in light_tokens["--au-marker-glow"]
+    # Light carries a cast shadow; dark uses an inset highlight instead.
+    assert dark_tokens["--au-cell-shadow"].startswith("inset")
+    assert not light_tokens["--au-cell-shadow"].startswith("inset")
+
+
+def test_x1_autonomy_is_responsive_at_every_existing_breakpoint() -> None:
+    styles = CSS.read_text(encoding="utf-8")
+    compact = styles[styles.index("@media (max-width: 1280px)") : styles.index("@media (max-width: 1050px)")]
+    dockless = styles[styles.index("@media (max-width: 1050px)") : styles.index("@media (max-width: 760px)")]
+    mobile = styles[styles.index("@media (max-width: 760px)") :]
+
+    assert ".ccr-au-row { grid-template-columns:" in compact
+    assert ".ccr-au-right { grid-column: 1 / -1; justify-items: start; }" in dockless
+    assert ".ccr-au-row { grid-template-columns: 1fr;" in mobile
+    assert ".ccr-nav-group { display: grid; grid-template-columns: repeat(5,1fr); }" in mobile
+    assert ".ccr-au-ledger-count { font-size: 20px; }" in mobile
+
+    reduced = styles[styles.index("@media (prefers-reduced-motion: reduce)") :]
+    assert ".ccr-au-row { transition: none; }" in reduced[: reduced.index("}\n")+2] or ".ccr-au-row { transition: none; }" in reduced[:400]
+
+
+def test_x1_autonomy_keeps_the_house_semantic_colour_law() -> None:
+    styles = CSS.read_text(encoding="utf-8")
+    section = styles[styles.index("/* autonomy — responsibilities") : styles.index("\n/* responsive */")]
+    # Green is reserved for narrow verified/openable success; the section never
+    # claims organizational health, so it must not reach for --ok at all.
+    assert "--ok" not in section
+    assert "var(--brass)" in section
+    assert "var(--slate)" in section
+    assert "var(--danger)" in section
+    # No parallel palette: only tokens, never raw product hex.
+    body = "\n".join(line for line in section.splitlines() if not line.strip().startswith("*"))
+    assert "#" not in body
