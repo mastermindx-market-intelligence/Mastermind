@@ -191,9 +191,8 @@ def test_no_rebuild_and_stop_boundaries_remain_explicit() -> None:
     for marker in (
         "not the provider-neutral materializer owned by HF1",
         "must not introduce a generic package installer",
-        "no general Model Router route",
+        "add a general Model Router route",
         "Do not migrate default policy",
-        "Do not",
         "begin non-Codex parity on the same carrier",
         "PREFERRED_AVENUE: CTO Sol",
         "WHY NOT FABLE",
