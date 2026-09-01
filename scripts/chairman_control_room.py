@@ -286,6 +286,12 @@ class ServerConfig:
     #: ``tmp_path`` here instead.
     claude_projects_dir: str | None = None
     codex_sessions_dir: str | None = None
+    #: CAP-C1: optional path to a placement-selection facts document,
+    #: passed straight through to ``ccr.build_control_room``'s own
+    #: ``placement_selection_path`` parameter. ``None`` (the default) means
+    #: no ``placement_selection`` section is composed at all — see
+    #: ``control_plane.chairman_control_room._read_placement_selection``.
+    placement_selection_path: str | Path | None = None
     #: Overrides for the ``chatgpt`` adapter's managed-browser environment
     #: store roots (Sol architecture correction, MAS-113, 2026-08-22) —
     #: ``None`` (the production default) means the adapter's own real default
@@ -393,6 +399,7 @@ def _compose_state_doc(
             now=generated_at,
             timeout=timeout,
             bindings_path=config.bindings_path,
+            placement_selection_path=config.placement_selection_path,
         )
     return _compose_with_live_active_builds(config, live_active_builds, generated_at, timeout=timeout)
 
@@ -1287,6 +1294,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", default=None, help="Mastermind checkout root (default: this repo)")
     parser.add_argument("--macro-root", default=None, help="Macro checkout root (default: auto-resolved)")
     parser.add_argument("--bindings-path", default=None, help="surface_bindings.json path (default: platform default)")
+    parser.add_argument(
+        "--placement-selection", default=None,
+        help="CAP-C1: path to a placement-selection facts document (default: no placement_selection "
+             "section composed)",
+    )
     parser.add_argument("--open", action="store_true", help="open the Control Room URL after startup")
     parser.add_argument("--check", action="store_true", help="build one document + capability census, print, exit 0")
     parser.add_argument(
@@ -1306,11 +1318,15 @@ def _build_config(args: argparse.Namespace) -> ServerConfig:
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _REPO_ROOT
     macro_root = _resolve_macro_root_simple(args.macro_root, os.environ, repo_root)
     bindings_path = Path(args.bindings_path).expanduser() if args.bindings_path else None
+    placement_selection_path = (
+        Path(args.placement_selection).expanduser() if args.placement_selection else None
+    )
     token = secrets.token_urlsafe(32)
     return ServerConfig(
         repo_root=repo_root,
         macro_root=macro_root,
         bindings_path=bindings_path,
+        placement_selection_path=placement_selection_path,
         token=token,
         origin=f"http://{HOST}:{args.port}",
         port=args.port,

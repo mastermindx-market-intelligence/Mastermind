@@ -47,6 +47,8 @@ from pathlib import Path
 import pytest
 
 from control_plane import chairman_control_room as ccr
+from control_plane import executive_placement_selection as eps
+from control_plane import executive_steward as es
 from control_plane import surface_bindings as sb
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "chairman_control_room"
@@ -132,7 +134,12 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
     assert set(doc.keys()) == {
         "schema", "generated_at", "sources", "degraded", "attention", "work",
         "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
+        "placement_selection",
     }
+    # No facts document was supplied (the common case) -> no section, no
+    # degraded entry named for it (CAP-C1).
+    assert doc["placement_selection"] is None
+    assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
     assert set(doc["sources"].keys()) == {
         "mastermind_sha", "mastermind_branch", "macro_sha", "macro_root",
         "executive_inbox_schema", "agent_os_brief_schema",
@@ -852,3 +859,242 @@ def test_falsifier_artifact_vs_brief_disagreement_preservation():
     # Both raw values survive unchanged alongside the disagreement note.
     assert card["agent_os"]["status"] == "done"
     assert card["agent_os"]["state"] == "in_progress"
+
+
+# ---------------------------------------------------------------------------
+# CAP-C1 — placement_selection (compose_control_room pure input)
+# ---------------------------------------------------------------------------
+
+
+def _placement_source(owner: es.SourceOwner, ref: str) -> es.SourceRef:
+    return es.SourceRef(owner=owner, ref=ref, observed_at="2026-09-01T00:00:00Z", freshness=es.Freshness.CURRENT)
+
+
+def _placement_responsibility(*, ref: str = "WS:CAP-C1", state: str | None = "waiting_capacity") -> es.ResponsibilityFact:
+    return es.ResponsibilityFact(
+        responsibility_ref=ref,
+        title="Deterministic placement selection",
+        accountable_seat=es.Seat.COO,
+        state=state,
+        root_job_id=None,
+        source=_placement_source(es.SourceOwner.AGENT_OS, "agentos/workstreams/WS-CAP-C1.md"),
+    )
+
+
+def _placement_candidate(worker_id: str = "worker-1") -> eps.PlacementCandidateFact:
+    return eps.PlacementCandidateFact(
+        worker_id=worker_id,
+        provider="acme",
+        account_label="account1",
+        quota_class="standard",
+        capabilities=frozenset({"cap_a"}),
+        observed_at_ms=1000,
+        occupancy=eps.OccupancyState.FREE,
+        occupancy_source=_placement_source(es.SourceOwner.RUNTIME_BINDING, f"binding/{worker_id}"),
+        capacity_state=es.CapacityState.AVAILABLE,
+        capacity_source=_placement_source(es.SourceOwner.CAPACITY, f"capacity/{worker_id}"),
+        host_source_closure_proven=True,
+        closure_source=_placement_source(es.SourceOwner.CAPACITY, f"closure/{worker_id}"),
+        effect_state=es.EffectState.NONE,
+    )
+
+
+def _valid_placement_selection_wire_dict() -> dict:
+    decision = eps.select_placement(
+        responsibility=_placement_responsibility(),
+        demand=eps.PlacementDemand(
+            required_capabilities=frozenset({"cap_a"}), quota_class="standard", provider="acme",
+        ),
+        candidates=(_placement_candidate(),),
+    )
+    assert decision.state is eps.SelectionState.SELECTED
+    return decision.to_dict()
+
+
+def test_compose_control_room_renders_a_valid_placement_selection_section_verbatim(
+    boot_packet, inbox, active_builds, bindings
+):
+    wire = _valid_placement_selection_wire_dict()
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=wire)
+    assert doc["placement_selection"] == wire
+    assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+
+
+def test_compose_control_room_degrades_an_invalid_placement_selection_wire_dict(
+    boot_packet, inbox, active_builds, bindings
+):
+    invalid = {"schema_version": eps.SELECTION_SCHEMA, "not_a_recognized_key": True}
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection=invalid)
+    assert doc["placement_selection"] is None
+    assert any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+    # compose_control_room stays total — it degrades, it never raises.
+    assert doc["schema"] == ccr.SCHEMA
+
+
+def test_compose_control_room_never_raises_on_a_garbage_placement_selection_value(
+    boot_packet, inbox, active_builds, bindings
+):
+    doc = _compose(boot_packet, inbox, active_builds, bindings, placement_selection="not even a mapping")
+    assert doc["placement_selection"] is None
+    assert any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+
+
+# ---------------------------------------------------------------------------
+# CAP-C1 — placement_selection (build_control_room gather layer)
+# ---------------------------------------------------------------------------
+
+
+def _facts_document(*, responsibility_state: str = "waiting_capacity") -> dict:
+    source = {
+        "owner": "agent_os", "ref": "agentos/workstreams/WS-CAP-C1.md",
+        "observed_at": "2026-09-01T00:00:00Z", "freshness": "current",
+    }
+    candidate_source = lambda owner, ref: {  # noqa: E731 — tiny local test helper
+        "owner": owner, "ref": ref, "observed_at": "2026-09-01T00:00:00Z", "freshness": "current",
+    }
+    return {
+        "responsibility": {
+            "responsibility_ref": "WS:CAP-C1",
+            "title": "Deterministic placement selection",
+            "accountable_seat": "coo",
+            "state": responsibility_state,
+            "root_job_id": None,
+            "source": source,
+        },
+        "demand": {
+            "required_capabilities": ["cap_a"],
+            "quota_class": "standard",
+            "provider": "acme",
+        },
+        "candidates": [
+            {
+                "worker_id": "worker-1",
+                "provider": "acme",
+                "account_label": "account1",
+                "quota_class": "standard",
+                "capabilities": ["cap_a"],
+                "observed_at_ms": 1000,
+                "occupancy": "free",
+                "occupancy_source": candidate_source("runtime_binding", "binding/worker-1"),
+                "capacity_state": "available",
+                "capacity_source": candidate_source("capacity", "capacity/worker-1"),
+                "host_source_closure_proven": True,
+                "closure_source": candidate_source("capacity", "closure/worker-1"),
+                "effect_state": "none",
+            }
+        ],
+    }
+
+
+def test_build_control_room_flows_a_valid_facts_document_to_a_selected_section(
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, agent_os_state, bindings
+):
+    macro_root = tmp_path / "macro"
+    (macro_root / "data" / "governance").mkdir(parents=True)
+    (macro_root / "data" / "governance" / "project_active_builds.json").write_text(
+        json.dumps(active_builds), encoding="utf-8"
+    )
+    (macro_root / "data" / "governance" / "agent_os_state.json").write_text(
+        json.dumps(agent_os_state), encoding="utf-8"
+    )
+
+    bindings_path = tmp_path / "bindings" / "surface_bindings.json"
+    sb.save_bindings(bindings, path=bindings_path)
+
+    facts_path = tmp_path / "placement_facts.json"
+    facts_path.write_text(json.dumps(_facts_document()), encoding="utf-8")
+
+    fixture_packet = copy.deepcopy(boot_packet)
+    fixture_packet["macro"]["root"] = str(macro_root)
+    fixture_inbox = copy.deepcopy(inbox)
+    fixture_inbox["grounding"]["macro"]["root"] = str(macro_root)
+
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", lambda **kwargs: fixture_packet)
+    monkeypatch.setattr(
+        ccr.executive_inbox, "build_inbox",
+        lambda **kwargs: fixture_inbox,
+    )
+
+    doc = ccr.build_control_room(
+        repo_root=tmp_path, now="2026-08-21T00:10:00Z", bindings_path=bindings_path,
+        placement_selection_path=facts_path,
+    )
+
+    assert doc["placement_selection"] is not None
+    assert doc["placement_selection"]["state"] == "selected"
+    assert doc["placement_selection"]["selected"]["worker_id"] == "worker-1"
+    assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+
+
+def test_build_control_room_names_a_malformed_facts_document_as_degraded(
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, agent_os_state, bindings
+):
+    macro_root = tmp_path / "macro"
+    (macro_root / "data" / "governance").mkdir(parents=True)
+    (macro_root / "data" / "governance" / "project_active_builds.json").write_text(
+        json.dumps(active_builds), encoding="utf-8"
+    )
+    (macro_root / "data" / "governance" / "agent_os_state.json").write_text(
+        json.dumps(agent_os_state), encoding="utf-8"
+    )
+
+    bindings_path = tmp_path / "bindings" / "surface_bindings.json"
+    sb.save_bindings(bindings, path=bindings_path)
+
+    facts_path = tmp_path / "placement_facts.json"
+    facts_path.write_text("{ not valid json", encoding="utf-8")
+
+    fixture_packet = copy.deepcopy(boot_packet)
+    fixture_packet["macro"]["root"] = str(macro_root)
+    fixture_inbox = copy.deepcopy(inbox)
+    fixture_inbox["grounding"]["macro"]["root"] = str(macro_root)
+
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", lambda **kwargs: fixture_packet)
+    monkeypatch.setattr(
+        ccr.executive_inbox, "build_inbox",
+        lambda **kwargs: fixture_inbox,
+    )
+
+    doc = ccr.build_control_room(
+        repo_root=tmp_path, now="2026-08-21T00:10:00Z", bindings_path=bindings_path,
+        placement_selection_path=facts_path,
+    )
+
+    assert doc["placement_selection"] is None
+    assert any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+    # gather layer never raises even on a broken facts document.
+    assert doc["schema"] == ccr.SCHEMA
+
+
+def test_build_control_room_without_the_flag_composes_no_placement_selection(
+    tmp_path, monkeypatch, boot_packet, inbox, active_builds, agent_os_state, bindings
+):
+    macro_root = tmp_path / "macro"
+    (macro_root / "data" / "governance").mkdir(parents=True)
+    (macro_root / "data" / "governance" / "project_active_builds.json").write_text(
+        json.dumps(active_builds), encoding="utf-8"
+    )
+    (macro_root / "data" / "governance" / "agent_os_state.json").write_text(
+        json.dumps(agent_os_state), encoding="utf-8"
+    )
+
+    bindings_path = tmp_path / "bindings" / "surface_bindings.json"
+    sb.save_bindings(bindings, path=bindings_path)
+
+    fixture_packet = copy.deepcopy(boot_packet)
+    fixture_packet["macro"]["root"] = str(macro_root)
+    fixture_inbox = copy.deepcopy(inbox)
+    fixture_inbox["grounding"]["macro"]["root"] = str(macro_root)
+
+    monkeypatch.setattr(ccr.ceo_boot_packet, "build_packet", lambda **kwargs: fixture_packet)
+    monkeypatch.setattr(
+        ccr.executive_inbox, "build_inbox",
+        lambda **kwargs: fixture_inbox,
+    )
+
+    doc = ccr.build_control_room(
+        repo_root=tmp_path, now="2026-08-21T00:10:00Z", bindings_path=bindings_path,
+    )
+
+    assert doc["placement_selection"] is None
+    assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
