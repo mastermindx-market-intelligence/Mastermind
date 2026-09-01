@@ -8,7 +8,16 @@ SPEC = ROOT / "docs/superpowers/specs/2026-08-31-agent-operator-capability-conve
 PLAN = ROOT / "docs/superpowers/plans/2026-08-31-agent-operator-capability-pack-attestation.md"
 AMENDMENT = ROOT / "docs/superpowers/specs/2026-09-01-agent-operator-capability-convergence-owner-amendment.md"
 CLOSURE = ROOT / "docs/superpowers/specs/2026-09-01-agent-operator-effective-skill-closure-amendment.md"
-RECEIVE_SKILL = ROOT / "plugins/mastermind-operator/skills/receive-commission/SKILL.md"
+EXPOSURE = ROOT / "docs/superpowers/specs/2026-09-01-agent-operator-skill-set-exposure-amendment.md"
+OPERATOR_SKILLS = {
+    name: ROOT / f"plugins/mastermind-operator/skills/{name}/SKILL.md"
+    for name in (
+        "escalate-decision",
+        "finish-operation",
+        "receive-commission",
+        "return-progress",
+    )
+}
 DIALOGUE_REFERENCE = ROOT / "plugins/mastermind-operator/references/dialogue-boundary.md"
 
 
@@ -30,16 +39,19 @@ def test_records_are_present_and_explicitly_production_inert() -> None:
         assert "TODO" not in text
         assert "TBD" not in text
 
-    closure = _read(CLOSURE)
-    assert "PRODUCTION_INERT" in closure
-    assert "ExecutionCapabilityRegistry" in closure
-    assert "TODO" not in closure
-    assert "TBD" not in closure
+    for path in (CLOSURE, EXPOSURE):
+        text = _read(path)
+        assert "PRODUCTION_INERT" in text
+        assert "TODO" not in text
+        assert "TBD" not in text
+
+    assert "ExecutionCapabilityRegistry" in _read(CLOSURE)
 
 
 def test_amendments_have_narrow_precedence_over_the_original_records() -> None:
     amendment = _read(AMENDMENT)
     closure = _read(CLOSURE)
+    exposure = _read(EXPOSURE)
 
     assert "where it conflicts, supersedes" in amendment
     assert SPEC.name in amendment
@@ -52,6 +64,11 @@ def test_amendments_have_narrow_precedence_over_the_original_records() -> None:
     assert PLAN.name in closure
     assert AMENDMENT.name in closure
     assert "existing-owner ruling" in closure
+
+    assert "where it conflicts, supersedes" in exposure
+    for path in (SPEC, PLAN, AMENDMENT, CLOSURE):
+        assert path.name in exposure
+    assert "All existing-owner" in exposure
 
 
 def test_existing_capability_and_practice_owners_are_not_duplicated() -> None:
@@ -88,6 +105,7 @@ def test_stale_bsc_f2_label_is_not_treated_as_an_executable_carrier() -> None:
 def test_first_vertical_and_hf1_boundary_are_precise() -> None:
     amendment = _read(AMENDMENT)
     plan = _read(PLAN)
+    exposure = _read(EXPOSURE)
 
     assert "`CAP-S1` does **not** require HF1" in amendment
     assert "Provider-neutral materialization and any non-Codex parity still require HF1" in amendment
@@ -99,13 +117,16 @@ def test_first_vertical_and_hf1_boundary_are_precise() -> None:
     assert "No `grok_broker`" in plan
     assert "Do not create `claude_broker.py`" in plan
 
+    assert "HF1 remains required before heterogeneous providers" in exposure
+    assert "first Codex rich-operator proof" in exposure
+
 
 def test_effective_skill_closure_includes_required_package_reference() -> None:
     closure = _read(CLOSURE)
-    receive_skill = _read(RECEIVE_SKILL)
     dialogue_reference = _read(DIALOGUE_REFERENCE)
 
-    assert "../../references/dialogue-boundary.md" in receive_skill
+    for skill_path in OPERATOR_SKILLS.values():
+        assert "../../references/dialogue-boundary.md" in _read(skill_path)
     assert "Distinct states remain distinct" in dialogue_reference
 
     assert "mastermind.effective_skill_closure/v1" in closure
@@ -119,6 +140,25 @@ def test_effective_skill_closure_includes_required_package_reference() -> None:
     assert "same name + changed required shared reference" in closure
     assert "same closure + changed unrelated sibling Skill" in closure
     assert "per-Skill effective-closure mapping" in closure
+
+
+def test_first_codex_profile_requires_the_exact_exposed_four_skill_set() -> None:
+    exposure = _read(EXPOSURE)
+
+    for name in OPERATOR_SKILLS:
+        assert name in exposure
+        assert f"mastermind-operator.{name}.v1" in exposure
+
+    assert "loads and requires the complete four-Skill" in exposure
+    assert "operator.appserver.readonly.mastermind-operator.v1" in exposure
+    assert "one requested typed identity" in exposure
+    assert "exactly one observed typed identity" in exposure
+    assert "multiple same-name observations, even when one matches" in exposure
+    assert "unexpected fifth custom Skill" in exposure
+    assert "skills/extraRoots/set" in exposure
+    assert "plugins/mastermind-operator/skills" in exposure
+    assert "one-Skill profile is lawful only" in exposure
+    assert "require all four exact `mastermind-operator` effective Skill closures" in exposure
 
 
 def test_practice_and_execution_capability_identity_remain_distinct() -> None:
@@ -144,6 +184,7 @@ def test_browser_and_desktop_access_remain_explicit_resources() -> None:
 def test_records_do_not_claim_runtime_or_product_completion() -> None:
     amendment = _read(AMENDMENT)
     closure = _read(CLOSURE)
+    exposure = _read(EXPOSURE)
     assert "It does not make any package generation attested" in amendment
     assert "custom Skill digest enforced" in amendment
     assert "provider materializer built" in amendment
@@ -152,3 +193,4 @@ def test_records_do_not_claim_runtime_or_product_completion() -> None:
     assert "practice adapter live" in amendment
     assert "does not attest a live package generation" in closure
     assert "Codex vertical `PROVEN_LIVE`" in closure
+    assert "does not load or prove the Skill set" in exposure
