@@ -70,6 +70,14 @@ class CodexAppServerWakeClient(Protocol):
         instruction: str,
     ) -> CodexWakeDeliveryObservation: ...
 
+    async def reconcile_wake(
+        self,
+        *,
+        native_handle: str,
+        nudge_id: str,
+        opaque_ids: Sequence[str],
+    ) -> CodexWakeDeliveryObservation: ...
+
 
 class CodexAppServerWakeDispatcher:
     """Deliver one bounded nudge to one exact runtime-bound Codex thread."""
@@ -136,6 +144,60 @@ class CodexAppServerWakeDispatcher:
                 "Codex turn/start effect is unknown after provider call began"
             ) from exc
 
+        return self._completion_from_observation(
+            wake,
+            observation,
+            native_handle=native_handle,
+        )
+
+    async def reconcile(
+        self,
+        wake: WakeNudge,
+    ) -> TransportReceipt | WakeTransportCompletion:
+        """Reduce one late result through the existing client without turn/start."""
+
+        if not isinstance(wake, WakeNudge):
+            raise WakeEffectUnknownError(
+                "Codex late reconciliation requires the exact persisted nudge"
+            )
+        native_handle = str(wake.native_handle or "").strip()
+        if (
+            not native_handle
+            or wake.wake_transport != self.transport_id
+            or wake.reasoning_surface != self.reasoning_surface
+        ):
+            raise WakeEffectUnknownError(
+                "Codex late reconciliation identity is not the bound transport"
+            )
+        reconcile_wake = getattr(self.client, "reconcile_wake", None)
+        if not callable(reconcile_wake):
+            raise WakeEffectUnknownError(
+                "Codex current-writer client has no reconciliation operation"
+            )
+        opaque_ids = tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+        try:
+            observation = await reconcile_wake(
+                native_handle=native_handle,
+                nudge_id=wake.nudge_id,
+                opaque_ids=opaque_ids,
+            )
+        except Exception as exc:
+            raise WakeEffectUnknownError(
+                "Codex late completion remains effect-unknown"
+            ) from exc
+        return self._completion_from_observation(
+            wake,
+            observation,
+            native_handle=native_handle,
+        )
+
+    def _completion_from_observation(
+        self,
+        wake: WakeNudge,
+        observation: CodexWakeDeliveryObservation,
+        *,
+        native_handle: str,
+    ) -> TransportReceipt | WakeTransportCompletion:
         if not isinstance(observation, CodexWakeDeliveryObservation):
             raise WakeEffectUnknownError(
                 "Codex provider returned an untyped observation after possible write"

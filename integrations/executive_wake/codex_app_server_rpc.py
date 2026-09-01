@@ -15,11 +15,16 @@ from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
     ProcessGenerationRef,
+    ReconcileObservation,
     runtime_binding_id_for,
 )
 from control_plane.session_targets import RuntimeBinding
 from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
-from control_plane.wake_dispatcher import TransportOutcome, WakePreSubmitError
+from control_plane.wake_dispatcher import (
+    TransportOutcome,
+    WakeEffectUnknownError,
+    WakePreSubmitError,
+)
 from control_plane.wake_events import WAKE_ID_RE
 from integrations.executive_wake.codex_app_server import CodexWakeDeliveryObservation
 
@@ -93,6 +98,30 @@ class CodexCurrentWriterWakeClient:
             instruction=instruction,
         )
 
+    async def reconcile_wake(
+        self,
+        *,
+        native_handle: str,
+        nudge_id: str,
+        opaque_ids: Sequence[str],
+    ) -> CodexWakeDeliveryObservation:
+        """Read the existing generation's late result without another turn/start."""
+
+        if isinstance(opaque_ids, (str, bytes)):
+            raise WakeEffectUnknownError(
+                "Codex late reconciliation identities are not a sequence"
+            )
+        if native_handle != self._runtime_binding.native_handle:
+            raise WakeEffectUnknownError(
+                "Codex late reconciliation moved from the bound RuntimeBinding"
+            )
+        return await asyncio.to_thread(
+            self._reconcile_sync,
+            native_handle=str(native_handle),
+            nudge_id=str(nudge_id),
+            opaque_ids=tuple(str(item) for item in opaque_ids),
+        )
+
     def _deliver_sync(
         self,
         *,
@@ -120,6 +149,50 @@ class CodexCurrentWriterWakeClient:
             # deliberately unsafe: the caller must preserve effect-unknown and
             # never retry or fail over.
             raise
+        return self._map_observation(
+            observation,
+            native_handle=native_handle,
+            nudge_id=nudge_id,
+            opaque_ids=opaque_ids,
+        )
+
+    def _reconcile_sync(
+        self,
+        *,
+        native_handle: str,
+        nudge_id: str,
+        opaque_ids: tuple[str, ...],
+    ) -> CodexWakeDeliveryObservation:
+        reconcile = getattr(self._operator_adapter, "reconcile", None)
+        if not callable(reconcile):
+            raise WakeEffectUnknownError(
+                "current Codex writer has no existing reconciliation path"
+            )
+        observation = reconcile(self._generation)
+        if not isinstance(observation, ReconcileObservation):
+            raise WakeEffectUnknownError(
+                "current-writer reconciliation returned an untyped observation"
+            )
+        late = observation.late_attention_observation
+        if late is None:
+            raise WakeEffectUnknownError(
+                "current-writer late completion is not yet effect-known"
+            )
+        return self._map_observation(
+            late,
+            native_handle=native_handle,
+            nudge_id=nudge_id,
+            opaque_ids=opaque_ids,
+        )
+
+    def _map_observation(
+        self,
+        observation: AttentionTurnObservation,
+        *,
+        native_handle: str,
+        nudge_id: str,
+        opaque_ids: tuple[str, ...],
+    ) -> CodexWakeDeliveryObservation:
         if not isinstance(observation, AttentionTurnObservation):
             raise RuntimeError("current-writer attention returned an untyped observation")
         if (

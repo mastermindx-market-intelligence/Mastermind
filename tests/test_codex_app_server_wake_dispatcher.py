@@ -45,7 +45,11 @@ def _wake(**overrides) -> WakeNudge:
 @dataclasses.dataclass
 class _FakeClient:
     observation: CodexWakeDeliveryObservation
+    late_observation: CodexWakeDeliveryObservation | None = None
     calls: list[tuple[str, str, tuple[str, ...], str]] = dataclasses.field(default_factory=list)
+    reconcile_calls: list[tuple[str, str, tuple[str, ...]]] = dataclasses.field(
+        default_factory=list
+    )
     fail: Exception | None = None
 
     async def deliver_wake(self, *, native_handle, nudge_id, opaque_ids, instruction):
@@ -53,6 +57,14 @@ class _FakeClient:
         if self.fail is not None:
             raise self.fail
         return self.observation
+
+    async def reconcile_wake(self, *, native_handle, nudge_id, opaque_ids):
+        self.reconcile_calls.append((native_handle, nudge_id, tuple(opaque_ids)))
+        if self.fail is not None:
+            raise self.fail
+        if self.late_observation is None:
+            raise RuntimeError("late completion is not available")
+        return self.late_observation
 
 
 def _projection() -> TrustedWorkerWakeAckProjection:
@@ -87,6 +99,10 @@ def _observation(
 
 def _nudge(dispatcher, wake):
     return asyncio.run(dispatcher.nudge(wake))
+
+
+def _reconcile(dispatcher, wake):
+    return asyncio.run(dispatcher.reconcile(wake))
 
 
 def test_codex_descriptor_is_implemented_but_registry_requires_explicit_composition():
@@ -175,6 +191,49 @@ def test_exact_bound_ack_projection_is_transient_completion_not_receipt_detail()
     assert dict(receipt.details) == {"nudge_id": "NUDGE-" + "b" * 32}
     assert normalized is projection
     assert "target_ack_projection" not in repr(completion)
+
+
+def test_late_reconcile_returns_delivery_and_projection_without_provider_submission():
+    """Catches late reconciliation calling deliver_wake or discarding its projection."""
+
+    projection = _projection()
+    client = _FakeClient(
+        _observation(),
+        late_observation=_observation(
+            accepted=True,
+            delivered=True,
+            target_ack_projection=projection,
+        ),
+    )
+    dispatcher = CodexAppServerWakeDispatcher(client)
+
+    completion = _reconcile(dispatcher, _wake())
+
+    receipt, normalized = normalize_transport_completion(completion)
+    assert receipt.outcome is TransportOutcome.DELIVERED
+    assert normalized is projection
+    assert client.calls == []
+    assert client.reconcile_calls == [
+        (
+            "thread-opaque-123",
+            "NUDGE-" + "b" * 32,
+            _wake().obligation_ids + _wake().attempt_command_ids,
+        )
+    ]
+
+
+def test_late_terminal_failure_remains_accepted_without_provider_submission():
+    client = _FakeClient(
+        _observation(),
+        late_observation=_observation(accepted=True, delivered=False),
+    )
+    dispatcher = CodexAppServerWakeDispatcher(client)
+
+    receipt = _reconcile(dispatcher, _wake())
+
+    assert receipt.outcome is TransportOutcome.ACCEPTED
+    assert client.calls == []
+    assert len(client.reconcile_calls) == 1
 
 
 def test_transport_completion_normalizer_rejects_untyped_projection_or_value():

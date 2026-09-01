@@ -621,6 +621,11 @@ class UnsupportedWakeDispatcher:
             created_at=utc_now_iso(),
         )
 
+    async def reconcile(self, wake: WakeNudge) -> TransportReceipt:
+        raise WakeEffectUnknownError(
+            "unsupported transport has no accepted-attempt reconciliation path"
+        )
+
     async def wake(self, obligation: WakeObligation, route: WakeRoute) -> WakeReceipt:
         if route.human_required:
             return make_receipt(
@@ -819,6 +824,71 @@ def _reconciliation_required(
     )
 
 
+def _persist_transport_result(
+    repo: WakeLedgerRepository,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+    *,
+    nudge_attempt: NudgeAttempt,
+    descriptor: WakeTransportDescriptor,
+    transport: TransportReceipt,
+    target_ack_projection: TrustedWorkerWakeAckProjection | None,
+    target_registry: SessionTargetRegistry | None,
+) -> PersistedNudgeResult:
+    attempts = nudge_attempt.attempts
+    phase = LedgerPhase(transport.outcome.value)
+    terminal_persisted = repo.append_records_atomic(
+        tuple(
+            (attempt_record(attempt, phase), obligation)
+            for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
+        )
+    )
+    if target_ack_projection is not None:
+        if phase is not LedgerPhase.DELIVERED:
+            raise WakeDispatchError(
+                "Wake ACK projection cannot accompany a non-delivered transport"
+            )
+        if not all(item.inserted for item in terminal_persisted):
+            raise WakeDispatchError(
+                "Wake ACK projection requires newly persisted DELIVERED evidence"
+            )
+        if target_registry is None:
+            raise WakeDispatchError(
+                "Wake ACK projection requires the current SessionTargetRegistry"
+            )
+        acknowledge_consumed_wakes(
+            repo.runtime,
+            target_registry,
+            claim=WakeAckClaim(target_ack_projection.obligation_ids),
+            trusted=target_ack_projection,
+        )
+    receipts: list[WakeReceipt] = []
+    for attempt, (obligation, route) in zip(attempts, pairs, strict=True):
+        receipt = make_receipt(
+            outcome=WakeOutcome(transport.outcome.value),
+            obligation=obligation,
+            route=route,
+            reason_code=transport.reason_code,
+            created_at=transport.created_at,
+            details=dict(transport.details),
+            attempt=attempt,
+        )
+        receipts.append(
+            authenticate_receipt(
+                receipt,
+                obligation=obligation,
+                route=route,
+                descriptor=descriptor,
+                attempt=attempt,
+            )
+        )
+    return PersistedNudgeResult(
+        state=PersistedNudgeState(transport.outcome.value),
+        nudge_attempt=nudge_attempt,
+        transport_receipt=transport,
+        receipts=tuple(receipts),
+    )
+
+
 async def dispatch_persisted_nudge(
     repo: WakeLedgerRepository,
     pairs: Sequence[tuple[WakeObligation, WakeRoute]],
@@ -892,9 +962,63 @@ async def dispatch_persisted_nudge(
         if len(set(terminal_phases)) != 1:
             raise WakeDispatchError("persisted nudge terminal phases disagree")
         nudge_attempt = _load_persisted_nudge(repo, terminal_seed)
-        return PersistedNudgeResult(
-            state=_state_for_phase(terminal_phases[0]),
+        terminal_phase = terminal_phases[0]
+        if terminal_phase is not LedgerPhase.ACCEPTED:
+            return PersistedNudgeResult(
+                state=_state_for_phase(terminal_phase),
+                nudge_attempt=nudge_attempt,
+            )
+        if first_route.human_required or not first_route.delivery_allowed:
+            return _reconciliation_required(nudge_attempt)
+        _assert_binding_ready(binding, first_route, resolved_descriptor)
+        attempts_by_obligation = {
+            attempt.obligation_id: attempt for attempt in nudge_attempt.attempts
+        }
+        if set(attempts_by_obligation) != set(obligation_ids) or any(
+            not attempts_by_obligation[obligation.obligation_id].matches_route(route)
+            for obligation, route in pairs
+        ):
+            raise WakeDispatchError(
+                "persisted ACCEPTED nudge does not match the supplied route set"
+            )
+        nudge_attempt = _nudge_attempt_from(
+            tuple(
+                attempts_by_obligation[obligation.obligation_id]
+                for obligation, _route in pairs
+            )
+        )
+        wake = _nudge_from(
+            nudge_attempt.attempts,
+            binding=binding,
+            first_route=first_route,
+        )
+        reconcile = getattr(dispatcher, "reconcile", None)
+        if not callable(reconcile):
+            return _reconciliation_required(nudge_attempt)
+        try:
+            raw_completion = await reconcile(wake)
+            raw_transport, target_ack_projection = normalize_transport_completion(
+                raw_completion
+            )
+            transport = authenticate_transport_receipt(
+                raw_transport,
+                expected_nudge_id=wake.nudge_id,
+            )
+        except Exception:
+            return _reconciliation_required(nudge_attempt)
+        if transport.outcome not in {
+            TransportOutcome.ACCEPTED,
+            TransportOutcome.DELIVERED,
+        }:
+            return _reconciliation_required(nudge_attempt)
+        return _persist_transport_result(
+            repo,
+            pairs,
             nudge_attempt=nudge_attempt,
+            descriptor=resolved_descriptor,
+            transport=transport,
+            target_ack_projection=target_ack_projection,
+            target_registry=target_registry,
         )
 
     if first_route.human_required or not first_route.delivery_allowed:
@@ -952,57 +1076,14 @@ async def dispatch_persisted_nudge(
             nudge_attempt=nudge_attempt,
         )
 
-    phase = LedgerPhase(transport.outcome.value)
-    terminal_persisted = repo.append_records_atomic(
-        tuple(
-            (attempt_record(attempt, phase), obligation)
-            for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
-        )
-    )
-    if target_ack_projection is not None:
-        if phase is not LedgerPhase.DELIVERED:
-            raise WakeDispatchError(
-                "Wake ACK projection cannot accompany a non-delivered transport"
-            )
-        if not all(item.inserted for item in terminal_persisted):
-            raise WakeDispatchError(
-                "Wake ACK projection requires newly persisted DELIVERED evidence"
-            )
-        if target_registry is None:
-            raise WakeDispatchError(
-                "Wake ACK projection requires the current SessionTargetRegistry"
-            )
-        acknowledge_consumed_wakes(
-            repo.runtime,
-            target_registry,
-            claim=WakeAckClaim(target_ack_projection.obligation_ids),
-            trusted=target_ack_projection,
-        )
-    receipts: list[WakeReceipt] = []
-    for attempt, (obligation, route) in zip(attempts, pairs, strict=True):
-        receipt = make_receipt(
-            outcome=WakeOutcome(transport.outcome.value),
-            obligation=obligation,
-            route=route,
-            reason_code=transport.reason_code,
-            created_at=transport.created_at,
-            details=dict(transport.details),
-            attempt=attempt,
-        )
-        receipts.append(
-            authenticate_receipt(
-                receipt,
-                obligation=obligation,
-                route=route,
-                descriptor=resolved_descriptor,
-                attempt=attempt,
-            )
-        )
-    return PersistedNudgeResult(
-        state=PersistedNudgeState(transport.outcome.value),
+    return _persist_transport_result(
+        repo,
+        pairs,
         nudge_attempt=nudge_attempt,
-        transport_receipt=transport,
-        receipts=tuple(receipts),
+        descriptor=resolved_descriptor,
+        transport=transport,
+        target_ack_projection=target_ack_projection,
+        target_registry=target_registry,
     )
 
 

@@ -1085,6 +1085,19 @@ class ReconcileObservation:
     observed_provider_session_id: str | None = None
     observed_config_digest: str | None = None
     recommended_failure_class: AdapterFailureClass | None = None
+    late_attention_observation: AttentionTurnObservation | None = field(
+        default=None,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self.late_attention_observation is not None and not isinstance(
+            self.late_attention_observation,
+            AttentionTurnObservation,
+        ):
+            raise ValueError(
+                "late attention reconciliation must be a typed observation"
+            )
 
 
 @dataclass(frozen=True)

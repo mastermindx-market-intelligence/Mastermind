@@ -343,6 +343,7 @@ def attention_turn_observation(value: Any) -> AttentionTurnObservation:
 def reconcile_observation(value: Any) -> ReconcileObservation:
     raw = _closed(value, ReconcileObservation, name="reconcile observation")
     failure = raw["recommended_failure_class"]
+    late_raw = raw["late_attention_observation"]
     return _construct(
         ReconcileObservation,
         raw,
@@ -360,6 +361,11 @@ def reconcile_observation(value: Any) -> ReconcileObservation:
             None
             if failure is None
             else _enum(AdapterFailureClass, failure, name="adapter failure class")
+        ),
+        late_attention_observation=(
+            None
+            if late_raw is None
+            else attention_turn_observation(late_raw)
         ),
     )
 

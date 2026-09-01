@@ -378,6 +378,15 @@ def _reject_symlink_components(path: Path, *, failure: AdapterFailureClass) -> N
 
 
 @dataclass
+class _PendingAttentionRequest:
+    attempt_id: str
+    binding_id: str
+    binding_generation: int
+    nudge_id: str
+    opaque_ids: tuple[str, ...]
+
+
+@dataclass
 class _GenerationState:
     epoch: SessionEpochRef
     generation: ProcessGenerationRef
@@ -393,6 +402,7 @@ class _GenerationState:
     turns: dict[str, str] = field(default_factory=dict)
     attention_inflight: bool = False
     attention_native_turn_id: str | None = None
+    attention_request: _PendingAttentionRequest | None = None
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
@@ -1740,6 +1750,13 @@ class CodexOperatorAdapter:
         # effect-unknown and may never be translated into a retryable refusal.
         state.attention_inflight = True
         state.attention_native_turn_id = None
+        state.attention_request = _PendingAttentionRequest(
+            attempt_id=attempt_id,
+            binding_id=binding_id,
+            binding_generation=binding_generation,
+            nudge_id=nudge_id,
+            opaque_ids=opaque,
+        )
         try:
             started = state.client.request("turn/start", params, timeout=30.0)
         except Exception as exc:
@@ -1802,41 +1819,11 @@ class CodexOperatorAdapter:
                 "attention completion status is not a recognized terminal outcome",
                 effect_unknown=True,
             )
-        state.attention_inflight = False
-        state.attention_native_turn_id = None
-        if terminal_status != "completed":
-            return AttentionTurnObservation(
-                process_generation_id=generation.process_generation_id,
-                provider_session_id=provider_session_id,
-                nudge_id=nudge_id,
-                provider_native_turn_id=native_turn_id,
-                accepted=True,
-                delivered=False,
-            )
-        obligation_ids = _terminal_wake_ack_ids(completion)
-        wake_ack_projection = (
-            None
-            if obligation_ids is None
-            else WorkerLocalWakeAckProjection(
-                target_attempt_id=attempt_id,
-                process_generation_id=generation.process_generation_id,
-                binding_id=binding_id,
-                binding_generation=binding_generation,
-                provider_session_id=provider_session_id,
-                provider_native_turn_id=native_turn_id,
-                nudge_id=nudge_id,
-                obligation_ids=obligation_ids,
-                terminal_ack_trailer=True,
-            )
-        )
-        return AttentionTurnObservation(
-            process_generation_id=generation.process_generation_id,
-            provider_session_id=provider_session_id,
-            nudge_id=nudge_id,
-            provider_native_turn_id=native_turn_id,
-            accepted=True,
-            delivered=True,
-            wake_ack_projection=wake_ack_projection,
+        return self._terminal_attention_observation(
+            state,
+            completion=completion,
+            terminal_status=terminal_status,
+            native_turn_id=native_turn_id,
         )
 
     @staticmethod
@@ -1860,12 +1847,68 @@ class CodexOperatorAdapter:
             and str(completed_turn.get("id") or "").strip() == native_turn_id
         )
 
-    def _reconcile_late_attention_completion(self, state: _GenerationState) -> None:
-        """Clear a timed-out attention fence only on its exact queued completion."""
+    @staticmethod
+    def _terminal_attention_observation(
+        state: _GenerationState,
+        *,
+        completion: object,
+        terminal_status: str,
+        native_turn_id: str,
+    ) -> AttentionTurnObservation:
+        pending = state.attention_request
+        if pending is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
+                "attention completion has no exact pending request",
+                effect_unknown=True,
+            )
+        state.attention_inflight = False
+        state.attention_native_turn_id = None
+        state.attention_request = None
+        if terminal_status != "completed":
+            return AttentionTurnObservation(
+                process_generation_id=state.generation.process_generation_id,
+                provider_session_id=state.provider_session_id,
+                nudge_id=pending.nudge_id,
+                provider_native_turn_id=native_turn_id,
+                accepted=True,
+                delivered=False,
+            )
+        obligation_ids = _terminal_wake_ack_ids(completion)
+        wake_ack_projection = (
+            None
+            if obligation_ids is None
+            else WorkerLocalWakeAckProjection(
+                target_attempt_id=pending.attempt_id,
+                process_generation_id=state.generation.process_generation_id,
+                binding_id=pending.binding_id,
+                binding_generation=pending.binding_generation,
+                provider_session_id=state.provider_session_id,
+                provider_native_turn_id=native_turn_id,
+                nudge_id=pending.nudge_id,
+                obligation_ids=obligation_ids,
+                terminal_ack_trailer=True,
+            )
+        )
+        return AttentionTurnObservation(
+            process_generation_id=state.generation.process_generation_id,
+            provider_session_id=state.provider_session_id,
+            nudge_id=pending.nudge_id,
+            provider_native_turn_id=native_turn_id,
+            accepted=True,
+            delivered=True,
+            wake_ack_projection=wake_ack_projection,
+        )
+
+    def _reconcile_late_attention_completion(
+        self,
+        state: _GenerationState,
+    ) -> AttentionTurnObservation | None:
+        """Reduce a timed-out exact terminal completion without provider resubmission."""
 
         native_turn_id = state.attention_native_turn_id
         if not state.attention_inflight or not native_turn_id:
-            return
+            return None
         while True:
             try:
                 completion = state.client.wait_notification(
@@ -1875,15 +1918,20 @@ class CodexOperatorAdapter:
             except Exception:
                 # Absence, transport loss, and malformed reader behavior are all
                 # fail-closed: none is evidence that the provider completed.
-                return
+                return None
             if self._matches_attention_completion(
                 completion,
                 provider_session_id=state.provider_session_id,
                 native_turn_id=native_turn_id,
-            ) and _attention_terminal_status(completion) is not None:
-                state.attention_inflight = False
-                state.attention_native_turn_id = None
-                return
+            ):
+                terminal_status = _attention_terminal_status(completion)
+                if terminal_status is not None:
+                    return self._terminal_attention_observation(
+                        state,
+                        completion=completion,
+                        terminal_status=terminal_status,
+                        native_turn_id=native_turn_id,
+                    )
 
     def read_events(
         self, cursor: EventCursor, *, timeout_seconds: float = 30.0
@@ -2270,7 +2318,7 @@ class CodexOperatorAdapter:
                 recommended_failure_class=AdapterFailureClass.SESSION_MISSING,
             )
         if state.client.alive():
-            self._reconcile_late_attention_completion(state)
+            late_attention = self._reconcile_late_attention_completion(state)
             try:
                 result = state.client.request(
                     "thread/read", {"threadId": state.provider_session_id}
@@ -2289,6 +2337,7 @@ class CodexOperatorAdapter:
                 recommended_failure_class=(
                     None if reachable else AdapterFailureClass.SESSION_MISSING
                 ),
+                late_attention_observation=late_attention,
             )
         return self._observation(state, failure=AdapterFailureClass.PROCESS_CRASH)
 

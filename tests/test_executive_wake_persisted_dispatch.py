@@ -14,6 +14,7 @@ import pytest
 
 from control_plane import wake_dispatcher
 from control_plane.executive_runtime import Runtime, StateConflict
+from control_plane.runtime_binding_projection import project_runtime_binding
 from control_plane.session_targets import RuntimeBinding, route_obligation
 from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
 from control_plane.wake_dispatcher import (
@@ -30,11 +31,16 @@ from control_plane.wake_ledger import (
 )
 from control_plane.wake_persist import WakeLedgerRepository
 from control_plane.wake_router import obligation_from_inbox
+from control_plane.wake_events import mint_obligation
 from integrations.executive_wake.codex_app_server import (
     CodexAppServerWakeDispatcher,
     CodexWakeDeliveryObservation,
 )
+from integrations.executive_wake.registry import WakeDispatcherRegistry
+from integrations.slack_agent_dialogue.persisted_wake_carrier import PersistedWakeCarrier
+from integrations.slack_agent_dialogue.turn_observer import WakeCarrierState
 from tests.test_executive_wake_fabric import _bound_registry, _projected_ceo_items
+from tests.test_wake_ack_ingress import _admitted_runtime
 
 
 _FROZEN = "2026-08-28T09:00:00Z"
@@ -66,6 +72,22 @@ def _binding(
     )
 
 
+def _codex_registry(alias: str = "EXECUTIVE-CEO-A"):
+    registry = _bound_registry()
+    target = dataclasses.replace(
+        registry.targets[alias],
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        target_enabled=True,
+    )
+    return dataclasses.replace(
+        registry,
+        production_armed=True,
+        targets={**registry.targets, target.session_alias: target},
+    )
+
+
 def _pair(*, ordinal: int = 0, binding: RuntimeBinding | None = None):
     item = _projected_ceo_items(
         [
@@ -76,19 +98,7 @@ def _pair(*, ordinal: int = 0, binding: RuntimeBinding | None = None):
         ]
     )[0]
     obligation = obligation_from_inbox(item)
-    registry = _bound_registry()
-    target = dataclasses.replace(
-        registry.targets["EXECUTIVE-CEO-A"],
-        reasoning_surface="codex",
-        wake_transport="codex-app-server",
-        allowed_transports=("codex-app-server",),
-        target_enabled=True,
-    )
-    registry = dataclasses.replace(
-        registry,
-        production_armed=True,
-        targets={**registry.targets, target.session_alias: target},
-    )
+    registry = _codex_registry()
     resolved_binding = binding or _binding()
     return obligation, route_obligation(
         obligation,
@@ -476,6 +486,164 @@ class _CodexClient:
             accepted=True,
             delivered=True,
         )
+
+
+@dataclasses.dataclass
+class _LateCodexClient:
+    target_attempt_id: str
+    process_generation_id: str
+    binding_id: str
+    binding_generation: int
+    mode: str = "canonical"
+    deliver_calls: int = 0
+    reconcile_calls: int = 0
+
+    async def deliver_wake(self, *, native_handle, nudge_id, opaque_ids, instruction):
+        self.deliver_calls += 1
+        return CodexWakeDeliveryObservation(
+            native_handle=native_handle,
+            nudge_id=nudge_id,
+            accepted=True,
+            delivered=False,
+        )
+
+    async def reconcile_wake(self, *, native_handle, nudge_id, opaque_ids):
+        self.reconcile_calls += 1
+        if self.mode == "unknown":
+            raise RuntimeError("late status is not recognized")
+        if self.mode == "stale":
+            return CodexWakeDeliveryObservation(
+                native_handle=native_handle,
+                nudge_id="NUDGE-" + "f" * 32,
+                accepted=True,
+                delivered=True,
+            )
+        if self.mode == "failed":
+            return CodexWakeDeliveryObservation(
+                native_handle=native_handle,
+                nudge_id=nudge_id,
+                accepted=True,
+                delivered=False,
+            )
+        projection = None
+        if self.mode == "canonical":
+            projection = TrustedWorkerWakeAckProjection(
+                target_attempt_id=self.target_attempt_id,
+                process_generation_id=self.process_generation_id,
+                binding_id=self.binding_id,
+                binding_generation=self.binding_generation,
+                provider_session_id=native_handle,
+                provider_native_turn_id="turn-late-ack-1",
+                nudge_id=nudge_id,
+                obligation_ids=tuple(
+                    sorted(item for item in opaque_ids if ":" not in item)
+                ),
+                terminal_ack_trailer=True,
+            )
+        return CodexWakeDeliveryObservation(
+            native_handle=native_handle,
+            nudge_id=nudge_id,
+            accepted=True,
+            delivered=True,
+            target_ack_projection=projection,
+        )
+
+
+def _late_carrier_fixture(tmp_path, *, mode: str = "canonical"):
+    runtime, sealed, generation = _admitted_runtime(tmp_path)
+    repo = WakeLedgerRepository(runtime)
+    registry = _codex_registry("PROPHET-COO-A")
+    binding = project_runtime_binding(
+        runtime,
+        sealed.attempt_id,
+        registry.targets["PROPHET-COO-A"],
+    )
+    obligation = mint_obligation(
+        wake_kind="job_failed",
+        source_kind="executive_inbox_attention",
+        source_ref="eia-0000000000aa",
+        declared_target_seat="coo",
+        root_job_id="JOB-001",
+    )
+    route = route_obligation(obligation, registry, binding=binding)
+    client = _LateCodexClient(
+        target_attempt_id=sealed.attempt_id,
+        process_generation_id=generation.process_generation_id,
+        binding_id=binding.binding_id,
+        binding_generation=binding.binding_generation,
+        mode=mode,
+    )
+    dispatcher = CodexAppServerWakeDispatcher(client)
+    carrier = PersistedWakeCarrier(
+        repository=repo,
+        dispatchers=WakeDispatcherRegistry({"codex-app-server": dispatcher}),
+        current_binding_for=lambda _route: binding,
+        retry_policy=_POLICY,
+        target_registry=registry,
+    )
+    return repo, obligation, route, binding, client, carrier
+
+
+def test_timeout_then_late_canonical_completion_persists_one_delivery_and_ack(
+    tmp_path,
+):
+    """Catches ACCEPTED swallowing a late exact completion and its canonical ACK."""
+
+    repo, obligation, route, binding, client, carrier = _late_carrier_fixture(tmp_path)
+
+    asyncio.run(carrier.submit(obligation, route))
+    assert [item.record.phase for item in repo.list_records(obligation.obligation_id)] == [
+        LedgerPhase.WAKE_REQUESTED,
+        LedgerPhase.DELIVERY_ATTEMPT,
+        LedgerPhase.ACCEPTED,
+    ]
+
+    assert asyncio.run(carrier.reconcile(obligation, route)) is WakeCarrierState.RECORDED
+    assert [item.record.phase for item in repo.list_records(obligation.obligation_id)] == [
+        LedgerPhase.WAKE_REQUESTED,
+        LedgerPhase.DELIVERY_ATTEMPT,
+        LedgerPhase.ACCEPTED,
+        LedgerPhase.DELIVERED,
+        LedgerPhase.TARGET_ACKNOWLEDGED,
+    ]
+
+    assert asyncio.run(carrier.reconcile(obligation, route)) is WakeCarrierState.RECORDED
+    assert client.deliver_calls == 1
+    assert client.reconcile_calls == 1
+    assert binding.native_handle is not None
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_state", "expected_tail"),
+    [
+        ("malformed", WakeCarrierState.RECORDED, (LedgerPhase.ACCEPTED, LedgerPhase.DELIVERED)),
+        ("failed", WakeCarrierState.EFFECT_UNKNOWN, (LedgerPhase.DELIVERY_ATTEMPT, LedgerPhase.ACCEPTED)),
+        ("stale", WakeCarrierState.EFFECT_UNKNOWN, (LedgerPhase.DELIVERY_ATTEMPT, LedgerPhase.ACCEPTED)),
+        ("unknown", WakeCarrierState.EFFECT_UNKNOWN, (LedgerPhase.DELIVERY_ATTEMPT, LedgerPhase.ACCEPTED)),
+    ],
+)
+def test_late_controls_never_resubmit_or_manufacture_ack(
+    tmp_path,
+    mode,
+    expected_state,
+    expected_tail,
+):
+    repo, obligation, route, _binding_value, client, carrier = _late_carrier_fixture(
+        tmp_path,
+        mode=mode,
+    )
+
+    asyncio.run(carrier.submit(obligation, route))
+    state = asyncio.run(carrier.reconcile(obligation, route))
+    phases = tuple(
+        item.record.phase for item in repo.list_records(obligation.obligation_id)
+    )
+
+    assert state is expected_state
+    assert phases[-2:] == expected_tail
+    assert LedgerPhase.TARGET_ACKNOWLEDGED not in phases
+    assert client.deliver_calls == 1
+    assert client.reconcile_calls == 1
 
 
 def test_concrete_codex_dispatcher_composes_through_generic_fabric():

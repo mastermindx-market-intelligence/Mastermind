@@ -100,6 +100,27 @@ class PersistedWakeCarrier:
         if unfinished_attempts:
             return WakeCarrierState.EFFECT_UNKNOWN
 
+        if (
+            LedgerPhase.ACCEPTED in phases
+            and LedgerPhase.DELIVERED not in phases
+            and LedgerPhase.TARGET_ACKNOWLEDGED not in phases
+        ):
+            binding = self._current_binding_for(route)
+            _assert_current_binding(binding, route)
+            assert binding is not None
+            dispatcher = self._dispatchers.resolve(route.wake_transport)
+            result = await dispatch_persisted_nudge(
+                self._repository,
+                [(obligation, route)],
+                dispatcher=dispatcher,
+                binding=binding,
+                retry_policy=self._retry_policy,
+                target_registry=self._target_registry,
+            )
+            if result.state is PersistedNudgeState.DELIVERED:
+                return WakeCarrierState.RECORDED
+            return WakeCarrierState.EFFECT_UNKNOWN
+
         return WakeCarrierState.RECORDED
 
     async def submit(self, obligation: WakeObligation, route: WakeRoute) -> None:
