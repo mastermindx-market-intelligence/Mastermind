@@ -202,11 +202,11 @@ scenario:<family>:<case> -> scenarios/<family>/<case>/v<version>/scenario.json
 configuration:<uuid>     -> configurations/<uuid>/configuration.json
 experiment:<uuid>        -> experiments/<uuid>/manifest.json
 run:<uuid>               -> runs/<uuid>/receipt.json
-scorer-pass:<uuid>       -> runs/<run-uuid>/scorer-passes/<uuid>.json
-evidence-ref:<uuid>      -> evidence-refs/<uuid>.json
+scorer-pass:<uuid>       -> scorer-passes/<uuid>/scorer-pass.json
+evidence-ref:<uuid>      -> evidence-refs/<uuid>/evidence-ref.json
 ```
 
-This mapping is globally resolvable without a mutable index. Reject slash, backslash, dot segment, control, empty/oversized segment, trailing dot/space, and Windows device names.
+This mapping is globally resolvable without a mutable index or repository-wide search. Reject slash, backslash, dot segment, control, empty/oversized segment, trailing dot/space, and Windows device names.
 
 ---
 
