@@ -409,27 +409,40 @@ def test_host_origin_and_duplicate_security_headers_refuse_before_verifier(
 
 
 def test_oversized_body_and_root_path_injection_refuse_before_verifier():
-    policy = _policy()
-    verifier = _Verifier(_access_token(policy, token="must-not-be-read"))
-    port = _Port()
-    app = build_authenticated_app(
-        build_contract_server(port),
-        policy=policy,
-        token_verifier=verifier,
+    oversized_policy = _policy()
+    oversized_verifier = _Verifier(
+        _access_token(oversized_policy, token="must-not-be-read")
+    )
+    oversized_port = _Port()
+    oversized_app = build_authenticated_app(
+        build_contract_server(oversized_port),
+        policy=oversized_policy,
+        token_verifier=oversized_verifier,
     )
     headers = {
         **MCP_HEADERS,
         "authorization": "Bearer must-not-be-read",
     }
 
-    with TestClient(app, base_url=BASE_URL) as client:
+    with TestClient(oversized_app, base_url=BASE_URL) as client:
         oversized = client.post(
             MCP_PATH,
             headers=headers,
             content=b"x" * (1024 * 1024 + 1),
         )
+
+    injected_policy = _policy()
+    injected_verifier = _Verifier(
+        _access_token(injected_policy, token="must-not-be-read")
+    )
+    injected_port = _Port()
+    injected_app = build_authenticated_app(
+        build_contract_server(injected_port),
+        policy=injected_policy,
+        token_verifier=injected_verifier,
+    )
     with TestClient(
-        app,
+        injected_app,
         base_url=BASE_URL,
         root_path="/injected-prefix",
     ) as client:
@@ -437,8 +450,10 @@ def test_oversized_body_and_root_path_injection_refuse_before_verifier():
 
     assert oversized.status_code == 413
     assert injected.status_code == 404
-    assert verifier.calls == []
-    assert port.calls == []
+    assert oversized_verifier.calls == []
+    assert oversized_port.calls == []
+    assert injected_verifier.calls == []
+    assert injected_port.calls == []
 
 
 def test_authenticated_app_refuses_cross_realm_scope_policy():
