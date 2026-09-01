@@ -172,6 +172,22 @@ def _auth_headers(config, extra=None):
     return headers
 
 
+def test_browser_resource_cannot_be_started_from_control_room_presentation_process(tmp_path):
+    """Removing the OHF boundary must not recreate a Control Room launch API."""
+
+    config = _make_config(tmp_path)
+    with _running_server(config) as (_httpd, port):
+        post_status, _headers, _body = _post(
+            port, "/api/browser-review", {}, headers=_auth_headers(config)
+        )
+        get_status, _headers, _body = _get(
+            port, "/api/browser-review", headers=_auth_headers(config)
+        )
+
+    assert post_status == 404
+    assert get_status == 404
+
+
 # ---------------------------------------------------------------------------
 # 1. token / origin gates on POST
 # ---------------------------------------------------------------------------
