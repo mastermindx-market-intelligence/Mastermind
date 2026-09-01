@@ -5,9 +5,10 @@
 **Operation:** `mastermind-agent-evaluation-organizational-learning-fabric-20260830-sol-pro-001`  
 **Chairman authority:** direct live assignment from Chairman Chris to the current ChatGPT Pro Sol session.  
 **Protected Mastermind/Skillpack initially loaded:** `990b5b6c10ca9acb2f5fa42405c688c3b2abe2fc`.  
-**Current protected base reconciled into this carrier:** `e60f69aa10e67b1334b1fa6a3299cb90fbbde7ab`.  
-**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1, minimum bootstrap major 1; compatible at both revisions.  
-**Observed Macro main:** `064dc130179e38688e046f9c10db03dc0b8b854e`.  
+**Authoring-time protected base reconciled on 2026-08-31:** `e60f69aa10e67b1334b1fa6a3299cb90fbbde7ab`.  
+**Release-time current-base law:** the PR body plus action-time Git ancestry/compare own the current protected base; later protected movement requires another history-preserving reconciliation, exact-head CI, and exact-head review.  
+**Skillpack:** `mastermind.sol_skillpack.v1` v1.0.1, minimum bootstrap major 1; compatible at both authoring revisions.  
+**Observed Macro main at authoring:** `064dc130179e38688e046f9c10db03dc0b8b854e`.  
 **Fresh-runner carrier:** Mastermind PR #162, head `6282617f3e14d7d2239c2188ad7308de7c06de2a`.  
 **Outcome Learning carrier:** Macro PR #6699, head `29518b3cfad719226db0444ccb4d92a3626b07c9`.  
 **Status:** **ARCHITECTURE FROZEN / RECORDS ONLY / PRODUCTION INERT.**
@@ -833,6 +834,6 @@ Show material forward improvement—such as 30% fewer broad reads/tool calls, ma
 
 ## 15. Exact next action
 
-Update the executable R0 plan to the direct scorer-pass path; run exact-head checks; obtain independent architecture/source-law review; reconcile new protected-base movement; then make a separate hold-removal/merge decision.
+Run exact-head CI; obtain independent exact-head architecture/source-law review; reconcile the action-time protected base; then make a separate HOLD-removal and expected-head merge decision.
 
 After F0 protection, commission R0 on a new implementation carrier and separately resume OHF1 on existing PR #162. No other wave starts merely because architecture exists.
