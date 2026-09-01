@@ -62,10 +62,12 @@ def _principal_matches_policy(
         return False
     if not _is_digest(principal.subject_digest):
         return False
-    if not any(
-        hmac.compare_digest(principal.subject_digest, allowed)
-        for allowed in policy.allowed_subject_digests
-    ):
+    subject_allowed = False
+    for allowed in policy.allowed_subject_digests:
+        # Evaluate every allowlist entry even after a match. Bitwise boolean
+        # accumulation avoids the early exit semantics of ``any`` and ``or``.
+        subject_allowed |= hmac.compare_digest(principal.subject_digest, allowed)
+    if not subject_allowed:
         return False
     if not (
         _is_digest(principal.client_ref)

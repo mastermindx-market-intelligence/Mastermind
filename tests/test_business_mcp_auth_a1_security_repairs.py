@@ -6,6 +6,7 @@ import hashlib
 
 import pytest
 
+from integrations.business_mcp_auth import mcp_adapter
 from integrations.business_mcp_auth.contracts import (
     AUTH_AUDIT_SCHEMA,
     AUTH_POLICY_SCHEMA,
@@ -256,6 +257,47 @@ def test_final_principal_projection_rechecks_exact_policy_facts(
             accepted=False,
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("subject_index", "accepted"),
+    [(0, True), (2, True), (None, False)],
+)
+def test_subject_membership_compares_the_full_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+    subject_index: int | None,
+    accepted: bool,
+) -> None:
+    allowed = ("a" * 64, "b" * 64, "c" * 64)
+    subject = allowed[subject_index] if subject_index is not None else "d" * 64
+    policy = dataclasses.replace(
+        _policy(),
+        allowed_subject_digests=allowed,
+    )
+    authenticator = _BoundAuthenticator(
+        policy=policy,
+        result=_principal(policy, subject_digest=subject),
+    )
+    sink = _Sink()
+    verifier = _verifier(
+        authenticator=authenticator,
+        policy=policy,
+        sink=sink,
+    )
+    comparisons: list[tuple[str, str]] = []
+
+    def _recording_compare_digest(left: str, right: str) -> bool:
+        comparisons.append((left, right))
+        return left == right
+
+    monkeypatch.setattr(mcp_adapter.hmac, "compare_digest", _recording_compare_digest)
+
+    access = _run(verifier.verify_token("raw-token"))
+
+    assert (access is not None) is accepted
+    # One issuer-digest comparison is followed by every allowlist comparison,
+    # even when an earlier subject entry already matched.
+    assert comparisons[1:] == [(subject, digest) for digest in allowed]
 
 
 def test_mcp_adapter_refuses_non_jwt_authenticator_at_composition_time() -> None:
