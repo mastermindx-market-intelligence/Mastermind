@@ -72,8 +72,7 @@ strategic_constraints_source_ref = STRATEGIC_STATE:config/strategic_state.yml
 ```
 
 The composer derives exactly one load-bearing Strategic State receipt from the boot packet and the
-protected-Mastermind revision attestation. The normalized constraint map must contain **all six
-current constraints**:
+protected-Mastermind revision attestation. The normalized constraint map must contain **all six current constraints**:
 
 ```text
 autonomous_production_deploy
@@ -95,7 +94,10 @@ The full strategic-state projection remains separately content-addressed for pro
 
 `STRATEGIC_STATE:config/strategic_state.yml` is CURRENT only when the boot packet reports canonical
 `master`, its full SHA matches the protected-Mastermind attestation and that attestation is CURRENT.
-An unresolved or noncanonical checkout is UNKNOWN. A mismatched local `master` is CONFLICT.
+An unresolved or noncanonical checkout is UNKNOWN at source derivation and causes A1 to reject the
+entire decision because the root Strategic State source is not CURRENT. A mismatched local `master`
+is CONFLICT and is rejected for the same reason. A2 never launders either state into an option-local
+refusal packet.
 
 ### Option classification
 
@@ -179,9 +181,9 @@ a newer attestation from being backdated into an older company snapshot.
 - missing/wrong boot-packet schema -> opaque invalid source bundle;
 - missing Strategic State or any current constraint -> fail closed;
 - missing/non-full-SHA/non-load-bearing canonical attestation -> fail closed;
-- unresolved/noncanonical revision -> UNKNOWN;
-- local/canonical disagreement -> CONFLICT;
-- malformed/degraded Agent OS brief -> UNKNOWN;
+- unresolved/noncanonical Strategic State revision -> derive UNKNOWN, then A1 rejects the whole decision;
+- local/canonical Strategic State disagreement -> derive CONFLICT, then A1 rejects the whole decision;
+- malformed/degraded Agent OS brief -> UNKNOWN and dependent options are refused;
 - reserved owner injection or duplicate source reference -> refused;
 - missing or mismatched `constraints-sha256`, `classification-sha256` or `envelope-sha256` -> A1 rejection;
 - source branch or merge without expected head -> A1 refusal;
@@ -199,7 +201,8 @@ The focused source-composer suite must prove:
 - exact option-subject classification and mutation refusal;
 - exact Chairman-envelope binding and mutation refusal;
 - expected-head source-action compatibility;
-- stale/unknown/conflict propagation;
+- non-current Strategic State inputs fail the complete A1 decision closed;
+- Agent OS and additional non-root stale/unknown/conflict states remain option-local;
 - malformed brief cannot become CURRENT;
 - latest-observation semantics;
 - strict recursive duplicate-key rejection;
