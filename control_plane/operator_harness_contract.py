@@ -1171,6 +1171,10 @@ class AttentionTurnObservation:
         if self.delivered and not self.accepted:
             raise ValueError("attention delivery requires provider acceptance")
         native_turn = str(self.provider_native_turn_id or "").strip()
+        if not self.accepted and self.provider_native_turn_id is not None:
+            raise ValueError(
+                "unaccepted attention cannot carry a provider native turn id"
+            )
         if self.accepted and (
             not native_turn or native_turn != self.provider_native_turn_id
         ):

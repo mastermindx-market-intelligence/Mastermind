@@ -1674,20 +1674,10 @@ class CodexOperatorAdapter:
                 "attention completion observation has unknown effect",
                 effect_unknown=True,
             ) from exc
-        params_value = (
-            completion.get("params") if isinstance(completion, Mapping) else None
-        )
-        completed_turn = (
-            params_value.get("turn") if isinstance(params_value, Mapping) else None
-        )
-        if (
-            not isinstance(completion, Mapping)
-            or completion.get("method") != _ATTENTION_COMPLETION_METHOD
-            or not isinstance(params_value, Mapping)
-            or str(params_value.get("threadId") or "").strip()
-            != provider_session_id
-            or not isinstance(completed_turn, Mapping)
-            or str(completed_turn.get("id") or "").strip() != native_turn_id
+        if not self._matches_attention_completion(
+            completion,
+            provider_session_id=provider_session_id,
+            native_turn_id=native_turn_id,
         ):
             raise CodexAdapterError(
                 AdapterFailureClass.MCP_OR_TOOL_TRANSPORT_FAILURE,
@@ -1704,6 +1694,52 @@ class CodexOperatorAdapter:
             accepted=True,
             delivered=True,
         )
+
+    @staticmethod
+    def _matches_attention_completion(
+        completion: object,
+        *,
+        provider_session_id: str,
+        native_turn_id: str,
+    ) -> bool:
+        if not isinstance(completion, Mapping):
+            return False
+        params_value = completion.get("params")
+        if not isinstance(params_value, Mapping):
+            return False
+        completed_turn = params_value.get("turn")
+        return bool(
+            completion.get("method") == _ATTENTION_COMPLETION_METHOD
+            and str(params_value.get("threadId") or "").strip()
+            == provider_session_id
+            and isinstance(completed_turn, Mapping)
+            and str(completed_turn.get("id") or "").strip() == native_turn_id
+        )
+
+    def _reconcile_late_attention_completion(self, state: _GenerationState) -> None:
+        """Clear a timed-out attention fence only on its exact queued completion."""
+
+        native_turn_id = state.attention_native_turn_id
+        if not state.attention_inflight or not native_turn_id:
+            return
+        while True:
+            try:
+                completion = state.client.wait_notification(
+                    _ATTENTION_COMPLETION_METHOD,
+                    timeout=0.0,
+                )
+            except Exception:
+                # Absence, transport loss, and malformed reader behavior are all
+                # fail-closed: none is evidence that the provider completed.
+                return
+            if self._matches_attention_completion(
+                completion,
+                provider_session_id=state.provider_session_id,
+                native_turn_id=native_turn_id,
+            ):
+                state.attention_inflight = False
+                state.attention_native_turn_id = None
+                return
 
     def read_events(
         self, cursor: EventCursor, *, timeout_seconds: float = 30.0
@@ -2090,6 +2126,7 @@ class CodexOperatorAdapter:
                 recommended_failure_class=AdapterFailureClass.SESSION_MISSING,
             )
         if state.client.alive():
+            self._reconcile_late_attention_completion(state)
             try:
                 result = state.client.request(
                     "thread/read", {"threadId": state.provider_session_id}

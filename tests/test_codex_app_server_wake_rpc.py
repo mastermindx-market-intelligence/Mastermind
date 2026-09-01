@@ -11,6 +11,7 @@ import pytest
 
 from control_plane import codex_operator_adapter as codex_adapter
 from control_plane import executive_worker_broker as broker_module
+from control_plane import runtime_binding_projection
 from control_plane.executive_worker_broker import (
     BrokerEffectUnknownError,
     BrokerPreSubmitError,
@@ -74,6 +75,7 @@ class FakeOwnedAppServerClient:
     fail_request: bool = False
     completion_timeout: bool = False
     completion: Mapping[str, Any] | None = None
+    queued_notifications: list[dict[str, Any]] = field(default_factory=list)
     running: bool = True
     calls: list[tuple[str, object]] = field(default_factory=list)
 
@@ -89,6 +91,8 @@ class FakeOwnedAppServerClient:
         timeout: float = 60.0,
     ) -> dict[str, Any]:
         self.calls.append((method, dict(params or {})))
+        if method == "thread/read":
+            return {"thread": {"id": NATIVE_HANDLE}}
         if method != "turn/start":
             raise AssertionError(f"second-writer/cold-resume method attempted: {method}")
         if self.fail_request:
@@ -97,10 +101,16 @@ class FakeOwnedAppServerClient:
 
     def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, Any]:
         self.calls.append((f"wait:{method}", timeout))
+        for notification in self.queued_notifications:
+            if notification.get("method") == method:
+                self.queued_notifications.remove(notification)
+                return notification
         if self.completion_timeout:
             raise JsonRpcError(f"timeout waiting for notification {method}")
         if self.completion is not None:
-            return dict(self.completion)
+            completion = dict(self.completion)
+            self.completion = None
+            return completion
         return {
             "method": "turn/completed",
             "params": {
@@ -229,6 +239,61 @@ def test_attention_observation_is_closed_and_delivery_requires_acceptance() -> N
             accepted=False,
             delivered=True,
         )
+
+    with pytest.raises(ValueError, match="native turn"):
+        AttentionTurnObservation(
+            process_generation_id=GENERATION.process_generation_id,
+            provider_session_id=NATIVE_HANDLE,
+            nudge_id=NUDGE_ID,
+            provider_native_turn_id="turn-wake-456",
+            accepted=False,
+            delivered=False,
+        )
+
+
+def test_runtime_binding_projector_delegates_identity_to_shared_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The canonical projector must not maintain a second binding-id formula."""
+
+    sentinel = "bind-" + "f" * 40
+    facts = SimpleNamespace(
+        attempt_id=ATTEMPT_ID,
+        session_epoch_id=EPOCH.session_epoch_id,
+        generation_number=GENERATION.generation_number,
+        provider_session_id=NATIVE_HANDLE,
+        account_label="account-a",
+    )
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        runtime_binding_projection,
+        "active_operator_binding_facts",
+        lambda _runtime, _attempt_id, _target, connection=None: facts,
+    )
+
+    def shared_binding_id(attempt_id: str, session_epoch_id: str) -> str:
+        calls.append((attempt_id, session_epoch_id))
+        return sentinel
+
+    monkeypatch.setattr(
+        runtime_binding_projection,
+        "runtime_binding_id_for",
+        shared_binding_id,
+        raising=False,
+    )
+
+    projected = runtime_binding_projection.project_runtime_binding(
+        object(),
+        ATTEMPT_ID,
+        SimpleNamespace(
+            session_alias="EXECUTIVE-CTO-FORGE",
+            reasoning_surface="codex",
+        ),
+    )
+
+    assert projected.binding_id == sentinel
+    assert calls == [(ATTEMPT_ID, EPOCH.session_epoch_id)]
 
 
 def test_worker_local_attention_reuses_exact_owned_generation_without_start_or_resume() -> None:
@@ -703,6 +768,108 @@ def test_composed_attention_timeout_keeps_browser_resource_and_blocks_turn() -> 
     assert [name for name, _payload in client.calls].count("turn/start") == 1
 
 
+def test_reconcile_late_exact_attention_completion_clears_only_attention_fence() -> None:
+    """The owned reader may reconcile a late exact completion without a resend."""
+
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    resource = FakeBoundBrowserResource()
+    adapter = _owned_adapter(client, resource=resource)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+    assert observation.delivered is False
+    client.queued_notifications.append(
+        {
+            "method": "turn/completed",
+            "params": {
+                "threadId": NATIVE_HANDLE,
+                "turn": {"id": "turn-wake-456", "status": "completed"},
+            },
+        }
+    )
+
+    reconciled = adapter.reconcile(GENERATION)
+
+    assert reconciled.provider_session_reachable is True
+    assert state.attention_inflight is False
+    assert state.attention_native_turn_id is None
+    assert state.resource is resource
+    assert resource.prompt_calls == 0
+    assert resource.observed_results == []
+    assert resource.stop_calls == 0
+
+    _begin_ordinary_turn(adapter)
+
+    turn_starts = [payload for name, payload in client.calls if name == "turn/start"]
+    assert len(turn_starts) == 2
+    assert turn_starts[1]["input"] == [
+        {
+            "type": "text",
+            "text": "ordinary governed turn\n\nBROWSER_B1_CLOSED_TURN_CONTRACT",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("thread_id", "turn_id"),
+    ((NATIVE_HANDLE, "stale-turn"), ("wrong-thread", "turn-wake-456")),
+)
+def test_reconcile_stale_attention_completion_keeps_no_resend_fence(
+    thread_id: str,
+    turn_id: str,
+) -> None:
+    """A late completion clears the fence only on both exact identities."""
+
+    client = FakeOwnedAppServerClient(completion_timeout=True)
+    resource = FakeBoundBrowserResource()
+    adapter = _owned_adapter(client, resource=resource)
+    state = adapter._generations[GENERATION.process_generation_id]
+
+    observation = adapter.deliver_attention(
+        generation=GENERATION,
+        attempt_id=ATTEMPT_ID,
+        binding_id=BINDING.binding_id,
+        binding_generation=BINDING.binding_generation,
+        provider_session_id=NATIVE_HANDLE,
+        nudge_id=NUDGE_ID,
+        opaque_ids=OPAQUE_IDS,
+        instruction=CODEX_WAKE_INSTRUCTION,
+        completion_timeout_seconds=3.0,
+    )
+    assert observation.delivered is False
+    client.queued_notifications.append(
+        {
+            "method": "turn/completed",
+            "params": {
+                "threadId": thread_id,
+                "turn": {"id": turn_id, "status": "completed"},
+            },
+        }
+    )
+
+    adapter.reconcile(GENERATION)
+
+    assert state.attention_inflight is True
+    assert state.attention_native_turn_id == "turn-wake-456"
+    assert state.resource is resource
+    with pytest.raises(codex_adapter.CodexAdapterError):
+        _begin_ordinary_turn(adapter)
+    assert resource.prompt_calls == 0
+    assert resource.observed_results == []
+    assert resource.stop_calls == 0
+    assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
 def test_composed_stale_completion_clears_neither_attention_nor_browser_fence() -> None:
     """A stale native completion cannot release either composed owner state."""
 
@@ -918,6 +1085,25 @@ def test_real_broker_preserves_effect_unknown_after_one_provider_write() -> None
         asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
 
     assert [name for name, _payload in client.calls].count("turn/start") == 1
+
+
+@dataclass
+class FakeUnclassifiedPostSubmitAttentionAdapter:
+    provider_writes: int = 0
+
+    def deliver_attention(self, **_kwargs: Any) -> AttentionTurnObservation:
+        self.provider_writes += 1
+        raise RuntimeError("unexpected failure after provider submission")
+
+
+def test_real_broker_fails_closed_on_unclassified_attention_exception() -> None:
+    adapter = FakeUnclassifiedPostSubmitAttentionAdapter()
+    broker = _real_broker_with_owned_adapter(adapter)
+
+    with pytest.raises(BrokerEffectUnknownError):
+        asyncio.run(broker._ohf_deliver_attention(_attention_payload()))
+
+    assert adapter.provider_writes == 1
 
 
 @dataclass

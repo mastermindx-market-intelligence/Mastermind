@@ -1913,7 +1913,8 @@ class ExecutiveWorkerBroker:
                     completion_timeout_seconds=float(timeout),
                 )
             except Exception as exc:
-                if bool(getattr(exc, "effect_unknown", False)):
+                effect_unknown = getattr(exc, "effect_unknown", None)
+                if effect_unknown is not False:
                     raise BrokerEffectUnknownError(
                         "attention provider write has unknown effect"
                     ) from exc
