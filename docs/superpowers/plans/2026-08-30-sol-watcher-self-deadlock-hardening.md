@@ -12,9 +12,9 @@
 
 ## Global Constraints
 
-- Authoring pickup was `Mastermind@fefd774701ea285b466cac2646a584801f4a976a`, Skillpack v1.0.1/bootstrap 1. The branch was history-preservingly composed onto protected `5a7046c46046a2ecf597c849aaab914b4f7cd5e1`; re-pin again before final release.
+- Authoring pickup was `Mastermind@fefd774701ea285b466cac2646a584801f4a976a`, Skillpack v1.0.1/bootstrap 1. The existing branch/PR must be history-preservingly joined to the current protected master immediately before release; never reset, rebase or force-update it.
 - Do not modify #147 Continuation Delta Skillpack paths except `WATCHER_ACTION_LOOP.md`, which #147 does not own.
-- No task-store, watcher, Slack, GitHub, Executive, provider, credential, lifecycle, queue, retry, cursor, or persistence mutation from production code.
+- No task-store, watcher, Slack, Executive, provider, credential, lifecycle, queue, retry, cursor or persistence mutation from production code.
 - One current child turn has one action-authoritative Sol target; sister Sol surfaces remain observers until canonical transfer.
 - `ACTION_AUTHORITATIVE` requires one exact Slack carrier. Observer/parent/triage roles may use a closed `aggregate:<stable-scope-id>` only as bounded read/oversight scope.
 - Account exports distinguish `audit_kind: SOL_WATCHER | NON_WATCHER`; non-watchers remain visible but are excluded from conformance counts.
@@ -78,8 +78,6 @@
 
 ### Task 5B: Clause-polarity, classification and rotating-Codex correction
 
-**Why:** Exact-head review found that a long line could hide a positive `wait for Sol` behind an unrelated earlier negation; observer prohibitions could be false-rejected; disabled tasks with unknown audit classifications could leave the overall report green; and the initial deployment packet risked conflating three web-account watcher stores with one rotating Codex OAuth slot.
-
 - [x] Add RED proving a later positive wait in a mixed clause is rejected.
 - [x] Add RED proving positive observer actuation is rejected and explicit observer prohibitions pass.
 - [x] Add RED proving unknown audit kinds fail the report even when the native task is disabled.
@@ -87,11 +85,8 @@
 - [x] Add `invalid_classification_tasks` to the stable audit summary.
 - [x] Record that one rotating Codex OAuth slot does not identify or authorize the three web-account task stores.
 - [x] Correct all three preflight carriers and the Grok placement carrier in place; no replacement carrier or Codex-session multiplication.
-- [x] Prior local validator/CLI proof: 19 focused tests passed; `py_compile` passed; four additional polarity/authority mutation probes passed.
 
 ### Task 5C: All-role authority and native-export identity hardening
-
-**Why:** A second adversarial pass found that parent/triage prompts could hide child modification authority in body prose, self-deferral synonyms could bypass the original vocabulary, and malformed native exports could coerce strings to enabled state or synthesize/duplicate task identity.
 
 - [x] Add RED for `await/defer/escalate/pause` self-deferral synonyms.
 - [x] Add RED proving observer, parent and triage body prose cannot issue child semantic edges, release, retry/failover or start successors.
@@ -100,23 +95,31 @@
 - [x] Add RED requiring real JSON booleans for enabled state and refusing conflicting aliases.
 - [x] Implement all-role body fences and strict export identity/typing.
 - [x] Add `invalid_export_tasks` and `duplicate_task_ids` to the stable report.
-- [x] Repair the valid `No blind retry` polarity case and widen clause boundaries so unrelated negation cannot suppress later positive authority.
-- [x] Synchronize Skillpack, runbook and design.
-- [ ] Run final exact-head focused tests and compile checks after the documentation freeze.
+
+### Task 5D: Exact failed-CI and independent-review repair
+
+**Why:** Hosted CI on `4c0cabfd5e66cc79e17fc06c542839b0cbd53e82` proved nine deterministic failures: negated required laws were accepted, positive lifecycle inference was accepted, and exact source-law phrases were absent. Independent review also found an open header instruction channel, Markdown-wrapped command bypasses, bare imperative merge forms, and pre-normalization `id`/`task_id` comparison.
+
+- [x] Preserve the failed exact-head logs as RED evidence; do not blame runner capacity or rerun the unchanged head.
+- [x] Add RED cases for unknown/bare header lines, Markdown-wrapped child commands, bare merge commands, whitespace-equivalent ID aliases, and duplicate canonical IDs.
+- [x] Close the header to exactly seven fields plus one blank-line boundary.
+- [x] Require positive operative re-pin, fresh-read, same-carrier action, typed blocker and STOP-before-disarm laws; require explicit lifecycle-inference refusal.
+- [x] Normalize native ID aliases independently before equality and duplicate census.
+- [x] Strip Markdown delimiters for policy scanning without changing stored prompt bytes.
+- [x] Synchronize Skillpack, runbook and design with the repaired implementation.
+- [x] History-preservingly join the existing branch to protected `47eaa510aa0b9877d91052fbaa27156957aa963c` without changing the nine-file surface.
+- [ ] Rejoin any later protected movement immediately before final verification.
 
 ### Task 6: Exact-head verification and release packet
 
 **Files:** all nine carrier paths.
 
-- [x] Run prior focused validator/CLI proof on exact authored bytes: 19 passed.
-- [x] Run prior validator/CLI `py_compile`.
-- [ ] Run the final enlarged focused suite and compile checks on the immutable release head.
-- [ ] Require current protected-base ancestry and exact nine-file census on the final head.
-- [x] Open one DRAFT/HOLD pull request on the same branch: Mastermind #268.
-- [x] Request independent review from `mastermindx-2` and `MastermindX1`.
-- [ ] Require exact-head hosted repository/security checks and independent review.
-- [ ] Reconcile any protected-source movement history-preservingly; no reset/rebase/force.
-- [ ] Update PR metadata to the immutable final head and proof.
+- [ ] Run the enlarged focused suite and compile checks on the immutable final head.
+- [ ] Require current protected-base ancestry / behind=0 and exact nine-file census.
+- [x] Keep one DRAFT/HOLD pull request on the original branch: Mastermind #268.
+- [x] Preserve all prior RED evidence and independent findings.
+- [ ] Require exact-head hosted repository/security checks and independent current-head review.
+- [ ] Update PR metadata to the immutable final head and current proof.
 - [ ] Final Sol review, ready transition and expected-head release only after all gates.
 - [ ] Do not call merge/CI/Slack delivery production proof.
 
@@ -128,15 +131,15 @@
 - ChatGPT3: `C0BSBM78V1N/1788074158.598619`, child `sol-watcher-account-hardening-chatgpt3-20260830-sol-001`.
 - Placement/attention bridge only: `C0BSBM78V1N/1788074188.046229`, `sol-watcher-three-account-placement-20260830-gs-001`.
 - Independent-review capacity census: `C0BSBM78V1N/1788075138.441739`, `sol-watcher-pr268-review-capacity-20260830-gs-001`.
-- Existing permanent owners: W3A #250, W3C under accepted Wake runtime plan, MAS-229 ACK/source resolution, AD-SOL1 exact action-target enforcement.
+- Existing permanent owners: released W3A, released W3B, W3C under the accepted Wake runtime plan, ACK1 source resolution, and AD-SOL1 exact action-target enforcement.
 
 - [x] Create exact account-local read-only preflight carriers for all three web accounts.
 - [x] Send one bounded exact-account placement/attention request to Grok Secretary; it has zero task-store authority.
 - [x] Correct placement law after Chairman clarified the one rotating Codex OAuth slot.
-- [ ] Collect account `PICKUP_ACK`, `WATCH_ARMED`, and `RESULT / PREFLIGHT` receipts.
+- [ ] Collect current account `PICKUP_ACK`, watcher-capability and `RESULT / PREFLIGHT` receipts.
 - [ ] After #268 is protected, issue same-carrier mutation CONTINUE to each account with the current protected SHA.
 - [ ] Audit every enabled account-local Sol watcher and rewrite only invalid prompts in place, preserving watcher IDs/operations/carriers where possible.
 - [ ] Collect native readback receipts and validator exit 0 from all three accounts.
 - [ ] Run the three-account adverse canary: one authoritative action, two observers, then fail-closed transfer test.
-- [ ] Continue existing W3A/W3C/MAS-229/AD-SOL1 carriers; create no replacements.
+- [ ] Continue the existing W3C/ACK1/AD-SOL1 carriers; create no replacements.
 - [ ] Mark temporary watcher hardening `PROVEN_LIVE` only after all three account receipts and a real no-Chairman continuation canary.
