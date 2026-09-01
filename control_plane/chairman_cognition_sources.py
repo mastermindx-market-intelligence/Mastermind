@@ -1,13 +1,14 @@
 """Compose Chairman-cognition input from existing canonical read projections.
 
-This is a pure owner-preserving adapter. It consumes an already-produced CEO boot
-packet plus explicit receipts from existing owners. It performs no source crawling,
-I/O, scheduling, mutation, authority grant, or durable storage.
+This module is a pure owner-preserving adapter.  It accepts an already-produced CEO
+boot packet plus explicit receipts from existing owners and produces the closed input
+consumed by :mod:`control_plane.chairman_cognition`.  It performs no I/O, scheduling,
+mutation, authority grant, or durable storage.
 
-The JSON values supplied to this module are evidence inputs, not authenticated source
-identity. A CURRENT attestation is meaningful only when a separately accepted trusted
-adapter acquired the owner payload and attestation together. Arbitrary or model-authored
-local JSON remains fixture/test input and grants no authority.
+The attestation fields below are evidence inputs, not self-authenticating identities.
+A CURRENT claim is meaningful only when a separately accepted trusted adapter acquired
+the owner payload, repository identity, and content identity together.  Arbitrary or
+model-authored JSON remains fixture/evidence input and grants no authority.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from typing import Any
 
 from control_plane.chairman_cognition import (
     INPUT_SCHEMA,
+    MODIFYING_ACTIONS,
     REQUIRED_CURRENT_CONSTRAINTS,
     evaluate_document,
 )
@@ -37,8 +39,11 @@ STRATEGIC_SOURCE_REF = "STRATEGIC_STATE:config/strategic_state.yml"
 AGENT_OS_SOURCE_REF = "AGENT_OS:ceo_brief"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_UNRESOLVED = "UNRESOLVED"
 _RESERVED_OWNERS = frozenset({"CHAIRMAN_DIRECTIVE", "STRATEGIC_STATE", "AGENT_OS"})
 _REQUIRED_CONSTRAINTS = REQUIRED_CURRENT_CONSTRAINTS
+_REQUIRED_OPTION_OWNER_REFS = frozenset({STRATEGIC_SOURCE_REF, AGENT_OS_SOURCE_REF})
 _AGENT_OS_BRIEF_REQUIRED_FIELDS = frozenset(
     {
         "schema",
@@ -117,23 +122,26 @@ def compose_input(bundle: Mapping[str, Any]) -> dict[str, Any]:
     generated_at = _text(boot["generated_at"], "boot_packet.generated_at", 40)
 
     chairman = _chairman_receipt(doc["chairman_directive"])
-    mastermind_revision = _revision_attestation(
-        doc["mastermind_revision_attestation"],
-        source_ref=MASTERMIND_REVISION_SOURCE_REF,
-        owner="GITHUB",
-        where="mastermind_revision_attestation",
+    mastermind_revision, mastermind_identity = _mastermind_attestation(
+        doc["mastermind_revision_attestation"]
     )
-    agentos_revision = _revision_attestation(
-        doc["agentos_revision_attestation"],
-        source_ref=AGENT_OS_REVISION_SOURCE_REF,
-        owner="AGENT_OS",
-        where="agentos_revision_attestation",
+    agentos_revision, agentos_identity = _agentos_attestation(
+        doc["agentos_revision_attestation"]
     )
     strategic_receipt, constraints = _strategic_receipt(
-        boot, generated_at, mastermind_revision
+        boot,
+        generated_at,
+        mastermind_revision,
+        mastermind_identity,
     )
-    agentos_receipt = _agentos_receipt(boot, generated_at, agentos_revision)
+    agentos_receipt = _agentos_receipt(
+        boot,
+        generated_at,
+        agentos_revision,
+        agentos_identity,
+    )
     additions = _additional_receipts(doc["additional_source_receipts"])
+    _require_modifying_option_owner_refs(doc["options"])
 
     receipts = [
         chairman,
@@ -245,18 +253,79 @@ def _chairman_receipt(value: Any) -> dict[str, Any]:
     }
 
 
-def _revision_attestation(
+def _mastermind_attestation(
     value: Any,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    item = _closed_mapping(
+        value,
+        required={
+            "revision",
+            "state",
+            "load_bearing",
+            "observed_at",
+            "source_blob_sha",
+            "payload_digest",
+        },
+        where="mastermind_revision_attestation",
+    )
+    receipt = _base_revision_attestation(
+        item,
+        source_ref=MASTERMIND_REVISION_SOURCE_REF,
+        owner="GITHUB",
+        where="mastermind_revision_attestation",
+    )
+    return receipt, {
+        "source_blob_sha": _sha_or_unresolved(
+            item["source_blob_sha"],
+            "mastermind_revision_attestation.source_blob_sha",
+        ),
+        "payload_digest": _sha256_or_unresolved(
+            item["payload_digest"],
+            "mastermind_revision_attestation.payload_digest",
+        ),
+    }
+
+
+def _agentos_attestation(
+    value: Any,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    item = _closed_mapping(
+        value,
+        required={
+            "revision",
+            "state",
+            "load_bearing",
+            "observed_at",
+            "source_records_digest",
+            "payload_digest",
+        },
+        where="agentos_revision_attestation",
+    )
+    receipt = _base_revision_attestation(
+        item,
+        source_ref=AGENT_OS_REVISION_SOURCE_REF,
+        owner="AGENT_OS",
+        where="agentos_revision_attestation",
+    )
+    return receipt, {
+        "source_records_digest": _sha256_or_unresolved(
+            item["source_records_digest"],
+            "agentos_revision_attestation.source_records_digest",
+        ),
+        "payload_digest": _sha256_or_unresolved(
+            item["payload_digest"],
+            "agentos_revision_attestation.payload_digest",
+        ),
+    }
+
+
+def _base_revision_attestation(
+    item: Mapping[str, Any],
     *,
     source_ref: str,
     owner: str,
     where: str,
 ) -> dict[str, Any]:
-    item = _closed_mapping(
-        value,
-        required={"revision", "state", "load_bearing", "observed_at"},
-        where=where,
-    )
     revision = _text(item["revision"], f"{where}.revision", 40)
     if _SHA_RE.fullmatch(revision) is None:
         raise ChairmanCognitionSourceError(
@@ -280,6 +349,7 @@ def _strategic_receipt(
     boot: Mapping[str, Any],
     observed_at: str,
     canonical_revision: Mapping[str, Any],
+    identity: Mapping[str, str],
 ) -> tuple[dict[str, Any], dict[str, str]]:
     strategic = boot.get("strategic_state")
     if not isinstance(strategic, Mapping):
@@ -309,25 +379,41 @@ def _strategic_receipt(
         and _SHA_RE.fullmatch(checkout_sha) is not None
     )
     canonical_sha = canonical_revision["revision"]
+    payload_digest = _payload_digest(strategic)
+    attested_payload_digest = identity["payload_digest"]
+    source_blob_sha = identity["source_blob_sha"]
+
     if not checkout_known or branch != "master":
         state = "UNKNOWN"
     elif checkout_sha != canonical_sha:
         state = "CONFLICT"
+    elif (
+        attested_payload_digest != _UNRESOLVED
+        and attested_payload_digest != payload_digest
+    ):
+        state = "CONFLICT"
+    elif (
+        attested_payload_digest == _UNRESOLVED
+        or source_blob_sha == _UNRESOLVED
+    ):
+        state = "UNKNOWN"
     else:
         state = canonical_revision["state"]
 
-    strategic_digest = hashlib.sha256(canonical_json_bytes(strategic)).hexdigest()
-    constraints_digest = hashlib.sha256(canonical_json_bytes(normalized)).hexdigest()
-    checkout_label = checkout_sha if checkout_known else "UNRESOLVED"
+    constraints_digest = hashlib.sha256(
+        canonical_json_bytes(normalized)
+    ).hexdigest()
+    payload_hex = payload_digest.removeprefix("sha256:")
+    revision = (
+        f"constraints-sha256:{constraints_digest};"
+        f"payload-sha256:{payload_hex};"
+        f"blob:{source_blob_sha};git:{canonical_sha}"
+    )
     return (
         {
             "source_ref": STRATEGIC_SOURCE_REF,
             "owner": "STRATEGIC_STATE",
-            "revision": (
-                f"constraints-sha256:{constraints_digest};"
-                f"s:{strategic_digest};mastermind:{checkout_label};"
-                f"canonical:{canonical_sha}"
-            ),
+            "revision": revision,
             "state": state,
             "load_bearing": True,
             "observed_at": _latest_observed_at(
@@ -342,6 +428,7 @@ def _agentos_receipt(
     boot: Mapping[str, Any],
     fallback_observed_at: str,
     canonical_revision: Mapping[str, Any],
+    identity: Mapping[str, str],
 ) -> dict[str, Any]:
     brief = boot.get("brief")
     checkout_sha = boot["macro"].get("sha")
@@ -353,27 +440,43 @@ def _agentos_receipt(
 
     valid_brief, brief_observed_at = _agentos_brief_status(brief)
     observed_at = brief_observed_at or fallback_observed_at
-    state = "UNKNOWN"
-    if valid_brief and checkout_known:
-        if checkout_sha != canonical_sha:
-            state = "CONFLICT"
-        else:
-            state = canonical_revision["state"]
+    payload_digest = _payload_digest(brief) if isinstance(brief, Mapping) else None
+    attested_payload_digest = identity["payload_digest"]
+    source_records_digest = identity["source_records_digest"]
 
-    brief_digest = (
-        hashlib.sha256(canonical_json_bytes(brief)).hexdigest()
-        if isinstance(brief, Mapping)
-        else None
-    )
-    checkout_label = checkout_sha if checkout_known else "UNRESOLVED"
-    revision = (
-        (
-            f"sha256:{brief_digest};macro:{checkout_label};"
-            f"canonical:{canonical_sha}"
+    if not valid_brief or not checkout_known or payload_digest is None:
+        state = "UNKNOWN"
+    elif checkout_sha != canonical_sha:
+        state = "CONFLICT"
+    elif (
+        attested_payload_digest != _UNRESOLVED
+        and attested_payload_digest != payload_digest
+    ):
+        state = "CONFLICT"
+    elif (
+        attested_payload_digest == _UNRESOLVED
+        or source_records_digest == _UNRESOLVED
+    ):
+        state = "UNKNOWN"
+    else:
+        state = canonical_revision["state"]
+
+    if payload_digest is None:
+        revision = (
+            f"payload-sha256:{_UNRESOLVED};"
+            f"records-sha256:{source_records_digest};git:{canonical_sha}"
         )
-        if brief_digest is not None
-        else f"UNRESOLVED;macro:{checkout_label};canonical:{canonical_sha}"
-    )
+    else:
+        payload_hex = payload_digest.removeprefix("sha256:")
+        records_hex = (
+            source_records_digest.removeprefix("sha256:")
+            if source_records_digest != _UNRESOLVED
+            else _UNRESOLVED
+        )
+        revision = (
+            f"payload-sha256:{payload_hex};"
+            f"records-sha256:{records_hex};git:{canonical_sha}"
+        )
     return {
         "source_ref": AGENT_OS_SOURCE_REF,
         "owner": "AGENT_OS",
@@ -386,12 +489,28 @@ def _agentos_receipt(
     }
 
 
-def _agentos_brief_status(value: Any) -> tuple[bool, str | None]:
-    """Return whether the current owner contract supports a CURRENT claim.
+def _require_modifying_option_owner_refs(value: Any) -> None:
+    if not isinstance(value, list):
+        return  # A1 owns the complete options grammar and emits the canonical error.
+    for index, option in enumerate(value):
+        if not isinstance(option, Mapping):
+            continue
+        if option.get("action") not in MODIFYING_ACTIONS:
+            continue
+        refs = option.get("source_refs")
+        if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+            raise ChairmanCognitionSourceError(
+                f"options[{index}] modifying option source_refs are invalid"
+            )
+        missing = sorted(_REQUIRED_OPTION_OWNER_REFS - set(refs))
+        if missing:
+            raise ChairmanCognitionSourceError(
+                f"options[{index}] modifying option must cite Strategic State and Agent OS"
+            )
 
-    This validates only the published `ceo_brief.v1` wire shape and degradation
-    receipts. It does not re-rank work, infer escalation, or recompute readiness.
-    """
+
+def _agentos_brief_status(value: Any) -> tuple[bool, str | None]:
+    """Return whether the owner wire contract supports a CURRENT claim."""
     if not isinstance(value, Mapping):
         return False, None
 
@@ -424,12 +543,12 @@ def _agentos_brief_status(value: Any) -> tuple[bool, str | None]:
         return False, observed_at
 
     for field in ("needs_ceo", "blocked", "finished"):
-        rows = value.get(field)
-        if not _mapping_list(rows):
+        if not _mapping_list(value.get(field)):
             return False, observed_at
 
-    running = value.get("running")
-    if not _nonnegative_int_mapping(running, _AGENT_OS_RUNNING_FIELDS):
+    if not _nonnegative_int_mapping(
+        value.get("running"), _AGENT_OS_RUNNING_FIELDS
+    ):
         return False, observed_at
 
     readiness = value.get("readiness")
@@ -440,8 +559,7 @@ def _agentos_brief_status(value: Any) -> tuple[bool, str | None]:
     if not _string_list(warnings):
         return False, observed_at
 
-    readiness_degraded = readiness.get("degraded")
-    healthy = not degraded and not warnings and not readiness_degraded
+    healthy = not degraded and not warnings and not readiness.get("degraded")
     return healthy, observed_at
 
 
@@ -475,6 +593,68 @@ def _valid_readiness_record(value: Any) -> bool:
     return _string_list(value.get("depends_on")) and _string_list(
         value.get("unmet_dependencies")
     )
+
+
+def _additional_receipts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > _MAX_ADDITIONAL_RECEIPTS:
+        raise ChairmanCognitionSourceError(
+            "additional_source_receipts must be a bounded list"
+        )
+    out: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, Mapping):
+            raise ChairmanCognitionSourceError(
+                "additional receipt must be a mapping"
+            )
+        if raw.get("owner") in _RESERVED_OWNERS:
+            raise ChairmanCognitionSourceError(
+                "reserved canonical source must use its dedicated composer path"
+            )
+        out.append(dict(raw))
+    out.sort(key=lambda item: str(item.get("source_ref", "")))
+    return out
+
+
+def _payload_digest(value: Mapping[str, Any]) -> str:
+    return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _sha_or_unresolved(value: Any, where: str) -> str:
+    text = _text(value, where, 40)
+    if text != _UNRESOLVED and _SHA_RE.fullmatch(text) is None:
+        raise ChairmanCognitionSourceError(
+            f"{where} must be a full Git blob SHA or UNRESOLVED"
+        )
+    return text
+
+
+def _sha256_or_unresolved(value: Any, where: str) -> str:
+    text = _text(value, where, 71)
+    if text != _UNRESOLVED and _SHA256_RE.fullmatch(text) is None:
+        raise ChairmanCognitionSourceError(
+            f"{where} must be sha256:<64 lowercase hex> or UNRESOLVED"
+        )
+    return text
+
+
+def _latest_observed_at(*values: str) -> str:
+    parsed: list[tuple[str, datetime]] = []
+    for raw in values:
+        text = _text(raw, "observed_at", 40)
+        try:
+            instant = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ChairmanCognitionSourceError(
+                "observed_at must be UTC ISO-8601"
+            ) from exc
+        if instant.tzinfo is None or instant.utcoffset() != timezone.utc.utcoffset(
+            instant
+        ):
+            raise ChairmanCognitionSourceError(
+                "observed_at must be UTC ISO-8601"
+            )
+        parsed.append((text, instant))
+    return max(parsed, key=lambda item: item[1])[0]
 
 
 def _nonnegative_int_mapping(value: Any, required: frozenset[str]) -> bool:
@@ -511,46 +691,6 @@ def _valid_utc_text(value: Any) -> str | None:
     if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
         return None
     return value
-
-
-def _additional_receipts(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or len(value) > _MAX_ADDITIONAL_RECEIPTS:
-        raise ChairmanCognitionSourceError(
-            "additional_source_receipts must be a bounded list"
-        )
-    out: list[dict[str, Any]] = []
-    for raw in value:
-        if not isinstance(raw, Mapping):
-            raise ChairmanCognitionSourceError(
-                "additional receipt must be a mapping"
-            )
-        if raw.get("owner") in _RESERVED_OWNERS:
-            raise ChairmanCognitionSourceError(
-                "reserved canonical source must use its dedicated composer path"
-            )
-        out.append(dict(raw))
-    out.sort(key=lambda item: str(item.get("source_ref", "")))
-    return out
-
-
-def _latest_observed_at(*values: str) -> str:
-    parsed: list[tuple[str, datetime]] = []
-    for raw in values:
-        text = _text(raw, "observed_at", 40)
-        try:
-            instant = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ChairmanCognitionSourceError(
-                "observed_at must be UTC ISO-8601"
-            ) from exc
-        if instant.tzinfo is None or instant.utcoffset() != timezone.utc.utcoffset(
-            instant
-        ):
-            raise ChairmanCognitionSourceError(
-                "observed_at must be UTC ISO-8601"
-            )
-        parsed.append((text, instant))
-    return max(parsed, key=lambda item: item[1])[0]
 
 
 def _closed_mapping(
