@@ -62,6 +62,13 @@ _DIGEST_FIELD_BY_SCHEMA = {
     contracts.RUN_SCHEMA: "run_digest",
     scoring.SCORER_PASS_SCHEMA: "scorer_pass_digest",
     scoring.EVIDENCE_REF_SCHEMA: "evidence_ref_digest",
+    # EVAL-S1 (operation mastermind-agent-evaluation-s1-scorers-20260901-
+    # fable-001, store-integration wave): the multi-scenario evidence
+    # reference shares the single-scenario schema's own "evidence_ref_id"
+    # field name and path scheme (evidence-refs/<uuid>/evidence-ref.json)
+    # -- only its internal field set differs (plural scenario_refs +
+    # per-scenario scenario_groups instead of one scenario_ref).
+    scoring.EVIDENCE_REF_MULTI_SCENARIO_SCHEMA: "evidence_ref_digest",
 }
 
 _ARTIFACT_FILENAME_BY_TOP = {
@@ -146,6 +153,8 @@ def _artifact_path_for(document: dict) -> tuple[str, Path]:
         return document["scorer_pass_id"], scorer_pass_path(document["scorer_pass_id"])
     if schema == scoring.EVIDENCE_REF_SCHEMA:
         return document["evidence_ref_id"], evidence_ref_path(document["evidence_ref_id"])
+    if schema == scoring.EVIDENCE_REF_MULTI_SCENARIO_SCHEMA:
+        return document["evidence_ref_id"], evidence_ref_path(document["evidence_ref_id"])
     raise ContractError([ContractDefect("$.schema", "UNKNOWN_SCHEMA", f"unknown persisted schema {schema!r}")])
 
 
@@ -163,6 +172,8 @@ def _graph_verify_for(document: dict, resolver) -> VerificationResult:
         return verify_scorer_pass_graph(document, resolver)
     if schema == scoring.EVIDENCE_REF_SCHEMA:
         return verify_evidence_ref_graph(document, resolver)
+    if schema == scoring.EVIDENCE_REF_MULTI_SCENARIO_SCHEMA:
+        return scoring.verify_multi_scenario_evidence_ref_graph(document, resolver)
     raise ContractError([ContractDefect("$.schema", "UNKNOWN_SCHEMA", f"unknown persisted schema {schema!r}")])
 
 
@@ -285,23 +296,33 @@ class ArtifactStore:
     def _require_evidence_ref_population_complete(self, document: dict) -> None:
         """BLOCKER-1 review repair: close the evidence-ref laundering hole.
 
-        ``scoring.verify_evidence_ref_graph`` alone only re-resolves the
-        specific runs/scorer-passes the document ITSELF claims in
-        ``run_entries``/``scorer_refs`` -- a caller could hand-build an
-        evidence reference over a cherry-picked SUBSET of an experiment's
-        runs (e.g. dropping an inconvenient INVALID one) and it would
-        recompute internally-consistently against that subset, publish
-        cleanly, and `verify-tree-graph` would report zero defects. This is
-        the ONE place in R0 that owns both an ``ArtifactResolver`` and the
+        ``scoring.verify_evidence_ref_graph``/``verify_multi_scenario_
+        evidence_ref_graph`` alone only re-resolve the specific scenarios/
+        runs/scorer-passes the document ITSELF claims -- a caller could
+        hand-build an evidence reference over a cherry-picked SUBSET of an
+        experiment's own declared scenarios/runs (e.g. dropping an
+        inconvenient scenario or an INVALID run) and it would recompute
+        internally-consistently against that subset, publish cleanly, and
+        `verify-tree-graph` would report zero defects. This is the ONE
+        place in the store that owns both an ``ArtifactResolver`` and the
         enumerator, so it is the only place that can catch the laundering:
         recompute the evidence reference from the store's OWN COMPLETE
-        enumeration (plan §5.6 complete-enumeration law -- never a
-        caller-selected subset) and require exact equality with what the
-        document claims. A resolver-missing scenario/experiment is left to
-        the ordinary graph-verify resolution step, which already reports it.
-        """
-        if document.get("schema") != scoring.EVIDENCE_REF_SCHEMA:
-            return
+        enumeration, against the EXPERIMENT's own declared scenario set
+        (plan §5.6 complete-enumeration law -- never a caller-selected
+        subset) and require exact equality with what the document claims.
+        A resolver-missing scenario/experiment is left to the ordinary
+        graph-verify resolution step, which already reports it. EVAL-S1
+        (operation mastermind-agent-evaluation-s1-scorers-20260901-
+        fable-001, store-integration wave) extends this from R0's single-
+        scenario schema to also cover the multi-scenario schema, with the
+        SAME guarantee -- dispatch below, one method per schema."""
+        schema = document.get("schema")
+        if schema == scoring.EVIDENCE_REF_SCHEMA:
+            self._require_single_scenario_evidence_ref_population_complete(document)
+        elif schema == scoring.EVIDENCE_REF_MULTI_SCENARIO_SCHEMA:
+            self._require_multi_scenario_evidence_ref_population_complete(document)
+
+    def _require_single_scenario_evidence_ref_population_complete(self, document: dict) -> None:
         scenario_ref = document["scenario_ref"]
         scenario = self.resolve_scenario(scenario_ref["scenario_id"], scenario_ref["scenario_version"])
         experiment = self.resolve_experiment(document["experiment_ref"]["experiment_id"])
@@ -332,6 +353,63 @@ class ArtifactStore:
                         "evidence reference does not match the complete-enumeration population recomputed from the "
                         "store (plan §5.6) -- a caller-selected subset of runs/scorer-passes is never a valid "
                         "evidence reference",
+                    )
+                    for field_name in mismatched_fields
+                ]
+            )
+
+    def _require_multi_scenario_evidence_ref_population_complete(self, document: dict) -> None:
+        """EVAL-S1 store-integration wave: the SAME anti-laundering
+        guarantee ``_require_single_scenario_evidence_ref_population_
+        complete`` gives R0's single-scenario evidence reference (BLOCKER-1
+        review repair), extended to the multi-scenario schema. The
+        authoritative scenario set is the EXPERIMENT's own declared
+        ``scenario_refs`` -- never the submitted document's own claimed
+        ``scenario_refs`` -- so a document that silently drops an
+        inconvenient scenario (or any of its runs) recomputes differently
+        from the store's own complete enumeration and is refused."""
+        experiment = self.resolve_experiment(document["experiment_ref"]["experiment_id"])
+        if experiment is None:
+            return
+        scenarios: list[dict] = []
+        for ref in experiment["scenario_refs"]:
+            scenario = self.resolve_scenario(ref["scenario_id"], ref["scenario_version"])
+            if scenario is None:
+                return  # left to the ordinary graph-verify resolution step
+            scenarios.append(scenario)
+        recomputed = scoring.summarize_multi_scenario_experiment(
+            experiment,
+            tuple(scenarios),
+            self.enumerate_runs(),
+            self.enumerate_scorer_passes(),
+            evidence_ref_id=document["evidence_ref_id"],
+            intended_owner=document["intended_owner"],
+            review_at=document["review_at"],
+            created_at=document["created_at"],
+            analysis_version=document["analysis_version"],
+        )
+        mismatched_fields = [
+            field_name
+            for field_name in (
+                "run_entries",
+                "counts",
+                "scenario_groups",
+                "scorer_refs",
+                "configuration_refs",
+                "scenario_refs",
+                "sample_size",
+            )
+            if recomputed[field_name] != document[field_name]
+        ]
+        if mismatched_fields:
+            raise VerificationContextError(
+                [
+                    ContractDefect(
+                        f"$.{field_name}",
+                        "EVIDENCE_POPULATION_INCOMPLETE",
+                        "multi-scenario evidence reference does not match the complete-enumeration population "
+                        "recomputed from the store across every scenario the EXPERIMENT declares (plan §5.6) -- a "
+                        "caller-selected subset of scenarios/runs/scorer-passes is never a valid evidence reference",
                     )
                     for field_name in mismatched_fields
                 ]

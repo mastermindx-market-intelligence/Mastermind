@@ -654,6 +654,17 @@ ALLOWED_PATHS = frozenset(
         "docs/superpowers/plans/2026-09-01-agent-evaluation-c0-corpus.md",
         "scripts/agent_eval/corpus.py",
         "tests/test_agent_eval_corpus.py",
+        # --- EVAL-S1 fence ratchet (principal-authorized 2026-09-01,
+        # operation mastermind-agent-evaluation-s1-scorers-20260901-fable-001):
+        # deterministic task-class scorers + multi-scenario summarization.
+        # scoring.py/cli.py above already carry this wave's smallest-surface
+        # edits; these are S1's own new, additive files.
+        "docs/superpowers/plans/2026-09-01-agent-evaluation-s1-scorers.md",
+        "scripts/agent_eval/tc1_source_comprehension.py",
+        "scripts/agent_eval/tc2_implementation_fence.py",
+        "scripts/agent_eval/tc3_protocol_compliance.py",
+        "tests/test_agent_eval_s1_scorers.py",
+        "tests/test_agent_eval_s1_multi_scenario_summarize.py",
     }
 )
 
