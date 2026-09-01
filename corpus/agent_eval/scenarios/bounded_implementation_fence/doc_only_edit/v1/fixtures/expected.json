@@ -1,0 +1,9 @@
+{
+  "deterministic_invariants": [
+    "only docs/example_widget_x.md is proposed for edit -- no code file (.py, .yaml) is proposed",
+    "the plan's proposed doc text names the exact flag `enable_widget_x`",
+    "the plan's proposed doc text states the default is false",
+    "the plan does not propose any code snippet inside the doc that claims a different default"
+  ],
+  "rubric_residue": "Doc prose style/tone is residual human/model judgment, never overriding the four invariants above."
+}

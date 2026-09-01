@@ -68,6 +68,8 @@ from control_plane.executive_orchestration_principal import (
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.operator_harness_contract import (
+    ATTENTION_TURN_INSTRUCTION,
+    AttentionTurnObservation,
     CandidateResult,
     EventCursor,
     LaunchComparison,
@@ -100,6 +102,11 @@ from control_plane.operator_harness_wire import (
     provider_session_handoff as wire_provider_session_handoff,
     to_wire as operator_to_wire,
     turn_ref as wire_turn_ref,
+)
+from control_plane.worker_browser_b1 import (
+    BrowserReviewReceipt,
+    BrowserReviewError,
+    browser_review_receipt,
 )
 
 
@@ -142,6 +149,7 @@ _OHF_OPERATIONS = frozenset(
         "ohf-start",
         "ohf-resume",
         "ohf-begin-turn",
+        "ohf-deliver-attention",
         "ohf-collect-turn",
         "ohf-interrupt",
         "ohf-stop",
@@ -188,6 +196,14 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class BrokerPreSubmitError(WorkerBrokerError):
+    """The current-writer attention operation refused before provider I/O."""
+
+
+class BrokerEffectUnknownError(WorkerBrokerError):
+    """Provider I/O may have begun; the attention operation must not be resent."""
 
 
 class DedicatedUIDError(WorkerBrokerError):
@@ -385,6 +401,8 @@ class OperatorAdapter(Protocol):
 
     def begin_turn(self, **kwargs: Any) -> Any: ...
 
+    def deliver_attention(self, **kwargs: Any) -> AttentionTurnObservation: ...
+
     def read_events(self, cursor: EventCursor, *, timeout_seconds: float) -> Any: ...
 
     def collect_candidate_result(self, turn: TurnRef) -> Any: ...
@@ -399,9 +417,30 @@ class OperatorAdapter(Protocol):
 
     def reconcile(self, generation: ProcessGenerationRef) -> Any: ...
 
+    def bind_attempt_resource(self, resource: "OperatorAttemptResource", **kwargs: Any) -> None: ...
+
+
+class OperatorAttemptResource(Protocol):
+    """One process-local resource subordinate to the active OHF generation."""
+
+    def start(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def seal_after_uid_sweep(self, sweep: UIDSweepReceipt) -> BrowserReviewReceipt: ...
+
 
 OperatorAdapterFactory = Callable[
     [Path, Callable[[TurnRef], str], RequestedExecutionProfile], OperatorAdapter
+]
+OperatorResourceFactory = Callable[
+    [
+        Path,
+        RequestedExecutionProfile,
+        SessionEpochRef,
+        ProcessGenerationRef,
+    ],
+    OperatorAttemptResource | None,
 ]
 
 
@@ -856,6 +895,7 @@ class _BrokerOperatorRun:
     epoch: SessionEpochRef
     generation: ProcessGenerationRef
     provider_session_id: str
+    resource: OperatorAttemptResource | None = None
     prompts: dict[str, str] = dataclasses.field(default_factory=dict)
     terminal_error: str | None = None
     busy: bool = False
@@ -1224,6 +1264,7 @@ class ExecutiveWorkerBroker:
         *,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
+        operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
         autonomy_canary_factory: Callable[
@@ -1236,6 +1277,7 @@ class ExecutiveWorkerBroker:
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
         self.operator_adapter_factory = operator_adapter_factory
+        self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
         self.autonomy_canary_factory = autonomy_canary_factory
@@ -1257,7 +1299,12 @@ class ExecutiveWorkerBroker:
         self._active_run_id: str | None = None
         self._operator_run: _BrokerOperatorRun | None = None
         self._operator_terminal: OrderedDict[
-            str, tuple[ProcessGenerationRef, ReconcileObservation]
+            str,
+            tuple[
+                ProcessGenerationRef,
+                ReconcileObservation,
+                BrowserReviewReceipt | None,
+            ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
         self._state_lock = asyncio.Lock()
@@ -1368,6 +1415,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_start(payload, resume=True)
         if operation == "ohf-begin-turn":
             return await self._ohf_begin_turn(payload)
+        if operation == "ohf-deliver-attention":
+            return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
         if operation == "ohf-interrupt":
@@ -1435,7 +1484,7 @@ class ExecutiveWorkerBroker:
 
     def _operator_factory(
         self, requested: RequestedExecutionProfile
-    ) -> tuple[OperatorAdapter, dict[str, str]]:
+    ) -> tuple[OperatorAdapter, dict[str, str], Path]:
         self._require_current_autonomy()
         if not self.operator_harness_armed or self.operator_adapter_factory is None:
             raise BrokerStateError("the Operator Harness is not armed by worker policy")
@@ -1464,7 +1513,7 @@ class ExecutiveWorkerBroker:
             raise BrokerStateError(
                 f"operator adapter construction failed: {type(exc).__name__}"
             ) from exc
-        return adapter, prompts
+        return adapter, prompts, workspace
 
     @staticmethod
     async def _operator_call(phase: str, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -1498,7 +1547,7 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError("the worker broker already has active work")
             self._starting = True
         try:
-            adapter, _prompts = self._operator_factory(requested)
+            adapter, _prompts, _workspace = self._operator_factory(requested)
             validation = await self._operator_call(
                 "profile validation", adapter.validate_requested_profile, requested
             )
@@ -1578,9 +1627,35 @@ class ExecutiveWorkerBroker:
                     )
             self._starting = True
         adapter: OperatorAdapter | None = None
+        resource: OperatorAttemptResource | None = None
         state: _BrokerOperatorRun | None = None
         try:
-            adapter, prompts = self._operator_factory(requested)
+            adapter, prompts, workspace = self._operator_factory(requested)
+            if self.operator_resource_factory is not None:
+                try:
+                    resource = self.operator_resource_factory(
+                        workspace, requested, epoch, generation
+                    )
+                except Exception as exc:
+                    raise BrokerStateError(
+                        "operator resource construction failed: "
+                        f"{type(exc).__name__}"
+                    ) from exc
+            if resource is not None:
+                await self._operator_call("resource start", resource.start)
+                binder = getattr(adapter, "bind_attempt_resource", None)
+                if not callable(binder):
+                    raise BrokerStateError(
+                        "browser resource requires an adapter binding seam"
+                    )
+                await self._operator_call(
+                    "resource bind",
+                    binder,
+                    resource,
+                    requested=requested,
+                    epoch=epoch,
+                    generation=generation,
+                )
             if resume:
                 assert handoff is not None
                 observation = await self._operator_call(
@@ -1635,6 +1710,7 @@ class ExecutiveWorkerBroker:
                 epoch=epoch,
                 generation=generation,
                 provider_session_id=provider_session_id,
+                resource=resource,
                 prompts=prompts,
             )
             async with self._state_lock:
@@ -1653,13 +1729,17 @@ class ExecutiveWorkerBroker:
         except Exception:
             if adapter is not None and state is None:
                 try:
+                    if resource is not None:
+                        await self._operator_call(
+                            "resource start cleanup", resource.stop
+                        )
                     cleanup = await asyncio.to_thread(
                         self.sweeper.sweep, "operator_start_failed"
                     )
                     self.last_sweep = cleanup
-                    if cleanup.found_residuals:
+                    if not uid_sweep_receipt_is_passing(cleanup.to_dict()):
                         raise BrokerStateError(
-                            "operator start cleanup left a detached same-UID process"
+                            "operator start cleanup did not prove exact quiescence"
                         )
                 except Exception as sweep_exc:
                     async with self._state_lock:
@@ -1742,6 +1822,108 @@ class ExecutiveWorkerBroker:
             if not isinstance(observation, TurnStartObservation):
                 raise BrokerStateError(
                     "operator begin-turn returned an untyped observation"
+                )
+            return {"observation": operator_to_wire(observation)}
+        finally:
+            await self._operator_release_busy(state)
+
+    async def _ohf_deliver_attention(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send one bounded nudge through the already-owned current writer."""
+
+        expected = {
+            "generation",
+            "attempt_id",
+            "binding_id",
+            "binding_generation",
+            "provider_session_id",
+            "nudge_id",
+            "opaque_ids",
+            "instruction",
+            "completion_timeout_seconds",
+        }
+        if set(payload) != expected:
+            raise BrokerPreSubmitError(
+                "ohf-deliver-attention payload fields are invalid"
+            )
+        try:
+            self._require_current_autonomy()
+            generation = wire_process_generation_ref(payload["generation"])
+        except (WorkerBrokerError, OperatorHarnessWireError) as exc:
+            raise BrokerPreSubmitError(
+                "current operator generation is unavailable"
+            ) from exc
+
+        attempt_id = payload["attempt_id"]
+        binding_id = payload["binding_id"]
+        binding_generation = payload["binding_generation"]
+        provider_session_id = payload["provider_session_id"]
+        nudge_id = payload["nudge_id"]
+        opaque_ids = payload["opaque_ids"]
+        instruction = payload["instruction"]
+        timeout = payload["completion_timeout_seconds"]
+        if (
+            not isinstance(attempt_id, str)
+            or _ID_RE.fullmatch(attempt_id) is None
+            or not isinstance(binding_id, str)
+            or _ID_RE.fullmatch(binding_id) is None
+            or type(binding_generation) is not int
+            or binding_generation < 1
+            or not isinstance(provider_session_id, str)
+            or _ID_RE.fullmatch(provider_session_id) is None
+            or not isinstance(nudge_id, str)
+            or _ID_RE.fullmatch(nudge_id) is None
+            or not isinstance(opaque_ids, list)
+            or not 1 <= len(opaque_ids) <= 32
+            or any(
+                not isinstance(item, str) or _ID_RE.fullmatch(item) is None
+                for item in opaque_ids
+            )
+            or instruction != ATTENTION_TURN_INSTRUCTION
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.1 <= float(timeout) <= 300.0
+        ):
+            raise BrokerPreSubmitError(
+                "attention request is outside the closed current-writer contract"
+            )
+
+        try:
+            state = await self._operator_state(generation)
+        except BrokerStateError as exc:
+            raise BrokerPreSubmitError(str(exc)) from exc
+        try:
+            if (
+                state.epoch.attempt_id != attempt_id
+                or state.provider_session_id != provider_session_id
+            ):
+                raise BrokerPreSubmitError(
+                    "attention request is outside the active Attempt writer"
+                )
+            try:
+                observation = await asyncio.to_thread(
+                    state.adapter.deliver_attention,
+                    generation=generation,
+                    attempt_id=attempt_id,
+                    binding_id=binding_id,
+                    binding_generation=binding_generation,
+                    provider_session_id=provider_session_id,
+                    nudge_id=nudge_id,
+                    opaque_ids=tuple(opaque_ids),
+                    instruction=instruction,
+                    completion_timeout_seconds=float(timeout),
+                )
+            except Exception as exc:
+                effect_unknown = getattr(exc, "effect_unknown", None)
+                if effect_unknown is not False:
+                    raise BrokerEffectUnknownError(
+                        "attention provider write has unknown effect"
+                    ) from exc
+                raise BrokerPreSubmitError(
+                    "attention refused before provider submission"
+                ) from exc
+            if not isinstance(observation, AttentionTurnObservation):
+                raise BrokerEffectUnknownError(
+                    "attention provider returned an untyped observation"
                 )
             return {"observation": operator_to_wire(observation)}
         finally:
@@ -1863,19 +2045,27 @@ class ExecutiveWorkerBroker:
             raise
         async with self._state_lock:
             self.last_sweep = sweep
-        if sweep.found_residuals:
+        if not uid_sweep_receipt_is_passing(sweep.to_dict()):
+            async with self._state_lock:
+                self._quarantined_reason = (
+                    "operator terminal UID sweep did not prove exact quiescence"
+                )
             raise BrokerStateError(
-                "operator generation left a detached same-UID process"
+                "operator terminal UID sweep did not prove exact quiescence"
             )
         return sweep
 
     async def _remember_operator_terminal(
-        self, state: _BrokerOperatorRun, observation: ReconcileObservation
+        self,
+        state: _BrokerOperatorRun,
+        observation: ReconcileObservation,
+        artifact_receipt: BrowserReviewReceipt | None = None,
     ) -> None:
         async with self._state_lock:
             self._operator_terminal[state.generation.process_generation_id] = (
                 state.generation,
                 observation,
+                artifact_receipt,
             )
             self._operator_terminal.move_to_end(
                 state.generation.process_generation_id
@@ -1895,13 +2085,35 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError(str(exc)) from exc
         state = await self._operator_state(generation)
         try:
-            observation = await self._operator_call(
-                "graceful stop",
-                state.adapter.graceful_stop,
-                generation,
-                operation_id=operation,
-            )
+            adapter_error: Exception | None = None
+            resource_error: Exception | None = None
+            observation: Any = None
+            try:
+                observation = await self._operator_call(
+                    "graceful stop",
+                    state.adapter.graceful_stop,
+                    generation,
+                    operation_id=operation,
+                )
+            except Exception as exc:
+                adapter_error = exc
+            if state.resource is not None:
+                try:
+                    await self._operator_call(
+                        "resource stop", state.resource.stop
+                    )
+                except Exception as exc:
+                    resource_error = exc
             sweep = await self._terminal_operator_sweep("operator_terminal")
+            if adapter_error is not None or resource_error is not None:
+                async with self._state_lock:
+                    self._quarantined_reason = (
+                        "operator terminal cleanup failed: "
+                        f"{type(adapter_error or resource_error).__name__}"
+                    )
+                raise BrokerStateError(self._quarantined_reason) from (
+                    adapter_error or resource_error
+                )
             if (
                 not isinstance(observation, ReconcileObservation)
                 or observation.process_liveness is not ProcessLiveness.PROVEN_DEAD
@@ -1914,10 +2126,46 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator graceful stop lacked exact dead/released evidence"
                 )
-            await self._remember_operator_terminal(state, observation)
+            artifact_receipt: BrowserReviewReceipt | None = None
+            if state.resource is not None:
+                artifact_receipt = await self._operator_call(
+                    "resource receipt seal",
+                    state.resource.seal_after_uid_sweep,
+                    sweep,
+                )
+                if not isinstance(artifact_receipt, BrowserReviewReceipt):
+                    raise BrokerStateError(
+                        "browser resource returned an untyped artifact receipt"
+                    )
+                try:
+                    artifact_receipt = browser_review_receipt(
+                        artifact_receipt.to_wire()
+                    )
+                except BrowserReviewError as exc:
+                    raise BrokerStateError(
+                        "browser resource returned an invalid closed artifact receipt"
+                    ) from exc
+                if (
+                    artifact_receipt.attempt_id != state.epoch.attempt_id
+                    or artifact_receipt.session_epoch_id
+                    != state.epoch.session_epoch_id
+                    or artifact_receipt.process_generation_id
+                    != state.generation.process_generation_id
+                ):
+                    raise BrokerStateError(
+                        "browser receipt generation identity drifted"
+                    )
+            await self._remember_operator_terminal(
+                state, observation, artifact_receipt
+            )
             return {
                 "observation": operator_to_wire(observation),
                 "uid_sweep": sweep,
+                "artifact_receipt": (
+                    artifact_receipt.to_wire()
+                    if artifact_receipt is not None
+                    else None
+                ),
             }
         finally:
             await self._operator_release_busy(state)
@@ -1935,14 +2183,36 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError("operator cancellation reason is invalid")
         state = await self._operator_state(generation)
         try:
-            observation = await self._operator_call(
-                "cancel",
-                state.adapter.cancel,
-                generation,
-                reason=reason.strip(),
-                operation_id=operation,
-            )
+            adapter_error: Exception | None = None
+            resource_error: Exception | None = None
+            observation: Any = None
+            try:
+                observation = await self._operator_call(
+                    "cancel",
+                    state.adapter.cancel,
+                    generation,
+                    reason=reason.strip(),
+                    operation_id=operation,
+                )
+            except Exception as exc:
+                adapter_error = exc
+            if state.resource is not None:
+                try:
+                    await self._operator_call(
+                        "resource stop", state.resource.stop
+                    )
+                except Exception as exc:
+                    resource_error = exc
             sweep = await self._terminal_operator_sweep("operator_terminal")
+            if adapter_error is not None or resource_error is not None:
+                async with self._state_lock:
+                    self._quarantined_reason = (
+                        "operator terminal cleanup failed: "
+                        f"{type(adapter_error or resource_error).__name__}"
+                    )
+                raise BrokerStateError(self._quarantined_reason) from (
+                    adapter_error or resource_error
+                )
             if (
                 not isinstance(observation, ReconcileObservation)
                 or observation.process_liveness is not ProcessLiveness.PROVEN_DEAD
@@ -1959,6 +2229,7 @@ class ExecutiveWorkerBroker:
             return {
                 "observation": operator_to_wire(observation),
                 "uid_sweep": sweep,
+                "artifact_receipt": None,
             }
         finally:
             await self._operator_release_busy(state)
@@ -1975,12 +2246,20 @@ class ExecutiveWorkerBroker:
                 generation.process_generation_id
             )
         if terminal_receipt is not None:
-            terminal_generation, terminal = terminal_receipt
+            terminal_generation, terminal, artifact_receipt = terminal_receipt
             if terminal_generation != generation:
                 raise BrokerProtocolError(
                     "operator terminal generation identity drifted"
                 )
-            return {"observation": operator_to_wire(terminal), "terminal": True}
+            return {
+                "observation": operator_to_wire(terminal),
+                "terminal": True,
+                "artifact_receipt": (
+                    artifact_receipt.to_wire()
+                    if artifact_receipt is not None
+                    else None
+                ),
+            }
         state = await self._operator_state(generation)
         try:
             observation = await self._operator_call(
@@ -2059,9 +2338,9 @@ class ExecutiveWorkerBroker:
                 self._status_sweep_busy = False
         async with self._state_lock:
             self.last_sweep = sweep
-        if not sweep.passed:
+        if not uid_sweep_receipt_is_passing(sweep.to_dict()):
             raise BrokerStateError(
-                "dedicated UID is not quiescent after OHF absence sweep"
+                "dedicated UID lacks exact quiescence after OHF absence sweep"
             )
         observation = ReconcileObservation(
             process_liveness=ProcessLiveness.PROVEN_DEAD,
@@ -2071,9 +2350,20 @@ class ExecutiveWorkerBroker:
             observed_provider_session_id=provider_session_id,
             observed_config_digest=config_digest,
         )
+        # A same-UID JSON file is not authenticated browser provenance after a
+        # broker restart.  Until the durable Executive boundary stores and
+        # supplies a previously trusted receipt digest, restart reconciliation
+        # proves process absence only and deliberately leaves the artifact
+        # capability unproven.
+        artifact_receipt = None
         return {
             "observation": operator_to_wire(observation),
             "uid_sweep": sweep,
+            "artifact_receipt": (
+                artifact_receipt.to_wire()
+                if artifact_receipt is not None
+                else None
+            ),
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3199,6 +3489,8 @@ __all__ = [
     "UID_SWEEP_SCHEMA_VERSION",
     "uid_sweep_receipt_is_passing",
     "BrokerPolicy",
+    "BrokerEffectUnknownError",
+    "BrokerPreSubmitError",
     "BrokerProtocolError",
     "BrokerStateError",
     "DedicatedUIDError",
