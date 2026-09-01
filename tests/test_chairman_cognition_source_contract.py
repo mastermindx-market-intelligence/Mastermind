@@ -62,6 +62,14 @@ def _digest(value) -> str:
 
 def _classification_payload(option: dict) -> dict:
     return {
+        "option_id": option["option_id"],
+        "action": option["action"],
+        "scope_refs": sorted(option["scope_refs"]),
+        "repositories": sorted(option["repositories"]),
+        "paths": sorted(option["paths"]),
+        "creates_duplicate_control_plane": option[
+            "creates_duplicate_control_plane"
+        ],
         "change_classes": sorted(option["change_classes"]),
         "affected_departments": sorted(option["affected_departments"]),
     }
@@ -97,6 +105,14 @@ def _set_binding(receipt: dict, label: str, digest: str) -> None:
     receipt["revision"] = ";".join([*fields, f"{label}:{digest}"])
 
 
+def _set_binding_tokens(receipt: dict, label: str, tokens: set[str]) -> None:
+    prefix = f"{label}:"
+    fields = [
+        field for field in receipt["revision"].split(";") if not field.startswith(prefix)
+    ]
+    receipt["revision"] = ";".join([*fields, *sorted(tokens)])
+
+
 def _bind_document(document: dict) -> dict:
     receipts = {item["source_ref"]: item for item in document["source_receipts"]}
     strategy_ref = document["strategic_constraints_source_ref"]
@@ -118,9 +134,7 @@ def _bind_document(document: dict) -> dict:
             f"classification-sha256:{_digest(_classification_payload(option))}"
         )
     for ref, tokens in bindings.items():
-        for token in sorted(tokens):
-            label, digest = token.split(":", 1)
-            _set_binding(receipts[ref], label, digest)
+        _set_binding_tokens(receipts[ref], "classification-sha256", tokens)
     return document
 
 
