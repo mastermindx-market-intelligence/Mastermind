@@ -1,0 +1,22 @@
+{
+  "name": "mastermind-x",
+  "interface": {
+    "displayName": "Mastermind-X"
+  },
+  "plugins": [
+    {
+      "name": "mastermind-sol",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mastermind-sol"
+      }
+    },
+    {
+      "name": "mastermind-operator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mastermind-operator"
+      }
+    }
+  ]
+}
