@@ -13,6 +13,7 @@ from pathlib import Path
 import secrets
 import socket
 import stat
+import time
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
@@ -200,6 +201,8 @@ def _complete_transport_handshake(
     *,
     expected_instance_id: str,
     challenge_factory: Callable[[], str] | None = None,
+    deadline: native.Deadline | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Complete two bound challenges before any action document is sent."""
 
@@ -220,8 +223,17 @@ def _complete_transport_handshake(
         challenge_nonce=first_challenge,
     )
     try:
-        native.write_frame(writer, first)
-        first_ack = native.read_frame(reader)
+        native.write_frame(
+            writer,
+            first,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
+        first_ack = native.read_frame(
+            reader,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
     except native.NativeHostError as exc:
         raise WebSolExtensionError("transport_handshake_failed") from exc
     accepted_first = _accepted_transport_ack(
@@ -245,8 +257,17 @@ def _complete_transport_handshake(
         challenge_nonce=second_challenge,
     )
     try:
-        native.write_frame(writer, second)
-        second_ack = native.read_frame(reader)
+        native.write_frame(
+            writer,
+            second,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
+        second_ack = native.read_frame(
+            reader,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
     except native.NativeHostError as exc:
         raise WebSolExtensionError("transport_handshake_failed") from exc
     return _accepted_transport_ack(
@@ -276,25 +297,44 @@ def _exchange_web_sol_socket(
     path: Path,
     expected_instance_id: str,
     challenge_factory: Callable[[], str] | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     _private_socket(path)
+    deadline = native.Deadline(
+        ends_at=monotonic() + SOCKET_TIMEOUT_SECONDS,
+    )
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(SOCKET_TIMEOUT_SECONDS)
+    connection.settimeout(deadline.remaining(monotonic))
     sent = False
     try:
         connection.connect(str(path))
         reader = connection.makefile("rb", buffering=0)
         writer = connection.makefile("wb", buffering=0)
         try:
+            handshake_kwargs = {
+                "expected_instance_id": expected_instance_id,
+                "deadline": deadline,
+                "monotonic": monotonic,
+            }
+            if challenge_factory is not None:
+                handshake_kwargs["challenge_factory"] = challenge_factory
             _complete_transport_handshake(
                 reader,
                 writer,
-                expected_instance_id=expected_instance_id,
-                challenge_factory=challenge_factory,
+                **handshake_kwargs,
             )
-            native.write_frame(writer, request)
+            native.write_frame(
+                writer,
+                request,
+                deadline=deadline,
+                monotonic=monotonic,
+            )
             sent = True
-            response = native.read_frame(reader)
+            response = native.read_frame(
+                reader,
+                deadline=deadline,
+                monotonic=monotonic,
+            )
         finally:
             reader.close()
             writer.close()
