@@ -443,6 +443,11 @@ to attribute the increment, with all material differences recorded. Where only A
 afforded, the result may assess the combined specialist composition but cannot claim an isolated
 audit-only or method-only effect.
 
+"The same independent Design Auditor" means the same frozen evaluator composition and rubric, not
+one stateful session that learns arm order. Evaluation uses fresh blinded evaluator sessions or
+equivalent randomized blocked isolation, hidden arm labels, balanced order, a frozen rubric, fixed
+repair-round budgets and the same target/base/fixtures.
+
 ### 11.2 Isolation
 
 - candidate creators do not see sibling solutions before first pass;
@@ -450,7 +455,10 @@ audit-only or method-only effect.
 - implementation workers receive their arm's accepted artifact only;
 - production/evaluation fixtures are shared;
 - evaluator and Chairman rationale are recorded before outcome disclosure where practical;
-- token, elapsed, tool and repair cost are measured.
+- token, elapsed, tool and repair cost are measured;
+- evaluator sessions are fresh or equivalently blocked so arm order cannot contaminate later scores;
+- arm labels are hidden from the evaluator until scores are recorded;
+- repair rounds are budgeted in advance and cannot silently expand one arm.
 
 ### 11.3 Primary verdict
 
@@ -462,6 +470,7 @@ outcomes.
 Possible verdicts:
 
 ```text
+PILOT_SIGNAL
 SPECIALIZATION_PROMOTED
 AUDIT_INCREMENT_PROMOTED
 METHOD_INCREMENT_PROMOTED
@@ -470,6 +479,9 @@ NO_MATERIAL_ADVANTAGE
 INCONCLUSIVE / OUTCOME_UNMEASURED
 ```
 
+`PILOT_SIGNAL` is the maximum claim after one representative surface. Broader practice or fleet
+promotion requires repeated evidence across more than one representative surface/task class. A
+single-user Chairman outcome is labeled accordingly and is not universal UX proof.
 `NO_MATERIAL_ADVANTAGE` means the architecture remains available for other practices but Product
 Design is not generalized by prestige. `INCONCLUSIVE` requires a named missing measurement, not an
 optimistic success label.

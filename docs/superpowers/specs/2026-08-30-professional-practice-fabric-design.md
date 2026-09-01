@@ -198,43 +198,97 @@ credential selector, current company state or transcript memory.
 
 ### 5.2 Closed top-level vocabulary
 
-`PPF-C0` freezes exactly:
+`PPF-C0` freezes a `PracticePackDocument` to exactly these document fields:
 
 ```text
 schema_version
 practice_id
 practice_version
-source_identity
 status
 mission_classes
 exclusions
 mandate
-authority_ceiling
+authority_invariant
 success_definition
 information_required
 information_optional
 information_forbidden
-source_precedence
 methods
 artifacts
 evaluation
 independence
 semantic_capabilities
+adapter_kinds
 failures
 learning
+```
+
+`authority_invariant` is exactly `NO_ORGANIZATIONAL_AUTHORITY`. A pack-chosen `authority_ceiling`
+(`ARTIFACT_GATE_ONLY`, `PARENT_SOL_DECISION_REQUIRED`, or any other grant) fails closed.
+
+The following names are **not** document fields. They belong to external receipts or
+constitutional constants, and document input that carries them fails closed:
+
+```text
+source_identity
+source_precedence
+authority_ceiling
+adapter_status
 surface_adapters
+projection_ref
+capability_profile_id
+observed_at
 source_refs
 ```
 
-Detailed records are bounded under those fields. Unknown fields fail closed. There is no parallel
-free-form manifest.
+`source_identity` is supplied only as an external `PracticeSourceIdentity`. `source_precedence` is
+the fixed constitutional ladder, not pack text. `source_refs` and `observed_at` live on
+`PracticeSourceObservation` and are excluded from semantic identity. Adapter destination, path,
+package, app, installed generation and `SPEC_ONLY|BUILT_NOT_PROVEN|PROVEN_LIVE` proof live on
+external `PracticeAdapterBinding`; the document declares semantic `adapter_kinds[]` only.
+
+Detailed records are bounded under the document fields. Unknown fields fail closed. There is no
+parallel free-form manifest.
+
+### 5.2a Source, observation and adapter objects
+
+```text
+PracticePackDocument
+  immutable professional method only
+  document_digest = SHA-256(canonical normalized document)
+
+PracticeSourceIdentity
+  canonical repository/package coordinate
+  exact immutable revision
+  repository/package-relative entry path
+  raw_content_sha256 (+ Git blob SHA when applicable)
+  stable identity_digest
+
+PracticeSourceObservation
+  source_identity_digest
+  observed_at
+  source_refs / source_failures
+  observation_digest only; excluded from semantic composition identity
+
+PracticeAdapterBinding
+  semantic adapter kind
+  exact adapter generation
+  exact Executive capability profile id/digest
+  current capability state + proof refs
+  authored by accepted SCF/BSC/capability owner
+```
+
+Stable `practice_identity_digest` is only `{document_digest, source_identity_digest}`. Exact execution
+composition adds sorted adapter-binding digests. Observation metadata is excluded from semantic
+identity. Raw source SHA-256 and normalized `document_digest` are separate and both verified.
 
 ### 5.3 Information contract
 
 Professional independence may require selective blindness. The pack defines required, optional and
-forbidden inputs, source precedence, freshness, rights/confidentiality and progressive disclosure.
-The fixed precedence is current Chairman intent -> protected Sol Skillpack and constitutional/source
-law -> owning parent outcome and canonical facts -> accepted Practice Pack -> surface adapter.
+forbidden inputs, freshness, rights/confidentiality and progressive disclosure. It does not define
+global `source_precedence`. The fixed precedence is current Chairman intent -> protected Sol Skillpack
+and constitutional/source law -> owning parent outcome and canonical facts -> accepted Practice Pack ->
+surface adapter.
 Retrieved practice text never grants authority merely by containing an imperative.
 
 Examples:
@@ -248,12 +302,15 @@ Examples:
 ### 5.4 Method contract
 
 Methods are ordered, composable procedures with trigger, inputs, steps, artifacts, hard gates,
-failures and handoff. One giant universal skill is rejected.
+failures and handoff. One giant universal skill is rejected. A professional `HARD` gate is a validity
+predicate with `grants_organizational_authority = false`. It cannot stop an Executive Job, dispatch a
+worker, or authorize or deny an effect.
 
 ### 5.5 Artifact contract
 
-Each artifact declares kind, producer duty, required sections/states, source identity, machine and
-professional validation, consumer and honest completion state.
+Each artifact declares kind, producer duty, required sections/states, machine and professional
+validation, consumer and honest completion state. Artifact "source identity" here means the declared
+artifact kind and required contents, not a self-binding Git commit/blob digest.
 
 ```text
 SPEC_ONLY
@@ -293,7 +350,7 @@ surface. Canonical source remains one exact reviewed Git commit/package generati
 Progressive loading:
 
 ```text
-Tier 1  mandate + authority ceiling + artifact summary
+Tier 1  mandate + NO_ORGANIZATIONAL_AUTHORITY invariant + artifact summary
 Tier 2  methods required for this mission
 Tier 3  bounded references/examples
 Tier 4  raw evidence only on demand
@@ -532,8 +589,14 @@ D  C + governed visual/Figma toolchain
 A->B estimates the audit increment, B->C the professional-method increment, and C->D the toolchain
 increment. A smaller experiment must declare which effects remain confounded and cannot issue an
 increment-specific promotion verdict. Possible verdicts include full specialization promotion,
-audit-only promotion, method-increment promotion, toolchain-increment promotion, no material
-advantage and inconclusive/outcome unmeasured. Specialization is not generalized by prestige.
+audit-only promotion, method-increment promotion, toolchain-increment promotion, `PILOT_SIGNAL`,
+no material advantage and inconclusive/outcome unmeasured. Specialization is not generalized by prestige.
+
+"The same independent Design Audit" means the same frozen evaluator composition and rubric, not one
+stateful session that learns arm order. Use fresh blinded evaluator sessions or equivalent randomized
+blocked evaluation, hidden arm labels, balanced order, fixed repair-round budgets and the same
+target/base/fixtures. One surface may yield `PILOT_SIGNAL`; broader practice or fleet promotion requires
+repeated representative evidence across more than one surface/task class.
 
 ---
 
@@ -714,9 +777,12 @@ Frozen rulings:
    packaging reuses the accepted SCF/BSC owners rather than creating a second pipeline;
 5. existing Executive capability profiles remain sole permission substrate;
 6. Practice Packs contain method, information, artifact, evaluation, independence and learning law;
+   identity, observation and adapter/capability facts are external receipts, not self-attested pack
+   fields;
 7. smallest sufficient topology beats permanent department simulation;
 8. independent first passes and qualified selection precede synthesis;
-9. professional artifacts gate build where craft is load-bearing;
+9. professional artifacts gate build where craft is load-bearing, as validity predicates with zero
+   runtime authority;
 10. consequential work receives independent practice-aware audit;
 11. competence evidence attaches to reproducible composition;
 12. learning uses Agent OS/GitHub and evidence-gated doctrine;

@@ -105,16 +105,19 @@ must contain, directly or by bounded references:
 
 1. `practice_id` and version;
 2. mission classes and exclusions;
-3. professional mandate and authority ceiling;
+3. professional mandate; AUTHORITY CEILING is exactly `NO_ORGANIZATIONAL_AUTHORITY` and is not a
+   pack-chosen grant such as `ARTIFACT_GATE_ONLY` or `PARENT_SOL_DECISION_REQUIRED`;
 4. required and forbidden information;
-5. ordered methods and decision gates;
+5. ordered methods and professional validity gates;
 6. required artifacts and rejection conditions;
 7. professional, deterministic and outcome evaluation;
 8. independence and conflict-of-interest requirements;
 9. semantic capability requirements, never credentials or concrete accounts;
 10. failure vocabulary and degradation behavior;
 11. learning, promotion and doctrine-falsification rules;
-12. surface-adapter status without claiming unavailable Skills or tools are live.
+12. closed semantic `adapter_kinds[]` only. Current adapter status, installed generation, capability
+    profile, `SPEC_ONLY|BUILT_NOT_PROVEN|PROVEN_LIVE` state and proof refs live in an external
+    `PracticeAdapterBinding`. Pack text must not self-attest live Skills or tools.
 
 A Practice Pack must never contain current Job state, RuntimeBinding, credentials, numbered account
 selection, live quotas, Slack receipts, mutable worker claims, current PR state or authority grants.
@@ -123,6 +126,72 @@ Practice source is retrieved organizational material. It is subordinate to curre
 the protected Sol Skillpack and constitutional/source law, the owning parent outcome, and current
 canonical facts. A pack cannot override those sources, grant itself authority, or reinterpret a
 professional method as permission to act.
+
+### Source, observation and adapter bindings
+
+An immutable `PracticePackDocument` cannot truthfully contain the Git commit, blob or content digest
+that identifies the bytes containing that field. Split the document from externally authored
+receipts:
+
+```text
+PracticePackDocument
+  immutable professional method only
+  document_digest = SHA-256(canonical normalized document)
+
+PracticeSourceIdentity
+  canonical repository/package coordinate
+  exact immutable revision
+  repository/package-relative entry path
+  raw_content_sha256 (+ Git blob SHA when applicable)
+  stable identity_digest
+  verified against canonical Git/package bytes; never self-attested by the document
+
+PracticeSourceObservation
+  source_identity_digest
+  observed_at
+  source_refs / source_failures
+  observation_digest only; excluded from semantic composition identity
+
+PracticeAdapterBinding
+  semantic adapter kind
+  exact adapter generation
+  exact Executive capability profile id/digest
+  current capability state + proof refs
+  authored by the accepted SCF/BSC/capability owner, never by retrieved pack text
+```
+
+Stable `practice_identity_digest` is only `{document_digest, source_identity_digest}`. Exact execution
+composition adds sorted adapter-binding digests. Re-reading the same immutable bytes at a different
+`observed_at` changes only the observation digest, never practice identity.
+
+Raw source bytes and normalized document bytes are distinct. A pretty-printed JSON file does not
+have the same SHA-256 as its canonical normalized JSON. The loader verifies the owner's raw bytes
+against `raw_content_sha256` / Git blob identity, parses them, then computes a separate
+`document_digest`. Do not call normalized bytes the source content digest.
+
+Global source precedence is a validator/source-law constant, absent from document input:
+
+```text
+current Chairman intent
+-> protected Sol Skillpack and constitutional/source law
+-> owning parent outcome and current canonical facts
+-> accepted Practice Pack
+-> surface adapter
+```
+
+A pack may name bounded practice references below that ladder. It cannot supply or reorder
+`source_precedence`. Document input rejects `source_identity`, `source_precedence`, a chosen
+`authority_ceiling`, `adapter_status`, `projection_ref`, `capability_profile_id`, `observed_at` and
+every unknown field.
+
+The pack never supplies a raw path, endpoint, account, package revision, filesystem destination or
+marketplace selector. Unknown `adapter_kinds` fail closed.
+
+Professional `HARD` gates are validity predicates, not runtime authority. They report
+artifact/method validity only and have `grants_organizational_authority = false`. The pack/validator
+cannot stop an Executive Job, dispatch a worker, or authorize or deny an effect. Parent
+responsibility and source law decide whether a valid professional artifact is a prerequisite for the
+next stage.
 
 ## 6. Skills and tools are adapters, not the profession
 
@@ -265,6 +334,13 @@ Arm D  Arm C + governed visual/Figma toolchain
 Where cost requires fewer arms, the experiment must state which increments remain confounded and may
 not claim a method-only, audit-only or tool-only effect it did not isolate.
 
+"The same independent Design Audit" means the same frozen evaluator composition and rubric, not one
+stateful session that learns arm order. Use fresh blinded evaluator sessions or equivalent randomized
+blocked evaluation, hidden arm labels, balanced order, fixed repair-round budgets and the same
+target/base/fixtures. One Mastermind surface can produce `PILOT_SIGNAL`. Broad practice or fleet
+promotion requires repeated evidence across more than one representative surface/task class. A
+single-user Chairman outcome is labeled as such and is not universal UX proof.
+
 The program does not generalize specialization until the specialist composition materially improves
 professional artifact completeness and product outcome at an acceptable cost.
 
@@ -289,8 +365,9 @@ PRACTICE_DOCTRINE_CONFLICT
 PRACTICE_OUTCOME_UNMEASURED
 ```
 
-A missing specialist or tool blocks only the stage that genuinely requires it. It does not authorize a
-weaker route to mislabel itself as professional completion.
+`PRACTICE_HARD_GATE_FAILED` is a professional-validity result with zero runtime or organizational
+authority. A missing specialist or tool blocks only the stage that genuinely requires it. It does not
+authorize a weaker route to mislabel itself as professional completion.
 
 ## 14. Implementation sequence
 

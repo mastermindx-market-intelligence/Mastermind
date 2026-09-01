@@ -177,31 +177,42 @@ docs/superpowers/plans/2026-08-30-professional-practice-fabric-c0.md
 
 ### Contract fields
 
+`PracticePackDocument` input is closed and contains only:
+
 ```text
 schema_version
 practice_id
 practice_version
-source_identity
 status
 mission_classes
 exclusions
 mandate
-authority_ceiling
+authority_invariant
 success_definition
 information_required
 information_optional
 information_forbidden
-source_precedence
 methods
 artifacts
 evaluation
 independence
 semantic_capabilities
+adapter_kinds
 failures
 learning
-surface_adapters
-source_refs
 ```
+
+`authority_invariant` is exactly `NO_ORGANIZATIONAL_AUTHORITY`. External receipts, not document
+fields:
+
+```text
+PracticeSourceIdentity   source_identity / raw_content_sha256 / immutable revision / entry path
+PracticeSourceObservation observed_at / source_refs / source_failures
+PracticeAdapterBinding   adapter generation / capability profile / proof / destination
+```
+
+Global `source_precedence` is a validator constant. The document declares semantic `adapter_kinds[]`
+only and never a path, `projection_ref`, package destination or marketplace selector.
 
 ### Refusals
 
@@ -213,17 +224,60 @@ source_refs
 - adapter claiming availability without an exact generation;
 - capability request not semantic or trying to widen effect rights;
 - duplicate practice/version with non-identical bytes;
-- current source or digest mismatch.
+- current source or digest mismatch;
+- self-binding `source_identity` / commit / blob / content digest inside the document;
+- pack-supplied or reordered `source_precedence`;
+- chosen `authority_ceiling` other than the invariant none;
+- `adapter_status`, `projection_ref`, `capability_profile_id` or destination path in pack text;
+- treating normalized JSON bytes as the raw source digest;
+- including `observed_at` or source-read metadata in semantic identity;
+- professional HARD gates that grant or deny runtime/organizational effect.
+
+### C0 hostile matrix
+
+C0 tests must kill at least:
+
+1. unknown root or nested field;
+2. recursive duplicate key;
+3. NaN/Infinity or non-canonical scalar;
+4. duplicate practice/version with different bytes;
+5. mutable branch-only source identity;
+6. embedded Job/Attempt/Worker/RuntimeBinding/Slack/Linear/current-PR identity;
+7. secret-shaped token/key/password material;
+8. authority language or practice-owned execution/lifecycle field;
+9. unbounded text/list/input size;
+10. missing artifact/evaluation/failure/learning contract;
+11. information-required/forbidden collision;
+12. semantic capability/adapter trying to widen effect rights;
+13. adapter claiming live/installed without exact generation;
+14. symlink, absolute path, `..` escape or undeclared package file;
+15. source/digest mismatch;
+16. permutation instability;
+17. accidental import from `control_plane`, provider, I/O or persistence owners;
+18. `pyproject.toml` or BSC/plugin owner modification;
+19. duplicate/self-binding identity fields inside the document;
+20. pack precedence escalation;
+21. raw/canonical digest mismatch;
+22. non-immutable revision or unsafe path;
+23. repeated-read identity instability;
+24. future-dated observation clocks;
+25. adapter path/status/profile injection;
+26. undeclared or duplicate adapters;
+27. false `PROVEN_LIVE` without proof;
+28. builder self-approval;
+29. runtime/network/persistence/`control_plane` imports.
 
 ### Acceptance
 
-- [ ] deterministic canonical digest;
+- [ ] deterministic canonical `document_digest` separate from raw `source_content_sha256`;
 - [ ] permutation-stable parsing where order is non-semantic;
 - [ ] unknown-field and secret-shape refusals;
-- [ ] explicit `SPEC_ONLY | BUILT_NOT_PROVEN | PROVEN_LIVE` honesty;
+- [ ] explicit `SPEC_ONLY | BUILT_NOT_PROVEN | PROVEN_LIVE` honesty on adapter bindings only;
 - [ ] no network, persistence or runtime imports in the pure contract;
 - [ ] focused tests, full CI and adversarial contract/security review;
-- [ ] no pack or adapter is installed by merge.
+- [ ] no pack or adapter is installed by merge;
+- [ ] observation metadata excluded from semantic identity;
+- [ ] professional gates have `grants_organizational_authority = false`.
 
 ---
 
@@ -470,6 +524,10 @@ D  C + accepted Figma/visual toolchain, only if FIGMA1 is proven
 
 A->B isolates the audit increment, B->C the professional-method increment, and C->D the toolchain
 increment. A reduced arm set must record which effects remain confounded.
+
+Evaluation uses fresh blinded evaluator sessions or equivalent randomized blocked isolation, hidden
+arm labels, a frozen rubric, balanced order, fixed repair budgets and the same base/fixtures. One
+surface may produce `PILOT_SIGNAL`. Broader promotion requires repeated representative evidence.
 
 ### Implementation sequence
 

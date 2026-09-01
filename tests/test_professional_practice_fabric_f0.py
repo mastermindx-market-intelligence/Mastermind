@@ -142,6 +142,49 @@ def test_program_contract_matches_architecture_and_stays_out_of_runtime_owner() 
     assert "control_plane/professional_practice_contract.py" not in text
     assert "do not create a second package" in text
     assert "marketplace pipeline" in text
+    assert "PracticePackDocument" in text
+    assert "PracticeSourceIdentity" in text
+    assert "PracticeSourceObservation" in text
+    assert "PracticeAdapterBinding" in text
+    assert "adapter_kinds" in text
+    assert "NO_ORGANIZATIONAL_AUTHORITY" in text
+    assert "grants_organizational_authority = false" in text
+    assert "C0 hostile matrix" in text
+    assert "repeated-read identity instability" in text
+    assert "false `PROVEN_LIVE` without proof" in text
+
+
+def test_source_observation_and_adapter_bindings_are_split_and_non_self_attesting() -> None:
+    law = _text(LAW)
+    spec = _text(SPEC)
+    for required in (
+        "PracticePackDocument",
+        "PracticeSourceIdentity",
+        "PracticeSourceObservation",
+        "PracticeAdapterBinding",
+        "document_digest",
+        "raw_content_sha256",
+        "observation_digest only; excluded from semantic composition identity",
+        "adapter_kinds",
+        "NO_ORGANIZATIONAL_AUTHORITY",
+        "grants_organizational_authority = false",
+    ):
+        assert required.lower() in law.lower() or required.lower() in spec.lower()
+    assert "cannot supply or reorder" in law
+    assert "source_precedence" in spec
+    assert "projection_ref" in spec
+
+
+def test_product_design_evaluation_is_blinded_and_promotion_is_staged() -> None:
+    combined = "\n".join(_text(path) for path in (LAW, SPEC, PILOT, PROGRAM))
+    for required in (
+        "fresh blinded evaluator sessions",
+        "hidden arm labels",
+        "fixed repair-round budgets",
+        "PILOT_SIGNAL",
+        "repeated evidence across more than one representative surface",
+    ):
+        assert required.lower() in combined.lower()
 
 
 
