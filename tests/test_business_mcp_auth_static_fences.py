@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = ROOT / "integrations" / "business_mcp_auth"
 JWT_EDGE = "integrations/business_mcp_auth/jwt_verifier.py"
 MCP_EDGE = "integrations/business_mcp_auth/mcp_adapter.py"
+INTEGRATION_PROOF = "tests/test_business_mcp_auth_integration.py"
 PURE_MODULES = (
     "integrations/business_mcp_auth/__init__.py",
     "integrations/business_mcp_auth/contracts.py",
@@ -175,7 +176,7 @@ def test_control_plane_does_not_import_business_auth() -> None:
 
 
 def test_pure_package_imports_when_edge_dependencies_are_blocked() -> None:
-    script = r'''
+    script = r"""
 import importlib.abc
 import sys
 
@@ -193,7 +194,7 @@ sys.meta_path.insert(0, BlockEdges())
 from integrations.business_mcp_auth import ResourcePolicy, load_resource_policy
 assert ResourcePolicy is not None
 assert load_resource_policy is not None
-'''
+"""
     completed = subprocess.run(
         [sys.executable, "-c", script],
         cwd=ROOT,
@@ -239,3 +240,58 @@ def test_metadata_and_claims_sources_contain_no_runtime_or_storage_actions() -> 
     ):
         text = (ROOT / relative).read_text(encoding="utf-8")
         assert not any(token in text for token in forbidden_tokens), relative
+
+
+def test_integration_proof_has_no_runtime_server_or_backend_dependency() -> None:
+    path = ROOT / INTEGRATION_PROOF
+    imports = _imports(path)
+    forbidden_prefixes = (
+        "app",
+        "bot",
+        "brain",
+        "bridge",
+        "control_plane",
+        "fastapi",
+        "starlette",
+        "uvicorn",
+        "subprocess",
+        "sqlite3",
+        "socket",
+        "requests",
+        "urllib.request",
+    )
+    assert not any(
+        name == prefix or name.startswith(prefix + ".")
+        for name in imports
+        for prefix in forbidden_prefixes
+    )
+
+    source = path.read_text(encoding="utf-8")
+    for forbidden in (
+        "FastMCP",
+        "Server(",
+        "Route(",
+        "call_tool",
+        "list_tools",
+        "RuntimeBinding",
+        "ExecutiveJob",
+    ):
+        assert forbidden not in source
+
+
+def test_business_auth_tests_contain_no_serialized_credentials() -> None:
+    markers = (
+        "BEGIN " + "PRIVATE KEY",
+        "xoxb" + "-",
+        "ghp" + "_",
+        "sk" + "-",
+        "client_" + "secret=",
+        "access_" + "token=",
+        "refresh_" + "token=",
+    )
+    this_file = Path(__file__).resolve()
+    for path in sorted((ROOT / "tests").glob("test_business_mcp_auth_*.py")):
+        if path.resolve() == this_file:
+            continue
+        text = path.read_text(encoding="utf-8")
+        assert not any(marker in text for marker in markers), path
