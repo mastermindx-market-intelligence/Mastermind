@@ -82,7 +82,9 @@ class _View:
 def responsibility_ref_for(work_ref: str) -> str:
     if not isinstance(work_ref, str) or _WORK_RE.fullmatch(work_ref) is None:
         raise ProjectionError("RESPONSIBILITY_UNKNOWN")
-    digest = hashlib.sha256(b"mastermind.steward.responsibility.v1\0" + work_ref.encode()).hexdigest()
+    digest = hashlib.sha256(
+        b"mastermind-steward-responsibility-v1\x00" + work_ref.encode()
+    ).hexdigest()
     return f"responsibility:{digest}"
 
 
@@ -165,6 +167,8 @@ def _responsibility_state(card: Mapping[str, Any]) -> tuple[str, list[str]]:
 
 def _runtime_state(card: Mapping[str, Any], present: bool | None) -> tuple[str, list[str]]:
     jobs = [row for row in _seq(_map(card.get("executive")).get("jobs")) if isinstance(row, Mapping)]
+    if len(jobs) > 1:
+        return "UNKNOWN", ["AMBIGUOUS_JOIN"]
     statuses = [str(row.get("status") or "").strip().lower() for row in jobs if row.get("status") is not None]
     found = {_RUNTIME[status] for status in statuses if status in _RUNTIME}
     if len(found) > 1:
@@ -383,9 +387,16 @@ class ControlRoomStewardReadPort:
             _fact(public, "runtime.state", runtime, executive_source, executive_fresh),
             _fact(public, "runtime.continuity", continuity, binding_source, binding_fresh),
         ]
-        ages = [value for value in (executive_fresh.age, binding_fresh.age) if value is not None]
-        if ages:
-            facts.append(_fact(public, "runtime.age_seconds", max(ages), binding_source, binding_fresh))
+        if executive_fresh.age is not None:
+            facts.append(
+                _fact(
+                    public,
+                    "runtime.age_seconds",
+                    executive_fresh.age,
+                    executive_source,
+                    executive_fresh,
+                )
+            )
         reasons.extend(continuity_reasons)
         reasons.extend(item for item in (executive_fresh.reason, binding_fresh.reason) if item)
         return _result(facts, [*view.reasons, *reasons])
