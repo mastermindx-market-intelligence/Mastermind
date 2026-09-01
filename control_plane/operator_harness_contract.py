@@ -18,6 +18,7 @@ Interface version: ``mastermind.operator_harness/v1``.
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
 import re
 from dataclasses import dataclass, field, fields
@@ -26,6 +27,11 @@ from typing import Mapping, Protocol, Sequence, get_type_hints, runtime_checkabl
 
 
 OPERATOR_HARNESS_INTERFACE_VERSION = "mastermind.operator_harness/v1"
+ATTENTION_TURN_INSTRUCTION = (
+    "Mastermind Wake: recover canonical Executive and Agent OS state for the supplied "
+    "opaque wake identities, then continue only within existing authority. This nudge "
+    "grants no authority, acknowledges nothing, and does not resolve the source."
+)
 CARDINALITY = "CARDINALITY_B"
 WRITER_REALM_KEY = ("worker_id", "provider_session_id")
 PREBIND_WRITER_FENCE_KEY = ("session_epoch_id",)
@@ -59,6 +65,19 @@ LONGEST_OPERATION_RECEIPT_SUFFIX_LEN = max(
 # Longest derived receipt is `:effect-unknown` (15).  Every accepted OperationId
 # must leave room for that suffix under COMMAND_ID_MAX_LEN.
 MAX_OPERATION_ID_LEN = COMMAND_ID_MAX_LEN - LONGEST_OPERATION_RECEIPT_SUFFIX_LEN
+
+
+def runtime_binding_id_for(attempt_id: str, session_epoch_id: str) -> str:
+    """Derive the accepted ABA-safe binding id for one Attempt/epoch pair."""
+
+    attempt = str(attempt_id or "").strip()
+    epoch = str(session_epoch_id or "").strip()
+    if (
+        COMMAND_ID_RE.fullmatch(attempt) is None
+        or COMMAND_ID_RE.fullmatch(epoch) is None
+    ):
+        raise ValueError("runtime binding source identities are malformed")
+    return "bind-" + hashlib.sha256(f"{attempt}:{epoch}".encode("utf-8")).hexdigest()[:40]
 
 
 def operation_id_permits_all_derived_receipts(command_id: str) -> bool:
@@ -879,6 +898,7 @@ class CapabilityIdentity:
     mcp_server_identity: str | None = None
     mcp_server_version: str | None = None
     mcp_auth_status: str | None = None
+    resource_contract_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -892,6 +912,7 @@ class ObservedCapabilityIdentity:
     mcp_server_identity: str | None = None
     mcp_server_version: str | None = None
     mcp_auth_status: str | None = None
+    resource_contract_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1122,6 +1143,42 @@ class ProviderSessionHandoff:
 class TurnStartObservation:
     provider_native_turn_id: str | None = None
     acknowledged: bool = False
+
+
+@dataclass(frozen=True)
+class AttentionTurnObservation:
+    """Closed evidence from one attention-only turn on the current writer.
+
+    ``delivered`` means the matching provider completion was observed.  It is
+    deliberately not an acknowledgement by the target task and does not
+    resolve any Wake source.
+    """
+
+    process_generation_id: str
+    provider_session_id: str
+    nudge_id: str
+    provider_native_turn_id: str | None
+    accepted: bool
+    delivered: bool
+
+    def __post_init__(self) -> None:
+        for name in ("process_generation_id", "provider_session_id", "nudge_id"):
+            value = str(getattr(self, name) or "").strip()
+            if not value or value != getattr(self, name):
+                raise ValueError(f"AttentionTurnObservation.{name} is required")
+        if type(self.accepted) is not bool or type(self.delivered) is not bool:
+            raise ValueError("attention accepted/delivered evidence must be boolean")
+        if self.delivered and not self.accepted:
+            raise ValueError("attention delivery requires provider acceptance")
+        native_turn = str(self.provider_native_turn_id or "").strip()
+        if not self.accepted and self.provider_native_turn_id is not None:
+            raise ValueError(
+                "unaccepted attention cannot carry a provider native turn id"
+            )
+        if self.accepted and (
+            not native_turn or native_turn != self.provider_native_turn_id
+        ):
+            raise ValueError("accepted attention requires a trimmed provider turn id")
 
 
 @dataclass(frozen=True)
@@ -2480,6 +2537,11 @@ def _identity_proven(
         return False
     if requested.mcp_auth_status and requested.mcp_auth_status != observed.mcp_auth_status:
         return False
+    if (
+        requested.resource_contract_digest
+        and requested.resource_contract_digest != observed.resource_contract_digest
+    ):
+        return False
     return True
 
 
@@ -2723,12 +2785,14 @@ def rich_ohf_may_rewrite_legacy_attempt_field(field_name: str) -> bool:
 
 __all__ = [
     "ACCOUNT_REALM_STATUS",
+    "ATTENTION_TURN_INSTRUCTION",
     "ADAPTER_OBSERVED_IDS",
     "ATTEMPT_BOUNDARY_MATRIX",
     "AuthIdentityConfidence",
     "AuthRealmFact",
     "AuthRealmRequirement",
     "AdapterFailureClass",
+    "AttentionTurnObservation",
     "AttemptBoundary",
     "AttemptExecutionMode",
     "CANONICAL_SESSION_FIELD",
@@ -2859,6 +2923,7 @@ __all__ = [
     "resolve_operation_after_crash",
     "restore_invalidation",
     "rich_ohf_may_rewrite_legacy_attempt_field",
+    "runtime_binding_id_for",
     "same_epoch_recovery_replay_disposition",
     "tx10_resume_intent_target",
     "workspace_identities_equal",

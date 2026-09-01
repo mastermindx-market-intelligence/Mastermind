@@ -165,7 +165,10 @@ class DialogueTurnObserver:
         for transport in channel.messages:
             if transport.thread_ts not in {None, transport.ts}:
                 continue
-            if transport.author_user_id not in self.policy.allowed_parent_user_ids:
+            if transport.author_user_id not in (
+                *self.policy.allowed_parent_user_ids,
+                self.policy.relay_bot_user_id,
+            ):
                 continue
             raw = self._created_text(transport)
             if not raw.startswith(PARENT_DISCRIMINATOR_V2):
