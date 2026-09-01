@@ -15,13 +15,37 @@ substrate only (``scripts.ohf.laboratory``, ``scripts.ohf.protocol``,
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Protocol
 
 import yaml
+
+from scripts.ohf.laboratory import AppServerClient, AppServerStopProof, validate_live_codex_home
+from scripts.ohf.p1a_capability_policy import LAUNCH_OK, classify_observed, launch_decision
+from scripts.ohf.protocol import (
+    config_mcp_names,
+    config_plugin_names,
+    parse_account_read,
+    parse_config_read,
+    skill_names,
+    skills_list_params,
+    thread_turns,
+)
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REQUIRED_MODEL = "gpt-5.6-sol"
+CLIENT_INFO = {
+    "name": "mastermind_fresh_sol_eval",
+    "title": "Mastermind fresh-Sol evaluation harness (EVAL-OHF1)",
+    "version": "0.1.0",
+}
 
 # ---------------------------------------------------------------------------
 # Immutable arm identity / closed failure vocabulary (plan Task 1, Step 2)
@@ -383,3 +407,465 @@ def build_eval_agents_md(bundle: ProcedureBundle) -> bytes:
             ).encode("utf-8")
         )
     return b"".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Fresh process/thread execution + capability attestation (plan Task 2)
+# ---------------------------------------------------------------------------
+
+
+class EvalClient(Protocol):
+    """The narrow subset of ``AppServerClient`` that ``run_one`` depends on.
+
+    Tests inject a fake implementing exactly this surface -- see
+    ``tests/test_fresh_sol_eval.py::_FakeEvalClient`` -- so unit coverage
+    never spawns a subprocess or talks to a provider.
+    """
+
+    pid: int | None
+    cwd: Path
+    notifications: list[dict[str, object]]
+
+    def start(self) -> None: ...
+
+    def request(
+        self, method: str, params: dict[str, object] | None = None, timeout: float = 15.0
+    ) -> dict[str, object]: ...
+
+    def notify(self, method: str, params: dict[str, object] | None = None) -> None: ...
+
+    def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, object]: ...
+
+    def terminate(self) -> object: ...
+
+
+ClientFactory = Callable[[Path, Path, Path], "EvalClient"]
+
+
+@dataclass(frozen=True)
+class CapabilityReceipt:
+    requested_model: str
+    served_model: str
+    approval_policy: str
+    sandbox_mode: str
+    mcp_names: tuple[str, ...]
+    plugin_names: tuple[str, ...]
+    skill_names: tuple[str, ...]
+    auth_type: str
+    plan_type: str
+    requires_openai_auth: bool | None
+    harness_version: str
+
+
+@dataclass(frozen=True)
+class CleanupReceipt:
+    controller_returncode: int | None
+    private_group_id: int | None
+    private_group_empty: bool
+    termination_outcome: str
+
+
+@dataclass(frozen=True)
+class RunObservation:
+    run_id: str
+    arm: str
+    scenario_id: str
+    workspace: Path
+    process_pid: int
+    process_pgid: int | None
+    process_start_identity: str
+    native_thread_id: str
+    prompt: str
+    output: str
+    started_at: str
+    completed_at: str
+    capability: CapabilityReceipt
+    cleanup: CleanupReceipt
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _write_minimal_config(config_path: Path, *, model: str) -> None:
+    """Minimal-surface config floor from design §8: no MCP, no bundled skills."""
+
+    config_path.write_text(
+        "\n".join(
+            [
+                f'model = "{model}"',
+                'approval_policy = "never"',
+                'sandbox_mode = "read-only"',
+                "",
+                "[features]",
+                "apps = false",
+                "",
+                "[skills.bundled]",
+                "enabled = false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _prepare_run_root(run_root: Path, *, agents_md: bytes, model: str) -> tuple[Path, Path, Path]:
+    """Create the fresh, unique (workspace, config, home) triad for one run.
+
+    ``workspace`` deliberately holds only the generated ``AGENTS.md`` and is
+    never a Git checkout -- it is not the ``repo_root`` used for Skillpack
+    materialization.
+    """
+
+    run_root = Path(run_root)
+    workspace = run_root / "workspace"
+    config_dir = run_root / "config"
+    home = run_root / "home"
+    for directory in (workspace, config_dir, home):
+        directory.mkdir(parents=True, exist_ok=True)
+    (workspace / "AGENTS.md").write_bytes(agents_md)
+    _write_minimal_config(config_dir / "config.toml", model=model)
+    return workspace, config_dir, home
+
+
+def _assert_empty_capability_surface(names: tuple[str, ...], *, label: str) -> None:
+    """Fail closed on any observed name; reuses the P1A classifier, no second one."""
+
+    classification = classify_observed(names, required=(), allowed_ambient=(), forbidden=())
+    decision = launch_decision(classification, fail_closed_unclassified=True)
+    if decision != LAUNCH_OK:
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID",
+            f"unexpected {label} present: {sorted(names)}",
+        )
+
+
+def _attest_capability(
+    client: "EvalClient", *, requested_model: str, harness_version: str
+) -> CapabilityReceipt:
+    """Query and validate the effective model/config/capability surface.
+
+    Every check here runs before ``thread/start``.  Any RPC failure or
+    ambiguous/missing observation is treated as
+    ``CAPABILITY_ATTESTATION_INVALID`` rather than silently passing.
+    """
+
+    try:
+        account_raw = client.request("account/read", {"refreshToken": False})
+    except Exception as exc:  # noqa: BLE001 - any transport failure invalidates the run
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID", f"account/read was unavailable: {exc}"
+        ) from exc
+    parsed_account = parse_account_read(account_raw)
+
+    try:
+        config_raw = client.request("config/read", {"includeLayers": False})
+    except Exception as exc:  # noqa: BLE001
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID", f"config/read was unavailable: {exc}"
+        ) from exc
+    config_obj = parse_config_read(config_raw)
+    if "model" not in config_obj:
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID", "config/read did not report an observed model"
+        )
+    served_model = str(config_obj.get("model") or "")
+    if served_model != requested_model:
+        raise FreshSolEvalError(
+            "SERVED_MODEL_MISMATCH",
+            f"served model {served_model!r} != requested {requested_model!r}",
+        )
+
+    approval_policy = str(config_obj.get("approval_policy") or config_obj.get("approvalPolicy") or "")
+    if approval_policy != "never":
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID", f"approval_policy {approval_policy!r} != 'never'"
+        )
+
+    sandbox_mode = str(config_obj.get("sandbox_mode") or config_obj.get("sandboxMode") or "")
+    if sandbox_mode != "read-only":
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID", f"sandbox_mode {sandbox_mode!r} != 'read-only'"
+        )
+
+    mcp_cfg = tuple(config_mcp_names(config_obj))
+    plugin_cfg = tuple(config_plugin_names(config_obj))
+
+    try:
+        skills_raw = client.request("skills/list", skills_list_params(str(client.cwd)))
+    except Exception as exc:  # noqa: BLE001
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID", f"skills/list was unavailable: {exc}"
+        ) from exc
+    discovered_skills = tuple(skill_names(skills_raw))
+
+    try:
+        mcp_status_raw = client.request("mcpServerStatus/list", {"detail": "toolsAndAuthOnly"})
+    except Exception as exc:  # noqa: BLE001
+        raise FreshSolEvalError(
+            "CAPABILITY_ATTESTATION_INVALID", f"mcpServerStatus/list was unavailable: {exc}"
+        ) from exc
+    mcp_observed = tuple(
+        str(row.get("name"))
+        for row in (mcp_status_raw.get("data") or [])
+        if isinstance(row, dict) and row.get("name")
+    )
+
+    mcp_all = tuple(sorted(set(mcp_cfg) | set(mcp_observed)))
+    _assert_empty_capability_surface(mcp_all, label="MCP server")
+    _assert_empty_capability_surface(plugin_cfg, label="plugin")
+    _assert_empty_capability_surface(discovered_skills, label="model-visible skill")
+
+    return CapabilityReceipt(
+        requested_model=requested_model,
+        served_model=served_model,
+        approval_policy=approval_policy,
+        sandbox_mode=sandbox_mode,
+        mcp_names=mcp_all,
+        plugin_names=plugin_cfg,
+        skill_names=discovered_skills,
+        auth_type=parsed_account["auth_type"],
+        plan_type=parsed_account["plan_type"],
+        requires_openai_auth=parsed_account["requires_openai_auth"],
+        harness_version=harness_version,
+    )
+
+
+def _thread_id_from(result: dict[str, Any]) -> str:
+    thread = result.get("thread") if isinstance(result, dict) else None
+    if isinstance(thread, dict):
+        return str(thread.get("id") or "")
+    return ""
+
+
+def _extract_final_output(read_result: dict[str, Any], *, thread_id: str) -> str:
+    """Extract the one unambiguous final assistant text from a canonical read.
+
+    Never reconstructs an answer from notification fragments.  If the
+    canonical thread does not contain exactly one discoverable text, this
+    fails closed with ``THREAD_READ_FAILED``.
+    """
+
+    turns = thread_turns(read_result)
+    if not turns:
+        raise FreshSolEvalError(
+            "THREAD_READ_FAILED", f"thread/read returned no turns for thread {thread_id}"
+        )
+    last_turn = turns[-1]
+    text = last_turn.get("text")
+    if isinstance(text, str) and text.strip():
+        return text
+    item_texts: list[str] = []
+    for item in last_turn.get("items") or []:
+        if (
+            isinstance(item, dict)
+            and item.get("type") in ("agentMessage", "agent_message")
+            and item.get("text")
+        ):
+            item_texts.append(str(item["text"]))
+    unique_texts = sorted(set(item_texts))
+    if len(unique_texts) == 1:
+        return unique_texts[0]
+    raise FreshSolEvalError(
+        "THREAD_READ_FAILED",
+        f"thread/read did not produce one unambiguous final assistant text for {thread_id} "
+        f"(candidates={unique_texts!r})",
+    )
+
+
+def _terminate_and_prove(client: "EvalClient") -> CleanupReceipt:
+    outcome = client.terminate()
+    if isinstance(outcome, AppServerStopProof):
+        if not outcome.private_group_empty:
+            raise FreshSolEvalError(
+                "CLEANUP_UNPROVEN", "process group was not proven empty after termination"
+            )
+        return CleanupReceipt(
+            controller_returncode=outcome.controller_returncode,
+            private_group_id=outcome.private_group_id,
+            private_group_empty=outcome.private_group_empty,
+            termination_outcome=outcome.termination_outcome,
+        )
+    if isinstance(outcome, CleanupReceipt):
+        if not outcome.private_group_empty:
+            raise FreshSolEvalError(
+                "CLEANUP_UNPROVEN", "cleanup receipt reported a non-empty process group"
+            )
+        return outcome
+    raise FreshSolEvalError(
+        "CLEANUP_UNPROVEN", f"terminate() returned an unrecognized cleanup proof: {outcome!r}"
+    )
+
+
+def run_one(
+    *,
+    repo_root: Path,
+    arm: SkillpackArm,
+    scenario: ScenarioPacket,
+    run_root: Path,
+    client_factory: "ClientFactory",
+    harness_kind: str = "codex-app-server",
+    harness_version: str = "unknown",
+) -> RunObservation:
+    """Execute exactly one fully isolated fresh-Sol evaluation sample.
+
+    Fresh workspace, fresh App Server process/private group, exactly one
+    ``thread/start`` (never ``resume``/``fork``), exactly one scenario turn,
+    canonical thread read, proven cleanup.  Raises ``FreshSolEvalError`` with
+    a closed failure code on any isolation/evidence law violation.
+    """
+
+    del harness_kind  # recorded by the caller into evidence; not used to branch here
+    run_id = uuid.uuid4().hex
+    started_at = _utc_now()
+
+    bundle = materialize_skillpack(repo_root, arm)
+    agents_md = build_eval_agents_md(bundle)
+    workspace, config_dir, home = _prepare_run_root(run_root, agents_md=agents_md, model=REQUIRED_MODEL)
+
+    client = client_factory(workspace, config_dir, home)
+    client.start()
+    if client.pid is None:
+        raise FreshSolEvalError(
+            "HARNESS_INITIALIZE_FAILED", "app-server process did not report a pid"
+        )
+
+    try:
+        client.request(
+            "initialize",
+            {"clientInfo": CLIENT_INFO, "capabilities": {"experimentalApi": True}},
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise FreshSolEvalError("HARNESS_INITIALIZE_FAILED", f"initialize failed: {exc}") from exc
+    client.notify("initialized", {})
+
+    capability = _attest_capability(
+        client, requested_model=REQUIRED_MODEL, harness_version=harness_version
+    )
+
+    try:
+        started = client.request(
+            "thread/start",
+            {
+                "model": REQUIRED_MODEL,
+                "cwd": str(workspace),
+                "approvalPolicy": "never",
+                "sandbox": "read-only",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise FreshSolEvalError("THREAD_START_FAILED", f"thread/start failed: {exc}") from exc
+    thread_id = _thread_id_from(started)
+    if not thread_id:
+        raise FreshSolEvalError(
+            "THREAD_START_FAILED", "thread/start did not return a native thread id"
+        )
+
+    try:
+        client.request(
+            "turn/start",
+            {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": scenario.prompt}],
+                "cwd": str(workspace),
+                "approvalPolicy": "never",
+            },
+            timeout=60.0,
+        )
+        client.wait_notification("turn/completed", timeout=60.0)
+    except Exception as exc:  # noqa: BLE001
+        raise FreshSolEvalError(
+            "TURN_EFFECT_UNKNOWN",
+            f"the scenario turn dispatch/completion is effect-unknown: {exc}",
+        ) from exc
+
+    try:
+        read_result = client.request("thread/read", {"threadId": thread_id, "includeTurns": True})
+    except Exception as exc:  # noqa: BLE001
+        raise FreshSolEvalError("THREAD_READ_FAILED", f"thread/read failed: {exc}") from exc
+    output = _extract_final_output(read_result, thread_id=thread_id)
+
+    completed_at = _utc_now()
+    cleanup = _terminate_and_prove(client)
+
+    process_pid = client.pid
+    assert process_pid is not None
+    return RunObservation(
+        run_id=run_id,
+        arm=arm.name,
+        scenario_id=scenario.scenario_id,
+        workspace=workspace,
+        process_pid=process_pid,
+        process_pgid=cleanup.private_group_id,
+        process_start_identity=f"{process_pid}:{cleanup.private_group_id}:{run_id}",
+        native_thread_id=thread_id,
+        prompt=scenario.prompt,
+        output=output,
+        started_at=started_at,
+        completed_at=completed_at,
+        capability=capability,
+        cleanup=cleanup,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Live App Server client factory (plan Task 2, Steps 3-5)
+#
+# Exercised only by the CLI (Task 3) against a real ``codex`` binary; unit
+# tests never call the returned factory's ``request``/``terminate`` -- they
+# inject ``_FakeEvalClient`` into ``run_one`` directly instead.
+# ---------------------------------------------------------------------------
+
+
+def build_live_client_factory(
+    *, codex_home: Path, model: str, codex_binary: str | None = None
+) -> "ClientFactory":
+    """Build a ``ClientFactory`` bound to one dedicated, independently
+    authenticated, non-default Codex realm.
+
+    Validates the realm eagerly (fails closed on the implicit ``~/.codex``
+    default or a missing ``auth.json`` marker) without ever opening,
+    reading, copying, or serializing credential bytes -- see
+    ``scripts.ohf.laboratory.validate_live_codex_home``, reused verbatim.
+
+    Does not mutate ``codex_home``'s persistent ``config.toml``: the minimal
+    surface (model/approval/sandbox/no-MCP/no-bundled-skills) is applied as
+    ``-c`` App Server CLI overrides layered on top of the dedicated realm's
+    own configuration, never written into it.
+    """
+
+    codex_home = Path(codex_home).expanduser().resolve()
+    try:
+        validate_live_codex_home(codex_home)
+    except RuntimeError as exc:
+        raise FreshSolEvalError("AUTH_REALM_INVALID", str(exc)) from exc
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> "EvalClient":
+        exe = codex_binary or shutil.which("codex")
+        if not exe:
+            raise FreshSolEvalError("HARNESS_BINARY_UNAVAILABLE", "codex CLI is not installed")
+        del config_dir  # the dedicated realm's own config.toml is not overwritten
+        argv = [
+            exe,
+            "app-server",
+            "-c",
+            f'model="{model}"',
+            "-c",
+            'approval_policy="never"',
+            "-c",
+            'sandbox_mode="read-only"',
+            "-c",
+            "features.apps=false",
+            "-c",
+            "skills.bundled.enabled=false",
+        ]
+        env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": str(home),
+            "CODEX_HOME": str(codex_home),
+            "PYTHONPATH": str(REPO_ROOT),
+            "LC_ALL": "C",
+        }
+        return AppServerClient(argv, env=env, cwd=workspace, start_new_session=True)
+
+    return factory

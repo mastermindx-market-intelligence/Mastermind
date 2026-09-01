@@ -7,8 +7,10 @@ subprocess.
 """
 from __future__ import annotations
 
+import itertools
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,9 +19,13 @@ from scripts.ohf.fresh_sol_eval import (
     MAS136_SCENARIOS,
     FreshSolEvalError,
     SkillpackArm,
+    ScenarioPacket,
+    CleanupReceipt,
     materialize_skillpack,
     parse_protocol,
     build_eval_agents_md,
+    run_one,
+    build_live_client_factory,
 )
 
 
@@ -285,4 +291,432 @@ def test_build_eval_agents_md_is_arm_neutral_wrapper_plus_sources(skillpack_git_
         assert banned not in amended_wrapper
     assert b"control content" in control_md
     assert b"amended content" in amended_md
+
+
+# ---------------------------------------------------------------------------
+# Task 2: fresh process/thread execution + capability attestation.
+#
+# ``_FakeEvalClient`` implements only the narrow structural surface
+# ``fresh_sol_eval.EvalClient`` needs (pid, cwd, notifications, start,
+# request, notify, wait_notification, terminate).  It never spawns a
+# subprocess and never calls a provider.
+# ---------------------------------------------------------------------------
+
+_fake_pid_counter = itertools.count(9001)
+
+
+class _FakeEvalClient:
+    def __init__(
+        self,
+        workspace: Path,
+        config_dir: Path,
+        home: Path,
+        *,
+        served_model: str = "gpt-5.6-sol",
+        approval_policy: str = "never",
+        sandbox_mode: str = "read-only",
+        skills: tuple[dict[str, Any], ...] = (),
+        mcp_status: tuple[dict[str, Any], ...] = (),
+        mcp_configured: tuple[str, ...] = (),
+        plugins_configured: tuple[str, ...] = (),
+        turn_output: str = "the answer",
+        omit_model_key: bool = False,
+        thread_read_turns: str = "normal",  # "normal" | "empty" | "ambiguous"
+        cleanup_ok: bool = True,
+        allow_resume_fork: bool = False,
+        fail_capability_rpc: str | None = None,
+    ) -> None:
+        self.workspace = workspace
+        self.config_dir = config_dir
+        self.home = home
+        self.cwd = workspace
+        self.notifications: list[dict[str, Any]] = []
+        self.pid: int | None = None
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.threads: dict[str, dict[str, Any]] = {}
+        self._served_model = served_model
+        self._approval_policy = approval_policy
+        self._sandbox_mode = sandbox_mode
+        self._skills = list(skills)
+        self._mcp_status = list(mcp_status)
+        self._mcp_configured = list(mcp_configured)
+        self._plugins_configured = list(plugins_configured)
+        self._turn_output = turn_output
+        self._omit_model_key = omit_model_key
+        self._thread_read_turns = thread_read_turns
+        self._cleanup_ok = cleanup_ok
+        self._allow_resume_fork = allow_resume_fork
+        self._fail_capability_rpc = fail_capability_rpc
+        self.thread_start_calls = 0
+        self.thread_resume_calls = 0
+        self.thread_fork_calls = 0
+        self.turn_start_calls = 0
+        self.terminate_calls = 0
+
+    def start(self) -> None:
+        self.pid = next(_fake_pid_counter)
+
+    def request(
+        self, method: str, params: dict[str, Any] | None = None, timeout: float = 15.0
+    ) -> dict[str, Any]:
+        params = dict(params or {})
+        self.calls.append((method, params))
+        if self._fail_capability_rpc == method:
+            raise RuntimeError(f"fixture-forced failure for {method}")
+        if method == "initialize":
+            return {"userAgent": "fake-eval-client/1"}
+        if method == "account/read":
+            return {
+                "account": {"type": "chatgpt", "planType": "pro"},
+                "requiresOpenaiAuth": True,
+            }
+        if method == "config/read":
+            config: dict[str, Any] = {
+                "approval_policy": self._approval_policy,
+                "sandbox_mode": self._sandbox_mode,
+                "mcp_servers": {name: {} for name in self._mcp_configured},
+                "plugins": {name: {} for name in self._plugins_configured},
+            }
+            if not self._omit_model_key:
+                config["model"] = self._served_model
+            return {"config": config}
+        if method == "skills/list":
+            return {"data": [{"cwd": str(self.workspace), "skills": self._skills, "errors": []}]}
+        if method == "mcpServerStatus/list":
+            return {"data": self._mcp_status}
+        if method == "thread/start":
+            self.thread_start_calls += 1
+            thread_id = f"thr_fake_{next(_fake_pid_counter)}"
+            self.threads[thread_id] = {"id": thread_id, "turns": []}
+            return {"thread": {"id": thread_id}}
+        if method == "thread/resume":
+            self.thread_resume_calls += 1
+            if not self._allow_resume_fork:
+                raise AssertionError("run_one must never call thread/resume")
+            return {"thread": {"id": params.get("threadId")}}
+        if method == "thread/fork":
+            self.thread_fork_calls += 1
+            if not self._allow_resume_fork:
+                raise AssertionError("run_one must never call thread/fork")
+            return {"thread": {"id": "thr_fake_fork"}}
+        if method == "turn/start":
+            self.turn_start_calls += 1
+            thread_id = str(params.get("threadId") or "")
+            thread = self.threads.setdefault(thread_id, {"id": thread_id, "turns": []})
+            thread["turns"].append(
+                {
+                    "id": "turn_fake",
+                    "text": self._turn_output,
+                    "items": [
+                        {
+                            "type": "agentMessage",
+                            "text": self._turn_output,
+                        }
+                    ],
+                }
+            )
+            return {"turn": {"id": "turn_fake"}}
+        if method == "thread/read":
+            thread_id = str(params.get("threadId") or "")
+            if self._thread_read_turns == "empty":
+                turns: list[dict[str, Any]] = []
+            elif self._thread_read_turns == "ambiguous":
+                turns = [
+                    {
+                        "id": "turn_fake",
+                        "items": [
+                            {"type": "agentMessage", "text": "first answer"},
+                            {"type": "agentMessage", "text": "second different answer"},
+                        ],
+                    }
+                ]
+            else:
+                thread = self.threads.get(thread_id) or {"turns": []}
+                turns = list(thread.get("turns") or [])
+            return {"thread": {"id": thread_id, "turns": turns}}
+        raise AssertionError(f"unexpected fake RPC method: {method}")
+
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+        self.calls.append((method, dict(params or {})))
+
+    def wait_notification(self, method: str, *, timeout: float = 15.0) -> dict[str, Any]:
+        return {
+            "method": method,
+            "params": {
+                "turn": {
+                    "id": "turn_fake",
+                    "text": "NOTIFICATION FRAGMENT MUST NEVER BE USED AS OUTPUT",
+                }
+            },
+        }
+
+    def terminate(self) -> object:
+        self.terminate_calls += 1
+        return CleanupReceipt(
+            controller_returncode=0 if self._cleanup_ok else 1,
+            private_group_id=self.pid,
+            private_group_empty=self._cleanup_ok,
+            termination_outcome="sigterm" if self._cleanup_ok else "unproven",
+        )
+
+
+def _fake_factory(**client_kwargs: Any):
+    made: list[_FakeEvalClient] = []
+
+    def factory(workspace: Path, config_dir: Path, home: Path) -> _FakeEvalClient:
+        client = _FakeEvalClient(workspace, config_dir, home, **client_kwargs)
+        made.append(client)
+        return client
+
+    factory.made = made  # type: ignore[attr-defined]
+    return factory
+
+
+def _scenario(scenario_id: str = "S8") -> ScenarioPacket:
+    return ScenarioPacket(scenario_id=scenario_id, prompt="fixture prompt body", pass_requires="unused")
+
+
+def _control_arm() -> SkillpackArm:
+    return SkillpackArm("control-1.0.0", "51f9942733b86e550bb9169d2a43462bd28e774f", "1.0.0")
+
+
+@pytest.fixture()
+def mastermind_repo_root() -> Path:
+    # This test worktree *is* the Mastermind repo; the two frozen MAS-136
+    # commits already exist in its object database.
+    return Path(__file__).resolve().parent.parent
+
+
+def test_run_one_fresh_session_per_call(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory()
+    obs1 = run_one(
+        repo_root=mastermind_repo_root,
+        arm=_control_arm(),
+        scenario=_scenario(),
+        run_root=tmp_path / "run1",
+        client_factory=factory,
+    )
+    obs2 = run_one(
+        repo_root=mastermind_repo_root,
+        arm=_control_arm(),
+        scenario=_scenario(),
+        run_root=tmp_path / "run2",
+        client_factory=factory,
+    )
+    assert obs1.run_id != obs2.run_id
+    assert obs1.process_pid != obs2.process_pid
+    assert obs1.workspace != obs2.workspace
+    assert obs1.native_thread_id != obs2.native_thread_id
+    for obs, client in zip((obs1, obs2), factory.made):
+        assert client.thread_start_calls == 1
+        assert client.thread_resume_calls == 0
+        assert client.thread_fork_calls == 0
+        assert client.turn_start_calls == 1
+    assert obs1.output == "the answer"
+    assert obs1.prompt == "fixture prompt body"
+
+
+# ---------------------------------------------------------------------------
+# Task 2, Step 2: RED capability-attestation tests.
+# ---------------------------------------------------------------------------
+
+
+def test_served_model_mismatch_refuses_before_thread_start(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(served_model="gpt-4-not-sol")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "SERVED_MODEL_MISMATCH"
+    assert factory.made[0].thread_start_calls == 0
+
+
+def test_approval_policy_mismatch_refuses_before_thread_start(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(approval_policy="on-request")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].thread_start_calls == 0
+
+
+def test_sandbox_mode_mismatch_refuses_before_thread_start(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(sandbox_mode="workspace-write")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].thread_start_calls == 0
+
+
+def test_configured_mcp_server_refuses_before_thread_start(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(mcp_configured=("some_mcp",))
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+    assert factory.made[0].thread_start_calls == 0
+
+
+def test_configured_plugin_refuses_before_thread_start(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(plugins_configured=("some_plugin",))
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+
+
+def test_visible_skill_refuses_before_thread_start(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(skills=({"name": "some-skill"},))
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+
+
+def test_ambiguous_capability_observation_refuses(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(omit_model_key=True)
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+
+
+def test_capability_rpc_failure_refuses(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(fail_capability_rpc="account/read")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CAPABILITY_ATTESTATION_INVALID"
+
+
+def test_thread_read_ambiguous_output_refuses(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(thread_read_turns="ambiguous")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "THREAD_READ_FAILED"
+
+
+def test_notification_fragment_never_substitutes_for_thread_read(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(thread_read_turns="empty")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "THREAD_READ_FAILED"
+
+
+def test_cleanup_unproven_invalidates_run(mastermind_repo_root: Path, tmp_path: Path):
+    factory = _fake_factory(cleanup_ok=False)
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        run_one(
+            repo_root=mastermind_repo_root,
+            arm=_control_arm(),
+            scenario=_scenario(),
+            run_root=tmp_path / "run",
+            client_factory=factory,
+        )
+    assert excinfo.value.code == "CLEANUP_UNPROVEN"
+
+
+# ---------------------------------------------------------------------------
+# Task 2, Step 4: dedicated auth-realm validation without credential reads.
+# ---------------------------------------------------------------------------
+
+
+def test_default_codex_home_refuses(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    fake_home = tmp_path / "fake_home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    default_codex_home = fake_home / ".codex"
+    default_codex_home.mkdir()
+    (default_codex_home / "auth.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(FreshSolEvalError) as excinfo:
+        build_live_client_factory(codex_home=default_codex_home, model="gpt-5.6-sol")
+    assert excinfo.value.code == "AUTH_REALM_INVALID"
+
+
+def test_auth_json_contents_are_never_read_copied_or_serialized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    dedicated = tmp_path / "dedicated_realm"
+    dedicated.mkdir()
+    secret_marker = "sk-should-never-be-read-1234567890"
+    (dedicated / "auth.json").write_text(secret_marker, encoding="utf-8")
+
+    auth_json_path = (dedicated / "auth.json").resolve()
+    real_read_bytes = Path.read_bytes
+    real_read_text = Path.read_text
+    real_open = Path.open
+
+    def guarded_read_bytes(self: Path, *args: Any, **kwargs: Any) -> bytes:
+        if self.resolve() == auth_json_path:
+            raise AssertionError("auth.json bytes must never be read")
+        return real_read_bytes(self, *args, **kwargs)
+
+    def guarded_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.resolve() == auth_json_path:
+            raise AssertionError("auth.json text must never be read")
+        return real_read_text(self, *args, **kwargs)
+
+    def guarded_open(self: Path, *args: Any, **kwargs: Any):
+        if self.resolve() == auth_json_path:
+            raise AssertionError("auth.json must never be opened")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+    monkeypatch.setattr(Path, "open", guarded_open)
+
+    factory = build_live_client_factory(codex_home=dedicated, model="gpt-5.6-sol")
+    assert callable(factory)
 
