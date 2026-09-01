@@ -48,8 +48,15 @@ def test_background_uses_ephemeral_exact_fingerprint_to_tab_mapping_only():
     assert "TARGET_NOT_FOUND" in text
     assert "TARGET_CHANGED" in text
 
+    # R1 is allowed one closed startup-discovery seam.  It may enumerate only
+    # the two exact ChatGPT host patterns already granted by the manifest; it
+    # does not gain caller-selected URL search or generic browser discovery.
+    assert 'const CHATGPT_TAB_PATTERNS = Object.freeze([\n  "https://chat.openai.com/*",\n  "https://chatgpt.com/*",\n]);' in text
+    assert "typeof chrome.tabs.query" in text
+    assert "openTabs = await chrome.tabs.query({url: CHATGPT_TAB_PATTERNS})" in text
+    assert text.count("chrome.tabs.query") == 2
+
     for forbidden in (
-        "chrome.tabs.query",
         ".title",
         "lastAccessed",
         "activeInfo",
@@ -67,17 +74,25 @@ def test_background_foreground_is_activation_and_focus_only():
     assert 'REPROBE_KIND = "MMX_WEB_SOL_REPROBE"' in text
     assert "kind: REPROBE_KIND" in text
 
+    # R1 adds exact-host startup discovery elsewhere in the service worker.
+    # Preserve the stricter S1 law on the FOREGROUND action itself: it may
+    # activate/focus an already-resolved tab but never navigate, query by URL,
+    # create/remove/reload tabs or inject script.
+    foreground = text.split("async function handleForeground(request) {", 1)[1].split(
+        "async function handleNativeRequest(request, port) {", 1
+    )[0]
     for forbidden in (
         "chrome.tabs.create",
         "chrome.tabs.reload",
         "chrome.tabs.remove",
+        "chrome.tabs.query",
         "chrome.windows.create",
         "chrome.windows.remove",
         "chrome.scripting",
         "executeScript",
         "url:",
     ):
-        assert forbidden not in text
+        assert forbidden not in foreground
 
 
 def test_content_script_supports_request_aware_reprobe_without_content_export():
