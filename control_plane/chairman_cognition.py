@@ -43,6 +43,7 @@ _ISO_UTC_RE = re.compile(
 _REF_BOUNDARY_CHARS = frozenset(":/#")
 _CONSTRAINT_BINDING_LABEL = "constraints-sha256"
 _CLASSIFICATION_BINDING_LABEL = "classification-sha256"
+_ENVELOPE_BINDING_LABEL = "envelope-sha256"
 
 MAX_OPTIONS = 64
 MAX_SOURCE_RECEIPTS = 128
@@ -384,7 +385,7 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
         where="strategic constraints source",
     )
 
-    envelope, envelope_state = _parse_envelope(
+    envelope, envelope_state, envelope_digest = _parse_envelope(
         doc["delegation_envelope"], source_receipts, as_of
     )
     options = _parse_options(doc["options"])
@@ -485,6 +486,9 @@ def evaluate_document(document: Mapping[str, Any]) -> dict[str, Any]:
             "state": envelope_state.value,
             "envelope_id": envelope.envelope_id if envelope is not None else None,
             "mode": envelope.mode.value if envelope is not None else None,
+            "digest": (
+                f"sha256:{envelope_digest}" if envelope_digest is not None else None
+            ),
         },
         "strategic_frontier": list(strategic_frontier),
         "actionable_frontier": list(actionable_frontier),
@@ -605,9 +609,9 @@ def _parse_envelope(
     value: Any,
     source_receipts: Mapping[str, SourceReceipt],
     as_of: str,
-) -> tuple[DelegationEnvelope | None, EnvelopeState]:
+) -> tuple[DelegationEnvelope | None, EnvelopeState, str | None]:
     if value is None:
-        return None, EnvelopeState.MISSING
+        return None, EnvelopeState.MISSING, None
     item = _closed_mapping(
         value,
         required={
@@ -723,14 +727,24 @@ def _parse_envelope(
         require_exact_carrier=item["require_exact_carrier"],
         expires_at=expires_at,
     )
+    envelope_digest = _envelope_digest(envelope)
+    if not any(
+        _revision_has_binding(
+            source_receipts[ref],
+            label=_ENVELOPE_BINDING_LABEL,
+            digest=envelope_digest,
+        )
+        for ref in authority_source_refs
+    ):
+        raise ChairmanCognitionError("delegation envelope is not content-bound")
     source_state = _aggregate_source_state(
         tuple(source_receipts[ref] for ref in authority_source_refs)
     )
     if source_state is not SourceState.CURRENT:
-        return envelope, EnvelopeState.SOURCE_NOT_CURRENT
+        return envelope, EnvelopeState.SOURCE_NOT_CURRENT, envelope_digest
     if _parse_time(expires_at) <= _parse_time(as_of):
-        return envelope, EnvelopeState.EXPIRED
-    return envelope, EnvelopeState.ACCEPTED
+        return envelope, EnvelopeState.EXPIRED, envelope_digest
+    return envelope, EnvelopeState.ACCEPTED, envelope_digest
 
 
 def _parse_options(value: Any) -> tuple[StrategicOption, ...]:
@@ -1291,8 +1305,48 @@ def _classification_digest(option: StrategicOption) -> str:
     return _payload_digest(_classification_payload(option))
 
 
+def _envelope_payload(envelope: DelegationEnvelope) -> dict[str, Any]:
+    return {
+        "schema": ENVELOPE_SCHEMA,
+        "envelope_id": envelope.envelope_id,
+        "authority_source_refs": sorted(envelope.authority_source_refs),
+        "mode": envelope.mode.value,
+        "allowed_actions": sorted(envelope.allowed_actions),
+        "allowed_reversibility": sorted(
+            item.value for item in envelope.allowed_reversibility
+        ),
+        "allowed_repositories": sorted(envelope.allowed_repositories),
+        "allowed_path_prefixes": {
+            repository: sorted(envelope.allowed_path_prefixes[repository])
+            for repository in sorted(envelope.allowed_path_prefixes)
+        },
+        "allowed_scope_prefixes": sorted(envelope.allowed_scope_prefixes),
+        "allowed_carrier_prefixes": sorted(envelope.allowed_carrier_prefixes),
+        "max_budget_units": envelope.max_budget_units,
+        "max_active_children": envelope.max_active_children,
+        "require_exact_carrier": envelope.require_exact_carrier,
+        "expires_at": envelope.expires_at,
+    }
+
+
+def _envelope_digest(envelope: DelegationEnvelope) -> str:
+    return _payload_digest(_envelope_payload(envelope))
+
+
 def _payload_digest(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _revision_has_binding(
+    receipt: SourceReceipt,
+    *,
+    label: str,
+    digest: str,
+) -> bool:
+    if _HEX64_RE.fullmatch(digest) is None:
+        return False
+    expected = f"{label}:{digest}"
+    return expected in receipt.revision.split(";")
 
 
 def _require_revision_binding(
@@ -1304,9 +1358,7 @@ def _require_revision_binding(
 ) -> None:
     if _HEX64_RE.fullmatch(digest) is None:
         raise ChairmanCognitionError(f"{where} digest is malformed")
-    expected = f"{label}:{digest}"
-    fields = receipt.revision.split(";")
-    if expected not in fields:
+    if not _revision_has_binding(receipt, label=label, digest=digest):
         raise ChairmanCognitionError(f"{where} is not content-bound")
 
 
