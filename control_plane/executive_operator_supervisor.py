@@ -71,6 +71,7 @@ from control_plane.operator_harness_wire import (
 )
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
 from control_plane.executive_worker_broker import RemoteBrokerError
+from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
 class ExecutiveOperatorSupervisorError(RuntimeError):
@@ -204,30 +205,46 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 f"operator capability policy is invalid: {exc}"
             ) from exc
-        if (
+        common_profile_ok = (
             registry.policy_version
-            != job.constraints.get("capability_policy_version")
-            or registry.policy_digest
-            != job.constraints.get("capability_policy_digest")
-            or profile.profile_digest
-            != job.constraints.get("execution_profile_digest")
-            or profile.execution_surface != "codex-app-server"
-            or profile.auth_realm != "dedicated-worker-account"
-            or profile.sandbox_policy != "read-only"
-            or profile.approval_policy != "never"
-            or profile.network_policy != "disabled"
-            or profile.write_capable
-            or profile.native_helper_policy.value
-            != "PARENT_READ_ONLY_CEILING"
-            or profile.native_helper is None
-            or profile.skills
-            or profile.profile_id
-            != "operator.appserver.readonly.docs-mcp.native-helper.v1"
-            or profile.mcp_servers != ("openai-developer-docs-v1",)
-            or profile.plugins
-        ):
+            == job.constraints.get("capability_policy_version")
+            and registry.policy_digest
+            == job.constraints.get("capability_policy_digest")
+            and profile.profile_digest
+            == job.constraints.get("execution_profile_digest")
+            and profile.execution_surface == "codex-app-server"
+            and profile.auth_realm == "dedicated-worker-account"
+            and profile.sandbox_policy == "read-only"
+            and profile.approval_policy == "never"
+            and not profile.write_capable
+            and not profile.skills
+            and not profile.plugins
+        )
+        docs_profile_ok = (
+            profile.profile_id
+            == "operator.appserver.readonly.docs-mcp.native-helper.v1"
+            and profile.network_policy == "disabled"
+            and profile.native_helper_policy.value == "PARENT_READ_ONLY_CEILING"
+            and profile.native_helper is not None
+            and profile.mcp_servers == ("openai-developer-docs-v1",)
+            and not profile.resource_grants
+        )
+        browser_profile_ok = (
+            profile.profile_id == "operator.browser.local-review.v1"
+            and profile.network_policy == "loopback-browser-only"
+            and profile.native_helper_policy.value == "DISABLED"
+            and profile.native_helper is None
+            and profile.mcp_servers
+            == (
+                "openai-developer-docs-v1",
+                "playwright-worker-browser-b1",
+            )
+            and tuple(grant.resource_id for grant in profile.resource_grants)
+            == ("worker-browser-b1-local",)
+        )
+        if not common_profile_ok or not (docs_profile_ok or browser_profile_ok):
             raise ExecutiveOperatorSupervisorError(
-                "operator planner profile is not the reviewed docs-MCP read-only lane"
+                "operator planner profile is not one reviewed rich read-only lane"
             )
         if quota.model != job.constraints.get("model") or quota.effort != job.constraints.get(
             "effort"
@@ -245,7 +262,7 @@ class ExecutiveOperatorSupervisor:
             workspace=self._workspace_identity(job),
             sandbox_policy="read-only",
             approval_policy="never",
-            network_policy="disabled",
+            network_policy=profile.network_policy,
             capabilities=profile.capability_manifest(
                 harness_binary_digest=harness_digest
             ),
@@ -278,7 +295,11 @@ class ExecutiveOperatorSupervisor:
 
     @staticmethod
     def _terminal_payload(
-        *, job: Job, lease: AttemptLease, canonical_result_json: str
+        *,
+        job: Job,
+        lease: AttemptLease,
+        canonical_result_json: str,
+        artifact_receipt_digest: str | None = None,
     ) -> dict[str, Any]:
         envelope = parse_canonical_json(canonical_result_json)
         if not isinstance(envelope, dict):
@@ -298,7 +319,11 @@ class ExecutiveOperatorSupervisor:
             "result_evidence": None,
             "result_envelope": envelope,
             "result_envelope_digest": canonical_digest(envelope),
-            "artifact_receipt_digest": canonical_digest([]),
+            "artifact_receipt_digest": (
+                artifact_receipt_digest
+                if artifact_receipt_digest is not None
+                else canonical_digest([])
+            ),
             "validation_receipt_digest": canonical_digest([]),
             "effective_grant_digest": lease.attempt.effective_grant_digest,
         }
@@ -339,12 +364,56 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "operator graceful stop did not prove dead/released"
             )
+        artifact_receipt_digest = self._terminal_artifact_receipt_digest(
+            session=session, adapter=adapter
+        )
         self._complete_after_shutdown(
             job=job,
             lease=lease,
             session=session,
             canonical_result_json=canonical_result_json,
+            artifact_receipt_digest=artifact_receipt_digest,
         )
+
+    @staticmethod
+    def _terminal_artifact_receipt_digest(
+        *,
+        session: OperatorSessionReceipt,
+        adapter: RemoteCodexOperatorAdapter,
+    ) -> str:
+        requires_resource = any(
+            capability.kind == "resource"
+            for capability in session.observed.capabilities
+        )
+        try:
+            receipt = adapter.terminal_artifact_receipt(session.generation)
+        except Exception as exc:
+            if requires_resource:
+                raise ExecutiveOperatorSupervisorError(
+                    "browser Attempt lacks its post-sweep artifact receipt"
+                ) from exc
+            return canonical_digest([])
+        if receipt is None:
+            if requires_resource:
+                raise ExecutiveOperatorSupervisorError(
+                    "browser Attempt lacks its post-sweep artifact receipt"
+                )
+            return canonical_digest([])
+        if not isinstance(receipt, BrowserReviewReceipt):
+            raise ExecutiveOperatorSupervisorError(
+                "operator terminal artifact receipt is not typed"
+            )
+        if (
+            not requires_resource
+            or receipt.attempt_id != session.attempt_id
+            or receipt.session_epoch_id != session.epoch.session_epoch_id
+            or receipt.process_generation_id
+            != session.generation.process_generation_id
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "operator terminal artifact receipt identity drifted"
+            )
+        return receipt.digest
 
     def _complete_after_shutdown(
         self,
@@ -353,6 +422,7 @@ class ExecutiveOperatorSupervisor:
         lease: AttemptLease,
         session: OperatorSessionReceipt,
         canonical_result_json: str,
+        artifact_receipt_digest: str | None = None,
     ) -> None:
         """Complete only after the caller has proven the generation shut down."""
 
@@ -369,6 +439,7 @@ class ExecutiveOperatorSupervisor:
                 job=job,
                 lease=lease,
                 canonical_result_json=canonical_result_json,
+                artifact_receipt_digest=artifact_receipt_digest,
             ),
         )
 
@@ -947,6 +1018,11 @@ class ExecutiveOperatorSupervisor:
                     lease=lease,
                     session=session,
                     canonical_result_json=sealed_result_json,
+                    artifact_receipt_digest=(
+                        self._terminal_artifact_receipt_digest(
+                            session=session, adapter=adapter
+                        )
+                    ),
                 )
                 current = self.runtime.attempts.get_attempt(attempt_id)
                 if current is None or current.status is not AttemptStatus.COMPLETED:
