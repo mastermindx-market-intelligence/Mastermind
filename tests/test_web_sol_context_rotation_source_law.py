@@ -68,7 +68,7 @@ def test_sol_identity_is_stable_while_chat_and_runtime_binding_rotate() -> None:
         assert phrase in spec, f"spec omits stable/rotating identity boundary: {phrase}"
 
     assert "Personal-Pro Chat remains the primary Sol cognition plane" in hierarchy
-    assert "A chat conversation is replaceable working memory" in hierarchy
+    assert "context rotation preserves responsibility and fences the predecessor" in hierarchy
 
 
 def test_owner_boundaries_extend_existing_planes_without_new_registry_or_memory() -> None:
@@ -95,7 +95,7 @@ def test_owner_boundaries_extend_existing_planes_without_new_registry_or_memory(
         assert phrase in law, f"law omits canonical owner/no-rebuild boundary: {phrase}"
         assert phrase in spec, f"spec omits canonical owner/no-rebuild boundary: {phrase}"
 
-    assert "binding_id is durable and opaque" in session_targets
+    assert "``binding_id`` is durable and opaque" in session_targets
     assert "A read-composed binding snapshot; never a binding registry or writer" in action_target
 
 
