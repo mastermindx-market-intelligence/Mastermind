@@ -98,6 +98,12 @@ class PreflightError(RuntimeError):
         super().__init__(self.code)
 
 
+class _OpaqueParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:  # pragma: no cover - argparse path
+        del message
+        raise PreflightError(PUBLIC_FAILURE)
+
+
 class AcpOutcome(Enum):
     READY = "ready"
     CACHED_TOKEN_UNAVAILABLE = "cached_token_unavailable"
@@ -489,14 +495,14 @@ def render_protocol_unsupported_receipt(binary_sha256: str, observed_at: str) ->
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Secret-free Grok Build OAuth/ACP preflight")
+    parser = _OpaqueParser(description="Secret-free Grok Build OAuth/ACP preflight")
     parser.add_argument("--grok-binary", type=Path, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
     try:
+        args = _parser().parse_args(argv)
         binary, identity = snapshot_binary(args.grok_binary)
         observe_version(binary)
         assert_binary_unchanged(binary, identity)

@@ -272,6 +272,22 @@ def test_main_unexpected_exception_output_is_fixed_and_opaque(
     assert json.loads(captured.out) == {"ok": False, "error": "PREFLIGHT_FAILED"}
 
 
+def test_main_parser_failure_is_fixed_opaque_and_provider_free(monkeypatch, capsys):
+    m = load_module()
+
+    def unexpected_provider_observation(*args, **kwargs):
+        pytest.fail("parser failure must not perform provider observation")
+
+    monkeypatch.setattr(m, "snapshot_binary", unexpected_provider_observation)
+    monkeypatch.setattr(m, "observe_version", unexpected_provider_observation)
+    monkeypatch.setattr(m, "observe_acp_cached_oauth", unexpected_provider_observation)
+
+    assert m.main(["--grok-binary"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == '{"error": "PREFLIGHT_FAILED", "ok": false}\n'
+    assert captured.err == ""
+
+
 def test_acp_probe_emits_only_initialize_then_authenticate(tmp_path: Path, monkeypatch):
     m = load_module()
     binary = executable(tmp_path)
