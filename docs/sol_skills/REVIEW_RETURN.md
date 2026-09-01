@@ -13,7 +13,11 @@ research packet, production receipt or claimed completion.
 ## Mission
 
 Decide whether the returned work actually advances/completes the **original user/machine
-outcome**, not merely whether its code is competent or CI is green.
+outcome**, not merely whether its code is competent or CI is green, while ensuring a watcher-enabled
+worker is never left indefinitely waiting for Sol's ruling.
+
+Apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` whenever the returning counterpart is on a
+watch/wait path.
 
 ## Step 1 — Recover the authority packet
 
@@ -160,6 +164,34 @@ after subtracting completed/superseded/rejected/binding-do-not-redo work.
 A completed effect described in the packet is context; only the derived
 workset may be re-commissioned (`CONTINUATION_DELTA_CONTRACT.md`).
 
+## Step 10 — Close or continue the reciprocal dialogue explicitly
+
+A worker return does not become terminal merely because Sol has enough information to continue
+CEO-only adjudication.
+
+After every watcher-enabled `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must post **exactly one
+explicit edge in the same lawful carrier/thread before leaving that dialogue turn**:
+
+### Nonterminal
+
+Use `SOL CONTINUE`, `SOL RULING / CONTINUE`, or `SOL REQUEST_REPAIR` (or the exact currently
+accepted semantic equivalent). Name the exact child operation, state the next action, and tell the
+worker to re-arm its watcher after its next nonterminal return.
+
+### Terminal
+
+Use `SOL STOP`, `SOL ACCEPTED / STOP`, or `SOL CLOSED / STOP`. State that the child wave is terminal,
+tell the worker to stop work and disarm its temporary watcher, state that no further reply is needed
+except any exact terminal consumption receipt required by current transport law or watcher shutdown
+failure, and state that this STOP authorizes no independent next wave.
+
+If final CEO review/merge/release work remains after the worker portion is complete, **STOP the
+worker child wave first** and conduct that CEO work outside the child operation. Never leave a worker
+on an armed watcher because “the next step is mine.”
+
+If watcher shutdown fails, report `WATCH_STOP_FAILED` (or current accepted equivalent), keep the
+child operation terminal, and never let the leftover watcher originate another continuation.
+
 ## Review-return output
 
 State:
@@ -178,10 +210,14 @@ Revalidation required and why
 Blocked / held
 Superseded / rejected
 Exact continuation action
+Dialogue edge: CONTINUE | STOP | NOT_WATCHER_ENABLED
+Watcher state: ARMED | DISARMED | WATCH_STOP_FAILED | NOT_APPLICABLE
 ```
 
 ## K1 pass criteria
 
 A fresh Sol reviewing a worker return must catch a technically green architecture violation,
 false completion, duplicate authority/policy implementation or missing real consumer without
-needing the original authoring session's hidden reasoning.
+needing the original authoring session's hidden reasoning. For watcher-enabled returns, K1 also
+fails if Sol leaves the counterpart waiting without an explicit nonterminal continuation or terminal
+STOP edge.

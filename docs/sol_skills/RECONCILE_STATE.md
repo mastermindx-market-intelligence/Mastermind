@@ -8,14 +8,17 @@ skill: reconcile_state
 # RECONCILE STATE — Resolve Disagreement Without Creating Another Truth Store
 
 Use when canonical/projection layers disagree, state is stale, transport reconnects, a modifying
-response is ambiguous, an operation duplicates/conflicts, or a worker/session may have moved a
-branch unexpectedly.
+response is ambiguous, an operation duplicates/conflicts, a worker/session may have moved a
+branch unexpectedly, or a watcher/dialogue state is ambiguous.
 
 ## Mission
 
 Recover the **single canonical fact for each layer**, preserve uncertainty where it genuinely
 exists, and repair only the layer that is wrong. Never create a new database/ledger merely to
 remember that two existing authorities disagree.
+
+Apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` when the disagreement involves whether a
+counterpart should still be waiting or whether a watcher was actually stopped.
 
 ## Step 1 — Classify the disagreement
 
@@ -39,6 +42,10 @@ Executive-host grounding differs from newer remote repository state.
 ### Transport uncertainty
 Request may have committed but reply/receipt was lost.
 
+### Dialogue/watcher uncertainty
+A worker/COO may still be awaiting Sol, Sol may still be awaiting a worker, or one side claims a
+watcher was stopped without proof the local wait/watch path was actually disabled.
+
 ### Duplicate/conflict
 Same stable operation identity reappears with same or changed semantic payload.
 
@@ -54,6 +61,10 @@ Examples:
 * portfolio status → Linear only as the projection being compared.
 * message delivery → Slack.
 * whether runtime actually saw/claimed work → canonical runtime/session evidence, not delivery.
+* whether a dialogue contains an explicit `CONTINUE` or terminal `STOP` edge → validated lawful
+  carrier/thread evidence; this does not become lifecycle truth.
+* whether a temporary local watcher process/call was actually disabled → the local watcher surface's
+  direct shutdown result, never an inferred Slack silence.
 
 Do not “majority vote” among sources. Canonical ownership is conceptual, not numeric.
 
@@ -66,6 +77,7 @@ Record exact identifiers relevant to the disagreement:
 * Linear `MAS-###`;
 * Slack workspace/channel/message/thread/sender if transport evidence matters;
 * Executive operation key / intent ID / Job ID if runtime evidence matters;
+* current child operation key and last validated dialogue edge when watcher state matters;
 * state timestamps/hashes/freshness.
 
 A correction made against an ambiguous identity can create a second problem while hiding the first.
@@ -127,7 +139,30 @@ CONNECTED
 If the accepted bridge epoch cannot be fully traversed within the reviewed bounds, remain
 `RECONCILIATION_INCOMPLETE`; do not skip old work or introduce a hidden replay cursor DB.
 
-## Step 8 — Stale `SOL_STATE`
+## Step 8 — Dialogue/watcher reconciliation
+
+A watcher is attention/transport only. Do not use watcher state to invent Job/Attempt/Worker status,
+completion, retry authority or a next wave.
+
+When dialogue state is uncertain:
+
+1. read the exact lawful carrier/thread and identify the latest valid semantic return/edge;
+2. distinguish worker return (`BLOCKED` / `DECISION_REQUEST` / `RESULT`) from Sol adjudication;
+3. if a worker return exists with no later explicit Sol `CONTINUE`/`RULING`/`REQUEST_REPAIR`/`STOP`
+   edge, treat the dialogue as **awaiting Sol**, not terminal by silence;
+4. if a terminal Sol STOP exists, keep the child operation terminal even when watcher shutdown later
+   fails;
+5. if the local watcher cannot be proven disabled, report `WATCH_STOP_FAILED` (or current accepted
+   typed equivalent) rather than claiming clean shutdown;
+6. never let a leftover watcher originate a retry, merge, new commission or continuation;
+7. any independent next child operation requires a new lawful operation key/carrier/commission and
+   fresh reciprocal continuation setup.
+
+If the historical dialogue contract requires one terminal consumption receipt after STOP, absence
+of that receipt means transport/dialogue consumption remains unresolved; it does **not** reopen the
+terminal child operation or authorize a new wave.
+
+## Step 9 — Stale `SOL_STATE`
 
 Once C1 is live:
 
@@ -136,7 +171,7 @@ Once C1 is live:
 * do not refresh freshness by copying old Executive values into a new wrapper;
 * if Executive state cannot be refreshed, expected state is DEGRADED / `do_not_submit=true`.
 
-## Step 9 — Host/remote grounding disagreement
+## Step 10 — Host/remote grounding disagreement
 
 V1 server grounding remains exact whole-repository SHA according to accepted Executive law.
 
@@ -154,7 +189,7 @@ If remote GitHub advanced beyond the Executive-host grounding:
 Do not invent a selective server grounding epoch in V1. Use the F0 falsifier before commissioning
 that future architecture.
 
-## Step 10 — Linear false-green repair
+## Step 11 — Linear false-green repair
 
 When Linear says Done/In Progress/etc. but canonical evidence disagrees:
 
@@ -166,7 +201,7 @@ When Linear says Done/In Progress/etc. but canonical evidence disagrees:
 
 Never close a production-proof gate because a sibling implementation PR merged.
 
-## Step 11 — Unexpected branch movement
+## Step 12 — Unexpected branch movement
 
 If a branch expected to be empty/behind now contains commits:
 
@@ -176,13 +211,17 @@ If a branch expected to be empty/behind now contains commits:
 * classify it as concurrent work, expected builder return or unauthorized drift;
 * review it under `REVIEW_RETURN.md` when it is real work.
 
-## Step 12 — Correction destination
+## Step 13 — Correction destination
 
 Repair the owning/projection layer only:
 
 * Agent OS record stale → Agent OS correction/handoff under lawful owner;
 * Linear stale → Linear projection update;
 * Slack missing receipt → reconstruct from canonical Executive status, not new lifecycle state;
+* dialogue missing explicit edge → post the required edge in the same lawful carrier; do not create
+  a replacement operation to make the history look closed;
+* watcher shutdown failed → preserve terminal child state, report transport defect and clean up the
+  watcher without granting it new authority;
 * GitHub branch/PR issue → GitHub bounded repair;
 * runtime canonical defect → dedicated Executive repair under its architecture.
 
@@ -217,6 +256,7 @@ Exact identities/revisions
 What is known
 What is uncertain
 Which layer is wrong/stale
+Dialogue edge / watcher state when applicable
 Repair performed or withheld
 Whether modification is safe now
 Exact next action
@@ -225,5 +265,6 @@ Exact next action
 ## K3 pass criteria
 
 A fresh Sol confronted with stale/duplicate/ambiguous/colliding state reaches one canonical
-answer per layer, performs zero duplicate modification, performs zero cross-carrier failover, and
-does not create a new truth store to make reconciliation easier.
+answer per layer, performs zero duplicate modification, performs zero cross-carrier failover, does
+not create a new truth store to make reconciliation easier, and never resolves watcher/dialogue
+ambiguity by treating silence as a terminal receipt.

@@ -1,0 +1,183 @@
+{
+  "schema": "mastermind.project_workroom_slack_snapshot.v1",
+  "workspace_id": "T0BRD2AQXQV",
+  "observed_at": "2026-08-29T14:05:55-04:00",
+  "source": {
+    "kind": "COMPOSITE_ACTING_PRINCIPAL_READ_ONLY_CENSUS_PLUS_EXACT_CHANNEL_READBACK",
+    "ref": "slack:T0BRD2AQXQV:2026-08-29T14:05:55-04:00",
+    "complete_for_public_channel_absence_proof": false,
+    "completeness_reason": "CONNECTED_PRINCIPAL_VISIBLE_CHANNEL_SET_ONLY_NOT_ADMIN_COMPLETE",
+    "mutation_performed": false
+  },
+  "capabilities": {
+    "public_channel_read": "OBSERVED",
+    "private_channel_read": "ACTING_PRINCIPAL_MEMBERSHIP_ONLY",
+    "canvas_feature": "OBSERVED_EXISTING_TAB",
+    "lists_feature": "UNKNOWN",
+    "workflow_app_feature": "UNKNOWN",
+    "custom_channel_templates": "TEMPORARILY_UNAVAILABLE_FOR_CREATE_OR_EDIT",
+    "native_list_tab_api": "PUBLIC_METHOD_NOT_FOUND",
+    "bookmark_folder_create_api": "PUBLIC_METHOD_NOT_FOUND"
+  },
+  "channels": [
+    {
+      "id": "C0BRAJUMGBD",
+      "name": "new-channel",
+      "is_private": false,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "This channel is for everything #new-channel. Hold meetings, share docs, and make decisions together with your team.",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BRD2B2L85",
+      "name": "all-mastermind-x",
+      "is_private": false,
+      "is_archived": false,
+      "is_general": true,
+      "topic": "",
+      "purpose": "Share announcements and updates about company news, upcoming events, or teammates who deserve some kudos.",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BRDFZPLHK",
+      "name": "ceo-control-room",
+      "is_private": true,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BRET68EH4",
+      "name": "social",
+      "is_private": false,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "Other channels are for work. This one is just for fun.",
+      "managed_marker": null,
+      "observed_surfaces": [
+        {
+          "kind": "CANVAS_TAB",
+          "ref": "F0BRAJL8REX"
+        }
+      ]
+    },
+    {
+      "id": "C0BRFC9JXK8",
+      "name": "build-events",
+      "is_private": false,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BRH9VRUE6",
+      "name": "company-intelligence",
+      "is_private": false,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BRUL9F2V7",
+      "name": "s0-sol-carrier-test",
+      "is_private": true,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BSBM78V1N",
+      "name": "agent-dispatch",
+      "is_private": false,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": [
+        {
+          "kind": "FILES_TAB",
+          "ref": "files"
+        }
+      ]
+    },
+    {
+      "id": "C0BSGABKBFY",
+      "name": "sol-runtime",
+      "is_private": true,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BTD5804QK",
+      "name": "mastermind-exec-ops",
+      "is_private": true,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    },
+    {
+      "id": "C0BTQ71QEA0",
+      "name": "canary-project-workroom-20260829",
+      "is_private": false,
+      "is_archived": false,
+      "is_general": false,
+      "topic": "",
+      "purpose": "",
+      "managed_marker": null,
+      "observed_surfaces": []
+    }
+  ],
+  "managed_workroom_matches": [],
+  "agent_relay": {
+    "app_name": "Mastermind Agent Relay",
+    "bot_user_id": "U0BTF3QGABF",
+    "configured_workspace_id": "T0BRD2AQXQV",
+    "configured_channel_ids": [
+      "C0BSBM78V1N"
+    ],
+    "bot_scopes": [
+      "channels:history",
+      "chat:write"
+    ],
+    "multi_workroom": false
+  },
+  "workroom_projector": {
+    "app_id": null,
+    "bot_user_id": null,
+    "credential_present": false,
+    "host_client_present": false,
+    "canary_receipt": null
+  },
+  "assertions": {
+    "managed_workroom_count": 0,
+    "same_channel_name_is_not_identity": true,
+    "slack_principal_is_not_runtime_identity": true,
+    "public_absence_proof_allowed": false,
+    "mutation_allowed": false
+  }
+}

@@ -48,6 +48,12 @@ from control_plane.executive_orchestration_principal import (
     validate_placement_snapshot,
     validate_provider_home_identity,
 )
+from control_plane.executive_retry_safety import (
+    RetrySafety,
+    RetrySafetyDecision,
+    RetrySafetyEvidence,
+    classify_retry_safety,
+)
 from control_plane.operator_harness_contract import (
     AttemptExecutionMode,
     CandidateResult,
@@ -983,6 +989,32 @@ class JobRequeueOutcome:
 
 
 @dataclasses.dataclass(frozen=True)
+class RetrySafetyProjection:
+    """One caller expectation derived from a single Runtime snapshot."""
+
+    attempt_id: str
+    requeue_kind: str | None
+    tx9_evidence_digest: str | None
+    retry_evidence_digest: str
+    evidence: RetrySafetyEvidence
+
+
+@dataclasses.dataclass(frozen=True)
+class CooRetryMutationOutcome:
+    """Atomic COO retry decision, including no-effect reconciliation."""
+
+    action: str
+    command_id: str
+    receipt: dict[str, Any]
+
+
+@dataclasses.dataclass(frozen=True)
+class _RetrySafetyMaterial:
+    projection: RetrySafetyProjection
+    tx9_material: tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
+
+
+@dataclasses.dataclass(frozen=True)
 class OrchestrationDispatchOutcome:
     """Command-bound active lease or immutable terminal dispatch outcome."""
 
@@ -1771,6 +1803,15 @@ class RuntimeStore:
             )
         self._database_was_absent = not os.path.lexists(self.path)
         self._fresh_file_identity: tuple[int, int] | None = None
+        self._database_file_identity: tuple[int, int] | None = None
+        if not self._database_was_absent:
+            try:
+                metadata = os.stat(self.path)
+            except OSError as exc:
+                raise PersistenceError(
+                    f"executive runtime database at {self.path} is unavailable: {exc}"
+                ) from exc
+            self._database_file_identity = (metadata.st_dev, metadata.st_ino)
         if (self.create or self.existing_writable) and not self._database_was_absent:
             if not self.path.is_file():
                 raise PersistenceError(
@@ -1833,7 +1874,28 @@ class RuntimeStore:
                 f"executive runtime database at {self.path} is missing"
             )
         connection = self._open()
-        connection.close()
+        try:
+            metadata = os.stat(self.path)
+            current_file_identity = (metadata.st_dev, metadata.st_ino)
+            expected_file_identity = (
+                self._fresh_file_identity
+                if self._database_was_absent
+                else self._database_file_identity
+            )
+            if (
+                expected_file_identity is not None
+                and current_file_identity != expected_file_identity
+            ):
+                raise PersistenceError(
+                    "executive runtime database file identity changed during initialization"
+                )
+            self._database_file_identity = current_file_identity
+        except OSError as exc:
+            raise PersistenceError(
+                f"executive runtime database at {self.path} is unavailable: {exc}"
+            ) from exc
+        finally:
+            connection.close()
 
     def _upgrade_barrier_present(self) -> bool:
         """Use lstat semantics so a dangling barrier symlink still quarantines."""
@@ -1938,6 +2000,47 @@ class RuntimeStore:
                 value = value.replace(tzinfo=timezone.utc)
             return int(value.timestamp() * 1000)
         return int(value)
+
+    def _assert_owned_snapshot_connection(
+        self, connection: sqlite3.Connection
+    ) -> None:
+        """Prove a supplied snapshot's ``main`` is this store's stable file."""
+
+        if connection.in_transaction is not True:
+            raise StateConflict(
+                "supplied connection must already own an active SQLite transaction"
+            )
+        try:
+            database_rows = connection.execute("PRAGMA database_list").fetchall()
+            main_rows = [row for row in database_rows if str(row[1]) == "main"]
+            if len(main_rows) != 1 or not str(main_rows[0][2] or ""):
+                raise StateConflict(
+                    "supplied connection has no exact file-backed SQLite main"
+                )
+            connection_path = Path(str(main_rows[0][2])).resolve(strict=True)
+            owned_path = self.path.resolve(strict=True)
+            connection_metadata = os.stat(connection_path)
+            owned_metadata = os.stat(owned_path)
+        except StateConflict:
+            raise
+        except (OSError, RuntimeError, sqlite3.Error) as exc:
+            raise StateConflict(
+                f"supplied connection database identity is unavailable: {exc}"
+            ) from exc
+        connection_identity = (
+            connection_metadata.st_dev,
+            connection_metadata.st_ino,
+        )
+        owned_identity = (owned_metadata.st_dev, owned_metadata.st_ino)
+        if (
+            self._database_file_identity is None
+            or connection_path != owned_path
+            or connection_identity != owned_identity
+            or owned_identity != self._database_file_identity
+        ):
+            raise StateConflict(
+                "supplied connection is not the stable database owned by this RuntimeStore"
+            )
 
     def _open_readonly(self) -> sqlite3.Connection:
         """Open an EXISTING database read-only: no create, no chmod, no migration.
@@ -3561,6 +3664,377 @@ def _tx9_requeue_material(
     return attempt, evidence, evidence_digest, snapshot, orchestration_digest(snapshot)
 
 
+def _retry_safety_material(
+    connection: sqlite3.Connection,
+    *,
+    job_id: str,
+    expected_attempt_id: str,
+) -> _RetrySafetyMaterial:
+    """Project every retry-classifier input from one caller-owned snapshot."""
+
+    job_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+    ).fetchone()
+    attempt_row = connection.execute(
+        "SELECT * FROM attempts WHERE attempt_id=?", (expected_attempt_id,)
+    ).fetchone()
+    current_attempt_id = job_row["current_attempt_id"] if job_row is not None else None
+    terminal_status = str(job_row["status"]) if job_row is not None else "UNKNOWN"
+    attempt_job_id = str(attempt_row["job_id"]) if attempt_row is not None else ""
+    retry_lineage_available = bool(
+        job_row is not None
+        and attempt_row is not None
+        and current_attempt_id == expected_attempt_id
+        and attempt_job_id == job_id
+        and type(job_row["attempt_count"]) is int
+        and type(job_row["attempt_limit"]) is int
+        and job_row["attempt_count"] < job_row["attempt_limit"]
+    )
+    event_types = {
+        str(row["event_type"])
+        for row in connection.execute(
+            "SELECT event_type FROM events WHERE attempt_id=?", (expected_attempt_id,)
+        )
+    }
+    candidate_present = "OHF_CANDIDATE_RESULT_RECORDED" in event_types
+    seal_present = "ORCHESTRATION_ROLE_RESULT_SEALED" in event_types
+    operation_effect_unknown_present = (
+        "OPERATOR_OPERATION_EFFECT_UNKNOWN" in event_types
+    )
+    result_present = bool(
+        (job_row is not None and job_row["result_json"] is not None)
+        or (attempt_row is not None and attempt_row["result_json"] is not None)
+    )
+    writer_or_provider_generation_live = (
+        connection.execute(
+            """
+            SELECT 1
+            FROM harness_session_epochs h
+            LEFT JOIN process_generations g ON g.session_epoch_id=h.session_epoch_id
+            WHERE h.attempt_id=? AND (
+              h.state='CURRENT'
+              OR coalesce(g.executive_writer_held,0)=1
+              OR (
+                h.state!='ABANDONED'
+                AND coalesce(g.provider_writer_state,'UNKNOWN')!='RELEASED'
+              )
+            )
+            LIMIT 1
+            """,
+            (expected_attempt_id,),
+        ).fetchone()
+        is not None
+    )
+    effective_grant_non_modifying = False
+    if attempt_row is not None and attempt_row["effective_grant_json"] is not None:
+        try:
+            grant = _strict_canonical_json_loads(
+                str(attempt_row["effective_grant_json"]),
+                name="retry-safety effective grant",
+            )
+        except StateConflict:
+            grant = None
+        if isinstance(grant, dict):
+            authorities = grant.get("authorities")
+            effective_grant_non_modifying = bool(
+                isinstance(authorities, list)
+                and authorities
+                and all(item in {"READ", "RUN_TESTS"} for item in authorities)
+                and grant.get("write_paths") == []
+            )
+    tx9_material = None
+    if job_row is not None and terminal_status == JobStatus.LOST.value:
+        try:
+            tx9_material = _tx9_requeue_material(connection, job_row)
+        except StateConflict:
+            pass
+    tx9_evidence_digest = tx9_material[2] if tx9_material is not None else None
+    if tx9_evidence_digest is not None:
+        retry_safety = RetrySafety.SAFE_PRE_EFFECT_INFRASTRUCTURE
+        requeue_kind = "TX9_DETACHED"
+    elif terminal_status == JobStatus.FAILED.value:
+        retry_safety = RetrySafety.GENERIC_FAILED
+        requeue_kind = "ORDINARY"
+    elif terminal_status == JobStatus.LOST.value:
+        retry_safety = RetrySafety.EFFECT_UNKNOWN
+        requeue_kind = None
+    else:
+        retry_safety = RetrySafety.UNKNOWN
+        requeue_kind = None
+    provenance_digest = tx9_evidence_digest
+    if provenance_digest is None and job_row is not None:
+        raw = job_row["orchestration_provenance_digest"]
+        provenance_digest = str(raw) if raw is not None else None
+    evidence = RetrySafetyEvidence(
+        retry_safety=retry_safety,
+        terminal_status=terminal_status,
+        job_id=job_id,
+        attempt_id=expected_attempt_id,
+        attempt_job_id=attempt_job_id,
+        current_attempt_id=(
+            str(current_attempt_id) if current_attempt_id is not None else None
+        ),
+        provenance_digest=provenance_digest,
+        retry_lineage_available=retry_lineage_available,
+        effect_unknown=(
+            operation_effect_unknown_present
+            or (
+                tx9_evidence_digest is None
+                and terminal_status
+                in {JobStatus.RATE_LIMITED.value, JobStatus.LOST.value}
+            )
+        ),
+        writer_or_provider_generation_live=writer_or_provider_generation_live,
+        candidate_present=candidate_present,
+        result_present=result_present,
+        seal_present=seal_present,
+        effective_grant_non_modifying=effective_grant_non_modifying,
+    )
+    return _RetrySafetyMaterial(
+        projection=RetrySafetyProjection(
+            attempt_id=expected_attempt_id,
+            requeue_kind=requeue_kind,
+            tx9_evidence_digest=tx9_evidence_digest,
+            retry_evidence_digest=evidence.evidence_digest,
+            evidence=evidence,
+        ),
+        tx9_material=tx9_material,
+    )
+
+
+def _validated_retry_safety_receipt(
+    value: Any, *, require_safe: bool
+) -> tuple[dict[str, Any], RetrySafetyEvidence, RetrySafetyDecision]:
+    """Parse one closed retry receipt and recompute all authority-bearing fields."""
+
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "decision",
+        "evidence",
+        "evidence_digest",
+    }:
+        raise StateConflict("retry-safety receipt is not the closed wire")
+    if value.get("schema_version") != "mastermind.executive_retry_safety_receipt/v1":
+        raise StateConflict("retry-safety receipt schema is invalid")
+    raw = value.get("evidence")
+    expected_evidence_keys = {field.name for field in dataclasses.fields(RetrySafetyEvidence)}
+    if not isinstance(raw, dict) or set(raw) != expected_evidence_keys:
+        raise StateConflict("retry-safety evidence is not the closed wire")
+    bool_fields = {
+        "retry_lineage_available",
+        "effect_unknown",
+        "writer_or_provider_generation_live",
+        "candidate_present",
+        "result_present",
+        "seal_present",
+        "effective_grant_non_modifying",
+    }
+    string_fields = {"terminal_status", "job_id", "attempt_id", "attempt_job_id"}
+    if any(type(raw.get(name)) is not bool for name in bool_fields) or any(
+        not isinstance(raw.get(name), str) or not raw.get(name)
+        for name in string_fields
+    ):
+        raise StateConflict("retry-safety evidence field type is invalid")
+    if raw.get("current_attempt_id") is not None and (
+        not isinstance(raw.get("current_attempt_id"), str)
+        or not raw.get("current_attempt_id")
+    ):
+        raise StateConflict("retry-safety current Attempt identity is invalid")
+    if raw.get("provenance_digest") is not None and (
+        not isinstance(raw.get("provenance_digest"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", str(raw.get("provenance_digest"))) is None
+    ):
+        raise StateConflict("retry-safety provenance digest is invalid")
+    try:
+        evidence = RetrySafetyEvidence(
+            retry_safety=RetrySafety(str(raw["retry_safety"])),
+            terminal_status=str(raw["terminal_status"]),
+            job_id=str(raw["job_id"]),
+            attempt_id=str(raw["attempt_id"]),
+            attempt_job_id=str(raw["attempt_job_id"]),
+            current_attempt_id=(
+                str(raw["current_attempt_id"])
+                if raw["current_attempt_id"] is not None
+                else None
+            ),
+            provenance_digest=(
+                str(raw["provenance_digest"])
+                if raw["provenance_digest"] is not None
+                else None
+            ),
+            retry_lineage_available=raw["retry_lineage_available"],
+            effect_unknown=raw["effect_unknown"],
+            writer_or_provider_generation_live=raw[
+                "writer_or_provider_generation_live"
+            ],
+            candidate_present=raw["candidate_present"],
+            result_present=raw["result_present"],
+            seal_present=raw["seal_present"],
+            effective_grant_non_modifying=raw["effective_grant_non_modifying"],
+        )
+        decision = RetrySafetyDecision(str(value["decision"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StateConflict("retry-safety receipt enum is invalid") from exc
+    if evidence.to_dict() != raw:
+        raise StateConflict("retry-safety evidence canonical form drifted")
+    if (
+        not isinstance(value.get("evidence_digest"), str)
+        or value["evidence_digest"] != evidence.evidence_digest
+        or decision is not classify_retry_safety(evidence)
+        or (require_safe and decision is not RetrySafetyDecision.SAFE_REQUEUE)
+    ):
+        raise StateConflict("retry-safety receipt classification/digest drifted")
+    return dict(value), evidence, decision
+
+
+def _validated_retry_safety_block_evidence(
+    connection: sqlite3.Connection,
+    evidence_value: dict[str, Any],
+    *,
+    selected_job_id: str,
+    attempt_id: str | None,
+) -> None:
+    """Bind an optional retry-backed block receipt to the live Runtime snapshot."""
+
+    if "retry_safety" not in evidence_value:
+        return
+    if set(evidence_value) != {"retry_safety"}:
+        raise StateConflict("COO retry block evidence is not the closed wire")
+    if not isinstance(attempt_id, str) or not attempt_id:
+        raise StateConflict("COO retry block requires one exact current Attempt")
+    _, retry_evidence, retry_decision = _validated_retry_safety_receipt(
+        evidence_value["retry_safety"], require_safe=False
+    )
+    if (
+        retry_decision is RetrySafetyDecision.SAFE_REQUEUE
+        or retry_evidence.job_id != selected_job_id
+        or retry_evidence.attempt_id != attempt_id
+        or retry_evidence.attempt_job_id != selected_job_id
+        or retry_evidence.current_attempt_id != attempt_id
+    ):
+        raise StateConflict("COO retry block receipt binding drifted")
+    observed = _retry_safety_material(
+        connection,
+        job_id=selected_job_id,
+        expected_attempt_id=attempt_id,
+    ).projection
+    if (
+        retry_evidence.to_dict() != observed.evidence.to_dict()
+        or retry_evidence.evidence_digest != observed.retry_evidence_digest
+    ):
+        raise StateConflict("COO retry block receipt no longer matches Runtime evidence")
+
+
+def _validated_coo_cycle_block_event(
+    connection: sqlite3.Connection,
+    event_row: sqlite3.Row,
+    *,
+    expected_root_id: str,
+) -> dict[str, Any]:
+    """Validate one complete durable COO block Event before replay."""
+
+    if (
+        event_row["event_type"] != "COO_CYCLE_BLOCKED"
+        or event_row["aggregate_type"] != "job"
+        or event_row["aggregate_id"] != expected_root_id
+        or event_row["job_id"] != expected_root_id
+        or event_row["actor"] != "coo"
+        or not isinstance(event_row["command_id"], str)
+        or _COMMAND_ID_RE.fullmatch(event_row["command_id"]) is None
+        or type(event_row["event_id"]) is not int
+        or event_row["event_id"] <= 0
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED Event identity is malformed")
+    payload = _strict_canonical_json_loads(
+        str(event_row["payload_json"]), name="COO_CYCLE_BLOCKED payload"
+    )
+    expected_keys = {
+        "schema_version",
+        "root_job_id",
+        "selected_job_id",
+        "reason",
+        "policy_sha",
+        "plan_digest",
+        "handoff_digest",
+        "evidence",
+        "evidence_digest",
+        "command_id",
+    }
+    if not isinstance(payload, dict) or set(payload) != expected_keys:
+        raise StateConflict("COO_CYCLE_BLOCKED payload is not the closed wire")
+    selected_id = payload.get("selected_job_id")
+    reason = payload.get("reason")
+    evidence_value = payload.get("evidence")
+    if (
+        payload.get("schema_version") != "mastermind.coo_cycle_block/v1"
+        or payload.get("root_job_id") != expected_root_id
+        or not isinstance(selected_id, str)
+        or not selected_id
+        or reason not in COO_CYCLE_BLOCK_REASONS
+        or payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+        or not isinstance(evidence_value, dict)
+        or not isinstance(payload.get("evidence_digest"), str)
+        or payload["evidence_digest"] != orchestration_digest(evidence_value)
+        or payload.get("command_id") != event_row["command_id"]
+        or event_row["command_id"]
+        != f"coo-cycle:{expected_root_id}:block:{reason}:{selected_id}"
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED payload identity/digest drifted")
+    root = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (expected_root_id,)
+    ).fetchone()
+    selected = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (selected_id,)
+    ).fetchone()
+    if (
+        root is None
+        or selected is None
+        or root["root_job_id"] != expected_root_id
+        or selected["root_job_id"] != expected_root_id
+        or (reason != "invalid_root" and root["orchestration_role"] != "aggregation")
+        or event_row["attempt_id"] != selected["current_attempt_id"]
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED Job/Attempt binding drifted")
+    plan_event = connection.execute(
+        "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+        (expected_root_id,),
+    ).fetchone()
+    handoff_event = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?
+        """,
+        (expected_root_id,),
+    ).fetchone()
+    plan_digest = (
+        _strict_canonical_json_loads(
+            str(plan_event["payload_json"]), name="COO_PLAN_ADMITTED payload"
+        ).get("plan_digest")
+        if plan_event is not None
+        else None
+    )
+    handoff_digest = (
+        _strict_canonical_json_loads(
+            str(handoff_event["payload_json"]),
+            name="COO_AGGREGATION_HANDOFF_READY payload",
+        ).get("handoff_digest")
+        if handoff_event is not None
+        else None
+    )
+    if (
+        payload.get("plan_digest") != plan_digest
+        or payload.get("handoff_digest") != handoff_digest
+    ):
+        raise StateConflict("COO_CYCLE_BLOCKED plan/handoff digest drifted")
+    _validated_retry_safety_block_evidence(
+        connection,
+        evidence_value,
+        selected_job_id=selected_id,
+        attempt_id=event_row["attempt_id"],
+    )
+    return dict(payload)
+
+
 def _validate_tx9_requeue_event(
     connection: sqlite3.Connection,
     event_row: sqlite3.Row,
@@ -3592,8 +4066,26 @@ def _validate_tx9_requeue_event(
         "invalidated_quota_snapshot",
         "invalidated_quota_snapshot_digest",
     }
+    if isinstance(payload, dict) and "retry_safety" in payload:
+        expected_keys.add("retry_safety")
     if not isinstance(payload, dict) or set(payload) != expected_keys:
         raise StateConflict("TX-9 JOB_REQUEUED payload is not the closed wire")
+    if "retry_safety" in payload:
+        _, retry_evidence, _ = _validated_retry_safety_receipt(
+            payload["retry_safety"], require_safe=True
+        )
+        if (
+            retry_evidence.retry_safety
+            is not RetrySafety.SAFE_PRE_EFFECT_INFRASTRUCTURE
+            or retry_evidence.terminal_status != JobStatus.LOST.value
+            or retry_evidence.job_id != expected_job_id
+            or retry_evidence.attempt_id != event_row["attempt_id"]
+            or retry_evidence.attempt_job_id != expected_job_id
+            or retry_evidence.current_attempt_id != event_row["attempt_id"]
+            or retry_evidence.provenance_digest
+            != payload.get("tx9_evidence_digest")
+        ):
+            raise StateConflict("TX-9 retry-safety receipt binding drifted")
     snapshot = payload.get("invalidated_quota_snapshot")
     snapshot_keys = {
         "schema_version",
@@ -7624,6 +8116,344 @@ class JobRegistry:
             )
             return _validated_aggregation_handoff(connection, root)
 
+    def project_retry_safety(
+        self, job_id: str, *, expected_attempt_id: str
+    ) -> RetrySafetyProjection:
+        """Return a read-only retry expectation from one exact snapshot."""
+
+        with self.store.read() as connection:
+            return _retry_safety_material(
+                connection,
+                job_id=str(job_id or "").strip(),
+                expected_attempt_id=str(expected_attempt_id or "").strip(),
+            ).projection
+
+    @staticmethod
+    def _retry_safety_receipt(
+        projection: RetrySafetyProjection,
+        decision: RetrySafetyDecision,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": "mastermind.executive_retry_safety_receipt/v1",
+            "decision": decision.value,
+            "evidence": projection.evidence.to_dict(),
+            "evidence_digest": projection.retry_evidence_digest,
+        }
+
+    @staticmethod
+    def _retry_reconciliation(
+        *,
+        command_id: str,
+        reason: str,
+        expectation: RetrySafetyProjection,
+        observed: RetrySafetyProjection | None,
+    ) -> CooRetryMutationOutcome:
+        return CooRetryMutationOutcome(
+            action="RECONCILIATION_REQUIRED",
+            command_id=command_id,
+            receipt={
+                "schema_version": "mastermind.executive_retry_reconciliation/v1",
+                "decision": RetrySafetyDecision.NEEDS_RECONCILIATION.value,
+                "effect_state": "NONE",
+                "reason": reason,
+                "expected": {
+                    "attempt_id": expectation.attempt_id,
+                    "requeue_kind": expectation.requeue_kind,
+                    "tx9_evidence_digest": expectation.tx9_evidence_digest,
+                    "retry_evidence_digest": expectation.retry_evidence_digest,
+                },
+                "observed": (
+                    None
+                    if observed is None
+                    else {
+                        "attempt_id": observed.attempt_id,
+                        "requeue_kind": observed.requeue_kind,
+                        "tx9_evidence_digest": observed.tx9_evidence_digest,
+                        "retry_evidence_digest": observed.retry_evidence_digest,
+                    }
+                ),
+            },
+        )
+
+    def commit_coo_retry_decision(
+        self,
+        root_job_id: str,
+        *,
+        selected_job_id: str,
+        expectation: RetrySafetyProjection,
+        policy_sha: str | None = None,
+    ) -> CooRetryMutationOutcome:
+        """Atomically rederive, classify, and commit one COO retry decision."""
+
+        root_token = str(root_job_id or "").strip()
+        selected_token = str(selected_job_id or "").strip()
+        attempt_token = str(expectation.attempt_id or "").strip()
+        requeue_command = (
+            f"coo-cycle:{root_token}:requeue:{selected_token}:{attempt_token}"
+        )
+        block_command = f"coo-cycle:{root_token}:block:state_conflict:{selected_token}"
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            # Exact command receipts are reconciled before any mutable Job read.
+            existing_requeue = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (requeue_command,)
+            ).fetchone()
+            if existing_requeue is not None:
+                outcome = _requeue_outcome_from_event(
+                    connection, existing_requeue, expected_job_id=selected_token
+                )
+                stored = outcome.payload.get("retry_safety")
+                if (
+                    not isinstance(stored, dict)
+                    or stored.get("evidence_digest")
+                    != expectation.retry_evidence_digest
+                    or outcome.payload.get("invalidated_attempt_id") != attempt_token
+                    or outcome.payload.get("requeue_kind") != expectation.requeue_kind
+                    or outcome.payload.get("tx9_evidence_digest")
+                    != expectation.tx9_evidence_digest
+                ):
+                    return self._retry_reconciliation(
+                        command_id=requeue_command,
+                        reason="command_expectation_conflict",
+                        expectation=expectation,
+                        observed=None,
+                    )
+                receipt = outcome.to_dict()
+                receipt["retry_safety"] = stored
+                return CooRetryMutationOutcome(
+                    action="REQUEUED",
+                    command_id=requeue_command,
+                    receipt=receipt,
+                )
+
+            existing_block = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (block_command,)
+            ).fetchone()
+            if existing_block is not None:
+                payload = _validated_coo_cycle_block_event(
+                    connection,
+                    existing_block,
+                    expected_root_id=root_token,
+                )
+                if payload["selected_job_id"] != selected_token:
+                    raise StateConflict("COO block command is owned by another target")
+                stored_retry = payload["evidence"].get("retry_safety")
+                if (
+                    not isinstance(stored_retry, dict)
+                    or stored_retry.get("evidence_digest")
+                    != expectation.retry_evidence_digest
+                ):
+                    return self._retry_reconciliation(
+                        command_id=block_command,
+                        reason="command_expectation_conflict",
+                        expectation=expectation,
+                        observed=None,
+                    )
+                return CooRetryMutationOutcome(
+                    action="BLOCKED", command_id=block_command, receipt=payload
+                )
+
+            material = _retry_safety_material(
+                connection,
+                job_id=selected_token,
+                expected_attempt_id=attempt_token,
+            )
+            observed = material.projection
+            if (
+                expectation.retry_evidence_digest
+                != expectation.evidence.evidence_digest
+                or expectation.attempt_id != observed.attempt_id
+                or expectation.requeue_kind != observed.requeue_kind
+                or expectation.tx9_evidence_digest != observed.tx9_evidence_digest
+                or expectation.retry_evidence_digest
+                != observed.retry_evidence_digest
+            ):
+                return self._retry_reconciliation(
+                    command_id=requeue_command,
+                    reason="retry_expectation_drift",
+                    expectation=expectation,
+                    observed=observed,
+                )
+            decision = classify_retry_safety(observed.evidence)
+            retry_receipt = self._retry_safety_receipt(observed, decision)
+
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            selected = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (selected_token,)
+            ).fetchone()
+            if (
+                root is None
+                or selected is None
+                or root["root_job_id"] != root_token
+                or root["orchestration_role"] != "aggregation"
+                or selected["root_job_id"] != root_token
+                or selected["current_attempt_id"] != attempt_token
+            ):
+                return self._retry_reconciliation(
+                    command_id=requeue_command,
+                    reason="retry_target_drift",
+                    expectation=expectation,
+                    observed=observed,
+                )
+
+            prior_block = connection.execute(
+                """
+                SELECT 1 FROM events
+                WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=? LIMIT 1
+                """,
+                (root_token,),
+            ).fetchone()
+            if prior_block is not None:
+                return self._retry_reconciliation(
+                    command_id=requeue_command,
+                    reason="prior_block_drift",
+                    expectation=expectation,
+                    observed=observed,
+                )
+
+            if decision is RetrySafetyDecision.SAFE_REQUEUE:
+                if (
+                    observed.requeue_kind != "TX9_DETACHED"
+                    or material.tx9_material is None
+                ):
+                    return self._retry_reconciliation(
+                        command_id=requeue_command,
+                        reason="safe_kind_unavailable",
+                        expectation=expectation,
+                        observed=observed,
+                    )
+                _assert_orchestration_requeue_eligible(connection, selected)
+                invalidated, _, evidence_digest, snapshot, snapshot_digest = (
+                    material.tx9_material
+                )
+                connection.execute(
+                    """
+                    UPDATE jobs SET status='QUEUED',assigned_worker_id=NULL,
+                      assigned_quota_class=NULL,current_attempt_id=NULL,
+                      updated_at_ms=?,version=version+1 WHERE job_id=?
+                    """,
+                    (timestamp, selected_token),
+                )
+                event_payload = {
+                    "previous_status": JobStatus.LOST.value,
+                    "requeue_kind": "TX9_DETACHED",
+                    "invalidated_attempt_id": str(invalidated["attempt_id"]),
+                    "invalidated_worker_id": str(invalidated["worker_id"]),
+                    "invalidated_quota_class": str(invalidated["quota_class"]),
+                    "tx9_evidence_digest": evidence_digest,
+                    "invalidated_quota_snapshot": snapshot,
+                    "invalidated_quota_snapshot_digest": snapshot_digest,
+                    "retry_safety": retry_receipt,
+                }
+                self.store.append_event(
+                    connection,
+                    aggregate_type="job",
+                    aggregate_id=selected_token,
+                    event_type="JOB_REQUEUED",
+                    command_id=requeue_command,
+                    actor="operator",
+                    job_id=selected_token,
+                    attempt_id=attempt_token,
+                    worker_id=str(invalidated["worker_id"]),
+                    quota_class=str(invalidated["quota_class"]),
+                    payload=event_payload,
+                    timestamp_ms=timestamp,
+                )
+                written = connection.execute(
+                    "SELECT * FROM events WHERE command_id=?", (requeue_command,)
+                ).fetchone()
+                assert written is not None
+                durable = _requeue_outcome_from_event(
+                    connection, written, expected_job_id=selected_token
+                )
+                receipt = durable.to_dict()
+                receipt["retry_safety"] = retry_receipt
+                return CooRetryMutationOutcome(
+                    action="REQUEUED",
+                    command_id=requeue_command,
+                    receipt=receipt,
+                )
+
+            plan_event = connection.execute(
+                "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+                (root_token,),
+            ).fetchone()
+            handoff_event = connection.execute(
+                "SELECT payload_json FROM events WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?",
+                (root_token,),
+            ).fetchone()
+            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
+            if policy_digest != EXPECTED_POLICY_SHA256:
+                raise StateConflict("COO block policy digest is not the reviewed policy")
+            evidence_value = {"retry_safety": retry_receipt}
+            _validated_retry_safety_block_evidence(
+                connection,
+                evidence_value,
+                selected_job_id=selected_token,
+                attempt_id=attempt_token,
+            )
+            payload = {
+                "schema_version": "mastermind.coo_cycle_block/v1",
+                "root_job_id": root_token,
+                "selected_job_id": selected_token,
+                "reason": "state_conflict",
+                "policy_sha": policy_digest,
+                "plan_digest": (
+                    _json_loads(plan_event["payload_json"], fallback={}).get("plan_digest")
+                    if plan_event
+                    else None
+                ),
+                "handoff_digest": (
+                    _json_loads(handoff_event["payload_json"], fallback={}).get("handoff_digest")
+                    if handoff_event
+                    else None
+                ),
+                "evidence": evidence_value,
+                "evidence_digest": orchestration_digest(evidence_value),
+                "command_id": block_command,
+            }
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=root_token,
+                event_type="COO_CYCLE_BLOCKED",
+                command_id=block_command,
+                actor="coo",
+                job_id=root_token,
+                attempt_id=attempt_token,
+                payload=payload,
+                timestamp_ms=timestamp,
+            )
+            return CooRetryMutationOutcome(
+                action="BLOCKED", command_id=block_command, receipt=payload
+            )
+
+    def validated_cycle_block(
+        self, root_job_id: str
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Return one fully validated durable COO block for exact replay."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM events
+                WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=?
+                ORDER BY event_id
+                """,
+                (root_token,),
+            ).fetchall()
+            if not rows:
+                return None
+            if len(rows) != 1:
+                raise StateConflict("COO root has multiple durable block Events")
+            payload = _validated_coo_cycle_block_event(
+                connection, rows[0], expected_root_id=root_token
+            )
+            return str(rows[0]["command_id"]), payload
+
     def block_cycle(
         self,
         root_job_id: str,
@@ -7664,6 +8494,12 @@ class JobRegistry:
                 )
             ):
                 raise StateConflict("COO block target is outside the strict root tree")
+            _validated_retry_safety_block_evidence(
+                connection,
+                evidence_value,
+                selected_job_id=selected_token,
+                attempt_id=selected["current_attempt_id"],
+            )
             plan_event = connection.execute(
                 """SELECT payload_json FROM events
                    WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?""",
@@ -7703,24 +8539,21 @@ class JobRegistry:
                 "SELECT * FROM events WHERE command_id=?", (command_id,)
             ).fetchone()
             if existing is not None:
-                if (
-                    existing["event_type"] == "COO_CYCLE_BLOCKED"
-                    and existing["job_id"] == root_token
-                    and _strict_canonical_json_loads(
-                        str(existing["payload_json"]), name="COO block replay"
-                    )
-                    == payload
-                ):
+                if _validated_coo_cycle_block_event(
+                    connection, existing, expected_root_id=root_token
+                ) == payload:
                     return payload
                 raise StateConflict("COO block command is owned by another semantic target")
             prior = connection.execute(
-                """SELECT payload_json FROM events
+                """SELECT * FROM events
                    WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=? ORDER BY event_id""",
                 (root_token,),
             ).fetchall()
             if prior:
-                prior_payload = _strict_canonical_json_loads(
-                    str(prior[0]["payload_json"]), name="prior COO block"
+                if len(prior) != 1:
+                    raise StateConflict("COO root has multiple durable block Events")
+                prior_payload = _validated_coo_cycle_block_event(
+                    connection, prior[0], expected_root_id=root_token
                 )
                 if prior_payload == payload:
                     return payload
@@ -8411,6 +9244,11 @@ class JobRegistry:
             if job_row is None:
                 raise StateConflict(f"job {job_id!r} does not exist")
             _job_from_row(job_row)
+            orchestration_role = job_row["orchestration_role"]
+            if orchestration_role is not None:
+                raise StateConflict(
+                    "fresh orchestration requeue requires atomic COO retry decision"
+                )
             status = JobStatus(job_row["status"])
             if status not in {
                 JobStatus.RATE_LIMITED,
@@ -8420,20 +9258,8 @@ class JobRegistry:
                 raise StateConflict(f"job {job_id} cannot requeue from {status.value}")
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
-            orchestration_role = job_row["orchestration_role"]
             attempt_id = job_row["current_attempt_id"]
-            if orchestration_role is not None:
-                if not isinstance(attempt_id, str) or not attempt_id:
-                    raise StateConflict("orchestration requeue requires its exact terminal Attempt")
-                expected_command = (
-                    f"coo-cycle:{job_row['root_job_id']}:requeue:{job_id}:{attempt_id}"
-                )
-                if command_id != expected_command:
-                    raise StateConflict(
-                        "orchestration requeue requires exact deterministic command_id"
-                    )
-                _assert_orchestration_requeue_eligible(connection, job_row)
-            elif command_id is not None:
+            if command_id is not None:
                 raise StateConflict("legacy role-null requeue does not accept a COO command")
             tx9_material: (
                 tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
@@ -8453,32 +9279,25 @@ class JobRegistry:
                 ).fetchone()
                 if quota_row is None:
                     raise PersistenceError(f"job {job_id} lost its quota-class record")
-                if (
-                    orchestration_role is not None
-                    and status == JobStatus.LOST
-                    and quota_row["held_attempt_id"] is None
+                if status in {JobStatus.RATE_LIMITED, JobStatus.LOST} and (
+                    quota_row["held_attempt_id"] != attempt_id
                 ):
-                    tx9_material = _tx9_requeue_material(connection, job_row)
-                else:
-                    if status in {JobStatus.RATE_LIMITED, JobStatus.LOST} and (
-                        quota_row["held_attempt_id"] != attempt_id
-                    ):
-                        raise PersistenceError(
-                            f"job {job_id} terminal attempt is not held by its quota class"
-                        )
-                    connection.execute(
-                        """
-                        UPDATE worker_quota_classes
-                        SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
-                        WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
-                        """,
-                        (
-                            timestamp,
-                            attempt_row["worker_id"],
-                            attempt_row["quota_class"],
-                            attempt_id,
-                        ),
+                    raise PersistenceError(
+                        f"job {job_id} terminal attempt is not held by its quota class"
                     )
+                connection.execute(
+                    """
+                    UPDATE worker_quota_classes
+                    SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
+                    WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
+                    """,
+                    (
+                        timestamp,
+                        attempt_row["worker_id"],
+                        attempt_row["quota_class"],
+                        attempt_id,
+                    ),
+                )
             if tx9_material is not None:
                 connection.execute(
                     """
@@ -13926,6 +14745,42 @@ class ResourceBroker:
         return WorkerRegistry(self.store).get_worker(lease.attempt.worker_id)
 
 
+def _runtime_binding_ordered_unique_strings(
+    value: Any, *, require_nonempty: bool
+) -> bool:
+    return (
+        isinstance(value, list)
+        and (bool(value) or not require_nonempty)
+        and all(
+            isinstance(item, str) and bool(item) and item == item.strip()
+            for item in value
+        )
+        and value == sorted(set(value))
+    )
+
+
+def _runtime_binding_validation_argv(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(argv, list)
+        and bool(argv)
+        and all(isinstance(item, str) and bool(item) for item in argv)
+        for argv in value
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class ActiveOperatorBindingFacts:
+    """One read-snapshot of the accepted current OHF binding source."""
+
+    attempt_id: str
+    session_epoch_id: str
+    generation_number: int
+    provider_session_id: str
+    provider: str
+    account_label: str
+    owner_seat: str
+
+
 @dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
@@ -13970,12 +14825,498 @@ class Runtime:
             )
         )
 
+    def current_harness_binding_source(
+        self,
+        attempt_id: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveOperatorBindingFacts:
+        """Read exactly one current, admitted OHF writer from one snapshot.
+
+        The caller may pass an already-open ``RuntimeStore.read()`` or
+        ``RuntimeStore.transaction()`` connection.  In that case this method opens
+        no nested read and all source facts remain from the caller's snapshot.
+        """
+
+        token = str(attempt_id or "").strip()
+        if not token:
+            raise StateConflict("runtime binding source requires an attempt_id")
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_binding_source(
+                    token, connection=owned_connection
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+
+        rows = connection.execute(
+            """
+            SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
+                   j.status AS job_status,j.owner_seat,j.orchestration_role,
+                   j.parent_job_id,j.root_job_id,j.orchestration_provenance_json,
+                   j.orchestration_provenance_digest,j.plan_attempt_id,j.plan_digest,
+                   j.plan_step_id,j.repair_round,j.supersedes_job_id,
+                   j.requested_authorities_json AS job_requested_authorities_json,
+                   j.allowed_write_paths_json AS job_allowed_write_paths_json,
+                   j.validation_commands_json AS job_validation_commands_json,
+                   j.authority_policy_hash AS job_authority_policy_hash,
+                   w.provider AS worker_provider,w.account_label AS worker_account_label,
+                   q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
+                   q.provider AS quota_provider,q.status AS quota_status,
+                   q.held_attempt_id,q.fence_counter AS quota_fence_counter,
+                   e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
+                   e.provider_session_id AS epoch_provider_session,
+                   g.process_generation_id,g.worker_id AS generation_worker,
+                   g.generation_number,g.provider_session_id AS generation_provider_session,
+                   g.pid AS generation_pid,g.pgid AS generation_pgid,
+                   g.process_start_identity AS generation_process_start_identity,
+                   g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
+                   g.observed_attestation_digest
+            FROM main.attempts a
+            JOIN main.jobs j ON j.job_id=a.job_id
+            JOIN main.workers w ON w.worker_id=a.worker_id
+            JOIN main.worker_quota_classes q
+              ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
+            LEFT JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
+              AND e.state='CURRENT'
+            LEFT JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
+              AND g.executive_writer_held=1
+            WHERE a.attempt_id=?
+            """,
+            (token,),
+        ).fetchall()
+        cardinality = connection.execute(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM main.jobs WHERE current_attempt_id=?) AS current_jobs,
+              (SELECT COUNT(*) FROM main.harness_session_epochs
+                 WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
+              (SELECT COUNT(*) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
+              (SELECT MAX(g.generation_number) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
+            """,
+            (token, token, token, token),
+        ).fetchone()
+        if len(rows) != 1 or cardinality is None:
+            raise StateConflict("runtime binding source cardinality is not exact")
+        row = rows[0]
+        accepted_statuses = {
+            AttemptStatus.RUNNING.value: JobStatus.RUNNING.value,
+            AttemptStatus.CHECKPOINTED.value: JobStatus.CHECKPOINTED.value,
+            AttemptStatus.CANCEL_REQUESTED.value: JobStatus.CANCEL_REQUESTED.value,
+        }
+        expected_job_status = accepted_statuses.get(str(row["status"]))
+        if (
+            int(cardinality["current_jobs"]) != 1
+            or int(cardinality["current_epochs"]) != 1
+            or int(cardinality["held_writers"]) != 1
+            or cardinality["current_epoch_max_generation"] is None
+            or row["job_current_attempt_id"] != token
+            or expected_job_status is None
+            or row["job_status"] != expected_job_status
+            or row["lease_token"] is None
+            or int(row["lease_expires_at_ms"]) <= self.store.now_ms()
+            or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+            or row["orchestration_role"] not in _ORCHESTRATION_ROLES
+            or row["quota_worker_id"] != row["worker_id"]
+            or row["quota_quota_class"] != row["quota_class"]
+            or row["quota_provider"] != row["worker_provider"]
+            or row["quota_status"] != WorkerStatus.BUSY.value
+            or row["held_attempt_id"] != token
+            or int(row["quota_fence_counter"]) != int(row["fence_generation"])
+            or row["session_epoch_id"] is None
+            or row["process_generation_id"] is None
+            or row["epoch_state"] != SessionEpochState.CURRENT.value
+            or row["epoch_worker"] != row["worker_id"]
+            or row["generation_worker"] != row["worker_id"]
+            or not row["executive_writer_held"]
+            or row["ended_at_ms"] is not None
+            or not row["epoch_provider_session"]
+            or row["generation_provider_session"] != row["epoch_provider_session"]
+            or int(row["generation_number"])
+            != int(cardinality["current_epoch_max_generation"])
+            or not row["observed_attestation_digest"]
+        ):
+            raise StateConflict("runtime binding source is not one current actionable OHF writer")
+
+        try:
+            placement = _load_canonical_digest_pair(
+                row["placement_snapshot_json"],
+                row["placement_snapshot_digest"],
+                name="runtime binding placement snapshot",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(f"runtime binding placement evidence is invalid: {exc}") from exc
+        if (
+            not isinstance(placement, dict)
+            or placement.get("worker_id") != row["worker_id"]
+            or placement.get("quota_class") != row["quota_class"]
+            or placement.get("provider") != row["worker_provider"]
+            or placement.get("account_label") != row["worker_account_label"]
+        ):
+            raise StateConflict("runtime binding placement evidence drifted")
+
+        try:
+            grant = _load_canonical_digest_pair(
+                row["effective_grant_json"],
+                row["effective_grant_digest"],
+                name="runtime binding effective grant",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(
+                f"runtime binding effective grant evidence is invalid: {exc}"
+            ) from exc
+        try:
+            job_authorities = _strict_canonical_json_loads(
+                str(row["job_requested_authorities_json"]),
+                name="runtime binding Job requested authorities",
+            )
+            job_write_paths = _strict_canonical_json_loads(
+                str(row["job_allowed_write_paths_json"]),
+                name="runtime binding Job allowed write paths",
+            )
+            job_validation_argv = _strict_canonical_json_loads(
+                str(row["job_validation_commands_json"]),
+                name="runtime binding Job validation commands",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(
+                f"runtime binding effective grant Job evidence is invalid: {exc}"
+            ) from exc
+        grant_keys = {
+            "schema_version",
+            "authorities",
+            "write_paths",
+            "validation_argv",
+            "policy_sha",
+            "job_id",
+            "role",
+        }
+        if (
+            not isinstance(grant, dict)
+            or set(grant) != grant_keys
+            or grant.get("schema_version")
+            != "mastermind.executive_effective_grant/v1"
+            or grant.get("job_id") != row["job_id"]
+            or grant.get("role") != row["orchestration_role"]
+            or grant.get("policy_sha") != row["authority_policy_hash"]
+            or row["job_authority_policy_hash"] != row["authority_policy_hash"]
+            or not _runtime_binding_ordered_unique_strings(
+                job_authorities, require_nonempty=True
+            )
+            or not _runtime_binding_ordered_unique_strings(
+                job_write_paths, require_nonempty=False
+            )
+            or not _runtime_binding_validation_argv(job_validation_argv)
+            or not _runtime_binding_ordered_unique_strings(
+                grant.get("authorities"), require_nonempty=True
+            )
+            or not _runtime_binding_ordered_unique_strings(
+                grant.get("write_paths"), require_nonempty=False
+            )
+            or not _runtime_binding_validation_argv(grant.get("validation_argv"))
+            or any(item not in job_authorities for item in grant["authorities"])
+            or any(item not in job_write_paths for item in grant["write_paths"])
+            or any(item not in job_validation_argv for item in grant["validation_argv"])
+        ):
+            raise StateConflict("runtime binding effective grant evidence drifted")
+        if row["orchestration_role"] in {"plan", "aggregation"} and (
+            grant["authorities"] != ["READ"]
+            or grant["write_paths"]
+            or grant["validation_argv"]
+        ):
+            raise StateConflict("runtime binding effective grant role semantics drifted")
+        if row["orchestration_role"] == "review" and (
+            grant["authorities"] != job_authorities
+            or any(item not in {"READ", "RUN_TESTS"} for item in job_authorities)
+            or "READ" not in job_authorities
+            or job_write_paths
+            or grant["write_paths"]
+            or grant["validation_argv"] != job_validation_argv
+            or bool(grant["validation_argv"])
+            != ("RUN_TESTS" in grant["authorities"])
+        ):
+            raise StateConflict("runtime binding effective grant role semantics drifted")
+
+        creation_events = connection.execute(
+            """SELECT * FROM main.events
+               WHERE event_type='JOB_CREATED' AND job_id=?
+               ORDER BY event_id""",
+            (row["job_id"],),
+        ).fetchall()
+        if len(creation_events) != 1:
+            raise StateConflict("runtime binding Job creation cardinality is not exact")
+        creation_event = creation_events[0]
+        try:
+            job_role, job_provenance, job_provenance_digest = (
+                _decode_orchestration_job_fields(row)
+            )
+            creation_payload = _strict_canonical_json_loads(
+                str(creation_event["payload_json"]),
+                name="runtime binding JOB_CREATED payload",
+            )
+        except PersistenceError as exc:
+            raise StateConflict(
+                f"runtime binding Job creation evidence is invalid: {exc}"
+            ) from exc
+        expected_creation_actor = (
+            "operator" if job_role in {"aggregation", "plan"} else "coo"
+        )
+        if (
+            not isinstance(job_provenance, dict)
+            or not isinstance(creation_payload, dict)
+            or creation_event["sequence"] != 1
+            or creation_event["actor"] != expected_creation_actor
+            or creation_event["aggregate_type"] != "job"
+            or creation_event["aggregate_id"] != row["job_id"]
+            or creation_event["job_id"] != row["job_id"]
+            or creation_event["attempt_id"] is not None
+            or creation_event["worker_id"] is not None
+            or creation_event["quota_class"] is not None
+            or creation_event["command_id"] != job_provenance.get("command_id")
+            or not isinstance(creation_payload.get("owner_seat"), str)
+            or creation_payload.get("owner_seat") != row["owner_seat"]
+            or creation_payload.get("orchestration_role") != job_role
+            or creation_payload.get("orchestration_provenance_digest")
+            != job_provenance_digest
+        ):
+            raise StateConflict("runtime binding Job creation evidence drifted")
+
+        admissions = connection.execute(
+            """SELECT * FROM main.events
+               WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+            (row["process_generation_id"],),
+        ).fetchall()
+        decisions = connection.execute(
+            """SELECT * FROM main.events
+               WHERE event_type='OHF_LAUNCH_DECISION'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+            (row["process_generation_id"],),
+        ).fetchall()
+        seals = connection.execute(
+            """SELECT 1 FROM main.events
+               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
+            (token,),
+        ).fetchall()
+        if len(admissions) != 1 or len(decisions) != 1 or seals:
+            raise StateConflict("runtime binding source lacks one active work admission")
+        admission_event = admissions[0]
+        admission = _strict_canonical_json_loads(
+            str(admission_event["payload_json"]), name="runtime binding work admission"
+        )
+        decision = _strict_canonical_json_loads(
+            str(decisions[0]["payload_json"]), name="runtime binding launch decision"
+        )
+        admission_keys = {
+            "schema_version", "job_id", "attempt_id", "worker_id", "quota_class",
+            "orchestration_role", "process_generation_id", "provider_session_id",
+            "tx3_applied_command_id", "observed_attestation_digest",
+            "principal_observation", "principal_observation_digest",
+            "execution_principal_snapshot_digest", "placement_snapshot_digest",
+            "effective_grant_digest", "policy_sha", "launch_decision",
+        }
+        immutable_digests = (
+            "observed_attestation_digest",
+            "principal_observation_digest",
+            "execution_principal_snapshot_digest",
+            "placement_snapshot_digest",
+            "effective_grant_digest",
+            "policy_sha",
+        )
+        decision_event = decisions[0]
+        tx3: sqlite3.Row | None = None
+        tx3_payload: Any = None
+        tx3_intent: sqlite3.Row | None = None
+        tx3_intent_payload: Any = None
+        expected_tx3_command_id: str | None = None
+        expected_tx3_applied: dict[str, Any] | None = None
+        expected_tx3_intent: dict[str, Any] | None = None
+        try:
+            generation_number = int(row["generation_number"])
+            if generation_number == 1:
+                expected_tx3_applied = {
+                    "operation_kind": OperationKind.START_SESSION.value,
+                    "provider_session_id": row["epoch_provider_session"],
+                    "process_generation_id": row["process_generation_id"],
+                }
+                expected_tx3_intent = {
+                    "schema_version": "mastermind.operator_harness_intent/v1",
+                    "operation_kind": OperationKind.START_SESSION.value,
+                    "attempt_id": token,
+                    "session_epoch_id": row["session_epoch_id"],
+                    "process_generation_id": row["process_generation_id"],
+                    "worker_id": row["worker_id"],
+                    "provider_session_id": None,
+                }
+            elif generation_number == 2:
+                expected_tx3_applied = {
+                    "operation_kind": OperationKind.RESUME_SESSION.value,
+                    "provider_session_id": row["epoch_provider_session"],
+                    "process_generation_id": row["process_generation_id"],
+                }
+                expected_tx3_intent = {
+                    "operation_kind": OperationKind.RESUME_SESSION.value,
+                    "attempt_id": token,
+                    "session_epoch_id": row["session_epoch_id"],
+                    "process_generation_id": row["process_generation_id"],
+                    "worker_id": row["worker_id"],
+                    "provider_session_id": row["epoch_provider_session"],
+                }
+            if expected_tx3_applied is not None and expected_tx3_intent is not None:
+                tx3_rows = connection.execute(
+                    """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                    (
+                        OperationReceiptKind.APPLIED.value,
+                        token,
+                        expected_tx3_applied["operation_kind"],
+                        row["process_generation_id"],
+                    ),
+                ).fetchall()
+                tx3_intent_rows = connection.execute(
+                    """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                    (
+                        OperationReceiptKind.INTENT.value,
+                        token,
+                        expected_tx3_intent["operation_kind"],
+                        row["process_generation_id"],
+                    ),
+                ).fetchall()
+                tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
+                tx3_intent = (
+                    tx3_intent_rows[0] if len(tx3_intent_rows) == 1 else None
+                )
+            if tx3 is not None and tx3_intent is not None:
+                tx3_payload = _strict_canonical_json_loads(
+                    str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
+                )
+                operation_id = OperationId(str(tx3["aggregate_id"]))
+                expected_tx3_command_id = operation_receipt_command_id(
+                    operation_id, OperationReceiptKind.APPLIED
+                )
+                tx3_intent_payload = _strict_canonical_json_loads(
+                    str(tx3_intent["payload_json"]),
+                    name="runtime binding TX-3 INTENT",
+                )
+        except (StateConflict, TypeError, ValueError) as exc:
+            raise StateConflict(
+                f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
+            ) from exc
+        if (
+            tx3 is None
+            or expected_tx3_applied is None
+            or expected_tx3_intent is None
+            or tx3["event_type"] != OperationReceiptKind.APPLIED.value
+            or tx3["command_id"] != expected_tx3_command_id
+            or tx3["command_id"] != admission.get("tx3_applied_command_id")
+            or tx3["actor"] != "supervisor"
+            or tx3["aggregate_type"] != "operator_operation"
+            or tx3["job_id"] != row["job_id"]
+            or tx3["attempt_id"] != token
+            or tx3["worker_id"] != row["worker_id"]
+            or tx3["quota_class"] != row["quota_class"]
+            or tx3_payload != expected_tx3_applied
+            or tx3_intent is None
+            or tx3_intent["event_type"] != OperationReceiptKind.INTENT.value
+            or tx3_intent["command_id"] != tx3["aggregate_id"]
+            or tx3_intent["actor"] != "supervisor"
+            or tx3_intent["aggregate_type"] != "operator_operation"
+            or tx3_intent["aggregate_id"] != tx3["aggregate_id"]
+            or tx3_intent["job_id"] != row["job_id"]
+            or tx3_intent["attempt_id"] != token
+            or tx3_intent["worker_id"] != row["worker_id"]
+            or tx3_intent["quota_class"] != row["quota_class"]
+            or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
+            or int(tx3["event_id"]) >= int(decision_event["event_id"])
+            or int(decision_event["event_id"]) >= int(admission_event["event_id"])
+            or tx3_intent_payload != expected_tx3_intent
+        ):
+            raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
+        observation = _validated_admission_principal(row, admission)
+        if (
+            set(admission) != admission_keys
+            or admission_event["command_id"]
+            != f"ohf-work-admit:{row['process_generation_id']}"
+            or admission_event["actor"] != "supervisor"
+            or admission_event["aggregate_type"] != "process_generation"
+            or admission_event["aggregate_id"] != row["process_generation_id"]
+            or admission_event["job_id"] != row["job_id"]
+            or admission_event["attempt_id"] != token
+            or admission_event["worker_id"] != row["worker_id"]
+            or admission_event["quota_class"] != row["quota_class"]
+            or admission.get("schema_version")
+            != "mastermind.orchestration_work_admission/v1"
+            or admission.get("job_id") != row["job_id"]
+            or admission.get("attempt_id") != token
+            or admission.get("worker_id") != row["worker_id"]
+            or admission.get("quota_class") != row["quota_class"]
+            or admission.get("orchestration_role") != row["orchestration_role"]
+            or admission.get("process_generation_id") != row["process_generation_id"]
+            or admission.get("provider_session_id") != row["epoch_provider_session"]
+            or admission.get("observed_attestation_digest")
+            != row["observed_attestation_digest"]
+            or admission.get("placement_snapshot_digest")
+            != row["placement_snapshot_digest"]
+            or admission.get("effective_grant_digest") != row["effective_grant_digest"]
+            or any(
+                not isinstance(admission.get(field), str)
+                or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
+                for field in immutable_digests
+            )
+            or admission.get("launch_decision") != LaunchDecision.ALLOW.value
+            or decision_event["actor"] != "supervisor"
+            or decision_event["aggregate_type"] != "process_generation"
+            or decision_event["aggregate_id"] != row["process_generation_id"]
+            or decision_event["job_id"] != row["job_id"]
+            or decision_event["attempt_id"] != token
+            or decision_event["worker_id"] != row["worker_id"]
+            or decision_event["quota_class"] != row["quota_class"]
+            or decision
+            != {
+                "decision": LaunchDecision.ALLOW.value,
+                "attestation_digest": row["observed_attestation_digest"],
+            }
+            or observation["process_generation_id"] != row["process_generation_id"]
+            or observation["provider_session_id"] != row["epoch_provider_session"]
+            or observation["process_identity"]
+            != {
+                "pid": row["generation_pid"],
+                "pgid": row["generation_pgid"],
+                "process_start_identity": row["generation_process_start_identity"],
+                "boot_id": row["generation_boot_id"],
+            }
+        ):
+            raise StateConflict("runtime binding admission evidence drifted")
+        return ActiveOperatorBindingFacts(
+            attempt_id=token,
+            session_epoch_id=str(row["session_epoch_id"]),
+            generation_number=int(row["generation_number"]),
+            provider_session_id=str(row["epoch_provider_session"]),
+            provider=str(placement["provider"]),
+            account_label=str(placement["account_label"]),
+            owner_seat=str(row["owner_seat"]),
+        )
+
 
 __all__ = [
+    "ActiveOperatorBindingFacts",
     "Attempt",
     "AttemptLease",
     "AttemptRegistry",
     "AttemptStatus",
+    "CooRetryMutationOutcome",
     "Event",
     "EventRegistry",
     "ExecutiveSchemaUpgradeRequired",
@@ -13986,6 +15327,7 @@ __all__ = [
     "OperatorHarnessRegistry",
     "PersistenceError",
     "ResourceBroker",
+    "RetrySafetyProjection",
     "Runtime",
     "RuntimeProofError",
     "RuntimeStore",

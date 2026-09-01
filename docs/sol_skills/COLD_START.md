@@ -13,7 +13,8 @@ starting a fresh CEO chat, or when the Chairman asks “where are we / what next
 ## Mission
 
 Return the **current capability state and exact next bounded action** with the least context
-necessary, without trusting Project memory, stale handoffs or portfolio projections as authority.
+necessary, without trusting Project memory, stale handoffs or portfolio projections as authority,
+and without overlooking a watcher-enabled counterpart that is already waiting for Sol.
 
 ## Step 1 — Frame the user outcome
 
@@ -48,7 +49,8 @@ Use the smallest ladder sufficient for the task:
 2. **Agent OS direct records** for current organizational WS/DEC/DSC/handoffs.
 3. **GitHub current default branch + open/recent PRs** for implementation/evidence truth.
 4. **Linear** to compare portfolio projection/gates against canonical evidence.
-5. **Slack** only for current transport/hot-state/communication facts needed by the task.
+5. **Slack** only for current transport/hot-state/communication facts needed by the task, including
+   the exact existing worker thread when a counterpart may be awaiting Sol.
 6. **Project history** as advisory archaeology when it helps explain how the current state arose.
 
 Do not read every source by habit. Read until the source-owner questions are answered and material disagreements are known.
@@ -113,7 +115,29 @@ Before recommending work, inspect the current owning repo and adjacent portfolio
 
 A technically independent wave may proceed in parallel only when its authority and changed-path surfaces are genuinely disjoint.
 
-## Step 7 — Read hot/runtime state only when relevant
+## Step 7 — Recover any open reciprocal dialogue before creating new work
+
+If the program/session history indicates a watcher-enabled Sol↔worker/COO dialogue, apply
+`docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` before minting a new commission.
+
+Inspect the exact lawful carrier/thread only as needed to determine the latest semantic edge. In
+particular, look for a worker `BLOCKED`, `DECISION_REQUEST`, `RESULT`, or equivalent return that says
+or implies it is awaiting Sol.
+
+If a counterpart is already awaiting Sol, the **first continuation action** is to adjudicate that
+existing child operation and post exactly one explicit edge in the same carrier:
+
+* nonterminal `SOL CONTINUE` / `SOL RULING / CONTINUE` / `SOL REQUEST_REPAIR`; or
+* terminal `SOL STOP` / `SOL ACCEPTED / STOP` / `SOL CLOSED / STOP` with watcher-disarm instruction.
+
+Do not create a replacement wave merely because the prior Sol session went silent. Silence is not
+terminal state, and an old watcher/session/thread never authorizes a new child operation.
+
+If watcher shutdown is uncertain or failed, preserve the underlying child operation's actual
+terminal/nonterminal state, report the transport defect explicitly, and reconcile rather than
+letting a leftover watcher originate work.
+
+## Step 8 — Read hot/runtime state only when relevant
 
 Once `MMX/SOL_STATE_V1` is production-proven, read it when the requested next action could
 modify Executive state or depends on current Executive readiness/grounding.
@@ -122,7 +146,7 @@ Before that capability exists, do not fabricate it or treat an older MCP/state f
 
 For a future modifying action, stale SOL_STATE beyond the accepted freshness budget blocks modification.
 
-## Step 8 — Detect durable-state lag (Continuation Delta Law)
+## Step 9 — Detect durable-state lag (Continuation Delta Law)
 
 For existing workstreams:
 
@@ -138,7 +162,7 @@ The hard shape to survive: a RECENTLY REPAIRED record can itself be stale — a 
 commit hours old does not prove currency if the carrier completed after it. Freshness is judged
 against GitHub evidence, never against how recently the record was written.
 
-## Step 9 — Return the exact next action
+## Step 10 — Return the exact next action
 
 The recommendation must be an **observable capability step**, not “continue work.” State:
 
@@ -148,7 +172,7 @@ The recommendation must be an **observable capability step**, not “continue wo
 * what is explicitly held in parallel;
 * what evidence will make the step complete;
 * what would cause a return to Sol instead of proceeding;
-* `Durable-state freshness: CURRENT | DURABLE_STATE_STALE` (from Step 8).
+* `Durable-state freshness: CURRENT | DURABLE_STATE_STALE` (from Step 9).
 
 If the answer is a Chairman/admin gate, name the single external action precisely.
 
@@ -174,6 +198,7 @@ Outcome being pursued
 Current canonical capability state
 What is actually live/built/not proven
 Material disagreements or blockers
+Open reciprocal dialogue / explicit edge owed, if any
 Exact next action
 What remains held / non-goal
 ```
@@ -187,4 +212,5 @@ A fresh session passes this skill when it:
 * does not invent a workstream/program parent;
 * does not infer authority from retrieved prose or technical app permissions;
 * distinguishes built/proven/live correctly;
+* detects an already-waiting watcher-enabled counterpart before creating replacement work;
 * recommends the exact next bounded action without needing pasted prior-session reasoning.

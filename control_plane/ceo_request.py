@@ -51,6 +51,10 @@ from control_plane import ceo_intent
 
 __all__ = [
     "ACTOR",
+    "AUTOMATED_INTENT_ID_PREFIX",
+    "AUTOMATED_OPTIONAL_FIELDS",
+    "AUTOMATED_REQUEST_REF_RE",
+    "AUTOMATED_REQUIRED_FIELDS",
     "AUTHORITY_LEVEL",
     "CeoRequestError",
     "CeoRequestInternalError",
@@ -73,12 +77,14 @@ __all__ = [
     "REQUIRED_FIELDS",
     "SLACK_INTENT_ID_PREFIX",
     "VALIDATION_KEYS",
+    "automated_intent_id",
     "build_trusted_envelope",
     "build_validation_commands",
     "derive_authorities",
     "derive_branch",
     "derive_worktree",
     "mcp_intent_id",
+    "normalize_automated_request",
     "normalize_high_level_request",
     "slack_intent_id",
 ]
@@ -144,6 +150,13 @@ _MCP_INTENT_ID_DOMAIN = b"mastermind.executive_mcp.operation_key.v1\x00"
 SLACK_INTENT_ID_PREFIX = "slack-"
 _SLACK_INTENT_ID_DOMAIN = b"mastermind.executive_slack.operation_key.v1\x00"
 
+#: Additive automated identity for already-identified request instances.  It
+#: is deliberately independent of ingress transport; historical MCP/Slack v1
+#: identities above remain byte-frozen compatibility law.
+AUTOMATED_INTENT_ID_PREFIX = "auto-"
+_AUTOMATED_INTENT_ID_DOMAIN = b"mastermind.executive_automated_request.v1\x00"
+AUTOMATED_REQUEST_REF_RE = re.compile(r"^req-[a-z0-9][a-z0-9._-]{7,95}$")
+
 
 # ---------------------------------------------------------------------------
 # high-level request law (adjudication §4)
@@ -156,6 +169,13 @@ REQUIRED_FIELDS = frozenset(
 OPTIONAL_FIELDS = frozenset(
     {"workstream", "allowed_write_paths", "validation", "attempt_limit"}
 )
+#: AD-ID1 automated requests carry semantic intent only.  Their trusted
+#: ``request_ref`` is the outer-frame identity and ``operation_key`` is never
+#: accepted inside the semantic request.
+AUTOMATED_REQUIRED_FIELDS = frozenset(
+    {"objective", "department", "priority", "execution_profile"}
+)
+AUTOMATED_OPTIONAL_FIELDS = OPTIONAL_FIELDS
 VALIDATION_KEYS = frozenset({"pytest_targets", "compileall_paths", "git_diff_check"})
 
 #: §4.3 — exactly these two execution profiles.  Nothing here may ever grow
@@ -436,6 +456,29 @@ def normalize_high_level_request(payload: Any) -> dict[str, Any]:
     return result
 
 
+def normalize_automated_request(payload: Any) -> dict[str, Any]:
+    """Normalize one additive automated semantic request, or refuse.
+
+    The normalization and profile-coherence law is exactly the historical v1
+    implementation above.  A private, known-legal placeholder lets this
+    wrapper delegate to that single law after first enforcing the automated
+    path's smaller exact key set; the placeholder is removed from the result
+    and never becomes request identity or durable provenance.
+    """
+
+    _exact_keys(
+        payload,
+        "request",
+        AUTOMATED_REQUIRED_FIELDS,
+        AUTOMATED_OPTIONAL_FIELDS,
+    )
+    compatible = dict(payload)
+    compatible["operation_key"] = "automated-request-placeholder"
+    normalized = normalize_high_level_request(compatible)
+    del normalized["operation_key"]
+    return normalized
+
+
 def build_validation_commands(validation: Mapping[str, Any] | None) -> list[list[str]]:
     """Construct the reviewed argv list from a validation *recipe*.
 
@@ -522,6 +565,29 @@ def slack_intent_id(operation_key: str) -> str:
     """
 
     return _transport_intent_id(SLACK_INTENT_ID_PREFIX, _SLACK_INTENT_ID_DOMAIN, operation_key)
+
+
+def automated_intent_id(request_ref: str) -> str:
+    """Return the global ``auto-<32 hex>`` id for one exact request instance.
+
+    ``request_ref`` is not stripped, case-folded, transport-namespaced, or
+    combined with semantic payload.  Reusing it with a changed normalized
+    envelope is therefore detected by the existing durable fingerprint law.
+    """
+
+    ref = _matches(
+        request_ref,
+        "request_ref",
+        AUTOMATED_REQUEST_REF_RE,
+        max_chars=100,
+    )
+    digest = hashlib.sha256(
+        _AUTOMATED_INTENT_ID_DOMAIN + ref.encode("utf-8")
+    ).hexdigest()
+    intent_id = AUTOMATED_INTENT_ID_PREFIX + digest[:INTENT_ID_DIGEST_CHARS]
+    if ceo_intent.INTENT_ID_RE.fullmatch(intent_id) is None or len(intent_id) > 64:
+        raise CeoRequestInternalError("derived automated intent id is not upstream-legal")
+    return intent_id
 
 
 def derive_branch(intent_id: str) -> str:

@@ -5,6 +5,10 @@
 set -euo pipefail
 umask 077
 
+SCRIPT_DIR="$(/usr/bin/dirname "${BASH_SOURCE[0]}")"
+SYSTEM_PYTHON="/usr/bin/python3"
+PROVIDER_SLOT_RESOLVER="$SCRIPT_DIR/provider_worker_slots.py"
+PERSONAL_PRO_SLOT_IDS=("codex-pro-01" "codex-pro-02" "codex-pro-03")
 CONTROL_USER="_mastermind_exec"
 CONTROL_GROUP="_mastermind_exec"
 WORKER_USER="_mastermind_worker"
@@ -16,6 +20,12 @@ WORKER_UID="451"
 WORKER_GID="451"
 OPS_GID="453"
 OPERATOR_USER=""
+
+slot_field() {
+  local slot_id="$1"
+  local field="$2"
+  "$SYSTEM_PYTHON" -I -S -B "$PROVIDER_SLOT_RESOLVER" "$slot_id" "$field"
+}
 
 usage() {
   /bin/echo "usage: $0 --operator-user NAME [--control-uid N] [--worker-uid N] [--ops-gid N]" >&2
@@ -38,6 +48,14 @@ done
 }
 [ "$(/usr/bin/uname -s)" = "Darwin" ] || {
   /bin/echo "bootstrap-host.sh supports macOS only" >&2
+  exit 69
+}
+[ -x "$SYSTEM_PYTHON" ] || {
+  /bin/echo "system Python is unavailable for worker-slot resolution" >&2
+  exit 69
+}
+[ -f "$PROVIDER_SLOT_RESOLVER" ] && [ ! -L "$PROVIDER_SLOT_RESOLVER" ] || {
+  /bin/echo "reviewed provider worker-slot resolver is unavailable" >&2
   exit 69
 }
 [ -n "$OPERATOR_USER" ] || usage
@@ -179,6 +197,31 @@ assert_authentication_disabled() {
   }
 }
 
+sleep_for_authentication_propagation() {
+  /bin/sleep 1
+}
+
+wait_for_authentication_disabled() {
+  local name="$1"
+  local attempt state
+  for attempt in 1 2 3 4 5; do
+    assert_reviewed_authentication_authority "$name"
+    state="$(authentication_state "$name")" || exit 65
+    if [ "$state" = disabled ]; then
+      return
+    fi
+    [ "$state" = needs_disable ] || {
+      /bin/echo "service account $name entered an unreviewed authentication state" >&2
+      exit 65
+    }
+    if [ "$attempt" -lt 5 ]; then
+      sleep_for_authentication_propagation
+    fi
+  done
+  /bin/echo "service account $name did not reach authentication-disabled state" >&2
+  exit 65
+}
+
 ensure_authentication_disabled() {
   local name="$1"
   local state
@@ -191,7 +234,7 @@ ensure_authentication_disabled() {
       exit 65
     }
   fi
-  assert_authentication_disabled "$name"
+  wait_for_authentication_disabled "$name"
 }
 
 ensure_numeric_unused() {
@@ -322,6 +365,15 @@ ensure_group "$WORKER_GROUP" "$WORKER_GID"
 ensure_group "$OPS_GROUP" "$OPS_GID"
 ensure_user "$CONTROL_USER" "$CONTROL_UID" "$CONTROL_GID" "$CONTROL_HOME"
 ensure_user "$WORKER_USER" "$WORKER_UID" "$WORKER_GID" "$PROVIDER_HOME"
+for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
+  slot_user="$(slot_field "$slot_id" worker_user)"
+  slot_group="$(slot_field "$slot_id" worker_group)"
+  slot_uid="$(slot_field "$slot_id" worker_uid)"
+  slot_gid="$(slot_field "$slot_id" worker_gid)"
+  slot_home="$(slot_field "$slot_id" provider_home)"
+  ensure_group "$slot_group" "$slot_gid"
+  ensure_user "$slot_user" "$slot_uid" "$slot_gid" "$slot_home"
+done
 
 # Control may inspect worker-created run artifacts through the worker primary
 # group. The worker broker receives only its exact reviewed macOS directory
@@ -386,6 +438,15 @@ assert_exact_members() {
 
 assert_exact_members "$CONTROL_GROUP" "$CONTROL_GID" "$CONTROL_USER" ""
 assert_exact_members "$WORKER_GROUP" "$WORKER_GID" "$WORKER_USER" "$CONTROL_USER"
+for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
+  slot_user="$(slot_field "$slot_id" worker_user)"
+  slot_group="$(slot_field "$slot_id" worker_group)"
+  slot_uid="$(slot_field "$slot_id" worker_uid)"
+  slot_gid="$(slot_field "$slot_id" worker_gid)"
+  assert_exact_members "$slot_group" "$slot_gid" "$slot_user" ""
+  assert_numeric_owner Users UniqueID "$slot_uid" "$slot_user"
+  assert_numeric_owner Groups PrimaryGroupID "$slot_gid" "$slot_group"
+done
 assert_exact_members "$OPS_GROUP" "$OPS_GID" "" "$OPERATOR_USER"
 assert_numeric_owner Users UniqueID "$CONTROL_UID" "$CONTROL_USER"
 assert_numeric_owner Users UniqueID "$WORKER_UID" "$WORKER_USER"
@@ -411,6 +472,19 @@ done
 /usr/bin/install -d -o "$WORKER_USER" -g "$WORKER_GROUP" -m 0700 "$RUNTIME_ROOT/workers/codex-01"
 /usr/bin/install -d -o "$WORKER_USER" -g "$WORKER_GROUP" -m 0700 "$PROVIDER_HOME"
 /usr/bin/install -d -o "$WORKER_USER" -g "$WORKER_GROUP" -m 0700 "$RUNTIME_ROOT/workers/codex-01/state"
+for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
+  slot_user="$(slot_field "$slot_id" worker_user)"
+  slot_group="$(slot_field "$slot_id" worker_group)"
+  slot_home="$(slot_field "$slot_id" provider_home)"
+  slot_root="${slot_home%/provider-home}"
+  [ "$slot_root" != "$slot_home" ] || {
+    /bin/echo "provider home for $slot_id is outside the reviewed slot shape" >&2
+    exit 65
+  }
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_root"
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_home"
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 "$slot_root/state"
+done
 
 # Explicit forbidden fixtures for the real secret-canary proof. Values are
 # generated later by the acceptance command and never by this bootstrap.
@@ -422,6 +496,12 @@ done
 /usr/bin/install -d -o root -g wheel -m 0755 /var/log/mastermind-executive
 /usr/bin/install -d -o "$CONTROL_USER" -g "$CONTROL_GROUP" -m 0700 /var/log/mastermind-executive/control
 /usr/bin/install -d -o "$WORKER_USER" -g "$WORKER_GROUP" -m 0700 /var/log/mastermind-executive/worker
+for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
+  slot_user="$(slot_field "$slot_id" worker_user)"
+  slot_group="$(slot_field "$slot_id" worker_group)"
+  /usr/bin/install -d -o "$slot_user" -g "$slot_group" -m 0700 \
+    "/var/log/mastermind-executive/workers/$slot_id"
+done
 
 for protected_path in \
   "$SYSTEM_ROOT" "$SYSTEM_ROOT/bin" "$SYSTEM_ROOT/config" "$SYSTEM_ROOT/releases" \
@@ -433,6 +513,16 @@ for protected_path in \
     *+) /bin/echo "unexpected filesystem ACL on $protected_path" >&2; exit 65 ;;
   esac
 done
+for slot_id in "${PERSONAL_PRO_SLOT_IDS[@]}"; do
+  slot_home="$(slot_field "$slot_id" provider_home)"
+  slot_root="${slot_home%/provider-home}"
+  for protected_path in "$slot_root" "$slot_home" "$slot_root/state" \
+    "/var/log/mastermind-executive/workers/$slot_id"; do
+    case "$(/usr/bin/stat -f '%Sp' "$protected_path")" in
+      *+) /bin/echo "unexpected filesystem ACL on $protected_path" >&2; exit 65 ;;
+    esac
+  done
+done
 
 /bin/echo "host bootstrap complete"
-/bin/echo "next: provision $PROVIDER_HOME/auth.json as $WORKER_USER mode 0600, then run install.sh"
+/bin/echo "next: run install.sh, then provision each reviewed worker slot independently"

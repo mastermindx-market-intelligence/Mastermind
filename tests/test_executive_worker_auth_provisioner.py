@@ -83,6 +83,50 @@ def test_enrollment_and_rotation_are_explicit_and_never_ready_by_themselves() ->
     assert "</dev/tty >/dev/tty 2>/dev/tty" in source
 
 
+def test_personal_pro_slot_is_catalog_derived_and_cannot_take_low_level_overrides() -> None:
+    source = _source()
+    assert "--slot-id" in source
+    assert "provider_worker_slots.py" in source
+    assert 'resolve_slot_field "worker_user"' in source
+    assert 'resolve_slot_field "worker_uid"' in source
+    assert 'resolve_slot_field "worker_gid"' in source
+    assert 'resolve_slot_field "provider_home"' in source
+    assert 'resolve_slot_field "readiness_receipt"' in source
+    assert 'resolve_slot_field "workspace_binding_class"' in source
+    assert 'resolve_slot_field "default_credential_kind"' in source
+    assert "slot identity cannot be combined with low-level identity/path overrides" in source
+    assert source.index("resolve_selected_slot") < source.index(
+        'case "$WORKER_UID" in'
+    )
+    assert "personal-pro-dedicated-worker-attested" not in source
+    assert "_mastermind_codex_01" not in source
+    assert "codex-pro-01/provider-home" not in source
+
+
+def test_selected_slot_is_bound_through_identity_readiness_and_canary() -> None:
+    source = _source()
+    ready = source.split('if [ "$VERIFY_READY" = "true" ]; then', 1)[1].split(
+        'if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then', 1
+    )[0]
+    assert ready.count('--worker-uid "$WORKER_UID"') >= 5
+    assert ready.count('--worker-gid "$WORKER_GID"') >= 5
+    assert ready.count('--worker-user "$WORKER_USER"') == 2
+    assert ready.count('--worker-group "$WORKER_GROUP"') == 2
+    assert 'provider-inference-canary.sh" --slot-id "$SLOT_ID"' in ready
+    assert '--receipt "$READINESS_RECEIPT"' in ready
+    assert 'READINESS_RECEIPT="$(resolve_slot_field "readiness_receipt")"' in source
+
+
+def test_personal_pro_slot_operation_has_no_normal_mac_codex_path() -> None:
+    source = _source()
+    assert "/Users/chriswong/.codex" not in source
+    assert 'CODEX_HOME="$HOME/.codex"' not in source
+    assert 'CODEX_HOME="~/.codex"' not in source
+    assert 'HOME="$PROVIDER_HOME"' in source
+    assert 'CODEX_HOME="$PROVIDER_HOME"' in source
+    assert 'cd -- "$PROVIDER_HOME"' in source
+
+
 def test_verify_ready_is_identity_first_exactly_one_canary_and_replay_safe() -> None:
     source = _source()
     branch = source.split('if [ "$VERIFY_READY" = "true" ]; then', 1)[1].split(

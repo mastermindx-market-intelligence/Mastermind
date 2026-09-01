@@ -93,20 +93,23 @@ def test_skillpack_metadata_is_one_compatible_release():
     assert parts[0] == 1, "major bump not authorized by this revision"
 
 
-def test_index_hard_law_13_is_continuation_delta():
+def test_index_hard_law_21_is_continuation_delta():
+    # 1.0.1 already occupies hard laws 13-20 (reciprocal dialogue / routing /
+    # placement). Continuation Delta appends as 21 after those protected laws.
     text = _read("INDEX.md")
-    m = re.search(r"^13\.\s+(.{0,120})", text, re.MULTILINE)
-    assert m, "INDEX.md has no hard law 13"
+    m = re.search(r"^21\.\s+(.{0,120})", text, re.MULTILINE)
+    assert m, "INDEX.md has no hard law 21"
     assert "Continuation Delta" in m.group(1)
     assert "NOTHING_TO_COMMISSION" in text
     assert "Revalidation is not redo" in text
     assert "CONTINUATION_DELTA_CONTRACT" in text, "contract not registered in skill selection"
 
 
-def test_bootstrap_kernel_law_14_is_continuation_delta():
+def test_bootstrap_kernel_law_21_is_continuation_delta():
+    # Same numbering collision as INDEX: 1.0.1 took kernel 14-20.
     text = _read("BOOTSTRAP_KERNEL.md")
-    m = re.search(r"^14\.\s+(.*)$", text, re.MULTILINE)
-    assert m, "BOOTSTRAP_KERNEL.md has no kernel law 14"
+    m = re.search(r"^21\.\s+(.*)$", text, re.MULTILINE)
+    assert m, "BOOTSTRAP_KERNEL.md has no kernel law 21"
     law = m.group(1)
     assert "delta" in law.lower() and "receipt-invalidating" in law
 

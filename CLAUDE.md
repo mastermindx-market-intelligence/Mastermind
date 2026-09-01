@@ -40,6 +40,36 @@ changes; do not rebuild an existing system without evidence it is unusable.
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
 
+### Reciprocal dialogue and watcher invariant
+
+For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
+universal procedure owner. Read it before creating or relying on a temporary watcher.
+
+- A **watcher prompt is not a scope fence**. It may constrain what the watcher detects, but it cannot
+  survive as a blanket `do not ACK/START/execute/continue` instruction after a later valid
+  same-operation carrier edge arrives.
+- On a qualifying carrier event, an exact bound reasoning session must fresh-read the carrier and
+  **re-enter normal worker procedure** on that same operation: reconcile identity/binding, ACK when
+  pickup is owed, keep/update the lawful watcher, emit separate START when gates clear, or return the
+  required blocker. A sidecar watcher that cannot do this uses only an accepted exact-native-task
+  wake/resume bound to the verified current RuntimeBinding/native task; never pick the newest tab or
+  fall back to another task. The nudge is attention only and the awakened session rereads the carrier.
+- Class-E passive/event wait is preferred; Class-T tool-only polling suppresses unchanged samples.
+  **Default Class-M interval is 60 minutes; the hard floor is 15 minutes.** Urgent Class-M no-change
+  polling backs off `15m -> 30m -> 60m`. Reasoning sessions are not polling daemons.
+- Before every substantive reciprocal write after pickup ACK, **fresh-read the exact bound carrier**
+  in the same interactive turn after the latest local evidence-producing action. `WATCH_ARMED`,
+  watcher silence, or “I would have been woken” never proves freshness.
+- Exactly one watcher per side + operation + exact carrier + purpose; reuse/update it rather than
+  stacking another. Terminal STOP closes the **child source/cycle**, not an independently valid
+  aggregate seat/principal watcher resource. If one heartbeat also serves a permanent seat inbox,
+  principal lane, or sibling children, remove only the terminal child source and keep the aggregate
+  resource active; whole-resource shutdown requires explicit seat/principal/resource shutdown.
+  `WATCH_STOP_FAILED` keeps the child terminal and must not suppress valid sibling sources.
+- **Slack delivery is not target consumption**, and neither delivery nor a historical native task ID
+  proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
+  accepted RuntimeBinding/Wake path proves them.
+
 ## Agent OS — the organizational knowledge plane
 
 Durable org memory — workstreams (`WS-*`), decisions (`DEC-*`), discoveries (`DSC-*`),

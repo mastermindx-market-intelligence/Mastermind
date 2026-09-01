@@ -52,6 +52,7 @@ from control_plane.executive_worker_broker import (
     activate_launchd_socket,
 )
 from control_plane.executive_ambient_process import DarwinDistnotedClassifier
+from control_plane.worker_browser_b1 import BrowserGenerationResource
 
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
@@ -439,7 +440,7 @@ def _build_broker(
     except CapabilityPolicyError as exc:
         raise WorkerConfigError(f"worker capability policy is invalid: {exc}") from exc
 
-    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+    def resolve_operator_profile(requested):
         matching = []
         for profile in capability_registry.profiles.values():
             if not profile.enabled or profile.execution_surface != "codex-app-server":
@@ -464,7 +465,10 @@ def _build_broker(
             raise WorkerConfigError(
                 "requested Operator Harness profile does not resolve to one reviewed policy"
             )
-        profile = matching[0]
+        return matching[0]
+
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        profile = resolve_operator_profile(requested)
         return CodexOperatorAdapter(
             binary_path=Path(config["codex_binary"]),
             codex_home=Path(config["provider_home"]),
@@ -474,8 +478,20 @@ def _build_broker(
             expected_config_digest=profile.expected_config_digest,
             app_server_config_overrides=profile.app_server_config_overrides(),
             native_helper_grant=profile.native_helper,
-            network_policy="disabled",
+            network_policy=profile.network_policy,
             turn_input_loader=turn_input_loader,
+        )
+
+    def operator_resource_factory(workspace, requested, epoch, generation):
+        profile = resolve_operator_profile(requested)
+        if not profile.resource_grants:
+            return None
+        return BrowserGenerationResource(
+            workspace=workspace,
+            requested=requested,
+            epoch=epoch,
+            generation=generation,
+            profile=profile,
         )
 
     armed = bool(config["operator_harness_armed"])
@@ -484,6 +500,7 @@ def _build_broker(
         policy,
         sweeper,
         operator_adapter_factory=operator_adapter_factory,
+        operator_resource_factory=operator_resource_factory,
         operator_harness_armed=armed,
         autonomy_guard=autonomy_guard,
         autonomy_canary_factory=(

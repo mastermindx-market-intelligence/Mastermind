@@ -13,9 +13,14 @@ reconciliation or operator handoff.
 ## Mission
 
 Leave the company in a state where a **brand-new Sol session can recover what became true,
-what remains false, and the exact next action without this chat**.
+what remains false, and the exact next action without this chat**, while leaving no watcher-enabled
+counterpart indefinitely waiting for an inferred terminal state.
 
-Closeout is not paperwork after the real work. Cross-session recoverability is part of the product.
+Closeout is not paperwork after the real work. Cross-session recoverability and clean dialogue
+termination are part of the product.
+
+Apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` whenever a worker/COO/session counterpart is or
+may still be on a reciprocal watch/wait path.
 
 ## Step 1 — State the capability delta
 
@@ -169,7 +174,30 @@ Before declaring closeout complete:
 
 Fix the projection, not the underlying truth, when the projection is wrong.
 
-## Step 9 — Protect future cold starts
+## Step 9 — Close every reciprocal watcher cycle explicitly
+
+Before Sol or a worker session considers the current dialogue/child wave finished, answer:
+
+* Is the latest dialogue state explicitly terminal or nonterminal?
+* If nonterminal, did the counterpart receive the exact next action and continuation instruction?
+* If terminal, did the counterpart receive explicit `STOP`, `ACCEPTED / STOP`, or `CLOSED / STOP`?
+* Did the terminal message tell the counterpart to stop work and disarm its temporary watcher?
+* Did this side disarm its own temporary watcher, or explicitly report `WATCH_STOP_FAILED` / the
+  current accepted equivalent?
+* Is any operator still saying or semantically indicating “awaiting your ruling/return”?
+* Is an old watcher/thread/session accidentally being used to bridge into a new independent wave?
+
+If any answer is unresolved, the watcher-enabled dialogue is **not cleanly closed** even if the
+worker's implementation portion is complete.
+
+If worker work is terminal but Sol still owes final CEO adjudication, send terminal STOP to the
+worker first, then continue CEO-only work outside that child operation.
+
+A parent program may remain active while a child operation is terminal. Any independent next child
+operation requires fresh lawful operation identity, carrier reconciliation, commission/pickup and
+reciprocal continuation setup; old watcher state grants no authority.
+
+## Step 10 — Protect future cold starts
 
 Ask:
 
@@ -181,7 +209,7 @@ put it in the appropriate durable source before closing.
 
 Do not solve the question by expanding the Skillpack with live company state.
 
-## Step 10 — State the next action precisely
+## Step 11 — State the next action precisely
 
 End with exactly one primary continuation action and its gate, plus any independent parallel work.
 
@@ -207,6 +235,7 @@ Canonical receipts
 Production proof status
 Durable records updated
 Projection/transport repairs
+Dialogue edge / watcher shutdown state
 Unresolveds / falsifiers
 Exact next action
 Independent parallel actions
@@ -215,6 +244,7 @@ Independent parallel actions
 ## K4 pass criteria
 
 A fresh session can recover the accepted result, its evidence, its limits and the exact continuation
-without chat archaeology, and no canonical/projection layer was advanced beyond what the evidence
-supports. A fresh session cannot lawfully infer a completed/superseded task as next work from the
-current durable record.
+without chat archaeology, no canonical/projection layer was advanced beyond what the evidence
+supports, and no watcher-enabled counterpart was left waiting on silence after a terminal or
+nonterminal return. A fresh session cannot lawfully infer a completed/superseded task as next
+work from the current durable record.

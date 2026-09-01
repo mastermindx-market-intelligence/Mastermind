@@ -30,6 +30,7 @@ class PersistedWakeEvent:
     event: Event
     record: WakeLedgerRecord
     obligation: WakeObligation | None = None
+    inserted: bool = False
 
 
 class WakeLedgerRepository:
@@ -141,7 +142,7 @@ class WakeLedgerRepository:
         )
         if written is None:
             raise StateConflict("wake event did not persist")
-        return self._hydrate(written)
+        return dataclasses.replace(self._hydrate(written), inserted=True)
 
     def _assert_replay(
         self,
