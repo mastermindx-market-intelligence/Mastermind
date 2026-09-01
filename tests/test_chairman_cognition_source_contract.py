@@ -67,12 +67,50 @@ def _classification_payload(option: dict) -> dict:
     }
 
 
+def _envelope_payload(envelope: dict) -> dict:
+    return {
+        "schema": envelope["schema"],
+        "envelope_id": envelope["envelope_id"],
+        "authority_source_refs": sorted(envelope["authority_source_refs"]),
+        "mode": envelope["mode"],
+        "allowed_actions": sorted(envelope["allowed_actions"]),
+        "allowed_reversibility": sorted(envelope["allowed_reversibility"]),
+        "allowed_repositories": sorted(envelope["allowed_repositories"]),
+        "allowed_path_prefixes": {
+            repository: sorted(envelope["allowed_path_prefixes"][repository])
+            for repository in sorted(envelope["allowed_path_prefixes"])
+        },
+        "allowed_scope_prefixes": sorted(envelope["allowed_scope_prefixes"]),
+        "allowed_carrier_prefixes": sorted(envelope["allowed_carrier_prefixes"]),
+        "max_budget_units": envelope["max_budget_units"],
+        "max_active_children": envelope["max_active_children"],
+        "require_exact_carrier": envelope["require_exact_carrier"],
+        "expires_at": envelope["expires_at"],
+    }
+
+
+def _set_binding(receipt: dict, label: str, digest: str) -> None:
+    prefix = f"{label}:"
+    fields = [
+        field for field in receipt["revision"].split(";") if not field.startswith(prefix)
+    ]
+    receipt["revision"] = ";".join([*fields, f"{label}:{digest}"])
+
+
 def _bind_document(document: dict) -> dict:
     receipts = {item["source_ref"]: item for item in document["source_receipts"]}
     strategy_ref = document["strategic_constraints_source_ref"]
-    receipts[strategy_ref]["revision"] = (
-        f"constraints-sha256:{_digest(document['strategic_constraints'])}"
+    _set_binding(
+        receipts[strategy_ref],
+        "constraints-sha256",
+        _digest(document["strategic_constraints"]),
     )
+    envelope = document["delegation_envelope"]
+    if envelope is not None:
+        envelope_digest = _digest(_envelope_payload(envelope))
+        for ref in envelope["authority_source_refs"]:
+            if ref in receipts:
+                _set_binding(receipts[ref], "envelope-sha256", envelope_digest)
     bindings: dict[str, set[str]] = {}
     for option in document["options"]:
         ref = option["classification_source_ref"]
@@ -80,8 +118,9 @@ def _bind_document(document: dict) -> dict:
             f"classification-sha256:{_digest(_classification_payload(option))}"
         )
     for ref, tokens in bindings.items():
-        base = receipts[ref]["revision"].split(";classification-sha256:", 1)[0]
-        receipts[ref]["revision"] = ";".join([base, *sorted(tokens)])
+        for token in sorted(tokens):
+            label, digest = token.split(":", 1)
+            _set_binding(receipts[ref], label, digest)
     return document
 
 
@@ -189,6 +228,7 @@ def test_source_law_freezes_one_office_two_modes_and_no_duplicate_owner():
         "classification_source_ref",
         "constraints-sha256",
         "classification-sha256",
+        "envelope-sha256",
         "constraint_results",
         "blocking_constraint",
     ):
@@ -221,6 +261,7 @@ def test_architecture_preserves_canonical_owners_and_accelerated_live_canary():
         "future constraint",
         "content-bound",
         "classification source",
+        "envelope-sha256",
     ):
         assert marker in spec
 
@@ -243,6 +284,7 @@ def test_program_has_real_vertical_and_completion_not_docs():
         "all six current constraints",
         "constraint map",
         "classification",
+        "envelope-sha256",
     ):
         assert marker in plan
 
@@ -670,3 +712,148 @@ def test_r2_constraint_output_and_digest_are_permutation_stable() -> None:
     )
     second = evaluate_document(document)
     assert first == second
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "envelope_id",
+        "mode",
+        "allowed_actions",
+        "allowed_reversibility",
+        "allowed_repositories",
+        "allowed_path_prefixes",
+        "allowed_scope_prefixes",
+        "allowed_carrier_prefixes",
+        "max_budget_units",
+        "max_active_children",
+        "expires_at",
+    ],
+)
+def test_r3_every_authority_bearing_envelope_field_is_content_bound(
+    mutation: str,
+) -> None:
+    document = _r2_document()
+    envelope = document["delegation_envelope"]
+    if mutation == "envelope_id":
+        envelope[mutation] = "ENV-R3-MUTATED"
+    elif mutation == "mode":
+        envelope[mutation] = "BOUNDED_AUTONOMOUS"
+    elif mutation == "allowed_actions":
+        envelope[mutation].append("PROGRAM_PAUSE")
+    elif mutation == "allowed_reversibility":
+        envelope[mutation].append("COSTLY_REVERSIBLE")
+    elif mutation == "allowed_repositories":
+        envelope[mutation].append("mastermindx-market-intelligence/macro")
+    elif mutation == "allowed_path_prefixes":
+        envelope[mutation]["mastermindx-market-intelligence/Mastermind"].append(
+            "docs"
+        )
+    elif mutation == "allowed_scope_prefixes":
+        envelope[mutation].append("WS:OTHER")
+    elif mutation == "allowed_carrier_prefixes":
+        envelope[mutation].append("slack:")
+    elif mutation == "max_budget_units":
+        envelope[mutation] = 11
+    elif mutation == "max_active_children":
+        envelope[mutation] = 3
+    elif mutation == "expires_at":
+        envelope[mutation] = "2026-09-29T00:00:00Z"
+    else:  # pragma: no cover - closed parameter set
+        raise AssertionError(mutation)
+
+    with pytest.raises(ChairmanCognitionError, match="delegation envelope is not content-bound"):
+        evaluate_document(document)
+
+
+def test_r3_authority_source_set_is_part_of_envelope_binding() -> None:
+    document = _r2_document()
+    document["source_receipts"].append(
+        {
+            "source_ref": "SRC-CHAIRMAN-2",
+            "owner": "CHAIRMAN_DIRECTIVE",
+            "revision": "conversation:2026-08-30:second",
+            "state": "CURRENT",
+            "load_bearing": True,
+            "observed_at": "2026-08-30T16:00:00Z",
+        }
+    )
+    document["delegation_envelope"]["authority_source_refs"].append(
+        "SRC-CHAIRMAN-2"
+    )
+    with pytest.raises(ChairmanCognitionError, match="delegation envelope is not content-bound"):
+        evaluate_document(document)
+
+
+def test_r3_at_least_one_cited_chairman_receipt_must_bind_the_envelope() -> None:
+    document = _r2_document()
+    chairman = document["source_receipts"][1]
+    chairman["revision"] = ";".join(
+        field
+        for field in chairman["revision"].split(";")
+        if not field.startswith("envelope-sha256:")
+    )
+    with pytest.raises(ChairmanCognitionError, match="delegation envelope is not content-bound"):
+        evaluate_document(document)
+
+
+def test_r3_one_of_multiple_cited_chairman_receipts_may_carry_the_binding() -> None:
+    document = _r2_document()
+    document["source_receipts"].append(
+        {
+            "source_ref": "SRC-CHAIRMAN-2",
+            "owner": "CHAIRMAN_DIRECTIVE",
+            "revision": "conversation:2026-08-30:second",
+            "state": "CURRENT",
+            "load_bearing": True,
+            "observed_at": "2026-08-30T16:00:00Z",
+        }
+    )
+    document["delegation_envelope"]["authority_source_refs"].append(
+        "SRC-CHAIRMAN-2"
+    )
+    _bind_document(document)
+    second = document["source_receipts"][-1]
+    second["revision"] = ";".join(
+        field
+        for field in second["revision"].split(";")
+        if not field.startswith("envelope-sha256:")
+    )
+    packet = evaluate_document(document)
+    assert packet["delegation_envelope"]["state"] == "ACCEPTED"
+
+
+def test_r3_envelope_digest_is_semantic_permutation_stable() -> None:
+    envelope = _r2_envelope()
+    envelope["allowed_repositories"].append("mastermindx-market-intelligence/macro")
+    envelope["allowed_path_prefixes"]["mastermindx-market-intelligence/macro"] = [
+        "agentos",
+        "src",
+    ]
+    envelope["allowed_actions"].append("PROGRAM_PAUSE")
+    envelope["allowed_scope_prefixes"].append("WS:SECOND")
+    envelope["allowed_carrier_prefixes"].append("executive:")
+
+    first = evaluate_document(_r2_document(envelope=copy.deepcopy(envelope)))
+    second_document = _r2_document(envelope=copy.deepcopy(envelope))
+    second_envelope = second_document["delegation_envelope"]
+    for field in (
+        "authority_source_refs",
+        "allowed_actions",
+        "allowed_reversibility",
+        "allowed_repositories",
+        "allowed_scope_prefixes",
+        "allowed_carrier_prefixes",
+    ):
+        second_envelope[field] = list(reversed(second_envelope[field]))
+    second_envelope["allowed_path_prefixes"] = {
+        repository: list(reversed(prefixes))
+        for repository, prefixes in reversed(
+            list(second_envelope["allowed_path_prefixes"].items())
+        )
+    }
+    second = evaluate_document(second_document)
+    assert first["delegation_envelope"]["digest"] == second["delegation_envelope"][
+        "digest"
+    ]
+    assert first["delegation_envelope"]["digest"].startswith("sha256:")
